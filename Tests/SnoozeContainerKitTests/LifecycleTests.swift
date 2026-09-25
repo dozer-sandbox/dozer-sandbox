@@ -9,13 +9,13 @@ final class LifecycleTests: XCTestCase {
     /// one on disk is not running, so both are revived (silently) and then stopped GRACEFULLY —
     /// never left stopped at the VZ level with the package's vminitd clients unclosed.
     func test_stopPlanDependsOnThePhaseItWasCalledIn() {
-        XCTAssertEqual(plan(.stop, .running), [.detachSessions(.sandboxStopped), .stopContainer, .deleteSnapshot, .releaseRuntime])
-        for p in [Phase.paused, .pausedSaved, .onDisk] {
-            XCTAssertEqual(plan(.stop, p), [.detachSessions(.sandboxStopped), .reviveForStop, .stopContainer, .deleteSnapshot, .releaseRuntime], "\(p)")
+        XCTAssertEqual(plan(.shutDown, .running), [.detachSessions(.sandboxStopped), .stopContainer, .deleteSnapshot, .releaseRuntime])
+        for p in [Phase.paused, .asleep, .deepAsleep] {
+            XCTAssertEqual(plan(.shutDown, p), [.detachSessions(.sandboxStopped), .reviveForStop, .stopContainer, .deleteSnapshot, .releaseRuntime], "\(p)")
         }
-        XCTAssertNil(plan(.stop, .off))
+        XCTAssertNil(plan(.shutDown, .off))
         for p in Phase.allCases {
-            XCTAssertFalse(plan(.stop, p)?.contains(.stopVMDirect) ?? false, "stop from \(p) is always graceful")
+            XCTAssertFalse(plan(.shutDown, p)?.contains(.stopVMDirect) ?? false, "stop from \(p) is always graceful")
         }
     }
 
@@ -23,7 +23,7 @@ final class LifecycleTests: XCTestCase {
     /// image and Delete remove it — from any phase, stopping first when something runs.
     func test_stopKeepsTheRootDiskResetAndDeleteRemoveIt() {
         for p in Phase.allCases {
-            let stop = plan(.stop, p) ?? []
+            let stop = plan(.shutDown, p) ?? []
             XCTAssertFalse(stop.contains(.removeRootDisk) || stop.contains(.removeSandboxFiles), "stop from \(p) keeps the disk")
             let reset = plan(.resetToImage, p)!
             XCTAssertEqual(reset.last, .removeRootDisk, "reset from \(p)")
@@ -41,14 +41,14 @@ final class LifecycleTests: XCTestCase {
 
     /// No stop leaves a snapshot: the next Start is a cold boot.
     func test_noStopLeavesASnapshot() {
-        for p in Phase.allCases { if let s = plan(.stop, p) { XCTAssertTrue(s.contains(.deleteSnapshot), "\(p)") } }
+        for p in Phase.allCases { if let s = plan(.shutDown, p) { XCTAssertTrue(s.contains(.deleteSnapshot), "\(p)") } }
     }
 
     /// Every stop detaches attached sessions FIRST, so no exec output reaches a connection
     /// after the VM goes down (the recycled-fd bug).
     func test_everyStopDetachesSessionsFirst() {
         for p in Phase.allCases {
-            guard let steps = plan(.stop, p) else { continue }
+            guard let steps = plan(.shutDown, p) else { continue }
             XCTAssertEqual(steps.first, .detachSessions(.sandboxStopped), "stop from \(p)")
         }
     }
@@ -63,41 +63,41 @@ final class LifecycleTests: XCTestCase {
                 XCTAssertGreaterThan(steps.firstIndex(of: .deleteSnapshot)!, resumeAt, "delete only once running: \(op) from \(p)")
             }
         }
-        XCTAssertTrue(plan(.stop, .onDisk)!.contains(.deleteSnapshot))
+        XCTAssertTrue(plan(.shutDown, .deepAsleep)!.contains(.deleteSnapshot))
     }
 
     /// Wake resyncs the clock and re-mounts shares, after the restore and before the snapshot goes.
     func test_wakeRestoresThenResyncsClockAndRemountsShares() {
-        XCTAssertEqual(plan(.wakeFromDisk, .onDisk), [.restoreSnapshot, .resyncClock, .remountShares, .deleteSnapshot, .persistState])
-        XCTAssertNil(plan(.wakeFromDisk, .running))
+        XCTAssertEqual(plan(.wake, .deepAsleep), [.restoreSnapshot, .resyncClock, .remountShares, .deleteSnapshot, .persistState])
+        XCTAssertNil(plan(.wake, .running))
     }
 
     /// Sleep to disk saves before it severs anything, detaches sessions before the VZ stop, and
     /// never pauses twice.
-    func test_sleepToDiskOrdering() {
-        let fromRunning = plan(.sleepToDisk, .running)!
+    func test_deepSleepOrdering() {
+        let fromRunning = plan(.deepSleep, .running)!
         XCTAssertEqual(fromRunning, [.pauseVM, .saveSnapshot, .detachSessions(.sandboxSleeping), .stopVMDirect, .persistState])
-        XCTAssertEqual(plan(.sleepToDisk, .paused), [.saveSnapshot, .detachSessions(.sandboxSleeping), .stopVMDirect, .persistState])
-        XCTAssertEqual(plan(.sleepToDisk, .pausedSaved), [.detachSessions(.sandboxSleeping), .stopVMDirect, .persistState])
-        XCTAssertNil(plan(.sleepToDisk, .onDisk))
+        XCTAssertEqual(plan(.deepSleep, .paused), [.saveSnapshot, .detachSessions(.sandboxSleeping), .stopVMDirect, .persistState])
+        XCTAssertEqual(plan(.deepSleep, .asleep), [.detachSessions(.sandboxSleeping), .stopVMDirect, .persistState])
+        XCTAssertNil(plan(.deepSleep, .deepAsleep))
     }
 
     func test_pauseResumeSleepAvailability() {
         XCTAssertEqual(plan(.pause, .running), [.pauseVM])
         XCTAssertNil(plan(.pause, .paused))
         XCTAssertEqual(plan(.resume, .paused), [.resumeVM, .deleteSnapshot, .persistState])
-        XCTAssertEqual(plan(.resume, .pausedSaved), [.resumeVM, .deleteSnapshot, .persistState])
-        XCTAssertNil(plan(.resume, .onDisk), "on disk needs a wake, not a resume")
+        XCTAssertEqual(plan(.resume, .asleep), [.resumeVM, .deleteSnapshot, .persistState])
+        XCTAssertNil(plan(.resume, .deepAsleep), "on disk needs a wake, not a resume")
         XCTAssertEqual(plan(.sleep, .running), [.pauseVM, .saveSnapshot, .persistState])
         XCTAssertEqual(plan(.sleep, .paused), [.saveSnapshot, .persistState])
-        XCTAssertNil(plan(.sleep, .pausedSaved))
+        XCTAssertNil(plan(.sleep, .asleep))
     }
 
     func test_phaseProperties() {
         XCTAssertTrue(Phase.paused.holdsRAM)
-        XCTAssertFalse(Phase.onDisk.holdsRAM)
-        XCTAssertEqual(Phase.allCases.filter(\.keepsSnapshot), [.pausedSaved, .onDisk])
-        XCTAssertEqual(LifecyclePlanner.target(of: .stop), .off)
+        XCTAssertFalse(Phase.deepAsleep.holdsRAM)
+        XCTAssertEqual(Phase.allCases.filter(\.keepsSnapshot), [.asleep, .deepAsleep])
+        XCTAssertEqual(LifecyclePlanner.target(of: .shutDown), .off)
     }
 }
 
@@ -153,7 +153,7 @@ final class PersistedSandboxTests: XCTestCase {
     func test_machineIdentifierRoundTrip() throws {
         let spec = SandboxSpec(name: "lab", storeRoot: dir, bakePackages: ["bash"], shares: [Share(hostPath: "/tmp/w", guestPath: "/work")])
         let mid = Data((0..<48).map { _ in UInt8.random(in: 0...255) })
-        let p = PersistedSandbox(spec: spec, phase: .onDisk, machineIdentifier: mid, macAddress: PersistedSandbox.randomMAC(),
+        let p = PersistedSandbox(spec: spec, phase: .deepAsleep, machineIdentifier: mid, macAddress: PersistedSandbox.randomMAC(),
                                  subnet: "192.168.64.1/24", shareTags: ["/work": "abc"])
         let url = StoreLayout(spec: spec).persistedState
         try p.write(to: url)
@@ -162,21 +162,21 @@ final class PersistedSandboxTests: XCTestCase {
         XCTAssertEqual(back.spec, spec)
         XCTAssertEqual(back.macAddress, p.macAddress)
         XCTAssertEqual(back.shareTags, ["/work": "abc"])
-        XCTAssertEqual(back.phase, .onDisk)
+        XCTAssertEqual(back.phase, .deepAsleep)
     }
 
     func test_restorableOnlyWhenAsleepWithSnapshotAndDisk() throws {
         let spec = SandboxSpec(name: "lab", storeRoot: dir)
         let layout = StoreLayout(spec: spec)
         try FileManager.default.createDirectory(at: layout.sandboxDirectory, withIntermediateDirectories: true)
-        var p = PersistedSandbox(spec: spec, phase: .onDisk, machineIdentifier: Data([1]), macAddress: nil, subnet: nil, shareTags: [:])
+        var p = PersistedSandbox(spec: spec, phase: .deepAsleep, machineIdentifier: Data([1]), macAddress: nil, subnet: nil, shareTags: [:])
         XCTAssertFalse(p.isRestorable(layout: layout), "no files yet")
         try Data("s".utf8).write(to: layout.snapshot)
         try Data("r".utf8).write(to: layout.rootfs)
         XCTAssertTrue(p.isRestorable(layout: layout))
         p.phase = .running
         XCTAssertFalse(p.isRestorable(layout: layout), "a crash while running leaves no valid snapshot")
-        p.phase = .pausedSaved
+        p.phase = .asleep
         XCTAssertTrue(p.isRestorable(layout: layout))
         try p.write(to: layout.persistedState)
         XCTAssertNotNil(Sandbox.restorableState(for: spec))
@@ -195,5 +195,73 @@ final class PersistedSandboxTests: XCTestCase {
             XCTAssertEqual(first & 0x03, 0x02, mac)
             XCTAssertEqual(mac.split(separator: ":").count, 6)
         }
+    }
+
+    // MARK: the 2026-09-25 vocabulary (Pause/Suspend · Sleep · Deep Sleep/Hibernate · Wake · Shut Down · Start/Cold Boot)
+
+    func test_wakeFromSleepResumesInPlace_andResumeStillWorksFromSleep() {
+        XCTAssertEqual(LifecyclePlanner.plan(.wake, from: .asleep), [.resumeVM, .deleteSnapshot, .persistState])
+        XCTAssertEqual(LifecyclePlanner.plan(.resume, from: .asleep), LifecyclePlanner.plan(.wake, from: .asleep), "resume from Sleep is the old spelling of wake")
+        XCTAssertNil(LifecyclePlanner.plan(.wake, from: .running))
+        XCTAssertNil(LifecyclePlanner.plan(.wake, from: .paused), "a paused sandbox resumes, it does not wake")
+        XCTAssertEqual(LifecyclePlanner.target(of: .wake), .running)
+        XCTAssertEqual(LifecyclePlanner.target(of: .deepSleep), .deepAsleep)
+    }
+
+    func test_phaseLabelsAreTheOwnersNames() {
+        XCTAssertEqual(Phase.paused.label, "Paused")
+        XCTAssertTrue(Phase.asleep.label.hasPrefix("Asleep"))
+        XCTAssertTrue(Phase.deepAsleep.label.hasPrefix("Deep asleep"))
+        XCTAssertEqual(Phase.off.label, "Shut down")
+    }
+
+    /// A sandbox left asleep by a build from before the rename must still decode — and wake.
+    func test_oldPersistedPhasesDecode() throws {
+        for (old, new) in [("pausedSaved", Phase.asleep), ("onDisk", .deepAsleep), ("hibernated", .deepAsleep),
+                           ("running", .running), ("off", .off), ("paused", .paused)] {
+            XCTAssertEqual(try JSONDecoder().decode(Phase.self, from: Data("\"\(old)\"".utf8)), new, old)
+            XCTAssertEqual(Phase(rawValue: old), new)
+        }
+        XCTAssertThrowsError(try JSONDecoder().decode(Phase.self, from: Data("\"nonsense\"".utf8)))
+        XCTAssertEqual(String(decoding: try JSONEncoder().encode(Phase.deepAsleep), as: UTF8.self), "\"deepAsleep\"", "new files use the new name")
+        // A whole persisted sandbox.json from before the rename.
+        let spec = SandboxSpec(name: "old", storeRoot: URL(fileURLWithPath: "/tmp/old-store"))
+        let p = PersistedSandbox(spec: spec, phase: .deepAsleep, machineIdentifier: Data([1, 2]), macAddress: nil, subnet: nil, shareTags: [:])
+        let json = String(decoding: try JSONEncoder().encode(p), as: UTF8.self).replacingOccurrences(of: "\"deepAsleep\"", with: "\"onDisk\"")
+        XCTAssertTrue(json.contains("\"onDisk\""))
+        XCTAssertEqual(try JSONDecoder().decode(PersistedSandbox.self, from: Data(json.utf8)).phase, .deepAsleep)
+    }
+
+    @available(*, deprecated)
+    func test_deprecatedNamesForward() {
+        XCTAssertEqual(Phase.onDisk, .deepAsleep)
+        XCTAssertEqual(Phase.pausedSaved, .asleep)
+        XCTAssertEqual(LifecycleOperation.sleepToDisk, .deepSleep)
+        XCTAssertEqual(LifecycleOperation.wakeFromDisk, .wake)
+        XCTAssertEqual(LifecycleOperation.stop, .shutDown)
+        XCTAssertEqual(LifecyclePlanner.plan(.sleepToDisk, from: .running), LifecyclePlanner.plan(.deepSleep, from: .running))
+    }
+
+    /// The forwarding METHODS, without a VM: each must reach the same planned operation — observed
+    /// through the error an off sandbox throws (it names the operation it was asked to perform).
+    @available(*, deprecated)
+    func test_deprecatedMethodsForward() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("fwd-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let sb = try Sandbox(spec: SandboxSpec(name: "fwd", storeRoot: root))
+        func opName(_ body: () async throws -> Void) async -> String? {
+            do { try await body(); return nil } catch SandboxError.invalidPhase(let op, _) { return op } catch { return "\(error)" }
+        }
+        let a = await opName { try await sb.sleepToDisk() }, b = await opName { try await sb.deepSleep() }, c = await opName { try await sb.hibernate() }
+        XCTAssertEqual(a, "deepSleep"); XCTAssertEqual(b, "deepSleep"); XCTAssertEqual(c, "deepSleep")
+        let w1 = await opName { try await sb.wakeFromDisk() }, w2 = await opName { try await sb.wake() }
+        XCTAssertEqual(w1, "wake"); XCTAssertEqual(w2, "wake")
+        let p1 = await opName { try await sb.suspend() }
+        XCTAssertEqual(p1, "pause")
+        // Shut Down from off: nothing to stop, refused the same way through either name.
+        let s1 = await opName { try await sb.stop() }, s2 = await opName { try await sb.shutDown() }
+        XCTAssertEqual(s1, "shutDown"); XCTAssertEqual(s2, "shutDown")
+        let phase = await sb.phase
+        XCTAssertEqual(phase, .off)
     }
 }

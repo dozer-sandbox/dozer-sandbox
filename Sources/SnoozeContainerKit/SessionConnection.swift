@@ -21,7 +21,7 @@ public enum DetachReason: String, Sendable, Equatable {
     /// `close()` was called.
     case closedByClient
     /// The sandbox is going to sleep on disk: the exec carrying this connection is about to be
-    /// severed. The SESSION survives in the guest; attach again after `wakeFromDisk()`.
+    /// severed. The SESSION survives in the guest; attach again after `wake()`.
     case sandboxSleeping
     /// The sandbox is stopping. The session is gone.
     case sandboxStopped

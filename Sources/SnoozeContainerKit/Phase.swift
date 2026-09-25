@@ -1,38 +1,75 @@
 import Foundation
 
-/// Where a sandbox is in its life. The 576.03 sleep design, one case per state a user can see.
+/// Where a sandbox is in its life — the owner's vocabulary (2026-09-25):
+///
+///     Start (Cold Boot) ─▶ running ─ Pause (Suspend) ─▶ paused ─ Resume ─▶ running
+///                          running ─ Sleep ───────────▶ asleep ─ Wake ───▶ running   RAM kept, snapshot on disk
+///                          running ─ Deep Sleep (Hibernate) ─▶ deepAsleep ─ Wake ─▶ running   RAM freed
+///                          any ─ Shut Down ─▶ off (the disk is kept; running programs end)
 public enum Phase: String, Sendable, Codable, CaseIterable {
-    /// No VM. `start()` makes one.
+    /// Shut down: no VM. `start()` (`coldBoot()`) boots the kept disk.
     case off
     /// `start()` is running: images, the prepared disk, VM boot.
     case booting
     case running
-    /// VZ-paused: guest CPU at 0, RAM still held. Resumes in ~1 ms.
+    /// Paused (suspended): guest CPU at 0, RAM still held. Resumes in ~1 ms.
     case paused
-    /// Paused AND its full state saved to disk — crash insurance; RAM still held.
-    case pausedSaved
-    /// Saved to disk and the VM stopped: RAM returned. Wake restores it in ~0.35 s.
-    case onDisk
-    /// `start()` failed. `start()` again, or `stop()` to clean up.
+    /// Asleep: paused AND its full state saved to disk — crash-safe; RAM still held. Wake resumes in place.
+    case asleep
+    /// Deep asleep (hibernated): saved to disk and the VM stopped — RAM returned. Wake restores it in ~0.35 s.
+    case deepAsleep
+    /// `start()` failed. `start()` again, or `shutDown()` to clean up.
     case failed
 
-    /// A human label, as the 576 POC shows it.
+    /// A human label.
     public var label: String {
         switch self {
-        case .off: "Off"
+        case .off: "Shut down"
         case .booting: "Booting"
         case .running: "Running"
-        case .paused: "Asleep — in memory"
-        case .pausedSaved: "Asleep — in memory + snapshot on disk"
-        case .onDisk: "Asleep — on disk, RAM freed"
+        case .paused: "Paused"
+        case .asleep: "Asleep — RAM kept, snapshot on disk"
+        case .deepAsleep: "Deep asleep — RAM freed"
         case .failed: "Failed"
         }
     }
 
     /// The VM holds host RAM in this phase.
-    public var holdsRAM: Bool { [.booting, .running, .paused, .pausedSaved].contains(self) }
+    public var holdsRAM: Bool { [.booting, .running, .paused, .asleep].contains(self) }
     /// A snapshot on disk is valid (and needed) only in these phases; every other phase deletes it.
-    public var keepsSnapshot: Bool { self == .pausedSaved || self == .onDisk }
+    public var keepsSnapshot: Bool { self == .asleep || self == .deepAsleep }
+
+    /// Decodes today's names AND the names persisted before the 2026-09-25 rename (`pausedSaved`,
+    /// `onDisk`) — a sandbox left deep asleep by an older build must still wake.
+    public init?(rawValue: String) {
+        switch rawValue {
+        case "off": self = .off
+        case "booting": self = .booting
+        case "running": self = .running
+        case "paused": self = .paused
+        case "asleep", "pausedSaved": self = .asleep
+        case "deepAsleep", "onDisk", "hibernated": self = .deepAsleep
+        case "failed": self = .failed
+        default: return nil
+        }
+    }
+
+    public var rawValue: String {
+        switch self {
+        case .off: "off"
+        case .booting: "booting"
+        case .running: "running"
+        case .paused: "paused"
+        case .asleep: "asleep"
+        case .deepAsleep: "deepAsleep"
+        case .failed: "failed"
+        }
+    }
+
+    @available(*, deprecated, renamed: "asleep")
+    public static var pausedSaved: Phase { .asleep }
+    @available(*, deprecated, renamed: "deepAsleep")
+    public static var onDisk: Phase { .deepAsleep }
 }
 
 /// The lifecycle operations, and — as pure data — the steps each performs from a given phase.
@@ -44,11 +81,17 @@ public enum Phase: String, Sendable, Codable, CaseIterable {
 /// unclosed, and their deallocation is a fatal error); the snapshot is deleted the moment the VM
 /// runs again; attached sessions are detached before anything severs their exec stdio.
 public enum LifecycleOperation: String, Sendable, CaseIterable {
-    case pause, resume, sleep, sleepToDisk, wakeFromDisk, stop
-    /// Stop (if needed), then discard the root disk: the next Start clones the prepared/baked disk.
+    /// Pause (alias Suspend) → Resume. Sleep → Wake. Deep Sleep (alias Hibernate) → Wake.
+    /// Shut Down → Start (alias Cold Boot; `start()` is not a planned operation — it boots).
+    case pause, resume, sleep, deepSleep, wake, shutDown
+    /// Shut down (if needed), then discard the root disk: the next Start clones the prepared/baked disk.
     case resetToImage
-    /// Stop (if needed), then remove everything the sandbox has on disk.
+    /// Shut down (if needed), then remove everything the sandbox has on disk.
     case delete
+
+    @available(*, deprecated, renamed: "deepSleep") public static var sleepToDisk: Self { .deepSleep }
+    @available(*, deprecated, renamed: "wake") public static var wakeFromDisk: Self { .wake }
+    @available(*, deprecated, renamed: "shutDown") public static var stop: Self { .shutDown }
 }
 
 public enum LifecycleStep: Equatable, Sendable {
@@ -61,10 +104,10 @@ public enum LifecycleStep: Equatable, Sendable {
     /// Tell every attached session connection it is detached, with this reason, BEFORE its exec
     /// stdio is severed — so nothing is written into a connection that is going away.
     case detachSessions(DetachReason)
-    /// VZ `stop` directly on the virtual machine — sleep to disk only: it keeps the container's
+    /// VZ `stop` directly on the virtual machine — Deep Sleep only: it keeps the container's
     /// objects for the wake.
     case stopVMDirect
-    /// Stop only: make the VM runnable again WITHOUT reporting a phase change — resume a paused
+    /// Shut Down only: make the VM runnable again WITHOUT reporting a phase change — resume a paused
     /// VM, restore + resume one on disk — so the graceful stop below can reach its agent.
     case reviveForStop
     /// `LinuxContainer.stop()` — graceful: kills the guest, deletes every process (closing each
@@ -79,8 +122,8 @@ public enum LifecycleStep: Equatable, Sendable {
     case remountShares
     /// Delete the snapshot file: it is valid only while the VM is paused.
     case deleteSnapshot
-    /// Drop the in-memory VM objects and the network lease, and persist the phase as off. The ROOT
-    /// DISK STAYS: the next Start cold-boots it (owner ruling 2026-09-25 — "Stop destroys the VM"
+    /// Drop the in-memory VM objects and the network lease, and persist the phase as off (shut
+    /// down). The ROOT DISK STAYS: the next Start (Cold Boot) boots it (owner ruling 2026-09-25 — "Stop destroys the VM"
     /// was the 578 smoke finding: anything `apk add`ed vanished).
     case releaseRuntime
     /// Discard the root disk (and the identity persisted with it) — Reset to image.
@@ -97,10 +140,10 @@ public enum LifecyclePlanner {
         switch op {
         case .pause: .paused
         case .resume: .running
-        case .sleep: .pausedSaved
-        case .sleepToDisk: .onDisk
-        case .wakeFromDisk: .running
-        case .stop, .resetToImage, .delete: .off
+        case .sleep: .asleep
+        case .deepSleep: .deepAsleep
+        case .wake: .running
+        case .shutDown, .resetToImage, .delete: .off
         }
     }
 
@@ -110,22 +153,24 @@ public enum LifecyclePlanner {
         switch (op, phase) {
         case (.pause, .running):
             return [.pauseVM]
-        case (.resume, .paused), (.resume, .pausedSaved):
-            // The snapshot is only valid while paused: running again invalidates it.
+        case (.resume, .paused), (.resume, .asleep), (.wake, .asleep):
+            // Resume from Pause; Wake from Sleep (resume in place). `resume` from Sleep is the
+            // pre-rename spelling and still works. The snapshot is valid only while paused:
+            // running again invalidates it.
             return [.resumeVM, .deleteSnapshot, .persistState]
         case (.sleep, .running):
             return [.pauseVM, .saveSnapshot, .persistState]
         case (.sleep, .paused):
             return [.saveSnapshot, .persistState]
-        case (.sleepToDisk, .running):
+        case (.deepSleep, .running):
             return [.pauseVM, .saveSnapshot, .detachSessions(.sandboxSleeping), .stopVMDirect, .persistState]
-        case (.sleepToDisk, .paused):
+        case (.deepSleep, .paused):
             return [.saveSnapshot, .detachSessions(.sandboxSleeping), .stopVMDirect, .persistState]
-        case (.sleepToDisk, .pausedSaved):
+        case (.deepSleep, .asleep):
             return [.detachSessions(.sandboxSleeping), .stopVMDirect, .persistState]
-        case (.wakeFromDisk, .onDisk):
+        case (.wake, .deepAsleep):
             return [.restoreSnapshot, .resyncClock, .remountShares, .deleteSnapshot, .persistState]
-        case (.stop, _):
+        case (.shutDown, _):
             return stopSteps(from: phase)
         case (.resetToImage, _):
             return (stopSteps(from: phase) ?? [.deleteSnapshot]) + [.removeRootDisk]
@@ -136,14 +181,14 @@ public enum LifecyclePlanner {
         }
     }
 
-    /// Stop from `phase`, or nil when there is nothing running to stop. Every variant keeps the
+    /// Shut Down from `phase`, or nil when there is nothing running to stop. Every variant keeps the
     /// root disk; none leaves a snapshot behind (so the next Start is a cold boot and a stale
     /// snapshot is never restored onto a disk that has moved on).
     static func stopSteps(from phase: Phase) -> [LifecycleStep]? {
         switch phase {
         case .running, .failed, .booting:
             return [.detachSessions(.sandboxStopped), .stopContainer, .deleteSnapshot, .releaseRuntime]
-        case .paused, .pausedSaved, .onDisk:
+        case .paused, .asleep, .deepAsleep:
             // A paused guest cannot answer its agent; one on disk has no VM running at all.
             return [.detachSessions(.sandboxStopped), .reviveForStop, .stopContainer, .deleteSnapshot, .releaseRuntime]
         case .off:

@@ -61,7 +61,7 @@ public struct StoreLayout: Sendable, Equatable {
 /// the NIC's MAC address and the vmnet subnet are pinned for the same reason).
 public struct PersistedSandbox: Codable, Sendable, Equatable {
     public var spec: SandboxSpec
-    /// The last durable phase: `running`, `pausedSaved`, `onDisk`, or `off` (stopped; the root
+    /// The last durable phase: `running`, `asleep`, `deepAsleep`, or `off` (shut down; the root
     /// disk is kept for the next Start).
     public var phase: Phase
     /// `VZGenericMachineIdentifier.dataRepresentation`.

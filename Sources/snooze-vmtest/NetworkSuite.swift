@@ -23,7 +23,7 @@ func networkSuite() async throws {
     let recipe = AgentRecipes.claudeCode
     let name = "net-agent"
     var sb = try Sandbox(spec: netSpec(name, policy: .agent))
-    if await sb.phase != .off { try? await sb.stop() }
+    if await sb.phase != .off { try? await sb.shutDown() }
     try? await sb.delete()
     sb = try Sandbox(spec: netSpec(name, policy: .agent))
     guard let proxy = sb.egress else { check(false, "a proxied spec has an EgressProxy"); return }
@@ -130,14 +130,14 @@ func networkSuite() async throws {
 
     // Sleep to disk → wake.
     print("vmtest[network]: sleep to disk → wake")
-    try await sb.sleepToDisk()
-    try await sb.wakeFromDisk()
+    try await sb.deepSleep()
+    try await sb.wake()
     check(proxy.isListening, "the proxy listens again after the wake")
     try await networkChecks(sb, log: log, phase: "after wake")
 
     // Stop → Start (the kept root disk cold-boots; the shim and CA are set up again, once).
     print("vmtest[network]: stop → start")
-    try await sb.stop()
+    try await sb.shutDown()
     try await sb.start()
     let bundle = try await sh("grep -c -F \"$(sed -n 2p \(EgressProxy.guestCAPath))\" /etc/ssl/certs/ca-certificates.crt")
     check(bundle.output.trimmingCharacters(in: .whitespacesAndNewlines) == "1", "the sandbox CA is in the system bundle exactly once after a cold boot")
@@ -162,14 +162,18 @@ func networkCrashSave() async throws -> Int32 {
     try await sb.start()
     let r = try await sb.exec(["sh", "-c", "getent hosts registry.npmjs.org >/dev/null && echo ok"], privileged: true)
     guard r.output.contains("ok") else { return 3 }
-    try await sb.sleepToDisk()
-    return 0
+    // A session to find again, then QUIT the way an app does (prepareForExit from RUNNING = Deep Sleep).
+    try await sb.openSession("hold", argv: ["sleep", "3600"])
+    let pid = try await sb.sessions().first { $0.name == "hold" }?.pid ?? -1
+    try "\(pid)".write(to: storeRoot.appendingPathComponent("net-crash-pid.txt"), atomically: true, encoding: .utf8)
+    await sb.prepareForExit()
+    return await sb.phase == .deepAsleep ? 0 : 4
 }
 
 /// Crash restore of a PROXIED sandbox: a new process adopts it, the proxy listens on the adopted
 /// VM, the guest's shim (still running in the restored memory) reaches it, the policy still applies.
 func networkCrashSuite() async throws {
-    print("vmtest[network]: crash restore of a proxied sandbox (a child sleeps it to disk and exits)")
+    print("vmtest[network]: quit while RUNNING → relaunch: a child quits (prepareForExit = Deep Sleep), this process wakes it")
     let spec = netSpec("net-crash", policy: .agent)
     if Sandbox.restorableState(for: spec) != nil { Sandbox.discardRestorableState(for: spec) }
     try? await Sandbox(spec: spec).delete()
@@ -178,10 +182,11 @@ func networkCrashSuite() async throws {
     child.arguments = ["net-crash-save", "--store", storeRoot.path]
     try child.run()
     child.waitUntilExit()
-    check(child.terminationStatus == 0 && Sandbox.restorableState(for: spec) != nil, "the child left a proxied sandbox asleep (\(child.terminationStatus))")
+    check(child.terminationStatus == 0 && Sandbox.restorableState(for: spec)?.phase == .deepAsleep,
+          "quitting with the proxied sandbox RUNNING left it deep asleep, not shut down (\(child.terminationStatus))")
     let sb = try Sandbox(spec: spec)
     let t0 = Date()
-    try await sb.restoreAfterCrash()
+    try await sb.wake()
     check(await sb.phase == .running && sb.egress?.isListening == true,
           String(format: "restored into this process in %.2f s; the proxy listens on the adopted VM", Date().timeIntervalSince(t0)))
     let r = try await sb.exec(["sh", "-c", "ls /sys/class/net | tr '\\n' ' '; node -e \"require('https').get('https://registry.npmjs.org/is-number',{agent:new (require('https').Agent)()},r=>{console.log('status',r.statusCode)}).on('error',e=>console.log('err',e.code))\" ; getent hosts example.com || echo example-denied"],
@@ -190,7 +195,10 @@ func networkCrashSuite() async throws {
     check(r.output.hasPrefix("lo ") && r.output.contains("status 200") && r.output.contains("example-denied")
           && rows.contains { $0.host == "registry.npmjs.org" && $0.kind == .tcp && $0.verdict == .allowed },
           "after the restore: still only lo, redirected TCP to the registry allowed, example.com still denied (\(r.output.replacingOccurrences(of: "\n", with: " ")))")
-    try await sb.stop()
+    let pid = Int((try? String(contentsOf: storeRoot.appendingPathComponent("net-crash-pid.txt"), encoding: .utf8)) ?? "")
+    let hold = try await sb.sessions().first { $0.name == "hold" }
+    check(hold?.pid == pid && hold?.isEnded == false, "the session is still there with the same pid (\(pid.map(String.init) ?? "?"))")
+    try await sb.shutDown()
     try await sb.delete()
 }
 

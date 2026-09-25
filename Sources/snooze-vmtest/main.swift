@@ -155,7 +155,7 @@ func lifecycleSuite() async throws {
     let sb = try Sandbox(spec: makeSpec("vmtest", share: share))
     let log = logEvents(sb)
     defer { log.cancel() }
-    if await sb.phase != .off { try? await sb.stop() }
+    if await sb.phase != .off { try? await sb.shutDown() }
 
     print("vmtest: start")
     let t0 = Date()
@@ -215,7 +215,7 @@ func lifecycleSuite() async throws {
     let snap = StoreLayout(spec: sb.spec).snapshot
     try await sb.sleep()
     let st1 = await sb.status
-    check(st1.phase == .pausedSaved && FileManager.default.fileExists(atPath: snap.path) && st1.snapshotBytes > 0,
+    check(st1.phase == .asleep && FileManager.default.fileExists(atPath: snap.path) && st1.snapshotBytes > 0,
           "asleep with a snapshot on disk (\(st1.snapshotBytes / 1_048_576) MiB), RAM held (\(st1.ramHeldMiB) MiB)")
     try await sb.resume()
     check(!FileManager.default.fileExists(atPath: snap.path), "resume deleted the snapshot")
@@ -225,10 +225,10 @@ func lifecycleSuite() async throws {
     for cycle in 1...2 {
         print("vmtest: sleep to disk / wake (cycle \(cycle))")
         let t1 = Date()
-        try await sb.sleepToDisk()
+        try await sb.deepSleep()
         let sleepMs = Date().timeIntervalSince(t1) * 1000
         let st2 = await sb.status
-        check(st2.phase == .onDisk && st2.ramHeldMiB == 0, String(format: "asleep on disk, RAM freed (%.0f ms)", sleepMs))
+        check(st2.phase == .deepAsleep && st2.ramHeldMiB == 0, String(format: "asleep on disk, RAM freed (%.0f ms)", sleepMs))
         _ = await rec.wait(2) { $0.finished }
         check(rec.last == .detached(.sandboxSleeping), "the attached connection was told the sandbox is sleeping")
         var attachRefused = false
@@ -238,7 +238,7 @@ func lifecycleSuite() async throws {
         let hostFile = share.appendingPathComponent("host-\(cycle).txt")
         try "from the host \(cycle)\n".write(to: hostFile, atomically: true, encoding: .utf8)
         let t2 = Date()
-        try await sb.wakeFromDisk()
+        try await sb.wake()
         let wakeMs = Date().timeIntervalSince(t2) * 1000
         check(await sb.phase == .running && !FileManager.default.fileExists(atPath: snap.path),
               String(format: "awake from disk in %.0f ms, snapshot deleted", wakeMs))
@@ -310,7 +310,7 @@ func lifecycleSuite() async throws {
         }
         return lines
     }
-    try await sb.stop()
+    try await sb.shutDown()
     let lines = await stopLog.value
     check(await sb.phase == .off, "stopped")
     check(lines.contains { $0.hasPrefix("stopped the container") || $0.hasPrefix("stopped the VM") },
@@ -335,7 +335,7 @@ func lifecycleSuite() async throws {
         let d = try await sb.exec(["sh", "-c", "ip -4 addr show eth0 | awk '/inet/{print $2}'; ip route | head -1; wget -q -T 4 -O /dev/null http://1.1.1.1 && echo NET-OK || echo NET-FAIL"])
         info("install failed (\(inst.exitCode)): \(inst.errorOutput.prefix(200)) · net: \(d.output.replacingOccurrences(of: "\n", with: " "))")
     }
-    try await sb.stop()
+    try await sb.shutDown()
     check(sb.hasRootDisk && Sandbox.restorableState(for: sb.spec) == nil, "Stop kept the root disk and left no snapshot")
     try await sb.start()
     let kept1 = try await sb.exec(["sh", "-c", "cat /root/snooze-keep; command -v jq"]).output
@@ -350,7 +350,7 @@ func lifecycleSuite() async throws {
     let dirGone = !FileManager.default.fileExists(atPath: StoreLayout(spec: sb.spec).sandboxDirectory.path)
     check(await sb.phase == .off && dirGone, "Delete sandbox (from running) stopped it and removed its whole directory")
 
-    for (label, park) in [("paused", { try await sb.pause() }), ("on disk", { try await sb.sleepToDisk() })] as [(String, () async throws -> Void)] {
+    for (label, park) in [("paused", { try await sb.pause() }), ("on disk", { try await sb.deepSleep() })] as [(String, () async throws -> Void)] {
         print("vmtest: stop while \(label) (revived, then stopped gracefully)")
         try await sb.start()
         try await sb.openSession("tick", argv: ["bash", "/work/tick.sh"])
@@ -365,7 +365,7 @@ func lifecycleSuite() async throws {
             }
             return l
         }
-        try await sb.stop()
+        try await sb.shutDown()
         let pl = await evLog.value
         check(await sb.phase == .off && pl.contains { $0.hasPrefix("stopped the container") } && !pl.contains("phase running"),
               "Stop while \(label): the VM is revived without a phase change and stopped through the package (\(pl.joined(separator: "; ")))")
@@ -384,9 +384,10 @@ func crashSave() async throws -> Int32 {
     await sleepS(1)
     let pid = try await sb.sessions().first { $0.name == "tick" }?.pid ?? -1
     try "\(pid)".write(to: storeRoot.appendingPathComponent("crash-pid.txt"), atomically: true, encoding: .utf8)
-    try await sb.sleepToDisk()
+    // Quit the way a host app does: prepareForExit from RUNNING — Deep Sleep, never a cold stop.
+    await sb.prepareForExit()
     log.cancel()
-    print("        · [child] asleep on disk with session tick (pid \(pid)); exiting WITHOUT stop, like a crash")
+    print("        · [child] quit with session tick (pid \(pid)) running → \(await sb.phase.label); exiting WITHOUT shutting down")
     return 0
 }
 
@@ -408,8 +409,8 @@ func crashSuite(skipChild: Bool = false) async throws {
     let log = logEvents(sb)
     defer { log.cancel() }
     let t0 = Date()
-    try await sb.restoreAfterCrash()
-    check(await sb.phase == .running, String(format: "restored into this process in %.2f s (pinned machine id)", Date().timeIntervalSince(t0)))
+    try await sb.wake()                       // in a new process: adopts the deep-asleep VM
+    check(await sb.phase == .running, String(format: "woke into this process in %.2f s (pinned machine id)", Date().timeIntervalSince(t0)))
     let pid = Int((try? String(contentsOf: storeRoot.appendingPathComponent("crash-pid.txt"), encoding: .utf8)) ?? "")
     let s = try await sb.sessions().first { $0.name == "tick" }
     check(s != nil && s?.pid == pid && s?.isEnded == false, "the session survived the crash (same pid \(pid.map(String.init) ?? "?"))")
@@ -432,7 +433,7 @@ func crashSuite(skipChild: Bool = false) async throws {
         info("diagnostics: \(m.output) \(m.errorOutput)")
     }
     check(!FileManager.default.fileExists(atPath: StoreLayout(spec: spec).snapshot.path), "the snapshot was deleted after the restore")
-    try await sb.stop()
+    try await sb.shutDown()
     check(await sb.phase == .off && Sandbox.restorableState(for: spec) == nil, "stopped; nothing left to restore")
 }
 
@@ -498,7 +499,7 @@ func agentSuite(_ recipe: ImageRecipe) async throws {
 
     print("vmtest[\(recipe.name)]: bake (or cache hit)")
     var sb = try Sandbox(spec: agentSpec(name, recipe: recipe, workspace: ws))
-    if await sb.phase != .off { try? await sb.stop() }
+    if await sb.phase != .off { try? await sb.shutDown() }
     let tb = Date()
     let img = try await bakeImage(sb, recipe)
     let m = img.manifest
@@ -582,11 +583,11 @@ func agentSuite(_ recipe: ImageRecipe) async throws {
 
     print("vmtest[\(recipe.name)]: sleep to disk → wake mid-session")
     let t1 = Date()
-    try await sb.sleepToDisk()
+    try await sb.deepSleep()
     let sleepMs = Date().timeIntervalSince(t1) * 1000
     _ = await rec.wait(2) { $0.finished }
     let t2 = Date()
-    try await sb.wakeFromDisk()
+    try await sb.wake()
     let wakeMs = Date().timeIntervalSince(t2) * 1000
     check(await sb.phase == .running, String(format: "slept to disk in %.0f ms, woke in %.0f ms", sleepMs, wakeMs))
     let pidAfter = try await sb.sessions().first { $0.name == "agent" }?.pid ?? -2
@@ -606,11 +607,11 @@ func agentSuite(_ recipe: ImageRecipe) async throws {
     c2.close()
 
     print("vmtest[\(recipe.name)]: state survives Stop → Start and a re-bake")
-    try await sb.stop()
+    try await sb.shutDown()
     try await sb.start()
     let m1 = try await sb.exec(["cat", "\(persist)/snooze-marker"], user: recipe.user).output
     check(m1.contains(marker), "Stop → Start: the state disk kept \(persist)")
-    try await sb.stop()
+    try await sb.shutDown()
     log.cancel()
 
     print("vmtest[\(recipe.name)]: crash restore with the state disk attached (two processes)")
@@ -630,13 +631,13 @@ func agentSuite(_ recipe: ImageRecipe) async throws {
     let crashPid = Int((try? String(contentsOf: storeRoot.appendingPathComponent("agent-crash-pid.txt"), encoding: .utf8)) ?? "")
     let rsb = try Sandbox(spec: agentSpec(name, recipe: recipe, workspace: ws))
     let tcr = Date()
-    try await rsb.restoreAfterCrash()
+    try await rsb.wake()
     let restoredPid = try await rsb.sessions().first { $0.name == "agent" }?.pid
     let still = try await rsb.exec(["cat", "\(persist)/snooze-marker"], user: recipe.user).output
     check(child.terminationStatus == 0 && restoredPid != nil && restoredPid == crashPid && still.contains(marker),
           String(format: "restored in a new process in %.2f s: the same agent pid (%@) and the state disk mounted", Date().timeIntervalSince(tcr),
                  restoredPid.map(String.init) ?? "none"))
-    try await rsb.stop()
+    try await rsb.shutDown()
 
     var variant = recipe
     variant.steps.append(BakeStep("re-bake \(UUID().uuidString.prefix(8))", argv: ["true"], needsNetwork: false))
@@ -650,7 +651,7 @@ func agentSuite(_ recipe: ImageRecipe) async throws {
     try await sb.start()
     let m2 = try await sb.exec(["cat", "\(persist)/snooze-marker"], user: recipe.user).output
     check(m2.contains(marker), "after the re-bake, the new root still sees the same state disk")
-    try await sb.stop()
+    try await sb.shutDown()
     try? FileManager.default.removeItem(at: img2.root.deletingLastPathComponent())
 }
 
@@ -670,7 +671,7 @@ func restorePointSuite() async throws {
     print("vmtest: restore points — take (stopped) → change → revert → the change is gone")
     try await sb.start()
     _ = try await sb.exec(["sh", "-c", "echo A > /root/A && sync"])
-    try await sb.stop()
+    try await sb.shutDown()
     let t0 = Date()
     let rp1 = try await sb.takeRestorePoint(name: "has-A", note: "stopped")
     check(rp1.takenWhile == .stopped && sb.restorePoints().count == 1,
@@ -708,7 +709,7 @@ func restorePointSuite() async throws {
     let a2 = try await has("A"), b2 = try await has("B"), c2 = try await has("C")
     check(fl.contains { $0.hasPrefix("e2fsck rootfs.ext4") }, "the first boot from the running-taken point ran e2fsck (\(fl.first { $0.hasPrefix("fsck rootfs") } ?? "no report"))")
     check(a2 && b2 && !c2, "after revert to has-A-B: A and B are there, C is not")
-    try await sb.stop()
+    try await sb.shutDown()
 
     print("vmtest: fork a restore point into a second sandbox; both run independently")
     try? await Sandbox(spec: { var s = sb.spec; s.name = "vmtest-rp-fork"; return s }()).delete()
@@ -725,7 +726,7 @@ func restorePointSuite() async throws {
     check(fa.contains("A") && fa.contains("F") && !fa.contains("B") && !oa && origRunning,
           "the fork booted from has-A and runs beside the original; its changes stay its own")
     try await fork.delete()
-    try await sb.stop()
+    try await sb.shutDown()
 
     print("vmtest: delete restore points in any order")
     let before = sb.restorePoints().map(\.id)
@@ -736,7 +737,7 @@ func restorePointSuite() async throws {
     try await sb.start()
     let a3 = try await has("A"), b3 = try await has("B")
     check(a3 && !b3, "the earlier restore point still reverts correctly")
-    try await sb.stop()
+    try await sb.shutDown()
 
     print("vmtest: save a restore point as a custom image, then start a new sandbox from it")
     let imgName = "vmtest-custom"
@@ -774,7 +775,7 @@ Task {
             try await sb.start()
             let r = try await sb.exec(["sh", "-c", args[i + 1]], privileged: true)
             print(r.output + r.errorOutput)
-            try await sb.stop()
+            try await sb.shutDown()
             exit(r.exitCode)
         case "bake":
             // snooze-vmtest bake claude-code|pi — bake (or cache-hit) one agent image, print the manifest.
@@ -798,7 +799,8 @@ Task {
             await sleepS(2)
             let pid = try await sb.sessions().first { $0.name == "agent" }?.pid ?? -1
             try "\(pid)".write(to: storeRoot.appendingPathComponent("agent-crash-pid.txt"), atomically: true, encoding: .utf8)
-            try await sb.sleepToDisk()
+            await sb.prepareForExit()            // quit with the agent RUNNING: Deep Sleep, not a cold stop
+            guard await sb.phase == .deepAsleep else { exit(4) }
             exit(0)
         case "agent-crash-restore":
             guard let r = args.dropFirst().first(where: { !$0.hasPrefix("-") && $0 != "agent-crash-restore" }).flatMap(agentRecipe) else { exit(2) }
@@ -807,7 +809,7 @@ Task {
             let log = logEvents(sb)
             try await sb.restoreAfterCrash()
             print("sessions: \(try await sb.sessions())")
-            try await sb.stop()
+            try await sb.shutDown()
             log.cancel()
             print("vmtest: ALL PASS"); exit(0)
         case "restore":
@@ -824,7 +826,7 @@ Task {
             let r = try await sb.exec(["sh", "-c", args[i + 1]], privileged: true, timeoutSeconds: 60)
             print(r.output + r.errorOutput)
             for rec in sb.egress?.log.records ?? [] where rec.kind != .http { print("  log \(rec.kind) \(rec.target) \(rec.verdict) \(rec.rule) up=\(rec.bytesUp) down=\(rec.bytesDown) lat=\(rec.latencyMs ?? -1) dur=\(rec.durationMs ?? -1) open=\(rec.open) \(rec.detail ?? "")") }
-            try await sb.stop()
+            try await sb.shutDown()
             try await sb.delete()
             exit(r.exitCode)
         case "agents":
@@ -847,10 +849,10 @@ Task {
                 try await sb.start()
                 try await net("cycle \(i) boot")
                 if withSleep {
-                    try await sb.sleepToDisk(); try await sb.wakeFromDisk()
+                    try await sb.deepSleep(); try await sb.wake()
                     try await net("cycle \(i) after wake")
                 }
-                try await sb.stop()
+                try await sb.shutDown()
             }
             try await sb.delete()
             exit(0)

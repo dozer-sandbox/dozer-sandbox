@@ -8,10 +8,10 @@ import Virtualization
 
 /// One Linux container in its own VM, with the 576.03 sleep design:
 ///
-///     start ─▶ running ⇄ paused (1 ms) ─▶ pausedSaved (+ snapshot, ~0.5 s)
-///                 │                              │
-///                 └──────────── sleepToDisk ─────┴─▶ onDisk (RAM freed) ─ wakeFromDisk (~0.35 s) ─▶ running
-///     any ─ stop ─▶ off           a new process ─ restoreAfterCrash ─▶ running   (pinned machine id)
+///     start ─▶ running ⇄ paused (1 ms) ─ sleep ─▶ asleep (+ snapshot, ~0.5 s) ─ wake ─▶ running
+///                 │                                   │
+///                 └────────── deepSleep ──────────────┴─▶ deepAsleep (RAM freed) ─ wake (~0.35 s) ─▶ running
+///     any ─ shutDown ─▶ off (disk kept)    a new process ─ wake / restoreAfterCrash ─▶ running   (pinned machine id)
 ///
 /// Terminal sessions live in the guest under `deckhold`, so they survive every transition;
 /// `attach` returns a `SessionConnection` that a front end reattaches after a wake.
@@ -172,7 +172,7 @@ public actor Sandbox {
             note(String(format: "restored after a crash in %.2f s — sessions are where they were", seconds(since: t0)))
         } catch {
             abandonBoot()
-            note("restore FAILED: \(error.localizedDescription) — the snapshot is kept; Stop discards it")
+            note("restore FAILED: \(error.localizedDescription) — the snapshot is kept; Shut Down discards it")
             setPhase(.failed)
             throw error
         }
@@ -198,18 +198,42 @@ public actor Sandbox {
         return PersistedSandbox.read(from: layout.persistedState)
     }
 
+    // The owner's vocabulary (2026-09-25): Pause (Suspend) → Resume · Sleep → Wake ·
+    // Deep Sleep (Hibernate) → Wake · Shut Down → Start (Cold Boot).
+
+    /// Pause: VZ pause, guest CPU 0, RAM kept (~1 ms). `resume()` continues.
     public func pause() async throws { try await perform(.pause) }
+    /// Suspend — the same as `pause()`.
+    public func suspend() async throws { try await pause() }
+    /// Resume after `pause()`. (From Sleep it still works — the pre-rename spelling of `wake()`.)
     public func resume() async throws { try await perform(.resume) }
-    /// Pause + snapshot to disk; stays paused, RAM held. From here a crash is survivable.
+    /// Sleep: pause + snapshot to disk; RAM kept. From here a crash is survivable. `wake()` resumes it in place.
     public func sleep() async throws { try await perform(.sleep) }
-    /// Pause + snapshot + VM stop: RAM returned. Attached connections are detached with
-    /// `.sandboxSleeping` first; attach again after `wakeFromDisk()`.
-    public func sleepToDisk() async throws { try await perform(.sleepToDisk) }
-    /// Restore + resume + clock resync + share re-mount + snapshot deleted.
-    public func wakeFromDisk() async throws { try await perform(.wakeFromDisk) }
-    /// Shut the VM down — gracefully, reviving a sleeping one first — and KEEP its root disk: the
-    /// next `start()` cold-boots that same disk. No snapshot survives a Stop.
-    public func stop() async throws { try await perform(.stop) }
+    /// Deep Sleep: pause + snapshot + VM stop — RAM returned. Attached connections are detached with
+    /// `.sandboxSleeping` first; attach again after `wake()`.
+    public func deepSleep() async throws { try await perform(.deepSleep) }
+    /// Hibernate — the same as `deepSleep()`.
+    public func hibernate() async throws { try await deepSleep() }
+    /// Wake from Sleep (resume in place, snapshot deleted) or from Deep Sleep (restore + resume +
+    /// clock re-sync + share re-mount + snapshot deleted). In a NEW process — the app quit or crashed
+    /// while the sandbox slept — this adopts it (`restoreAfterCrash()`), sessions and all.
+    public func wake() async throws {
+        if phase == .off, Self.restorableState(for: spec) != nil { try await restoreAfterCrash(); return }
+        try await perform(.wake)
+    }
+    /// Shut Down: a cold stop — gracefully, reviving a sleeping VM first — that KEEPS the root
+    /// disk; running programs end. The next `start()` (`coldBoot()`) boots that same disk. No
+    /// snapshot survives a Shut Down.
+    public func shutDown() async throws { try await perform(.shutDown) }
+    /// Cold Boot — the same as `start()`.
+    public func coldBoot() async throws { try await start() }
+
+    @available(*, deprecated, renamed: "deepSleep()")
+    public func sleepToDisk() async throws { try await deepSleep() }
+    @available(*, deprecated, renamed: "wake()")
+    public func wakeFromDisk() async throws { try await wake() }
+    @available(*, deprecated, renamed: "shutDown()")
+    public func stop() async throws { try await shutDown() }
     /// Stop if needed, then discard the root disk: the next `start()` begins from a fresh clone of
     /// the prepared disk.
     public func resetToImage() async throws { try await perform(.resetToImage) }
@@ -238,7 +262,7 @@ public actor Sandbox {
         let taken: RestorePoint.TakenWhile
         switch phase {
         case .off: taken = .stopped
-        case .running, .paused, .pausedSaved, .onDisk: taken = .running
+        case .running, .paused, .asleep, .deepAsleep: taken = .running
         case .booting, .failed: throw SandboxError.invalidPhase(operation: "take a restore point", phase: phase)
         }
         let persisted = identity ?? PersistedSandbox.read(from: layout.persistedState)
@@ -399,17 +423,32 @@ public actor Sandbox {
     /// This sandbox has a root disk that the next `start()` will boot (rather than a fresh clone).
     public nonisolated var hasRootDisk: Bool { FileManager.default.fileExists(atPath: layout.rootfs.path) }
 
-    /// What a host app should do at quit: keep a sleeping sandbox restorable (its VM dies with
-    /// the process, its snapshot does not), stop anything else.
+    /// What a host app does at quit (owner ruling 2026-09-25): **Deep Sleep**, never a cold stop.
+    /// A running, paused or sleeping sandbox is snapshotted and its VM stopped, so the next launch
+    /// `wake()`s it with every session and pid where it was. Deep asleep: left as it is. Booting or
+    /// failed (nothing worth keeping): shut down. If the Deep Sleep itself fails, it shuts down.
     public func prepareForExit() async {
         await acquire(); defer { release() }
-        if phase.keepsSnapshot {
+        switch phase {
+        case .running, .paused, .asleep:
+            let from = phase
+            do {
+                for step in LifecyclePlanner.plan(.deepSleep, from: from) ?? [] { try await run(step, target: .deepAsleep) }
+                setPhase(.deepAsleep)
+                note("deep asleep for the quit — the next launch wakes it, sessions and all")
+            } catch {
+                note("deep sleep at quit FAILED (\(error.localizedDescription)) — shutting down instead")
+                await runStopSteps(from: phase)
+                setPhase(.off)
+            }
+        case .deepAsleep:
             for c in connections.values { c.detach(.sandboxSleeping) }
             connections.removeAll()
-            note("left asleep with its snapshot on disk — restorable after relaunch")
-        } else if phase != .off {
+        case .booting, .failed:
             await runStopSteps(from: phase)
             setPhase(.off)
+        case .off:
+            break
         }
     }
 
@@ -422,7 +461,7 @@ public actor Sandbox {
             throw SandboxError.invalidPhase(operation: op.rawValue, phase: from)
         }
         setBusy(true); defer { setBusy(false) }
-        if [.stop, .resetToImage, .delete].contains(op) {
+        if [.shutDown, .resetToImage, .delete].contains(op) {
             // Best effort at every step: whatever state the VM is in, it ends stopped.
             for step in steps {
                 do { try await run(step, target: .off) } catch { note("\(op.rawValue): \(step) — \(error.localizedDescription)") }
@@ -443,7 +482,7 @@ public actor Sandbox {
     /// Stop is best effort at every step: whatever state the VM is in, it ends stopped and the
     /// runtime files are gone.
     private func runStopSteps(from: Phase) async {
-        for step in LifecyclePlanner.plan(.stop, from: from) ?? [] {
+        for step in LifecyclePlanner.plan(.shutDown, from: from) ?? [] {
             do { try await run(step, target: .off) } catch { note("stop: \(step) — \(error.localizedDescription)") }
         }
     }
@@ -463,7 +502,7 @@ public actor Sandbox {
             try? FileManager.default.removeItem(at: layout.snapshot)
             try await timed("saved VM state to disk") { try await vz(handle, .save(layout.snapshot)) }
             snapshotBytes = fileSize(layout.snapshot)
-            setPhase(.pausedSaved)
+            setPhase(.asleep)
         case .detachSessions(let reason):
             let conns = Array(connections.values)
             connections.removeAll()
@@ -472,10 +511,10 @@ public actor Sandbox {
         case .stopVMDirect:
             guard let handle else { return }
             if vzStateIsStopped(handle) { return }
-            try await timed(target == .onDisk ? "stopped the VM — RAM freed, state on disk" : "stopped the VM") {
+            try await timed(target == .deepAsleep ? "deep sleep: stopped the VM — RAM freed, state on disk" : "stopped the VM") {
                 try await vz(handle, .stop)
             }
-            if target == .onDisk { setPhase(.onDisk) }
+            if target == .deepAsleep { setPhase(.deepAsleep) }
         case .reviveForStop:
             guard let handle else { return }
             let vmState = handle.queue.sync { handle.vm.state }
