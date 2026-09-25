@@ -814,6 +814,8 @@ Task {
             try await restorePointSuite()
         case "network":
             try await networkSuite()
+        case "net-crash-save":
+            exit(try await networkCrashSave())
         case "netdebug":
             // snooze-vmtest netdebug --script '<sh>' : a proxied (agent policy) claude-code sandbox; run the script as root; stop.
             guard let i = args.firstIndex(of: "--script"), i + 1 < args.count else { print("netdebug needs --script"); exit(2) }

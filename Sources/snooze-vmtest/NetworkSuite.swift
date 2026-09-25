@@ -152,7 +152,46 @@ func networkSuite() async throws {
           "the log exports as JSON lines (\(parsed.count) records, \(log.deniedCount) denied) with no key, placeholder or query string")
     try await sb.delete()
 
+    try await networkCrashSuite()
     try await bakeSuite()
+}
+
+/// The child half: start a proxied sandbox, make sure it works, sleep it to disk, exit without stopping.
+func networkCrashSave() async throws -> Int32 {
+    let sb = try Sandbox(spec: netSpec("net-crash", policy: .agent))
+    try await sb.start()
+    let r = try await sb.exec(["sh", "-c", "getent hosts registry.npmjs.org >/dev/null && echo ok"], privileged: true)
+    guard r.output.contains("ok") else { return 3 }
+    try await sb.sleepToDisk()
+    return 0
+}
+
+/// Crash restore of a PROXIED sandbox: a new process adopts it, the proxy listens on the adopted
+/// VM, the guest's shim (still running in the restored memory) reaches it, the policy still applies.
+func networkCrashSuite() async throws {
+    print("vmtest[network]: crash restore of a proxied sandbox (a child sleeps it to disk and exits)")
+    let spec = netSpec("net-crash", policy: .agent)
+    if Sandbox.restorableState(for: spec) != nil { Sandbox.discardRestorableState(for: spec) }
+    try? await Sandbox(spec: spec).delete()
+    let child = Process()
+    child.executableURL = URL(fileURLWithPath: CommandLine.arguments[0]).standardizedFileURL
+    child.arguments = ["net-crash-save", "--store", storeRoot.path]
+    try child.run()
+    child.waitUntilExit()
+    check(child.terminationStatus == 0 && Sandbox.restorableState(for: spec) != nil, "the child left a proxied sandbox asleep (\(child.terminationStatus))")
+    let sb = try Sandbox(spec: spec)
+    let t0 = Date()
+    try await sb.restoreAfterCrash()
+    check(await sb.phase == .running && sb.egress?.isListening == true,
+          String(format: "restored into this process in %.2f s; the proxy listens on the adopted VM", Date().timeIntervalSince(t0)))
+    let r = try await sb.exec(["sh", "-c", "ls /sys/class/net | tr '\\n' ' '; node -e \"require('https').get('https://registry.npmjs.org/is-number',{agent:new (require('https').Agent)()},r=>{console.log('status',r.statusCode)}).on('error',e=>console.log('err',e.code))\" ; getent hosts example.com || echo example-denied"],
+                              privileged: true, timeoutSeconds: 60)
+    let rows = sb.egress?.log.records ?? []
+    check(r.output.hasPrefix("lo ") && r.output.contains("status 200") && r.output.contains("example-denied")
+          && rows.contains { $0.host == "registry.npmjs.org" && $0.kind == .tcp && $0.verdict == .allowed },
+          "after the restore: still only lo, redirected TCP to the registry allowed, example.com still denied (\(r.output.replacingOccurrences(of: "\n", with: " ")))")
+    try await sb.stop()
+    try await sb.delete()
 }
 
 /// Allowed and denied HTTPS, DNS, redirected TCP, UDP — run while running and again after a wake.
