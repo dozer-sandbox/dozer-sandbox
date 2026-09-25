@@ -1,0 +1,4 @@
+# placeholder: fill in with the platform-UI / app-only modules this package must never import.
+# One module name per line. Blank lines and lines starting with # are ignored.
+# Typical entries for a package meant to stay usable from an app, a CLI, or a
+# headless/Linux process: SwiftUI, AppKit, UIKit, Metal, MetalKit, WebKit.

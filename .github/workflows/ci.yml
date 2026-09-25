@@ -1,0 +1,81 @@
+# placeholder legend: SnoozeContainerKit this library's name · {{name}} lowercase slug ·
+# {{DEP_NAME}}/{{DEP_PIN}}/{{DEP_OWNER}} an optional single upstream sovereign-library dependency —
+# delete the two "checkout {{DEP_NAME}}" steps entirely if this package has no such dependency ·
+# {{LINUX}} delete the whole `linux` job if this package links AppKit/SwiftUI/Metal and has no
+# Foundation-only subset (see GhosttyTerminalKit: macOS-only, no linux job) · delete every
+# PRELAUNCH step at the unveil, once {{DEP_NAME}} resolves from its real public URL.
+name: SnoozeContainerKit
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: {{name}}-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  package:
+    name: Swift package (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15]     # add ubuntu-24.04 here once this package is proven Foundation-only
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: repo/lib/SnoozeContainerKit
+      # PRELAUNCH: {{DEP_NAME}} is not public yet, so the pinned URL is not
+      # fetchable from CI. Check the sibling out at the path lib() looks for
+      # and the manifest resolves it locally, exactly as a developer's
+      # workspace does. Delete this step at the unveil.
+      - uses: actions/checkout@v4
+        with:
+          repository: {{DEP_OWNER}}/{{DEP_NAME}}-prelaunch
+          path: repo/lib/{{DEP_NAME}}
+          ref: {{DEP_PIN}}
+          token: ${{ secrets.DECK_FACTORY_TOKEN }}
+      - name: Swift toolchain
+        run: swift --version
+      - name: Neutrality audit
+        working-directory: repo/lib/SnoozeContainerKit
+        run: Scripts/audit.sh
+      - name: Build
+        working-directory: repo/lib/SnoozeContainerKit
+        run: swift build -j 8
+      - name: Test
+        working-directory: repo/lib/SnoozeContainerKit
+        run: swift test -j 8
+
+  # Delete this job if this package links AppKit/SwiftUI/Metal and has no
+  # Foundation-only subset — see repo/lib/GhosttyTerminalKit for that shape.
+  linux:
+    name: Linux compile + runtime smoke
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: repo/lib/SnoozeContainerKit
+      # PRELAUNCH — see the `package` job above. Delete at the unveil.
+      - uses: actions/checkout@v4
+        with:
+          repository: {{DEP_OWNER}}/{{DEP_NAME}}-prelaunch
+          path: repo/lib/{{DEP_NAME}}
+          ref: {{DEP_PIN}}
+          token: ${{ secrets.DECK_FACTORY_TOKEN }}
+      - name: Swift toolchain
+        run: swift --version
+      - name: Compile the Foundation-only targets
+        working-directory: repo/lib/SnoozeContainerKit
+        run: swift build {{LINUX}} -j 8
+      - name: Runtime smoke
+        working-directory: repo/lib/SnoozeContainerKit
+        run: swift run {{name}}-smoke
