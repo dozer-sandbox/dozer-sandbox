@@ -1,0 +1,6 @@
+.build/
+.build-remote/
+.swiftpm/
+.tools/
+Guest/deckhold/out/
+/*.xcodeproj
