@@ -35,6 +35,8 @@ let storeRoot: URL = {
 // Kernel: the library's pinned one (fetched once), cached in $SNOOZE_KERNEL_CACHE when set (CI
 // shares one cache across runs and repos), else under the store. $SNOOZE_KERNEL = explicit path.
 let kernelPath = ProcessInfo.processInfo.environment["SNOOZE_KERNEL"].flatMap { $0.isEmpty ? nil : $0 }
+/// Its own vmnet subnet, so a run never shares one with a SandboxLab (or another run) on this Mac.
+let testSubnet = ProcessInfo.processInfo.environment["SNOOZE_SUBNET"] ?? "192.168.201.0/24"
 let kernelCache = ProcessInfo.processInfo.environment["SNOOZE_KERNEL_CACHE"].flatMap { $0.isEmpty ? nil : URL(fileURLWithPath: $0) }
 
 // MARK: harness
@@ -113,7 +115,7 @@ while :; do i=$((i+1)); printf 'tick %d\\r\\n' "$i"; sleep 0.2; done
 func makeSpec(_ name: String, share: URL) -> SandboxSpec {
     SandboxSpec(name: name, storeRoot: storeRoot, kernelPath: kernelPath, kernelCacheDirectory: kernelCache, cpus: 2, memoryMiB: 512,
                 rootfsMiB: 1024, bakePackages: ["bash", "ncurses"],
-                shares: [Share(hostPath: share.path, guestPath: "/work")])
+                shares: [Share(hostPath: share.path, guestPath: "/work")], subnet: testSubnet)
 }
 
 func prepareShare(_ name: String) throws -> URL {
@@ -317,7 +319,10 @@ func lifecycleSuite() async throws {
     print("vmtest: Stop keeps the root disk; Reset to image and Delete sandbox discard it")
     try await sb.start()
     let keep = "kept-\(UUID().uuidString.prefix(8))"
-    _ = try await sb.exec(["sh", "-c", "echo \(keep) > /root/snooze-keep && apk add --no-cache jq >/dev/null && sync"], timeoutSeconds: 120)
+    // The package install needs the network; an intermittent vmnet loss right after boot is not what
+    // this checks, so it retries (and says so).
+    let inst = try await sb.exec(["sh", "-c", "echo \(keep) > /root/snooze-keep; for n in 1 2 3 4; do apk add --no-cache jq >/dev/null 2>&1 && { [ $n -gt 1 ] && echo \"apk needed $n tries\"; sync; exit 0; }; sleep 3; done; exit 1"], timeoutSeconds: 180)
+    if inst.output.contains("tries") { info(inst.output.trimmingCharacters(in: .whitespacesAndNewlines)) }
     try await sb.stop()
     check(sb.hasRootDisk && Sandbox.restorableState(for: sb.spec) == nil, "Stop kept the root disk and left no snapshot")
     try await sb.start()

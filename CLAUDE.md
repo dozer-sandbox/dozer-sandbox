@@ -62,6 +62,11 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   root disk; `delete()` removes the sandbox's whole directory. No Stop leaves a snapshot, and a
   snapshot found beside a kept disk on a cold Start is deleted — never restored onto a disk that
   has moved on.
+- **One vmnet network per `Sandbox`, and never vmnet's default subnet beside another process.** Each
+  Start used to create a new vmnet network (after a handful the guest had no route out); it is now
+  created once and reused. Two processes that both take the default can get the same subnet and the
+  same guest addresses — the NAT then silently drops one (the gateway still answers ping). Hosts that
+  run beside others set `SandboxSpec.subnet`; the test hosts pin 192.168.201/202.0/24.
 - **Stop decides from the phase it was CALLED in** (`perform()` reads `phase` before going busy).
 - **Stop is always graceful.** A paused VM is resumed and a VM on disk restored (silently — no phase
   event) and then `LinuxContainer.stop()` runs. Stopping at the VZ level instead leaves the package's
