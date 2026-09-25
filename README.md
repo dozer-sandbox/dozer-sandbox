@@ -64,7 +64,9 @@ if Sandbox.restorableState(for: spec) != nil { try await sandbox.restoreAfterCra
 
 Lifecycle: `start` · `pause` / `resume` · `sleep` (pause + snapshot) · `sleepToDisk` · `wakeFromDisk`
 · `stop` · `restoreAfterCrash` · `prepareForExit` (keep a sleeping sandbox restorable, stop anything
-else). Guest: `exec(argv)` (no shell unless you pass one), `sessions()` (`deckhold ls`),
+else) · `resetToImage` · `delete`. **Stop keeps the root disk**: the next Start cold-boots the same
+disk (what you installed is still there); Reset to image starts again from a fresh clone of the
+prepared disk; Delete removes everything the sandbox has on disk. Guest: `exec(argv)` (no shell unless you pass one), `sessions()` (`deckhold ls`),
 `screenText(name)` (`deckhold dump`), `bootConsole()`.
 
 **Sessions** live in the guest under `deckhold`, a PTY holder on headless libghostty-vt: it owns

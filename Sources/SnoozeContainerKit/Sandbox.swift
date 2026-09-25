@@ -90,11 +90,17 @@ public actor Sandbox {
         return p
     }
 
-    /// Throw away what a previous process left asleep (its snapshot, root disk and persisted
-    /// state) instead of restoring it. Only for a sandbox no process is running.
+    /// Throw away the snapshot a previous process left instead of restoring it (as a Stop
+    /// would): the root disk is kept and the next Start cold-boots it. Only for a sandbox no
+    /// process is running.
     public nonisolated static func discardRestorableState(for spec: SandboxSpec) {
+        // Stop semantics: the snapshot goes; the root disk stays and the next Start cold-boots it.
         let layout = StoreLayout(spec: spec)
-        for url in [layout.snapshot, layout.rootfs, layout.persistedState] { try? FileManager.default.removeItem(at: url) }
+        try? FileManager.default.removeItem(at: layout.snapshot)
+        if var p = PersistedSandbox.read(from: layout.persistedState) {
+            p.phase = .off
+            try? p.write(to: layout.persistedState)
+        }
     }
 
     // MARK: lifecycle
@@ -133,17 +139,46 @@ public actor Sandbox {
         setPhase(.booting)
         snapshotBytes = fileSize(layout.snapshot)
         do {
-            try await boot(restoring: persisted)
+            // Right after the previous owner exits, its VM process can still hold the disks for a
+            // moment ("The storage device attachment is invalid"): retry briefly.
+            var attempt = 0
+            while true {
+                do { try await boot(restoring: persisted); break } catch where attempt < 20 && Self.disksStillHeld(error) {
+                    attempt += 1
+                    abandonBoot()
+                    if attempt == 1 { note("the disks are still held by the previous process — retrying") }
+                    try await Task.sleep(for: .milliseconds(250))
+                }
+            }
             setPhase(.running)
             for step in [LifecycleStep.resyncClock, .remountShares, .deleteSnapshot, .persistState] {
                 try await run(step, target: .running)
             }
             note(String(format: "restored after a crash in %.2f s — sessions are where they were", seconds(since: t0)))
         } catch {
+            abandonBoot()
             note("restore FAILED: \(error.localizedDescription) — the snapshot is kept; Stop discards it")
             setPhase(.failed)
             throw error
         }
+    }
+
+    static func disksStillHeld(_ error: Error) -> Bool {
+        "\(error) \(error.localizedDescription)".contains("storage device attachment is invalid")
+    }
+
+    /// Drop a boot that failed part-way: its container may own vminitd clients that were never
+    /// closed, and deallocating one is fatal — so it is kept (Graveyard), never freed.
+    private func abandonBoot() {
+        if let network { var n = network; try? n.releaseInterface(spec.name); self.network = nil }
+        if container != nil || instance != nil { Graveyard.keep(container, instance) }
+        container = nil; instance = nil; handle = nil; identity = nil
+    }
+
+    /// The identity persisted with a root disk that Stop kept, if both are there.
+    static func keptRootDisk(_ layout: StoreLayout) -> PersistedSandbox? {
+        guard FileManager.default.fileExists(atPath: layout.rootfs.path) else { return nil }
+        return PersistedSandbox.read(from: layout.persistedState)
     }
 
     public func pause() async throws { try await perform(.pause) }
@@ -155,8 +190,17 @@ public actor Sandbox {
     public func sleepToDisk() async throws { try await perform(.sleepToDisk) }
     /// Restore + resume + clock resync + share re-mount + snapshot deleted.
     public func wakeFromDisk() async throws { try await perform(.wakeFromDisk) }
-    /// Stop the VM (at the VZ level when paused) and remove the sandbox's runtime files.
+    /// Shut the VM down — gracefully, reviving a sleeping one first — and KEEP its root disk: the
+    /// next `start()` cold-boots that same disk. No snapshot survives a Stop.
     public func stop() async throws { try await perform(.stop) }
+    /// Stop if needed, then discard the root disk: the next `start()` begins from a fresh clone of
+    /// the prepared disk.
+    public func resetToImage() async throws { try await perform(.resetToImage) }
+    /// Stop if needed, then remove everything this sandbox has on disk.
+    public func delete() async throws { try await perform(.delete) }
+
+    /// This sandbox has a root disk that the next `start()` will boot (rather than a fresh clone).
+    public nonisolated var hasRootDisk: Bool { FileManager.default.fileExists(atPath: layout.rootfs.path) }
 
     /// What a host app should do at quit: keep a sleeping sandbox restorable (its VM dies with
     /// the process, its snapshot does not), stop anything else.
@@ -181,8 +225,11 @@ public actor Sandbox {
             throw SandboxError.invalidPhase(operation: op.rawValue, phase: from)
         }
         setBusy(true); defer { setBusy(false) }
-        if op == .stop {
-            await runStopSteps(from: from)
+        if [.stop, .resetToImage, .delete].contains(op) {
+            // Best effort at every step: whatever state the VM is in, it ends stopped.
+            for step in steps {
+                do { try await run(step, target: .off) } catch { note("\(op.rawValue): \(step) — \(error.localizedDescription)") }
+            }
             setPhase(.off)
             return
         }
@@ -271,8 +318,11 @@ public actor Sandbox {
             try await timed("re-synced the guest clock") {
                 let agent = try await v.dialAgent()
                 let now = Date().timeIntervalSince1970
-                try await agent.setTime(sec: Int64(now), usec: Int32((now - floor(now)) * 1_000_000))
-                try? await agent.close()
+                do { try await agent.setTime(sec: Int64(now), usec: Int32((now - floor(now)) * 1_000_000)) } catch {
+                    await closeKeepingOnFailure(agent)
+                    throw error
+                }
+                await closeKeepingOnFailure(agent)
             }
         case .remountShares:
             let tags = (identity?.shareTags ?? [:]).map { (tag: $0.value, guestPath: $0.key) }.sorted { $0.guestPath < $1.guestPath }
@@ -287,7 +337,7 @@ public actor Sandbox {
                 note("deleted the snapshot (it is valid only while the VM is paused)")
             }
             snapshotBytes = 0
-        case .removeRuntimeFiles:
+        case .releaseRuntime:
             if let network { var n = network; try? n.releaseInterface(spec.name); self.network = nil }
             if !cleanlyStopped, let container {
                 // Never let the package deallocate a vminitd client it did not close: that is a
@@ -295,9 +345,18 @@ public actor Sandbox {
                 // LinuxContainer.stop() is kept for the life of the process instead.
                 Graveyard.keep(container, instance)
             }
+            if var p = identity {
+                p.phase = .off
+                p.savedAt = Date()
+                try? p.write(to: layout.persistedState)
+            }
             container = nil; instance = nil; handle = nil; identity = nil; cleanlyStopped = false
-            try? FileManager.default.removeItem(at: layout.rootfs)
-            try? FileManager.default.removeItem(at: layout.persistedState)
+        case .removeRootDisk:
+            for url in [layout.rootfs, layout.persistedState, layout.snapshot] { try? FileManager.default.removeItem(at: url) }
+            note("reset to image: the root disk was discarded — the next Start clones the prepared disk")
+        case .removeSandboxFiles:
+            try? FileManager.default.removeItem(at: layout.sandboxDirectory)
+            note("deleted the sandbox and everything it had on disk")
         case .persistState:
             guard var p = identity else { return }
             p.phase = target
@@ -331,8 +390,22 @@ public actor Sandbox {
         }
 
         var identity: PersistedSandbox
+        let kept = persisted == nil ? Self.keptRootDisk(layout) : nil
         if let persisted {
             identity = persisted
+        } else if var kept {
+            // Stop kept this root disk: cold-boot it. Its snapshot, if one is lying around (a
+            // crash while asleep, then Start instead of Restore), no longer matches a disk that
+            // is about to move on — delete it, never restore it later.
+            try? fm.removeItem(at: layout.snapshot)
+            try? fm.removeItem(at: layout.bootLog)
+            let want = StoreLayout.goldenKey(for: spec)
+            if let from = kept.rootImage, from != want {
+                note("the kept root disk was cloned from \(from), not \(want) — Reset to image to start from the new one")
+            }
+            note("cold-booting the kept root disk (Stop keeps it; Reset to image starts afresh)")
+            kept.spec = spec
+            identity = kept
         } else {
             let hadImage = (try? await store.get(reference: spec.image, pull: false)) != nil
             let image = try await timed("\(spec.image) ready\(hadImage ? " (cached)" : " (pulled)")") {
@@ -352,6 +425,7 @@ public actor Sandbox {
                                         machineIdentifier: VZGenericMachineIdentifier().dataRepresentation,
                                         macAddress: spec.networking ? PersistedSandbox.randomMAC() : nil,
                                         subnet: nil, shareTags: [:])
+            identity.rootImage = StoreLayout.goldenKey(for: spec)
         }
 
         var iface: (any Interface)?
@@ -650,7 +724,7 @@ public actor Sandbox {
     }
 }
 
-/// Containers that could not be stopped through `LinuxContainer.stop()` (see `.removeRuntimeFiles`).
+/// Containers that could not be stopped through `LinuxContainer.stop()` (see `.releaseRuntime`).
 enum Graveyard {
     nonisolated(unsafe) private static var bodies: [Any] = []
     private static let lock = NSLock()

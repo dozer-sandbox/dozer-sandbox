@@ -57,7 +57,8 @@ public struct StoreLayout: Sendable, Equatable {
 /// the NIC's MAC address and the vmnet subnet are pinned for the same reason).
 public struct PersistedSandbox: Codable, Sendable, Equatable {
     public var spec: SandboxSpec
-    /// The last durable phase: `running`, `pausedSaved` or `onDisk`.
+    /// The last durable phase: `running`, `pausedSaved`, `onDisk`, or `off` (stopped; the root
+    /// disk is kept for the next Start).
     public var phase: Phase
     /// `VZGenericMachineIdentifier.dataRepresentation`.
     public var machineIdentifier: Data
@@ -68,6 +69,8 @@ public struct PersistedSandbox: Codable, Sendable, Equatable {
     /// virtio-fs tag per share guest path, as the package attached them.
     public var shareTags: [String: String]
     public var savedAt: Date
+    /// Which prepared/baked disk the root disk was cloned from (nil: unknown / older record).
+    public var rootImage: String?
 
     public init(spec: SandboxSpec, phase: Phase, machineIdentifier: Data, macAddress: String?, subnet: String?,
                 shareTags: [String: String], savedAt: Date = Date()) {

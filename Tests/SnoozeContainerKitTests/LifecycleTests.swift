@@ -9,14 +9,39 @@ final class LifecycleTests: XCTestCase {
     /// one on disk is not running, so both are revived (silently) and then stopped GRACEFULLY —
     /// never left stopped at the VZ level with the package's vminitd clients unclosed.
     func test_stopPlanDependsOnThePhaseItWasCalledIn() {
-        XCTAssertEqual(plan(.stop, .running), [.detachSessions(.sandboxStopped), .stopContainer, .deleteSnapshot, .removeRuntimeFiles])
+        XCTAssertEqual(plan(.stop, .running), [.detachSessions(.sandboxStopped), .stopContainer, .deleteSnapshot, .releaseRuntime])
         for p in [Phase.paused, .pausedSaved, .onDisk] {
-            XCTAssertEqual(plan(.stop, p), [.detachSessions(.sandboxStopped), .reviveForStop, .stopContainer, .deleteSnapshot, .removeRuntimeFiles], "\(p)")
+            XCTAssertEqual(plan(.stop, p), [.detachSessions(.sandboxStopped), .reviveForStop, .stopContainer, .deleteSnapshot, .releaseRuntime], "\(p)")
         }
         XCTAssertNil(plan(.stop, .off))
         for p in Phase.allCases {
             XCTAssertFalse(plan(.stop, p)?.contains(.stopVMDirect) ?? false, "stop from \(p) is always graceful")
         }
+    }
+
+    /// Owner ruling 2026-09-25: Stop KEEPS the root disk (the next Start cold-boots it); Reset to
+    /// image and Delete remove it — from any phase, stopping first when something runs.
+    func test_stopKeepsTheRootDiskResetAndDeleteRemoveIt() {
+        for p in Phase.allCases {
+            let stop = plan(.stop, p) ?? []
+            XCTAssertFalse(stop.contains(.removeRootDisk) || stop.contains(.removeSandboxFiles), "stop from \(p) keeps the disk")
+            let reset = plan(.resetToImage, p)!
+            XCTAssertEqual(reset.last, .removeRootDisk, "reset from \(p)")
+            XCTAssertTrue(reset.contains(.deleteSnapshot), "reset never leaves a snapshot for a disk that is gone (\(p))")
+            XCTAssertEqual(plan(.delete, p)!.last, .removeSandboxFiles, "delete from \(p)")
+            if p != .off {
+                XCTAssertEqual(Array(reset.dropLast()), stop, "reset stops first (\(p))")
+                XCTAssertEqual(Array(plan(.delete, p)!.dropLast()), stop, "delete stops first (\(p))")
+            }
+        }
+        XCTAssertEqual(plan(.delete, .off), [.removeSandboxFiles])
+        XCTAssertEqual(LifecyclePlanner.target(of: .resetToImage), .off)
+        XCTAssertEqual(LifecyclePlanner.target(of: .delete), .off)
+    }
+
+    /// No stop leaves a snapshot: the next Start is a cold boot.
+    func test_noStopLeavesASnapshot() {
+        for p in Phase.allCases { if let s = plan(.stop, p) { XCTAssertTrue(s.contains(.deleteSnapshot), "\(p)") } }
     }
 
     /// Every stop detaches attached sessions FIRST, so no exec output reaches a connection
@@ -158,6 +183,9 @@ final class PersistedSandboxTests: XCTestCase {
         Sandbox.discardRestorableState(for: spec)
         XCTAssertNil(Sandbox.restorableState(for: spec))
         XCTAssertFalse(FileManager.default.fileExists(atPath: layout.snapshot.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: layout.rootfs.path), "discarding the snapshot keeps the root disk")
+        XCTAssertEqual(PersistedSandbox.read(from: layout.persistedState)?.phase, .off)
+        XCTAssertNotNil(Sandbox.keptRootDisk(layout), "the next Start cold-boots the kept disk")
     }
 
     func test_randomMACIsLocallyAdministeredUnicast() {
