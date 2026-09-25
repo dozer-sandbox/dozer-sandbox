@@ -219,15 +219,25 @@ public struct ImageBaker: Sendable {
 
     static func mib(_ bytes: Int64) -> Int { Int(bytes / 1_048_576) }
 
+    /// ISO 8601 WITH fractional seconds: restore points taken within one second must still sort
+    /// in the order they were taken. The decoder also reads the plain form older files used.
     static let encoder: JSONEncoder = {
         let e = JSONEncoder()
         e.outputFormatting = [.prettyPrinted, .sortedKeys]
-        e.dateEncodingStrategy = .iso8601
+        e.dateEncodingStrategy = .custom { date, enc in
+            var c = enc.singleValueContainer()
+            try c.encode(date.formatted(.iso8601.year().month().day().time(includingFractionalSeconds: true)))
+        }
         return e
     }()
     static let decoder: JSONDecoder = {
         let d = JSONDecoder()
-        d.dateDecodingStrategy = .iso8601
+        d.dateDecodingStrategy = .custom { dec in
+            let s = try dec.singleValueContainer().decode(String.self)
+            if let v = try? Date(s, strategy: .iso8601.year().month().day().time(includingFractionalSeconds: true)) { return v }
+            if let v = try? Date(s, strategy: .iso8601) { return v }
+            throw DecodingError.dataCorrupted(.init(codingPath: dec.codingPath, debugDescription: "not an ISO 8601 date: \(s)"))
+        }
         return d
     }()
 }

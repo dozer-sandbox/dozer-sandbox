@@ -69,6 +69,19 @@ disk (what you installed is still there); Reset to image starts again from a fre
 prepared disk; Delete removes everything the sandbox has on disk. Guest: `exec(argv)` (no shell unless you pass one), `sessions()` (`deckhold ls`),
 `screenText(name)` (`deckhold dump`), `bootConsole()`.
 
+**Images** (`ImageRecipe`, `ImageBaker`, `AgentRecipes.claudeCode` / `.pi`): no layered images and
+no Dockerfile — a digest-pinned OCI base is read once and flattened to one ext4 disk, the install
+steps run inside a VM booted from it, a credential-free check verifies the result, and the disk is
+kept read-only in the store, keyed by recipe + kernel + deckhold. A sandbox with `spec.recipe`
+APFS-clones it as its root and gets a per-sandbox **state disk** for the agent's login/state (it
+survives Stop, Reset to image and re-bakes). Credentials go to `openSession(environment:)` only.
+
+**Restore points** (disk only, no memory): `takeRestorePoint` (an APFS clone of the root + state
+disks — instant; from a running VM: sync → pause → clone → resume, marked for `e2fsck` on the next
+boot, since the ext4 has no journal), `revert(to:)` (takes a "before revert" point first),
+`fork(_:as:)` (a new, cold-booted sandbox), `deleteRestorePoint` (any, in any order), and
+`saveAsImage` (a read-only **custom** image with its provenance, bootable via `spec.customImage`).
+
 **Sessions** live in the guest under `deckhold`, a PTY holder on headless libghostty-vt: it owns
 the PTY, keeps an emulator model of the screen, and on attach sends a rendered SNAPSHOT reflowed to
 the viewer's size, then the program's own bytes. That is why a session survives a sleep to disk
@@ -124,7 +137,8 @@ This package owns no brand and no directory name: the host passes `storeRoot`. N
 ```bash
 make build            # swift build (with the build-system pin Xcode 27 needs)
 make test             # unit tests — no VM
-make test-vm          # the VM integration suite: builds, ad-hoc signs and runs the entitled test host
+make test-vm          # the VM integration suite: lifecycle, crash restore, restore points (entitled test host)
+make test-vm-agents   # the claude-code and pi images: bake/cache, start, sessions, sleep → wake, state disk
 make kernel           # fetch + verify the pinned kernel into the cache (KERNEL_CACHE=dir), no VM
 make audit            # import allowlist, one exact dependency, no host brand, deckhold == PROVENANCE
 make deckhold         # rebuild the guest binary (pinned Zig + ghostty; first run ~3.5 min)

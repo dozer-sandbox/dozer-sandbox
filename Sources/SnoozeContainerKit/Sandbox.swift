@@ -1,6 +1,7 @@
 import Containerization
 import ContainerizationEXT4
 import ContainerizationExtras
+import Darwin
 import Foundation
 import SystemPackage
 import Virtualization
@@ -203,6 +204,186 @@ public actor Sandbox {
     /// Stop if needed, then remove everything this sandbox has on disk.
     public func delete() async throws { try await perform(.delete) }
 
+    // MARK: restore points (disk only — see RestorePoints.swift)
+
+    /// This sandbox's restore points, oldest first.
+    public nonisolated func restorePoints() -> [RestorePoint] { layout.restorePoints() }
+
+    /// Clone the root disk (and the state disk) into a new restore point. Stopped: an exact copy.
+    /// Running: guest `sync`, pause, clone, resume — crash-consistent (no journal), recorded as
+    /// `takenWhile: running`, and the first boot from it runs e2fsck. Paused / asleep: cloned as
+    /// they are, also recorded as running.
+    public func takeRestorePoint(name: String, note: String = "") async throws -> RestorePoint {
+        await acquire(); defer { release() }
+        return try await takeRestorePointLocked(name: name, note: note, automatic: false)
+    }
+
+    private func takeRestorePointLocked(name: String, note: String, automatic: Bool) async throws -> RestorePoint {
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: layout.rootfs.path) else {
+            throw SandboxError.invalidPhase(operation: "take a restore point (there is no root disk yet)", phase: phase)
+        }
+        let taken: RestorePoint.TakenWhile
+        switch phase {
+        case .off: taken = .stopped
+        case .running, .paused, .pausedSaved, .onDisk: taken = .running
+        case .booting, .failed: throw SandboxError.invalidPhase(operation: "take a restore point", phase: phase)
+        }
+        let persisted = identity ?? PersistedSandbox.read(from: layout.persistedState)
+        let rp = RestorePoint(id: RestorePoint.newID(), name: name, note: note, createdAt: Date(), parent: persisted?.restorePoint,
+                              sourceImage: persisted?.rootImage, takenWhile: taken,
+                              hasStateDisk: fm.fileExists(atPath: layout.stateDisk.path), automatic: automatic)
+        let dir = layout.restorePointDirectory(rp.id)
+        try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        let clone: () throws -> Void = { [layout] in
+            try cloneFile(layout.rootfs, to: dir.appendingPathComponent("root.ext4"))
+            if rp.hasStateDisk { try cloneFile(layout.stateDisk, to: dir.appendingPathComponent("state.ext4")) }
+        }
+        do {
+            if phase == .running, let instance {
+                _ = try? await execInContainer(["sync"], timeout: 30)
+                try await timed("restore point \"\(name)\": sync → pause → APFS clone → resume") {
+                    try await instance.pause()
+                    do { try clone() } catch {
+                        try? await instance.resume()
+                        throw error
+                    }
+                    try await instance.resume()
+                }
+            } else {
+                try await timed("restore point \"\(name)\": APFS clone of the \(taken == .stopped ? "stopped" : "sleeping VM's") disk") { try clone() }
+            }
+            try ImageBaker.encoder.encode(rp).write(to: dir.appendingPathComponent("meta.json"))
+        } catch {
+            try? fm.removeItem(at: dir)
+            throw error
+        }
+        return rp
+    }
+
+    /// Revert to a restore point: Stop if needed (keeping the disk), take an automatic "before revert
+    /// to …" restore point of the current disk (unless told not to), then replace the root disk
+    /// (and the state disk, if the point has one) with clones of it. The next Start cold-boots it —
+    /// after e2fsck, if the point was taken while running.
+    public func revert(to id: String, takeBeforeRevert: Bool = true) async throws {
+        await acquire(); defer { release() }
+        guard let rp = layout.restorePoints().first(where: { $0.id == id }) else { throw SandboxError.restorePointNotFound(id) }
+        if phase != .off {
+            setBusy(true)
+            await runStopStepsBestEffort(from: phase)
+            setPhase(.off)
+            setBusy(false)
+        }
+        let fm = FileManager.default
+        if takeBeforeRevert, fm.fileExists(atPath: layout.rootfs.path) {
+            _ = try await takeRestorePointLocked(name: "before revert to \(rp.name)", note: "taken automatically", automatic: true)
+        }
+        let dir = layout.restorePointDirectory(rp.id)
+        try await timed("reverted to \"\(rp.name)\" (APFS clone; Start cold-boots it)") {
+            try fm.createDirectory(at: layout.sandboxDirectory, withIntermediateDirectories: true)
+            try cloneFile(dir.appendingPathComponent("root.ext4"), to: layout.rootfs)
+            if rp.hasStateDisk { try cloneFile(dir.appendingPathComponent("state.ext4"), to: layout.stateDisk) }
+            try? fm.removeItem(at: layout.snapshot)
+        }
+        var p = PersistedSandbox.read(from: layout.persistedState)
+            ?? PersistedSandbox(spec: spec, phase: .off, machineIdentifier: VZGenericMachineIdentifier().dataRepresentation,
+                                macAddress: spec.networking ? PersistedSandbox.randomMAC() : nil, subnet: nil, shareTags: [:])
+        p.phase = .off
+        p.rootImage = rp.sourceImage
+        p.restorePoint = rp.id
+        p.fsckOnNextBoot = rp.needsFsck ? true : nil
+        try p.write(to: layout.persistedState)
+        emitStatus()
+    }
+
+    /// A new sandbox, `newName`, whose disks are clones of restore point `id` — cold-booted on its
+    /// first Start (after e2fsck if the point was taken while running). Same spec otherwise (the
+    /// same shares). Returns its spec; make a `Sandbox` from it.
+    public nonisolated func fork(_ id: String, as newName: String) throws -> SandboxSpec {
+        guard let rp = layout.restorePoints().first(where: { $0.id == id }) else { throw SandboxError.restorePointNotFound(id) }
+        var s = spec
+        s.name = newName
+        try s.validate()
+        let nl = StoreLayout(spec: s)
+        let fm = FileManager.default
+        guard !fm.fileExists(atPath: nl.sandboxDirectory.path) else { throw SandboxError.alreadyExists("sandbox \(newName)") }
+        try fm.createDirectory(at: nl.sandboxDirectory, withIntermediateDirectories: true)
+        let dir = layout.restorePointDirectory(rp.id)
+        try cloneFile(dir.appendingPathComponent("root.ext4"), to: nl.rootfs)
+        if rp.hasStateDisk { try cloneFile(dir.appendingPathComponent("state.ext4"), to: nl.stateDisk) }
+        var p = PersistedSandbox(spec: s, phase: .off, machineIdentifier: VZGenericMachineIdentifier().dataRepresentation,
+                                 macAddress: s.networking ? PersistedSandbox.randomMAC() : nil, subnet: nil, shareTags: [:])
+        p.rootImage = rp.sourceImage
+        p.restorePoint = rp.id
+        p.fsckOnNextBoot = rp.needsFsck ? true : nil
+        try p.write(to: nl.persistedState)
+        return s
+    }
+
+    /// Delete a restore point. Any one, in any order: each is a set of independent APFS clones —
+    /// there is no chain of deltas to merge.
+    public nonisolated func deleteRestorePoint(_ id: String) throws {
+        let dir = layout.restorePointDirectory(id)
+        guard FileManager.default.fileExists(atPath: dir.path) else { throw SandboxError.restorePointNotFound(id) }
+        try FileManager.default.removeItem(at: dir)
+    }
+
+    /// Promote a restore point — or, with `restorePoint: nil`, the stopped sandbox's current root
+    /// disk — to a CUSTOM image other sandboxes can start from (`SandboxSpec.customImage`). Not
+    /// reproducible like a recipe bake, so it records `origin: custom` and its provenance.
+    public nonisolated func saveAsImage(_ restorePoint: String?, name: String, note: String = "") throws -> CustomImage {
+        let allowed = Set("abcdefghijklmnopqrstuvwxyz0123456789-")
+        guard (1...40).contains(name.count), name.allSatisfy(allowed.contains) else {
+            throw SandboxError.invalidSpec("custom image names are 1–40 characters of [a-z0-9-]")
+        }
+        let fm = FileManager.default
+        let source: URL, taken: Bool, chainStart: String?, base: String?, suffix: String
+        if let restorePoint {
+            guard let rp = layout.restorePoints().first(where: { $0.id == restorePoint }) else { throw SandboxError.restorePointNotFound(restorePoint) }
+            source = layout.restorePointDirectory(rp.id).appendingPathComponent("root.ext4")
+            taken = rp.needsFsck
+            chainStart = rp.id
+            base = rp.sourceImage
+            suffix = rp.id
+        } else {
+            guard let p = PersistedSandbox.read(from: layout.persistedState), p.phase == .off,
+                  fm.fileExists(atPath: layout.rootfs.path) else {
+                throw SandboxError.invalidSpec("save the current disk as an image only while the sandbox is stopped")
+            }
+            source = layout.rootfs
+            taken = p.fsckOnNextBoot == true
+            chainStart = p.restorePoint
+            base = p.rootImage
+            suffix = "disk-" + String(RestorePoint.newID().dropFirst(3))
+        }
+        let key = "\(name)/\(suffix)"
+        let dir = layout.customImageDirectory(key)
+        guard !fm.fileExists(atPath: dir.path) else { throw SandboxError.alreadyExists("custom image \(key)") }
+        try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        let root = dir.appendingPathComponent("root.ext4")
+        try cloneFile(source, to: root)
+        chmod(root.path, 0o444)
+        let (apparent, allocated) = ImageBaker.sizes(root)
+        var chain = layout.restorePointChain(from: chainStart)
+        if restorePoint == nil, chain.isEmpty, let c = chainStart { chain = [c] }
+        let img = CustomImage(key: key, name: name, note: note, createdAt: Date(), fromSandbox: spec.name, baseImage: base,
+                              restorePointChain: chain, recipe: spec.recipe, needsFsck: taken,
+                              apparentBytes: apparent, allocatedBytes: allocated)
+        try ImageBaker.encoder.encode(img).write(to: dir.appendingPathComponent("image.json"))
+        return img
+    }
+
+    /// Remove a custom image (sandboxes already cloned from it are unaffected).
+    public nonisolated static func deleteCustomImage(_ key: String, storeRoot: URL) throws {
+        try FileManager.default.removeItem(at: StoreLayout(root: storeRoot, name: "_").customImageDirectory(key))
+    }
+
+    private func runStopStepsBestEffort(from p: Phase) async {
+        for step in LifecyclePlanner.stopSteps(from: p) ?? [] {
+            do { try await run(step, target: .off) } catch { note("stop: \(step) — \(error.localizedDescription)") }
+        }
+    }
+
     /// This sandbox has a root disk that the next `start()` will boot (rather than a fresh clone).
     public nonisolated var hasRootDisk: Bool { FileManager.default.fileExists(atPath: layout.rootfs.path) }
 
@@ -398,7 +579,13 @@ public actor Sandbox {
         var identity: PersistedSandbox
         let kept = persisted == nil ? Self.keptRootDisk(layout) : nil
         // What a fresh root disk would be cloned from: the prepared disk, or the recipe's bake.
-        let wantedRoot: String = try spec.recipe.map {
+        let custom: CustomImage? = try spec.customImage.map { key in
+            guard let c = layout.customImages().first(where: { $0.key == key }) else {
+                throw SandboxError.invalidSpec("no custom image \(key) in this store")
+            }
+            return c
+        }
+        let wantedRoot: String = try custom.map { "custom:\($0.key)" } ?? spec.recipe.map {
             "\($0.name)@\($0.bakeKey(kernelSHA256: try KernelProvider.sha256(of: kernelURL), deckholdSHA256: try KernelProvider.sha256(of: deckhold)).prefix(12))"
         } ?? StoreLayout.goldenKey(for: spec)
         if let persisted {
@@ -421,9 +608,13 @@ public actor Sandbox {
                                         macAddress: spec.networking ? PersistedSandbox.randomMAC() : nil,
                                         subnet: nil, shareTags: [:])
             identity.rootImage = kept.rootImage
+            identity.restorePoint = kept.restorePoint
+            identity.fsckOnNextBoot = kept.fsckOnNextBoot
         } else {
             let golden: URL
-            if let recipe = spec.recipe {
+            if let custom {
+                golden = layout.customImageDirectory(custom.key).appendingPathComponent("root.ext4")
+            } else if let recipe = spec.recipe {
                 golden = try await ensureImage(recipe, kernel: kernel, kernelURL: kernelURL, deckhold: deckhold).root
             } else {
                 golden = layout.golden(for: spec)
@@ -448,6 +639,7 @@ public actor Sandbox {
                                         macAddress: spec.networking ? PersistedSandbox.randomMAC() : nil,
                                         subnet: nil, shareTags: [:])
             identity.rootImage = wantedRoot
+            if custom?.needsFsck == true { identity.fsckOnNextBoot = true }
         }
         // The state disk outlives root disks (Stop, Reset to image, a re-bake); only Delete removes it.
         if spec.recipe != nil, !fm.fileExists(atPath: layout.stateDisk.path) {
@@ -455,6 +647,19 @@ public actor Sandbox {
                 let f = try EXT4.Formatter(FilePath(layout.stateDisk.path), minDiskSize: spec.stateDiskMiB * 1_048_576)
                 try f.close()
             }
+        }
+
+        if persisted == nil, identity.fsckOnNextBoot == true {
+            // This disk is a copy taken while its VM ran, and ext4 here has no journal.
+            let helper = FsckHelper(storeRoot: spec.storeRoot, kernel: kernel, initfsReference: spec.initfsReference,
+                                    dnsServers: spec.dnsServers, events: { [broadcaster] in broadcaster.yield($0) })
+            for disk in [layout.rootfs, layout.stateDisk] where fm.fileExists(atPath: disk.path) {
+                let report = try await timed("e2fsck \(disk.lastPathComponent) (copied from a running VM; ext4 without a journal)") {
+                    try await helper.check(disk)
+                }
+                note("fsck \(disk.lastPathComponent): " + (report.split(separator: "\n").suffix(2).joined(separator: " · ")))
+            }
+            identity.fsckOnNextBoot = nil
         }
 
         var iface: (any Interface)?

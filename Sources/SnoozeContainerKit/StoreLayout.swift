@@ -75,6 +75,10 @@ public struct PersistedSandbox: Codable, Sendable, Equatable {
     public var savedAt: Date
     /// Which prepared/baked disk the root disk was cloned from (nil: unknown / older record).
     public var rootImage: String?
+    /// The restore point the root disk descends from (after a revert or a fork), if any.
+    public var restorePoint: String?
+    /// The disk came from a copy taken while its VM ran (no journal): e2fsck it before the next boot.
+    public var fsckOnNextBoot: Bool?
 
     public init(spec: SandboxSpec, phase: Phase, machineIdentifier: Data, macAddress: String?, subnet: String?,
                 shareTags: [String: String], savedAt: Date = Date()) {

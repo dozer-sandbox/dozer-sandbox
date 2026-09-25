@@ -44,6 +44,8 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
 | `DeckholdProtocol.swift` | Frame codec, `deckhold ls` parser, `GuestCommand` (every guest argv; the share re-mount script) |
 | `StoreLayout.swift` | Storage layout under `storeRoot`; `PersistedSandbox` (what a new process needs to restore) |
 | `DeckholdBinary.swift` | Finds the resource without `Bundle.module` |
+| `ImageRecipe.swift`, `ImageBaker.swift` | Recipes (base@digest + steps + verify + persist dirs), the two agent recipes, the baked-disk cache |
+| `RestorePoints.swift`, `FsckHelper.swift` | Restore points, custom images; e2fsck of a running-taken copy in a helper VM (on the file, over virtio-fs) |
 | `KernelProvider.swift` | The pinned Linux kernel (`KernelArtifact.recommended`): override → verified cache → byte-identical seed → download + verify archive + extract + verify kernel |
 | `Resources/deckhold` | The committed static aarch64-linux-musl guest binary — see `Guest/deckhold/PROVENANCE.md` |
 | `Guest/deckhold/` | deckhold's C source, `build.sh` (pinned Zig 0.16.0 + ghostty `b988efc`), `PROVENANCE.md` |
@@ -88,6 +90,12 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   A file there is used only as a SEED, and only when its sha256 equals the pin. A kernel change is a
   new `KernelArtifact` (URL + archive sha256 + member + kernel sha256) and `make test-vm` twice — a
   snapshot must be restored with the kernel it was taken under.
+- **Restore points are disk-only APFS clones** (owner ruling: no live forks). A copy of a RUNNING
+  VM is crash-consistent at best — the ext4 disks have no journal — so it is marked `needsFsck` and
+  the next boot from it runs e2fsck first (`FsckHelper`). e2fsck runs on the image FILE over virtio-fs:
+  a container's device cgroup refuses a raw block node even to a privileged exec.
+- **Metadata dates have fractional seconds** (`ImageBaker.encoder`): restore points taken within one
+  second must sort in the order they were taken.
 - **virtio-fs caches:** deleting a file on the HOST that the guest has cached is not visible at once
   — tests use fresh file names (this cost an afternoon of chasing a non-bug).
 

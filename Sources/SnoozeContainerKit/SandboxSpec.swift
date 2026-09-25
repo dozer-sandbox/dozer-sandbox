@@ -45,6 +45,9 @@ public struct SandboxSpec: Sendable, Codable, Equatable {
     /// never cloned, never deleted by Stop) holds the recipe's `persistDirs`.
     public var recipe: ImageRecipe?
     public var stateDiskMiB: UInt64
+    /// Start from a CUSTOM image (`CustomImage.key`, saved from a restore point) instead of the
+    /// prepared disk or the recipe's bake. `recipe` should be the custom image's recipe, if it has one.
+    public var customImage: String?
 
     public init(
         name: String,
@@ -62,7 +65,8 @@ public struct SandboxSpec: Sendable, Codable, Equatable {
         dnsServers: [String] = ["1.1.1.1", "8.8.8.8"],
         subnet: String? = nil,
         recipe: ImageRecipe? = nil,
-        stateDiskMiB: UInt64 = 2048
+        stateDiskMiB: UInt64 = 2048,
+        customImage: String? = nil
     ) {
         self.name = name
         self.storeRoot = storeRoot
@@ -80,6 +84,7 @@ public struct SandboxSpec: Sendable, Codable, Equatable {
         self.subnet = subnet
         self.recipe = recipe
         self.stateDiskMiB = stateDiskMiB
+        self.customImage = customImage
     }
 
     /// Throws `SandboxError.invalidSpec` for a spec that would fail later in a less obvious way.

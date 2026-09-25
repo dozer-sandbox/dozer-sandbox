@@ -6,6 +6,7 @@
 // driven through the library's public API only, plus the crash-restore case (two processes).
 //
 // Usage: snooze-vmtest [all|lifecycle|crash|crash-restore|agents|agent NAME|bake NAME|kernel] [--store DIR] [--no-seed]
+//          restore        579 §D: restore points — take / revert / fork / delete / save as image
 //          agents         579: bake (or cache-hit) the claude-code and pi images and run the agent suite
 //                         on each (start, verify, /workspace, state disk, session, snapshot sizes, sleep
 //                         to disk → wake with the same pid, crash restore, Stop → Start, re-bake)
@@ -13,7 +14,7 @@
 //                         no entitlement needed) — `make kernel`, and CI's first step.
 //                         --no-seed skips copying a byte-identical local kernel, forcing the
 //                         real download path.
-//          all (default)  the lifecycle suite, then the crash-restore case
+//          all (default)  the lifecycle suite, the crash-restore case, then restore points
 //          crash-restore  only the restoring half (after a crash-save left a sandbox asleep)
 //          crash-save     (internal) the child half of the crash case
 // Inputs: --store DIR or $SNOOZE_VMTEST_STORE (default $TMPDIR/snooze-vmtest-store) — a scratch
@@ -650,6 +651,111 @@ func agentSuite(_ recipe: ImageRecipe) async throws {
     try? FileManager.default.removeItem(at: img2.root.deletingLastPathComponent())
 }
 
+// MARK: restore points (579 §D)
+
+func restorePointSuite() async throws {
+    let share = try prepareShare("vmtest-rp")
+    let sb = try Sandbox(spec: makeSpec("vmtest-rp", share: share))
+    let log = logEvents(sb)
+    defer { log.cancel() }
+    try await sb.delete()                                    // a clean slate each run
+    for rp in sb.restorePoints() { try? sb.deleteRestorePoint(rp.id) }
+    func has(_ file: String) async throws -> Bool {
+        try await sb.exec(["sh", "-c", "test -f /root/\(file) && echo yes || echo no"]).output.contains("yes")
+    }
+
+    print("vmtest: restore points — take (stopped) → change → revert → the change is gone")
+    try await sb.start()
+    _ = try await sb.exec(["sh", "-c", "echo A > /root/A && sync"])
+    try await sb.stop()
+    let t0 = Date()
+    let rp1 = try await sb.takeRestorePoint(name: "has-A", note: "stopped")
+    check(rp1.takenWhile == .stopped && sb.restorePoints().count == 1,
+          String(format: "took restore point has-A while stopped in %.0f ms (APFS clone)", Date().timeIntervalSince(t0) * 1000))
+    try await sb.start()
+    _ = try await sb.exec(["sh", "-c", "echo B > /root/B && apk add --no-cache jq >/dev/null 2>&1; sync"])
+    let t1 = Date()
+    let rp2 = try await sb.takeRestorePoint(name: "has-A-B", note: "running")
+    let stillRunning = await sb.phase == .running
+    check(rp2.takenWhile == .running && rp2.parent == nil && stillRunning,
+          String(format: "took restore point has-A-B while RUNNING (sync → pause → clone → resume) in %.0f ms; still running", Date().timeIntervalSince(t1) * 1000))
+    _ = try await sb.exec(["sh", "-c", "echo C > /root/C && sync"])
+    try await sb.revert(to: rp1.id)
+    let auto = sb.restorePoints().first { $0.automatic }
+    let offNow = await sb.phase == .off
+    check(offNow && auto?.name == "before revert to has-A", "revert stopped the VM and first took an automatic \"before revert to has-A\" restore point")
+    try await sb.start()
+    let a1 = try await has("A"), b1 = try await has("B"), c1 = try await has("C")
+    check(a1 && !b1 && !c1, "after revert to has-A: A is there, B and C are gone")
+
+    print("vmtest: revert to a restore point taken while running → e2fsck on the next boot")
+    try await sb.revert(to: rp2.id, takeBeforeRevert: false)
+    let fsckEvents = sb.events()
+    let fsckLog = Task { () -> [String] in
+        var l: [String] = []
+        for await e in fsckEvents {
+            if case .step(let s, _) = e { l.append(s) }
+            if case .note(let s) = e { l.append(s) }
+            if case .phase(.running) = e { break }
+        }
+        return l
+    }
+    try await sb.start()
+    let fl = await fsckLog.value
+    let a2 = try await has("A"), b2 = try await has("B"), c2 = try await has("C")
+    check(fl.contains { $0.hasPrefix("e2fsck rootfs.ext4") }, "the first boot from the running-taken point ran e2fsck (\(fl.first { $0.hasPrefix("fsck rootfs") } ?? "no report"))")
+    check(a2 && b2 && !c2, "after revert to has-A-B: A and B are there, C is not")
+    try await sb.stop()
+
+    print("vmtest: fork a restore point into a second sandbox; both run independently")
+    try? await Sandbox(spec: { var s = sb.spec; s.name = "vmtest-rp-fork"; return s }()).delete()
+    let forkSpec = try sb.fork(rp1.id, as: "vmtest-rp-fork")
+    var fspec = forkSpec
+    fspec.subnet = nil                                        // the original holds the test subnet
+    let fork = try Sandbox(spec: fspec)
+    try await sb.start()
+    try await fork.start()
+    _ = try await fork.exec(["sh", "-c", "echo F > /root/F && sync"])
+    let fa = try await fork.exec(["sh", "-c", "ls /root"]).output
+    let oa = try await has("F")
+    let origRunning = await sb.phase == .running
+    check(fa.contains("A") && fa.contains("F") && !fa.contains("B") && !oa && origRunning,
+          "the fork booted from has-A and runs beside the original; its changes stay its own")
+    try await fork.delete()
+    try await sb.stop()
+
+    print("vmtest: delete restore points in any order")
+    let before = sb.restorePoints().map(\.id)
+    try sb.deleteRestorePoint(rp2.id)                       // the middle one
+    let after = sb.restorePoints().map(\.id)
+    check(after.count == before.count - 1 && after.contains(rp1.id) && !after.contains(rp2.id), "deleted the middle restore point; the others are intact")
+    try await sb.revert(to: rp1.id, takeBeforeRevert: false)
+    try await sb.start()
+    let a3 = try await has("A"), b3 = try await has("B")
+    check(a3 && !b3, "the earlier restore point still reverts correctly")
+    try await sb.stop()
+
+    print("vmtest: save a restore point as a custom image, then start a new sandbox from it")
+    let imgName = "vmtest-custom"
+    for c in StoreLayout(spec: sb.spec).customImages() where c.name == imgName { try? Sandbox.deleteCustomImage(c.key, storeRoot: storeRoot) }
+    let custom = try sb.saveAsImage(rp1.id, name: imgName, note: "A only")
+    check(custom.origin == "custom" && custom.restorePointChain.first == rp1.id && custom.fromSandbox == "vmtest-rp",
+          "saved has-A as custom image \(custom.key) (origin custom, from vmtest-rp, chain \(custom.restorePointChain))")
+    var cspec = makeSpec("vmtest-rp-custom", share: share)
+    cspec.customImage = custom.key
+    cspec.subnet = nil
+    let fromCustom = try Sandbox(spec: cspec)
+    try? await fromCustom.delete()
+    try await fromCustom.start()
+    let cl = try await fromCustom.exec(["sh", "-c", "ls /root"]).output
+    check(cl.contains("A") && !cl.contains("B"), "a new sandbox started from the custom image has its contents")
+    try await fromCustom.delete()
+    try Sandbox.deleteCustomImage(custom.key, storeRoot: storeRoot)
+    for rp in sb.restorePoints() { try sb.deleteRestorePoint(rp.id) }
+    try await sb.delete()
+    check(sb.restorePoints().isEmpty, "cleaned up")
+}
+
 // MARK: main
 
 Task {
@@ -701,6 +807,8 @@ Task {
             try await sb.stop()
             log.cancel()
             print("vmtest: ALL PASS"); exit(0)
+        case "restore":
+            try await restorePointSuite()
         case "agents":
             try await agentSuite(AgentRecipes.claudeCode)
             try await agentSuite(AgentRecipes.pi)
@@ -753,6 +861,7 @@ Task {
         default:
             try await lifecycleSuite()
             try await crashSuite()
+            try await restorePointSuite()
         }
     } catch {
         print("  FAIL  aborted: \(error.localizedDescription)")

@@ -12,6 +12,8 @@ public enum SandboxError: Error, LocalizedError, Equatable {
     case noSnapshot
     case vmUnavailable
     case timedOut(String)
+    case restorePointNotFound(String)
+    case alreadyExists(String)
 
     public var errorDescription: String? {
         switch self {
@@ -24,6 +26,8 @@ public enum SandboxError: Error, LocalizedError, Equatable {
         case .noSnapshot: "there is no snapshot to restore"
         case .vmUnavailable: "the virtual machine is not available"
         case .timedOut(let what): "timed out: \(what)"
+        case .restorePointNotFound(let id): "no restore point \(id)"
+        case .alreadyExists(let what): "\(what) already exists"
         }
     }
 }
