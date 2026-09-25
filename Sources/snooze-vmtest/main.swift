@@ -318,6 +318,25 @@ func lifecycleSuite() async throws {
     do { _ = try await sb.attach("tick2", size: .standard) } catch SandboxError.notRunning { refused = true }
     check(refused, "a reconnecting viewer gets nothing: attach is refused once stopped")
 
+    print("vmtest: Stop keeps the root disk; Reset to image and Delete sandbox discard it")
+    try await sb.start()
+    let keep = "kept-\(UUID().uuidString.prefix(8))"
+    _ = try await sb.exec(["sh", "-c", "echo \(keep) > /root/snooze-keep && apk add --no-cache jq >/dev/null && sync"], timeoutSeconds: 120)
+    try await sb.stop()
+    check(sb.hasRootDisk && Sandbox.restorableState(for: sb.spec) == nil, "Stop kept the root disk and left no snapshot")
+    try await sb.start()
+    let kept1 = try await sb.exec(["sh", "-c", "cat /root/snooze-keep; command -v jq"]).output
+    check(kept1.contains(keep) && kept1.contains("/usr/bin/jq"), "Stop → Start: the marker file and the apk-added package are still there")
+    try await sb.pause()
+    try await sb.resetToImage()
+    check(await sb.phase == .off && !sb.hasRootDisk, "Reset to image (from paused) stopped the VM and discarded the root disk")
+    try await sb.start()
+    let fresh = try await sb.exec(["sh", "-c", "cat /root/snooze-keep 2>/dev/null; command -v jq || echo no-jq"]).output
+    check(!fresh.contains(keep) && fresh.contains("no-jq"), "after Reset, Start begins from a fresh clone of the prepared disk")
+    try await sb.delete()
+    let dirGone = !FileManager.default.fileExists(atPath: StoreLayout(spec: sb.spec).sandboxDirectory.path)
+    check(await sb.phase == .off && dirGone, "Delete sandbox (from running) stopped it and removed its whole directory")
+
     for (label, park) in [("paused", { try await sb.pause() }), ("on disk", { try await sb.sleepToDisk() })] as [(String, () async throws -> Void)] {
         print("vmtest: stop while \(label) (revived, then stopped gracefully)")
         try await sb.start()
@@ -608,6 +627,9 @@ func agentSuite(_ recipe: ImageRecipe) async throws {
     var variant = recipe
     variant.steps.append(BakeStep("re-bake \(UUID().uuidString.prefix(8))", argv: ["true"], needsNetwork: false))
     sb = try Sandbox(spec: agentSpec(name, recipe: variant, workspace: ws))
+    try await sb.resetToImage()           // Stop keeps the old root; a new image needs Reset to image
+    check(!sb.hasRootDisk && FileManager.default.fileExists(atPath: StoreLayout(spec: sb.spec).stateDisk.path),
+          "Reset to image discarded the root disk and kept the state disk")
     let tr = Date()
     let img2 = try await bakeImage(sb, variant)
     check(img2.key != img.key, String(format: "a changed recipe re-bakes (new key %@, %.1f s with the base cached)", String(img2.key.prefix(12)), Date().timeIntervalSince(tr)))

@@ -38,7 +38,7 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
 | Path | What |
 |---|---|
 | `Sources/SnoozeContainerKit/Sandbox.swift` | The `Sandbox` actor: boot (images, golden-disk bake, APFS clone, VM), lifecycle via the planner, exec, sessions/attach |
-| `Phase.swift` | `Phase` and `LifecyclePlanner` — each operation's steps as DATA, so the 576 invariants are unit tests |
+| `Phase.swift` | `Phase` and `LifecyclePlanner` — each operation's steps as DATA (incl. stop / resetToImage / delete), so the invariants are unit tests |
 | `VirtualMachine.swift` | Direct VZ ops; `PinnedIdentity` (machine id + MAC); `SnoozeVMM`, `AdoptingInstance`, `AdoptingAgent` — restore into a new process |
 | `SessionConnection.swift` | One viewer's connection: HELLO/DATA/RESIZE out, SNAPSHOT/DATA/EXIT in; never delivers or sends after close |
 | `DeckholdProtocol.swift` | Frame codec, `deckhold ls` parser, `GuestCommand` (every guest argv; the share re-mount script) |
@@ -56,6 +56,12 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   program cannot trap a signal ignored on entry (576: the screensaver's `m` menu). `GuestCommand.serve`
   builds argv; deckhold additionally resets every signal to default before exec. Utility execs
   (`exec(["sh","-c",…])`) may use a shell — never a session.
+- **Stop keeps the root disk** (owner ruling 2026-09-25, after the 578 smoke found `apk add`ed
+  packages gone): Stop shuts the VM down and persists the phase as `off`; the next Start cold-boots
+  the SAME disk and clones the prepared disk only when none exists. `resetToImage()` discards the
+  root disk; `delete()` removes the sandbox's whole directory. No Stop leaves a snapshot, and a
+  snapshot found beside a kept disk on a cold Start is deleted — never restored onto a disk that
+  has moved on.
 - **Stop decides from the phase it was CALLED in** (`perform()` reads `phase` before going busy).
 - **Stop is always graceful.** A paused VM is resumed and a VM on disk restored (silently — no phase
   event) and then `LinuxContainer.stop()` runs. Stopping at the VZ level instead leaves the package's

@@ -108,8 +108,12 @@ final class ImageRecipeTests: XCTestCase {
         XCTAssertEqual(GuestCommand.prepareGuest(recipe: nil), "set -e; mkdir -p /run/deckhold; chmod 1777 /run/deckhold")
         let layout = StoreLayout(root: URL(fileURLWithPath: "/tmp/s"), name: "lab")
         XCTAssertEqual(layout.stateDisk.path, "/tmp/s/sandboxes/lab/state.ext4")
-        XCTAssertFalse(LifecyclePlanner.plan(.stop, from: .running)!.isEmpty)   // Stop removes the root clone,
-        // and removeRuntimeFiles never names the state disk (see Sandbox.run(.removeRuntimeFiles)).
+        // The state disk outlives root disks: Stop and Reset to image never remove the sandbox
+        // directory; only Delete does.
+        for p in Phase.allCases {
+            XCTAssertFalse(LifecyclePlanner.plan(.stop, from: p)?.contains(.removeSandboxFiles) ?? false)
+            XCTAssertFalse(LifecyclePlanner.plan(.resetToImage, from: p)!.contains(.removeSandboxFiles))
+        }
     }
 }
 

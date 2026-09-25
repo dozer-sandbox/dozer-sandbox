@@ -45,6 +45,10 @@ public enum Phase: String, Sendable, Codable, CaseIterable {
 /// runs again; attached sessions are detached before anything severs their exec stdio.
 public enum LifecycleOperation: String, Sendable, CaseIterable {
     case pause, resume, sleep, sleepToDisk, wakeFromDisk, stop
+    /// Stop (if needed), then discard the root disk: the next Start clones the prepared/baked disk.
+    case resetToImage
+    /// Stop (if needed), then remove everything the sandbox has on disk.
+    case delete
 }
 
 public enum LifecycleStep: Equatable, Sendable {
@@ -75,8 +79,14 @@ public enum LifecycleStep: Equatable, Sendable {
     case remountShares
     /// Delete the snapshot file: it is valid only while the VM is paused.
     case deleteSnapshot
-    /// Remove the container's runtime files (root disk clone, persisted state).
-    case removeRuntimeFiles
+    /// Drop the in-memory VM objects and the network lease, and persist the phase as off. The ROOT
+    /// DISK STAYS: the next Start cold-boots it (owner ruling 2026-09-25 — "Stop destroys the VM"
+    /// was the 578 smoke finding: anything `apk add`ed vanished).
+    case releaseRuntime
+    /// Discard the root disk (and the identity persisted with it) — Reset to image.
+    case removeRootDisk
+    /// Remove the sandbox's whole directory — Delete sandbox.
+    case removeSandboxFiles
     /// Write the persisted state (phase + identity), so a new process can restore.
     case persistState
 }
@@ -90,7 +100,7 @@ public enum LifecyclePlanner {
         case .sleep: .pausedSaved
         case .sleepToDisk: .onDisk
         case .wakeFromDisk: .running
-        case .stop: .off
+        case .stop, .resetToImage, .delete: .off
         }
     }
 
@@ -115,12 +125,28 @@ public enum LifecyclePlanner {
             return [.detachSessions(.sandboxSleeping), .stopVMDirect, .persistState]
         case (.wakeFromDisk, .onDisk):
             return [.restoreSnapshot, .resyncClock, .remountShares, .deleteSnapshot, .persistState]
-        case (.stop, .running), (.stop, .failed), (.stop, .booting):
-            return [.detachSessions(.sandboxStopped), .stopContainer, .deleteSnapshot, .removeRuntimeFiles]
-        case (.stop, .paused), (.stop, .pausedSaved), (.stop, .onDisk):
-            // A paused guest cannot answer its agent; one on disk has no VM running at all.
-            return [.detachSessions(.sandboxStopped), .reviveForStop, .stopContainer, .deleteSnapshot, .removeRuntimeFiles]
+        case (.stop, _):
+            return stopSteps(from: phase)
+        case (.resetToImage, _):
+            return (stopSteps(from: phase) ?? [.deleteSnapshot]) + [.removeRootDisk]
+        case (.delete, _):
+            return (stopSteps(from: phase) ?? []) + [.removeSandboxFiles]
         default:
+            return nil
+        }
+    }
+
+    /// Stop from `phase`, or nil when there is nothing running to stop. Every variant keeps the
+    /// root disk; none leaves a snapshot behind (so the next Start is a cold boot and a stale
+    /// snapshot is never restored onto a disk that has moved on).
+    static func stopSteps(from phase: Phase) -> [LifecycleStep]? {
+        switch phase {
+        case .running, .failed, .booting:
+            return [.detachSessions(.sandboxStopped), .stopContainer, .deleteSnapshot, .releaseRuntime]
+        case .paused, .pausedSaved, .onDisk:
+            // A paused guest cannot answer its agent; one on disk has no VM running at all.
+            return [.detachSessions(.sandboxStopped), .reviveForStop, .stopContainer, .deleteSnapshot, .releaseRuntime]
+        case .off:
             return nil
         }
     }
