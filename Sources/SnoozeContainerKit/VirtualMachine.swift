@@ -1,0 +1,206 @@
+import Containerization
+import ContainerizationError
+import ContainerizationExtras
+import ContainerizationOCI
+import Foundation
+import Virtualization
+
+// The VM plumbing under `Sandbox`: identity pinning, restore-into-a-new-process, and direct VZ
+// operations. Everything here is public Containerization API (0.47.0) — no forks, no SPI.
+
+/// `VZVirtualMachine` is touched only on its own queue, which VZ enforces.
+struct VMHandle: @unchecked Sendable {
+    let vm: VZVirtualMachine
+    let queue: DispatchQueue
+}
+
+enum VZOp: Sendable { case stop, save(URL), restore(URL), resume, pause }
+
+/// Run one VZ operation on the VM's own queue.
+func vz(_ h: VMHandle, _ op: VZOp) async throws {
+    try await withCheckedThrowingContinuation { (c: CheckedContinuation<Void, Error>) in
+        h.queue.async {
+            let done: @Sendable (Error?) -> Void = { e in if let e { c.resume(throwing: e) } else { c.resume() } }
+            switch op {
+            case .stop: h.vm.stop(completionHandler: done)
+            case .save(let u): h.vm.saveMachineStateTo(url: u, completionHandler: done)
+            case .restore(let u): h.vm.restoreMachineStateFrom(url: u, completionHandler: done)
+            case .resume: h.vm.resume { r in if case .failure(let e) = r { done(e) } else { done(nil) } }
+            case .pause: h.vm.pause { r in if case .failure(let e) = r { done(e) } else { done(nil) } }
+            }
+        }
+    }
+}
+
+func vzStateIsStopped(_ h: VMHandle) -> Bool {
+    h.queue.sync { h.vm.state == .stopped || h.vm.state == .error }
+}
+
+/// Pins what the package would otherwise randomise, and what VZ checks when restoring a
+/// snapshot: the platform's machine identifier (576.02 — a mismatch fails "invalid argument")
+/// and the NIC's MAC address.
+struct PinnedIdentity: VZInstanceExtension {
+    let machineIdentifier: Data
+    let macAddress: String?
+
+    func configureVZ(_ config: inout VZVirtualMachineConfiguration, allocator: any AddressAllocator<Character>,
+                     storageDeviceCount: Int, mountsByID: [String: [Containerization.Mount]]) throws {
+        guard let platform = config.platform as? VZGenericPlatformConfiguration,
+              let mid = VZGenericMachineIdentifier(dataRepresentation: machineIdentifier)
+        else { throw SandboxError.invalidSpec("cannot pin the VM's machine identifier") }
+        platform.machineIdentifier = mid
+        if let macAddress, let mac = VZMACAddress(string: macAddress) {
+            for device in config.networkDevices { device.macAddress = mac }
+        }
+    }
+}
+
+/// Set while a restored VM is being adopted by a fresh `LinuxContainer` (see `AdoptingAgent`).
+final class AdoptionFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _adopting: Bool
+    init(_ v: Bool) { _adopting = v }
+    var adopting: Bool {
+        get { lock.lock(); defer { lock.unlock() }; return _adopting }
+        set { lock.lock(); _adopting = newValue; lock.unlock() }
+    }
+}
+
+/// The VMM every sandbox VM is created through. Normal mode: the package's own VZ manager plus
+/// `PinnedIdentity`. Adopt mode (restore after a crash): the created instance is wrapped so that
+/// "starting" it RESTORES the snapshot instead of booting.
+struct SnoozeVMM: VirtualMachineManager {
+    let inner: VZVirtualMachineManager
+    let identity: PinnedIdentity
+    /// Non-nil in adopt mode: the snapshot to restore, and the flag the agent wrapper reads.
+    let adopt: (snapshot: URL, flag: AdoptionFlag, containerID: String)?
+
+    func create(config: some VMCreationConfig) async throws -> any VirtualMachineInstance {
+        var c = config.configuration
+        c.extensions.append(identity)
+        let vm = try inner.create(config: StandardVMConfig(configuration: c))
+        guard let adopt else { return vm }
+        guard let vz = vm as? VZVirtualMachineInstance else { throw SandboxError.vmUnavailable }
+        return AdoptingInstance(inner: vz, snapshot: adopt.snapshot, flag: adopt.flag, containerID: adopt.containerID)
+    }
+}
+
+/// A VZ instance whose `start()` restores a snapshot (and resumes) rather than booting.
+///
+/// Why this works (576.02 crash case): a snapshot restored into an identical VM brings back the
+/// whole guest — vminitd, the container, its processes, the holder's sessions. The package's
+/// `LinuxContainer.create()`/`start()` would then try to set that guest up again (mount the
+/// root disk, configure the NIC, create the init process); during adoption `AdoptingAgent`
+/// answers those calls as already done, so the fresh `LinuxContainer` ends in `started` state,
+/// bound to the restored guest, and every later exec is ordinary package code.
+struct AdoptingInstance: VirtualMachineInstance {
+    typealias Agent = AdoptingAgent
+    let inner: VZVirtualMachineInstance
+    let snapshot: URL
+    let flag: AdoptionFlag
+    let containerID: String
+
+    var state: VirtualMachineInstanceState { inner.state }
+    var mounts: [String: [AttachedFilesystem]] { inner.mounts }
+
+    func dialAgent() async throws -> AdoptingAgent {
+        AdoptingAgent(inner: try await inner.dialAgent(), flag: flag, containerID: containerID)
+    }
+    func dial(_ port: UInt32) async throws -> FileHandle { try await inner.dial(port) }
+    func listen(_ port: UInt32) throws -> VsockListener { try inner.listen(port) }
+
+    func start() async throws {
+        let h = VMHandle(vm: inner.vzVirtualMachine, queue: inner.vmQueue)
+        try await vz(h, .restore(snapshot))
+        try await vz(h, .resume)
+    }
+    func stop() async throws { try await inner.stop() }
+    func pause() async throws { try await inner.pause() }
+    func resume() async throws { try await inner.resume() }
+}
+
+/// Pass-through agent that, while adopting, treats guest SET-UP as already done (see
+/// `AdoptingInstance`). Everything else — and everything once adoption ends — goes to vminitd.
+struct AdoptingAgent: VirtualMachineAgent {
+    let inner: Vminitd
+    let flag: AdoptionFlag
+    let containerID: String
+
+    private var adopting: Bool { flag.adopting }
+
+    func standardSetup() async throws { if !adopting { try await inner.standardSetup() } }
+    func close() async throws { try await inner.close() }
+    func filesystemOperation(operation: FilesystemOperation, path: String, containerID: String?) async throws {
+        try await inner.filesystemOperation(operation: operation, path: path, containerID: containerID)
+    }
+    func getenv(key: String) async throws -> String { try await inner.getenv(key: key) }
+    func setenv(key: String, value: String) async throws { try await inner.setenv(key: key, value: value) }
+    func mount(_ mount: ContainerizationOCI.Mount) async throws { if !adopting { try await inner.mount(mount) } }
+    func umount(path: String, flags: Int32) async throws { try await inner.umount(path: path, flags: flags) }
+    func mkdir(path: String, all: Bool, perms: UInt32) async throws {
+        if !adopting { try await inner.mkdir(path: path, all: all, perms: perms) }
+    }
+    @discardableResult
+    func kill(pid: Int32, signal: Int32) async throws -> Int32 { try await inner.kill(pid: pid, signal: signal) }
+    func sync() async throws { try await inner.sync() }
+    func writeFile(path: String, data: Data, flags: WriteFileFlags, mode: UInt32) async throws {
+        if !adopting { try await inner.writeFile(path: path, data: data, flags: flags, mode: mode) }
+    }
+
+    /// The container's init process already exists in the restored guest.
+    private func isInit(_ id: String, _ cid: String?) -> Bool { adopting && id == containerID && (cid == nil || cid == containerID) }
+
+    func createProcess(id: String, containerID: String?, stdinPort: UInt32?, stdoutPort: UInt32?, stderrPort: UInt32?,
+                       ociRuntimePath: String?, configuration: ContainerizationOCI.Spec, options: Data?) async throws {
+        if isInit(id, containerID) { return }
+        try await inner.createProcess(id: id, containerID: containerID, stdinPort: stdinPort, stdoutPort: stdoutPort,
+                                      stderrPort: stderrPort, ociRuntimePath: ociRuntimePath,
+                                      configuration: configuration, options: options)
+    }
+    func startProcess(id: String, containerID: String?) async throws -> Int32 {
+        if isInit(id, containerID) { return 1 }
+        return try await inner.startProcess(id: id, containerID: containerID)
+    }
+    func signalProcess(id: String, containerID: String?, signal: Int32) async throws {
+        try await inner.signalProcess(id: id, containerID: containerID, signal: signal)
+    }
+    func resizeProcess(id: String, containerID: String?, columns: UInt32, rows: UInt32) async throws {
+        try await inner.resizeProcess(id: id, containerID: containerID, columns: columns, rows: rows)
+    }
+    func waitProcess(id: String, containerID: String?, timeoutInSeconds: Int64?) async throws -> ExitStatus {
+        try await inner.waitProcess(id: id, containerID: containerID, timeoutInSeconds: timeoutInSeconds)
+    }
+    func deleteProcess(id: String, containerID: String?) async throws {
+        try await inner.deleteProcess(id: id, containerID: containerID)
+    }
+    func closeProcessStdin(id: String, containerID: String?) async throws {
+        try await inner.closeProcessStdin(id: id, containerID: containerID)
+    }
+    func up(name: String, mtu: UInt32?) async throws { if !adopting { try await inner.up(name: name, mtu: mtu) } }
+    func down(name: String) async throws { try await inner.down(name: name) }
+    func addressAdd(name: String, address: InterfaceAddress) async throws {
+        if !adopting { try await inner.addressAdd(name: name, address: address) }
+    }
+    func routeAddLink(name: String, route: LinkRoute) async throws {
+        if !adopting { try await inner.routeAddLink(name: name, route: route) }
+    }
+    func routeAddDefault(name: String, route: DefaultRoute) async throws {
+        if !adopting { try await inner.routeAddDefault(name: name, route: route) }
+    }
+    func configureDNS(config: DNS, location: String) async throws {
+        if !adopting { try await inner.configureDNS(config: config, location: location) }
+    }
+    func configureHosts(config: Hosts, location: String) async throws {
+        if !adopting { try await inner.configureHosts(config: config, location: location) }
+    }
+    func containerStatistics(containerIDs: [String], categories: StatCategory) async throws -> [ContainerStatistics] {
+        try await inner.containerStatistics(containerIDs: containerIDs, categories: categories)
+    }
+}
+
+/// The concrete VZ instance under whatever `LinuxContainer.withVirtualMachineInstance` hands out.
+func vzInstance(of vm: any VirtualMachineInstance) -> VZVirtualMachineInstance? {
+    if let v = vm as? VZVirtualMachineInstance { return v }
+    if let a = vm as? AdoptingInstance { return a.inner }
+    return nil
+}
