@@ -24,7 +24,7 @@ at the root is the whole story for a consumer.
 
 | Product | Targets | Depends on |
 |---|---|---|
-| `SnoozeContainerKit` | `SnoozeContainerKit` (+ resource `deckhold`) | `apple/containerization` **exact** `0.47.0`: `Containerization`, `ContainerizationArchive` (the kernel tarball), `ContainerizationExtras`, `ContainerizationOCI`, `ContainerizationOS` |
+| `SnoozeContainerKit` | `SnoozeContainerKit` (+ resources `deckhold`, `snoozenet`) | `apple/containerization` **exact** `0.47.0`: `Containerization`, `ContainerizationArchive` (the kernel tarball), `ContainerizationExtras`, `ContainerizationOCI`, `ContainerizationOS`; since 580 `swift-nio` (`NIOCore`, `NIOEmbedded`), `swift-nio-ssl` (`NIOSSL`), `swift-certificates` (`X509`), `swift-asn1` — apple/* packages containerization already resolves (README "Dependencies") |
 | — (not a product) | `snooze-vmtest` — the entitled VM test host | `SnoozeContainerKit` |
 
 The Containerization pin is EXACT on purpose: the sleep design leans on its internals' shape —
@@ -49,7 +49,12 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
 | `KernelProvider.swift` | The pinned Linux kernel (`KernelArtifact.recommended`): override → verified cache → byte-identical seed → download + verify archive + extract + verify kernel |
 | `Resources/deckhold` | The committed static aarch64-linux-musl guest binary — see `Guest/deckhold/PROVENANCE.md` |
 | `Guest/deckhold/` | deckhold's C source, `build.sh` (pinned Zig 0.16.0 + ghostty `b988efc`), `PROVENANCE.md` |
-| `Sources/snooze-vmtest/` | The VM integration suite (entitled executable) |
+| `NetworkPolicy.swift` | 580: `NetworkMode`, `NetworkPolicy` (presets, ordered rules, DNS gating), `EgressRule`, IPv4 CIDR |
+| `EgressProxy.swift` | 580: the host proxy (vsock listener; CONNECT / plain HTTP / redirected TCP / DNS; decrypted tunnels via NIOSSL on `EmbeddedChannel`; `TLSUpstream` verified by Security.framework); `Wire` socket plumbing; `DNSMessage` |
+| `Credentials.swift` | 580: `CredentialBinding`, `CredentialVault` (secrets in memory, placeholders, the byte-exact head rewrite); `HTTPHead` |
+| `SandboxCA.swift`, `HTTPRequestReader.swift`, `ConnectionLog.swift` | 580: the per-sandbox CA + leaves; request/body framing; the metadata-only log |
+| `Resources/snoozenet`, `Guest/snoozenet/` | 580: the guest half of a proxied network — C source, `build.sh` (the same pinned Zig), `PROVENANCE.md` |
+| `Sources/snooze-vmtest/` | The VM integration suite (entitled executable); `NetworkSuite.swift` is `network` |
 | `Tests/SnoozeContainerKitTests/` | Unit tests — no VM |
 
 ## Rules that each cost a bug to learn (keep them, and keep their tests)
@@ -96,6 +101,19 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   a container's device cgroup refuses a raw block node even to a privileged exec.
 - **Metadata dates have fractional seconds** (`ImageBaker.encoder`): restore points taken within one
   second must sort in the order they were taken.
+- **A proxied VM has NO NIC; the host proxy is the only way out** (580). The guest shim decides
+  nothing. Every boot, crash restore and wake re-registers the proxy's vsock listener
+  (`listenForEgress`) — the listener happened to survive a same-process wake in the probe, but a
+  crash restore is a new VM.
+- **`lo` needs a global-scope source address** (`lo:snz`, 169.254.255.254/32, set by snoozenet):
+  lo's 127.0.0.1 is host-scoped, so without it an outbound socket gets source 0.0.0.0, its SYN is
+  still redirected, and every later segment is dropped — a silent stall, not an error.
+- **Never `EmbeddedChannel.writeOutbound` / `.finish()` / `close().wait()` with NIOSSL in the
+  pipeline.** `writeOutbound` waits on a write promise NIOSSL completes only after the handshake;
+  `finish()` waits on close, which waits for the peer's close_notify. Each hung a proxy thread
+  forever. Use `writeAndFlush(_, promise: nil)` and `close(promise: nil)`, then drain.
+- **A real key given to `openSession`/`exec` is moved into the vault** and replaced by a
+  placeholder; keep it that way — "keys never enter the sandbox" rests on it.
 - **virtio-fs caches:** deleting a file on the HOST that the guest has cached is not visible at once
   — tests use fresh file names (this cost an afternoon of chasing a non-bug).
 
@@ -120,7 +138,8 @@ an executable target, `snooze-vmtest`, that `make test-vm`:
    fails the run instead of wedging it; stdout is line-buffered so a hang shows where it stopped.
 
 It prints one `PASS`/`FAIL` line per check and `vmtest: ALL PASS` last. Modes: `all` (default),
-`lifecycle`, `crash` (spawns itself as `crash-save` — start, session, sleep to disk, exit without
+`network` (580, `make test-vm-network`: the claude-code image proxied; live-prompt check SKIPs
+without `ANTHROPIC_API_KEY`), `netdebug --script '…'`, `lifecycle`, `crash` (spawns itself as `crash-save` — start, session, sleep to disk, exit without
 stopping — then restores in the parent), `crash-restore`.
 
 - **Store:** `VMTEST_STORE` (default `$TMPDIR/snooze-vmtest-store`) — a SCRATCH store, never an app's

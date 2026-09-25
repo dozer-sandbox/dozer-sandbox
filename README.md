@@ -90,6 +90,52 @@ the viewer's size, then the program's own bytes. That is why a session survives 
 program cannot trap). The wire protocol and the snapshot recipe are documented in
 [`Guest/deckhold/deckhold.c`](Guest/deckhold/deckhold.c).
 
+**Network (580): proxied sandboxes.** `SandboxSpec(…, network: .proxied(.agent))` boots a VM with
+**no network interface** — only `lo`. The guest's only way out is `snoozenet` (a small static guest
+binary, `Guest/snoozenet/`) relaying over vsock to `sandbox.egress`, an `EgressProxy` running in
+the host process, where root in the guest cannot reach:
+
+```swift
+var spec = SandboxSpec(name: "agent", storeRoot: root, recipe: AgentRecipes.claudeCode,
+                       network: .proxied(.agent))        // .locked · .bake · .agent · .open, or your own
+let sandbox = try Sandbox(spec: spec)
+sandbox.setCredential(.anthropic, secret: key)          // memory only; the guest gets snz_cred_… placeholders
+try await sandbox.start()
+for await r in sandbox.egress!.log.stream() { … }        // ConnectionRecord: host, verdict, rule, bytes, ms
+sandbox.setNetworkPolicy(newPolicy)                      // live; e.g. policy.allow(host: "example.com")
+let jsonl = sandbox.egress!.log.exportJSONLines()
+```
+
+- **Policy** (`NetworkPolicy`): default deny; rules checked in order, first match wins, by exact
+  host, `*.domain` (subdomains), IPv4 CIDR/address (IP-literal destinations) or `*`, optional
+  ports, and optional **methods / path prefixes** — enforceable only on requests the proxy reads,
+  so a host with such a rule is decrypted. DNS is gated too: a name no rule could allow gets
+  NXDOMAIN. Presets: `locked` (nothing), `bake` (npm, apt, apk, PyPI registries), `agent`
+  (Anthropic's API and sign-in hosts + registries), `open` (everything, still proxied and logged).
+- **What reaches the proxy:** `HTTP(S)_PROXY` (set for every `exec` and session) → CONNECT tunnels
+  and plain HTTP; **any other TCP** is redirected in the guest (nat REDIRECT) and judged by the name
+  its address was resolved from (a bare IP no DNS answer produced is denied); **DNS** is answered
+  from the Mac's resolver (A records only — the guest has no IPv6 path); **UDP is rejected** (QUIC
+  and outside DNS fail fast and clients fall back to TCP).
+- **Credentials:** a `CredentialBinding` names a secret's hosts and header (`x-api-key`,
+  `Authorization: Bearer`). TLS is decrypted **only** for bound hosts (and hosts with HTTP rules),
+  with a **per-sandbox CA** (`SandboxCA`: P-256, key `0600` in the sandbox's directory, certificate
+  installed in the guest's trust store at every fresh boot and pointed to by `NODE_EXTRA_CA_CERTS`,
+  `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE`, `GIT_SSL_CAINFO`). On each request: a
+  placeholder minted for that host is swapped for the secret; no auth header → the secret is
+  injected; a placeholder for another host, or an unknown/revoked one → **403** and a log entry; a
+  credential the tool supplied itself passes through untouched. A real key passed to `openSession`
+  or `exec` in a bound variable is moved into the vault and replaced by a placeholder — **keys never
+  enter the sandbox**. Placeholders are issued fresh per session/exec and revoked on Stop.
+- **Log** (`ConnectionLog`): metadata only — kind, host:port, method + path *without the query*,
+  rule, verdict, credential action, bytes each way, latency, duration. Never bodies, header values,
+  prompts or keys. `exportJSONLines()` doubles as test fixtures.
+- **Limits, by design:** hosts that are not decrypted pass through by name untouched — WebSockets,
+  HTTP/2 and gRPC included — so the proxy cannot see a placeholder sent to them (it has no power
+  there anyway). Decrypted tunnels offer only HTTP/1.1 (ALPN), so HTTP/2-only or gRPC clients of a
+  *bound* host fail, and **a client that pins certificates fails loudly on a decrypted host** —
+  which is why only bound hosts are decrypted. A proxied bake runs under the `bake` preset.
+
 **Requirements on the host:** the `com.apple.security.virtualization` entitlement, and network on
 the first start in a store. Nothing else to install: the library owns its **Linux kernel** —
 `KernelProvider` fetches one pinned artifact (the kata-containers 3.28.0 static release for arm64,
@@ -98,6 +144,20 @@ and the kernel's sha256, and caches it in `<storeRoot>/kernels` (or `SandboxSpec
 First fetch ~90 s (a 569 MiB archive); every later start verifies the cached 15 MiB kernel in ~10 ms.
 A byte-identical copy already on the Mac (the `container` CLI's) seeds the cache with no network;
 `SandboxSpec.kernelPath` boots any kernel you choose instead.
+
+## Dependencies
+
+| Package | Pin | Why |
+|---|---|---|
+| apple/containerization | **exact** 0.47.0 | the VM runtime; the sleep design leans on its internals' shape |
+| apple/swift-nio (NIOCore, NIOEmbedded) | from 2.103.0 | 580: drives TLS synchronously on the proxy's connection threads (`EmbeddedChannel`) |
+| apple/swift-nio-ssl (NIOSSL) | from 2.37.5 | 580: terminates and re-originates TLS for bound hosts with **in-memory** keys — Network.framework and Secure Transport need a `SecIdentity`, i.e. a keychain (prompts for an ad-hoc-signed app, and a leaf key per host on disk) |
+| apple/swift-certificates (X509), apple/swift-asn1 | from 1.21.0 / 1.7.3 | 580: issues the per-sandbox CA and its per-host leaves |
+
+All four 580 additions are apple/* packages that containerization 0.47.0 already resolves, so
+declaring them changed nothing in `Package.resolved`. Upstream certificates are verified with the
+Mac's own trust store (Security.framework, `SecTrustEvaluateWithError`). `Scripts/audit.sh` holds
+the import and dependency allowlists.
 
 ## Consuming
 
@@ -143,6 +203,9 @@ make kernel           # fetch + verify the pinned kernel into the cache (KERNEL_
 make audit            # import allowlist, one exact dependency, no host brand, deckhold == PROVENANCE
 make deckhold         # rebuild the guest binary (pinned Zig + ghostty; first run ~3.5 min)
 make deckhold-verify  # rebuild from scratch and check the committed bytes match
+make test-vm-network  # 580: a proxied (no-NIC) sandbox end to end, then a bake under the bake preset
+make snoozenet        # rebuild the snoozenet guest binary (pinned Zig; no ghostty) + refresh PROVENANCE.md
+make snoozenet-verify # rebuild snoozenet and check the committed bytes match
 ```
 
 ## Contributing
