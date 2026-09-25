@@ -13,6 +13,8 @@ import Foundation
 ///         bootlog.log                     the guest serial console
 ///         vm.state                        the snapshot (exists only while asleep)
 ///         sandbox.json                    PersistedSandbox: what a new process needs to restore
+///         state.ext4                      image sandboxes: the persist dirs (survives Stop and re-bakes)
+///     <storeRoot>/images/<name>/<key12>/  baked image disks (see ImageBaker)
 public struct StoreLayout: Sendable, Equatable {
     public let root: URL
     public let name: String
@@ -33,6 +35,8 @@ public struct StoreLayout: Sendable, Equatable {
     public var bootLog: URL { sandboxDirectory.appendingPathComponent("bootlog.log") }
     public var snapshot: URL { sandboxDirectory.appendingPathComponent("vm.state") }
     public var persistedState: URL { sandboxDirectory.appendingPathComponent("sandbox.json") }
+    /// The per-sandbox STATE disk of an image sandbox (created empty once; Stop keeps it).
+    public var stateDisk: URL { sandboxDirectory.appendingPathComponent("state.ext4") }
     public var bakeContainerID: String { "\(name)-bake" }
 
     /// The prepared disk for this image + package set + size. A different package list or disk

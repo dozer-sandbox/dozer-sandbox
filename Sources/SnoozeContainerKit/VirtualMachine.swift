@@ -104,7 +104,8 @@ struct AdoptingInstance: VirtualMachineInstance {
     var mounts: [String: [AttachedFilesystem]] { inner.mounts }
 
     func dialAgent() async throws -> AdoptingAgent {
-        AdoptingAgent(inner: try await inner.dialAgent(), flag: flag, containerID: containerID)
+        let inner = self.inner
+        return AdoptingAgent(dial: { try await inner.dialAgent() }, flag: flag, containerID: containerID)
     }
     func dial(_ port: UInt32) async throws -> FileHandle { try await inner.dial(port) }
     func listen(_ port: UInt32) throws -> VsockListener { try inner.listen(port) }
@@ -121,30 +122,47 @@ struct AdoptingInstance: VirtualMachineInstance {
 
 /// Pass-through agent that, while adopting, treats guest SET-UP as already done (see
 /// `AdoptingInstance`). Everything else — and everything once adoption ends — goes to vminitd.
+///
+/// The vminitd connection is dialled LAZILY, on the first call that needs the guest: adoption's
+/// set-up calls are all answered locally, so no gRPC client exists during them. (578/579: a client
+/// dialled straight after a restore could fail, its `close()` then threw, and deallocating a gRPC
+/// client that never finished is a fatal error in the transport.) A client whose `close()` fails
+/// is kept for the life of the process instead of being freed.
 struct AdoptingAgent: VirtualMachineAgent {
-    let inner: Vminitd
+    let dialer: @Sendable () async throws -> Vminitd
     let flag: AdoptionFlag
     let containerID: String
+    private let box = AgentBox()
+
+    init(dial: @escaping @Sendable () async throws -> Vminitd, flag: AdoptionFlag, containerID: String) {
+        self.dialer = dial
+        self.flag = flag
+        self.containerID = containerID
+    }
+
+    private var inner: Vminitd {
+        get async throws { try await box.get(dialer) }
+    }
 
     private var adopting: Bool { flag.adopting }
 
-    func standardSetup() async throws { if !adopting { try await inner.standardSetup() } }
-    func close() async throws { try await inner.close() }
+    func standardSetup() async throws { if !adopting { try await (try await inner).standardSetup() } }
+    func close() async throws { await box.close() }
     func filesystemOperation(operation: FilesystemOperation, path: String, containerID: String?) async throws {
-        try await inner.filesystemOperation(operation: operation, path: path, containerID: containerID)
+        try await (try await inner).filesystemOperation(operation: operation, path: path, containerID: containerID)
     }
-    func getenv(key: String) async throws -> String { try await inner.getenv(key: key) }
-    func setenv(key: String, value: String) async throws { try await inner.setenv(key: key, value: value) }
-    func mount(_ mount: ContainerizationOCI.Mount) async throws { if !adopting { try await inner.mount(mount) } }
-    func umount(path: String, flags: Int32) async throws { try await inner.umount(path: path, flags: flags) }
+    func getenv(key: String) async throws -> String { try await (try await inner).getenv(key: key) }
+    func setenv(key: String, value: String) async throws { try await (try await inner).setenv(key: key, value: value) }
+    func mount(_ mount: ContainerizationOCI.Mount) async throws { if !adopting { try await (try await inner).mount(mount) } }
+    func umount(path: String, flags: Int32) async throws { try await (try await inner).umount(path: path, flags: flags) }
     func mkdir(path: String, all: Bool, perms: UInt32) async throws {
-        if !adopting { try await inner.mkdir(path: path, all: all, perms: perms) }
+        if !adopting { try await (try await inner).mkdir(path: path, all: all, perms: perms) }
     }
     @discardableResult
-    func kill(pid: Int32, signal: Int32) async throws -> Int32 { try await inner.kill(pid: pid, signal: signal) }
-    func sync() async throws { try await inner.sync() }
+    func kill(pid: Int32, signal: Int32) async throws -> Int32 { try await (try await inner).kill(pid: pid, signal: signal) }
+    func sync() async throws { try await (try await inner).sync() }
     func writeFile(path: String, data: Data, flags: WriteFileFlags, mode: UInt32) async throws {
-        if !adopting { try await inner.writeFile(path: path, data: data, flags: flags, mode: mode) }
+        if !adopting { try await (try await inner).writeFile(path: path, data: data, flags: flags, mode: mode) }
     }
 
     /// The container's init process already exists in the restored guest.
@@ -153,49 +171,71 @@ struct AdoptingAgent: VirtualMachineAgent {
     func createProcess(id: String, containerID: String?, stdinPort: UInt32?, stdoutPort: UInt32?, stderrPort: UInt32?,
                        ociRuntimePath: String?, configuration: ContainerizationOCI.Spec, options: Data?) async throws {
         if isInit(id, containerID) { return }
-        try await inner.createProcess(id: id, containerID: containerID, stdinPort: stdinPort, stdoutPort: stdoutPort,
+        try await (try await inner).createProcess(id: id, containerID: containerID, stdinPort: stdinPort, stdoutPort: stdoutPort,
                                       stderrPort: stderrPort, ociRuntimePath: ociRuntimePath,
                                       configuration: configuration, options: options)
     }
     func startProcess(id: String, containerID: String?) async throws -> Int32 {
         if isInit(id, containerID) { return 1 }
-        return try await inner.startProcess(id: id, containerID: containerID)
+        return try await (try await inner).startProcess(id: id, containerID: containerID)
     }
     func signalProcess(id: String, containerID: String?, signal: Int32) async throws {
-        try await inner.signalProcess(id: id, containerID: containerID, signal: signal)
+        try await (try await inner).signalProcess(id: id, containerID: containerID, signal: signal)
     }
     func resizeProcess(id: String, containerID: String?, columns: UInt32, rows: UInt32) async throws {
-        try await inner.resizeProcess(id: id, containerID: containerID, columns: columns, rows: rows)
+        try await (try await inner).resizeProcess(id: id, containerID: containerID, columns: columns, rows: rows)
     }
     func waitProcess(id: String, containerID: String?, timeoutInSeconds: Int64?) async throws -> ExitStatus {
-        try await inner.waitProcess(id: id, containerID: containerID, timeoutInSeconds: timeoutInSeconds)
+        try await (try await inner).waitProcess(id: id, containerID: containerID, timeoutInSeconds: timeoutInSeconds)
     }
     func deleteProcess(id: String, containerID: String?) async throws {
-        try await inner.deleteProcess(id: id, containerID: containerID)
+        try await (try await inner).deleteProcess(id: id, containerID: containerID)
     }
     func closeProcessStdin(id: String, containerID: String?) async throws {
-        try await inner.closeProcessStdin(id: id, containerID: containerID)
+        try await (try await inner).closeProcessStdin(id: id, containerID: containerID)
     }
-    func up(name: String, mtu: UInt32?) async throws { if !adopting { try await inner.up(name: name, mtu: mtu) } }
-    func down(name: String) async throws { try await inner.down(name: name) }
+    func up(name: String, mtu: UInt32?) async throws { if !adopting { try await (try await inner).up(name: name, mtu: mtu) } }
+    func down(name: String) async throws { try await (try await inner).down(name: name) }
     func addressAdd(name: String, address: InterfaceAddress) async throws {
-        if !adopting { try await inner.addressAdd(name: name, address: address) }
+        if !adopting { try await (try await inner).addressAdd(name: name, address: address) }
     }
     func routeAddLink(name: String, route: LinkRoute) async throws {
-        if !adopting { try await inner.routeAddLink(name: name, route: route) }
+        if !adopting { try await (try await inner).routeAddLink(name: name, route: route) }
     }
     func routeAddDefault(name: String, route: DefaultRoute) async throws {
-        if !adopting { try await inner.routeAddDefault(name: name, route: route) }
+        if !adopting { try await (try await inner).routeAddDefault(name: name, route: route) }
     }
     func configureDNS(config: DNS, location: String) async throws {
-        if !adopting { try await inner.configureDNS(config: config, location: location) }
+        if !adopting { try await (try await inner).configureDNS(config: config, location: location) }
     }
     func configureHosts(config: Hosts, location: String) async throws {
-        if !adopting { try await inner.configureHosts(config: config, location: location) }
+        if !adopting { try await (try await inner).configureHosts(config: config, location: location) }
     }
     func containerStatistics(containerIDs: [String], categories: StatCategory) async throws -> [ContainerStatistics] {
-        try await inner.containerStatistics(containerIDs: containerIDs, categories: categories)
+        try await (try await inner).containerStatistics(containerIDs: containerIDs, categories: categories)
     }
+}
+
+/// Holds a lazily dialled vminitd client; closing a client that never connected is free.
+actor AgentBox {
+    private var agent: Vminitd?
+    func get(_ dial: @Sendable () async throws -> Vminitd) async throws -> Vminitd {
+        if let agent { return agent }
+        let a = try await dial()
+        agent = a
+        return a
+    }
+    func close() async {
+        guard let a = agent else { return }
+        agent = nil
+        await closeKeepingOnFailure(a)
+    }
+}
+
+/// Close a vminitd client; if that fails, keep it alive forever rather than let it deallocate
+/// unfinished (a fatal error in the gRPC transport).
+func closeKeepingOnFailure(_ agent: Vminitd) async {
+    do { try await agent.close() } catch { Graveyard.keep(agent) }
 }
 
 /// The concrete VZ instance under whatever `LinuxContainer.withVirtualMachineInstance` hands out.

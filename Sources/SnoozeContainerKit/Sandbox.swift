@@ -1,6 +1,8 @@
 import Containerization
+import ContainerizationEXT4
 import ContainerizationExtras
 import Foundation
+import SystemPackage
 import Virtualization
 
 /// One Linux container in its own VM, with the 576.03 sleep design:
@@ -133,17 +135,40 @@ public actor Sandbox {
         setPhase(.booting)
         snapshotBytes = fileSize(layout.snapshot)
         do {
-            try await boot(restoring: persisted)
+            // Right after the previous owner exits, its VM process can still hold the disks for a
+            // moment ("The storage device attachment is invalid"): retry briefly (578/579 suites).
+            var attempt = 0
+            while true {
+                do { try await boot(restoring: persisted); break } catch where attempt < 20 && Self.disksStillHeld(error) {
+                    attempt += 1
+                    abandonBoot()
+                    if attempt == 1 { note("the disks are still held by the previous process — retrying") }
+                    try await Task.sleep(for: .milliseconds(250))
+                }
+            }
             setPhase(.running)
             for step in [LifecycleStep.resyncClock, .remountShares, .deleteSnapshot, .persistState] {
                 try await run(step, target: .running)
             }
             note(String(format: "restored after a crash in %.2f s — sessions are where they were", seconds(since: t0)))
         } catch {
+            abandonBoot()
             note("restore FAILED: \(error.localizedDescription) — the snapshot is kept; Stop discards it")
             setPhase(.failed)
             throw error
         }
+    }
+
+    static func disksStillHeld(_ error: Error) -> Bool {
+        "\(error) \(error.localizedDescription)".contains("storage device attachment is invalid")
+    }
+
+    /// Drop a boot that failed part-way: its container may own vminitd clients that were never
+    /// closed, and deallocating one is fatal — so it is kept (Graveyard), never freed.
+    private func abandonBoot() {
+        if let network { var n = network; try? n.releaseInterface(spec.name); self.network = nil }
+        if container != nil || instance != nil { Graveyard.keep(container, instance) }
+        container = nil; instance = nil; handle = nil; identity = nil
     }
 
     public func pause() async throws { try await perform(.pause) }
@@ -271,8 +296,11 @@ public actor Sandbox {
             try await timed("re-synced the guest clock") {
                 let agent = try await v.dialAgent()
                 let now = Date().timeIntervalSince1970
-                try await agent.setTime(sec: Int64(now), usec: Int32((now - floor(now)) * 1_000_000))
-                try? await agent.close()
+                do { try await agent.setTime(sec: Int64(now), usec: Int32((now - floor(now)) * 1_000_000)) } catch {
+                    await closeKeepingOnFailure(agent)
+                    throw error
+                }
+                await closeKeepingOnFailure(agent)
             }
         case .remountShares:
             let tags = (identity?.shareTags ?? [:]).map { (tag: $0.value, guestPath: $0.key) }.sorted { $0.guestPath < $1.guestPath }
@@ -334,19 +362,36 @@ public actor Sandbox {
         if let persisted {
             identity = persisted
         } else {
-            let hadImage = (try? await store.get(reference: spec.image, pull: false)) != nil
-            let image = try await timed("\(spec.image) ready\(hadImage ? " (cached)" : " (pulled)")") {
-                try await store.get(reference: spec.image, pull: true)
-            }
-            let golden = layout.golden(for: spec)
-            if !fm.fileExists(atPath: golden.path) {
-                try await bake(image: image, kernel: kernel, store: store, into: golden)
+            let golden: URL
+            if let recipe = spec.recipe {
+                let inputs = ImageBaker.BakeInputs(kernel: kernel, kernelSHA256: try KernelProvider.sha256(of: kernelURL),
+                                                   deckholdSHA256: try KernelProvider.sha256(of: deckhold),
+                                                   initfsReference: spec.initfsReference, dnsServers: spec.dnsServers)
+                let broadcaster = self.broadcaster
+                golden = try await ImageBaker(storeRoot: spec.storeRoot).ensure(recipe, inputs: inputs) { broadcaster.yield($0) }.root
+            } else {
+                golden = layout.golden(for: spec)
+                if !fm.fileExists(atPath: golden.path) {
+                    let hadImage = (try? await store.get(reference: spec.image, pull: false)) != nil
+                    let image = try await timed("\(spec.image) ready\(hadImage ? " (cached)" : " (pulled)")") {
+                        try await store.get(reference: spec.image, pull: true)
+                    }
+                    try await bake(image: image, kernel: kernel, store: store, into: golden)
+                }
             }
             try? fm.removeItem(at: layout.rootfs)
             try? fm.removeItem(at: layout.bootLog)
             try? fm.removeItem(at: layout.snapshot)
-            try await timed("root disk cloned from the prepared disk (APFS clone, \(spec.rootfsMiB) MiB)") {
-                try fm.copyItem(at: golden, to: layout.rootfs)
+            let rootfs = layout.rootfs
+            try await timed("root disk cloned from the \(spec.recipe == nil ? "prepared disk" : "baked image \(spec.recipe!.name)") (APFS clone)") {
+                try FileManager.default.copyItem(at: golden, to: rootfs)
+                chmod(rootfs.path, 0o644)                   // the baked disk is read-only; its clone is not
+            }
+            if spec.recipe != nil, !fm.fileExists(atPath: layout.stateDisk.path) {
+                try await timed("created the empty state disk (\(spec.stateDiskMiB) MiB, sparse)") {
+                    let f = try EXT4.Formatter(FilePath(layout.stateDisk.path), minDiskSize: spec.stateDiskMiB * 1_048_576)
+                    try f.close()
+                }
             }
             identity = PersistedSandbox(spec: spec, phase: .running,
                                         machineIdentifier: VZGenericMachineIdentifier().dataRepresentation,
@@ -376,6 +421,7 @@ public actor Sandbox {
             adopt: persisted != nil ? (snapshot: layout.snapshot, flag: flag, containerID: spec.name) : nil)
         let spec = self.spec
         let bootLog = layout.bootLog
+        let stateDisk = layout.stateDisk
         let c = try LinuxContainer(
             spec.name,
             rootfs: .block(format: "ext4", source: layout.rootfs.path, destination: "/", options: []),
@@ -389,6 +435,11 @@ public actor Sandbox {
             cfg.process.arguments = ["sleep", "infinity"]
             cfg.process.environmentVariables = GuestCommand.environment()
             for s in spec.shares { cfg.mounts.append(.share(source: s.hostPath, destination: s.guestPath)) }
+            // The state disk comes AFTER the shares, always: device order is a VM input that a
+            // snapshot restore must reproduce exactly.
+            if spec.recipe != nil {
+                cfg.mounts.append(.block(format: "ext4", source: stateDisk.path, destination: GuestCommand.stateMount))
+            }
             if let iface { cfg.interfaces = [iface] }
             cfg.dns = DNS(nameservers: spec.dnsServers)
             cfg.bootLog = BootLog.file(path: bootLog)
@@ -422,6 +473,11 @@ public actor Sandbox {
             }
             try await timed("installed deckhold (the guest PTY holder)") {
                 try await c.copyIn(from: deckhold, to: URL(fileURLWithPath: GuestCommand.deckholdPath), mode: 0o755)
+            }
+            try await timed(spec.recipe == nil ? "prepared the guest" : "prepared the guest (persist dirs bound from the state disk)") {
+                let r = try await Self.exec(on: c, ["sh", "-c", GuestCommand.prepareGuest(recipe: spec.recipe)], environment: [:],
+                                            workingDirectory: "/", privileged: true, timeout: 30)
+                if r.exitCode != 0 { throw SandboxError.commandFailed(command: "prepare guest", exitCode: r.exitCode, output: r.output + r.errorOutput) }
             }
         }
         identity.phase = .running
@@ -491,21 +547,21 @@ public actor Sandbox {
 
     /// Run `argv` in the guest (no shell unless you pass one) and collect its output.
     public func exec(_ argv: [String], environment: [String: String] = [:], workingDirectory: String = "/",
-                     privileged: Bool = false, timeoutSeconds: Int64 = 120) async throws -> ExecResult {
+                     privileged: Bool = false, user: String? = nil, timeoutSeconds: Int64 = 120) async throws -> ExecResult {
         guard phase == .running else { throw SandboxError.notRunning(phase) }
         return try await execInContainer(argv, environment: environment, workingDirectory: workingDirectory,
-                                         privileged: privileged, timeout: timeoutSeconds)
+                                         privileged: privileged, timeout: timeoutSeconds, user: user)
     }
 
     private func execInContainer(_ argv: [String], environment: [String: String] = [:], workingDirectory: String = "/",
-                                 privileged: Bool = false, timeout: Int64) async throws -> ExecResult {
+                                 privileged: Bool = false, timeout: Int64, user: String? = nil) async throws -> ExecResult {
         guard let container else { throw SandboxError.vmUnavailable }
         return try await Self.exec(on: container, argv, environment: environment, workingDirectory: workingDirectory,
-                                   privileged: privileged, timeout: timeout)
+                                   privileged: privileged, timeout: timeout, user: user)
     }
 
-    private static func exec(on container: LinuxContainer, _ argv: [String], environment: [String: String],
-                             workingDirectory: String, privileged: Bool, timeout: Int64) async throws -> ExecResult {
+    static func exec(on container: LinuxContainer, _ argv: [String], environment: [String: String],
+                     workingDirectory: String, privileged: Bool, timeout: Int64, user: String? = nil) async throws -> ExecResult {
         let out = OutputCollector(), err = OutputCollector()
         let p = try await container.exec("x-\(UUID().uuidString.prefix(12).lowercased())") { cfg in
             cfg.arguments = argv
@@ -513,6 +569,7 @@ public actor Sandbox {
             cfg.workingDirectory = workingDirectory
             cfg.stdout = out
             cfg.stderr = err
+            if let user, user != "root" { cfg.user = .init(username: user) }
             if privileged { cfg.capabilities = .allCapabilities }
         }
         // Every exec is deleted, whatever happens: deletion is what closes its vminitd client.
@@ -539,17 +596,36 @@ public actor Sandbox {
 
     /// Start `argv` (NOT through a shell — see `GuestCommand`) as the guest session `name`, held
     /// by deckhold at `size`. Returns once the session's socket is listening.
+    ///
+    /// In an image sandbox the session runs as the recipe's user (pass `user: "root"` to override),
+    /// in its `workdir`, with its `sessionEnvironment` — and `environment` on top: this is where a
+    /// credential such as `ANTHROPIC_API_KEY` goes. It reaches the program's environment only; it
+    /// is never written to any disk by this library.
     public func openSession(_ name: String, argv: [String], environment: [String: String] = [:],
-                            workingDirectory: String = "/root", size: TermSize = .standard,
+                            workingDirectory: String? = nil, user: String? = nil, size: TermSize = .standard,
                             scrollbackBytes: Int? = nil) async throws {
         try GuestCommand.validateSessionName(name)
         precondition(!argv.isEmpty, "a session needs a program")
-        let r = try await exec(GuestCommand.serve(name: name, size: size, argv: argv, scrollbackBytes: scrollbackBytes),
-                               environment: environment, workingDirectory: workingDirectory, timeoutSeconds: 30)
+        let (env, cwd, runAs) = Self.sessionContext(recipe: spec.recipe, environment: environment,
+                                                    workingDirectory: workingDirectory, user: user)
+        guard phase == .running else { throw SandboxError.notRunning(phase) }
+        let r = try await execInContainer(GuestCommand.serve(name: name, size: size, argv: argv, scrollbackBytes: scrollbackBytes),
+                                          environment: env, workingDirectory: cwd, privileged: false, timeout: 30, user: runAs)
         guard r.exitCode == 0 else {
             throw SandboxError.commandFailed(command: "open session \(name)", exitCode: r.exitCode, output: r.output + r.errorOutput)
         }
-        note("opened session \(name): \(argv.joined(separator: " "))")
+        note("opened session \(name)\(runAs.map { " as \($0)" } ?? ""): \(argv.joined(separator: " "))")
+    }
+
+    /// The environment, working directory and user a session runs with (see `openSession`).
+    static func sessionContext(recipe: ImageRecipe?, environment: [String: String], workingDirectory: String?,
+                               user: String?) -> (environment: [String: String], workingDirectory: String, user: String?) {
+        guard let r = recipe else { return (environment, workingDirectory ?? "/root", user) }
+        let runAs = user ?? r.user
+        var env = r.sessionEnvironment
+        if runAs == r.user { env["HOME"] = r.home; env["USER"] = r.user }
+        env.merge(environment) { _, caller in caller }
+        return (env, workingDirectory ?? r.workdir, runAs == "root" ? nil : runAs)
     }
 
     /// Attach a viewer to session `name` at `size`. The first output is the session's current

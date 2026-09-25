@@ -5,7 +5,10 @@
 // and runs it under a watchdog. It is a trimmed port of the 576 sleep POC's selftest + keytest,
 // driven through the library's public API only, plus the crash-restore case (two processes).
 //
-// Usage: snooze-vmtest [all|lifecycle|crash|crash-restore|kernel] [--store DIR] [--no-seed]
+// Usage: snooze-vmtest [all|lifecycle|crash|crash-restore|agents|agent NAME|bake NAME|kernel] [--store DIR] [--no-seed]
+//          agents         579: bake (or cache-hit) the claude-code and pi images and run the agent suite
+//                         on each (start, verify, /workspace, state disk, session, snapshot sizes, sleep
+//                         to disk → wake with the same pid, crash restore, Stop → Start, re-bake)
 //          kernel         only resolve the pinned kernel (fetch + verify into the cache; no VM,
 //                         no entitlement needed) — `make kernel`, and CI's first step.
 //                         --no-seed skips copying a byte-identical local kernel, forcing the
@@ -20,6 +23,7 @@
 //   exits 0 only when all pass.
 import Darwin
 import Foundation
+import Containerization
 import SnoozeContainerKit
 
 setvbuf(stdout, nil, _IOLBF, 0)
@@ -400,6 +404,220 @@ func crashSuite(skipChild: Bool = false) async throws {
     check(await sb.phase == .off && Sandbox.restorableState(for: spec) == nil, "stopped; nothing left to restore")
 }
 
+// MARK: agent images
+
+func agentRecipe(_ name: String) -> ImageRecipe? {
+    switch name { case "claude-code": AgentRecipes.claudeCode; case "pi": AgentRecipes.pi; default: nil }
+}
+
+func agentSpec(_ name: String, recipe: ImageRecipe, workspace: URL? = nil) -> SandboxSpec {
+    SandboxSpec(name: name, storeRoot: storeRoot, kernelPath: kernelPath, kernelCacheDirectory: kernelCache,
+                cpus: 2, memoryMiB: 2048, shares: workspace.map { [Share(hostPath: $0.path, guestPath: "/workspace")] } ?? [],
+                recipe: recipe)
+}
+
+/// Bake through the library's baker with the same inputs a Sandbox would use.
+func bakeImage(_ sb: Sandbox, _ recipe: ImageRecipe) async throws -> BakedImage {
+    let kernelURL = try await sb.kernelProvider.resolve(override: sb.spec.kernelPath)
+    guard let deckhold = DeckholdBinary.locate() else { throw SandboxError.deckholdMissing }
+    let inputs = ImageBaker.BakeInputs(kernel: .init(path: kernelURL, platform: .linuxArm),
+                                       kernelSHA256: try KernelProvider.sha256(of: kernelURL),
+                                       deckholdSHA256: try KernelProvider.sha256(of: deckhold),
+                                       initfsReference: sb.spec.initfsReference, dnsServers: sb.spec.dnsServers)
+    return try await ImageBaker(storeRoot: storeRoot).ensure(recipe, inputs: inputs) { e in
+        switch e {
+        case .step(let s, let ms): info(String(format: "%@ — %.0f ms", s, ms))
+        case .note(let s): info(s)
+        default: break
+        }
+    }
+}
+
+/// The session-start credential. A real key from the environment is used only for the live
+/// prompt check and is never printed; without one, a SENTINEL stands in, so the "never on any
+/// disk" check still has something to look for.
+let realKey = ProcessInfo.processInfo.environment["ANTHROPIC_API_KEY"].flatMap { $0.isEmpty ? nil : $0 }
+let sentinelKey = "sk-ant-api03-SNOOZE-SENTINEL-\(UUID().uuidString.prefix(8))-NOT-A-KEY"
+
+/// Bytes of `needle` anywhere in `file` (streamed; holes read as zeros).
+func fileContains(_ file: URL, _ needle: String) -> Bool {
+    guard let h = try? FileHandle(forReadingFrom: file) else { return false }
+    defer { try? h.close() }
+    let n = Data(needle.utf8)
+    var carry = Data()
+    while let chunk = try? h.read(upToCount: 8 << 20), !chunk.isEmpty {
+        let window = carry + chunk
+        if window.range(of: n) != nil { return true }
+        carry = window.suffix(n.count)
+    }
+    return false
+}
+
+func mib(_ b: Int64) -> String { "\(b / 1_048_576) MiB" }
+
+func agentSuite(_ recipe: ImageRecipe) async throws {
+    let agentArgv = recipe.name == "pi" ? ["pi"] : ["claude"]
+    let versionArgv = recipe.verify[0].argv
+    let persist = recipe.resolvedPersistDirs[0]
+    let ws = storeRoot.appendingPathComponent("workspace-\(recipe.name)")
+    try FileManager.default.createDirectory(at: ws, withIntermediateDirectories: true)
+    let name = "agent-\(recipe.name)"
+
+    print("vmtest[\(recipe.name)]: bake (or cache hit)")
+    var sb = try Sandbox(spec: agentSpec(name, recipe: recipe, workspace: ws))
+    if await sb.phase != .off { try? await sb.stop() }
+    let tb = Date()
+    let img = try await bakeImage(sb, recipe)
+    let m = img.manifest
+    check(m.verifyOutput.first?.contains(recipe.verify[0].expect ?? "") == true,
+          "baked image \(recipe.name) \(m.key.prefix(12)): verify → \(m.verifyOutput.first ?? "?") (bake took \(String(format: "%.1f", m.totalMilliseconds / 1000)) s)")
+    info("disk: \(mib(m.apparentBytes)) apparent, \(mib(m.allocatedBytes)) allocated; timings: " + m.timings.map { "\($0.step) \(Int($0.milliseconds)) ms" }.joined(separator: " · "))
+    let tc = Date()
+    _ = try await bakeImage(sb, recipe)
+    check(Date().timeIntervalSince(tc) < 2, String(format: "a second ensure is a cache hit (%.0f ms)", Date().timeIntervalSince(tc) * 1000))
+    _ = tb
+
+    print("vmtest[\(recipe.name)]: start from the baked disk")
+    let log = logEvents(sb)
+    let t0 = Date()
+    try await sb.start()
+    let v = try await sb.exec(versionArgv, environment: recipe.sessionEnvironment, workingDirectory: recipe.workdir, user: recipe.user)
+    let readyS = Date().timeIntervalSince(t0)
+    check(v.exitCode == 0 && v.output.contains(recipe.verify[0].expect ?? ""),
+          String(format: "cold start → `%@` answers in %.2f s (%@)", versionArgv.joined(separator: " "), readyS, v.output.trimmingCharacters(in: .whitespacesAndNewlines)))
+    let os = try await sb.exec(["sh", "-c", "grep PRETTY_NAME /etc/os-release; node --version; id agent; df -h / | tail -1"]).output
+    info(os.replacingOccurrences(of: "\n", with: " | "))
+    check(os.contains("Debian"), "the guest is the Debian node base (glibc)")
+
+    let wsFile = "from-agent-\(UUID().uuidString.prefix(6)).txt"
+    let w = try await sb.exec(["sh", "-c", "echo hello > /workspace/\(wsFile) && id -un"], user: recipe.user)
+    check(w.exitCode == 0 && w.output.contains(recipe.user) && FileManager.default.fileExists(atPath: ws.appendingPathComponent(wsFile).path),
+          "the \(recipe.user) user writes /workspace and the host sees it")
+    let mp = try await sb.exec(["sh", "-c", "mountpoint '\(persist)' && stat -c %U '\(persist)'"])
+    check(mp.exitCode == 0 && mp.output.contains(recipe.user), "\(persist) is bound from the state disk, owned by \(recipe.user)")
+    let marker = "marker-\(UUID().uuidString.prefix(8))"
+    _ = try await sb.exec(["sh", "-c", "echo \(marker) > '\(persist)/snooze-marker'"], user: recipe.user)
+
+    print("vmtest[\(recipe.name)]: the agent session (key at session start only)")
+    let key = realKey ?? sentinelKey
+    let ts = Date()
+    try await sb.openSession("agent", argv: agentArgv, environment: ["ANTHROPIC_API_KEY": key], size: TermSize(cols: 120, rows: 36))
+    let conn = try await sb.attach("agent", size: TermSize(cols: 120, rows: 36))
+    let rec = Recorder(conn)
+    var painted = false
+    var paintS = 0.0
+    for _ in 0..<150 where !painted {
+        let t = (try? await sb.screenText("agent")) ?? ""
+        let text = t.split(separator: "\n").filter { !$0.hasPrefix("cursor=") }.joined()
+        if text.filter({ $0.isLetter }).count > 20 { painted = true; paintS = Date().timeIntervalSince(ts) } else { await sleepS(0.2) }
+    }
+    check(painted, String(format: "the %@ TUI painted its first screen %.2f s after the session opened", agentArgv[0], paintS))
+    let screen = (try? await sb.screenText("agent")) ?? ""
+    info("screen: " + screen.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty && !$0.hasPrefix("cursor=") }.prefix(6).joined(separator: " / "))
+    let pid = try await sb.sessions().first { $0.name == "agent" }?.pid ?? -1
+    let envCheck = try await sb.exec(["sh", "-c", "tr '\\0' '\\n' < /proc/\(pid)/environ | grep -c '^ANTHROPIC_API_KEY=' ; stat -c %U /proc/\(pid)"], privileged: true)
+    if !envCheck.output.hasPrefix("1") { info("env check: \(envCheck.output) \(envCheck.errorOutput) · ps: \((try? await sb.exec(["ps", "-eo", "pid,ppid,user,rss,args"]).output) ?? "")") }
+    check(envCheck.output.hasPrefix("1") && envCheck.output.contains(recipe.user),
+          "the key reached the agent's environment (pid \(pid), user \(recipe.user)) — and nowhere else")
+    check(!fileContains(img.root, key), "the key is not on the baked disk")
+
+    if let realKey, recipe.name == "claude-code" {
+        let r = try await sb.exec(["claude", "-p", "Reply with exactly the word PONG and nothing else."],
+                                  environment: recipe.sessionEnvironment.merging(["ANTHROPIC_API_KEY": realKey]) { $1 },
+                                  workingDirectory: recipe.workdir, user: recipe.user, timeoutSeconds: 120)
+        check(r.exitCode == 0 && r.output.contains("PONG"), "live prompt: claude -p answers from the guest")
+    } else {
+        print("  SKIP  live prompt — \(realKey == nil ? "no ANTHROPIC_API_KEY in the environment" : "no automated prompt for \(recipe.name)"); the owner checks this by hand")
+    }
+
+    await sleepS(5)
+    let rss = try await sb.exec(["sh", "-c", """
+        for d in /proc/[0-9]*; do awk '/^PPid:/{pp=$2} /^VmRSS:/{r=$2} END{print FILENAME, pp, r+0}' $d/status 2>/dev/null; done \\
+          | sed 's#/proc/##; s#/status##' | awk -v root=\(pid) '{ p[$1]=$2; r[$1]=$3 } END {
+            t=0; n=0; for (x in p) { y=x; while (y != "" && y != 0 && y != root) y=p[y]; if (y == root) { t+=r[x]; n++ } }
+            print "tree_kib=" t " procs=" n }'
+        awk '/MemTotal/{t=$2} /MemAvailable/{a=$2} END { print "guest_used_mib=" int((t-a)/1024) }' /proc/meminfo
+        """], privileged: true).output
+    info("idle: " + rss.replacingOccurrences(of: "\n", with: " "))
+    check(!rss.contains("tree_kib=0 ") && rss.contains("guest_used_mib="), "idle RSS measured: \(rss.replacingOccurrences(of: "\n", with: " "))")
+
+    print("vmtest[\(recipe.name)]: sleep (pause + snapshot) with the agent idle")
+    try await sb.sleep()
+    let snapIdle = await sb.status.snapshotBytes
+    check(snapIdle > 0, "snapshot with the agent running idle: \(mib(Int64(snapIdle)))")
+    try await sb.resume()
+
+    print("vmtest[\(recipe.name)]: sleep to disk → wake mid-session")
+    let t1 = Date()
+    try await sb.sleepToDisk()
+    let sleepMs = Date().timeIntervalSince(t1) * 1000
+    _ = await rec.wait(2) { $0.finished }
+    let t2 = Date()
+    try await sb.wakeFromDisk()
+    let wakeMs = Date().timeIntervalSince(t2) * 1000
+    check(await sb.phase == .running, String(format: "slept to disk in %.0f ms, woke in %.0f ms", sleepMs, wakeMs))
+    let pidAfter = try await sb.sessions().first { $0.name == "agent" }?.pid ?? -2
+    check(pidAfter == pid, "the same \(agentArgv[0]) process after the wake (pid \(pid) → \(pidAfter))")
+    let t3 = Date()
+    let c2 = try await sb.attach("agent", size: TermSize(cols: 120, rows: 36))
+    let r2 = Recorder(c2)
+    _ = await r2.wait(3) { $0.count > 0 }
+    if case .snapshot(let d) = r2.first?.1 {
+        check(d.count > 200, String(format: "a viewer reattaches with a SNAPSHOT of the agent's screen %.0f ms after attach (%d bytes)",
+                                    r2.first!.0.timeIntervalSince(t3) * 1000, d.count))
+    } else { check(false, "a viewer reattaches with a SNAPSHOT") }
+    let before = r2.count
+    c2.send(Data("\u{1B}[B".utf8))                    // a key the TUI redraws for
+    let reacted = await r2.wait(4) { $0.bytes(from: before) > 0 }
+    check(reacted, "the agent's TUI reacts to a key after the wake")
+    c2.close()
+
+    print("vmtest[\(recipe.name)]: state survives Stop → Start and a re-bake")
+    try await sb.stop()
+    try await sb.start()
+    let m1 = try await sb.exec(["cat", "\(persist)/snooze-marker"], user: recipe.user).output
+    check(m1.contains(marker), "Stop → Start: the state disk kept \(persist)")
+    try await sb.stop()
+    log.cancel()
+
+    print("vmtest[\(recipe.name)]: crash restore with the state disk attached (two processes)")
+    let child = Process()
+    child.executableURL = URL(fileURLWithPath: CommandLine.arguments[0]).standardizedFileURL
+    child.arguments = ["agent-crash-save", recipe.name, "--store", storeRoot.path]
+    let childLog = storeRoot.appendingPathComponent("agent-crash-child.log")
+    FileManager.default.createFile(atPath: childLog.path, contents: nil)
+    let childOut = try FileHandle(forWritingTo: childLog)
+    child.standardOutput = childOut
+    child.standardError = childOut
+    try child.run(); child.waitUntilExit()
+    try? childOut.close()
+    if child.terminationStatus != 0 {
+        info("child exited \(child.terminationStatus): " + ((try? String(contentsOf: childLog, encoding: .utf8)) ?? "").split(separator: "\n").suffix(8).joined(separator: " | "))
+    }
+    let crashPid = Int((try? String(contentsOf: storeRoot.appendingPathComponent("agent-crash-pid.txt"), encoding: .utf8)) ?? "")
+    let rsb = try Sandbox(spec: agentSpec(name, recipe: recipe, workspace: ws))
+    let tcr = Date()
+    try await rsb.restoreAfterCrash()
+    let restoredPid = try await rsb.sessions().first { $0.name == "agent" }?.pid
+    let still = try await rsb.exec(["cat", "\(persist)/snooze-marker"], user: recipe.user).output
+    check(child.terminationStatus == 0 && restoredPid != nil && restoredPid == crashPid && still.contains(marker),
+          String(format: "restored in a new process in %.2f s: the same agent pid (%@) and the state disk mounted", Date().timeIntervalSince(tcr),
+                 restoredPid.map(String.init) ?? "none"))
+    try await rsb.stop()
+
+    var variant = recipe
+    variant.steps.append(BakeStep("re-bake \(UUID().uuidString.prefix(8))", argv: ["true"], needsNetwork: false))
+    sb = try Sandbox(spec: agentSpec(name, recipe: variant, workspace: ws))
+    let tr = Date()
+    let img2 = try await bakeImage(sb, variant)
+    check(img2.key != img.key, String(format: "a changed recipe re-bakes (new key %@, %.1f s with the base cached)", String(img2.key.prefix(12)), Date().timeIntervalSince(tr)))
+    try await sb.start()
+    let m2 = try await sb.exec(["cat", "\(persist)/snooze-marker"], user: recipe.user).output
+    check(m2.contains(marker), "after the re-bake, the new root still sees the same state disk")
+    try await sb.stop()
+    try? FileManager.default.removeItem(at: img2.root.deletingLastPathComponent())
+}
+
 // MARK: main
 
 Task {
@@ -407,6 +625,58 @@ Task {
         switch mode {
         case "crash-save":
             exit(try await crashSave())
+        case "probe":
+            // snooze-vmtest probe --script '<sh>' : start the lab sandbox, run the script as root, stop.
+            guard let i = args.firstIndex(of: "--script"), i + 1 < args.count else { print("probe needs --script"); exit(2) }
+            let share = try prepareShare("vmtest")
+            let sb = try Sandbox(spec: makeSpec("vmtest", share: share))
+            try await sb.start()
+            let r = try await sb.exec(["sh", "-c", args[i + 1]], privileged: true)
+            print(r.output + r.errorOutput)
+            try await sb.stop()
+            exit(r.exitCode)
+        case "bake":
+            // snooze-vmtest bake claude-code|pi — bake (or cache-hit) one agent image, print the manifest.
+            let recipe = args.dropFirst().first { !$0.hasPrefix("-") && $0 != "bake" }.flatMap(agentRecipe) ?? AgentRecipes.claudeCode
+            let sb = try Sandbox(spec: agentSpec("bake-\(recipe.name)", recipe: recipe))
+            let log = logEvents(sb)
+            let img = try await bakeImage(sb, recipe)
+            log.cancel()
+            print(String(decoding: try JSONEncoder().encode(img.manifest.timings), as: UTF8.self))
+            check(true, "image \(recipe.name) at \(img.root.path)")
+            print("vmtest: ALL PASS"); exit(0)
+        case "agent-crash-save":
+            // Child half of the agent crash case: start, open the agent session, sleep to disk, exit.
+            guard let r = args.dropFirst().first(where: { !$0.hasPrefix("-") && $0 != "agent-crash-save" }).flatMap(agentRecipe) else { exit(2) }
+            let ws = storeRoot.appendingPathComponent("workspace-\(r.name)")
+            let sb = try Sandbox(spec: agentSpec("agent-\(r.name)", recipe: r, workspace: ws))
+            let clog = logEvents(sb, prefix: "[child] ")
+            try await sb.start()
+            try await sb.openSession("agent", argv: r.name == "pi" ? ["pi"] : ["claude"], environment: ["ANTHROPIC_API_KEY": sentinelKey])
+            clog.cancel()
+            await sleepS(2)
+            let pid = try await sb.sessions().first { $0.name == "agent" }?.pid ?? -1
+            try "\(pid)".write(to: storeRoot.appendingPathComponent("agent-crash-pid.txt"), atomically: true, encoding: .utf8)
+            try await sb.sleepToDisk()
+            exit(0)
+        case "agent-crash-restore":
+            guard let r = args.dropFirst().first(where: { !$0.hasPrefix("-") && $0 != "agent-crash-restore" }).flatMap(agentRecipe) else { exit(2) }
+            let ws = storeRoot.appendingPathComponent("workspace-\(r.name)")
+            let sb = try Sandbox(spec: agentSpec("agent-\(r.name)", recipe: r, workspace: ws))
+            let log = logEvents(sb)
+            try await sb.restoreAfterCrash()
+            print("sessions: \(try await sb.sessions())")
+            try await sb.stop()
+            log.cancel()
+            print("vmtest: ALL PASS"); exit(0)
+        case "agents":
+            try await agentSuite(AgentRecipes.claudeCode)
+            try await agentSuite(AgentRecipes.pi)
+        case "agent":
+            guard let r = args.dropFirst().first(where: { !$0.hasPrefix("-") && $0 != "agent" }).flatMap(agentRecipe) else {
+                print("usage: snooze-vmtest agent claude-code|pi"); exit(2)
+            }
+            try await agentSuite(r)
         case "kernel":
             let spec = makeSpec("vmtest", share: storeRoot)
             var provider = try Sandbox(spec: spec).kernelProvider

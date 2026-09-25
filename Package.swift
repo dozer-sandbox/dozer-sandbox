@@ -28,6 +28,7 @@ let package = Package(
             dependencies: [
                 .product(name: "Containerization", package: "containerization"),
                 .product(name: "ContainerizationArchive", package: "containerization"),
+                .product(name: "ContainerizationEXT4", package: "containerization"),
                 .product(name: "ContainerizationExtras", package: "containerization"),
                 .product(name: "ContainerizationOCI", package: "containerization"),
                 .product(name: "ContainerizationOS", package: "containerization"),
@@ -46,7 +47,7 @@ let package = Package(
         // `Scripts/vmtest.entitlements`, and runs under a watchdog. See CLAUDE.md.
         .executableTarget(
             name: "snooze-vmtest",
-            dependencies: ["SnoozeContainerKit"],
+            dependencies: ["SnoozeContainerKit", .product(name: "Containerization", package: "containerization")],
             path: "Sources/snooze-vmtest"
         ),
         .testTarget(

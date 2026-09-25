@@ -214,4 +214,28 @@ public enum GuestCommand {
         }
         return s
     }
+
+    /// Where the state disk is mounted in an image sandbox.
+    public static let stateMount = "/state"
+
+    /// A persist dir's directory on the state disk: its absolute path, flattened.
+    public static func stateKey(_ dir: String) -> String {
+        String(dir.drop(while: { $0 == "/" })).replacingOccurrences(of: "/", with: "_")
+    }
+
+    /// Run as root after a FRESH boot (a restore keeps everything in guest memory): a sticky,
+    /// world-writable deckhold socket directory, so sessions can run as a non-root user; and, for
+    /// an image sandbox, each persist dir bind-mounted from the state disk and owned by the user.
+    /// Idempotent.
+    public static func prepareGuest(recipe: ImageRecipe?) -> String {
+        var s = "set -e; mkdir -p /run/deckhold; chmod 1777 /run/deckhold"
+        guard let r = recipe else { return s }
+        for d in r.resolvedPersistDirs {
+            let src = "\(stateMount)/\(stateKey(d))"
+            s += "; mkdir -p '\(src)' '\(d)'; chown \(r.user):\(r.user) '\(src)'"
+            s += "; p='\(d)'; while [ \"$p\" != '\(r.home)' ] && [ \"$p\" != / ]; do chown \(r.user):\(r.user) \"$p\"; p=$(dirname \"$p\"); done"
+            s += "; mountpoint -q '\(d)' || mount --bind '\(src)' '\(d)'"
+        }
+        return s
+    }
 }

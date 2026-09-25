@@ -35,6 +35,11 @@ public struct SandboxSpec: Sendable, Codable, Equatable {
     /// internet, including the one-time package bake.
     public var networking: Bool
     public var dnsServers: [String]
+    /// A baked image to boot instead of `image` + `bakePackages`: its read-only baked disk is
+    /// APFS-cloned as the root, and a per-sandbox STATE disk (`stateDiskMiB`, created empty once,
+    /// never cloned, never deleted by Stop) holds the recipe's `persistDirs`.
+    public var recipe: ImageRecipe?
+    public var stateDiskMiB: UInt64
 
     public init(
         name: String,
@@ -49,7 +54,9 @@ public struct SandboxSpec: Sendable, Codable, Equatable {
         bakePackages: [String] = [],
         shares: [Share] = [],
         networking: Bool = true,
-        dnsServers: [String] = ["1.1.1.1", "8.8.8.8"]
+        dnsServers: [String] = ["1.1.1.1", "8.8.8.8"],
+        recipe: ImageRecipe? = nil,
+        stateDiskMiB: UInt64 = 2048
     ) {
         self.name = name
         self.storeRoot = storeRoot
@@ -64,6 +71,8 @@ public struct SandboxSpec: Sendable, Codable, Equatable {
         self.shares = shares
         self.networking = networking
         self.dnsServers = dnsServers
+        self.recipe = recipe
+        self.stateDiskMiB = stateDiskMiB
     }
 
     /// Throws `SandboxError.invalidSpec` for a spec that would fail later in a less obvious way.
@@ -79,6 +88,11 @@ public struct SandboxSpec: Sendable, Codable, Equatable {
             guard s.guestPath.hasPrefix("/"), !s.guestPath.contains("'") else {
                 throw SandboxError.invalidSpec("share guest path must be absolute and quote-free: \(s.guestPath)")
             }
+        }
+        if let recipe {
+            try recipe.validate()
+            guard stateDiskMiB >= 64 else { throw SandboxError.invalidSpec("stateDiskMiB must be ≥ 64") }
+            guard !shares.contains(where: { $0.guestPath == "/state" }) else { throw SandboxError.invalidSpec("/state is the state disk") }
         }
         for p in bakePackages where !p.allSatisfy({ $0.isLetter || $0.isNumber || "+-._".contains($0) }) {
             throw SandboxError.invalidSpec("bad package name \(p)")

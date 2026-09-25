@@ -33,7 +33,7 @@ export SNOOZE_KERNEL_CACHE := $(KERNEL_CACHE)
 DECKHOLD_OUT := Guest/deckhold/out/deckhold
 DECKHOLD_RES := Sources/SnoozeContainerKit/Resources/deckhold
 
-.PHONY: help build test audit test-vm vmtest-host kernel deckhold deckhold-verify
+.PHONY: help build test audit test-vm test-vm-agents vmtest-host kernel deckhold deckhold-verify
 
 help: ## Show this help
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) | sed 's/:.*## /\t/' | expand -t 22
@@ -50,6 +50,9 @@ audit: ## Neutrality audit: import allowlist, one remote dependency, no host bra
 vmtest-host: ## Build the VM test host and ad-hoc sign it with the virtualization entitlement
 	swift build $(SWIFT_BUILD_SYSTEM) -j $(JOBS) --product snooze-vmtest
 	codesign --force --sign - --entitlements Scripts/vmtest.entitlements $(VMTEST_BIN)
+
+test-vm-agents: vmtest-host ## 579 agent images: bake claude-code + pi (cold: minutes, network), full agent suite
+	perl -e 'alarm shift; exec @ARGV' 2400 $(VMTEST_BIN) agents --store "$(VMTEST_STORE)"
 
 kernel: vmtest-host ## Fetch + verify the pinned Linux kernel into the cache (KERNEL_CACHE=dir; no VM)
 	perl -e 'alarm shift; exec @ARGV' 900 $(VMTEST_BIN) kernel --store "$(VMTEST_STORE)"
