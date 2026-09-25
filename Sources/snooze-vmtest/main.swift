@@ -5,11 +5,14 @@
 // and runs it under a watchdog. It is a trimmed port of the 576 sleep POC's selftest + keytest,
 // driven through the library's public API only, plus the crash-restore case (two processes).
 //
-// Usage: snooze-vmtest [all|lifecycle|crash|crash-restore|agents|agent NAME|bake NAME|kernel] [--store DIR] [--no-seed]
+// Usage: snooze-vmtest [all|lifecycle|crash|crash-restore|agents|agent NAME|bake NAME|network|kernel] [--store DIR] [--no-seed]
 //          restore        579 §D: restore points — take / revert / fork / delete / save as image
 //          agents         579: bake (or cache-hit) the claude-code and pi images and run the agent suite
 //                         on each (start, verify, /workspace, state disk, session, snapshot sizes, sleep
 //                         to disk → wake with the same pid, crash restore, Stop → Start, re-bake)
+//          network        580: a proxied sandbox (no NIC) on the claude-code image — policy, DNS, redirected
+//                         TCP, UDP blocked, placeholder credentials + the sandbox CA, method/path rules,
+//                         sleep to disk → wake, Stop → Start, the log's export; then a bake under the bake preset
 //          kernel         only resolve the pinned kernel (fetch + verify into the cache; no VM,
 //                         no entitlement needed) — `make kernel`, and CI's first step.
 //                         --no-seed skips copying a byte-identical local kernel, forcing the
@@ -809,6 +812,19 @@ Task {
             print("vmtest: ALL PASS"); exit(0)
         case "restore":
             try await restorePointSuite()
+        case "network":
+            try await networkSuite()
+        case "netdebug":
+            // snooze-vmtest netdebug --script '<sh>' : a proxied (agent policy) claude-code sandbox; run the script as root; stop.
+            guard let i = args.firstIndex(of: "--script"), i + 1 < args.count else { print("netdebug needs --script"); exit(2) }
+            let sb = try Sandbox(spec: netSpec("net-debug", policy: .agent))
+            try await sb.start()
+            let r = try await sb.exec(["sh", "-c", args[i + 1]], privileged: true, timeoutSeconds: 60)
+            print(r.output + r.errorOutput)
+            for rec in sb.egress?.log.records ?? [] where rec.kind != .http { print("  log \(rec.kind) \(rec.target) \(rec.verdict) \(rec.rule) up=\(rec.bytesUp) down=\(rec.bytesDown) lat=\(rec.latencyMs ?? -1) dur=\(rec.durationMs ?? -1) open=\(rec.open) \(rec.detail ?? "")") }
+            try await sb.stop()
+            try await sb.delete()
+            exit(r.exitCode)
         case "agents":
             try await agentSuite(AgentRecipes.claudeCode)
             try await agentSuite(AgentRecipes.pi)
