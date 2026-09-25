@@ -424,11 +424,7 @@ public actor Sandbox {
         } else {
             let golden: URL
             if let recipe = spec.recipe {
-                let inputs = ImageBaker.BakeInputs(kernel: kernel, kernelSHA256: try KernelProvider.sha256(of: kernelURL),
-                                                   deckholdSHA256: try KernelProvider.sha256(of: deckhold),
-                                                   initfsReference: spec.initfsReference, dnsServers: spec.dnsServers)
-                let broadcaster = self.broadcaster
-                golden = try await ImageBaker(storeRoot: spec.storeRoot).ensure(recipe, inputs: inputs) { broadcaster.yield($0) }.root
+                golden = try await ensureImage(recipe, kernel: kernel, kernelURL: kernelURL, deckhold: deckhold).root
             } else {
                 golden = layout.golden(for: spec)
                 if !fm.fileExists(atPath: golden.path) {
@@ -568,6 +564,24 @@ public actor Sandbox {
             }
         }
         return try VmnetNetwork()
+    }
+
+    /// The baked disk for this sandbox's recipe — a cache hit, or a bake (timed events, progress in
+    /// the event stream). nil for a sandbox without a recipe. Safe to call in any phase; it never
+    /// touches this sandbox's own VM or disks.
+    public func ensureImage() async throws -> BakedImage? {
+        guard let recipe = spec.recipe else { return nil }
+        guard let deckhold = DeckholdBinary.locate() else { throw SandboxError.deckholdMissing }
+        let kernelURL = try await kernelProvider.resolve(override: spec.kernelPath)
+        return try await ensureImage(recipe, kernel: Kernel(path: kernelURL, platform: .linuxArm), kernelURL: kernelURL, deckhold: deckhold)
+    }
+
+    private func ensureImage(_ recipe: ImageRecipe, kernel: Kernel, kernelURL: URL, deckhold: URL) async throws -> BakedImage {
+        let inputs = ImageBaker.BakeInputs(kernel: kernel, kernelSHA256: try KernelProvider.sha256(of: kernelURL),
+                                           deckholdSHA256: try KernelProvider.sha256(of: deckhold),
+                                           initfsReference: spec.initfsReference, dnsServers: spec.dnsServers)
+        let broadcaster = self.broadcaster
+        return try await ImageBaker(storeRoot: spec.storeRoot).ensure(recipe, inputs: inputs) { broadcaster.yield($0) }
     }
 
     /// One-time per store and package set: boot the image, install the packages, keep the disk.

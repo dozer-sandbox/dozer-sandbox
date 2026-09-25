@@ -444,22 +444,23 @@ func agentSpec(_ name: String, recipe: ImageRecipe, workspace: URL? = nil) -> Sa
                 subnet: testSubnet, recipe: recipe)
 }
 
-/// Bake through the library's baker with the same inputs a Sandbox would use.
+/// Bake (or cache-hit) through the Sandbox's own API, echoing its events.
 func bakeImage(_ sb: Sandbox, _ recipe: ImageRecipe) async throws -> BakedImage {
-    let kernelURL = try await sb.kernelProvider.resolve(override: sb.spec.kernelPath)
-    guard let deckhold = DeckholdBinary.locate() else { throw SandboxError.deckholdMissing }
-    let inputs = ImageBaker.BakeInputs(kernel: .init(path: kernelURL, platform: .linuxArm),
-                                       kernelSHA256: try KernelProvider.sha256(of: kernelURL),
-                                       deckholdSHA256: try KernelProvider.sha256(of: deckhold),
-                                       initfsReference: sb.spec.initfsReference, dnsServers: sb.spec.dnsServers)
-    return try await ImageBaker(storeRoot: storeRoot).ensure(recipe, inputs: inputs) { e in
-        switch e {
-        case .step(let s, let ms): info(String(format: "%@ — %.0f ms", s, ms))
-        case .note(let s): info(s)
-        default: break
+    let stream = sb.events()
+    let echo = Task.detached {
+        for await e in stream {
+            switch e {
+            case .step(let s, let ms): info(String(format: "%@ — %.0f ms", s, ms))
+            case .note(let s): info(s)
+            default: break
+            }
         }
     }
+    defer { echo.cancel() }
+    guard let img = try await sb.ensureImage() else { throw SandboxError.invalidSpec("no recipe") }
+    return img
 }
+
 
 /// The session-start credential. A real key from the environment is used only for the live
 /// prompt check and is never printed; without one, a SENTINEL stands in, so the "never on any
