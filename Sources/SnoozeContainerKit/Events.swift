@@ -6,7 +6,6 @@ public enum SandboxError: Error, LocalizedError, Equatable {
     case invalidPhase(operation: String, phase: Phase)
     /// Sessions and exec need a running sandbox.
     case notRunning(Phase)
-    case kernelMissing(String)
     case deckholdMissing
     case invalidSessionName(String)
     case commandFailed(command: String, exitCode: Int32, output: String)
@@ -19,7 +18,6 @@ public enum SandboxError: Error, LocalizedError, Equatable {
         case .invalidSpec(let s): "invalid sandbox spec: \(s)"
         case .invalidPhase(let op, let phase): "\(op) is not possible while the sandbox is \(phase.label.lowercased())"
         case .notRunning(let phase): "the sandbox is not running (\(phase.label.lowercased()))"
-        case .kernelMissing(let p): "no Linux kernel at \(p) — install Apple's `container` CLI and run `container system start` once, or pass kernelPath"
         case .deckholdMissing: "the deckhold guest binary is missing from SnoozeContainerKit's resources"
         case .invalidSessionName(let n): "session names are 1–64 characters of [A-Za-z0-9._-], got \"\(n)\""
         case .commandFailed(let c, let code, let out): "`\(c)` exited \(code): \(out.suffix(400))"
@@ -37,6 +35,8 @@ public enum SandboxEvent: Sendable, Equatable {
     case step(String, milliseconds: Double)
     /// Anything else worth a line in a log.
     case note(String)
+    /// A long transfer's progress (the one-time kernel download).
+    case progress(String, completedBytes: Int64, totalBytes: Int64?)
     /// The readouts changed (RAM held, snapshot size, busy).
     case status(SandboxStatus)
 }

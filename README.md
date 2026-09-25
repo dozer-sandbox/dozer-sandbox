@@ -75,10 +75,14 @@ the viewer's size, then the program's own bytes. That is why a session survives 
 program cannot trap). The wire protocol and the snapshot recipe are documented in
 [`Guest/deckhold/deckhold.c`](Guest/deckhold/deckhold.c).
 
-**Requirements on the host:** the `com.apple.security.virtualization` entitlement; a Linux kernel
-(default: `~/Library/Application Support/com.apple.container/kernels/default.kernel-arm64`, which
-`container system start` from Apple's `container` CLI installs — or pass `kernelPath`); network on
-the first start in a store.
+**Requirements on the host:** the `com.apple.security.virtualization` entitlement, and network on
+the first start in a store. Nothing else to install: the library owns its **Linux kernel** —
+`KernelProvider` fetches one pinned artifact (the kata-containers 3.28.0 static release for arm64,
+the same kernel Apple's `container` CLI 1.2.2 recommends: `vmlinux-6.18.15-186`), checks the archive's
+and the kernel's sha256, and caches it in `<storeRoot>/kernels` (or `SandboxSpec.kernelCacheDirectory`).
+First fetch ~90 s (a 569 MiB archive); every later start verifies the cached 15 MiB kernel in ~10 ms.
+A byte-identical copy already on the Mac (the `container` CLI's) seeds the cache with no network;
+`SandboxSpec.kernelPath` boots any kernel you choose instead.
 
 ## Consuming
 
@@ -119,6 +123,7 @@ This package owns no brand and no directory name: the host passes `storeRoot`. N
 make build            # swift build (with the build-system pin Xcode 27 needs)
 make test             # unit tests — no VM
 make test-vm          # the VM integration suite: builds, ad-hoc signs and runs the entitled test host
+make kernel           # fetch + verify the pinned kernel into the cache (KERNEL_CACHE=dir), no VM
 make audit            # import allowlist, one exact dependency, no host brand, deckhold == PROVENANCE
 make deckhold         # rebuild the guest binary (pinned Zig + ghostty; first run ~3.5 min)
 make deckhold-verify  # rebuild from scratch and check the committed bytes match

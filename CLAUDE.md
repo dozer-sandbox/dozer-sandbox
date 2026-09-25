@@ -24,7 +24,7 @@ at the root is the whole story for a consumer.
 
 | Product | Targets | Depends on |
 |---|---|---|
-| `SnoozeContainerKit` | `SnoozeContainerKit` (+ resource `deckhold`) | `apple/containerization` **exact** `0.47.0`: `Containerization`, `ContainerizationExtras`, `ContainerizationOCI`, `ContainerizationOS` |
+| `SnoozeContainerKit` | `SnoozeContainerKit` (+ resource `deckhold`) | `apple/containerization` **exact** `0.47.0`: `Containerization`, `ContainerizationArchive` (the kernel tarball), `ContainerizationExtras`, `ContainerizationOCI`, `ContainerizationOS` |
 | — (not a product) | `snooze-vmtest` — the entitled VM test host | `SnoozeContainerKit` |
 
 The Containerization pin is EXACT on purpose: the sleep design leans on its internals' shape —
@@ -44,6 +44,7 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
 | `DeckholdProtocol.swift` | Frame codec, `deckhold ls` parser, `GuestCommand` (every guest argv; the share re-mount script) |
 | `StoreLayout.swift` | Storage layout under `storeRoot`; `PersistedSandbox` (what a new process needs to restore) |
 | `DeckholdBinary.swift` | Finds the resource without `Bundle.module` |
+| `KernelProvider.swift` | The pinned Linux kernel (`KernelArtifact.recommended`): override → verified cache → byte-identical seed → download + verify archive + extract + verify kernel |
 | `Resources/deckhold` | The committed static aarch64-linux-musl guest binary — see `Guest/deckhold/PROVENANCE.md` |
 | `Guest/deckhold/` | deckhold's C source, `build.sh` (pinned Zig 0.16.0 + ghostty `b988efc`), `PROVENANCE.md` |
 | `Sources/snooze-vmtest/` | The VM integration suite (entitled executable) |
@@ -71,6 +72,11 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
 - **Crash restore = identical VM + adoption.** The machine identifier and the NIC's MAC are pinned
   (`PinnedIdentity`), the vmnet subnet reused, and `AdoptingAgent` answers `LinuxContainer`'s
   guest SET-UP calls as already done while the restored guest is adopted.
+- **The library owns its kernel.** Never read `~/Library/Application Support/com.apple.container`
+  as a source of truth (the runners have no `container` CLI; that file is another tool's to change).
+  A file there is used only as a SEED, and only when its sha256 equals the pin. A kernel change is a
+  new `KernelArtifact` (URL + archive sha256 + member + kernel sha256) and `make test-vm` twice — a
+  snapshot must be restored with the kernel it was taken under.
 - **virtio-fs caches:** deleting a file on the HOST that the guest has cached is not visible at once
   — tests use fresh file names (this cost an afternoon of chasing a non-bug).
 
@@ -102,7 +108,9 @@ stopping — then restores in the parent), `crash-restore`.
   storage root. The first run in a new store pulls images and bakes `bash ncurses` (~40 s, network).
 - **Coexistence:** sandboxes are named `vmtest` / `vmtest-crash`; the suite touches nothing outside
   its store and never kills a process it did not start, so SandboxLab or a probe can run beside it.
-- **Kernel:** Apple's `container` CLI kernel, or `SNOOZE_KERNEL=<path>`.
+- **Kernel:** the library's pinned kernel via `KernelProvider`, cached in `KERNEL_CACHE` (exported
+  as `$SNOOZE_KERNEL_CACHE`; default: under the store). `make kernel` fetches it alone.
+  `SNOOZE_KERNEL=<path>` boots an explicit kernel instead.
 - A VM test is green when it is green **twice in a row**.
 
 ## Contributing

@@ -8,8 +8,8 @@
 #   package  every push/PR: audit, build, unit tests (no VM).
 #   vm       the entitled VM integration suite (`make test-vm`). Runs only when asked for
 #            (workflow_dispatch `vm: true`) or when the repository variable SNOOZE_VM_CI is "1" —
-#            set that once the runner is verified to boot VMs (logged-in user session, the
-#            `container` CLI kernel installed, network for the first image pull).
+#            set that once the runner is verified to boot VMs (logged-in user session; network
+#            for the first kernel fetch and image pull — no `container` CLI needed).
 #   deckhold workflow_dispatch `deckhold: true` only: rebuild the guest binary from the pinned
 #            Zig + ghostty and check it matches the committed bytes (~3.5 min cold).
 # No concurrency group: the self-hosted runner runs one job at a time, and every job here is
@@ -73,14 +73,17 @@ jobs:
       - uses: actions/checkout@v4
         with:
           set-safe-directory: false
-      - name: Kernel present
-        run: test -f "$HOME/Library/Application Support/com.apple.container/kernels/default.kernel-arm64"
+      - name: The pinned Linux kernel (fetched once per host, then a verified cache hit)
+        # The library owns its kernel (KernelProvider): kata-containers 3.28.0's vmlinux-6.18.15-186,
+        # sha256-pinned. The cache lives under the runner user's home so it persists between runs and
+        # is shared with SandboxLab's CI on the same host; concurrent fillers are safe (atomic rename).
+        run: make kernel KERNEL_CACHE="$HOME/Library/Caches/SnoozeContainerKit-ci/kernels" VMTEST_STORE="$RUNNER_TEMP/snooze-vmtest-store"
       - name: make test-vm (scratch store under the runner's temp dir)
         shell: bash
         run: |
           set -euo pipefail
           LOCK="$HOME/Developer/bin/ci-build-lock"
-          RUN='make test-vm VMTEST_STORE="$RUNNER_TEMP/snooze-vmtest-store"'
+          RUN='make test-vm VMTEST_STORE="$RUNNER_TEMP/snooze-vmtest-store" KERNEL_CACHE="$HOME/Library/Caches/SnoozeContainerKit-ci/kernels"'
           if [ -x "$LOCK" ]; then "$LOCK" --name "$GITHUB_REPOSITORY#vm" -- bash -c "$RUN"; else bash -c "$RUN"; fi
 
   deckhold:

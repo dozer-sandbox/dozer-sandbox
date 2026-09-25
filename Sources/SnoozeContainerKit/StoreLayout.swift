@@ -5,6 +5,7 @@ import Foundation
 ///
 ///     <storeRoot>/                        the Containerization image store (content/, …)
 ///     <storeRoot>/initfs.ext4             the guest init disk (vminitd), built once
+///     <storeRoot>/kernels/vmlinux-…       the pinned Linux kernel, fetched + verified once
 ///     <storeRoot>/golden/<key>.ext4       prepared root disks: image + baked packages, one per key
 ///     <storeRoot>/containers/<name>-bake  scratch for a bake (removed afterwards)
 ///     <storeRoot>/sandboxes/<name>/
@@ -24,6 +25,8 @@ public struct StoreLayout: Sendable, Equatable {
     public init(spec: SandboxSpec) { self.init(root: spec.storeRoot, name: spec.name) }
 
     public var initfs: URL { root.appendingPathComponent("initfs.ext4") }
+    /// The default kernel cache (`SandboxSpec.kernelCacheDirectory` overrides it).
+    public var kernels: URL { root.appendingPathComponent("kernels") }
     public var goldenDirectory: URL { root.appendingPathComponent("golden") }
     public var sandboxDirectory: URL { root.appendingPathComponent("sandboxes/\(name)") }
     public var rootfs: URL { sandboxDirectory.appendingPathComponent("rootfs.ext4") }

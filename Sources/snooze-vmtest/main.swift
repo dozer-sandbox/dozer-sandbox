@@ -5,13 +5,18 @@
 // and runs it under a watchdog. It is a trimmed port of the 576 sleep POC's selftest + keytest,
 // driven through the library's public API only, plus the crash-restore case (two processes).
 //
-// Usage: snooze-vmtest [all|lifecycle|crash|crash-restore] [--store DIR]
+// Usage: snooze-vmtest [all|lifecycle|crash|crash-restore|kernel] [--store DIR] [--no-seed]
+//          kernel         only resolve the pinned kernel (fetch + verify into the cache; no VM,
+//                         no entitlement needed) — `make kernel`, and CI's first step.
+//                         --no-seed skips copying a byte-identical local kernel, forcing the
+//                         real download path.
 //          all (default)  the lifecycle suite, then the crash-restore case
 //          crash-restore  only the restoring half (after a crash-save left a sandbox asleep)
 //          crash-save     (internal) the child half of the crash case
 // Inputs: --store DIR or $SNOOZE_VMTEST_STORE (default $TMPDIR/snooze-vmtest-store) — a scratch
-//   store, never an app's; network on the first run (images + one package bake); the kernel from
-//   Apple's `container` CLI ($SNOOZE_KERNEL overrides). Prints one PASS/FAIL line per check and
+//   store, never an app's; network on the first run (kernel, images, one package bake); the
+//   library's pinned kernel, cached in $SNOOZE_KERNEL_CACHE if set ($SNOOZE_KERNEL = explicit path).
+//   Prints one PASS/FAIL line per check and
 //   exits 0 only when all pass.
 import Darwin
 import Foundation
@@ -27,7 +32,10 @@ let storeRoot: URL = {
     if let s = ProcessInfo.processInfo.environment["SNOOZE_VMTEST_STORE"], !s.isEmpty { return URL(fileURLWithPath: s) }
     return URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("snooze-vmtest-store")
 }()
-let kernelPath = ProcessInfo.processInfo.environment["SNOOZE_KERNEL"] ?? SandboxSpec.defaultKernelPath
+// Kernel: the library's pinned one (fetched once), cached in $SNOOZE_KERNEL_CACHE when set (CI
+// shares one cache across runs and repos), else under the store. $SNOOZE_KERNEL = explicit path.
+let kernelPath = ProcessInfo.processInfo.environment["SNOOZE_KERNEL"].flatMap { $0.isEmpty ? nil : $0 }
+let kernelCache = ProcessInfo.processInfo.environment["SNOOZE_KERNEL_CACHE"].flatMap { $0.isEmpty ? nil : URL(fileURLWithPath: $0) }
 
 // MARK: harness
 
@@ -103,7 +111,7 @@ while :; do i=$((i+1)); printf 'tick %d\\r\\n' "$i"; sleep 0.2; done
 """
 
 func makeSpec(_ name: String, share: URL) -> SandboxSpec {
-    SandboxSpec(name: name, storeRoot: storeRoot, kernelPath: kernelPath, cpus: 2, memoryMiB: 512,
+    SandboxSpec(name: name, storeRoot: storeRoot, kernelPath: kernelPath, kernelCacheDirectory: kernelCache, cpus: 2, memoryMiB: 512,
                 rootfsMiB: 1024, bakePackages: ["bash", "ncurses"],
                 shares: [Share(hostPath: share.path, guestPath: "/work")])
 }
@@ -122,6 +130,8 @@ func logEvents(_ sb: Sandbox, prefix: String = "") -> Task<Void, Never> {
             switch e {
             case .step(let s, let ms): info(prefix + String(format: "%@ — %.0f ms", s, ms))
             case .note(let s): info(prefix + s)
+            case .progress(let s, let done, let total):
+                info(prefix + "\(s): \(done / 1_048_576) MiB" + (total.map { " of \($0 / 1_048_576) MiB" } ?? ""))
             default: break
             }
         }
@@ -397,6 +407,22 @@ Task {
         switch mode {
         case "crash-save":
             exit(try await crashSave())
+        case "kernel":
+            let spec = makeSpec("vmtest", share: storeRoot)
+            var provider = try Sandbox(spec: spec).kernelProvider
+            if args.contains("--no-seed") { provider.seedCandidates = [] }
+            let t0 = Date()
+            let url = try await provider.resolve(override: spec.kernelPath) { e in
+                switch e {
+                case .step(let s, let ms): info(String(format: "%@ — %.0f ms", s, ms))
+                case .note(let s): info(s)
+                case .progress(let s, let done, let total):
+                    info("\(s): \(done / 1_048_576) MiB" + (total.map { " of \($0 / 1_048_576) MiB" } ?? ""))
+                }
+            }
+            check(true, String(format: "kernel ready at %@ (%.1f s)", url.path, Date().timeIntervalSince(t0)))
+            print("vmtest: ALL PASS")
+            exit(0)
         case "lifecycle":
             try await lifecycleSuite()
         case "crash":

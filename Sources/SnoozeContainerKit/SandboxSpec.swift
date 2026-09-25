@@ -15,8 +15,12 @@ public struct SandboxSpec: Sendable, Codable, Equatable {
     public var image: String
     /// The guest init image (vminitd). Tied to the Containerization version.
     public var initfsReference: String
-    /// The Linux kernel to boot. Default: the one Apple's `container` CLI installs.
-    public var kernelPath: String
+    /// An explicit Linux kernel to boot, used as given. nil (the default): the library's own
+    /// pinned kernel (`KernelArtifact.recommended`), fetched once into `kernelCacheDirectory`.
+    public var kernelPath: String?
+    /// Where the pinned kernel is cached. nil: `<storeRoot>/kernels`. Point several stores (or
+    /// CI runs) at one directory to download the ~600 MB release archive only once.
+    public var kernelCacheDirectory: URL?
     public var cpus: Int
     /// Guest RAM, MiB (the package adds its own small overhead on top).
     public var memoryMiB: UInt64
@@ -37,7 +41,8 @@ public struct SandboxSpec: Sendable, Codable, Equatable {
         storeRoot: URL,
         image: String = "docker.io/library/alpine:3.20",
         initfsReference: String = "ghcr.io/apple/containerization/vminit:0.47.0",
-        kernelPath: String = SandboxSpec.defaultKernelPath,
+        kernelPath: String? = nil,
+        kernelCacheDirectory: URL? = nil,
         cpus: Int = 2,
         memoryMiB: UInt64 = 1024,
         rootfsMiB: UInt64 = 1024,
@@ -51,6 +56,7 @@ public struct SandboxSpec: Sendable, Codable, Equatable {
         self.image = image
         self.initfsReference = initfsReference
         self.kernelPath = kernelPath
+        self.kernelCacheDirectory = kernelCacheDirectory
         self.cpus = cpus
         self.memoryMiB = memoryMiB
         self.rootfsMiB = rootfsMiB
@@ -58,13 +64,6 @@ public struct SandboxSpec: Sendable, Codable, Equatable {
         self.shares = shares
         self.networking = networking
         self.dnsServers = dnsServers
-    }
-
-    /// `~/Library/Application Support/com.apple.container/kernels/default.kernel-arm64` — where
-    /// `container system start` installs its kernel. Pass `kernelPath` to use another.
-    public static var defaultKernelPath: String {
-        FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Application Support/com.apple.container/kernels/default.kernel-arm64").path
     }
 
     /// Throws `SandboxError.invalidSpec` for a spec that would fail later in a less obvious way.

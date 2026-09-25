@@ -36,10 +36,15 @@ public actor Sandbox {
     /// Set once `LinuxContainer.stop()` has shut the VM down through the package.
     private var cleanlyStopped = false
 
-    public init(spec: SandboxSpec) throws {
+    /// Resolves the kernel on every boot (see `KernelProvider`).
+    public nonisolated let kernelProvider: KernelProvider
+
+    public init(spec: SandboxSpec, kernelProvider: KernelProvider? = nil) throws {
         try spec.validate()
         self.spec = spec
         self.layout = StoreLayout(spec: spec)
+        self.kernelProvider = kernelProvider
+            ?? KernelProvider(cacheDirectory: spec.kernelCacheDirectory ?? StoreLayout(spec: spec).kernels)
     }
 
     // MARK: observing
@@ -308,9 +313,16 @@ public actor Sandbox {
     private func boot(restoring persisted: PersistedSandbox?) async throws {
         let fm = FileManager.default
         try fm.createDirectory(at: layout.sandboxDirectory, withIntermediateDirectories: true)
-        guard fm.fileExists(atPath: spec.kernelPath) else { throw SandboxError.kernelMissing(spec.kernelPath) }
         guard let deckhold = DeckholdBinary.locate() else { throw SandboxError.deckholdMissing }
-        let kernel = Kernel(path: URL(fileURLWithPath: spec.kernelPath), platform: .linuxArm)
+        let broadcaster = self.broadcaster
+        let kernelURL = try await kernelProvider.resolve(override: spec.kernelPath) { e in
+            switch e {
+            case .step(let s, let ms): broadcaster.yield(.step(s, milliseconds: ms))
+            case .note(let s): broadcaster.yield(.note(s))
+            case .progress(let s, let done, let total): broadcaster.yield(.progress(s, completedBytes: done, totalBytes: total))
+            }
+        }
+        let kernel = Kernel(path: kernelURL, platform: .linuxArm)
         let store = try ImageStore(path: spec.storeRoot)
         let firstRun = !fm.fileExists(atPath: layout.initfs.path)
         if firstRun { note("first start in this store: downloading images (one-time, needs network)…") }

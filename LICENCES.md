@@ -36,7 +36,12 @@ One direct dependency, pinned exactly; everything below it is transitive.
 | swift-argument-parser, swift-http-types, swift-http-structured-headers | Apache-2.0 | |
 | [zstd](https://github.com/facebook/zstd) 1.5.7 | BSD-3-Clause OR GPL-2.0 | dual-licensed upstream; used under BSD-3-Clause |
 
-Run-time downloads (not redistributed by this package): the guest init image
-`ghcr.io/apple/containerization/vminit` (Apache-2.0, Apple), the OCI image a spec names (Alpine by
-default: its packages carry their own licences), and the Linux kernel Apple's `container` CLI
-installs (GPL-2.0, supplied by the host, never bundled here).
+## The Linux kernel (downloaded at run time, not in this repository)
+
+| Component | Licence | Notes |
+|---|---|---|
+| Linux `vmlinux-6.18.15-186` from [kata-containers 3.28.0](https://github.com/kata-containers/kata-containers/releases/tag/3.28.0) (`kata-static-3.28.0-arm64.tar.zst`) | **GPL-2.0-only** (Linux, with the syscall note) | `KernelProvider` downloads the upstream release archive and uses the kernel **unmodified**, verified by sha256 (archive `f63d5450…0e66a91`, kernel `2fe4a58d…c47fc3a1`). It is not committed here or bundled into a consumer by this package. A host that ships the kernel (e.g. pre-seeds a cache in an app bundle) redistributes GPL-2.0 binaries and must offer the corresponding source: the kata-containers 3.28.0 kernel build (`tools/packaging/kernel` at that tag, config + patches) on top of Linux 6.18.15. The rest of the archive (kata runtime, other kernels) is discarded after extraction. |
+
+Other run-time downloads (not redistributed by this package): the guest init image
+`ghcr.io/apple/containerization/vminit` (Apache-2.0, Apple) and the OCI image a spec names (Alpine
+by default: its packages carry their own licences).
