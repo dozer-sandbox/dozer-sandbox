@@ -1,9 +1,19 @@
-# placeholder legend: SnoozeContainerKit this library's name · {{name}} lowercase slug ·
-# {{DEP_NAME}}/{{DEP_PIN}}/{{DEP_OWNER}} an optional single upstream sovereign-library dependency —
-# delete the two "checkout {{DEP_NAME}}" steps entirely if this package has no such dependency ·
-# {{LINUX}} delete the whole `linux` job if this package links AppKit/SwiftUI/Metal and has no
-# Foundation-only subset (see GhosttyTerminalKit: macOS-only, no linux job) · delete every
-# PRELAUNCH step at the unveil, once {{DEP_NAME}} resolves from its real public URL.
+# SnoozeContainerKit CI — feature 578. Runs on the SELF-HOSTED Mac runner (label `deck-mac`, as
+# DeckStack does), never a GitHub-hosted image: macOS minutes bill 10x, the hosted image ships an
+# older Swift, and a VM needs a real Mac with Virtualization.framework.
+#
+# macOS ONLY — there is no Linux job: the package is built on Virtualization.framework and vmnet.
+#
+# Jobs:
+#   package  every push/PR: audit, build, unit tests (no VM).
+#   vm       the entitled VM integration suite (`make test-vm`). Runs only when asked for
+#            (workflow_dispatch `vm: true`) or when the repository variable SNOOZE_VM_CI is "1" —
+#            set that once the runner is verified to boot VMs (logged-in user session, the
+#            `container` CLI kernel installed, network for the first image pull).
+#   deckhold workflow_dispatch `deckhold: true` only: rebuild the guest binary from the pinned
+#            Zig + ghostty and check it matches the committed bytes (~3.5 min cold).
+# No concurrency group: the self-hosted runner runs one job at a time, and every job here is
+# read-only (`permissions: contents: read`).
 name: SnoozeContainerKit
 
 on:
@@ -11,71 +21,75 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      vm:
+        description: Run the VM integration suite (needs a runner that can boot VMs)
+        type: boolean
+        default: true
+      deckhold:
+        description: Rebuild deckhold from source and verify the committed binary
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
-concurrency:
-  group: {{name}}-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
   package:
-    name: Swift package (${{ matrix.os }})
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [macos-15]     # add ubuntu-24.04 here once this package is proven Foundation-only
-    runs-on: ${{ matrix.os }}
+    name: Swift package (Mac runner)
+    runs-on: [self-hosted, deck-mac]
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
         with:
-          path: repo/lib/SnoozeContainerKit
-      # PRELAUNCH: {{DEP_NAME}} is not public yet, so the pinned URL is not
-      # fetchable from CI. Check the sibling out at the path lib() looks for
-      # and the manifest resolves it locally, exactly as a developer's
-      # workspace does. Delete this step at the unveil.
-      - uses: actions/checkout@v4
-        with:
-          repository: {{DEP_OWNER}}/{{DEP_NAME}}-prelaunch
-          path: repo/lib/{{DEP_NAME}}
-          ref: {{DEP_PIN}}
-          token: ${{ secrets.DECK_FACTORY_TOKEN }}
-      - name: Swift toolchain
-        run: swift --version
+          set-safe-directory: false    # 558 §D: the runner's ~/.gitconfig is a relative symlink
+      - name: Assert the toolchain
+        run: |
+          swift --version
+          swift --version 2>&1 | grep -q '6\.4' || { echo "x expected Swift 6.4 on the runner" >&2; exit 1; }
       - name: Neutrality audit
-        working-directory: repo/lib/SnoozeContainerKit
         run: Scripts/audit.sh
-      - name: Build
-        working-directory: repo/lib/SnoozeContainerKit
-        run: swift build -j 8
-      - name: Test
-        working-directory: repo/lib/SnoozeContainerKit
-        run: swift test -j 8
+      - name: Per-job SwiftPM security directory
+        run: echo "DECK_SWIFTPM_SECURITY_DIR=$RUNNER_TEMP/swiftpm-security" >> "$GITHUB_ENV"
+      - name: Build and unit-test (serialised across repos on the runner)
+        shell: bash
+        run: |
+          set -euo pipefail
+          LOCK="$HOME/Developer/bin/ci-build-lock"
+          if [ -x "$LOCK" ]; then
+            "$LOCK" --name "$GITHUB_REPOSITORY#$GITHUB_JOB" -- bash -c 'make build && make test'
+          else
+            echo "! $LOCK missing — building unserialised"
+            make build && make test
+          fi
 
-  # Delete this job if this package links AppKit/SwiftUI/Metal and has no
-  # Foundation-only subset — see repo/lib/GhosttyTerminalKit for that shape.
-  linux:
-    name: Linux compile + runtime smoke
-    runs-on: ubuntu-24.04
+  vm:
+    name: VM integration suite (entitled test host)
+    needs: package
+    if: (github.event_name == 'workflow_dispatch' && inputs.vm) || vars.SNOOZE_VM_CI == '1'
+    runs-on: [self-hosted, deck-mac]
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          set-safe-directory: false
+      - name: Kernel present
+        run: test -f "$HOME/Library/Application Support/com.apple.container/kernels/default.kernel-arm64"
+      - name: make test-vm (scratch store under the runner's temp dir)
+        shell: bash
+        run: |
+          set -euo pipefail
+          LOCK="$HOME/Developer/bin/ci-build-lock"
+          RUN='make test-vm VMTEST_STORE="$RUNNER_TEMP/snooze-vmtest-store"'
+          if [ -x "$LOCK" ]; then "$LOCK" --name "$GITHUB_REPOSITORY#vm" -- bash -c "$RUN"; else bash -c "$RUN"; fi
+
+  deckhold:
+    name: Rebuild deckhold and verify the committed binary
+    if: github.event_name == 'workflow_dispatch' && inputs.deckhold
+    runs-on: [self-hosted, deck-mac]
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
         with:
-          path: repo/lib/SnoozeContainerKit
-      # PRELAUNCH — see the `package` job above. Delete at the unveil.
-      - uses: actions/checkout@v4
-        with:
-          repository: {{DEP_OWNER}}/{{DEP_NAME}}-prelaunch
-          path: repo/lib/{{DEP_NAME}}
-          ref: {{DEP_PIN}}
-          token: ${{ secrets.DECK_FACTORY_TOKEN }}
-      - name: Swift toolchain
-        run: swift --version
-      - name: Compile the Foundation-only targets
-        working-directory: repo/lib/SnoozeContainerKit
-        run: swift build {{LINUX}} -j 8
-      - name: Runtime smoke
-        working-directory: repo/lib/SnoozeContainerKit
-        run: swift run {{name}}-smoke
+          set-safe-directory: false
+      - run: make deckhold-verify

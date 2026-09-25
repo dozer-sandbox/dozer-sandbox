@@ -1,4 +1,14 @@
-# placeholder: fill in with the platform-UI / app-only modules this package must never import.
-# One module name per line. Blank lines and lines starting with # are ignored.
-# Typical entries for a package meant to stay usable from an app, a CLI, or a
-# headless/Linux process: SwiftUI, AppKit, UIKit, Metal, MetalKit, WebKit.
+# Modules SnoozeContainerKit must never import (Scripts/audit.sh). One per line; # and blank ignored.
+# The package runs a VM for any host — an app, a CLI, a test runner — so no UI framework, and no
+# module of any Deck app or library.
+SwiftUI
+AppKit
+UIKit
+Metal
+MetalKit
+WebKit
+Combine
+GhosttyKit
+GhosttyTerminalKit
+DeckKit
+DeckStack
