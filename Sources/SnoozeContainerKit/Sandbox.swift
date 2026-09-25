@@ -42,12 +42,24 @@ public actor Sandbox {
     /// Resolves the kernel on every boot (see `KernelProvider`).
     public nonisolated let kernelProvider: KernelProvider
 
+    /// 580: the host proxy of a PROXIED sandbox (`spec.network = .proxied(…)`), nil otherwise. Its
+    /// policy can change while the sandbox runs; its log and credential vault live as long as this
+    /// object. The VM has no network interface: this is its only way out.
+    public nonisolated let egress: EgressProxy?
+
     public init(spec: SandboxSpec, kernelProvider: KernelProvider? = nil) throws {
         try spec.validate()
         self.spec = spec
         self.layout = StoreLayout(spec: spec)
         self.kernelProvider = kernelProvider
             ?? KernelProvider(cacheDirectory: spec.kernelCacheDirectory ?? StoreLayout(spec: spec).kernels)
+        if let policy = spec.network.policy {
+            let proxy = try EgressProxy(policy: policy, ca: nil)
+            proxy.vault.set(.anthropic, secret: nil)
+            egress = proxy
+        } else {
+            egress = nil
+        }
     }
 
     // MARK: observing
@@ -498,6 +510,7 @@ public actor Sandbox {
             try await timed("restored VM state from disk") { try await vz(handle, .restore(layout.snapshot)) }
             try await timed("resumed") { try await vz(handle, .resume) }
             setPhase(.running)
+            try listenForEgress()
         case .resyncClock:
             guard let instance, let v = vzInstance(of: instance) else { throw SandboxError.vmUnavailable }
             try await timed("re-synced the guest clock") {
@@ -538,6 +551,8 @@ public actor Sandbox {
                 try? p.write(to: layout.persistedState)
             }
             container = nil; instance = nil; handle = nil; identity = nil; cleanlyStopped = false
+            egress?.stopListening()
+            egress?.vault.revokeAll()
         case .removeRootDisk:
             for url in [layout.rootfs, layout.persistedState, layout.snapshot] { try? FileManager.default.removeItem(at: url) }
             note("reset to image: the root disk was discarded — the next Start clones the prepared disk")
@@ -710,7 +725,8 @@ public actor Sandbox {
                 cfg.mounts.append(.block(format: "ext4", source: stateDisk.path, destination: GuestCommand.stateMount))
             }
             if let iface { cfg.interfaces = [iface] }
-            cfg.dns = DNS(nameservers: spec.dnsServers)
+            // A proxied sandbox asks its shim (127.0.0.1:53), which asks the Mac.
+            cfg.dns = DNS(nameservers: spec.isProxied ? ["127.0.0.1"] : spec.dnsServers)
             cfg.bootLog = BootLog.file(path: bootLog)
         }
         container = c
@@ -736,6 +752,7 @@ public actor Sandbox {
         }
         instance = inst
         handle = h
+        try listenForEgress()
         if persisted == nil {
             if let v = vzInstance(of: inst) {
                 for m in v.mounts[spec.name] ?? [] where m.type == "virtiofs" { identity.shareTags[m.destination] = m.source }
@@ -748,6 +765,16 @@ public actor Sandbox {
                                             workingDirectory: "/", privileged: true, timeout: 30)
                 if r.exitCode != 0 { throw SandboxError.commandFailed(command: "prepare guest", exitCode: r.exitCode, output: r.output + r.errorOutput) }
             }
+            if let egress {
+                let ca = try SandboxCA.loadOrCreate(in: layout.sandboxDirectory, sandbox: spec.name)
+                egress.ca = ca
+                try await timed("network: no interface; snoozenet + the sandbox CA installed, DNS and egress via the Mac's proxy (\(egress.policy.preset ?? "custom") policy)") {
+                    try await Self.startEgressShim(on: c, caFile: layout.sandboxDirectory.appendingPathComponent("egress-ca.pem"))
+                }
+            }
+        } else if let egress, egress.ca == nil {
+            // Adopted after a crash: the guest still runs its shim and trusts this sandbox's CA.
+            egress.ca = try? SandboxCA.loadOrCreate(in: layout.sandboxDirectory, sandbox: spec.name)
         }
         identity.phase = .running
         self.identity = identity
@@ -784,7 +811,9 @@ public actor Sandbox {
     private func ensureImage(_ recipe: ImageRecipe, kernel: Kernel, kernelURL: URL, deckhold: URL) async throws -> BakedImage {
         let inputs = ImageBaker.BakeInputs(kernel: kernel, kernelSHA256: try KernelProvider.sha256(of: kernelURL),
                                            deckholdSHA256: try KernelProvider.sha256(of: deckhold),
-                                           initfsReference: spec.initfsReference, dnsServers: spec.dnsServers)
+                                           initfsReference: spec.initfsReference, dnsServers: spec.dnsServers,
+                                           // A proxied sandbox's image is baked through the proxy too — registries only.
+                                           egress: spec.isProxied ? .bake : nil, egressLog: egress?.log)
         let broadcaster = self.broadcaster
         return try await ImageBaker(storeRoot: spec.storeRoot).ensure(recipe, inputs: inputs) { broadcaster.yield($0) }
     }
@@ -794,6 +823,7 @@ public actor Sandbox {
         let pkgs = spec.bakePackages
         note("no prepared disk yet — baking one\(pkgs.isEmpty ? "" : " (\(pkgs.joined(separator: ", ")))") (one-time, needs network)…")
         let t0 = ContinuousClock.now
+        let proxy = try spec.isProxied ? EgressProxy(policy: .bake, ca: nil, log: egress?.log ?? ConnectionLog()) : nil
         var mgr = try await ContainerManager(kernel: kernel, initfsReference: spec.initfsReference, imageStore: store,
                                              network: spec.networking ? try VmnetNetwork() : nil)
         let id = layout.bakeContainerID
@@ -805,14 +835,22 @@ public actor Sandbox {
             cfg.cpus = spec.cpus
             cfg.memoryInBytes = spec.memoryMiB * 1_048_576
             cfg.process.arguments = ["sleep", "infinity"]
-            cfg.dns = DNS(nameservers: spec.dnsServers)
+            cfg.dns = DNS(nameservers: proxy != nil ? ["127.0.0.1"] : spec.dnsServers)
         }
         do {
             try await b.create()
             try await b.start()
+            if let proxy {
+                try await b.withVirtualMachineInstance { i in
+                    guard let v = vzInstance(of: i) else { throw SandboxError.vmUnavailable }
+                    try proxy.listen(on: v)
+                }
+                try await Self.startEgressShim(on: b, caFile: nil)
+            }
+            defer { proxy?.stopListening() }
             if !pkgs.isEmpty {
                 let r = try await Self.exec(on: b, ["sh", "-c", "apk add --no-cache \(pkgs.joined(separator: " ")) >/dev/null && sync"],
-                                            environment: [:], workingDirectory: "/", privileged: false, timeout: 300)
+                                            environment: proxy?.guestEnvironment ?? [:], workingDirectory: "/", privileged: false, timeout: 300)
                 guard r.exitCode == 0 else {
                     throw SandboxError.commandFailed(command: "apk add \(pkgs.joined(separator: " "))", exitCode: r.exitCode, output: r.output + r.errorOutput)
                 }
@@ -833,13 +871,68 @@ public actor Sandbox {
                     golden.lastPathComponent, seconds(since: t0)))
     }
 
+    // MARK: network (580)
+
+    /// (Re)register the proxy's vsock listener on the current VM. A VM stop drops host vsock
+    /// listeners, so this runs after every boot, restore and wake.
+    private func listenForEgress() throws {
+        guard let egress, let instance, let v = vzInstance(of: instance) else { return }
+        try egress.listen(on: v)
+    }
+
+    /// Install and start the guest half of a proxied network in a freshly booted container: the
+    /// shim, the CA certificate (optional — a bake needs none), and the trust-store setup.
+    static func startEgressShim(on c: LinuxContainer, caFile: URL?) async throws {
+        guard let shim = SnoozenetBinary.locate() else { throw SandboxError.invalidSpec("the snoozenet guest binary is missing from the resource bundle") }
+        try await c.copyIn(from: shim, to: URL(fileURLWithPath: EgressProxy.guestShimPath), mode: 0o755)
+        if let caFile {
+            try await c.copyIn(from: caFile, to: URL(fileURLWithPath: EgressProxy.guestCAPath), mode: 0o644)
+        }
+        let r = try await exec(on: c, ["sh", "-c", EgressProxy.guestSetupScript(withCA: caFile != nil)], environment: [:],
+                               workingDirectory: "/", privileged: true, timeout: 30)
+        if r.exitCode != 0 { throw SandboxError.commandFailed(command: "start snoozenet", exitCode: r.exitCode, output: r.output + r.errorOutput) }
+    }
+
+    /// Change the running (or next) policy of a proxied sandbox.
+    public nonisolated func setNetworkPolicy(_ policy: NetworkPolicy) {
+        egress?.policy = policy
+    }
+
+    /// Give the proxy a secret for `binding` (memory only; never written to disk, never sent into
+    /// the guest). Sessions started from now on get a fresh placeholder in the binding's variable.
+    public nonisolated func setCredential(_ binding: CredentialBinding, secret: String?) {
+        egress?.vault.set(binding, secret: secret)
+    }
+
+    /// The environment a proxied sandbox's command gets: the proxy + CA variables, then the
+    /// caller's (which win) — except that a real credential in a bound variable is moved into the
+    /// vault and replaced by a placeholder, so it never reaches the guest.
+    nonisolated func guestEnvironment(_ caller: [String: String], placeholders: Bool) -> [String: String] {
+        guard let egress else { return caller }
+        var env = egress.guestEnvironment
+        var callerEnv = caller
+        for b in egress.vault.allBindings {
+            guard let v = b.environmentVariable, let value = callerEnv[v], !value.isEmpty,
+                  !value.hasPrefix(CredentialVault.placeholderPrefix) else { continue }
+            egress.vault.set(b, secret: value)
+            callerEnv[v] = egress.vault.mint(b.id)          // the guest sees a placeholder, never the key
+        }
+        if placeholders {
+            for b in egress.vault.allBindings where egress.vault.hasSecret(b.id) {
+                if let v = b.environmentVariable, let t = egress.vault.mint(b.id) { env[v] = t }
+            }
+        }
+        env.merge(callerEnv) { _, caller in caller }
+        return env
+    }
+
     // MARK: guest commands
 
     /// Run `argv` in the guest (no shell unless you pass one) and collect its output.
     public func exec(_ argv: [String], environment: [String: String] = [:], workingDirectory: String = "/",
                      privileged: Bool = false, user: String? = nil, timeoutSeconds: Int64 = 120) async throws -> ExecResult {
         guard phase == .running else { throw SandboxError.notRunning(phase) }
-        return try await execInContainer(argv, environment: environment, workingDirectory: workingDirectory,
+        return try await execInContainer(argv, environment: guestEnvironment(environment, placeholders: true), workingDirectory: workingDirectory,
                                          privileged: privileged, timeout: timeoutSeconds, user: user)
     }
 
@@ -896,7 +989,7 @@ public actor Sandbox {
                             scrollbackBytes: Int? = nil) async throws {
         try GuestCommand.validateSessionName(name)
         precondition(!argv.isEmpty, "a session needs a program")
-        let (env, cwd, runAs) = Self.sessionContext(recipe: spec.recipe, environment: environment,
+        let (env, cwd, runAs) = Self.sessionContext(recipe: spec.recipe, environment: guestEnvironment(environment, placeholders: true),
                                                     workingDirectory: workingDirectory, user: user)
         guard phase == .running else { throw SandboxError.notRunning(phase) }
         let r = try await execInContainer(GuestCommand.serve(name: name, size: size, argv: argv, scrollbackBytes: scrollbackBytes),

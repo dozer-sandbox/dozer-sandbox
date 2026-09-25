@@ -31,9 +31,11 @@ public struct SandboxSpec: Sendable, Codable, Equatable {
     public var bakePackages: [String]
     /// Host directories shared into the guest (virtio-fs). Re-mounted on every wake.
     public var shares: [Share]
-    /// A NAT network interface (vmnet shared mode). Needed for anything that talks to the
-    /// internet, including the one-time package bake.
+    /// A NAT network interface (vmnet shared mode). Set from `network` (true only for `.nat`);
+    /// kept as its own field because older persisted specs carry only this.
     public var networking: Bool
+    /// 580: how the sandbox reaches the network. nil (older specs): `.nat` if `networking`, else `.none`.
+    public var networkMode: NetworkMode?
     public var dnsServers: [String]
     /// The vmnet subnet (CIDR, e.g. `192.168.201.0/24`). nil: vmnet's default. Two PROCESSES that
     /// each take the default can get the SAME subnet and the same guest addresses, and the NAT then
@@ -66,7 +68,8 @@ public struct SandboxSpec: Sendable, Codable, Equatable {
         subnet: String? = nil,
         recipe: ImageRecipe? = nil,
         stateDiskMiB: UInt64 = 2048,
-        customImage: String? = nil
+        customImage: String? = nil,
+        network: NetworkMode? = nil
     ) {
         self.name = name
         self.storeRoot = storeRoot
@@ -85,7 +88,21 @@ public struct SandboxSpec: Sendable, Codable, Equatable {
         self.recipe = recipe
         self.stateDiskMiB = stateDiskMiB
         self.customImage = customImage
+        if let network { self.network = network }
     }
+
+    /// How the sandbox reaches the network: `.proxied(policy)` — no network interface, everything
+    /// through the host's `EgressProxy` — `.nat` (a vmnet interface, no policy) or `.none`.
+    public var network: NetworkMode {
+        get { networkMode ?? (networking ? .nat : .none) }
+        set {
+            networkMode = newValue
+            networking = newValue == .nat
+        }
+    }
+
+    /// True when the sandbox has no NIC and talks to the network through the host proxy.
+    public var isProxied: Bool { network.policy != nil }
 
     /// Throws `SandboxError.invalidSpec` for a spec that would fail later in a less obvious way.
     public func validate() throws {
@@ -100,6 +117,9 @@ public struct SandboxSpec: Sendable, Codable, Equatable {
             guard s.guestPath.hasPrefix("/"), !s.guestPath.contains("'") else {
                 throw SandboxError.invalidSpec("share guest path must be absolute and quote-free: \(s.guestPath)")
             }
+        }
+        if networkMode != nil, networking != (network == .nat) {
+            throw SandboxError.invalidSpec("networking must match network (\(network))")
         }
         if let recipe {
             try recipe.validate()

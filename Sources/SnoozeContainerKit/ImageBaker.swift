@@ -87,8 +87,17 @@ public struct ImageBaker: Sendable {
         public var dnsServers: [String]
         public var cpus: Int
         public var memoryMiB: UInt64
+        /// 580: bake with NO network interface, through the host proxy under this policy (usually
+        /// `NetworkPolicy.bake`: package registries only). nil: a vmnet NAT interface, as before.
+        /// Not part of the bake key — it changes what the bake may reach, not what it installs.
+        public var egress: NetworkPolicy?
+        /// Where a proxied bake's connections are logged (nil: a private log, summarised in events).
+        public var egressLog: ConnectionLog?
         public init(kernel: Kernel, kernelSHA256: String, deckholdSHA256: String, initfsReference: String,
-                    dnsServers: [String], cpus: Int = 4, memoryMiB: UInt64 = 2048) {
+                    dnsServers: [String], cpus: Int = 4, memoryMiB: UInt64 = 2048, egress: NetworkPolicy? = nil,
+                    egressLog: ConnectionLog? = nil) {
+            self.egress = egress
+            self.egressLog = egressLog
             self.kernel = kernel
             self.kernelSHA256 = kernelSHA256
             self.deckholdSHA256 = deckholdSHA256
@@ -131,7 +140,7 @@ public struct ImageBaker: Sendable {
         events(.note("baking image \(recipe.name) \(key.prefix(12)) from \(recipe.base) (one-time per recipe, needs network)…"))
         let store = try ImageStore(path: storeRoot)
         var mgr = try await ContainerManager(kernel: inputs.kernel, initfsReference: inputs.initfsReference,
-                                             imageStore: store, network: try VmnetNetwork())
+                                             imageStore: store, network: inputs.egress == nil ? try VmnetNetwork() : nil)
         let hadBase = (try? await store.get(reference: recipe.base, pull: false)) != nil
         let image = try await timed("base \(hadBase ? "ready (cached)" : "pulled") — \(recipe.base.split(separator: "@").first ?? "")") {
             try await store.get(reference: recipe.base, pull: true)
@@ -140,11 +149,13 @@ public struct ImageBaker: Sendable {
         try? mgr.delete(id)
         let staging = imageDirectory(recipe).appendingPathComponent("\(key.prefix(12)).partial-\(UUID().uuidString.prefix(8))")
         defer { try? fm.removeItem(at: staging) }
-        let dns = inputs.dnsServers
+        let proxied = inputs.egress != nil
+        let dns = proxied ? ["127.0.0.1"] : inputs.dnsServers
         let cpus = inputs.cpus, mem = inputs.memoryMiB
+        let proxy = try inputs.egress.map { try EgressProxy(policy: $0, ca: nil, log: inputs.egressLog ?? ConnectionLog()) }
         let c = try await timed("flattened the base to one ext4 disk (\(recipe.rootfsMiB) MiB capacity)") {
             try await mgr.create(id, image: image, rootfsSizeInBytes: recipe.rootfsMiB * 1_048_576, readOnly: false,
-                                 networking: true,
+                                 networking: !proxied,
                                  vm: VMResources(cpus: cpus, memoryInBytes: mem * 1_048_576 + VMResources.guestMemoryOverhead)) { cfg in
                 cfg.cpus = cpus
                 cfg.memoryInBytes = mem * 1_048_576
@@ -155,10 +166,28 @@ public struct ImageBaker: Sendable {
         var verifyOutput: [String] = []
         do {
             try await timed("booted the bake VM") { try await c.create(); try await c.start() }
+            if let proxy {
+                try await timed("bake network: no interface, via the Mac's proxy (\(proxy.policy.preset ?? "custom") policy)") {
+                    try await c.withVirtualMachineInstance { i in
+                        guard let v = vzInstance(of: i) else { throw SandboxError.vmUnavailable }
+                        try proxy.listen(on: v)
+                    }
+                    try await Sandbox.startEgressShim(on: c, caFile: nil)
+                }
+            }
+            defer {
+                if let proxy {
+                    proxy.stopListening()
+                    let denied = proxy.log.records.filter { $0.verdict == .denied }
+                    events(.note("bake network: \(proxy.log.totalCount) connection(s), \(denied.count) denied"
+                                 + (denied.isEmpty ? "" : " (" + Set(denied.map(\.target)).sorted().prefix(8).joined(separator: ", ") + ")")))
+                }
+            }
+            let netEnv = proxy?.guestEnvironment ?? [:]
             for step in recipe.steps {
                 let r = try await timed("step: \(step.name)") {
                     try await Sandbox.exec(on: c, step.argv,
-                                           environment: BakeEnvironment.scrubbed(step.environment.merging(Self.userEnv(step.user, recipe)) { a, _ in a }),
+                                           environment: BakeEnvironment.scrubbed(step.environment.merging(Self.userEnv(step.user, recipe)) { a, _ in a }.merging(netEnv) { a, _ in a }),
                                            workingDirectory: "/", privileged: false, timeout: step.timeoutSeconds, user: step.user)
                 }
                 guard r.exitCode == 0 else {

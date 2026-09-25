@@ -7,9 +7,12 @@
 # not asserted:
 #   1. Every import under Sources/ is on the allowlist (no UI framework, no host module).
 #   2. No denylisted import (Scripts/import-denylist.txt) — belt and braces for the UI frameworks.
-#   3. The manifest declares exactly one remote dependency: apple/containerization, pinned EXACT.
+#   3. The manifest's remote dependencies are on an allowlist: apple/containerization pinned EXACT,
+#      plus (580) swift-nio, swift-nio-ssl, swift-certificates, swift-asn1 — apple/* packages that
+#      containerization already resolves, used by the egress proxy's TLS (README "Dependencies").
 #   4. No app-brand literal (a bundle id, a product or storage directory name) survives.
 #   5. The committed deckhold binary is the one Guest/deckhold/PROVENANCE.md records.
+#   6. The committed snoozenet binary is the one Guest/snoozenet/PROVENANCE.md records.
 # (No Linux seam check: this package is macOS-only by nature — Virtualization.framework + vmnet.)
 set -euo pipefail
 
@@ -26,7 +29,7 @@ fail() {
 [[ -f "$DENYLIST" ]] || fail "missing import denylist"
 
 # ── 1. Import allowlist ──────────────────────────────────────────────────────
-ALLOWED='Foundation|Darwin|os|CryptoKit|Virtualization|Containerization|ContainerizationArchive|ContainerizationEXT4|SystemPackage|ContainerizationError|ContainerizationExtras|ContainerizationOCI|ContainerizationOS|SnoozeContainerKit'
+ALLOWED='Foundation|Darwin|os|CryptoKit|Security|NIOCore|NIOEmbedded|NIOSSL|X509|SwiftASN1|Virtualization|Containerization|ContainerizationArchive|ContainerizationEXT4|SystemPackage|ContainerizationError|ContainerizationExtras|ContainerizationOCI|ContainerizationOS|SnoozeContainerKit'
 BAD=$(grep -rhoE --include='*.swift' '^[[:space:]]*(@[A-Za-z_]+[[:space:]]+)*(public[[:space:]]+)?import[[:space:]]+[A-Za-z_][A-Za-z0-9_.]*' \
         "$PACKAGE/Sources" \
       | sed -E 's/.*import[[:space:]]+//' \
@@ -48,11 +51,17 @@ if [[ -n "$ALTS" ]]; then
 $DENIED"
 fi
 
-# ── 3. One remote dependency, pinned exactly ─────────────────────────────────
+# ── 3. The dependency allowlist: containerization pinned exactly, plus (580) the four apple/*
+#       packages containerization already resolves, for the egress proxy's TLS ────────────────
+ALLOWED_DEPS='https://github.com/apple/containerization.git
+https://github.com/apple/swift-asn1.git
+https://github.com/apple/swift-certificates.git
+https://github.com/apple/swift-nio-ssl.git
+https://github.com/apple/swift-nio.git'
 DEPS=$(grep -oE '\.package\(url: "[^"]+"' "$MANIFEST" | sed -E 's/.*"(.*)"/\1/' | sort -u)
-[[ "$DEPS" == "https://github.com/apple/containerization.git" ]] \
-    || fail "the manifest declares dependencies other than apple/containerization:
-$DEPS"
+EXTRA=$(comm -23 <(printf '%s\n' "$DEPS") <(printf '%s\n' "$ALLOWED_DEPS" | sort -u))
+[[ -z "$EXTRA" ]] || fail "the manifest declares dependencies outside the allowlist (Scripts/audit.sh step 3):
+$EXTRA"
 grep -qE '\.package\(url: "https://github.com/apple/containerization.git", exact: "[0-9]+\.[0-9]+\.[0-9]+"\)' "$MANIFEST" \
     || fail "apple/containerization must be pinned with exact: (the sleep design depends on its internals' shape)"
 
@@ -69,5 +78,13 @@ SHA=$(shasum -a 256 "$BIN" | awk '{print $1}')
 grep -qF "| sha256 (auto) | \`$SHA\` |" "$PACKAGE/Guest/deckhold/PROVENANCE.md" \
     || fail "Resources/deckhold ($SHA) is not the binary Guest/deckhold/PROVENANCE.md records — run make deckhold"
 
-printf 'ok audit: SnoozeContainerKit imports only Foundation/Virtualization/Containerization, depends only on\n'
-printf '          apple/containerization (exact), carries no host brand, and deckhold matches its provenance\n'
+# ── 6. The committed snoozenet binary (580) matches its provenance ───────────
+NBIN="$PACKAGE/Sources/SnoozeContainerKit/Resources/snoozenet"
+[[ -f "$NBIN" ]] || fail "missing the committed snoozenet binary ($NBIN)"
+NSHA=$(shasum -a 256 "$NBIN" | awk '{print $1}')
+grep -qF "| sha256 (auto) | \`$NSHA\` |" "$PACKAGE/Guest/snoozenet/PROVENANCE.md" \
+    || fail "Resources/snoozenet ($NSHA) is not the binary Guest/snoozenet/PROVENANCE.md records — run make snoozenet"
+
+printf 'ok audit: SnoozeContainerKit imports only its allowlist (Foundation/Security/Virtualization/Containerization/NIO/X509),\n'
+printf '          depends only on apple/containerization (exact) + the apple/* TLS packages it already resolves,\n'
+printf '          carries no host brand, and deckhold + snoozenet match their provenance\n'

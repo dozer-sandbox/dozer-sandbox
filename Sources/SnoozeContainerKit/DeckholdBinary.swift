@@ -14,6 +14,12 @@ public enum DeckholdBinary {
     public static let environmentOverride = "SNOOZE_DECKHOLD"
 
     public static func locate(environment: [String: String] = ProcessInfo.processInfo.environment) -> URL? {
+        locate(resource: resourceName, override: environmentOverride, environment: environment)
+    }
+
+    /// Any committed guest binary of this package's resource bundle (deckhold, snoozenet).
+    static func locate(resource resourceName: String, override environmentOverride: String,
+                       environment: [String: String] = ProcessInfo.processInfo.environment) -> URL? {
         let fm = FileManager.default
         if let override = environment[environmentOverride], !override.isEmpty {
             return fm.fileExists(atPath: override) ? URL(fileURLWithPath: override) : nil
@@ -41,5 +47,15 @@ public enum DeckholdBinary {
         var seen = Set<String>()
         return dirs.map { $0.appendingPathComponent(bundleName) }
             .filter { seen.insert($0.standardizedFileURL.path).inserted }
+    }
+}
+
+/// Finds the committed `snoozenet` guest binary (580: the guest half of a proxied sandbox's
+/// network) the same way — `$SNOOZE_SNOOZENET` overrides.
+public enum SnoozenetBinary {
+    public static let resourceName = "snoozenet"
+    public static let environmentOverride = "SNOOZE_SNOOZENET"
+    public static func locate(environment: [String: String] = ProcessInfo.processInfo.environment) -> URL? {
+        DeckholdBinary.locate(resource: resourceName, override: environmentOverride, environment: environment)
     }
 }

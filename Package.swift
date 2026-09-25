@@ -7,10 +7,12 @@
 // Stand-alone: no knowledge of any host app. macOS 26+ only — Virtualization.framework and vmnet
 // have no Linux equivalent, so there is no Linux build of this package at all.
 //
-// ONE remote dependency, pinned EXACTLY: apple/containerization 0.47.0. The sleep design leans on
-// its internals' shape (a `VZVirtualMachineInstance` behind `withVirtualMachineInstance`, the
-// `VZInstanceExtension` hook, the `VirtualMachineManager`/`VirtualMachineAgent` protocols), so a
-// minor bump is a deliberate re-verification (run `make test-vm`), never a silent resolve.
+// apple/containerization 0.47.0, pinned EXACTLY: the sleep design leans on its internals' shape (a
+// `VZVirtualMachineInstance` behind `withVirtualMachineInstance`, the `VZInstanceExtension` hook,
+// the `VirtualMachineManager`/`VirtualMachineAgent` protocols), so a minor bump is a deliberate
+// re-verification (run `make test-vm`), never a silent resolve. Since 580, also four apple/*
+// packages that containerization already resolves (NIO, NIOSSL, X509, ASN1) — for the egress
+// proxy's TLS; Scripts/audit.sh holds the allowlist.
 import PackageDescription
 
 let package = Package(
@@ -21,6 +23,15 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/apple/containerization.git", exact: "0.47.0"),
+        // 580 — the egress proxy's TLS for credential injection. All four are apple/* packages
+        // that containerization 0.47.0 ALREADY pulls into every build (Package.resolved is
+        // unchanged by declaring them): NIOSSL (BoringSSL) terminates TLS with in-memory keys — no
+        // keychain, no prompts — driven synchronously through NIOEmbedded; swift-certificates
+        // issues the per-sandbox CA and its leaves. See README "Dependencies".
+        .package(url: "https://github.com/apple/swift-nio.git", from: "2.103.0"),
+        .package(url: "https://github.com/apple/swift-nio-ssl.git", from: "2.37.5"),
+        .package(url: "https://github.com/apple/swift-certificates.git", from: "1.21.0"),
+        .package(url: "https://github.com/apple/swift-asn1.git", from: "1.7.3"),
     ],
     targets: [
         .target(
@@ -32,6 +43,11 @@ let package = Package(
                 .product(name: "ContainerizationExtras", package: "containerization"),
                 .product(name: "ContainerizationOCI", package: "containerization"),
                 .product(name: "ContainerizationOS", package: "containerization"),
+                .product(name: "NIOCore", package: "swift-nio"),
+                .product(name: "NIOEmbedded", package: "swift-nio"),
+                .product(name: "NIOSSL", package: "swift-nio-ssl"),
+                .product(name: "X509", package: "swift-certificates"),
+                .product(name: "SwiftASN1", package: "swift-asn1"),
             ],
             path: "Sources/SnoozeContainerKit",
             resources: [
@@ -39,6 +55,8 @@ let package = Package(
                 // (Resources/PROVENANCE.md records sha256, toolchain and command; the C source
                 // and build script live in Guest/deckhold/). Copied, never processed.
                 .copy("Resources/deckhold"),
+                // 580: the guest half of a proxied sandbox's network (Guest/snoozenet/).
+                .copy("Resources/snoozenet"),
             ]
         ),
         // The ENTITLED test host. `swift test` binaries cannot carry
@@ -52,7 +70,10 @@ let package = Package(
         ),
         .testTarget(
             name: "SnoozeContainerKitTests",
-            dependencies: ["SnoozeContainerKit"],
+            dependencies: ["SnoozeContainerKit",
+                           .product(name: "NIOCore", package: "swift-nio"),
+                           .product(name: "NIOEmbedded", package: "swift-nio"),
+                           .product(name: "NIOSSL", package: "swift-nio-ssl")],
             path: "Tests/SnoozeContainerKitTests"
         ),
     ]

@@ -33,7 +33,10 @@ export SNOOZE_KERNEL_CACHE := $(KERNEL_CACHE)
 DECKHOLD_OUT := Guest/deckhold/out/deckhold
 DECKHOLD_RES := Sources/SnoozeContainerKit/Resources/deckhold
 
-.PHONY: help build test audit test-vm test-vm-agents vmtest-host kernel deckhold deckhold-verify
+SNOOZENET_OUT := Guest/snoozenet/out/snoozenet
+SNOOZENET_RES := Sources/SnoozeContainerKit/Resources/snoozenet
+
+.PHONY: help build test audit test-vm test-vm-agents test-vm-network vmtest-host kernel deckhold deckhold-verify snoozenet snoozenet-verify
 
 help: ## Show this help
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) | sed 's/:.*## /\t/' | expand -t 22
@@ -54,6 +57,9 @@ vmtest-host: ## Build the VM test host and ad-hoc sign it with the virtualizatio
 test-vm-agents: vmtest-host ## 579 agent images: bake claude-code + pi (cold: minutes, network), full agent suite
 	perl -e 'alarm shift; exec @ARGV' 2400 $(VMTEST_BIN) agents --store "$(VMTEST_STORE)"
 
+test-vm-network: vmtest-host ## 580 proxied network: no NIC, policy, DNS, UDP, credentials, CA, bake preset, sleep → wake (network, claude-code image)
+	perl -e 'alarm shift; exec @ARGV' 1800 $(VMTEST_BIN) network --store "$(VMTEST_STORE)"
+
 kernel: vmtest-host ## Fetch + verify the pinned Linux kernel into the cache (KERNEL_CACHE=dir; no VM)
 	perl -e 'alarm shift; exec @ARGV' 900 $(VMTEST_BIN) kernel --store "$(VMTEST_STORE)"
 
@@ -68,3 +74,12 @@ deckhold: ## Rebuild the deckhold guest binary, install it as the committed reso
 deckhold-verify: ## Rebuild deckhold from scratch and check the committed bytes match (slow: pinned Zig + ghostty)
 	FORCE=1 Guest/deckhold/build.sh
 	@cmp $(DECKHOLD_OUT) $(DECKHOLD_RES) && echo "ok deckhold: the committed binary is exactly what the pinned source builds"
+
+snoozenet: ## Rebuild the snoozenet guest binary (580), install it as the committed resource, refresh PROVENANCE.md
+	Guest/snoozenet/build.sh
+	cp $(SNOOZENET_OUT) $(SNOOZENET_RES)
+	@Scripts/snoozenet-provenance.sh
+
+snoozenet-verify: ## Rebuild snoozenet from scratch and check the committed bytes match
+	FORCE=1 Guest/snoozenet/build.sh
+	@cmp $(SNOOZENET_OUT) $(SNOOZENET_RES) && echo "ok snoozenet: the committed binary is exactly what the pinned source builds"
