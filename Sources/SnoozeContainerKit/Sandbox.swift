@@ -85,6 +85,13 @@ public actor Sandbox {
         return p
     }
 
+    /// Throw away what a previous process left asleep (its snapshot, root disk and persisted
+    /// state) instead of restoring it. Only for a sandbox no process is running.
+    public nonisolated static func discardRestorableState(for spec: SandboxSpec) {
+        let layout = StoreLayout(spec: spec)
+        for url in [layout.snapshot, layout.rootfs, layout.persistedState] { try? FileManager.default.removeItem(at: url) }
+    }
+
     // MARK: lifecycle
 
     /// Boot a fresh sandbox: images and the guest init disk (downloaded once per store), the
@@ -506,6 +513,14 @@ public actor Sandbox {
             try? await p.delete()
             throw error
         }
+    }
+
+    /// Copy a host file onto the guest's root disk (e.g. a program a session will run). Prefer
+    /// this to running a program straight from a share: a share is re-mounted on every wake, and
+    /// a file a process had open across that is gone from under it.
+    public func copyIn(_ source: URL, to guestPath: String, mode: UInt32 = 0o644) async throws {
+        guard phase == .running, let container else { throw SandboxError.notRunning(phase) }
+        try await container.copyIn(from: source, to: URL(fileURLWithPath: guestPath), mode: mode)
     }
 
     // MARK: sessions

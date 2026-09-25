@@ -155,6 +155,9 @@ final class PersistedSandboxTests: XCTestCase {
         XCTAssertTrue(p.isRestorable(layout: layout))
         try p.write(to: layout.persistedState)
         XCTAssertNotNil(Sandbox.restorableState(for: spec))
+        Sandbox.discardRestorableState(for: spec)
+        XCTAssertNil(Sandbox.restorableState(for: spec))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: layout.snapshot.path))
     }
 
     func test_randomMACIsLocallyAdministeredUnicast() {
