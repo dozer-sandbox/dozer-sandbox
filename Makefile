@@ -1,78 +1,60 @@
-# placeholder legend: SnoozeContainerKit this library's name · {{DEP_NAME}} an optional single upstream
-# sovereign-library dependency (delete the DEP_NAME block entirely, and set SWIFT_PKG_FLAGS := ,
-# if this package has no such dependency) · {{LINUX_TARGETS}} space-separated `--target` list for
-# the Foundation-only subset this package compiles on Linux (delete the linux/smoke targets
-# entirely if this package is macOS-only, e.g. it links AppKit/Metal — see GhosttyTerminalKit for
-# that shape) · {{DOCKER_IMAGE}} e.g. {{name}}/linux
+# SnoozeContainerKit — sovereign package (feature 578; workspace template, derived from
+# repo/lib/GhosttyTerminalKit's Makefile: no sibling-library dependency, so no lib() lookup and no
+# prelaunch mirror; macOS-only, so no Linux container).
 #
-# SnoozeContainerKit — sovereign package (workspace template; derived from repo/lib/DeckKit's real Makefile).
-#
-# `swift build && swift test` at the root is the whole story; these targets add the two things
-# that are easy to get wrong by hand: the prelaunch mirror in remote mode, and (if applicable) the
-# Linux container this package must keep compiling in.
+# `swift build && swift test` at the root is the whole story for a consumer. These targets add
+# what is easy to get wrong by hand: the build-system pin, the ENTITLED VM integration run, and
+# the committed deckhold guest binary.
 
 NCPU := $(shell sysctl -n hw.logicalcpu 2>/dev/null || nproc)
+JOBS ?= 8
 
-# The {{DEP_NAME}} sibling this package resolves as a path dependency, or EMPTY
-# when Package.swift will fall back to the pin. Same rule an app's manifest
-# applies: a slot worktree considers ONLY its own token's library worktree. A
-# LIBRARY slot worktree carries no `.instance-token`, so the slot name is the
-# PARENT path component (`.../worktrees/slot-<token>/SnoozeContainerKit`) — exactly what
-# `lib()` reads.
-DECK_SLOT_DIR := $(if $(findstring /.claude/worktrees/,$(CURDIR)),$(notdir $(patsubst %/,%,$(dir $(CURDIR)))))
-# A LIBRARY slot worktree is SEVEN levels deep, not six: it ends in the
-# library's own name, one deeper than an app's. This mirrors the same fix in
-# every consuming app's Package.swift / Makefile.
-WORKSPACE_ROOT ?= $(abspath $(CURDIR)/../../..$(if $(DECK_SLOT_DIR),/../../../..))
-{{DEP_NAME}}_LOCAL := $(shell \
-	slot="$(WORKSPACE_ROOT)/repo/lib/{{DEP_NAME}}/.claude/worktrees/$(DECK_SLOT_DIR)/{{DEP_NAME}}"; \
-	prim="$(WORKSPACE_ROOT)/repo/lib/{{DEP_NAME}}"; \
-	if [ -n "$(DECK_SLOT_DIR)" ]; then \
-	  [ -f "$$slot/Package.swift" ] && echo "$$slot"; \
-	else \
-	  [ -f "$$prim/Package.swift" ] && echo "$$prim"; \
-	fi; true)
+# Xcode 27's SwiftPM defaults to the `swiftbuild` engine; probe rather than hardcode, so this is a
+# no-op on a toolchain that already defaults to `native` (same probe as every workspace repo).
+SWIFT_BUILD_SYSTEM := $(shell h=$$(swift build --help 2>/dev/null); \
+	echo "$$h" | grep -q -- '--build-system' \
+	  && echo "$$h" | grep -qE 'default: *swiftbuild' \
+	  && echo "$$h" | grep -qE '^[[:space:]]*native' \
+	  && echo '--build-system native')
 
-# A SwiftPM mirror rewrites package IDENTITY, so it must be supplied ONLY when
-# the manifest falls back to the pin — never when a path dependency is in play.
-MIRROR_FLAG := --config-path Scripts/swiftpm-remote-config
+# ── VM integration (needs com.apple.security.virtualization) ─────────────────
+# The test host is an executable (not an XCTest bundle) because only a signed executable can
+# carry the entitlement. VMTEST_STORE is a SCRATCH store — never an app's storage root.
+VMTEST_BIN     := .build/debug/snooze-vmtest
+VMTEST_STORE  ?= $(or $(TMPDIR),/tmp/)snooze-vmtest-store
+VMTEST_ARGS   ?= all
+# The watchdog: a hang (a VM op that never completes) fails the run instead of wedging it.
+VMTEST_TIMEOUT ?= 420
 
-DECK_LOCAL_PACKAGES ?=
-ifeq ($(DECK_LOCAL_PACKAGES),0)
-SWIFT_PKG_FLAGS := --scratch-path .build-remote $(MIRROR_FLAG)
-else
-SWIFT_PKG_FLAGS := $(if $({{DEP_NAME}}_LOCAL),,$(MIRROR_FLAG))
-endif
+DECKHOLD_OUT := Guest/deckhold/out/deckhold
+DECKHOLD_RES := Sources/SnoozeContainerKit/Resources/deckhold
 
-.PHONY: help build test audit linux smoke
+.PHONY: help build test audit test-vm vmtest-host deckhold deckhold-verify
 
 help: ## Show this help
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) | sed 's/:.*## /\t/' | expand -t 22
 
-build: ## Build every product
-	swift build $(SWIFT_PKG_FLAGS) -j $(NCPU)
+build: ## Build every product (and the VM test host)
+	swift build $(SWIFT_BUILD_SYSTEM) -j $(JOBS)
 
-test: ## Run the package test suite
-	swift test $(SWIFT_PKG_FLAGS) -j $(NCPU)
+test: ## Unit tests — no VM, no entitlement (never --parallel)
+	swift test $(SWIFT_BUILD_SYSTEM) -j $(JOBS)
 
-audit: ## App-neutrality + de-branding (+ Linux-seam, if applicable) audit
+audit: ## Neutrality audit: import allowlist, one remote dependency, no host brand
 	@Scripts/audit.sh
 
-# ── Linux (Foundation-only packages only) — delete this section if this
-# package links AppKit/SwiftUI/Metal and has no Linux-buildable subset. ──────
+vmtest-host: ## Build the VM test host and ad-hoc sign it with the virtualization entitlement
+	swift build $(SWIFT_BUILD_SYSTEM) -j $(JOBS) --product snooze-vmtest
+	codesign --force --sign - --entitlements Scripts/vmtest.entitlements $(VMTEST_BIN)
 
-linux: ## Compile-check the Foundation-only targets in the pinned Linux container
-	@docker image inspect {{DOCKER_IMAGE}} >/dev/null 2>&1 || \
-		docker build -t {{DOCKER_IMAGE}} -f Scripts/linux.Dockerfile Scripts
-	docker run --rm -v "$(WORKSPACE_ROOT)":/ws -w /ws/repo/lib/SnoozeContainerKit \
-		-v {{name}}-linux:/linux-build \
-		{{DOCKER_IMAGE}} \
-		swift build {{LINUX_TARGETS}} --scratch-path /linux-build/scratch
+test-vm: vmtest-host ## VM integration suite (entitled host, watchdog, scratch store; VMTEST_ARGS=lifecycle|crash)
+	perl -e 'alarm shift; exec @ARGV' $(VMTEST_TIMEOUT) $(VMTEST_BIN) $(VMTEST_ARGS) --store "$(VMTEST_STORE)"
 
-smoke: ## Run the Linux runtime smoke (builds if needed) in the container
-	@docker image inspect {{DOCKER_IMAGE}} >/dev/null 2>&1 || \
-		docker build -t {{DOCKER_IMAGE}} -f Scripts/linux.Dockerfile Scripts
-	docker run --rm -v "$(WORKSPACE_ROOT)":/ws -w /ws/repo/lib/SnoozeContainerKit \
-		-v {{name}}-linux:/linux-build \
-		{{DOCKER_IMAGE}} \
-		swift run --scratch-path /linux-build/scratch {{name}}-smoke
+deckhold: ## Rebuild the deckhold guest binary, install it as the committed resource, refresh PROVENANCE.md
+	Guest/deckhold/build.sh
+	cp $(DECKHOLD_OUT) $(DECKHOLD_RES)
+	@Scripts/deckhold-provenance.sh
+
+deckhold-verify: ## Rebuild deckhold from scratch and check the committed bytes match (slow: pinned Zig + ghostty)
+	FORCE=1 Guest/deckhold/build.sh
+	@cmp $(DECKHOLD_OUT) $(DECKHOLD_RES) && echo "ok deckhold: the committed binary is exactly what the pinned source builds"
