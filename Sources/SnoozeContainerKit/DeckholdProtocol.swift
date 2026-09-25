@@ -223,12 +223,13 @@ public enum GuestCommand {
         String(dir.drop(while: { $0 == "/" })).replacingOccurrences(of: "/", with: "_")
     }
 
-    /// Run as root after a FRESH boot (a restore keeps everything in guest memory): a sticky,
-    /// world-writable deckhold socket directory, so sessions can run as a non-root user; and, for
+    /// Run as root after a FRESH boot (a restore keeps everything in guest memory): a fresh — the
+    /// directory is on the root disk, which Stop keeps, so the last boot's sockets and exit records
+    /// would otherwise linger — sticky, world-writable deckhold socket directory, so sessions can run as a non-root user; and, for
     /// an image sandbox, each persist dir bind-mounted from the state disk and owned by the user.
     /// Idempotent.
     public static func prepareGuest(recipe: ImageRecipe?) -> String {
-        var s = "set -e; mkdir -p /run/deckhold; chmod 1777 /run/deckhold"
+        var s = "set -e; rm -rf /run/deckhold; mkdir -p /run/deckhold; chmod 1777 /run/deckhold"
         guard let r = recipe else { return s }
         for d in r.resolvedPersistDirs {
             let src = "\(stateMount)/\(stateKey(d))"

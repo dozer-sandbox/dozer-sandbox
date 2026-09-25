@@ -105,7 +105,8 @@ final class ImageRecipeTests: XCTestCase {
         XCTAssertTrue(s.contains("mount --bind '/state/home_agent_.pi_agent' '/home/agent/.pi/agent'"))
         XCTAssertTrue(s.contains("mountpoint -q '/home/agent/.pi/agent' ||"), "idempotent")
         XCTAssertTrue(s.contains("chown agent:agent '/state/home_agent_.pi_agent'"))
-        XCTAssertEqual(GuestCommand.prepareGuest(recipe: nil), "set -e; mkdir -p /run/deckhold; chmod 1777 /run/deckhold")
+        XCTAssertEqual(GuestCommand.prepareGuest(recipe: nil), "set -e; rm -rf /run/deckhold; mkdir -p /run/deckhold; chmod 1777 /run/deckhold",
+                       "a kept root disk must not carry the last boot's sessions")
         let layout = StoreLayout(root: URL(fileURLWithPath: "/tmp/s"), name: "lab")
         XCTAssertEqual(layout.stateDisk.path, "/tmp/s/sandboxes/lab/state.ext4")
         // The state disk outlives root disks: Stop and Reset to image never remove the sandbox

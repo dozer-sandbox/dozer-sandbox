@@ -39,6 +39,8 @@ let storeRoot: URL = {
 // Kernel: the library's pinned one (fetched once), cached in $SNOOZE_KERNEL_CACHE when set (CI
 // shares one cache across runs and repos), else under the store. $SNOOZE_KERNEL = explicit path.
 let kernelPath = ProcessInfo.processInfo.environment["SNOOZE_KERNEL"].flatMap { $0.isEmpty ? nil : $0 }
+/// Its own vmnet subnet, so a run never shares one with a SandboxLab (or another run) on this Mac.
+let testSubnet = ProcessInfo.processInfo.environment["SNOOZE_SUBNET"] ?? "192.168.201.0/24"
 let kernelCache = ProcessInfo.processInfo.environment["SNOOZE_KERNEL_CACHE"].flatMap { $0.isEmpty ? nil : URL(fileURLWithPath: $0) }
 
 // MARK: harness
@@ -117,7 +119,7 @@ while :; do i=$((i+1)); printf 'tick %d\\r\\n' "$i"; sleep 0.2; done
 func makeSpec(_ name: String, share: URL) -> SandboxSpec {
     SandboxSpec(name: name, storeRoot: storeRoot, kernelPath: kernelPath, kernelCacheDirectory: kernelCache, cpus: 2, memoryMiB: 512,
                 rootfsMiB: 1024, bakePackages: ["bash", "ncurses"],
-                shares: [Share(hostPath: share.path, guestPath: "/work")])
+                shares: [Share(hostPath: share.path, guestPath: "/work")], subnet: testSubnet)
 }
 
 func prepareShare(_ name: String) throws -> URL {
@@ -321,7 +323,14 @@ func lifecycleSuite() async throws {
     print("vmtest: Stop keeps the root disk; Reset to image and Delete sandbox discard it")
     try await sb.start()
     let keep = "kept-\(UUID().uuidString.prefix(8))"
-    _ = try await sb.exec(["sh", "-c", "echo \(keep) > /root/snooze-keep && apk add --no-cache jq >/dev/null && sync"], timeoutSeconds: 120)
+    // The package install needs the network; an intermittent vmnet loss right after boot is not what
+    // this checks, so it retries (and says so).
+    let inst = try await sb.exec(["sh", "-c", "echo \(keep) > /root/snooze-keep; for n in 1 2 3 4; do apk add --no-cache jq >/dev/null 2>&1 && { [ $n -gt 1 ] && echo \"apk needed $n tries\"; sync; exit 0; }; sleep 3; done; exit 1"], timeoutSeconds: 180)
+    if inst.output.contains("tries") { info(inst.output.trimmingCharacters(in: .whitespacesAndNewlines)) }
+    if inst.exitCode != 0 {
+        let d = try await sb.exec(["sh", "-c", "ip -4 addr show eth0 | awk '/inet/{print $2}'; ip route | head -1; wget -q -T 4 -O /dev/null http://1.1.1.1 && echo NET-OK || echo NET-FAIL"])
+        info("install failed (\(inst.exitCode)): \(inst.errorOutput.prefix(200)) · net: \(d.output.replacingOccurrences(of: "\n", with: " "))")
+    }
     try await sb.stop()
     check(sb.hasRootDisk && Sandbox.restorableState(for: sb.spec) == nil, "Stop kept the root disk and left no snapshot")
     try await sb.start()
@@ -432,7 +441,7 @@ func agentRecipe(_ name: String) -> ImageRecipe? {
 func agentSpec(_ name: String, recipe: ImageRecipe, workspace: URL? = nil) -> SandboxSpec {
     SandboxSpec(name: name, storeRoot: storeRoot, kernelPath: kernelPath, kernelCacheDirectory: kernelCache,
                 cpus: 2, memoryMiB: 2048, shares: workspace.map { [Share(hostPath: $0.path, guestPath: "/workspace")] } ?? [],
-                recipe: recipe)
+                subnet: testSubnet, recipe: recipe)
 }
 
 /// Bake through the library's baker with the same inputs a Sandbox would use.
@@ -699,6 +708,25 @@ Task {
                 print("usage: snooze-vmtest agent claude-code|pi"); exit(2)
             }
             try await agentSuite(r)
+        case "netprobe":
+            let share = try prepareShare("vmtest")
+            let sb = try Sandbox(spec: makeSpec("netprobe", share: share))
+            let withSleep = args.contains("--sleep")
+            func net(_ label: String) async throws {
+                let r = try await sb.exec(["sh", "-c", "ip -4 addr show eth0 | awk '/inet/{print $2}'; for n in 1 2 3; do wget -q -T 3 -O /dev/null http://1.1.1.1 && { echo NET-OK-try$n; exit 0; }; sleep 2; done; echo NET-FAIL"])
+                print("\(label): \(r.output.replacingOccurrences(of: "\n", with: " "))")
+            }
+            for i in 1...6 {
+                try await sb.start()
+                try await net("cycle \(i) boot")
+                if withSleep {
+                    try await sb.sleepToDisk(); try await sb.wakeFromDisk()
+                    try await net("cycle \(i) after wake")
+                }
+                try await sb.stop()
+            }
+            try await sb.delete()
+            exit(0)
         case "kernel":
             let spec = makeSpec("vmtest", share: storeRoot)
             var provider = try Sandbox(spec: spec).kernelProvider

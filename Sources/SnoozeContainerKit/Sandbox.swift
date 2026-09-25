@@ -172,7 +172,9 @@ public actor Sandbox {
     /// Drop a boot that failed part-way: its container may own vminitd clients that were never
     /// closed, and deallocating one is fatal — so it is kept (Graveyard), never freed.
     private func abandonBoot() {
-        if let network { var n = network; try? n.releaseInterface(spec.name); self.network = nil }
+        // Release the address, but KEEP the vmnet network for the next Start: creating a new one
+        // per boot left the guest without a route out after a handful of Starts in one process.
+        try? network?.releaseInterface(spec.name)
         if container != nil || instance != nil { Graveyard.keep(container, instance) }
         container = nil; instance = nil; handle = nil; identity = nil
     }
@@ -340,7 +342,9 @@ public actor Sandbox {
             }
             snapshotBytes = 0
         case .releaseRuntime:
-            if let network { var n = network; try? n.releaseInterface(spec.name); self.network = nil }
+            // Release the address, but KEEP the vmnet network for the next Start: creating a new one
+        // per boot left the guest without a route out after a handful of Starts in one process.
+        try? network?.releaseInterface(spec.name)
             if !cleanlyStopped, let container {
                 // Never let the package deallocate a vminitd client it did not close: that is a
                 // fatal error in its gRPC transport. A container that was not stopped through
@@ -399,7 +403,7 @@ public actor Sandbox {
         } ?? StoreLayout.goldenKey(for: spec)
         if let persisted {
             identity = persisted
-        } else if var kept {
+        } else if let kept {
             // Stop kept this root disk: cold-boot it. Its snapshot, if one is lying around (a
             // crash while asleep, then Start instead of Restore), no longer matches a disk that
             // is about to move on — delete it, never restore it later.
@@ -409,8 +413,14 @@ public actor Sandbox {
                 note("the kept root disk was cloned from \(from), not \(wantedRoot) — Reset to image to start from the new one")
             }
             note("cold-booting the kept root disk (Stop keeps it; Reset to image starts afresh)")
-            kept.spec = spec
-            identity = kept
+            // A cold boot restores no snapshot, so it needs none of the old VM identity — and
+            // reusing the old MAC with a newly allocated address broke the guest's networking
+            // (579: `apk add` could not reach the mirror on every Start of a kept disk).
+            identity = PersistedSandbox(spec: spec, phase: .running,
+                                        machineIdentifier: VZGenericMachineIdentifier().dataRepresentation,
+                                        macAddress: spec.networking ? PersistedSandbox.randomMAC() : nil,
+                                        subnet: nil, shareTags: [:])
+            identity.rootImage = kept.rootImage
         } else {
             let golden: URL
             if let recipe = spec.recipe {
@@ -454,7 +464,13 @@ public actor Sandbox {
         var iface: (any Interface)?
         var readdress: (address: String, gateway: String)?
         if spec.networking {
-            var net = try await makeNetwork(persistedSubnet: persisted == nil ? nil : identity.subnet)
+            var net: VmnetNetwork
+            if let existing = network, persisted == nil || existing.subnet.description == identity.subnet {
+                net = existing                      // one vmnet network per Sandbox, reused across Starts
+            } else {
+                net = try await makeNetwork(persistedSubnet: persisted == nil ? spec.subnet : identity.subnet, restoring: persisted != nil)
+            }
+            try? net.releaseInterface(spec.name)
             guard let i = try net.createInterface(spec.name) else { throw SandboxError.vmUnavailable }
             if let old = identity.subnet, persisted != nil, old != net.subnet.description, let gw = i.ipv4Gateway {
                 // The guest still has its old address; fix it once the restored guest runs.
@@ -540,11 +556,14 @@ public actor Sandbox {
     /// The vmnet network. On a restore, the subnet the guest was addressed from — vmnet can take
     /// a moment to release a dead process's network, so retry briefly before settling for a new
     /// subnet (and re-addressing the guest).
-    private func makeNetwork(persistedSubnet: String?) async throws -> VmnetNetwork {
+    private func makeNetwork(persistedSubnet: String?, restoring: Bool) async throws -> VmnetNetwork {
         guard let persistedSubnet, let cidr = try? CIDRv4(persistedSubnet) else { return try VmnetNetwork() }
-        for attempt in 1...10 {
+        // A restore must get its old subnet back (vmnet may still be releasing it: retry); a fresh
+        // start that asked for one that is taken just falls back to vmnet's default.
+        let attempts = restoring ? 10 : 1
+        for attempt in 1...attempts {
             do { return try VmnetNetwork(subnet: cidr) } catch {
-                if attempt == 10 { note("subnet \(persistedSubnet) unavailable (\(error.localizedDescription)); using a new one") }
+                if attempt == attempts { note("subnet \(persistedSubnet) unavailable (\(error.localizedDescription)); using a new one") }
                 try? await Task.sleep(for: .milliseconds(300))
             }
         }

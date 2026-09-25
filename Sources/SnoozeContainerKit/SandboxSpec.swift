@@ -35,6 +35,11 @@ public struct SandboxSpec: Sendable, Codable, Equatable {
     /// internet, including the one-time package bake.
     public var networking: Bool
     public var dnsServers: [String]
+    /// The vmnet subnet (CIDR, e.g. `192.168.201.0/24`). nil: vmnet's default. Two PROCESSES that
+    /// each take the default can get the SAME subnet and the same guest addresses, and the NAT then
+    /// drops one of them (578/579: a test run beside a running SandboxLab lost its network) — a host
+    /// that runs beside others should pick its own.
+    public var subnet: String?
     /// A baked image to boot instead of `image` + `bakePackages`: its read-only baked disk is
     /// APFS-cloned as the root, and a per-sandbox STATE disk (`stateDiskMiB`, created empty once,
     /// never cloned, never deleted by Stop) holds the recipe's `persistDirs`.
@@ -55,6 +60,7 @@ public struct SandboxSpec: Sendable, Codable, Equatable {
         shares: [Share] = [],
         networking: Bool = true,
         dnsServers: [String] = ["1.1.1.1", "8.8.8.8"],
+        subnet: String? = nil,
         recipe: ImageRecipe? = nil,
         stateDiskMiB: UInt64 = 2048
     ) {
@@ -71,6 +77,7 @@ public struct SandboxSpec: Sendable, Codable, Equatable {
         self.shares = shares
         self.networking = networking
         self.dnsServers = dnsServers
+        self.subnet = subnet
         self.recipe = recipe
         self.stateDiskMiB = stateDiskMiB
     }
