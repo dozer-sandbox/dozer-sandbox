@@ -79,6 +79,9 @@ public struct PersistedSandbox: Codable, Sendable, Equatable {
     public var restorePoint: String?
     /// The disk came from a copy taken while its VM ran (no journal): e2fsck it before the next boot.
     public var fsckOnNextBoot: Bool?
+    /// 583: the VM has a virtio memory balloon (every VM a 583+ build boots). nil or false: an
+    /// older record, whose snapshot must be restored into a VM without one.
+    public var memoryBalloon: Bool?
 
     public init(spec: SandboxSpec, phase: Phase, machineIdentifier: Data, macAddress: String?, subnet: String?,
                 shareTags: [String: String], savedAt: Date = Date()) {

@@ -122,6 +122,13 @@ public enum LifecycleStep: Equatable, Sendable {
     case remountShares
     /// Delete the snapshot file: it is valid only while the VM is paused.
     case deleteSnapshot
+    /// 583: best effort, never fails the operation — inflate the memory balloon over the guest's free
+    /// pages (and keep it inflated), so the host drops the RAM a restore faulted in but the guest
+    /// never touched (`Sandbox.returnFreeMemory()`).
+    case returnFreeMemory
+    /// 583: deflate the balloon before the VM is paused for a snapshot — a snapshot of an inflated
+    /// balloon does not restore.
+    case restoreGuestMemory
     /// Drop the in-memory VM objects and the network lease, and persist the phase as off (shut
     /// down). The ROOT DISK STAYS: the next Start (Cold Boot) boots it (owner ruling 2026-09-25 — "Stop destroys the VM"
     /// was the 578 smoke finding: anything `apk add`ed vanished).
@@ -159,17 +166,17 @@ public enum LifecyclePlanner {
             // running again invalidates it.
             return [.resumeVM, .deleteSnapshot, .persistState]
         case (.sleep, .running):
-            return [.pauseVM, .saveSnapshot, .persistState]
+            return [.restoreGuestMemory, .pauseVM, .saveSnapshot, .persistState]
         case (.sleep, .paused):
             return [.saveSnapshot, .persistState]
         case (.deepSleep, .running):
-            return [.pauseVM, .saveSnapshot, .detachSessions(.sandboxSleeping), .stopVMDirect, .persistState]
+            return [.restoreGuestMemory, .pauseVM, .saveSnapshot, .detachSessions(.sandboxSleeping), .stopVMDirect, .persistState]
         case (.deepSleep, .paused):
             return [.saveSnapshot, .detachSessions(.sandboxSleeping), .stopVMDirect, .persistState]
         case (.deepSleep, .asleep):
             return [.detachSessions(.sandboxSleeping), .stopVMDirect, .persistState]
         case (.wake, .deepAsleep):
-            return [.restoreSnapshot, .resyncClock, .remountShares, .deleteSnapshot, .persistState]
+            return [.restoreSnapshot, .resyncClock, .remountShares, .deleteSnapshot, .returnFreeMemory, .persistState]
         case (.shutDown, _):
             return stopSteps(from: phase)
         case (.resetToImage, _):

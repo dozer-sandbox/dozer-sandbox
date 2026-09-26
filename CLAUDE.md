@@ -79,6 +79,14 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   which Deep Sleep never calls — each VM instance a host made kept 8 threads + 8 kqueues forever (582;
   thread cap 6,144). `hardening leak` is the regression test (threads, fds, footprint flat).
 - **Stop decides from the phase it was CALLED in** (`perform()` reads `phase` before going busy).
+- **Every VM has a memory balloon; a snapshot is never taken with it inflated** (583). A device is a
+  VM input: `PinnedIdentity.memoryBalloon` comes from `PersistedSandbox.memoryBalloon` on a restore
+  (nil = an older build's VM — restore it WITHOUT one) and is true on every cold boot. `wake()`
+  inflates it over free guest pages and it STAYS inflated (VZ charges the pages again on deflate —
+  measured). `.restoreGuestMemory` runs before every pause-for-snapshot, and `saveSnapshot` deflates
+  a paused one (resume → deflate → pause): a snapshot of an inflated balloon fails to restore
+  (`VZErrorDomain 12 invalid argument`). Progress is read from the guest's `/proc/meminfo`
+  `Balloon:` line — VZ offers DEFLATE_ON_OOM, so MemTotal never moves.
 - **Stop is always graceful.** A paused VM is resumed and a VM on disk restored (silently — no phase
   event) and then `LinuxContainer.stop()` runs. Stopping at the VZ level instead leaves the package's
   vminitd gRPC clients unclosed, and deallocating one is a FATAL error

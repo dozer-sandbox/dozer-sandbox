@@ -87,3 +87,20 @@ final class EventBroadcaster<Element: Sendable>: @unchecked Sendable {
         for c in cs { c.finish() }
     }
 }
+
+/// What `Sandbox.returnFreeMemory()` did (583).
+public struct MemoryReturn: Sendable, Equatable {
+    /// Guest RAM this call handed back to the Mac (what the balloon had filled when it returned), MiB.
+    public var returnedMiB: UInt64
+    /// Guest RAM the balloon holds for the Mac in all, now, MiB.
+    public var heldMiB: UInt64
+    /// The guest's free memory before, MiB.
+    public var guestFreeMiB: UInt64
+    public var milliseconds: Double
+    public init(returnedMiB: UInt64, heldMiB: UInt64, guestFreeMiB: UInt64, milliseconds: Double) {
+        self.returnedMiB = returnedMiB
+        self.heldMiB = heldMiB
+        self.guestFreeMiB = guestFreeMiB
+        self.milliseconds = milliseconds
+    }
+}

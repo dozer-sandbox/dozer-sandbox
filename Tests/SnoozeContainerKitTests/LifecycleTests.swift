@@ -68,7 +68,7 @@ final class LifecycleTests: XCTestCase {
 
     /// Wake resyncs the clock and re-mounts shares, after the restore and before the snapshot goes.
     func test_wakeRestoresThenResyncsClockAndRemountsShares() {
-        XCTAssertEqual(plan(.wake, .deepAsleep), [.restoreSnapshot, .resyncClock, .remountShares, .deleteSnapshot, .persistState])
+        XCTAssertEqual(plan(.wake, .deepAsleep), [.restoreSnapshot, .resyncClock, .remountShares, .deleteSnapshot, .returnFreeMemory, .persistState])
         XCTAssertNil(plan(.wake, .running))
     }
 
@@ -76,7 +76,7 @@ final class LifecycleTests: XCTestCase {
     /// never pauses twice.
     func test_deepSleepOrdering() {
         let fromRunning = plan(.deepSleep, .running)!
-        XCTAssertEqual(fromRunning, [.pauseVM, .saveSnapshot, .detachSessions(.sandboxSleeping), .stopVMDirect, .persistState])
+        XCTAssertEqual(fromRunning, [.restoreGuestMemory, .pauseVM, .saveSnapshot, .detachSessions(.sandboxSleeping), .stopVMDirect, .persistState])
         XCTAssertEqual(plan(.deepSleep, .paused), [.saveSnapshot, .detachSessions(.sandboxSleeping), .stopVMDirect, .persistState])
         XCTAssertEqual(plan(.deepSleep, .asleep), [.detachSessions(.sandboxSleeping), .stopVMDirect, .persistState])
         XCTAssertNil(plan(.deepSleep, .deepAsleep))
@@ -88,9 +88,21 @@ final class LifecycleTests: XCTestCase {
         XCTAssertEqual(plan(.resume, .paused), [.resumeVM, .deleteSnapshot, .persistState])
         XCTAssertEqual(plan(.resume, .asleep), [.resumeVM, .deleteSnapshot, .persistState])
         XCTAssertNil(plan(.resume, .deepAsleep), "on disk needs a wake, not a resume")
-        XCTAssertEqual(plan(.sleep, .running), [.pauseVM, .saveSnapshot, .persistState])
+        XCTAssertEqual(plan(.sleep, .running), [.restoreGuestMemory, .pauseVM, .saveSnapshot, .persistState])
         XCTAssertEqual(plan(.sleep, .paused), [.saveSnapshot, .persistState])
         XCTAssertNil(plan(.sleep, .asleep))
+    }
+
+    /// 583: a snapshot of an inflated memory balloon does not restore — every plan that snapshots a
+    /// RUNNING VM gives the guest its memory back before it pauses (from Pause, `saveSnapshot` does).
+    func test_balloonDeflatedBeforeEverySnapshotOfARunningVM() {
+        for op in LifecycleOperation.allCases {
+            guard let steps = plan(op, .running), let save = steps.firstIndex(of: .saveSnapshot) else { continue }
+            let deflate = steps.firstIndex(of: .restoreGuestMemory)
+            XCTAssertNotNil(deflate, "\(op)")
+            XCTAssertLessThan(deflate ?? .max, steps.firstIndex(of: .pauseVM) ?? save, "\(op): deflate while the guest runs")
+        }
+        XCTAssertEqual(plan(.wake, .deepAsleep)?.firstIndex(of: .returnFreeMemory).map { $0 > 0 }, true)
     }
 
     func test_phaseProperties() {

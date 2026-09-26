@@ -55,6 +55,10 @@ func vzStateIsStopped(_ h: VMHandle) -> Bool {
 struct PinnedIdentity: VZInstanceExtension {
     let machineIdentifier: Data
     let macAddress: String?
+    /// 583: a virtio memory balloon (`returnFreeMemory`). A device is a VM input: a snapshot must be
+    /// restored into a VM with exactly the devices it was taken with, so this is persisted per
+    /// sandbox (`PersistedSandbox.memoryBalloon`) and a VM slept by an older build restores without.
+    let memoryBalloon: Bool
 
     func configureVZ(_ config: inout VZVirtualMachineConfiguration, allocator: any AddressAllocator<Character>,
                      storageDeviceCount: Int, mountsByID: [String: [Containerization.Mount]]) throws {
@@ -65,6 +69,16 @@ struct PinnedIdentity: VZInstanceExtension {
         if let macAddress, let mac = VZMACAddress(string: macAddress) {
             for device in config.networkDevices { device.macAddress = mac }
         }
+        if memoryBalloon { config.memoryBalloonDevices = [VZVirtioTraditionalMemoryBalloonDeviceConfiguration()] }
+    }
+}
+
+/// The VM's balloon target (bytes): read, or set and read back. nil without a balloon device.
+func balloonTarget(_ h: VMHandle, set bytes: UInt64? = nil) -> UInt64? {
+    h.queue.sync {
+        guard let b = h.vm.memoryBalloonDevices.first as? VZVirtioTraditionalMemoryBalloonDevice else { return nil }
+        if let bytes { b.targetVirtualMachineMemorySize = bytes }
+        return b.targetVirtualMachineMemorySize
     }
 }
 

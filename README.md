@@ -79,6 +79,22 @@ kept read-only in the store, keyed by recipe + kernel + deckhold. A sandbox with
 APFS-clones it as its root and gets a per-sandbox **state disk** for the agent's login/state (it
 survives Stop, Reset to image and re-bakes). Credentials go to `openSession(environment:)` only.
 
+**Memory (583): a woken sandbox gives back what it does not use.** The Mac charges a VM for every
+guest page it has ever touched, and restoring a snapshot touches them all: woken from Deep Sleep, a
+1 GiB Lab held **1,273 MiB** (cold-booted: 213) and a 2 GiB claude-code **2,340 MiB** (cold: 645).
+Every VM now has a virtio memory balloon, and `wake()` inflates it over the guest's free pages,
+leaving the guest `defaultFreeReserveMiB` free (¼ of the allocation, ≥ 256 MiB): woken, the Lab holds
+**~585 MiB** and claude-code **~1,310 MiB** (−54% / −44%), for **+25–40 ms** of wake. The balloon
+stays inflated (deflating would charge the pages again); the guest's page cache and processes are
+untouched, and a guest that needs more still gets it (VZ deflates on guest OOM — a 512 MiB
+allocation above the reserve took ~0.35–0.5 s instead of ~0.12 s). `returnFreeMemory(keepingFreeMiB:)`
+does it on demand (e.g. after heavy work: −130–160 MiB after a 300 MiB turn), `restoreGuestMemory()`
+gives the guest everything back, `setReturnsFreeMemoryOnWake(false)` turns the wake's off, and
+`memoryReturnedMiB` reads it. Sleep and Deep Sleep deflate first (+~80–150 ms): a snapshot of an
+inflated balloon does not restore. A sandbox deep-slept by an older build wakes without a balloon
+(`PersistedSandbox.memoryBalloon`) and gets one at its next cold boot. Measured by
+`probes/583-*/wake-memory` in the workspace; `hardening memory` is the regression test.
+
 **Restore points** (disk only, no memory): `takeRestorePoint` (an APFS clone of the root + state
 disks — instant; from a running VM: sync → pause → clone → resume, marked for `e2fsck` on the next
 boot, since the ext4 has no journal), `revert(to:)` (takes a "before revert" point first),

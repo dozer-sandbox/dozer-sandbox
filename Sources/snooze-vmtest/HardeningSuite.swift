@@ -281,14 +281,149 @@ func concurrentSuite() async throws {
     for sb in sbs { try? await sb.shutDown(); try? await sb.delete() }
 }
 
+// MARK: wake memory (item 4)
+
+/// The VM helper serving sandbox `name`: a com.apple.Virtualization.VirtualMachine process with its
+/// `sandboxes/<name>/rootfs.ext4` open (the 582 method).
+func vmHelper(of name: String) -> pid_t? {
+    let n = proc_listallpids(nil, 0)
+    var pids = [pid_t](repeating: 0, count: Int(n) + 256)
+    let m = Int(proc_listallpids(&pids, Int32(pids.count * MemoryLayout<pid_t>.size)))
+    for p in pids.prefix(max(m, 0)) {
+        var b = [CChar](repeating: 0, count: 4096)
+        guard proc_pidpath(p, &b, 4096) > 0, String(cString: b).hasSuffix("com.apple.Virtualization.VirtualMachine") else { continue }
+        let size = proc_pidinfo(p, PROC_PIDLISTFDS, 0, nil, 0)
+        guard size > 0 else { continue }
+        var fds = [proc_fdinfo](repeating: proc_fdinfo(), count: Int(size) / MemoryLayout<proc_fdinfo>.stride + 16)
+        let k = Int(proc_pidinfo(p, PROC_PIDLISTFDS, 0, &fds, Int32(fds.count * MemoryLayout<proc_fdinfo>.stride))) / MemoryLayout<proc_fdinfo>.stride
+        for fd in fds.prefix(k) where fd.proc_fdtype == UInt32(PROX_FDTYPE_VNODE) {
+            var vi = vnode_fdinfowithpath()
+            let sz = Int32(MemoryLayout<vnode_fdinfowithpath>.size)
+            guard proc_pidfdinfo(p, fd.proc_fd, PROC_PIDFDVNODEPATHINFO, &vi, sz) == sz else { continue }
+            let path = withUnsafeBytes(of: &vi) { raw in
+                let off = MemoryLayout<vnode_fdinfowithpath>.size - 1024
+                return String(decoding: raw[off..<(off + 1024)].prefix(while: { $0 != 0 }), as: UTF8.self)
+            }
+            if path.hasSuffix("/sandboxes/\(name)/rootfs.ext4") { return p }
+        }
+    }
+    return nil
+}
+
+func memorySuite() async throws {
+    print("vmtest[hardening]: a woken sandbox gives its untouched RAM back (memory balloon)")
+    var spec = try hardenSpec("harden-mem", memoryMiB: 1024)
+    spec.network = .none
+    let sb = try await freshSandbox(spec)
+    try await sb.start()
+    try await sb.openSession("tick", argv: ["bash", "/work/tick.sh"], size: .standard)
+    func footprint() async -> Double {
+        try? await Task.sleep(for: .seconds(4))
+        return vmHelper(of: spec.name).map { hostFootprintMiB($0) } ?? -1
+    }
+    let cold = await footprint()
+    try await sb.deepSleep()
+    await sb.setReturnsFreeMemoryOnWake(false)
+    try await sb.wake()
+    let plain = await footprint()
+    try await sb.deepSleep()
+    await sb.setReturnsFreeMemoryOnWake(true)
+    let t0 = Date()
+    try await sb.wake()
+    let wakeMs = Date().timeIntervalSince(t0) * 1000
+    let held = await sb.memoryReturnedMiB
+    let ballooned = await footprint()
+    info(String(format: "helper footprint: cold-booted %.0f MiB · woken without the balloon %.0f · woken %.0f (%llu MiB held; wake %.0f ms)",
+                cold, plain, ballooned, held, wakeMs))
+    check(plain > 1000, String(format: "woken without the balloon the VM holds its allocation (%.0f MiB)", plain))
+    check(held > 500 && ballooned < plain * 0.6, String(format: "woken, it gives %llu MiB back: %.0f → %.0f MiB", held, plain, ballooned))
+    // Every snapshot path deflates first — from running (Sleep, Deep Sleep) and from Pause.
+    try await sb.pause()
+    try await sb.sleep()
+    try await sb.wake()
+    try await sb.deepSleep()
+    try await sb.wake()
+    let s = try await sb.sessions().first { $0.name == "tick" }
+    check(await sb.phase == .running && s?.isEnded == false, "Pause → Sleep → Wake → Deep Sleep → Wake with the balloon held: running, session alive")
+    try await sb.restoreGuestMemory()
+    check(await sb.memoryReturnedMiB == 0, "restoreGuestMemory gives the guest its whole allocation back")
+    let r = try await sb.returnFreeMemory()
+    check((r?.heldMiB ?? 0) > 500, "returnFreeMemory on demand: \(r?.heldMiB ?? 0) MiB held (\(Int(r?.milliseconds ?? -1)) ms)")
+    try await sb.shutDown()
+    try? await sb.delete()
+}
+
+// MARK: automatic subnets (item 6)
+
+func subnetSuite() async throws {
+    print("vmtest[hardening]: automatic vmnet subnets")
+    func natSpec(_ name: String, subnet: String?) throws -> SandboxSpec {
+        var s = try hardenSpec(name, memoryMiB: 256)
+        s.subnet = subnet
+        return s
+    }
+    let a = try await freshSandbox(try natSpec("harden-net-a", subnet: nil))
+    let b = try await freshSandbox(try natSpec("harden-net-b", subnet: nil))
+    let c = try await freshSandbox(try natSpec("harden-net-c", subnet: testSubnet))
+    var subnets: [String] = []
+    for sb in [a, b, c] {
+        try await sb.start()
+        let s = PersistedSandbox.read(from: sb.layout.persistedState)?.subnet ?? "?"
+        subnets.append(s)
+        let r = try await sb.exec(["sh", "-c", "ip -4 addr show eth0 | awk '/inet/{print $2}'; for n in 1 2 3; do wget -q -T 4 -O /dev/null http://1.1.1.1 && { echo NET-OK; exit 0; }; sleep 1; done; echo NET-FAIL"],
+                                  timeoutSeconds: 40)
+        info("\(sb.spec.name): subnet \(s) · guest \(r.output.replacingOccurrences(of: "\n", with: " "))")
+        check(r.output.contains("NET-OK"), "\(sb.spec.name) reaches the internet through NAT on \(s)")
+    }
+    let pool = (100...199).map { "192.168.\($0).0/24" }
+    check(pool.contains(subnets[0]) && pool.contains(subnets[1]), "no subnet asked for → one from the pool (\(subnets[0]), \(subnets[1]))")
+    check(subnets[0] != subnets[1], "two sandboxes in one process get different subnets")
+    check(subnets[2] == testSubnet, "an explicit SandboxSpec.subnet stays an override (\(subnets[2]))")
+    // Deep Sleep → Wake keeps the subnet (a restore needs its guest's addresses).
+    try await a.deepSleep()
+    try await a.wake()
+    let after = PersistedSandbox.read(from: a.layout.persistedState)?.subnet
+    check(after == subnets[0], "a wake keeps the automatic subnet (\(after ?? "?"))")
+    for sb in [a, b, c] { try? await sb.shutDown(); try? await sb.delete() }
+}
+
+// MARK: quit settle (item 5)
+
+func settleSuite() async throws {
+    print("vmtest[hardening]: prepareForExit lets a just-started program settle")
+    let sb = try await freshSandbox(try hardenSpec("harden-settle", memoryMiB: 256))
+    try await sb.start()
+    try await sb.openSession("tick", argv: ["bash", "/work/tick.sh"], size: .standard)
+    let t0 = Date()
+    await sb.prepareForExit()
+    let waited = Date().timeIntervalSince(t0)
+    check(await sb.phase == .deepAsleep && waited >= 2.3, String(format: "a session opened just now: the quit waited %.1f s, then deep-slept", waited))
+    try await sb.wake()
+    let s = try await sb.sessions().first { $0.name == "tick" }
+    check(s != nil && s?.isEnded == false, "the program is alive after the wake")
+    try? await Task.sleep(for: .seconds(3))
+    let t1 = Date()
+    await sb.prepareForExit()
+    let waited2 = Date().timeIntervalSince(t1)
+    check(waited2 < 2.0, String(format: "a session older than the settle time: no wait (quit took %.1f s)", waited2))
+    try await sb.shutDown()
+    try? await sb.delete()
+}
+
 func hardeningSuite(_ part: String?) async throws {
     switch part {
     case "discard": try await discardSuite()
     case "leak": try await leakSuite()
     case "concurrent": try await concurrentSuite()
+    case "subnets": try await subnetSuite()
+    case "settle": try await settleSuite()
+    case "memory": try await memorySuite()
     default:
         try await discardSuite()
         try await leakSuite()
         try await concurrentSuite()
+        try await memorySuite()
+        try await settleSuite()
+        try await subnetSuite()
     }
 }

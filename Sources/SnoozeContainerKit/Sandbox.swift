@@ -178,7 +178,7 @@ public actor Sandbox {
                 }
             }
             setPhase(.running)
-            for step in [LifecycleStep.resyncClock, .remountShares, .deleteSnapshot, .persistState] {
+            for step in [LifecycleStep.resyncClock, .remountShares, .deleteSnapshot, .returnFreeMemory, .persistState] {
                 try await run(step, target: .running)
             }
             note(String(format: "restored after a crash in %.2f s — sessions are where they were", seconds(since: t0)))
@@ -454,6 +454,121 @@ public actor Sandbox {
         }
     }
 
+    // MARK: memory (583)
+
+    /// Whether every wake from Deep Sleep ends with `returnFreeMemory()` (default: true).
+    public private(set) var returnsFreeMemoryOnWake = true
+
+    public func setReturnsFreeMemoryOnWake(_ on: Bool) { returnsFreeMemoryOnWake = on }
+
+    /// Guest RAM the balloon holds right now (handed back to the Mac), bytes.
+    private var balloonHeld: UInt64 = 0
+
+    /// Guest RAM, MiB, the balloon currently holds for the Mac (0: the guest has its whole allocation).
+    public var memoryReturnedMiB: UInt64 { balloonHeld / 1_048_576 }
+
+    /// The free guest RAM `returnFreeMemory()` leaves the guest by default: a quarter of the
+    /// allocation, at least 256 MiB.
+    public nonisolated var defaultFreeReserveMiB: UInt64 { max(256, spec.memoryMiB / 4) }
+
+    /// Hand the Mac back guest RAM the guest is not using: inflate the VM's memory balloon over the
+    /// guest's free pages, leaving it `keepingFreeMiB` free (default `defaultFreeReserveMiB`). The
+    /// page cache and every process are untouched.
+    ///
+    /// Why: the Mac charges a VM for every guest page it has EVER touched. After a wake from Deep
+    /// Sleep that is the whole allocation (restoring a snapshot faults every page in — 582: a 1 GiB
+    /// Lab held 1,273 MiB woken vs 215 MiB cold-booted), and after work it is the high-water mark.
+    /// Ballooned pages leave the VM's footprint at once and are the first the Mac takes back.
+    ///
+    /// The balloon STAYS inflated — deflating it would charge the pages to the VM again. The guest
+    /// still has its whole allocation in an emergency (VZ's balloon deflates on guest OOM, slowly), and
+    /// gets it back at once with `restoreGuestMemory()`. Sleep and Deep Sleep deflate it first (a
+    /// snapshot of an inflated balloon does not restore). `wake()` calls this by itself
+    /// (`setReturnsFreeMemoryOnWake`). nil when the sandbox is not running or its VM has no balloon
+    /// (one deep-slept by a build before 583, until its next cold boot).
+    @discardableResult
+    public func returnFreeMemory(keepingFreeMiB: UInt64? = nil) async throws -> MemoryReturn? {
+        await acquire(); defer { release() }
+        return try await returnFreeMemoryLocked(keepingFreeMiB: keepingFreeMiB)
+    }
+
+    /// Deflate the balloon: the guest has its whole allocation again (and the Mac is charged for it).
+    public func restoreGuestMemory() async throws {
+        await acquire(); defer { release() }
+        guard phase == .running else { return }
+        try await deflateBalloon()
+    }
+
+    /// `wait: false` (the wake): set the balloon's target and return — the guest fills it in the
+    /// next ~100 ms on its own, so the wake does not wait; the result reports what was asked for.
+    private func returnFreeMemoryLocked(keepingFreeMiB: UInt64? = nil, wait: Bool = true) async throws -> MemoryReturn? {
+        guard phase == .running, let handle, let current = balloonTarget(handle) else { return nil }
+        let full = current + balloonHeld
+        let t0 = ContinuousClock.now
+        let reserve = (keepingFreeMiB ?? defaultFreeReserveMiB) * 1024
+        let m = try await guestMeminfo()
+        let free0 = m["MemFree"] ?? 0, before = m["Balloon"] ?? 0
+        guard free0 > reserve + 16 * 1024 else {
+            return MemoryReturn(returnedMiB: 0, heldMiB: before / 1024, guestFreeMiB: free0 / 1024, milliseconds: milliseconds(since: t0))
+        }
+        let more = ((free0 - reserve) * 1024) & ~UInt64(1_048_575)
+        let floor = (full / 8) & ~UInt64(1_048_575)          // never ask for more than 7/8 of the VM
+        let target = current > more + floor ? current - more : floor
+        guard target < current else {
+            return MemoryReturn(returnedMiB: 0, heldMiB: before / 1024, guestFreeMiB: free0 / 1024, milliseconds: milliseconds(since: t0))
+        }
+        _ = balloonTarget(handle, set: target)
+        balloonHeld = full - target
+        guard wait else {
+            return MemoryReturn(returnedMiB: (current - target) / 1_048_576, heldMiB: balloonHeld / 1_048_576, guestFreeMiB: free0 / 1024,
+                                milliseconds: milliseconds(since: t0))
+        }
+        // The guest fills the balloon at its own pace; its /proc/meminfo `Balloon:` line says how far.
+        let now = try await waitForBalloon(kiB: balloonHeld / 1024)
+        return MemoryReturn(returnedMiB: (now - min(before, now)) / 1024, heldMiB: now / 1024, guestFreeMiB: free0 / 1024,
+                            milliseconds: milliseconds(since: t0))
+    }
+
+    /// Deflate the balloon completely (the VM must be running) and wait for the guest to take it back.
+    private func deflateBalloon() async throws {
+        guard balloonHeld > 0, let handle else { balloonHeld = 0; return }
+        let t0 = ContinuousClock.now
+        let held = try await guestBalloonKiB()
+        if let current = balloonTarget(handle) { _ = balloonTarget(handle, set: current + balloonHeld) }
+        balloonHeld = 0
+        _ = try await waitForBalloon(kiB: 0)
+        broadcaster.yield(.step("gave the guest back \(held / 1024) MiB (memory balloon deflated)", milliseconds: milliseconds(since: t0)))
+    }
+
+    /// Poll the guest's balloon (kB) until it is within 2% of `kiB`, stops moving, or 5 s pass.
+    private func waitForBalloon(kiB goal: UInt64) async throws -> UInt64 {
+        var b: UInt64 = 0, last: UInt64 = .max, still = 0
+        let tolerance = max(goal / 50, 4 * 1024)
+        let deadline = ContinuousClock.now + .seconds(5)
+        while ContinuousClock.now < deadline {
+            b = try await guestBalloonKiB()
+            if b + tolerance >= goal && b <= goal + tolerance { break }
+            if b == last { still += 1; if still >= 10 { break } } else { still = 0 }
+            last = b
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        return b
+    }
+
+    /// What the guest's balloon holds right now, kB (/proc/meminfo `Balloon:`).
+    private func guestBalloonKiB() async throws -> UInt64 { try await guestMeminfo()["Balloon"] ?? 0 }
+
+    /// The guest's /proc/meminfo, kB.
+    private func guestMeminfo() async throws -> [String: UInt64] {
+        let r = try await execInContainer(["cat", "/proc/meminfo"], timeout: 10)
+        var m: [String: UInt64] = [:]
+        for line in r.output.split(separator: "\n") {
+            let p = line.split(whereSeparator: { $0 == ":" || $0 == " " })
+            if p.count >= 2, let v = UInt64(p[1]) { m[String(p[0])] = v }
+        }
+        return m
+    }
+
     /// This sandbox has a root disk that the next `start()` will boot (rather than a fresh clone).
     public nonisolated var hasRootDisk: Bool { FileManager.default.fileExists(atPath: layout.rootfs.path) }
 
@@ -531,8 +646,18 @@ public actor Sandbox {
             guard let instance else { throw SandboxError.vmUnavailable }
             try await timed("resumed the VM") { try await instance.resume() }
             setPhase(.running)
+        case .restoreGuestMemory:
+            if balloonHeld > 0 { try await deflateBalloon() }
         case .saveSnapshot:
             guard let handle else { throw SandboxError.vmUnavailable }
+            if balloonHeld > 0, let instance {
+                // A snapshot taken with the balloon inflated does not restore ("invalid argument"):
+                // let the guest take it back first. (Sleep from Pause lands here; from running,
+                // `.restoreGuestMemory` already did it before the pause.)
+                try await instance.resume()
+                try await deflateBalloon()
+                try await instance.pause()
+            }
             try? FileManager.default.removeItem(at: layout.snapshot)
             try await timed("saved VM state to disk") { try await vz(handle, .save(layout.snapshot)) }
             snapshotBytes = fileSize(layout.snapshot)
@@ -580,6 +705,7 @@ public actor Sandbox {
             }
         case .restoreSnapshot:
             guard let handle else { throw SandboxError.vmUnavailable }
+            balloonHeld = 0                             // snapshots are only ever taken deflated
             try await timed("restored VM state from disk") { try await vz(handle, .restore(layout.snapshot)) }
             try await timed("resumed") { try await vz(handle, .resume) }
             setPhase(.running)
@@ -613,6 +739,16 @@ public actor Sandbox {
                 note("deleted the snapshot (it is valid only while the VM is paused)")
             }
             snapshotBytes = 0
+        case .returnFreeMemory:
+            guard returnsFreeMemoryOnWake else { return }
+            do {
+                if let r = try await returnFreeMemoryLocked(wait: false) {
+                    broadcaster.yield(.step(String(format: "returning %llu MiB of untouched guest RAM to the Mac (memory balloon; the guest had %llu MiB free, keeps %llu)",
+                                                   r.heldMiB, r.guestFreeMiB, defaultFreeReserveMiB), milliseconds: r.milliseconds))
+                }
+            } catch {
+                note("could not return free guest RAM (\(error.localizedDescription)) — the wake is unaffected")
+            }
         case .releaseRuntime:
             // Release the address, but KEEP the vmnet network for the next Start: creating a new one
         // per boot left the guest without a route out after a handful of Starts in one process.
@@ -632,7 +768,7 @@ public actor Sandbox {
                 if unclean, FileManager.default.fileExists(atPath: layout.rootfs.path) { p.fsckOnNextBoot = true }
                 try? p.write(to: layout.persistedState)
             }
-            container = nil; instance = nil; handle = nil; identity = nil; cleanlyStopped = false
+            container = nil; instance = nil; handle = nil; identity = nil; cleanlyStopped = false; balloonHeld = 0
             egress?.stopListening()
             egress?.vault.revokeAll()
         case .removeRootDisk:
@@ -739,6 +875,8 @@ public actor Sandbox {
             identity.rootImage = wantedRoot
             if custom?.needsFsck == true { identity.fsckOnNextBoot = true }
         }
+        // A cold boot builds a new VM, with a memory balloon; a restore keeps what the snapshot had.
+        if persisted == nil { identity.memoryBalloon = true }
         // The state disk outlives root disks (Stop, Reset to image, a re-bake); only Delete removes it.
         if spec.recipe != nil, !fm.fileExists(atPath: layout.stateDisk.path) {
             try await timed("created the empty state disk (\(spec.stateDiskMiB) MiB, sparse)") {
@@ -785,7 +923,8 @@ public actor Sandbox {
         let initfs = Containerization.Mount.block(format: "ext4", source: layout.initfs.path, destination: "/", options: ["ro"])
         let vmm = SnoozeVMM(
             inner: VZVirtualMachineManager(kernel: kernel, initialFilesystem: initfs, group: SharedEventLoop.group),
-            identity: PinnedIdentity(machineIdentifier: identity.machineIdentifier, macAddress: identity.macAddress),
+            identity: PinnedIdentity(machineIdentifier: identity.machineIdentifier, macAddress: identity.macAddress,
+                                     memoryBalloon: identity.memoryBalloon == true),
             adopt: persisted != nil ? (snapshot: layout.snapshot, flag: flag, containerID: spec.name) : nil)
         let spec = self.spec
         let bootLog = layout.bootLog
@@ -836,6 +975,7 @@ public actor Sandbox {
         }
         instance = inst
         handle = h
+        balloonHeld = 0
         try listenForEgress()
         if persisted == nil {
             if let v = vzInstance(of: inst) {
