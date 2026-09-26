@@ -186,6 +186,24 @@ final class PersistedSandboxTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: layout.rootfs.path), "discarding the snapshot keeps the root disk")
         XCTAssertEqual(PersistedSandbox.read(from: layout.persistedState)?.phase, .off)
         XCTAssertNotNil(Sandbox.keptRootDisk(layout), "the next Start cold-boots the kept disk")
+        XCTAssertEqual(PersistedSandbox.read(from: layout.persistedState)?.fsckOnNextBoot, true,
+                       "583: the deep-slept VM never unmounted the disk — the cold boot runs e2fsck first")
+    }
+
+    /// 583 (582 §8: 12 of 15 cold boots of a discarded snapshot's disk failed): a kept disk is
+    /// checked unless the last VM that ran it was shut down through the package.
+    func test_keptDiskNeedsFsckUnlessCleanlyShutDown() {
+        let spec = SandboxSpec(name: "lab", storeRoot: dir)
+        var p = PersistedSandbox(spec: spec, phase: .off, machineIdentifier: Data([1]), macAddress: nil, subnet: nil, shareTags: [:])
+        XCTAssertFalse(Sandbox.keptDiskNeedsFsck(p, snapshotPresent: false), "a clean Shut Down")
+        XCTAssertTrue(Sandbox.keptDiskNeedsFsck(p, snapshotPresent: true), "a snapshot beside the disk: it was asleep, never unmounted")
+        for phase in [Phase.running, .paused, .asleep, .deepAsleep, .booting, .failed] {
+            p.phase = phase
+            XCTAssertTrue(Sandbox.keptDiskNeedsFsck(p, snapshotPresent: false), "last durable phase \(phase)")
+        }
+        p.phase = .off
+        p.fsckOnNextBoot = true
+        XCTAssertTrue(Sandbox.keptDiskNeedsFsck(p, snapshotPresent: false), "an explicit mark")
     }
 
     func test_randomMACIsLocallyAdministeredUnicast() {

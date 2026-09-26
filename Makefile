@@ -36,7 +36,7 @@ DECKHOLD_RES := Sources/SnoozeContainerKit/Resources/deckhold
 SNOOZENET_OUT := Guest/snoozenet/out/snoozenet
 SNOOZENET_RES := Sources/SnoozeContainerKit/Resources/snoozenet
 
-.PHONY: help build test audit test-vm test-vm-agents test-vm-network vmtest-host kernel deckhold deckhold-verify snoozenet snoozenet-verify
+.PHONY: help build test audit test-vm test-vm-agents test-vm-network test-vm-hardening vmtest-host kernel deckhold deckhold-verify snoozenet snoozenet-verify
 
 help: ## Show this help
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) | sed 's/:.*## /\t/' | expand -t 22
@@ -59,6 +59,9 @@ test-vm-agents: vmtest-host ## 579 agent images: bake claude-code + pi (cold: mi
 
 test-vm-network: vmtest-host ## 580 proxied network: no NIC, policy, DNS, UDP, credentials, CA, bake preset, sleep → wake (network, claude-code image)
 	perl -e 'alarm shift; exec @ARGV' 1800 $(VMTEST_BIN) network --store "$(VMTEST_STORE)"
+
+test-vm-hardening: vmtest-host ## 583 regression tests: discard → cold boot (e2fsck), 200 Deep Sleep cycles with flat threads/fds/footprint, 16 concurrent wakes (HARDENING=discard|leak|concurrent for one)
+	perl -e 'alarm shift; exec @ARGV' 2400 $(VMTEST_BIN) hardening $(HARDENING) --store "$(VMTEST_STORE)"
 
 kernel: vmtest-host ## Fetch + verify the pinned Linux kernel into the cache (KERNEL_CACHE=dir; no VM)
 	perl -e 'alarm shift; exec @ARGV' 900 $(VMTEST_BIN) kernel --store "$(VMTEST_STORE)"

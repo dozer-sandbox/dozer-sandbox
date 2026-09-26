@@ -99,6 +99,12 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   VM is crash-consistent at best — the ext4 disks have no journal — so it is marked `needsFsck` and
   the next boot from it runs e2fsck first (`FsckHelper`). e2fsck runs on the image FILE over virtio-fs:
   a container's device cgroup refuses a raw block node even to a privileged exec.
+- **A kept disk that was not cleanly unmounted is e2fsck'd before it cold-boots** (583). Deep Sleep
+  stops the VM at the VZ level, so a discarded snapshot (`discardRestorableState`), a failed restore,
+  a crash while running or a VZ-level stop fallback leaves a disk that was never unmounted — and the
+  ext4 has no journal (582: 12 of 15 such cold boots failed with `EXT4-fs error … doubly allocated`).
+  `keptDiskNeedsFsck` decides (last durable phase ≠ off, a snapshot beside the disk, or the mark);
+  `hardening discard` is the regression test.
 - **Metadata dates have fractional seconds** (`ImageBaker.encoder`): restore points taken within one
   second must sort in the order they were taken.
 - **A proxied VM has NO NIC; the host proxy is the only way out** (580). The guest shim decides

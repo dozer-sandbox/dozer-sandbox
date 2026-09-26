@@ -13,6 +13,8 @@
 //          network        580: a proxied sandbox (no NIC) on the claude-code image — policy, DNS, redirected
 //                         TCP, UDP blocked, placeholder credentials + the sandbox CA, method/path rules,
 //                         sleep to disk → wake, Stop → Start, the log's export; then a bake under the bake preset
+//          hardening [discard|leak|concurrent]
+//                         583: the regression tests for the 582 hazards (HardeningSuite.swift)
 //          kernel         only resolve the pinned kernel (fetch + verify into the cache; no VM,
 //                         no entitlement needed) — `make kernel`, and CI's first step.
 //                         --no-seed skips copying a byte-identical local kernel, forcing the
@@ -814,6 +816,8 @@ Task {
             print("vmtest: ALL PASS"); exit(0)
         case "restore":
             try await restorePointSuite()
+        case "hardening":
+            try await hardeningSuite(args.dropFirst().first { !$0.hasPrefix("-") && !$0.hasPrefix("/") })
         case "network":
             try await networkSuite()
         case "net-crash-save":

@@ -66,7 +66,10 @@ Lifecycle: `start` · `pause` / `resume` · `sleep` (pause + snapshot) · `sleep
 · `stop` · `restoreAfterCrash` · `prepareForExit` (keep a sleeping sandbox restorable, stop anything
 else) · `resetToImage` · `delete`. **Stop keeps the root disk**: the next Start cold-boots the same
 disk (what you installed is still there); Reset to image starts again from a fresh clone of the
-prepared disk; Delete removes everything the sandbox has on disk. Guest: `exec(argv)` (no shell unless you pass one), `sessions()` (`deckhold ls`),
+prepared disk; Delete removes everything the sandbox has on disk. A disk that was not cleanly
+unmounted — `Sandbox.discardRestorableState(for:)` (a deep-slept VM is stopped without unmounting it),
+a failed restore, a crash while running — is checked with `e2fsck` before its next cold boot (583;
+the ext4 has no journal, and booting such a disk as it is corrupted it in 12 of 15 tries in 582). Guest: `exec(argv)` (no shell unless you pass one), `sessions()` (`deckhold ls`),
 `screenText(name)` (`deckhold dump`), `bootConsole()`.
 
 **Images** (`ImageRecipe`, `ImageBaker`, `AgentRecipes.claudeCode` / `.pi`): no layered images and

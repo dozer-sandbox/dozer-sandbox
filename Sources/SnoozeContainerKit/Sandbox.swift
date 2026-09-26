@@ -106,16 +106,28 @@ public actor Sandbox {
     }
 
     /// Throw away the snapshot a previous process left instead of restoring it (as a Stop
-    /// would): the root disk is kept and the next Start cold-boots it. Only for a sandbox no
-    /// process is running.
+    /// would): the root disk is kept and the next Start cold-boots it — after e2fsck, because the
+    /// VM that slept was stopped without unmounting it. Only for a sandbox no process is running.
     public nonisolated static func discardRestorableState(for spec: SandboxSpec) {
         // Stop semantics: the snapshot goes; the root disk stays and the next Start cold-boots it.
+        // 583: the disk was never unmounted (Deep Sleep stops the VM at the VZ level) and ext4 here
+        // has no journal, so booting it as it is corrupts it (582: 12 of 15 boots failed) — mark
+        // it (and the state disk) for e2fsck on that boot.
         let layout = StoreLayout(spec: spec)
         try? FileManager.default.removeItem(at: layout.snapshot)
         if var p = PersistedSandbox.read(from: layout.persistedState) {
             p.phase = .off
+            if FileManager.default.fileExists(atPath: layout.rootfs.path) { p.fsckOnNextBoot = true }
             try? p.write(to: layout.persistedState)
         }
+    }
+
+    /// A kept root disk needs e2fsck before it boots unless the last VM that ran it was shut down
+    /// through the package (which unmounts it). A record whose last durable phase is not `off`
+    /// (a crash while running, a snapshot discarded or a restore that failed), a snapshot lying
+    /// beside the disk, or an explicit mark all mean it was not.
+    static func keptDiskNeedsFsck(_ kept: PersistedSandbox, snapshotPresent: Bool) -> Bool {
+        kept.fsckOnNextBoot == true || kept.phase != .off || snapshotPresent
     }
 
     // MARK: lifecycle
@@ -584,9 +596,13 @@ public actor Sandbox {
                 // LinuxContainer.stop() is kept for the life of the process instead.
                 Graveyard.keep(container, instance)
             }
-            if var p = identity {
+            // 583: a VM that was not stopped through the package (the VZ-level fallback, a boot or
+            // restore abandoned part-way) never unmounted its disks: e2fsck them on the next boot.
+            let unclean = !cleanlyStopped && container != nil
+            if var p = identity ?? (unclean ? PersistedSandbox.read(from: layout.persistedState) : nil) {
                 p.phase = .off
                 p.savedAt = Date()
+                if unclean, FileManager.default.fileExists(atPath: layout.rootfs.path) { p.fsckOnNextBoot = true }
                 try? p.write(to: layout.persistedState)
             }
             container = nil; instance = nil; handle = nil; identity = nil; cleanlyStopped = false
@@ -648,6 +664,7 @@ public actor Sandbox {
             // Stop kept this root disk: cold-boot it. Its snapshot, if one is lying around (a
             // crash while asleep, then Start instead of Restore), no longer matches a disk that
             // is about to move on — delete it, never restore it later.
+            let dirty = Self.keptDiskNeedsFsck(kept, snapshotPresent: fm.fileExists(atPath: layout.snapshot.path))
             try? fm.removeItem(at: layout.snapshot)
             try? fm.removeItem(at: layout.bootLog)
             if let from = kept.rootImage, from != wantedRoot {
@@ -663,7 +680,7 @@ public actor Sandbox {
                                         subnet: nil, shareTags: [:])
             identity.rootImage = kept.rootImage
             identity.restorePoint = kept.restorePoint
-            identity.fsckOnNextBoot = kept.fsckOnNextBoot
+            identity.fsckOnNextBoot = dirty ? true : nil
         } else {
             let golden: URL
             if let custom {
@@ -704,11 +721,12 @@ public actor Sandbox {
         }
 
         if persisted == nil, identity.fsckOnNextBoot == true {
-            // This disk is a copy taken while its VM ran, and ext4 here has no journal.
+            // This disk was not cleanly unmounted (a copy taken while its VM ran, a discarded
+            // snapshot, a crash), and ext4 here has no journal.
             let helper = FsckHelper(storeRoot: spec.storeRoot, kernel: kernel, initfsReference: spec.initfsReference,
                                     dnsServers: spec.dnsServers, events: { [broadcaster] in broadcaster.yield($0) })
             for disk in [layout.rootfs, layout.stateDisk] where fm.fileExists(atPath: disk.path) {
-                let report = try await timed("e2fsck \(disk.lastPathComponent) (copied from a running VM; ext4 without a journal)") {
+                let report = try await timed("e2fsck \(disk.lastPathComponent) (not cleanly unmounted; ext4 without a journal)") {
                     try await helper.check(disk)
                 }
                 note("fsck \(disk.lastPathComponent): " + (report.split(separator: "\n").suffix(2).joined(separator: " · ")))
