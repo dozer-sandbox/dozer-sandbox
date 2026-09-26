@@ -60,5 +60,83 @@ final class DiskTests: XCTestCase {
         XCTAssertGreaterThan(freeBytes, 200 << 20)
         XCTAssertEqual(i.usedBytes + freeBytes, i.capacityBytes)
         for k in 1..<free.count { XCTAssertLessThan(free[k - 1].0 + free[k - 1].1, free[k].0, "sorted, merged, disjoint") }
+        // Punch every free range out of a copy: the in-use blocks read exactly as before.
+        let copy = dir.appendingPathComponent("copy.ext4")
+        XCTAssertEqual(copyfile(disk.path, copy.path, nil, copyfile_flags_t(COPYFILE_DATA)), 0)
+        try DiskAccounting.punchHoles(copy, free)
+        XCTAssertTrue(try DiskAccounting.identical(disk, copy, over: DiskAccounting.complement(free, size: i.capacityBytes)))
+        XCTAssertEqual(try DiskAccounting.garbage(of: copy), 0)
+    }
+
+    /// Clones share, writes un-share, and the sweep agrees with APFS's private size — the 586 Q5
+    /// method, on the test host's volume.
+    func test_accountingMatchesAPFS() throws {
+        let a = dir.appendingPathComponent("a.bin"), b = dir.appendingPathComponent("b.bin")
+        try Self.random(8 << 20).write(to: a)
+        XCTAssertEqual(clonefile(a.path, b.path, 0), 0)
+        var v = try DiskAccounting.share([a, b])
+        XCTAssertEqual(v.unique, [0, 0])
+        XCTAssertEqual(v.shared(0, 1), 8 << 20)
+        let h = try FileHandle(forWritingTo: b)
+        try h.seek(toOffset: 1 << 20)
+        try h.write(contentsOf: Self.random(2 << 20))
+        try h.synchronize()
+        try h.close()
+        v = try DiskAccounting.share([a, b])
+        XCTAssertEqual(v.unique[1], 2 << 20)
+        XCTAssertEqual(v.unique[0], 2 << 20, "the source's rewritten-in-the-clone blocks are now its own")
+        XCTAssertEqual(v.shared(0, 1), 6 << 20)
+        XCTAssertEqual(v.union, 10 << 20)
+        for (i, u) in [a, b].enumerated() {
+            if let p = DiskAccounting.privateSize(u) { XCTAssertEqual(p, v.unique[i], "PRIVATESIZE agrees (\(u.lastPathComponent))") }
+        }
+    }
+
+    /// Blocks a file system freed but whose data is still in the file are garbage; the content
+    /// delta against a parent finds rewritten-but-identical blocks.
+    func test_garbageAndContentDelta() throws {
+        let parent = dir.appendingPathComponent("parent.ext4")
+        try Self.makeDisk(parent, mib: 64, files: ["/keep.bin": Self.random(4 << 20)])
+        let child = dir.appendingPathComponent("child.ext4")
+        XCTAssertEqual(clonefile(parent.path, child.path, 0), 0)
+        let i = try EXT4Inspector(child)
+        let free = try i.freeRanges()
+        // Garbage: write data into 2 MiB of free blocks (as a deleted file leaves it).
+        let g = free.first { $0.1 >= 2 << 20 }!
+        let fh = try FileHandle(forWritingTo: child)
+        try fh.seek(toOffset: UInt64(g.0))
+        try fh.write(contentsOf: Self.random(2 << 20))
+        // Lost identical sharing: rewrite 1 MiB of in-use blocks with the same bytes.
+        let used = DiskAccounting.complement(free, size: i.capacityBytes)
+        let u = used.first { $0.1 >= 1 << 20 && $0.0 > 0 }!
+        let pf = try FileHandle(forReadingFrom: parent)
+        try pf.seek(toOffset: UInt64(u.0))
+        let same = try pf.read(upToCount: 1 << 20)!
+        try fh.seek(toOffset: UInt64(u.0))
+        try fh.write(contentsOf: same)
+        try fh.synchronize()
+        try fh.close()
+        // The formatter itself leaves a little data in free blocks (the parent's own garbage).
+        let expected = DiskAccounting.total(DiskAccounting.merge(try DiskAccounting.garbageRanges(of: parent) + [(g.0, 2 << 20)]))
+        // (APFS may allocate a few neighbouring blocks of the write's allocation unit too.)
+        let got = try DiskAccounting.garbage(of: child)
+        XCTAssertGreaterThanOrEqual(got, expected)
+        XCTAssertLessThanOrEqual(got, expected + (64 << 10))
+        XCTAssertGreaterThanOrEqual(expected, 2 << 20)
+        let delta = DiskAccounting.blockDelta(child: try DiskAccounting.extents(of: child), parent: try DiskAccounting.extents(of: parent))
+        let inUse = DiskAccounting.subtract(delta.differ, free)
+        let c = try DiskAccounting.contentRuns(child: child, parent: parent, ranges: inUse)
+        // APFS un-shares a whole allocation unit around a write, so a few KiB beyond the MiB count too.
+        XCTAssertGreaterThanOrEqual(c.identical, 1 << 20, "1 MiB rewritten with identical bytes")
+        XCTAssertLessThanOrEqual(c.identical, (1 << 20) + (64 << 10))
+        XCTAssertTrue(c.runs.isEmpty)
+    }
+
+    func test_rangeAlgebra() {
+        let a: [(Int64, Int64)] = [(0, 10), (20, 10)], b: [(Int64, Int64)] = [(5, 20)]
+        XCTAssertEqual(DiskAccounting.intersect(a, b).map { [$0.0, $0.1] }, [[5, 5], [20, 5]])
+        XCTAssertEqual(DiskAccounting.subtract(a, b).map { [$0.0, $0.1] }, [[0, 5], [25, 5]])
+        XCTAssertEqual(DiskAccounting.complement(a, size: 40).map { [$0.0, $0.1] }, [[10, 10], [30, 10]])
+        XCTAssertEqual(DiskAccounting.merge([(10, 5), (0, 10), (12, 1)]).map { [$0.0, $0.1] }, [[0, 15]])
     }
 }
