@@ -24,10 +24,10 @@ public actor Sandbox {
     public nonisolated let layout: StoreLayout
 
     public private(set) var phase: Phase = .off
-    private var busy = false
+    var busy = false
     private var snapshotBytes = 0
 
-    private let broadcaster = EventBroadcaster<SandboxEvent>()
+    let broadcaster = EventBroadcaster<SandboxEvent>()
     private var gateHeld = false
     private var gateWaiters: [CheckedContinuation<Void, Never>] = []
 
@@ -1385,11 +1385,11 @@ public actor Sandbox {
 
     // MARK: helpers
 
-    private func acquire() async {
+    func acquire() async {
         if gateHeld { await withCheckedContinuation { gateWaiters.append($0) } } else { gateHeld = true }
     }
 
-    private func release() {
+    func release() {
         if gateWaiters.isEmpty { gateHeld = false } else { gateWaiters.removeFirst().resume() }
     }
 
@@ -1400,16 +1400,16 @@ public actor Sandbox {
         emitStatus()
     }
 
-    private func setBusy(_ b: Bool) {
+    func setBusy(_ b: Bool) {
         busy = b
         emitStatus()
     }
 
     private func emitStatus() { broadcaster.yield(.status(status)) }
 
-    private func note(_ s: String) { broadcaster.yield(.note(s)) }
+    func note(_ s: String) { broadcaster.yield(.note(s)) }
 
-    private func timed<T>(_ label: String, _ body: () async throws -> T) async throws -> T {
+    func timed<T>(_ label: String, _ body: () async throws -> T) async throws -> T {
         let t0 = ContinuousClock.now
         let v = try await body()
         broadcaster.yield(.step(label, milliseconds: milliseconds(since: t0)))

@@ -30,7 +30,11 @@ final class DiskTests: XCTestCase {
         try f.close()
     }
 
-    static func random(_ n: Int) -> Data { Data((0..<n).map { _ in UInt8.random(in: 0...255) }) }
+    static func random(_ n: Int) -> Data {
+        var d = Data(count: n)
+        d.withUnsafeMutableBytes { arc4random_buf($0.baseAddress!, n) }
+        return d
+    }
 
     func test_inspectorReadsJournalAndState() throws {
         let plain = dir.appendingPathComponent("plain.ext4"), journaled = dir.appendingPathComponent("j.ext4")
@@ -130,6 +134,103 @@ final class DiskTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(c.identical, 1 << 20, "1 MiB rewritten with identical bytes")
         XCTAssertLessThanOrEqual(c.identical, (1 << 20) + (64 << 10))
         XCTAssertTrue(c.runs.isEmpty)
+    }
+
+    /// 586's thresholds, at, just below and just above each edge (strict "greater than").
+    func test_adviceThresholds() {
+        let MiB: Int64 = 1 << 20
+        func act(_ alloc: Int64, _ g: Int64, _ lost: Int64?, _ img: Int64?) -> [MaintenanceAction] {
+            MaintenanceAdvice.actions(allocated: alloc, garbage: g, lostSharing: lost, imageBytes: img).actions
+        }
+        // garbage > 25 % of the allocation
+        XCTAssertEqual(act(400 * MiB, 100 * MiB, nil, nil), [], "at 25 %")
+        XCTAssertEqual(act(400 * MiB, 100 * MiB - 1, nil, nil), [], "below 25 %")
+        XCTAssertEqual(act(400 * MiB, 100 * MiB + 1, nil, nil), [.reclaim], "above 25 %")
+        // garbage > 512 MiB (on a disk where that is < 25 %)
+        XCTAssertEqual(act(4096 * MiB, 512 * MiB, nil, nil), [], "at 512 MiB")
+        XCTAssertEqual(act(4096 * MiB, 512 * MiB - 1, nil, nil), [], "below 512 MiB")
+        XCTAssertEqual(act(4096 * MiB, 512 * MiB + 1, nil, nil), [.reclaim], "above 512 MiB")
+        // lost identical sharing > 64 MiB (on an image where that is < 10 %)
+        XCTAssertEqual(act(1, 0, 64 * MiB, 1000 * MiB), [], "at 64 MiB")
+        XCTAssertEqual(act(1, 0, 64 * MiB - 1, 1000 * MiB), [], "below 64 MiB")
+        XCTAssertEqual(act(1, 0, 64 * MiB + 1, 1000 * MiB), [.rederive], "above 64 MiB")
+        // lost identical sharing > 10 % of the image
+        XCTAssertEqual(act(1, 0, 50 * MiB, 500 * MiB), [], "at 10 %")
+        XCTAssertEqual(act(1, 0, 50 * MiB - 1, 500 * MiB), [], "below 10 %")
+        XCTAssertEqual(act(1, 0, 50 * MiB + 1, 500 * MiB), [.rederive], "above 10 %")
+        // both, and neither without an image
+        XCTAssertEqual(act(400 * MiB, 200 * MiB, 100 * MiB, 500 * MiB), [.reclaim, .rederive])
+        XCTAssertEqual(act(400 * MiB, 0, nil, nil), [])
+    }
+
+    /// The same rules through `Sandbox.maintenanceAdvice()`, on synthetic disks: a prepared disk
+    /// with a file on it, and a sandbox root cloned from it, then dirtied on the host.
+    func test_adviceOnSyntheticDisks() async throws {
+        let store = dir.appendingPathComponent("store")
+        let spec = SandboxSpec(name: "syn", storeRoot: store)
+        let layout = StoreLayout(spec: spec)
+        try FileManager.default.createDirectory(at: layout.goldenDirectory, withIntermediateDirectories: true)
+        let goldenKey = "synthetic-000000000000"
+        let golden = layout.goldenDirectory.appendingPathComponent("\(goldenKey).ext4")
+        try Self.makeDisk(golden, mib: 256, files: ["/payload.bin": Self.random(64 << 20)])
+        let imageBytes = ImageBaker.sizes(golden).allocated
+
+        func sandbox(garbageMiB: Int, identicalMiB: Int) async throws -> MaintenanceAdvice {
+            try? FileManager.default.removeItem(at: layout.sandboxDirectory)
+            try FileManager.default.createDirectory(at: layout.sandboxDirectory, withIntermediateDirectories: true)
+            XCTAssertEqual(clonefile(golden.path, layout.rootfs.path, 0), 0)
+            let i = try EXT4Inspector(layout.rootfs)
+            let free = try i.freeRanges()
+            // In-use blocks that hold data in the image (the payload), not holes.
+            let used = DiskAccounting.intersect(DiskAccounting.complement(free, size: i.capacityBytes),
+                                                DiskAccounting.merge(try DiskAccounting.extents(of: golden).map { ($0.logical, $0.length) }))
+            let fh = try FileHandle(forWritingTo: layout.rootfs)
+            if garbageMiB > 0, let g = free.first(where: { $0.1 >= Int64(garbageMiB) << 20 }) {
+                try fh.seek(toOffset: UInt64(g.0))
+                try fh.write(contentsOf: Self.random(garbageMiB << 20))
+            }
+            if identicalMiB > 0 {
+                let r = try XCTUnwrap(used.first(where: { $0.1 >= Int64(identicalMiB + 1) << 20 }),
+                                      "in-use data ranges: \(used.map { "\($0.0 >> 20)+\($0.1 >> 10)K" })")
+                let u = (r.0 + (1 << 20), Int64(identicalMiB) << 20)
+                let pf = try FileHandle(forReadingFrom: golden)
+                try pf.seek(toOffset: UInt64(u.0))
+                let same = try pf.read(upToCount: identicalMiB << 20)!
+                try fh.seek(toOffset: UInt64(u.0))
+                try fh.write(contentsOf: same)
+            }
+            try fh.synchronize()
+            try fh.close()
+            var p = PersistedSandbox(spec: spec, phase: .off, machineIdentifier: Data([1]), macAddress: nil, subnet: nil, shareTags: [:])
+            p.rootImage = goldenKey
+            try p.write(to: layout.persistedState)
+            return try await Sandbox(spec: spec).maintenanceAdvice()
+        }
+        let clean = try await sandbox(garbageMiB: 0, identicalMiB: 0)
+        XCTAssertEqual(clean.actions, [], clean.reasons.joined(separator: "; "))
+        XCTAssertEqual(clean.lostSharingBytes, 0)
+        let below = try await sandbox(garbageMiB: 8, identicalMiB: 4)       // 8 of ~72 MiB; 4 of ~64 MiB
+        XCTAssertEqual(below.actions, [], below.reasons.joined(separator: "; "))
+        let above = try await sandbox(garbageMiB: 40, identicalMiB: 16)     // 40 of ~104 MiB; 16 of ~64 MiB
+        XCTAssertEqual(above.actions, [.reclaim, .rederive], above.reasons.joined(separator: "; "))
+        XCTAssertGreaterThanOrEqual(above.lostSharingBytes ?? 0, 16 << 20)
+        XCTAssertEqual(above.imageBytes, imageBytes)
+        // reclaim() (host only): the garbage goes, every in-use block reads the same.
+        let before = layout.sandboxDirectory.appendingPathComponent("before.ext4")
+        XCTAssertEqual(copyfile(layout.rootfs.path, before.path, nil, copyfile_flags_t(COPYFILE_DATA)), 0)
+        let r = try await Sandbox(spec: spec).reclaim()
+        XCTAssertEqual(r.first?.garbageAfter, 0)
+        XCTAssertGreaterThanOrEqual(r.first?.garbageBefore ?? 0, 40 << 20)
+        XCTAssertLessThanOrEqual(r.first!.allocatedAfter, r.first!.allocatedBefore - (40 << 20))
+        let i = try EXT4Inspector(layout.rootfs)
+        XCTAssertTrue(try DiskAccounting.identical(before, layout.rootfs, over: DiskAccounting.complement(try i.freeRanges(), size: i.capacityBytes)))
+        let after = try await Sandbox(spec: spec).maintenanceAdvice()
+        XCTAssertEqual(after.actions, [.rederive], "reclaimed: only the lost sharing is left")
+        // A disk that was not cleanly unmounted is refused.
+        var p = PersistedSandbox.read(from: layout.persistedState)!
+        p.fsckOnNextBoot = true
+        try p.write(to: layout.persistedState)
+        do { _ = try await Sandbox(spec: spec).maintenanceAdvice(); XCTFail("an unclean disk must be refused") } catch {}
     }
 
     func test_rangeAlgebra() {

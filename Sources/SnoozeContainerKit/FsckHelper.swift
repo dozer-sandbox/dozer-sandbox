@@ -27,6 +27,28 @@ struct FsckHelper {
     /// e2fsck `disk`; returns its report. Throws when the file system could not be repaired
     /// (exit code ≥ 2 other than "fixed, reboot").
     func check(_ disk: URL) async throws -> String {
+        let script = """
+            e2fsck -fy '/fsck/\(disk.lastPathComponent)'; rc=$?; echo "e2fsck-exit=$rc"; [ $rc -le 2 ]
+            """
+        let r = try await run(script, sharing: disk.deletingLastPathComponent())
+        let out = (r.output + r.errorOutput).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard r.exitCode == 0 else {
+            throw SandboxError.commandFailed(command: "e2fsck \(disk.lastPathComponent)", exitCode: r.exitCode, output: out)
+        }
+        return out
+    }
+
+    /// 587: `e2fsck -fn` — a read-only check that changes nothing. Returns e2fsck's exit code (0:
+    /// clean) and its report.
+    func checkReadOnly(_ disk: URL) async throws -> (exitCode: Int32, report: String) {
+        let r = try await run("e2fsck -fn '/fsck/\(disk.lastPathComponent)' 2>&1; echo \"e2fsck-exit=$?\"", sharing: disk.deletingLastPathComponent())
+        let out = (r.output + r.errorOutput).trimmingCharacters(in: .whitespacesAndNewlines)
+        let code = out.split(separator: "\n").last { $0.hasPrefix("e2fsck-exit=") }.flatMap { Int32($0.dropFirst(12)) } ?? -1
+        return (code, out)
+    }
+
+    /// Run `script` as root in the helper VM, with `directory` shared at /fsck.
+    func run(_ script: String, sharing directory: URL) async throws -> ExecResult {
         let store = try ImageStore(path: storeRoot)
         var mgr = try await ContainerManager(kernel: kernel, initfsReference: initfsReference, imageStore: store, network: nil)
         let image = try await store.get(reference: Self.image, pull: true)
@@ -48,23 +70,16 @@ struct FsckHelper {
             cfg.cpus = 1
             cfg.memoryInBytes = 256 * 1_048_576
             cfg.process.arguments = ["sleep", "infinity"]
-            cfg.mounts.append(.share(source: disk.deletingLastPathComponent().path, destination: "/fsck"))
+            cfg.mounts.append(.share(source: directory.path, destination: "/fsck"))
         }
         defer { try? mgr.delete(id) }
         do {
             try await c.create()
             try await c.start()
-            let script = """
-                e2fsck -fy '/fsck/\(disk.lastPathComponent)'; rc=$?; echo "e2fsck-exit=$rc"; [ $rc -le 2 ]
-                """
             let r = try await Sandbox.exec(on: c, ["sh", "-c", script], environment: [:], workingDirectory: "/",
                                            privileged: true, timeout: 300)
             try await c.stop()
-            let out = (r.output + r.errorOutput).trimmingCharacters(in: .whitespacesAndNewlines)
-            guard r.exitCode == 0 else {
-                throw SandboxError.commandFailed(command: "e2fsck \(disk.lastPathComponent)", exitCode: r.exitCode, output: out)
-            }
-            return out
+            return r
         } catch {
             try? await c.stop()
             throw error
