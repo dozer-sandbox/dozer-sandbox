@@ -364,7 +364,10 @@ func subnetSuite() async throws {
     }
     let a = try await freshSandbox(try natSpec("harden-net-a", subnet: nil))
     let b = try await freshSandbox(try natSpec("harden-net-b", subnet: nil))
-    let c = try await freshSandbox(try natSpec("harden-net-c", subnet: testSubnet))
+    // Not `testSubnet`: the other parts' NAT sandboxes (kept alive, as a host's registry keeps them)
+    // hold it in this process, and a taken subnet — rightly — falls back to a free one.
+    let override = ProcessInfo.processInfo.environment["HARDEN_OVERRIDE_SUBNET"] ?? "192.168.223.0/24"
+    let c = try await freshSandbox(try natSpec("harden-net-c", subnet: override))
     var subnets: [String] = []
     for sb in [a, b, c] {
         try await sb.start()
@@ -378,7 +381,7 @@ func subnetSuite() async throws {
     let pool = (100...199).map { "192.168.\($0).0/24" }
     check(pool.contains(subnets[0]) && pool.contains(subnets[1]), "no subnet asked for → one from the pool (\(subnets[0]), \(subnets[1]))")
     check(subnets[0] != subnets[1], "two sandboxes in one process get different subnets")
-    check(subnets[2] == testSubnet, "an explicit SandboxSpec.subnet stays an override (\(subnets[2]))")
+    check(subnets[2] == override, "an explicit SandboxSpec.subnet stays an override (\(subnets[2]))")
     // Deep Sleep → Wake keeps the subnet (a restore needs its guest's addresses).
     try await a.deepSleep()
     try await a.wake()
