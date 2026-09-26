@@ -64,7 +64,7 @@ if Sandbox.restorableState(for: spec) != nil { try await sandbox.restoreAfterCra
 
 Lifecycle: `start` · `pause` / `resume` · `sleep` (pause + snapshot) · `sleepToDisk` · `wakeFromDisk`
 · `stop` · `restoreAfterCrash` · `prepareForExit` (keep a sleeping sandbox restorable, stop anything
-else) · `resetToImage` · `delete`. **Stop keeps the root disk**: the next Start cold-boots the same
+else; 583: a program a session started less than `settle` — 3 s — ago gets the rest of it first) · `resetToImage` · `delete`. **Stop keeps the root disk**: the next Start cold-boots the same
 disk (what you installed is still there); Reset to image starts again from a fresh clone of the
 prepared disk; Delete removes everything the sandbox has on disk. A disk that was not cleanly
 unmounted — `Sandbox.discardRestorableState(for:)` (a deep-slept VM is stopped without unmounting it),

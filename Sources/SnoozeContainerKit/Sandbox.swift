@@ -38,6 +38,8 @@ public actor Sandbox {
     private var connections: [UUID: SessionConnection] = [:]
     /// Set once `LinuxContainer.stop()` has shut the VM down through the package.
     private var cleanlyStopped = false
+    /// When `openSession` last started a program (583: `prepareForExit` lets a new one settle).
+    private var lastSessionStart: ContinuousClock.Instant?
 
     /// Resolves the kernel on every boot (see `KernelProvider`).
     public nonisolated let kernelProvider: KernelProvider
@@ -576,8 +578,21 @@ public actor Sandbox {
     /// A running, paused or sleeping sandbox is snapshotted and its VM stopped, so the next launch
     /// `wake()`s it with every session and pid where it was. Deep asleep: left as it is. Booting or
     /// failed (nothing worth keeping): shut down. If the Deep Sleep itself fails, it shuts down.
-    public func prepareForExit() async {
+    ///
+    /// 583: a program a session started less than `settle` ago is given the rest of that time before
+    /// the Deep Sleep (580: Claude Code deep-slept within ~1 s of launching exited after the wake in
+    /// 2 of ~7 runs). Pass `.zero` not to wait.
+    public func prepareForExit(settle: Duration = .seconds(3)) async {
         await acquire(); defer { release() }
+        if phase == .running {
+            let wait = Self.exitSettleDelay(sinceLastSessionStart: lastSessionStart.map { ContinuousClock.now - $0 }, settle: settle)
+            if wait > .zero {
+                let s = { (d: Duration) in Double(d.components.seconds) + Double(d.components.attoseconds) / 1e18 }
+                note(String(format: "a session's program started %.1f s ago — letting it settle for %.1f s before the Deep Sleep",
+                            s(settle - wait), s(wait)))
+                try? await Task.sleep(for: wait)
+            }
+        }
         switch phase {
         case .running, .paused, .asleep:
             let from = phase
@@ -630,6 +645,12 @@ public actor Sandbox {
 
     /// Stop is best effort at every step: whatever state the VM is in, it ends stopped and the
     /// runtime files are gone.
+    /// How long `prepareForExit` waits: the rest of `settle` since the last session's program started.
+    static func exitSettleDelay(sinceLastSessionStart since: Duration?, settle: Duration) -> Duration {
+        guard let since, since >= .zero, since < settle else { return .zero }
+        return settle - since
+    }
+
     private func runStopSteps(from: Phase) async {
         for step in LifecyclePlanner.plan(.shutDown, from: from) ?? [] {
             do { try await run(step, target: .off) } catch { note("stop: \(step) — \(error.localizedDescription)") }
@@ -1221,6 +1242,7 @@ public actor Sandbox {
         guard r.exitCode == 0 else {
             throw SandboxError.commandFailed(command: "open session \(name)", exitCode: r.exitCode, output: r.output + r.errorOutput)
         }
+        lastSessionStart = ContinuousClock.now
         note("opened session \(name)\(runAs.map { " as \($0)" } ?? ""): \(argv.joined(separator: " "))")
     }
 

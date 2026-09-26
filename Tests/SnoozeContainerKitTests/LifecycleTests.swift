@@ -202,6 +202,16 @@ final class PersistedSandboxTests: XCTestCase {
                        "583: the deep-slept VM never unmounted the disk — the cold boot runs e2fsck first")
     }
 
+    /// 583: at quit, a program started less than `settle` ago gets the rest of it before the Deep Sleep.
+    func test_exitSettleDelay() {
+        let three = Duration.seconds(3)
+        XCTAssertEqual(Sandbox.exitSettleDelay(sinceLastSessionStart: nil, settle: three), .zero, "no session opened here")
+        XCTAssertEqual(Sandbox.exitSettleDelay(sinceLastSessionStart: .milliseconds(500), settle: three), .milliseconds(2500))
+        XCTAssertEqual(Sandbox.exitSettleDelay(sinceLastSessionStart: .seconds(3), settle: three), .zero)
+        XCTAssertEqual(Sandbox.exitSettleDelay(sinceLastSessionStart: .seconds(40), settle: three), .zero)
+        XCTAssertEqual(Sandbox.exitSettleDelay(sinceLastSessionStart: .milliseconds(100), settle: .zero), .zero, "opt out")
+    }
+
     /// 583: the first guest calls of a wake are retried on a closed/reset vsock channel — and only then.
     func test_transientGuestTransportErrors() {
         struct E: Error, CustomStringConvertible { let description: String }

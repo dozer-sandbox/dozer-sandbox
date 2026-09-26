@@ -78,6 +78,9 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   itself `VZVirtualMachineInstance` makes an 8-thread group and shuts it down only in its own `stop()`,
   which Deep Sleep never calls — each VM instance a host made kept 8 threads + 8 kqueues forever (582;
   thread cap 6,144). `hardening leak` is the regression test (threads, fds, footprint flat).
+- **Quit lets a just-started program settle** (583). `prepareForExit(settle:)` waits out the rest of 3 s
+  since the last `openSession` before the Deep Sleep (580: Claude Code deep-slept within ~1 s of its
+  launch exited after the wake in 2 of ~7 runs). `hardening settle` is the test.
 - **Stop decides from the phase it was CALLED in** (`perform()` reads `phase` before going busy).
 - **Every VM has a memory balloon; a snapshot is never taken with it inflated** (583). A device is a
   VM input: `PinnedIdentity.memoryBalloon` comes from `PersistedSandbox.memoryBalloon` on a restore
