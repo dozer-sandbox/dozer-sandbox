@@ -287,9 +287,11 @@ struct KeySet: AsyncParsableCommand {
             secret = String(decoding: FileHandle.standardInput.readDataToEndOfFile(), as: UTF8.self)
             source = "stdin"
         }
+        let trimmed = secret.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { throw fail(HostError(.invalid, "an empty key (pipe it in: snooze key set \(name) --anthropic < file)"), g) }
         var r = HostRequest(.keySet, name: name)
         r.binding = CredentialBinding.anthropic.id
-        r.secret = secret.trimmingCharacters(in: .whitespacesAndNewlines)
+        r.secret = trimmed
         r.source = source
         let rows = try decode(try call(r, g), [CredentialRow].self, g)
         if g.json { Out.json(rows) } else { Out.stdout("anthropic key set for \(name) (from \(source); held by the host, never in the sandbox)\n") }

@@ -239,8 +239,12 @@ public enum SnoozeImages {
     }
 }
 
-/// Allocated bytes under a directory (sparse disks count what they hold, not their size).
+/// Allocated bytes of a file, or of everything under a directory (sparse disks count what they
+/// hold, not their size).
 func allocatedBytes(_ dir: URL) -> Int64 {
+    var st = stat()
+    guard lstat(dir.path, &st) == 0 else { return 0 }
+    if (st.st_mode & S_IFMT) == S_IFREG { return Int64(st.st_blocks) * 512 }
     guard let e = FileManager.default.enumerator(at: dir, includingPropertiesForKeys: nil) else { return 0 }
     var total: Int64 = 0
     for case let u as URL in e {

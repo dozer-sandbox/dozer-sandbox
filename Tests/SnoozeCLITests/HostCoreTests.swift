@@ -152,6 +152,15 @@ final class HostCoreTests: XCTestCase {
         XCTAssertEqual(again.first?.phase, "deepAsleep")
     }
 
+    func testAllocatedBytesOfAFileAndADirectory() throws {
+        let f = root.appendingPathComponent("d/f")
+        try FileManager.default.createDirectory(at: f.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data(repeating: 7, count: 10_000).write(to: f)
+        XCTAssertGreaterThanOrEqual(allocatedBytes(f), 10_000)
+        XCTAssertEqual(allocatedBytes(f.deletingLastPathComponent()), allocatedBytes(f))
+        XCTAssertEqual(allocatedBytes(root.appendingPathComponent("missing")), 0)
+    }
+
     func testSettleDelay() {
         XCTAssertEqual(HostCore.settleDelay(since: nil), .zero)
         XCTAssertEqual(HostCore.settleDelay(since: .seconds(1)), .seconds(2))
