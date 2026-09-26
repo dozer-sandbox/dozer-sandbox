@@ -79,8 +79,10 @@ v040-host: ## Build + sign the $(V040_TAG) test host from the tag (once, into V0
 test-vm-lineage: vmtest-host v040-host ## 587 image lineage: warm-base bakes, journal, discard, sync, accounting, reclaim, rederive (LINEAGE=part), then v0.4.0 compat
 	perl -e 'alarm shift; exec @ARGV' 3600 $(VMTEST_BIN) lineage $(LINEAGE) --store "$(VMTEST_STORE)"
 	@if [ -z "$(LINEAGE)" ]; then \
+	  perl -e 'alarm shift; exec @ARGV' 600 $(VMTEST_BIN) lineage compat-clean --store "$(VMTEST_STORE)" && \
 	  perl -e 'alarm shift; exec @ARGV' 600 $(V040_BIN) crash-save --store "$(VMTEST_STORE)" && \
 	  perl -e 'alarm shift; exec @ARGV' 600 $(VMTEST_BIN) lineage compat-wake --store "$(VMTEST_STORE)" && \
+	  perl -e 'alarm shift; exec @ARGV' 600 $(VMTEST_BIN) lineage compat-clean --store "$(VMTEST_STORE)" && \
 	  perl -e 'alarm shift; exec @ARGV' 600 $(V040_BIN) crash-save --store "$(VMTEST_STORE)" && \
 	  perl -e 'alarm shift; exec @ARGV' 600 $(VMTEST_BIN) lineage compat-discard --store "$(VMTEST_STORE)" ; fi
 

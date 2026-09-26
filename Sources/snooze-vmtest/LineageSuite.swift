@@ -524,6 +524,13 @@ func lineageSuite(_ part: String?) async throws {
     case "reclaim": try await lineageReclaim()
     case "rederive": try await lineageRederive()
     case "children": try await lineageChildren()
+    case "compat-clean":
+        // Before v0.4.0's crash-save: no kept vmtest-crash disk (this build's crash suite keeps a
+        // journaled one), so v0.4.0 clones its own journal-less prepared disk.
+        let spec = makeSpec("vmtest-crash", share: storeRoot.appendingPathComponent("share-vmtest-crash"))
+        _ = try await freshSandbox(spec)
+        check(!StoreLayout(spec: spec).rootfs.path.isEmpty && !FileManager.default.fileExists(atPath: StoreLayout(spec: spec).rootfs.path),
+              "vmtest-crash removed before the v0.4.0 host makes it")
     case "compat-wake": try await lineageCompat(discard: false)
     case "compat-discard": try await lineageCompat(discard: true)
     default:
