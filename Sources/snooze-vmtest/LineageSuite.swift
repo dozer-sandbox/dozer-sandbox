@@ -452,7 +452,8 @@ func lineageChildren() async throws {
     let img = try await bakeImage(sb, v)
     try await sb.start()
     let token = UUID().uuidString
-    _ = try await sb.exec(["sh", "-c", "echo \(token) > /root/child.txt && sync"])
+    let w = try await sb.exec(["sh", "-c", "echo \(token) > /root/child.txt && sync && cat /root/child.txt"], privileged: true)
+    check(w.output.contains(token), "wrote a marker into the sandbox (exit \(w.exitCode) \(w.errorOutput.prefix(120)))")
     try await sb.shutDown()
     let baker = ImageBaker(storeRoot: storeRoot)
     try FileManager.default.removeItem(at: img.root.deletingLastPathComponent())
@@ -460,8 +461,10 @@ func lineageChildren() async throws {
     check(baker.cachedBase(v.baseKey) == nil && !FileManager.default.fileExists(atPath: img.root.path), "deleted the image and its base")
     let sb2 = try Sandbox(spec: spec)
     lineageKeep.append(sb2)
+    let log = logEvents(sb2)
     try await sb2.start()
-    let got = try await sb2.exec(["sh", "-c", "cat /root/child.txt; pi --version"], environment: v.sessionEnvironment, user: v.user).output
+    log.cancel()
+    let got = try await sb2.exec(["sh", "-c", "cat /root/child.txt 2>&1; pi --version"], environment: v.sessionEnvironment, privileged: true).output
     check(got.contains(token) && got.contains("0.84.1"), "the sandbox still cold-boots with its data and its agent (\(got.split(separator: "\n").last ?? ""))")
     try await sb2.shutDown()
     let checks = try await sb2.checkDisks()
