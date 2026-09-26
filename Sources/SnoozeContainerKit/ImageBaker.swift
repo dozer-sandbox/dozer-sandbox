@@ -18,6 +18,23 @@ public struct ImageManifest: Sendable, Codable, Equatable {
     public var allocatedBytes: Int64
     /// Output of each verification command.
     public var verifyOutput: [String]
+    /// 587: what the bake's final `fstrim /` returned to the Mac, bytes (nil: a pre-587 bake).
+    public var trimmedBytes: Int64?
+    /// 587: the disk's ext4 journal, MiB (nil: none, or a pre-587 bake).
+    public var journalMiB: Int?
+
+    public init(key: String, recipe: ImageRecipe, kernelSHA256: String, deckholdSHA256: String, bakedAt: Date,
+                timings: [TimedStep], apparentBytes: Int64, allocatedBytes: Int64, verifyOutput: [String]) {
+        self.key = key
+        self.recipe = recipe
+        self.kernelSHA256 = kernelSHA256
+        self.deckholdSHA256 = deckholdSHA256
+        self.bakedAt = bakedAt
+        self.timings = timings
+        self.apparentBytes = apparentBytes
+        self.allocatedBytes = allocatedBytes
+        self.verifyOutput = verifyOutput
+    }
 
     public struct TimedStep: Sendable, Codable, Equatable {
         public var step: String
@@ -152,20 +169,29 @@ public struct ImageBaker: Sendable {
         try? mgr.delete(id)
         let staging = imageDirectory(recipe).appendingPathComponent("\(key.prefix(12)).partial-\(UUID().uuidString.prefix(8))")
         defer { try? fm.removeItem(at: staging) }
+        try fm.createDirectory(at: staging, withIntermediateDirectories: true)
+        let root = staging.appendingPathComponent("root.ext4")
         let proxied = inputs.egress != nil
         let dns = proxied ? ["127.0.0.1"] : inputs.dnsServers
         let cpus = inputs.cpus, mem = inputs.memoryMiB
         let proxy = try inputs.egress.map { try EgressProxy(policy: $0, ca: nil, log: inputs.egressLog ?? ConnectionLog()) }
-        let c = try await timed("flattened the base to one ext4 disk (\(recipe.rootfsMiB) MiB capacity)") {
-            try await mgr.create(id, image: image, rootfsSizeInBytes: recipe.rootfsMiB * 1_048_576, readOnly: false,
-                                 networking: !proxied,
-                                 vm: VMResources(cpus: cpus, memoryInBytes: mem * 1_048_576 + VMResources.guestMemoryOverhead)) { cfg in
-                cfg.cpus = cpus
-                cfg.memoryInBytes = mem * 1_048_576
-                cfg.process.arguments = ["sleep", "infinity"]
-                cfg.dns = DNS(nameservers: dns)
-            }
+        let journal = recipe.journalConfig
+        try await timed("flattened the base to one ext4 disk (\(recipe.rootfsMiB) MiB capacity\(recipe.journalMiB.map { ", \($0) MiB journal" } ?? ", no journal"))") {
+            _ = try await EXT4Unpacker(capacityInBytes: recipe.rootfsMiB * 1_048_576, journal: journal).unpack(image, for: .current, at: root)
         }
+        // The VM boots the staging disk itself; `create(rootfs:)` does not make the container's
+        // directory (586), so it is made here.
+        try? fm.removeItem(at: storeRoot.appendingPathComponent("containers/\(id)"))
+        try fm.createDirectory(at: storeRoot.appendingPathComponent("containers/\(id)"), withIntermediateDirectories: true)
+        let c = try await mgr.create(id, image: image, rootfs: .block(format: "ext4", source: root.path, destination: "/"),
+                                     networking: !proxied,
+                                     vm: VMResources(cpus: cpus, memoryInBytes: mem * 1_048_576 + VMResources.guestMemoryOverhead)) { cfg in
+            cfg.cpus = cpus
+            cfg.memoryInBytes = mem * 1_048_576
+            cfg.process.arguments = ["sleep", "infinity"]
+            cfg.dns = DNS(nameservers: dns)
+        }
+        var trimmed: Int64 = 0
         var verifyOutput: [String] = []
         do {
             try await timed("booted the bake VM") { try await c.create(); try await c.start() }
@@ -210,7 +236,15 @@ public struct ImageBaker: Sendable {
                 verifyOutput.append(out)
                 events(.note("verify: \(check.argv.joined(separator: " ")) → \(out.prefix(120))"))
             }
-            _ = try await Sandbox.exec(on: c, ["sync"], environment: [:], workingDirectory: "/", privileged: false, timeout: 60, user: nil)
+            // 587: trim as the last step (586: −11 % for 56 ms) — the install's own deleted files
+            // (npm's tarball and cache) would otherwise stay in the image, and in every clone of it.
+            let before = Self.sizes(root).allocated
+            let tr = try await timed("trimmed the disk (fstrim /)") {
+                try await Sandbox.exec(on: c, ["sh", "-c", GuestCommand.trimRoot], environment: [:], workingDirectory: "/",
+                                       privileged: true, timeout: 120, user: nil)
+            }
+            trimmed = max(0, before - Self.sizes(root).allocated)
+            events(.note("fstrim: \((tr.output + tr.errorOutput).trimmingCharacters(in: .whitespacesAndNewlines)) — \(Self.mib(trimmed)) MiB returned to the Mac"))
             try await timed("stopped the bake VM cleanly") { try await c.stop() }
         } catch {
             try? await c.stop()
@@ -219,15 +253,14 @@ public struct ImageBaker: Sendable {
             throw error
         }
 
-        try fm.createDirectory(at: staging, withIntermediateDirectories: true)
-        let root = staging.appendingPathComponent("root.ext4")
-        try fm.moveItem(at: storeRoot.appendingPathComponent("containers/\(id)/rootfs.ext4"), to: root)
         try? mgr.delete(id)
         let (apparent, allocated) = Self.sizes(root)
         chmod(root.path, 0o444)
-        let manifest = ImageManifest(key: key, recipe: recipe, kernelSHA256: inputs.kernelSHA256,
+        var manifest = ImageManifest(key: key, recipe: recipe, kernelSHA256: inputs.kernelSHA256,
                                      deckholdSHA256: inputs.deckholdSHA256, bakedAt: Date(), timings: timings,
                                      apparentBytes: apparent, allocatedBytes: allocated, verifyOutput: verifyOutput)
+        manifest.trimmedBytes = trimmed
+        manifest.journalMiB = recipe.journalMiB
         try Self.encoder.encode(manifest).write(to: staging.appendingPathComponent("manifest.json"))
         let final = location(recipe, key: key)
         try? fm.removeItem(at: final)

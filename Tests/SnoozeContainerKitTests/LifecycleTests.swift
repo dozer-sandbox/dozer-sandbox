@@ -1,3 +1,4 @@
+import CryptoKit
 import XCTest
 @testable import SnoozeContainerKit
 
@@ -9,9 +10,14 @@ final class LifecycleTests: XCTestCase {
     /// one on disk is not running, so both are revived (silently) and then stopped GRACEFULLY —
     /// never left stopped at the VZ level with the package's vminitd clients unclosed.
     func test_stopPlanDependsOnThePhaseItWasCalledIn() {
-        XCTAssertEqual(plan(.shutDown, .running), [.detachSessions(.sandboxStopped), .stopContainer, .deleteSnapshot, .releaseRuntime])
-        for p in [Phase.paused, .asleep, .deepAsleep] {
+        // 587: a running (or paused, once resumed) guest syncs and reports its disk usage first.
+        XCTAssertEqual(plan(.shutDown, .running), [.detachSessions(.sandboxStopped), .syncGuest, .stopContainer, .deleteSnapshot, .releaseRuntime])
+        XCTAssertEqual(plan(.shutDown, .paused), [.detachSessions(.sandboxStopped), .reviveForStop, .syncGuest, .stopContainer, .deleteSnapshot, .releaseRuntime])
+        for p in [Phase.asleep, .deepAsleep] {
             XCTAssertEqual(plan(.shutDown, p), [.detachSessions(.sandboxStopped), .reviveForStop, .stopContainer, .deleteSnapshot, .releaseRuntime], "\(p)")
+        }
+        for p in [Phase.failed, .booting] {
+            XCTAssertEqual(plan(.shutDown, p), [.detachSessions(.sandboxStopped), .stopContainer, .deleteSnapshot, .releaseRuntime], "\(p)")
         }
         XCTAssertNil(plan(.shutDown, .off))
         for p in Phase.allCases {
@@ -76,7 +82,8 @@ final class LifecycleTests: XCTestCase {
     /// never pauses twice.
     func test_deepSleepOrdering() {
         let fromRunning = plan(.deepSleep, .running)!
-        XCTAssertEqual(fromRunning, [.restoreGuestMemory, .pauseVM, .saveSnapshot, .detachSessions(.sandboxSleeping), .stopVMDirect, .persistState])
+        // 587: the guest syncs before the pause — a discarded Deep Sleep must not lose its last writes.
+        XCTAssertEqual(fromRunning, [.restoreGuestMemory, .syncGuest, .pauseVM, .saveSnapshot, .detachSessions(.sandboxSleeping), .stopVMDirect, .persistState])
         XCTAssertEqual(plan(.deepSleep, .paused), [.saveSnapshot, .detachSessions(.sandboxSleeping), .stopVMDirect, .persistState])
         XCTAssertEqual(plan(.deepSleep, .asleep), [.detachSessions(.sandboxSleeping), .stopVMDirect, .persistState])
         XCTAssertNil(plan(.deepSleep, .deepAsleep))
@@ -139,6 +146,38 @@ final class StoreLayoutTests: XCTestCase {
         XCTAssertNotEqual(k(a), k(d))
         XCTAssertEqual(k(a), k(e), "shared across sandboxes in one store")
         XCTAssertTrue(k(a).hasPrefix("alpine-3.20-"))
+        // 587: the journal is part of the key; a journal-less disk keeps the pre-587 key.
+        var f = a; f.journalMiB = 32
+        var g = a; g.journalMiB = nil
+        XCTAssertNotEqual(k(a), k(f))
+        XCTAssertNotEqual(k(a), k(g))
+        XCTAssertEqual(k(g), "alpine-3.20-" + SHA256.hash(data: Data("docker.io/library/alpine:3.20|bash,ncurses|1024".utf8))
+                        .map { String(format: "%02x", $0) }.joined().prefix(12), "a journal-less prepared disk keeps its pre-587 key")
+    }
+
+    /// 587: a new spec is journaled by default; a spec persisted before 587 decodes as journal-less.
+    func test_journalDefaultsAndOldRecords() throws {
+        XCTAssertEqual(SandboxSpec(name: "lab", storeRoot: root).journalMiB, 16)
+        XCTAssertEqual(AgentRecipes.claudeCode.journalMiB, 16)
+        var old = try JSONSerialization.jsonObject(with: JSONEncoder().encode(SandboxSpec(name: "lab", storeRoot: root))) as! [String: Any]
+        old.removeValue(forKey: "journalMiB")
+        let decoded = try JSONDecoder().decode(SandboxSpec.self, from: JSONSerialization.data(withJSONObject: old))
+        XCTAssertNil(decoded.journalMiB)
+        XCTAssertThrowsError(try SandboxSpec(name: "a", storeRoot: root, journalMiB: 1).validate())
+        XCTAssertThrowsError(try SandboxSpec(name: "a", storeRoot: root, rootfsMiB: 256, journalMiB: 64).validate())
+        XCTAssertNoThrow(try SandboxSpec(name: "a", storeRoot: root, journalMiB: nil).validate())
+    }
+
+    /// 587: `df -Pk` parsing for the usage `syncGuest` records.
+    func test_parseDiskUsage() {
+        let out = """
+            Filesystem     1024-blocks    Used Available Capacity Mounted on
+            /dev/vdb           4062912  583680   3462848      15% /
+            /dev/vdc           2031440   20480   1994576       2% /state
+            """
+        let u = GuestCommand.parseDiskUsage(out)
+        XCTAssertEqual(u["/"], 570)
+        XCTAssertEqual(u["/state"], 20)
     }
 
     func test_specValidation() {
@@ -235,6 +274,14 @@ final class PersistedSandboxTests: XCTestCase {
         p.phase = .off
         p.fsckOnNextBoot = true
         XCTAssertTrue(Sandbox.keptDiskNeedsFsck(p, snapshotPresent: false), "an explicit mark")
+        // 587: journaled disks are replayed by the kernel — only the explicit mark still asks for e2fsck.
+        XCTAssertTrue(Sandbox.keptDiskNeedsFsck(p, snapshotPresent: false, journaled: true), "an explicit mark, journaled")
+        p.fsckOnNextBoot = nil
+        XCTAssertFalse(Sandbox.keptDiskNeedsFsck(p, snapshotPresent: true, journaled: true), "journaled: a snapshot beside it needs no e2fsck")
+        for phase in [Phase.running, .deepAsleep, .failed] {
+            p.phase = phase
+            XCTAssertFalse(Sandbox.keptDiskNeedsFsck(p, snapshotPresent: false, journaled: true), "journaled, last durable phase \(phase)")
+        }
     }
 
     func test_randomMACIsLocallyAdministeredUnicast() {

@@ -74,7 +74,10 @@ func bootLogExt4Errors(_ sb: Sandbox) -> [String] {
 
 func discardSuite() async throws {
     let cycles = envInt("HARDEN_CYCLES", 15)
-    let spec = try hardenSpec("harden-discard")
+    // 587: the journal-less path — the one that needs e2fsck (a journaled disk is replayed by the
+    // kernel instead; `lineage journal` tests that one).
+    var spec = try hardenSpec("harden-discard")
+    spec.journalMiB = nil
     var sb = try await freshSandbox(spec)
     print("vmtest[hardening]: discard → cold boot × \(cycles)")
     try await sb.start()

@@ -1,3 +1,4 @@
+import ContainerizationEXT4
 import CryptoKit
 import Foundation
 
@@ -27,10 +28,16 @@ public struct ImageRecipe: Sendable, Codable, Equatable {
     public var workdir: String
     /// Capacity of the baked disk (apparent size; APFS only allocates what is written).
     public var rootfsMiB: UInt64
+    /// 587: the ext4 journal of the baked disk (and of every sandbox's state disk), MiB. Default 16
+    /// (586: the smallest size, the fastest for `fsync`, and it removes e2fsck from the discard →
+    /// cold boot path). nil: no journal — a disk not cleanly unmounted is e2fsck'd before it boots,
+    /// as before 587. Part of the base key and the bake key. A record written before 587 has no
+    /// value here, and decodes as nil: its disks have no journal.
+    public var journalMiB: Int?
 
     public init(name: String, base: String, steps: [BakeStep], verify: [VerifyCheck], user: String, home: String,
                 persistDirs: [String], sessionEnvironment: [String: String] = [:], workdir: String = "/workspace",
-                rootfsMiB: UInt64 = 4096) {
+                rootfsMiB: UInt64 = 4096, journalMiB: Int? = 16) {
         self.name = name
         self.base = base
         self.steps = steps
@@ -41,12 +48,23 @@ public struct ImageRecipe: Sendable, Codable, Equatable {
         self.sessionEnvironment = sessionEnvironment
         self.workdir = workdir
         self.rootfsMiB = rootfsMiB
+        self.journalMiB = journalMiB
     }
+
+    /// Recipe names the store keeps for itself under `<store>/images/`.
+    public static let reservedNames: Set<String> = ["bases", "custom"]
 
     public func validate() throws {
         let allowed = Set("abcdefghijklmnopqrstuvwxyz0123456789-")
         guard (1...40).contains(name.count), name.allSatisfy(allowed.contains) else {
             throw SandboxError.invalidSpec("image name must be 1–40 characters of [a-z0-9-], got \"\(name)\"")
+        }
+        guard !Self.reservedNames.contains(name) else {
+            throw SandboxError.invalidSpec("image name \"\(name)\" is reserved (images/\(name)/ is the store's own)")
+        }
+        if let j = journalMiB {
+            guard (4...1024).contains(j) else { throw SandboxError.invalidSpec("journalMiB must be 4–1024 (or nil for none), got \(j)") }
+            guard UInt64(j) * 8 <= rootfsMiB else { throw SandboxError.invalidSpec("journalMiB \(j) is too large for a \(rootfsMiB) MiB disk") }
         }
         guard base.contains("@sha256:") else { throw SandboxError.invalidSpec("image base must be digest-pinned (…@sha256:…): \(base)") }
         guard !user.isEmpty, home.hasPrefix("/"), workdir.hasPrefix("/") else { throw SandboxError.invalidSpec("image user/home/workdir") }
@@ -71,12 +89,20 @@ public struct ImageRecipe: Sendable, Codable, Equatable {
         return (try? enc.encode(self)) ?? Data()
     }
 
-    /// sha256(canonical recipe + kernel sha256 + deckhold sha256).
+    /// sha256(canonical recipe + kernel sha256 + deckhold sha256). The recipe carries `journalMiB`
+    /// (587), so a journaled recipe never hits a pre-587 bake.
     public func bakeKey(kernelSHA256: String, deckholdSHA256: String) -> String {
         var h = SHA256()
         h.update(data: canonicalJSON)
         h.update(data: Data("\nkernel:\(kernelSHA256)\ndeckhold:\(deckholdSHA256)".utf8))
         return h.finalize().map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// The journal as Containerization's formatter takes it.
+    var journalConfig: EXT4.JournalConfig? { Self.journalConfig(journalMiB) }
+
+    static func journalConfig(_ mib: Int?) -> EXT4.JournalConfig? {
+        mib.map { EXT4.JournalConfig(size: UInt64($0) * 1_048_576, defaultMode: .ordered) }
     }
 }
 

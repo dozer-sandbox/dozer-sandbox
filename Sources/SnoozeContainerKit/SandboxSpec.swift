@@ -50,6 +50,11 @@ public struct SandboxSpec: Sendable, Codable, Equatable {
     /// Start from a CUSTOM image (`CustomImage.key`, saved from a restore point) instead of the
     /// prepared disk or the recipe's bake. `recipe` should be the custom image's recipe, if it has one.
     public var customImage: String?
+    /// 587: the ext4 journal of the PREPARED disk (the lab's `image` + `bakePackages` sandbox), MiB.
+    /// Default 16; nil: no journal (a disk that was not cleanly unmounted is e2fsck'd before it
+    /// boots, as before 587). Part of the prepared disk's key. An image sandbox's root and state
+    /// disks take `recipe.journalMiB` instead. A spec persisted before 587 decodes as nil.
+    public var journalMiB: Int?
 
     public init(
         name: String,
@@ -69,8 +74,10 @@ public struct SandboxSpec: Sendable, Codable, Equatable {
         recipe: ImageRecipe? = nil,
         stateDiskMiB: UInt64 = 2048,
         customImage: String? = nil,
-        network: NetworkMode? = nil
+        network: NetworkMode? = nil,
+        journalMiB: Int? = 16
     ) {
+        self.journalMiB = journalMiB
         self.name = name
         self.storeRoot = storeRoot
         self.image = image
@@ -125,6 +132,11 @@ public struct SandboxSpec: Sendable, Codable, Equatable {
             try recipe.validate()
             guard stateDiskMiB >= 64 else { throw SandboxError.invalidSpec("stateDiskMiB must be ≥ 64") }
             guard !shares.contains(where: { $0.guestPath == "/state" }) else { throw SandboxError.invalidSpec("/state is the state disk") }
+        }
+        if let j = journalMiB {
+            guard (4...1024).contains(j), UInt64(j) * 8 <= rootfsMiB else {
+                throw SandboxError.invalidSpec("journalMiB must be 4–1024 and at most an eighth of rootfsMiB (or nil for none), got \(j)")
+            }
         }
         for p in bakePackages where !p.allSatisfy({ $0.isLetter || $0.isNumber || "+-._".contains($0) }) {
             throw SandboxError.invalidSpec("bad package name \(p)")

@@ -218,6 +218,29 @@ public enum GuestCommand {
     /// Where the state disk is mounted in an image sandbox.
     public static let stateMount = "/state"
 
+    /// 587: guest mount options of the root and state disks — `discard`, so a block the guest frees
+    /// is punched out of the host file (online TRIM). Mount options are not a VM input: a snapshot
+    /// taken before 587 restores unchanged.
+    public static let diskMountOptions = ["discard"]
+
+    /// 587: `fstrim` the root file system — the last step of every bake, so a baked disk holds no
+    /// blocks its own install freed. Busybox and util-linux both have it.
+    public static let trimRoot = "sync; if command -v fstrim >/dev/null 2>&1; then fstrim -v /; else echo 'fstrim: not available'; fi; sync"
+
+    /// 587: flush the guest's dirty pages, then report what its disks hold (`df -Pk`, POSIX output).
+    public static let syncAndMeasure = "sync; df -Pk / \(stateMount) 2>/dev/null || true"
+
+    /// `df -Pk` output → MiB used per mount point.
+    public static func parseDiskUsage(_ out: String) -> [String: Double] {
+        var m: [String: Double] = [:]
+        for line in out.split(separator: "\n").dropFirst() {
+            let f = line.split(separator: " ", omittingEmptySubsequences: true)
+            guard f.count >= 6, let used = Double(f[2]) else { continue }
+            m[String(f[f.count - 1])] = used / 1024
+        }
+        return m
+    }
+
     /// A persist dir's directory on the state disk: its absolute path, flattened.
     public static func stateKey(_ dir: String) -> String {
         String(dir.drop(while: { $0 == "/" })).replacingOccurrences(of: "/", with: "_")

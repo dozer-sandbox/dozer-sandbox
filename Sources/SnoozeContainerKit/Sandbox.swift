@@ -1,6 +1,7 @@
 import Containerization
 import ContainerizationEXT4
 import ContainerizationExtras
+import ContainerizationOCI
 import Darwin
 import Foundation
 import SystemPackage
@@ -112,14 +113,15 @@ public actor Sandbox {
     /// VM that slept was stopped without unmounting it. Only for a sandbox no process is running.
     public nonisolated static func discardRestorableState(for spec: SandboxSpec) {
         // Stop semantics: the snapshot goes; the root disk stays and the next Start cold-boots it.
-        // 583: the disk was never unmounted (Deep Sleep stops the VM at the VZ level) and ext4 here
-        // has no journal, so booting it as it is corrupts it (582: 12 of 15 boots failed) — mark
-        // it (and the state disk) for e2fsck on that boot.
+        // 583: the disk was never unmounted (Deep Sleep stops the VM at the VZ level), and a
+        // journal-less ext4 booted as it is corrupts (582: 12 of 15 boots failed) — mark it (and
+        // the state disk) for e2fsck on that boot. 587: a journaled disk needs no mark — the
+        // kernel replays its journal on mount (586: 0 of 45 boots needed more).
         let layout = StoreLayout(spec: spec)
         try? FileManager.default.removeItem(at: layout.snapshot)
         if var p = PersistedSandbox.read(from: layout.persistedState) {
             p.phase = .off
-            if FileManager.default.fileExists(atPath: layout.rootfs.path) { p.fsckOnNextBoot = true }
+            if FileManager.default.fileExists(atPath: layout.rootfs.path), !disksJournaled(layout) { p.fsckOnNextBoot = true }
             try? p.write(to: layout.persistedState)
         }
     }
@@ -127,9 +129,17 @@ public actor Sandbox {
     /// A kept root disk needs e2fsck before it boots unless the last VM that ran it was shut down
     /// through the package (which unmounts it). A record whose last durable phase is not `off`
     /// (a crash while running, a snapshot discarded or a restore that failed), a snapshot lying
-    /// beside the disk, or an explicit mark all mean it was not.
-    static func keptDiskNeedsFsck(_ kept: PersistedSandbox, snapshotPresent: Bool) -> Bool {
-        kept.fsckOnNextBoot == true || kept.phase != .off || snapshotPresent
+    /// beside the disk, or an explicit mark all mean it was not. 587: when every disk is journaled
+    /// (`journaled`), only the explicit mark (a copy taken while running) still asks for e2fsck —
+    /// the rest is journal replay's job.
+    static func keptDiskNeedsFsck(_ kept: PersistedSandbox, snapshotPresent: Bool, journaled: Bool = false) -> Bool {
+        kept.fsckOnNextBoot == true || (!journaled && (kept.phase != .off || snapshotPresent))
+    }
+
+    /// 587: every disk this sandbox has (root, and state if any) carries an ext4 journal.
+    nonisolated static func disksJournaled(_ layout: StoreLayout) -> Bool {
+        let disks = [layout.rootfs, layout.stateDisk].filter { FileManager.default.fileExists(atPath: $0.path) }
+        return !disks.isEmpty && disks.allSatisfy(EXT4Inspector.hasJournal)
     }
 
     // MARK: lifecycle
@@ -669,6 +679,22 @@ public actor Sandbox {
             setPhase(.running)
         case .restoreGuestMemory:
             if balloonHeld > 0 { try await deflateBalloon() }
+        case .syncGuest:
+            guard container != nil else { return }
+            do {
+                let t0 = ContinuousClock.now
+                let r = try await execInContainer(["sh", "-c", GuestCommand.syncAndMeasure], timeout: 20)
+                let usage = GuestCommand.parseDiskUsage(r.output)
+                if var p = identity {
+                    p.guestUsedMiB = usage["/"]
+                    p.stateGuestUsedMiB = usage[GuestCommand.stateMount]
+                    identity = p
+                }
+                broadcaster.yield(.step("synced the guest's file systems (\(usage["/"].map { String(format: "%.0f MiB in use", $0) } ?? "usage unknown"))",
+                                        milliseconds: milliseconds(since: t0)))
+            } catch {
+                note("could not sync the guest (\(error.localizedDescription)) — continuing")
+            }
         case .saveSnapshot:
             guard let handle else { throw SandboxError.vmUnavailable }
             if balloonHeld > 0, let instance {
@@ -786,7 +812,7 @@ public actor Sandbox {
             if var p = identity ?? (unclean ? PersistedSandbox.read(from: layout.persistedState) : nil) {
                 p.phase = .off
                 p.savedAt = Date()
-                if unclean, FileManager.default.fileExists(atPath: layout.rootfs.path) { p.fsckOnNextBoot = true }
+                if unclean, FileManager.default.fileExists(atPath: layout.rootfs.path), !Self.disksJournaled(layout) { p.fsckOnNextBoot = true }
                 try? p.write(to: layout.persistedState)
             }
             container = nil; instance = nil; handle = nil; identity = nil; cleanlyStopped = false; balloonHeld = 0
@@ -848,7 +874,8 @@ public actor Sandbox {
             // Stop kept this root disk: cold-boot it. Its snapshot, if one is lying around (a
             // crash while asleep, then Start instead of Restore), no longer matches a disk that
             // is about to move on — delete it, never restore it later.
-            let dirty = Self.keptDiskNeedsFsck(kept, snapshotPresent: fm.fileExists(atPath: layout.snapshot.path))
+            let dirty = Self.keptDiskNeedsFsck(kept, snapshotPresent: fm.fileExists(atPath: layout.snapshot.path),
+                                               journaled: Self.disksJournaled(layout))
             try? fm.removeItem(at: layout.snapshot)
             try? fm.removeItem(at: layout.bootLog)
             if let from = kept.rootImage, from != wantedRoot {
@@ -899,25 +926,33 @@ public actor Sandbox {
         // A cold boot builds a new VM, with a memory balloon; a restore keeps what the snapshot had.
         if persisted == nil { identity.memoryBalloon = true }
         // The state disk outlives root disks (Stop, Reset to image, a re-bake); only Delete removes it.
-        if spec.recipe != nil, !fm.fileExists(atPath: layout.stateDisk.path) {
-            try await timed("created the empty state disk (\(spec.stateDiskMiB) MiB, sparse)") {
-                let f = try EXT4.Formatter(FilePath(layout.stateDisk.path), minDiskSize: spec.stateDiskMiB * 1_048_576)
+        if let recipe = spec.recipe, !fm.fileExists(atPath: layout.stateDisk.path) {
+            // 587: the state disk gets the recipe's journal setting.
+            let journal = recipe.journalMiB
+            try await timed("created the empty state disk (\(spec.stateDiskMiB) MiB, sparse\(journal.map { ", \($0) MiB journal" } ?? ", no journal"))") {
+                let f = try EXT4.Formatter(FilePath(layout.stateDisk.path), minDiskSize: spec.stateDiskMiB * 1_048_576,
+                                           journal: ImageRecipe.journalConfig(journal))
                 try f.close()
             }
         }
 
         if persisted == nil, identity.fsckOnNextBoot == true {
             // This disk was not cleanly unmounted (a copy taken while its VM ran, a discarded
-            // snapshot, a crash), and ext4 here has no journal.
+            // snapshot, a crash) — see `keptDiskNeedsFsck`.
             let helper = FsckHelper(storeRoot: spec.storeRoot, kernel: kernel, initfsReference: spec.initfsReference,
                                     dnsServers: spec.dnsServers, events: { [broadcaster] in broadcaster.yield($0) })
             for disk in [layout.rootfs, layout.stateDisk] where fm.fileExists(atPath: disk.path) {
-                let report = try await timed("e2fsck \(disk.lastPathComponent) (not cleanly unmounted; ext4 without a journal)") {
+                let kind = EXT4Inspector.hasJournal(disk) ? "journaled ext4" : "ext4 without a journal"
+                let report = try await timed("e2fsck \(disk.lastPathComponent) (not cleanly unmounted; \(kind))") {
                     try await helper.check(disk)
                 }
                 note("fsck \(disk.lastPathComponent): " + (report.split(separator: "\n").suffix(2).joined(separator: " · ")))
             }
             identity.fsckOnNextBoot = nil
+        }
+        if persisted == nil {
+            identity.rootJournaled = EXT4Inspector.hasJournal(layout.rootfs)
+            identity.stateJournaled = fm.fileExists(atPath: layout.stateDisk.path) ? EXT4Inspector.hasJournal(layout.stateDisk) : nil
         }
 
         var iface: (any Interface)?
@@ -953,7 +988,9 @@ public actor Sandbox {
         let stateDisk = layout.stateDisk
         let c = try LinuxContainer(
             spec.name,
-            rootfs: .block(format: "ext4", source: layout.rootfs.path, destination: "/", options: []),
+            // 587: `discard` — a block the guest frees is punched out of the host file at once
+            // (586: VZ's virtio-blk passes discards through). A guest mount option, not a VM input.
+            rootfs: .block(format: "ext4", source: layout.rootfs.path, destination: "/", options: GuestCommand.diskMountOptions),
             vmm: vmm,
             vm: VMResources(cpus: spec.cpus, memoryInBytes: spec.memoryMiB * 1_048_576 + VMResources.guestMemoryOverhead)
         ) { cfg in
@@ -967,7 +1004,8 @@ public actor Sandbox {
             // The state disk comes AFTER the shares, always: device order is a VM input that a
             // snapshot restore must reproduce exactly.
             if spec.recipe != nil {
-                cfg.mounts.append(.block(format: "ext4", source: stateDisk.path, destination: GuestCommand.stateMount))
+                cfg.mounts.append(.block(format: "ext4", source: stateDisk.path, destination: GuestCommand.stateMount,
+                                         options: GuestCommand.diskMountOptions))
             }
             if let iface { cfg.interfaces = [iface] }
             // A proxied sandbox asks its shim (127.0.0.1:53), which asks the Mac.
@@ -1089,7 +1127,16 @@ public actor Sandbox {
         let id = layout.bakeContainerID
         try? mgr.delete(id)
         let spec = self.spec
-        let b = try await mgr.create(id, image: image, rootfsSizeInBytes: spec.rootfsMiB * 1_048_576, readOnly: false,
+        // 587: flattened here (not by the package) so the disk gets `spec.journalMiB`'s journal.
+        let bakeDir = spec.storeRoot.appendingPathComponent("containers/\(id)")
+        try? FileManager.default.removeItem(at: bakeDir)
+        try FileManager.default.createDirectory(at: bakeDir, withIntermediateDirectories: true)
+        let bakeDisk = bakeDir.appendingPathComponent("rootfs.ext4")
+        try await timed("flattened \(spec.image) to one ext4 disk (\(spec.rootfsMiB) MiB\(spec.journalMiB.map { ", \($0) MiB journal" } ?? ", no journal"))") {
+            _ = try await EXT4Unpacker(capacityInBytes: spec.rootfsMiB * 1_048_576, journal: ImageRecipe.journalConfig(spec.journalMiB))
+                .unpack(image, for: .current, at: bakeDisk)
+        }
+        let b = try await mgr.create(id, image: image, rootfs: .block(format: "ext4", source: bakeDisk.path, destination: "/"),
                                      networking: spec.networking,
                                      vm: VMResources(cpus: spec.cpus, memoryInBytes: spec.memoryMiB * 1_048_576 + VMResources.guestMemoryOverhead)) { cfg in
             cfg.cpus = spec.cpus
@@ -1115,6 +1162,7 @@ public actor Sandbox {
                     throw SandboxError.commandFailed(command: "apk add \(pkgs.joined(separator: " "))", exitCode: r.exitCode, output: r.output + r.errorOutput)
                 }
             }
+            try await trimBakeDisk(b, disk: bakeDisk)
             try await b.stop()
         } catch {
             try? await b.stop()
@@ -1129,6 +1177,17 @@ public actor Sandbox {
         try? mgr.delete(id)
         note(String(format: "prepared disk baked and kept at golden/%@ — %.1f s (never again for this store)",
                     golden.lastPathComponent, seconds(since: t0)))
+    }
+
+    /// 587: `fstrim /` as a bake's last step (586: −11 % for 56 ms), timed with what it returned.
+    private func trimBakeDisk(_ c: LinuxContainer, disk: URL) async throws {
+        let t0 = ContinuousClock.now
+        let (_, before) = ImageBaker.sizes(disk)
+        let r = try await Self.exec(on: c, ["sh", "-c", GuestCommand.trimRoot], environment: [:], workingDirectory: "/",
+                                    privileged: true, timeout: 120)
+        let (_, after) = ImageBaker.sizes(disk)
+        broadcaster.yield(.step(String(format: "trimmed the disk (fstrim /): %d → %d MiB allocated — %@", ImageBaker.mib(before), ImageBaker.mib(after),
+                                       r.output.trimmingCharacters(in: .whitespacesAndNewlines)), milliseconds: milliseconds(since: t0)))
     }
 
     // MARK: network (580)

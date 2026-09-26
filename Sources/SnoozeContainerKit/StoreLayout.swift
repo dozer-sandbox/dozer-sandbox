@@ -45,9 +45,12 @@ public struct StoreLayout: Sendable, Equatable {
         goldenDirectory.appendingPathComponent("\(StoreLayout.goldenKey(for: spec)).ext4")
     }
 
+    /// 587: a journaled prepared disk (`spec.journalMiB`) has its own key; a journal-less one keeps
+    /// the pre-587 key, because it is the same kind of disk.
     public static func goldenKey(for spec: SandboxSpec) -> String {
-        let material = [spec.image, spec.bakePackages.sorted().joined(separator: ","), String(spec.rootfsMiB)]
-            .joined(separator: "|")
+        var parts = [spec.image, spec.bakePackages.sorted().joined(separator: ","), String(spec.rootfsMiB)]
+        if let j = spec.journalMiB { parts.append("journal:\(j)MiB+trim") }
+        let material = parts.joined(separator: "|")
         let digest = SHA256.hash(data: Data(material.utf8))
         let hex = digest.map { String(format: "%02x", $0) }.joined()
         let slug = spec.image.split(separator: "/").last.map(String.init)?
@@ -82,6 +85,15 @@ public struct PersistedSandbox: Codable, Sendable, Equatable {
     /// 583: the VM has a virtio memory balloon (every VM a 583+ build boots). nil or false: an
     /// older record, whose snapshot must be restored into a VM without one.
     public var memoryBalloon: Bool?
+    /// 587: the root / state disk has an ext4 journal (read from its superblock at boot). A journaled
+    /// disk that was not cleanly unmounted is replayed by the kernel, not e2fsck'd. nil: an older
+    /// record — treated as no journal.
+    public var rootJournaled: Bool?
+    public var stateJournaled: Bool?
+    /// 587: what the guest's file systems held (`df` used, MiB) at the last Stop or Deep Sleep —
+    /// `DiskAccounting`'s garbage is the host file's allocation beyond it.
+    public var guestUsedMiB: Double?
+    public var stateGuestUsedMiB: Double?
 
     public init(spec: SandboxSpec, phase: Phase, machineIdentifier: Data, macAddress: String?, subnet: String?,
                 shareTags: [String: String], savedAt: Date = Date()) {

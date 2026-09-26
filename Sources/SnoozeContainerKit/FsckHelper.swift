@@ -20,7 +20,8 @@ struct FsckHelper {
     static let image = "docker.io/library/alpine:3.20"
 
     private var helperSpec: SandboxSpec {
-        SandboxSpec(name: "fsck-helper", storeRoot: storeRoot, rootfsMiB: 512, bakePackages: ["e2fsprogs"])
+        // journalMiB nil: the helper's own disk keeps its pre-587 key (it never needs a journal).
+        SandboxSpec(name: "fsck-helper", storeRoot: storeRoot, rootfsMiB: 512, bakePackages: ["e2fsprogs"], journalMiB: nil)
     }
 
     /// e2fsck `disk`; returns its report. Throws when the file system could not be repaired

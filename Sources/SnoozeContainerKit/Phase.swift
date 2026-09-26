@@ -129,6 +129,10 @@ public enum LifecycleStep: Equatable, Sendable {
     /// 583: deflate the balloon before the VM is paused for a snapshot — a snapshot of an inflated
     /// balloon does not restore.
     case restoreGuestMemory
+    /// 587: best effort, never fails the operation — `sync` in the guest (so a discarded Deep Sleep
+    /// loses nothing written before it) and record what its file systems hold (`df`), for
+    /// `DiskAccounting`'s garbage. Before a Deep Sleep's pause, and before a Stop's graceful stop.
+    case syncGuest
     /// Drop the in-memory VM objects and the network lease, and persist the phase as off (shut
     /// down). The ROOT DISK STAYS: the next Start (Cold Boot) boots it (owner ruling 2026-09-25 — "Stop destroys the VM"
     /// was the 578 smoke finding: anything `apk add`ed vanished).
@@ -170,7 +174,9 @@ public enum LifecyclePlanner {
         case (.sleep, .paused):
             return [.saveSnapshot, .persistState]
         case (.deepSleep, .running):
-            return [.restoreGuestMemory, .pauseVM, .saveSnapshot, .detachSessions(.sandboxSleeping), .stopVMDirect, .persistState]
+            // 587: the guest syncs first — a Deep Sleep may be discarded, and what the guest had not
+            // written back would be lost with it (586: the last ~5 s, journal or not).
+            return [.restoreGuestMemory, .syncGuest, .pauseVM, .saveSnapshot, .detachSessions(.sandboxSleeping), .stopVMDirect, .persistState]
         case (.deepSleep, .paused):
             return [.saveSnapshot, .detachSessions(.sandboxSleeping), .stopVMDirect, .persistState]
         case (.deepSleep, .asleep):
@@ -193,10 +199,15 @@ public enum LifecyclePlanner {
     /// snapshot is never restored onto a disk that has moved on).
     static func stopSteps(from phase: Phase) -> [LifecycleStep]? {
         switch phase {
-        case .running, .failed, .booting:
+        case .running:
+            return [.detachSessions(.sandboxStopped), .syncGuest, .stopContainer, .deleteSnapshot, .releaseRuntime]
+        case .failed, .booting:
             return [.detachSessions(.sandboxStopped), .stopContainer, .deleteSnapshot, .releaseRuntime]
-        case .paused, .asleep, .deepAsleep:
-            // A paused guest cannot answer its agent; one on disk has no VM running at all.
+        case .paused:
+            // A paused guest cannot answer its agent: resume it first.
+            return [.detachSessions(.sandboxStopped), .reviveForStop, .syncGuest, .stopContainer, .deleteSnapshot, .releaseRuntime]
+        case .asleep, .deepAsleep:
+            // One on disk has no VM running at all. (Its disk usage was recorded when it slept.)
             return [.detachSessions(.sandboxStopped), .reviveForStop, .stopContainer, .deleteSnapshot, .releaseRuntime]
         case .off:
             return nil

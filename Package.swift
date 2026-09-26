@@ -73,6 +73,9 @@ let package = Package(
         .testTarget(
             name: "SnoozeContainerKitTests",
             dependencies: ["SnoozeContainerKit",
+                           // 587: real ext4 disks, made on the host, for the EXT4Inspector / accounting tests.
+                           .product(name: "ContainerizationEXT4", package: "containerization"),
+                           .product(name: "ContainerizationArchive", package: "containerization"),
                            .product(name: "NIOCore", package: "swift-nio"),
                            .product(name: "NIOEmbedded", package: "swift-nio"),
                            .product(name: "NIOSSL", package: "swift-nio-ssl")],
