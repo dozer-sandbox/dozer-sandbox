@@ -85,6 +85,11 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   (`Deinited NIOAsyncWriter without calling finish()`, seen in the 578 suite). Anything that could
   not be stopped through the package goes to `Graveyard` rather than being deallocated. Every exec
   is `delete()`d, including on error paths — deletion is what closes its client.
+- **A wake's first guest calls are retried on a closed channel** (583). A restored guest resets its
+  vsock transport as it resumes; a vminitd connection dialled in that moment can be closed under its
+  first call (`unavailable: "The channel was closed"` — 582: 2 of 31 concurrent wakes; 583: always
+  `resyncClock`). `resyncClock` and `remountShares` are idempotent, so `retryingFirstGuestCall` retries
+  them on a fresh connection. `hardening concurrent` (16 at once) is the regression test.
 - **The snapshot is deleted the moment the VM runs again** (resume, wake, restore) and on stop.
 - **Wake re-syncs the guest clock and re-mounts every share.** The re-mount lists the fresh virtio-fs
   root (READDIRPLUS) before binding: the "fresh" mount reuses the live superblock, and without the

@@ -194,6 +194,28 @@ public actor Sandbox {
         "\(error) \(error.localizedDescription)".contains("storage device attachment is invalid")
     }
 
+    /// 583 (582: 2 of 31 concurrent wakes threw `unavailable: "The channel was closed"` although the
+    /// sandbox came up). A restored guest resets its vsock transport as it resumes, and a vminitd
+    /// connection the host dials in that moment can be closed under its first call — the wider the
+    /// window, the busier the Mac (16 concurrent wakes: 1 in 64–80, always the wake's FIRST guest
+    /// call, `resyncClock`). The first guest calls of a wake are idempotent, so they are retried,
+    /// each attempt on a fresh connection.
+    static func isTransientGuestTransportError(_ error: Error) -> Bool {
+        let s = "\(error) \(error.localizedDescription)"
+        return s.contains("The channel was closed") || s.contains("unavailable:") || s.contains("Connection reset by peer")
+    }
+
+    private func retryingFirstGuestCall<T>(_ what: String, attempts: Int = 5, _ body: () async throws -> T) async throws -> T {
+        var attempt = 1
+        while true {
+            do { return try await body() } catch where attempt < attempts && Self.isTransientGuestTransportError(error) {
+                note("\(what): \(error) — retrying on a fresh connection (\(attempt))")
+                try await Task.sleep(for: .milliseconds(50 * attempt))
+                attempt += 1
+            }
+        }
+    }
+
     /// Drop a boot that failed part-way: its container may own vminitd clients that were never
     /// closed, and deallocating one is fatal — so it is kept (Graveyard), never freed.
     private func abandonBoot() {
@@ -482,13 +504,13 @@ public actor Sandbox {
             return
         }
         let target = LifecyclePlanner.target(of: op)
-        do {
-            for step in steps { try await run(step, target: target) }
-            setPhase(target)
-        } catch {
-            note("\(op.rawValue) FAILED: \(error.localizedDescription)")
-            throw error
+        for step in steps {
+            do { try await run(step, target: target) } catch {
+                note("\(op.rawValue) FAILED at \(step): \(error.localizedDescription)")
+                throw error
+            }
         }
+        setPhase(target)
     }
 
     /// Stop is best effort at every step: whatever state the VM is in, it ends stopped and the
@@ -565,19 +587,24 @@ public actor Sandbox {
         case .resyncClock:
             guard let instance, let v = vzInstance(of: instance) else { throw SandboxError.vmUnavailable }
             try await timed("re-synced the guest clock") {
-                let agent = try await v.dialAgent()
-                let now = Date().timeIntervalSince1970
-                do { try await agent.setTime(sec: Int64(now), usec: Int32((now - floor(now)) * 1_000_000)) } catch {
+                try await retryingFirstGuestCall("re-sync the guest clock") {
+                    let agent = try await v.dialAgent()
+                    let now = Date().timeIntervalSince1970
+                    do { try await agent.setTime(sec: Int64(now), usec: Int32((now - floor(now)) * 1_000_000)) } catch {
+                        await closeKeepingOnFailure(agent)
+                        throw error
+                    }
                     await closeKeepingOnFailure(agent)
-                    throw error
                 }
-                await closeKeepingOnFailure(agent)
             }
         case .remountShares:
             let tags = (identity?.shareTags ?? [:]).map { (tag: $0.value, guestPath: $0.key) }.sorted { $0.guestPath < $1.guestPath }
             guard !tags.isEmpty else { return }
             try await timed("re-mounted \(tags.count) share(s) (virtio-fs does not survive a VM stop)") {
-                let r = try await execInContainer(["sh", "-c", GuestCommand.remountShares(tags)], privileged: true, timeout: 30)
+                // The re-mount script is idempotent (it unmounts before it mounts).
+                let r = try await retryingFirstGuestCall("re-mount the shares") {
+                    try await execInContainer(["sh", "-c", GuestCommand.remountShares(tags)], privileged: true, timeout: 30)
+                }
                 if r.exitCode != 0 { throw SandboxError.commandFailed(command: "remount shares", exitCode: r.exitCode, output: r.output + r.errorOutput) }
             }
         case .deleteSnapshot:

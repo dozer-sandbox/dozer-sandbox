@@ -190,6 +190,15 @@ final class PersistedSandboxTests: XCTestCase {
                        "583: the deep-slept VM never unmounted the disk — the cold boot runs e2fsck first")
     }
 
+    /// 583: the first guest calls of a wake are retried on a closed/reset vsock channel — and only then.
+    func test_transientGuestTransportErrors() {
+        struct E: Error, CustomStringConvertible { let description: String }
+        XCTAssertTrue(Sandbox.isTransientGuestTransportError(E(description: "unavailable: \"The channel was closed\"")))
+        XCTAssertTrue(Sandbox.isTransientGuestTransportError(E(description: "read: Connection reset by peer")))
+        XCTAssertFalse(Sandbox.isTransientGuestTransportError(E(description: "invalidArgument: \"no such file\"")))
+        XCTAssertFalse(Sandbox.isTransientGuestTransportError(SandboxError.vmUnavailable))
+    }
+
     /// 583 (582 §8: 12 of 15 cold boots of a discarded snapshot's disk failed): a kept disk is
     /// checked unless the last VM that ran it was shut down through the package.
     func test_keptDiskNeedsFsckUnlessCleanlyShutDown() {
