@@ -757,7 +757,7 @@ public actor Sandbox {
         let flag = AdoptionFlag(persisted != nil)
         let initfs = Containerization.Mount.block(format: "ext4", source: layout.initfs.path, destination: "/", options: ["ro"])
         let vmm = SnoozeVMM(
-            inner: VZVirtualMachineManager(kernel: kernel, initialFilesystem: initfs),
+            inner: VZVirtualMachineManager(kernel: kernel, initialFilesystem: initfs, group: SharedEventLoop.group),
             identity: PinnedIdentity(machineIdentifier: identity.machineIdentifier, macAddress: identity.macAddress),
             adopt: persisted != nil ? (snapshot: layout.snapshot, flag: flag, containerID: spec.name) : nil)
         let spec = self.spec

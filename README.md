@@ -153,7 +153,7 @@ A byte-identical copy already on the Mac (the `container` CLI's) seeds the cache
 | Package | Pin | Why |
 |---|---|---|
 | apple/containerization | **exact** 0.47.0 | the VM runtime; the sleep design leans on its internals' shape |
-| apple/swift-nio (NIOCore, NIOEmbedded) | from 2.103.0 | 580: drives TLS synchronously on the proxy's connection threads (`EmbeddedChannel`) |
+| apple/swift-nio (NIOCore, NIOEmbedded, NIOPosix) | from 2.103.0 | 580: drives TLS synchronously on the proxy's connection threads (`EmbeddedChannel`); 583: one shared `MultiThreadedEventLoopGroup` for every VM's vminitd clients |
 | apple/swift-nio-ssl (NIOSSL) | from 2.37.5 | 580: terminates and re-originates TLS for bound hosts with **in-memory** keys — Network.framework and Secure Transport need a `SecIdentity`, i.e. a keychain (prompts for an ad-hoc-signed app, and a leaf key per host on disk) |
 | apple/swift-certificates (X509), apple/swift-asn1 | from 1.21.0 / 1.7.3 | 580: issues the per-sandbox CA and its per-host leaves |
 

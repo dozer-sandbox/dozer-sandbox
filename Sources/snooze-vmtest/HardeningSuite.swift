@@ -138,10 +138,157 @@ final class NoteLog: @unchecked Sendable {
     func stop() { task?.cancel() }
 }
 
+// MARK: Deep Sleep → Wake cycles: threads, fds, footprint (item 2)
+
+struct HostSample: CustomStringConvertible {
+    let threads: Int, fds: Int, footprintMiB: Double
+    static func now() -> HostSample { HostSample(threads: hostThreads(), fds: hostFDs(), footprintMiB: hostFootprintMiB()) }
+    var description: String { String(format: "threads %d · fds %d · footprint %.1f MiB", threads, fds, footprintMiB) }
+}
+
+func leakSuite() async throws {
+    // A: what a long-lived host does — one Sandbox object per sandbox, cycled.
+    // B: a NEW Sandbox object (a new VM instance — the path that stranded an event-loop group) every
+    //    cycle; the old object is kept, as a host registry would keep it (dropping a deep-asleep one
+    //    is not supported), so each still holds its VM's boot-log file: +1 fd per object, expected.
+    try await leakCycles("A same object", cycles: envInt("HARDEN_LEAK_CYCLES", 200), newObjects: false)
+    try await leakCycles("B new object", cycles: envInt("HARDEN_LEAK_NEW_CYCLES", 60), newObjects: true)
+}
+
+func leakCycles(_ label: String, cycles: Int, newObjects: Bool) async throws {
+    // No NIC: a new Sandbox object must not fight the old one for a pinned vmnet subnet.
+    var spec = try hardenSpec("harden-leak")
+    spec.network = .none
+    var sb = try await freshSandbox(spec)
+    print("vmtest[hardening]: leak \(label): \(cycles) Deep Sleep → Wake cycles")
+    try await sb.start()
+    try await sb.openSession("tick", argv: ["bash", "/work/tick.sh"], size: .standard)
+    let pid = try await sb.sessions().first { $0.name == "tick" }?.pid
+    try await sb.deepSleep()
+    let start = HostSample.now()
+    info("before the cycles: \(start)")
+    let warmup = min(20, cycles / 2)
+    var base = start, errors = 0, objects = 0
+    var wakeMs: [Double] = []
+    for i in 1...cycles {
+        if newObjects {
+            hardeningKeep.append(sb)
+            sb = try Sandbox(spec: spec)
+            if i > warmup { objects += 1 }
+        }
+        let t0 = Date()
+        do {
+            try await sb.wake()
+            wakeMs.append(Date().timeIntervalSince(t0) * 1000)
+            try await sb.deepSleep()
+        } catch {
+            errors += 1
+            info("cycle \(i): \(error)")
+            if await sb.phase != .deepAsleep { break }
+        }
+        if i == warmup { try? await Task.sleep(for: .seconds(1)); base = HostSample.now(); info("after \(i) cycles (baseline): \(base)") }
+        if i % 50 == 0 { info("after \(i) cycles: \(HostSample.now())") }
+    }
+    try? await Task.sleep(for: .seconds(2))
+    let end = HostSample.now()
+    let n = cycles - warmup
+    info("after \(cycles) cycles: \(end)")
+    info(String(format: "wake p50 %.0f ms · max %.0f ms", wakeMs.sorted()[wakeMs.count / 2], wakeMs.max() ?? 0))
+    check(errors == 0, "leak \(label): \(cycles) Deep Sleep → Wake cycles, \(errors) errors")
+    check(end.threads - base.threads <= 4, "leak \(label): threads flat over the last \(n) cycles: \(base.threads) → \(end.threads) (from \(start.threads) before any)")
+    check(end.fds - base.fds <= 4 + objects,
+          "leak \(label): fds flat over the last \(n) cycles: \(base.fds) → \(end.fds) (from \(start.fds))" + (newObjects ? " — \(objects) kept objects' boot-log files allowed" : ""))
+    check(end.footprintMiB - base.footprintMiB <= 16, String(format: "leak %@: footprint flat over the last %d cycles: %.1f → %.1f MiB (from %.1f)", label, n, base.footprintMiB, end.footprintMiB, start.footprintMiB))
+    try await sb.wake()
+    let s = try await sb.sessions().first { $0.name == "tick" }
+    check(s != nil && s?.pid == pid && s?.isEnded == false, "leak \(label): the session survived all \(cycles) cycles (pid \(pid.map(String.init) ?? "?"))")
+    try await sb.shutDown()
+    try? await sb.delete()
+}
+
+// MARK: concurrent wakes (item 3)
+
+func concurrentSuite() async throws {
+    let n = envInt("HARDEN_CONCURRENT", 16), rounds = envInt("HARDEN_ROUNDS", 3)
+    // Proxied (no NIC), as SandboxLab's sandboxes are: the wake re-registers the proxy listener too.
+    let specs: [SandboxSpec] = try (1...n).map { i in
+        var s = try hardenSpec(String(format: "harden-cc-%02d", i), memoryMiB: 256)
+        s.network = .proxied(.locked)
+        return s
+    }
+    print("vmtest[hardening]: \(n) sandboxes woken concurrently × \(rounds) rounds (+1 round through new objects)")
+    var sbs: [Sandbox] = []
+    for s in specs {
+        let sb = try await freshSandbox(s)
+        try await sb.start()
+        try await sb.openSession("tick", argv: ["bash", "/work/tick.sh"], size: .standard)
+        try await sb.deepSleep()
+        sbs.append(sb)
+    }
+    info("\(n) sandboxes deep asleep")
+    var wakeErrors = 0, sleepErrors = 0, deadAfter = 0, total = 0
+    func all(_ label: String, _ op: @escaping @Sendable (Sandbox) async throws -> Void) async -> [(Int, Double, String?)] {
+        await withTaskGroup(of: (Int, Double, String?).self) { g in
+            for (i, sb) in sbs.enumerated() {
+                g.addTask {
+                    let t0 = Date()
+                    do { try await op(sb); return (i, Date().timeIntervalSince(t0) * 1000, nil) } catch {
+                        return (i, Date().timeIntervalSince(t0) * 1000, "\(error)")
+                    }
+                }
+            }
+            var out: [(Int, Double, String?)] = []
+            for await r in g { out.append(r) }
+            return out
+        }
+    }
+    for round in 1...(rounds + 1) {
+        let newObjects = round == rounds + 1
+        if newObjects {
+            hardeningKeep.append(contentsOf: sbs)
+            sbs = try specs.map { try Sandbox(spec: $0) }
+        }
+        let notes = sbs.map { NoteLog($0) }
+        let t0 = Date()
+        let w = await all("wake") { try await $0.wake() }
+        let ms = Date().timeIntervalSince(t0) * 1000
+        total += w.count
+        let errs = w.filter { $0.2 != nil }
+        wakeErrors += errs.count
+        for e in errs { info("round \(round): \(specs[e.0].name) wake threw: \(e.2!)") }
+        for (i, nl) in notes.enumerated() {
+            for l in nl.lines where l.contains("FAILED") || l.contains("retrying") { info("round \(round): \(specs[i].name): \(l)") }
+            nl.stop()
+        }
+        // Every one must be up and answering, whatever the wake reported.
+        var dead = 0
+        for sb in sbs {
+            let r = try? await sb.exec(["sh", "-c", "echo up"], timeoutSeconds: 20)
+            if r?.output.contains("up") != true { dead += 1 }
+        }
+        deadAfter += dead
+        let d = await all("deep sleep") { try await $0.deepSleep() }
+        let dErr = d.filter { $0.2 != nil }
+        sleepErrors += dErr.count
+        for e in dErr { info("round \(round): \(specs[e.0].name) deep sleep threw: \(e.2!)") }
+        let per = w.map(\.1).sorted()
+        info(String(format: "round %d%@: %d woken together in %.0f ms (each p50 %.0f · max %.0f ms) · wake errors %d · not answering %d · deep-sleep errors %d",
+                    round, newObjects ? " (new objects: restore)" : "", n, ms, per[per.count / 2], per.last ?? 0, errs.count, dead, dErr.count))
+    }
+    check(wakeErrors == 0, "\(total) concurrent wakes (\(n) at a time): \(wakeErrors) errors")
+    check(deadAfter == 0, "every woken sandbox answered an exec (\(deadAfter) did not)")
+    check(sleepErrors == 0, "concurrent Deep Sleeps: \(sleepErrors) errors")
+    for sb in sbs { try? await sb.shutDown(); try? await sb.delete() }
+}
+
 func hardeningSuite(_ part: String?) async throws {
     switch part {
     case "discard": try await discardSuite()
+    case "leak": try await leakSuite()
+    case "concurrent": try await concurrentSuite()
     default:
         try await discardSuite()
+        try await leakSuite()
+        try await concurrentSuite()
     }
 }

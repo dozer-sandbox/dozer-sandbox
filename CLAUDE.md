@@ -24,7 +24,7 @@ at the root is the whole story for a consumer.
 
 | Product | Targets | Depends on |
 |---|---|---|
-| `SnoozeContainerKit` | `SnoozeContainerKit` (+ resources `deckhold`, `snoozenet`) | `apple/containerization` **exact** `0.47.0`: `Containerization`, `ContainerizationArchive` (the kernel tarball), `ContainerizationExtras`, `ContainerizationOCI`, `ContainerizationOS`; since 580 `swift-nio` (`NIOCore`, `NIOEmbedded`), `swift-nio-ssl` (`NIOSSL`), `swift-certificates` (`X509`), `swift-asn1` — apple/* packages containerization already resolves (README "Dependencies") |
+| `SnoozeContainerKit` | `SnoozeContainerKit` (+ resources `deckhold`, `snoozenet`) | `apple/containerization` **exact** `0.47.0`: `Containerization`, `ContainerizationArchive` (the kernel tarball), `ContainerizationExtras`, `ContainerizationOCI`, `ContainerizationOS`; since 580 `swift-nio` (`NIOCore`, `NIOEmbedded`; 583 `NIOPosix`), `swift-nio-ssl` (`NIOSSL`), `swift-certificates` (`X509`), `swift-asn1` — apple/* packages containerization already resolves (README "Dependencies") |
 | — (not a product) | `snooze-vmtest` — the entitled VM test host | `SnoozeContainerKit` |
 
 The Containerization pin is EXACT on purpose: the sleep design leans on its internals' shape —
@@ -74,6 +74,10 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   created once and reused. Two processes that both take the default can get the same subnet and the
   same guest addresses — the NAT then silently drops one (the gateway still answers ping). Hosts that
   run beside others set `SandboxSpec.subnet`; the test hosts pin 192.168.201/202.0/24.
+- **Every sandbox VM uses the ONE shared event-loop group** (`SharedEventLoop.group`, 583). Left to
+  itself `VZVirtualMachineInstance` makes an 8-thread group and shuts it down only in its own `stop()`,
+  which Deep Sleep never calls — each VM instance a host made kept 8 threads + 8 kqueues forever (582;
+  thread cap 6,144). `hardening leak` is the regression test (threads, fds, footprint flat).
 - **Stop decides from the phase it was CALLED in** (`perform()` reads `phase` before going busy).
 - **Stop is always graceful.** A paused VM is resumed and a VM on disk restored (silently — no phase
   event) and then `LinuxContainer.stop()` runs. Stopping at the VZ level instead leaves the package's
