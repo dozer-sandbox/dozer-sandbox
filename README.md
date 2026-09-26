@@ -179,6 +179,9 @@ snooze doctor                          # macOS, Apple silicon, the entitlement, 
 snooze up myproj --image claude-code --workspace ~/code/myproj   # create → boot → attach to Claude Code
 ```
 
+New to it: the [walkthrough](docs/CLI-WALKTHROUGH.md) (~20 min, first run end to end) and the
+[user guide](docs/CLI-USER-GUIDE.md) (concepts, every command by task, keys, network, troubleshooting).
+
 `make cli` builds and signs `.build/debug/snooze` for development. An unsigned `snooze` runs every
 command but cannot boot a VM (`snooze doctor` says so).
 
