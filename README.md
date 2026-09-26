@@ -15,6 +15,7 @@ Linux equivalent, so there is no Linux build and no Linux CI job. The VM needs t
 | Product | What it is |
 |---|---|
 | `SnoozeContainerKit` | `Sandbox` (the actor that owns one VM and its lifecycle), `SandboxSpec`, `SessionConnection` (one viewer's connection to a guest terminal session), the `deckhold` wire protocol, and the committed `deckhold` guest binary as a resource. |
+| `snooze` (executable, 585) | The command-line tool: create, start, pause, sleep, deep-sleep and wake sandboxes, attach to their sessions, restore points, network policy, metrics — see [The `snooze` CLI](#the-snooze-cli). Built on the library; the library does not depend on it. |
 
 ## What it does, measured
 
@@ -170,6 +171,91 @@ First fetch ~90 s (a 569 MiB archive); every later start verifies the cached 15 
 A byte-identical copy already on the Mac (the `container` CLI's) seeds the cache with no network;
 `SandboxSpec.kernelPath` boots any kernel you choose instead.
 
+## The `snooze` CLI
+
+```bash
+make install-cli PREFIX=~/.local       # release build, signed with the virtualization entitlement
+snooze doctor                          # macOS, Apple silicon, the entitlement, kernel, store, host
+snooze up myproj --image claude-code --workspace ~/code/myproj   # create → boot → attach to Claude Code
+```
+
+`make cli` builds and signs `.build/debug/snooze` for development. An unsigned `snooze` runs every
+command but cannot boot a VM (`snooze doctor` says so).
+
+### Commands (the owner's vocabulary; aliases in brackets)
+
+| | |
+|---|---|
+| `snooze create NAME --image lab\|claude-code\|pi\|<custom> [--cpus N] [--memory 2G] [--workspace DIR] [--network agent\|bake\|locked\|open\|nat\|none] [--subnet CIDR]` | Make a sandbox (off until started). `lab` is Alpine + bash (1 GiB); the agent images get 2 GiB. The workspace is shared at `/workspace`. The network defaults to **proxied** — no network interface, every connection judged by the Mac's policy and logged: `agent` for an agent image, `bake` (package registries only) for the lab. |
+| `snooze up NAME [create options] [--session S] [-d] [-- CMD…]` | Create if missing → start or wake → attach to the image's session (`claude`, `pi`, or a `bash -l` shell), opening it if it is not running (`vagrant up` / `compose up`). |
+| `snooze start NAME` [`cold-boot`] | Boot — or wake it if it is asleep, resume it if paused. |
+| `snooze pause NAME` [`suspend`] · `snooze resume NAME` | Guest CPU to 0 in ~1 ms, RAM kept. |
+| `snooze sleep NAME` | Pause + snapshot to disk: RAM kept, and it survives a host crash. |
+| `snooze deep-sleep NAME` [`hibernate`] · `snooze wake NAME` | Snapshot + VM stopped: RAM returned. Wake ~0.3 s, sessions and pids where they were. A program started less than 3 s ago gets the rest of that time first (583). |
+| `snooze shutdown NAME` · `snooze reset NAME` · `snooze rm NAME` | Cold stop keeping the disk · discard the disk (back to the image) · remove everything. Each asks first on the terminal; `--yes` skips; with no terminal and no `--yes` they refuse (exit 5). |
+| `snooze ls` · `snooze inspect NAME` · `snooze sessions NAME` | Name, image, phase, RAM held (the allocation less what the balloon returned; 0 deep asleep or off), disk, sessions, network · everything as JSON · the guest's terminal sessions. |
+| `snooze attach NAME [SESSION] [--no-wake]` | A raw-tty client of a guest session. **Ctrl-]** detaches (`--detach-key ctrl-x\|none`); the session keeps running. A Deep Sleep disconnects you and the client waits, then reattaches by itself when the sandbox runs again. A paused or sleeping sandbox is woken first unless `--no-wake`. |
+| `snooze run NAME [--session S] [-d] -- CMD…` | A NEW session running CMD (no shell in front — say `bash -lc '…'` for one), attached; exits with the program's exit code. |
+| `snooze exec NAME [--user U] [--workdir D] [-e K=V] [--timeout S] -- CMD…` | One-shot and non-interactive: stdout, stderr and the exit code pass through. Runs like a session (an agent image's user in `/workspace`). |
+| `snooze image ls\|bake NAME\|rm NAME` | The built-in images and custom ones; bake now rather than at the first start. `pull`/`push` answer "not yet" (584.B2). |
+| `snooze point take\|ls\|revert\|fork\|rm\|save-image NAME …` | Restore points (disk-only APFS clones): `take NAME [POINT]`, `revert NAME POINT` (shuts down; a "before revert" point is taken first), `fork NAME POINT NEW`, `save-image NAME [POINT] --as IMAGE`. A point is named by its name or id. |
+| `snooze net policy NAME [--preset P] [--allow HOST…] [--deny HOST…] [--remove HOST…]` · `snooze net log NAME [--denied] [--follow]` | A proxied sandbox's policy, changed live and kept for the next start · its connection log (metadata only). |
+| `snooze key set NAME --anthropic [--keychain SERVICE]` · `key rm` · `key ls` | The key is read from stdin (or a no-echo prompt, or a keychain generic password) — **never an argument** — and held by the host's proxy in memory; the guest's `ANTHROPIC_API_KEY` is a placeholder. A key from stdin lasts while the host runs; one from the keychain is read again when a new host loads the sandbox. |
+| `snooze metrics [--csv] [--image X] [--days N] [--no-steps]` | Every action's timing (count, median, p90, min, max, failures) from `<store>/metrics.sqlite` — SandboxLab's schema. |
+| `snooze doctor` · `snooze events [NAME]` | Checks · follow the host's phases, steps and notes. |
+| `snooze host [--foreground] [--idle-timeout MIN]` · `host stop` · `host status` | The host (normally started for you) · Deep Sleep everything and stop it · is one running (never starts one). |
+
+Every command takes `--json` (machine-readable output on stdout; errors as `{"error":{"code","message"}}`),
+`--store DIR` (default `$SNOOZE_STORE`, else `~/Library/Application Support/SnoozeContainerKit`),
+`-v` (every progress step; by default only an operation slower than a second shows its steps, on
+stderr) and `-q`. JSON documents only ever gain fields. Phases on the wire are `off`, `booting`,
+`running`, `paused`, `asleep`, `deepAsleep`, `failed`.
+
+**Exit codes:** 0 ok · 1 failed · 2 not found · 3 not possible in this phase · 4 already exists ·
+5 not confirmed · 6 host unavailable · 7 not implemented yet · 64 usage. `exec`, `run` and
+`attach` exit with the program's own code, and 125 when snooze itself fails.
+
+**Environment:** `SNOOZE_STORE`; `SNOOZE_HOST_IDLE` (minutes, the host's idle timeout; default 5, 0 =
+never); `SNOOZE_KERNEL_CACHE` / `SNOOZE_KERNEL` (a shared kernel cache / an explicit kernel, as for
+the library's tests); `SNOOZE_SUBNET` (the default subnet of a `--network nat` sandbox). They are
+read when a sandbox is created (the kernel and subnet are then part of its spec).
+
+### The host
+
+A running VM lives in the process that started it, so one process per user and store owns them
+all: **`snooze host`** (owner ruling, 585: a lazy per-user host). It owns every running VM, each
+proxied sandbox's egress proxy (its policy, connection log and credential vault), the metrics
+writer, and the shared event-loop group (583), and serves `<store>/host.sock`. Every command is a
+thin client of that socket.
+
+- **Lazy.** The first command that needs it starts it as a **detached child** — its own session
+  (`setsid`), stdin `/dev/null`, output appended to `<store>/host.log`, none of the caller's other
+  file descriptors. No launchd agent: nothing is installed in `~/Library/LaunchAgents`. It holds
+  `<store>/host.lock` (flock) for its whole life, so there is never a second host for a store, and a
+  new one waits for an exiting one to finish before it loads anything.
+- **Idle exit.** It exits once no sandbox has a VM (booting, running, paused or asleep) and no
+  client is connected, for `--idle-timeout` minutes (default 5; `$SNOOZE_HOST_IDLE`). Read-only
+  commands — `ls`, `inspect`, `point ls`, `image ls`, `net policy` (shown), `key ls` — answer from the
+  store in-process when no host runs, so **no daemon runs when no sandbox is running**, and looking
+  never starts one.
+- **Quit = Deep Sleep.** `snooze host stop`, SIGTERM and SIGINT deep-sleep every running, paused or
+  sleeping sandbox (the library's `prepareForExit`, with its settle delay) and then exit. The next
+  command starts a new host; `wake` (or `attach`, `up`, `exec`) brings each back, sessions and pids
+  intact.
+- **Crash.** After `kill -9` (or a crash) the next command starts a new host, which, for each
+  sandbox: **asleep** (its VM died with the host, the snapshot is on disk) → restored and put back to
+  sleep, sessions intact; **deep asleep** → nothing to do, `wake` adopts it in the new process;
+  **running** → reported as died (`ls` shows it; `inspect` has `diedWithHost`), its disk — never
+  unmounted, and the ext4 has no journal — marked for e2fsck at the next start. A read-only command
+  that finds such a record starts the host so it can recover.
+- **The protocol** (`Sources/SnoozeHost/HostProtocol.swift`) is JSON lines: one request line
+  (`{"v":1,"op":"deep-sleep","name":"myproj"}`), then zero or more `{"event":…}` progress lines and one
+  final `{"ok":true,"result":…}` / `{"ok":false,"error":{"code","message"}}`. `attach` switches to raw
+  after its `ok` line (`{"state":"attached"|"held"}`): VT bytes from the host; keystrokes plus in-band
+  `0xFF 'H'|'R' cols rows` frames from the client (SandboxLab's attach wire); the end of a session is
+  a notice carrying `ESC ] 777;snooze;ended;<code> BEL`. `events` and `net-log --follow` stream event
+  lines. Fields are only ever added; a host answers a newer `v` with `error.code = "version"`.
+
 ## Dependencies
 
 | Package | Pin | Why |
@@ -179,8 +265,11 @@ A byte-identical copy already on the Mac (the `container` CLI's) seeds the cache
 | apple/swift-nio-ssl (NIOSSL) | from 2.37.5 | 580: terminates and re-originates TLS for bound hosts with **in-memory** keys — Network.framework and Secure Transport need a `SecIdentity`, i.e. a keychain (prompts for an ad-hoc-signed app, and a leaf key per host on disk) |
 | apple/swift-certificates (X509), apple/swift-asn1 | from 1.21.0 / 1.7.3 | 580: issues the per-sandbox CA and its per-host leaves |
 
-All four 580 additions are apple/* packages that containerization 0.47.0 already resolves, so
-declaring them changed nothing in `Package.resolved`. Upstream certificates are verified with the
+| apple/swift-argument-parser (ArgumentParser) | from 1.5.0 (resolved 1.8.2) | 585: the `snooze` CLI's subcommands, aliases, options and `--help`. Imported ONLY by the CLI's command targets (`Sources/SnoozeCLI`, `Sources/snooze`) — never by the library or the host; the audit enforces it. Hand-rolling a parser for ~40 subcommands with aliases and `--` passthrough would be more code to get wrong than this Apple package. |
+
+All five are apple/* packages that containerization 0.47.0 already resolves, so declaring them
+changed nothing in `Package.resolved`. The CLI's host also uses the system `SQLite3` module for its
+metrics (no package). Upstream certificates are verified with the
 Mac's own trust store (Security.framework, `SecTrustEvaluateWithError`). `Scripts/audit.sh` holds
 the import and dependency allowlists.
 
@@ -231,6 +320,10 @@ make deckhold-verify  # rebuild from scratch and check the committed bytes match
 make test-vm-network  # 580: a proxied (no-NIC) sandbox end to end, then a bake under the bake preset
 make snoozenet        # rebuild the snoozenet guest binary (pinned Zig; no ghostty) + refresh PROVENANCE.md
 make snoozenet-verify # rebuild snoozenet and check the committed bytes match
+make cli              # 585: build .build/debug/snooze and sign it with the virtualization entitlement
+make install-cli      # release build, signed, into PREFIX (default ~/.local): bin/snooze → libexec/snooze/
+make test-cli         # 585: the signed snooze driven from separate processes against a scratch store
+                      #      (up/exec/run/attach, lifecycle, points, two sandboxes, kill -9 the host, idle exit)
 ```
 
 ## Contributing

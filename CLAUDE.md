@@ -25,7 +25,8 @@ at the root is the whole story for a consumer.
 | Product | Targets | Depends on |
 |---|---|---|
 | `SnoozeContainerKit` | `SnoozeContainerKit` (+ resources `deckhold`, `snoozenet`) | `apple/containerization` **exact** `0.47.0`: `Containerization`, `ContainerizationArchive` (the kernel tarball), `ContainerizationExtras`, `ContainerizationOCI`, `ContainerizationOS`; since 580 `swift-nio` (`NIOCore`, `NIOEmbedded`; 583 `NIOPosix`), `swift-nio-ssl` (`NIOSSL`), `swift-certificates` (`X509`), `swift-asn1` — apple/* packages containerization already resolves (README "Dependencies") |
-| — (not a product) | `snooze-vmtest` — the entitled VM test host | `SnoozeContainerKit` |
+| `snooze` (executable, 585) | `snooze` → `SnoozeCLI` (commands) → `SnoozeHost` (the host + its client) | `SnoozeContainerKit`; `swift-argument-parser` (`ArgumentParser`) in `SnoozeCLI`/`snooze` ONLY; the system `SQLite3` in `SnoozeHost` (metrics) |
+| — (not a product) | `snooze-vmtest` — the entitled VM test host | `SnoozeContainerKit`, `SnoozeHost` (the `cli` mode decodes `--json` with its types) |
 
 The Containerization pin is EXACT on purpose: the sleep design leans on its internals' shape —
 `LinuxContainer.withVirtualMachineInstance` handing out a `VZVirtualMachineInstance`, the
@@ -55,7 +56,13 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
 | `Credentials.swift` | 580: `CredentialBinding`, `CredentialVault` (secrets in memory, placeholders, the byte-exact head rewrite); `HTTPHead` |
 | `SandboxCA.swift`, `HTTPRequestReader.swift`, `ConnectionLog.swift` | 580: the per-sandbox CA + leaves; request/body framing; the metadata-only log |
 | `Resources/snoozenet`, `Guest/snoozenet/` | 580: the guest half of a proxied network — C source, `build.sh` (the same pinned Zig), `PROVENANCE.md` |
-| `Sources/snooze-vmtest/` | The VM integration suite (entitled executable); `NetworkSuite.swift` is `network` |
+| `Sources/snooze-vmtest/` | The VM integration suite (entitled executable); `NetworkSuite.swift` is `network`; `CLISuite.swift` is `cli` (585, `make test-cli`) |
+| `Sources/SnoozeHost/HostProtocol.swift` | 585: the host protocol (JSON lines, `HostOp`, results) — fields only ever added |
+| `Sources/SnoozeHost/HostCore.swift` | 585: the host's model — every sandbox as a `Sandbox`, every operation, crash recovery, metrics rows; also used read-only in-process |
+| `Sources/SnoozeHost/HostServer.swift` | 585: `snooze host` — the lock, the socket, the attach relay (held clients), streams, idle exit, quit = Deep Sleep |
+| `Sources/SnoozeHost/HostClient.swift`, `UnixSocket.swift` | 585: the detached-child launcher, the client, socket plumbing, `ClientWire` (SandboxLab's attach wire) |
+| `Sources/SnoozeHost/SnoozeStore.swift`, `Metrics.swift` | 585: the CLI store's files, `SandboxConfig` (`snooze.json`), images → specs; the metrics DB (SandboxLab's schema) |
+| `Sources/SnoozeCLI/` | 585: the commands (ArgumentParser), the attach client, `doctor` |
 | `Tests/SnoozeContainerKitTests/` | Unit tests — no VM |
 
 ## Rules that each cost a bug to learn (keep them, and keep their tests)
@@ -144,6 +151,18 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   forever. Use `writeAndFlush(_, promise: nil)` and `close(promise: nil)`, then drain.
 - **A real key given to `openSession`/`exec` is moved into the vault** and replaced by a
   placeholder; keep it that way — "keys never enter the sandbox" rests on it.
+- **The `snooze` host (585) is the ONE owner of a store's VMs.** It holds `<store>/host.lock` for its
+  whole life and loads nothing before it has it (a new host waits for an exiting one — otherwise it
+  would read a record still saying `running` and report a live sandbox as died). The launcher is a
+  detached child with ONLY stdin/stdout/stderr (`POSIX_SPAWN_CLOEXEC_DEFAULT`): a host that inherited
+  a caller's pipe kept a test harness waiting on EOF. No launchd agent.
+- **Looking never starts the host.** Read-only commands answer from the store in-process
+  (`HostCore(readOnly: true)`) unless a host runs — or a record says a VM was live when its host went
+  away, which only a host can recover. A short request does not reset the idle clock; an open
+  attach or stream does.
+- **The attach relay adopts the session BEFORE it answers**, and the client sends what was typed
+  ahead of its first connection once it reads that answer (keys typed right after `up` were lost
+  otherwise — the first `test-cli` run). After that, keys for a held (sleeping) sandbox are dropped, never queued for a frozen guest.
 - **virtio-fs caches:** deleting a file on the HOST that the guest has cached is not visible at once
   — tests use fresh file names (this cost an afternoon of chasing a non-bug).
 
@@ -154,6 +173,8 @@ make build     # swift build — Xcode 27 needs the --build-system native pin th
 make test      # unit tests: no VM, no entitlement. Never --parallel.
 make audit     # Scripts/audit.sh
 make test-vm   # the VM integration suite — see below
+make cli       # 585: build + sign .build/debug/snooze
+make test-cli  # 585: the signed snooze from separate processes, scratch store $TMPDIR/snooze-clitest-store
 ```
 
 ### The VM integration tests need an ENTITLED host — how
