@@ -20,6 +20,9 @@ let package = Package(
     platforms: [.macOS("26.0")],
     products: [
         .library(name: "SnoozeContainerKit", targets: ["SnoozeContainerKit"]),
+        // 585: the `snooze` command-line tool. `make cli` builds it and signs it with the
+        // virtualization entitlement (an unsigned build can do everything but boot a VM).
+        .executable(name: "snooze", targets: ["snooze"]),
     ],
     dependencies: [
         .package(url: "https://github.com/apple/containerization.git", exact: "0.47.0"),
@@ -32,6 +35,10 @@ let package = Package(
         .package(url: "https://github.com/apple/swift-nio-ssl.git", from: "2.37.5"),
         .package(url: "https://github.com/apple/swift-certificates.git", from: "1.21.0"),
         .package(url: "https://github.com/apple/swift-asn1.git", from: "1.7.3"),
+        // 585 — the `snooze` CLI's argument parsing (subcommands, aliases, --help). Another apple/*
+        // package containerization 0.47.0 already resolves (Package.resolved is unchanged by
+        // declaring it); only the CLI target imports it, never the library. README "Dependencies".
+        .package(url: "https://github.com/apple/swift-argument-parser.git", from: "1.5.0"),
     ],
     targets: [
         .target(
@@ -69,6 +76,31 @@ let package = Package(
             name: "snooze-vmtest",
             dependencies: ["SnoozeContainerKit", .product(name: "Containerization", package: "containerization")],
             path: "Sources/snooze-vmtest"
+        ),
+        // 585 — the per-user host behind the `snooze` CLI: it owns every running VM, the egress
+        // proxies, the metrics writer and the shared event-loop group, and serves `<store>/host.sock`
+        // (JSON lines + a raw attach relay). Also the client side of that socket. Not a product.
+        .target(
+            name: "SnoozeHost",
+            dependencies: ["SnoozeContainerKit"],
+            path: "Sources/SnoozeHost"
+        ),
+        // 585 — the commands (swift-argument-parser), the attach client, the human/JSON output.
+        .target(
+            name: "SnoozeCLI",
+            dependencies: ["SnoozeHost", "SnoozeContainerKit",
+                           .product(name: "ArgumentParser", package: "swift-argument-parser")],
+            path: "Sources/SnoozeCLI"
+        ),
+        .executableTarget(
+            name: "snooze",
+            dependencies: ["SnoozeCLI", .product(name: "ArgumentParser", package: "swift-argument-parser")],
+            path: "Sources/snooze"
+        ),
+        .testTarget(
+            name: "SnoozeCLITests",
+            dependencies: ["SnoozeCLI", "SnoozeHost", "SnoozeContainerKit"],
+            path: "Tests/SnoozeCLITests"
         ),
         .testTarget(
             name: "SnoozeContainerKitTests",

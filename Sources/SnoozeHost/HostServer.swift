@@ -1,0 +1,423 @@
+import Darwin
+import Foundation
+import SnoozeContainerKit
+
+/// `snooze host` (585, owner ruling (b): a lazy per-user host). One process per store owns every
+/// running VM, the egress proxies, the metrics writer and the shared event-loop group, and serves
+/// `<store>/host.sock`.
+///
+/// Life:
+///   · started by the first CLI call that needs it (a detached child, `HostLauncher`), or by hand;
+///   · holds `<store>/host.lock` (flock) for its whole life — there is never a second host for a store,
+///     and a new one waits for the old one to finish exiting before it loads anything;
+///   · exits by itself once NO sandbox has a VM (booting, running, paused, asleep) and no client is
+///     connected for `idleTimeoutMinutes` (default 5; 0 = never) — so no daemon runs when nothing does;
+///   · `snooze host stop`, SIGTERM or SIGINT: Deep Sleep everything (quit = Deep Sleep) and exit;
+///   · after a crash (kill -9): the next CLI call starts a new host, which restores what was asleep
+///     and reports what died (`HostCore.recoverAfterStart`). Deep-asleep sandboxes wake on demand.
+public final class HostServer: @unchecked Sendable {
+    public let store: SnoozeStore
+    public let idleTimeoutMinutes: Double
+    public let version: String
+    let core: HostCore
+    let startedAt = Date()
+
+    private let lock = NSLock()
+    private var connections = 0
+    private var idleSince: Date?
+    private var listenFD: Int32 = -1
+    private var lockFD: Int32 = -1
+    private var stopping = false
+    private var signalSources: [DispatchSourceSignal] = []
+
+    init(store: SnoozeStore, idleTimeoutMinutes: Double, version: String) {
+        self.store = store
+        self.idleTimeoutMinutes = idleTimeoutMinutes
+        self.version = version
+        core = HostCore(store: store, readOnly: false, version: version)
+    }
+
+    public enum StartError: Error, LocalizedError {
+        case alreadyRunning(Int32?)
+        case socket(String)
+        public var errorDescription: String? {
+            switch self {
+            case .alreadyRunning(let pid): "a host is already running for this store" + (pid.map { " (pid \($0))" } ?? "")
+            case .socket(let s): s
+            }
+        }
+    }
+
+    /// Run the host in this process until it exits (never returns).
+    public static func run(store: SnoozeStore, idleTimeoutMinutes: Double, version: String) async throws -> Never {
+        setvbuf(stdout, nil, _IOLBF, 0)
+        signal(SIGPIPE, SIG_IGN)
+        signal(SIGHUP, SIG_IGN)
+        try store.ensureDirectory()
+        guard store.socketPathFits else { throw StartError.socket(UnixSocket.Failure.pathTooLong(store.socket.path).localizedDescription) }
+        let server = HostServer(store: store, idleTimeoutMinutes: idleTimeoutMinutes, version: version)
+        try server.takeLock(waitSeconds: 60)
+        HostLog.enabled = true
+        HostLog.line("snooze host \(version) (pid \(getpid())) — store \(store.root.path), idle timeout \(idleTimeoutMinutes) min")
+        await server.core.load()
+        do {
+            server.listenFD = try UnixSocket.listen(store.socket.path)
+        } catch {
+            throw StartError.socket(error.localizedDescription)
+        }
+        let lfd = server.listenFD
+        Thread.detachNewThread { server.acceptLoop(lfd) }
+        server.installSignalHandlers()
+        Task.detached { await server.core.recoverAfterStart() }
+        Task.detached { await server.idleLoop() }
+        HostLog.line("listening on \(store.socket.path)")
+        while true { try? await Task.sleep(for: .seconds(3600)) }
+    }
+
+    /// The store's lock, for the life of the process. A host that is exiting still holds it: wait.
+    private func takeLock(waitSeconds: Double) throws {
+        let fd = open(store.lockFile.path, O_RDWR | O_CREAT | O_CLOEXEC, 0o600)
+        guard fd >= 0 else { throw StartError.socket("cannot open \(store.lockFile.path): \(String(cString: strerror(errno)))") }
+        let deadline = Date().addingTimeInterval(waitSeconds)
+        while flock(fd, LOCK_EX | LOCK_NB) != 0 {
+            // A live host that is not exiting answers its socket: then this one is not needed.
+            if Date() > deadline || UnixSocket.connect(store.socket.path).map({ close($0); return true }) == true {
+                close(fd)
+                throw StartError.alreadyRunning(store.hostPID())
+            }
+            usleep(100_000)
+        }
+        lockFD = fd
+        try? "\(getpid())\n".write(to: store.pidFile, atomically: true, encoding: .utf8)
+    }
+
+    private func installSignalHandlers() {
+        for sig in [SIGTERM, SIGINT] {
+            signal(sig, SIG_IGN)
+            let src = DispatchSource.makeSignalSource(signal: sig, queue: .global())
+            src.setEventHandler { [weak self] in
+                guard let self else { return }
+                HostLog.line("signal \(sig): deep-sleeping every sandbox, then exiting")
+                Task.detached { await self.shutdown(prepare: true, reply: nil) }
+            }
+            src.resume()
+            signalSources.append(src)
+        }
+    }
+
+    // MARK: idle
+
+    func idleLoop() async {
+        let timeout = idleTimeoutMinutes * 60
+        let interval = timeout <= 0 ? 30.0 : min(15, max(0.5, timeout / 4))
+        while true {
+            try? await Task.sleep(for: .milliseconds(Int(interval * 1000)))
+            guard timeout > 0 else { continue }
+            let live = await core.liveSandboxes()
+            let now = Date()
+            let exit: Bool = lock.withLock {
+                guard !stopping else { return false }
+                if live.isEmpty && connections == 0 {
+                    if let s = idleSince { return now.timeIntervalSince(s) >= timeout }
+                    idleSince = now
+                } else {
+                    idleSince = nil
+                }
+                return false
+            }
+            if exit {
+                HostLog.line(String(format: "idle for %.1f min with nothing running — exiting", idleTimeoutMinutes))
+                await shutdown(prepare: false, reply: nil)
+            }
+        }
+    }
+
+    var idleSeconds: Double? { lock.withLock { idleSince.map { Date().timeIntervalSince($0) } } }
+    var connectionCount: Int { lock.withLock { connections } }
+
+    /// Stop serving, (optionally) Deep Sleep everything, answer the `host stop` that asked, exit.
+    func shutdown(prepare: Bool, reply: HostConnection?) async {
+        let first: Bool = lock.withLock {
+            if stopping { return false }
+            stopping = true
+            return true
+        }
+        guard first else { return }
+        // New clients start a new host, which waits for this one's lock before it loads anything.
+        let fd = lock.withLock { () -> Int32 in let f = listenFD; listenFD = -1; return f }
+        if fd >= 0 { Darwin.shutdown(fd, SHUT_RDWR); close(fd) }
+        unlink(store.socket.path)
+        if prepare { await core.prepareAllForExit() }
+        if let reply {
+            reply.send(.success(.string("stopped")))
+            reply.close()
+        }
+        try? FileManager.default.removeItem(at: store.pidFile)
+        HostLog.line("host exiting")
+        if lockFD >= 0 { flock(lockFD, LOCK_UN) }
+        exit(0)
+    }
+
+    // MARK: connections
+
+    private func acceptLoop(_ lfd: Int32) {
+        while true {
+            let c = accept(lfd, nil, nil)
+            if c < 0 {
+                if errno == EINTR { continue }
+                return                                       // the listener was closed
+            }
+            _ = fcntl(c, F_SETFD, FD_CLOEXEC)
+            let conn = HostConnection(fd: c)
+            let accepted: Bool = lock.withLock {
+                if stopping { return false }
+                connections += 1
+                idleSince = nil
+                return true
+            }
+            guard accepted else { conn.close(); continue }
+            Thread.detachNewThread { [self] in self.serve(conn) }
+        }
+    }
+
+    private func finished(_ conn: HostConnection) {
+        conn.close()
+        lock.withLock { connections -= 1 }
+    }
+
+    /// One connection: its request line, then the operation.
+    private func serve(_ conn: HostConnection) {
+        let reader = LineReader(fd: conn.fd)
+        guard let line = reader.readLine(limit: 1 << 20) else { finished(conn); return }
+        let req: HostRequest
+        do { req = try HostWire.decoder.decode(HostRequest.self, from: line) } catch {
+            conn.send(.failure(HostError(.invalid, "a request this host cannot read (\(error.localizedDescription)) — is the CLI newer than the host? (snooze host stop)")))
+            finished(conn)
+            return
+        }
+        switch req.op {
+        case .attach:
+            attach(conn, reader: reader, request: req)
+        case .events:
+            stream(conn, reader: reader) { [core] in
+                let name = req.name
+                return core.subscribe().filter { name == nil || $0.sandbox == name }.map { HostMessage(event: $0) }
+            }
+        case .netLog where req.follow == true:
+            netLogFollow(conn, reader: reader, request: req)
+        case .hostStop:
+            Task.detached { [self] in await self.shutdown(prepare: true, reply: conn) }
+        case .ping:
+            Task.detached { [self] in
+                let st = await core.status(connections: connectionCount, idleSeconds: idleSeconds,
+                                           idleTimeoutMinutes: idleTimeoutMinutes, startedAt: startedAt)
+                conn.send((try? JSONValue(encoding: st)).map { HostMessage.success($0) } ?? .failure(HostError(.failed, "status")))
+                finished(conn)
+            }
+        default:
+            Task.detached { [self] in
+                let msg = await core.handle(req) { e in conn.send(HostMessage(event: e)) }
+                conn.send(msg)
+                finished(conn)
+            }
+        }
+    }
+
+    /// Stream messages until the client hangs up.
+    private func stream<S: AsyncSequence & Sendable>(_ conn: HostConnection, reader: LineReader,
+                                                     _ make: @escaping @Sendable () -> S) where S.Element == HostMessage {
+        let task = Task.detached {
+            do { for try await m in make() { if !conn.send(m) { break } } } catch {}
+        }
+        watchHangup(conn, reader: reader) { task.cancel() }
+    }
+
+    /// Blocks this connection's thread until the peer closes (or shutdownIO), then cleans up.
+    private func watchHangup(_ conn: HostConnection, reader: LineReader, _ onHangup: () -> Void) {
+        var buf = [UInt8](repeating: 0, count: 1024)
+        while true {
+            let n = read(conn.fd, &buf, buf.count)
+            if n < 0 && errno == EINTR { continue }
+            if n <= 0 { break }
+        }
+        onHangup()
+        finished(conn)
+    }
+
+    private func netLogFollow(_ conn: HostConnection, reader: LineReader, request req: HostRequest) {
+        Task.detached { [core] in
+            do {
+                let (log, name) = try await core.connectionLog(req.name)
+                let denied = req.deniedOnly == true
+                let live = log.stream()
+                for r in log.records where !denied || r.verdict == .denied {
+                    conn.send(HostMessage(event: HostEvent(kind: .connection, sandbox: name, connection: r, time: r.time)))
+                }
+                for await r in live where !r.open && (!denied || r.verdict == .denied) {
+                    if !conn.send(HostMessage(event: HostEvent(kind: .connection, sandbox: name, connection: r, time: r.time))) { break }
+                }
+            } catch {
+                conn.send(.failure(HostError.from(error)))
+                conn.shutdownIO()
+            }
+        }
+        watchHangup(conn, reader: reader) {}
+    }
+
+    // MARK: attach relay
+
+    /// One attached (or held) terminal. Identity is this object — never its fd.
+    final class AttachState: @unchecked Sendable {
+        private let lock = NSLock()
+        private var _size: TermSize
+        private var _session: SessionConnection?
+        private var _gone = false
+        init(size: TermSize) { _size = size }
+        var size: TermSize { lock.withLock { _size } }
+        var gone: Bool { lock.withLock { _gone } }
+        var session: SessionConnection? { lock.withLock { _session } }
+        func setSize(_ s: TermSize) -> SessionConnection? { lock.withLock { _size = s; return _session } }
+        /// False when the client left meanwhile.
+        func adopt(_ c: SessionConnection) -> Bool { lock.withLock { if _gone { return false }; _session = c; return true } }
+        func release(_ c: SessionConnection) { lock.withLock { if _session === c { _session = nil } } }
+        func markGone() -> SessionConnection? { lock.withLock { _gone = true; let s = _session; _session = nil; return s } }
+    }
+
+    /// `attach`: answer `{state: attached|held}`, then relay the terminal. A client that attaches
+    /// while the sandbox is not running (and did not ask to wake it) is HELD until it runs, then
+    /// attached with the size it last sent. Deep Sleep closes the connection (the guest session
+    /// survives; the client reconnects and is held); the end of the session sends the notice.
+    private func attach(_ conn: HostConnection, reader: LineReader, request req: HostRequest) {
+        let state = AttachState(size: TermSize(cols: req.cols ?? 80, rows: req.rows ?? 24))
+        let core = self.core
+        let t0 = ContinuousClock.now
+        Task.detached {
+            let sandbox: Sandbox, session: String
+            do {
+                (sandbox, session) = try await core.sandboxForAttach(req.name, session: req.session, wake: req.wake ?? true)
+            } catch {
+                conn.send(.failure(HostError.from(error)))
+                conn.shutdownIO()
+                return
+            }
+            let name = sandbox.spec.name
+            var announced = false
+            while !state.gone {
+                guard let phase = await core.phase(of: name) else {
+                    if announced { conn.write(ClientWire.endedNotice(.stopped, text: "\(name) was removed")) }
+                    else { conn.send(.failure(HostError(.notFound, "no sandbox \(name)"))) }
+                    conn.shutdownIO()
+                    return
+                }
+                let busy = await core.busy(name)
+                if phase == .running && !busy {
+                    if !announced {
+                        // The first attach checks the session is there (a later one gets `ended` from deckhold).
+                        let list = (try? await sandbox.sessions()) ?? []
+                        if let s = list.first(where: { $0.name == session }), s.isEnded {
+                            conn.send(.failure(HostError(.notFound, "session \(session) in \(name) has ended (exit \(s.exitCode.map(String.init) ?? "?"))")))
+                            conn.shutdownIO()
+                            return
+                        } else if !list.contains(where: { $0.name == session }) {
+                            let live = list.filter { !$0.isEnded }.map(\.name)
+                            conn.send(.failure(HostError(.notFound, "no session \(session) in \(name)" + (live.isEmpty ? "" : " — sessions: \(live.joined(separator: ", "))"))))
+                            conn.shutdownIO()
+                            return
+                        }
+                    }
+                    do {
+                        let c = try await sandbox.attach(session, size: state.size)
+                        if !announced {
+                            conn.send(.success(.object(["state": .string("attached"), "session": .string(session), "sandbox": .string(name)])))
+                            announced = true
+                        }
+                        guard state.adopt(c) else { c.close(); return }
+                        await core.sessionAttached(name, session: session, ms: ms(since: t0))
+                        await Self.pump(c, to: conn, state: state, core: core, sandbox: name, session: session)
+                        return
+                    } catch {
+                        let nowPhase = await core.phase(of: name)
+                        let nowBusy = await core.busy(name)
+                        if nowPhase == .running && !nowBusy {
+                            if !announced { conn.send(.failure(HostError.from(error))) }
+                            conn.shutdownIO()
+                            return
+                        }
+                        continue                                  // it went to sleep under us: hold
+                    }
+                }
+                switch phase {
+                case .off, .failed:
+                    if announced { conn.write(ClientWire.endedNotice(.stopped, text: "\(name) is \(PhaseName.label(phase)) — the session is gone")) }
+                    else { conn.send(.failure(HostError(.invalidPhase, "\(name) is \(PhaseName.label(phase)) — `snooze start \(name)` boots it"))) }
+                    conn.shutdownIO()
+                    return
+                default:
+                    if !announced {
+                        conn.send(.success(.object(["state": .string("held"), "session": .string(session), "sandbox": .string(name),
+                                                    "phase": .string(phase.rawValue)])))
+                        announced = true
+                    }
+                    try? await Task.sleep(for: .milliseconds(200))
+                }
+            }
+        }
+        // Client → session, on this thread, for the life of the connection.
+        var parser = ClientWire.Parser()
+        func feed(_ bytes: [UInt8]) {
+            for f in parser.feed(bytes) {
+                switch f {
+                case .hello(let s), .resize(let s): state.setSize(s)?.resize(s)
+                case .input(let d): state.session?.send(d)       // dropped while held: nobody to type to
+                }
+            }
+        }
+        let early = reader.takeRemainder()
+        if !early.isEmpty { feed(Array(early)) }
+        var buf = [UInt8](repeating: 0, count: 8192)
+        while true {
+            let n = read(conn.fd, &buf, buf.count)
+            if n < 0 && errno == EINTR { continue }
+            if n <= 0 { break }
+            feed(Array(buf[0..<n]))
+        }
+        state.markGone()?.close()
+        finished(conn)
+    }
+
+    /// Session → client, until the session connection ends.
+    private static func pump(_ c: SessionConnection, to conn: HostConnection, state: AttachState, core: HostCore,
+                             sandbox: String, session: String) async {
+        for await out in c.output {
+            switch out {
+            case .snapshot(let d), .data(let d):
+                conn.write(d)
+            case .ended(let code):
+                let text = code.map { "the \(session) session has ended (exit \($0))" } ?? "there is no \(session) session in \(sandbox)"
+                conn.write(ClientWire.endedNotice(code.map { .exited($0) } ?? .noSession, text: text))
+                await core.sessionEnded(sandbox, session: session, exitCode: code)
+                conn.shutdownIO()
+            case .detached(.sandboxStopped):
+                conn.write(ClientWire.endedNotice(.stopped, text: "\(sandbox) shut down — the \(session) session is gone"))
+                conn.shutdownIO()
+            case .detached(.sandboxSleeping), .detached(.transportLost):
+                // The guest session lives on: close; the client reconnects and is held until it runs.
+                conn.shutdownIO()
+            case .detached(.closedByClient):
+                break
+            }
+        }
+        state.release(c)
+    }
+}
+
+extension HostCore {
+    /// The proxy's log of a sandbox (for `net log --follow`).
+    func connectionLog(_ name: String?) throws -> (ConnectionLog, String) {
+        let m = try get(name)
+        guard let log = m.sandbox.egress?.log else {
+            throw HostError(.invalid, "\(m.name) is not proxied (network \(m.config.networkName)) — it has no connection log")
+        }
+        return (log, m.name)
+    }
+}
