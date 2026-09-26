@@ -89,13 +89,24 @@ public struct ImageRecipe: Sendable, Codable, Equatable {
         return (try? enc.encode(self)) ?? Data()
     }
 
-    /// sha256(canonical recipe + kernel sha256 + deckhold sha256). The recipe carries `journalMiB`
-    /// (587), so a journaled recipe never hits a pre-587 bake.
+    /// sha256(canonical recipe + kernel sha256 + deckhold sha256 + the lineage format). The recipe
+    /// carries `journalMiB`; the lineage format (587: baked on a clone of a base disk, trimmed at
+    /// the end) is in every key, so a pre-587 store re-bakes each image once.
     public func bakeKey(kernelSHA256: String, deckholdSHA256: String) -> String {
         var h = SHA256()
         h.update(data: canonicalJSON)
         h.update(data: Data("\nkernel:\(kernelSHA256)\ndeckhold:\(deckholdSHA256)".utf8))
+        h.update(data: Data("\nlineage:\(ImageBaker.lineageFormat)".utf8))
         return h.finalize().map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// 587: the key of the base disk this recipe's bakes clone — the base's OCI digest, the
+    /// capacity, the journal size and the formatter version. Recipes that agree on all four share
+    /// one base disk (the two agent recipes do).
+    public var baseKey: String {
+        let digest = base.split(separator: "@").last.map(String.init) ?? base
+        let material = "snooze-base|\(digest)|capacity:\(rootfsMiB)MiB|journal:\(journalMiB.map { "\($0)MiB" } ?? "none")|formatter:\(ImageBaker.formatterVersion)"
+        return SHA256.hash(data: Data(material.utf8)).map { String(format: "%02x", $0) }.joined()
     }
 
     /// The journal as Containerization's formatter takes it.

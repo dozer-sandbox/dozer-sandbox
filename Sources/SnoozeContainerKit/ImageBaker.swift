@@ -22,6 +22,10 @@ public struct ImageManifest: Sendable, Codable, Equatable {
     public var trimmedBytes: Int64?
     /// 587: the disk's ext4 journal, MiB (nil: none, or a pre-587 bake).
     public var journalMiB: Int?
+    /// 587: the key of the base disk this image was baked on (`<store>/images/bases/<key12>/`) —
+    /// its lineage parent. nil: a pre-587 bake, flattened on its own. The image never depends on
+    /// the parent FILE: deleting or re-deriving the base leaves it (and its sandboxes) as they are.
+    public var parent: String?
 
     public init(key: String, recipe: ImageRecipe, kernelSHA256: String, deckholdSHA256: String, bakedAt: Date,
                 timings: [TimedStep], apparentBytes: Int64, allocatedBytes: Int64, verifyOutput: [String]) {
@@ -51,19 +55,117 @@ public struct BakedImage: Sendable, Equatable {
     public var key: String { manifest.key }
 }
 
-/// Builds and caches baked root disks:
+/// 587: what a base disk recorded, next to it.
+public struct BaseManifest: Sendable, Codable, Equatable {
+    public var key: String
+    /// The OCI reference it was flattened from (`repo@sha256:…`) and its digest.
+    public var reference: String
+    public var digest: String
+    public var capacityMiB: UInt64
+    public var journalMiB: Int?
+    public var formatterVersion: String
+    public var flattenedAt: Date
+    public var flattenMilliseconds: Double
+    public var apparentBytes: Int64
+    public var allocatedBytes: Int64
+}
+
+/// 587: a flattened OCI base, cloned by every bake on it.
+public struct BaseDisk: Sendable, Equatable {
+    public var root: URL
+    public var manifest: BaseManifest
+    public var key: String { manifest.key }
+}
+
+/// Builds and caches baked root disks, as a clone tree (587):
 ///
+///     <storeRoot>/images/bases/<key12>/root.ext4        an OCI base flattened ONCE (0444)
+///     <storeRoot>/images/bases/<key12>/manifest.json    digest, capacity, journal, formatter version
+///     <storeRoot>/images/bases/<key12>.lock             serialises concurrent flattens of one base
 ///     <storeRoot>/images/<name>/<key12>/root.ext4       read-only (0444) — sandboxes APFS-clone it
-///     <storeRoot>/images/<name>/<key12>/manifest.json   key, recipe, timings, sizes, verify output
+///     <storeRoot>/images/<name>/<key12>/manifest.json   key, parent (the base key), recipe, timings, sizes, verify output
 ///     <storeRoot>/images/<name>/<key12>.lock            serialises concurrent bakes of one key
 ///
-/// Bake = pull the digest-pinned base (once per store) → flatten it to ext4 → boot it → run the
-/// steps → verify (credential-free) → `sync` → clean stop → move into place atomically. A failed
-/// bake leaves nothing in the cache.
+/// Bake = pull the digest-pinned base (once per store) → flatten it to ext4 (once per base key) →
+/// APFS-clone the base → boot the clone → run the steps → verify (credential-free) → `fstrim` →
+/// clean stop → move into place atomically. A failed bake leaves nothing in the cache. Every image
+/// on one base shares the base's blocks (586: ~255 MiB each for the `node` base), and a re-bake
+/// skips the flatten (586: ~50 s → ~15–17 s).
 public struct ImageBaker: Sendable {
     public var storeRoot: URL
 
+    /// The EXT4 formatter a base disk was made with: a different one is a different base.
+    public static let formatterVersion = "containerization-0.47.0/EXT4Unpacker"
+    /// 587: the image layout generation, part of every bake key (clone of a base + trim).
+    public static let lineageFormat = "587-base-clone-v1"
+
     public init(storeRoot: URL) { self.storeRoot = storeRoot }
+
+    public var basesDirectory: URL { storeRoot.appendingPathComponent("images/bases") }
+
+    public func baseLocation(_ key: String) -> URL { basesDirectory.appendingPathComponent(String(key.prefix(12))) }
+
+    /// The base disk for this key, if a complete flatten is there.
+    public func cachedBase(_ key: String) -> BaseDisk? {
+        let dir = baseLocation(key)
+        let root = dir.appendingPathComponent("root.ext4")
+        guard FileManager.default.fileExists(atPath: root.path),
+              let d = try? Data(contentsOf: dir.appendingPathComponent("manifest.json")),
+              let m = try? Self.decoder.decode(BaseManifest.self, from: d), m.key == key
+        else { return nil }
+        return BaseDisk(root: root, manifest: m)
+    }
+
+    /// Every base disk in the store.
+    public func allBases() -> [BaseDisk] {
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: basesDirectory.path)) ?? []
+        return names.compactMap { n -> BaseDisk? in
+            let d = basesDirectory.appendingPathComponent(n)
+            guard let data = try? Data(contentsOf: d.appendingPathComponent("manifest.json")),
+                  let m = try? Self.decoder.decode(BaseManifest.self, from: data) else { return nil }
+            return BaseDisk(root: d.appendingPathComponent("root.ext4"), manifest: m)
+        }.sorted { $0.manifest.flattenedAt > $1.manifest.flattenedAt }
+    }
+
+    /// Delete a base disk. Images baked on it — and their sandboxes — are unaffected (each is its
+    /// own APFS clone); only the next bake on this base flattens it again.
+    public func deleteBase(_ key: String) throws {
+        try FileManager.default.removeItem(at: baseLocation(key))
+    }
+
+    /// The base disk for `recipe`: a cache hit, or a flatten (once per key, under a lock, so
+    /// concurrent bakes of one base wait instead of flattening twice).
+    public func ensureBase(_ recipe: ImageRecipe, image: Containerization.Image,
+                           events: @escaping @Sendable (SandboxEvent) -> Void = { _ in }) async throws -> BaseDisk {
+        let key = recipe.baseKey
+        if let hit = cachedBase(key) { return hit }
+        let fm = FileManager.default
+        try fm.createDirectory(at: basesDirectory, withIntermediateDirectories: true)
+        let lock = try await FileLock.acquire(basesDirectory.appendingPathComponent("\(key.prefix(12)).lock"),
+                                              waiting: { events(.note("another flatten of this base is running — waiting for it")) })
+        defer { lock.release() }
+        if let hit = cachedBase(key) { return hit }
+        let staging = basesDirectory.appendingPathComponent("\(key.prefix(12)).partial-\(UUID().uuidString.prefix(8))")
+        defer { try? fm.removeItem(at: staging) }
+        try fm.createDirectory(at: staging, withIntermediateDirectories: true)
+        let root = staging.appendingPathComponent("root.ext4")
+        let t0 = ContinuousClock.now
+        _ = try await EXT4Unpacker(capacityInBytes: recipe.rootfsMiB * 1_048_576, journal: recipe.journalConfig)
+            .unpack(image, for: .current, at: root)
+        let ms = milliseconds(since: t0)
+        let (apparent, allocated) = Self.sizes(root)
+        chmod(root.path, 0o444)
+        let m = BaseManifest(key: key, reference: recipe.base, digest: recipe.base.split(separator: "@").last.map(String.init) ?? "",
+                             capacityMiB: recipe.rootfsMiB, journalMiB: recipe.journalMiB, formatterVersion: Self.formatterVersion,
+                             flattenedAt: Date(), flattenMilliseconds: ms, apparentBytes: apparent, allocatedBytes: allocated)
+        try Self.encoder.encode(m).write(to: staging.appendingPathComponent("manifest.json"))
+        let final = baseLocation(key)
+        try? fm.removeItem(at: final)
+        guard rename(staging.path, final.path) == 0 else { throw CocoaError(.fileWriteUnknown) }
+        events(.step("flattened the base \(recipe.base.split(separator: "@").first ?? "") once (\(recipe.rootfsMiB) MiB\(recipe.journalMiB.map { ", \($0) MiB journal" } ?? ", no journal"); \(Self.mib(allocated)) MiB) — base \(key.prefix(12))",
+                     milliseconds: ms))
+        return BaseDisk(root: final.appendingPathComponent("root.ext4"), manifest: m)
+    }
 
     public func imageDirectory(_ recipe: ImageRecipe) -> URL {
         storeRoot.appendingPathComponent("images/\(recipe.name)")
@@ -175,9 +277,14 @@ public struct ImageBaker: Sendable {
         let dns = proxied ? ["127.0.0.1"] : inputs.dnsServers
         let cpus = inputs.cpus, mem = inputs.memoryMiB
         let proxy = try inputs.egress.map { try EgressProxy(policy: $0, ca: nil, log: inputs.egressLog ?? ConnectionLog()) }
-        let journal = recipe.journalConfig
-        try await timed("flattened the base to one ext4 disk (\(recipe.rootfsMiB) MiB capacity\(recipe.journalMiB.map { ", \($0) MiB journal" } ?? ", no journal"))") {
-            _ = try await EXT4Unpacker(capacityInBytes: recipe.rootfsMiB * 1_048_576, journal: journal).unpack(image, for: .current, at: root)
+        // 587: the base is flattened once per base key; this bake starts from an APFS clone of it.
+        let hadBaseDisk = cachedBase(recipe.baseKey) != nil
+        let base = try await timed(hadBaseDisk ? "base disk ready (cached, \(recipe.baseKey.prefix(12)))" : "base disk flattened (\(recipe.baseKey.prefix(12)))") {
+            try await ensureBase(recipe, image: image, events: events)
+        }
+        try await timed("cloned the base disk (APFS clone)") {
+            guard clonefile(base.root.path, root.path, 0) == 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+            chmod(root.path, 0o644)
         }
         // The VM boots the staging disk itself; `create(rootfs:)` does not make the container's
         // directory (586), so it is made here.
@@ -238,14 +345,14 @@ public struct ImageBaker: Sendable {
             }
             // 587: trim as the last step (586: −11 % for 56 ms) — the install's own deleted files
             // (npm's tarball and cache) would otherwise stay in the image, and in every clone of it.
-            let before = Self.sizes(root).allocated
+            let before = try await Self.settledAllocation(c, root)
             let tr = try await timed("trimmed the disk (fstrim /)") {
                 try await Sandbox.exec(on: c, ["sh", "-c", GuestCommand.trimRoot], environment: [:], workingDirectory: "/",
                                        privileged: true, timeout: 120, user: nil)
             }
+            try await timed("stopped the bake VM cleanly") { try await c.stop() }
             trimmed = max(0, before - Self.sizes(root).allocated)
             events(.note("fstrim: \((tr.output + tr.errorOutput).trimmingCharacters(in: .whitespacesAndNewlines)) — \(Self.mib(trimmed)) MiB returned to the Mac"))
-            try await timed("stopped the bake VM cleanly") { try await c.stop() }
         } catch {
             try? await c.stop()
             try? mgr.delete(id)
@@ -261,6 +368,7 @@ public struct ImageBaker: Sendable {
                                      apparentBytes: apparent, allocatedBytes: allocated, verifyOutput: verifyOutput)
         manifest.trimmedBytes = trimmed
         manifest.journalMiB = recipe.journalMiB
+        manifest.parent = base.key
         try Self.encoder.encode(manifest).write(to: staging.appendingPathComponent("manifest.json"))
         let final = location(recipe, key: key)
         try? fm.removeItem(at: final)
@@ -268,6 +376,15 @@ public struct ImageBaker: Sendable {
         events(.note(String(format: "baked image %@ %@ in %.1f s — disk %d MiB apparent, %d MiB allocated",
                             recipe.name, String(key.prefix(12)), manifest.totalMilliseconds / 1000, Self.mib(apparent), Self.mib(allocated))))
         return BakedImage(root: final.appendingPathComponent("root.ext4"), manifest: manifest)
+    }
+
+    /// What a running VM's disk file really holds: the guest syncs, then the host flushes the file
+    /// (APFS allocates written data when it is flushed), then its allocation is read.
+    static func settledAllocation(_ c: LinuxContainer, _ disk: URL) async throws -> Int64 {
+        _ = try await Sandbox.exec(on: c, ["sync"], environment: [:], workingDirectory: "/", privileged: false, timeout: 60, user: nil)
+        let fd = open(disk.path, O_RDONLY)
+        if fd >= 0 { fsync(fd); close(fd) }
+        return sizes(disk).allocated
     }
 
     static func userEnv(_ user: String?, _ recipe: ImageRecipe) -> [String: String] {

@@ -171,6 +171,68 @@ final class ImageBakerCacheTests: XCTestCase {
         try await t.value
     }
 
+    /// 587: the base key is the digest + capacity + journal + formatter — the two agent recipes
+    /// share one base; a journal or capacity change is another base; the lineage format and the
+    /// journal are in every bake key.
+    func test_baseKeyIsSharedAndSensitive() {
+        let cc = AgentRecipes.claudeCode, pi = AgentRecipes.pi
+        XCTAssertEqual(cc.baseKey, pi.baseKey, "claude-code and pi bake on one base disk")
+        var j = cc; j.journalMiB = nil
+        var j32 = cc; j32.journalMiB = 32
+        var cap = cc; cap.rootfsMiB = 8192
+        var other = cc; other.base = "docker.io/library/node@sha256:" + String(repeating: "c", count: 64)
+        var renamed = cc; renamed.base = "example.org/mirror/node@" + cc.base.split(separator: "@").last!
+        XCTAssertEqual(Set([cc.baseKey, j.baseKey, j32.baseKey, cap.baseKey, other.baseKey]).count, 5)
+        XCTAssertEqual(renamed.baseKey, cc.baseKey, "the digest names the base, not the repository")
+        var step = cc; step.steps.append(BakeStep("x", argv: ["true"]))
+        XCTAssertEqual(step.baseKey, cc.baseKey, "steps are the image's, not the base's")
+        XCTAssertNotEqual(j.bakeKey(kernelSHA256: "k", deckholdSHA256: "d"), cc.bakeKey(kernelSHA256: "k", deckholdSHA256: "d"))
+    }
+
+    /// 587: an image manifest written before 587 (no parent, trim or journal) still decodes; `images/bases`
+    /// and `images/custom` are the store's own names.
+    func test_oldManifestsDecodeAndReservedNames() throws {
+        let r = AgentRecipes.pi
+        let key = r.bakeKey(kernelSHA256: "k", deckholdSHA256: "d")
+        let loc = try plant(r, key: key)
+        var json = try JSONSerialization.jsonObject(with: Data(contentsOf: loc.appendingPathComponent("manifest.json"))) as! [String: Any]
+        for k in ["parent", "trimmedBytes", "journalMiB"] { json.removeValue(forKey: k) }
+        var recipe = json["recipe"] as! [String: Any]
+        recipe.removeValue(forKey: "journalMiB")
+        json["recipe"] = recipe
+        try JSONSerialization.data(withJSONObject: json).write(to: loc.appendingPathComponent("manifest.json"))
+        let m = try XCTUnwrap(ImageBaker(storeRoot: dir).all(r).first?.manifest)
+        XCTAssertNil(m.parent)
+        XCTAssertNil(m.recipe.journalMiB, "a pre-587 recipe decodes journal-less")
+        for n in ["bases", "custom"] {
+            var x = r; x.name = n
+            XCTAssertThrowsError(try x.validate(), n)
+        }
+    }
+
+    /// 587: image keys resolve to their disks.
+    func test_imageDiskForKey() throws {
+        let r = AgentRecipes.pi
+        let key = r.bakeKey(kernelSHA256: "k", deckholdSHA256: "d")
+        let loc = try plant(r, key: key)
+        let layout = StoreLayout(root: dir, name: "x")
+        XCTAssertEqual(layout.imageDisk(forKey: "pi@\(key.prefix(12))"), loc.appendingPathComponent("root.ext4"))
+        XCTAssertNil(layout.imageDisk(forKey: "pi@000000000000"))
+        let golden = layout.goldenDirectory.appendingPathComponent("alpine-3.20-abcdefabcdef.ext4")
+        try FileManager.default.createDirectory(at: layout.goldenDirectory, withIntermediateDirectories: true)
+        try Data("d".utf8).write(to: golden)
+        XCTAssertEqual(layout.imageDisk(forKey: "alpine-3.20-abcdefabcdef"), golden)
+        let custom = layout.customImageDirectory("mine/rp-1")
+        try FileManager.default.createDirectory(at: custom, withIntermediateDirectories: true)
+        try Data("d".utf8).write(to: custom.appendingPathComponent("root.ext4"))
+        XCTAssertEqual(layout.imageDisk(forKey: "custom:mine/rp-1"), custom.appendingPathComponent("root.ext4"))
+        let base = ImageBaker(storeRoot: dir).baseLocation(r.baseKey)
+        try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+        try Data("d".utf8).write(to: base.appendingPathComponent("root.ext4"))
+        XCTAssertEqual(layout.imageDisk(forKey: "base:\(r.baseKey)"), base.appendingPathComponent("root.ext4"))
+        XCTAssertNil(ImageBaker(storeRoot: dir).cachedBase(r.baseKey), "a base without its manifest is not complete")
+    }
+
     func test_sizesReportApparentAndAllocated() throws {
         let f = dir.appendingPathComponent("sparse")
         FileManager.default.createFile(atPath: f.path, contents: nil)

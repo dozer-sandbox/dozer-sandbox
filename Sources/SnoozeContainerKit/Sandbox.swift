@@ -448,9 +448,10 @@ public actor Sandbox {
         let (apparent, allocated) = ImageBaker.sizes(root)
         var chain = layout.restorePointChain(from: chainStart)
         if restorePoint == nil, chain.isEmpty, let c = chainStart { chain = [c] }
-        let img = CustomImage(key: key, name: name, note: note, createdAt: Date(), fromSandbox: spec.name, baseImage: base,
+        var img = CustomImage(key: key, name: name, note: note, createdAt: Date(), fromSandbox: spec.name, baseImage: base,
                               restorePointChain: chain, recipe: spec.recipe, needsFsck: taken,
                               apparentBytes: apparent, allocatedBytes: allocated)
+        img.journaled = EXT4Inspector.hasJournal(root)
         try ImageBaker.encoder.encode(img).write(to: dir.appendingPathComponent("image.json"))
         return img
     }
@@ -1163,7 +1164,6 @@ public actor Sandbox {
                 }
             }
             try await trimBakeDisk(b, disk: bakeDisk)
-            try await b.stop()
         } catch {
             try? await b.stop()
             try? mgr.delete(id)
@@ -1179,12 +1179,14 @@ public actor Sandbox {
                     golden.lastPathComponent, seconds(since: t0)))
     }
 
-    /// 587: `fstrim /` as a bake's last step (586: −11 % for 56 ms), timed with what it returned.
+    /// 587: `fstrim /` as a bake's last step (586: −11 % for 56 ms), then the clean stop — timed with
+    /// what it returned.
     private func trimBakeDisk(_ c: LinuxContainer, disk: URL) async throws {
         let t0 = ContinuousClock.now
-        let (_, before) = ImageBaker.sizes(disk)
+        let before = try await ImageBaker.settledAllocation(c, disk)
         let r = try await Self.exec(on: c, ["sh", "-c", GuestCommand.trimRoot], environment: [:], workingDirectory: "/",
                                     privileged: true, timeout: 120)
+        try await c.stop()
         let (_, after) = ImageBaker.sizes(disk)
         broadcaster.yield(.step(String(format: "trimmed the disk (fstrim /): %d → %d MiB allocated — %@", ImageBaker.mib(before), ImageBaker.mib(after),
                                        r.output.trimmingCharacters(in: .whitespacesAndNewlines)), milliseconds: milliseconds(since: t0)))

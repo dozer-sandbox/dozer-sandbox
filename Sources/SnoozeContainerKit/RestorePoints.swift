@@ -63,7 +63,8 @@ public struct CustomImage: Sendable, Codable, Equatable, Identifiable {
     public var origin: String = "custom"
     public var createdAt: Date
     /// The sandbox it was saved from, the image that sandbox's disk came from, and the chain of
-    /// restore points (newest first) it descends from.
+    /// restore points (newest first) it descends from. 587: `baseImage` is an image KEY —
+    /// `StoreLayout.imageDisk(forKey:)` finds its disk (its lineage parent, for `DiskAccounting`).
     public var fromSandbox: String
     public var baseImage: String?
     public var restorePointChain: [String]
@@ -73,6 +74,31 @@ public struct CustomImage: Sendable, Codable, Equatable, Identifiable {
     public var needsFsck: Bool
     public var apparentBytes: Int64
     public var allocatedBytes: Int64
+    /// 587: the disk has an ext4 journal (nil: saved before 587).
+    public var journaled: Bool?
+}
+
+extension StoreLayout {
+    /// 587: the disk an image KEY names, if it is in this store. The keys are what
+    /// `PersistedSandbox.rootImage`, `RestorePoint.sourceImage` and `CustomImage.baseImage` hold:
+    ///
+    ///     <name>@<key12>        a baked image      images/<name>/<key12>/root.ext4
+    ///     custom:<name>/<id>    a custom image     images/custom/<name>/<id>/root.ext4
+    ///     base:<key>            a base disk        images/bases/<key12>/root.ext4
+    ///     <slug>-<hex12>        a prepared disk    golden/<slug>-<hex12>.ext4
+    public func imageDisk(forKey key: String) -> URL? {
+        let url: URL
+        if key.hasPrefix("custom:") {
+            url = customImageDirectory(String(key.dropFirst(7))).appendingPathComponent("root.ext4")
+        } else if key.hasPrefix("base:") {
+            url = ImageBaker(storeRoot: root).baseLocation(String(key.dropFirst(5))).appendingPathComponent("root.ext4")
+        } else if let at = key.firstIndex(of: "@") {
+            url = root.appendingPathComponent("images/\(key[..<at])/\(key[key.index(after: at)...].prefix(12))/root.ext4")
+        } else {
+            url = goldenDirectory.appendingPathComponent("\(key).ext4")
+        }
+        return FileManager.default.fileExists(atPath: url.path) ? url : nil
+    }
 }
 
 extension StoreLayout {
