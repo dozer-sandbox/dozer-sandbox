@@ -937,6 +937,7 @@ public actor Sandbox {
             }
             iface = i
             identity.subnet = net.subnet.description
+            if let old = network, old.subnet != net.subnet { SubnetPool.release(old.subnet.description) }
             network = net
         }
 
@@ -1028,19 +1029,31 @@ public actor Sandbox {
 
     /// The vmnet network. On a restore, the subnet the guest was addressed from — vmnet can take
     /// a moment to release a dead process's network, so retry briefly before settling for a new
-    /// subnet (and re-addressing the guest).
+    /// subnet (and re-addressing the guest). With no subnet asked for (583): a free one of its own
+    /// (`SubnetPool`), never vmnet's shared default.
     private func makeNetwork(persistedSubnet: String?, restoring: Bool) async throws -> VmnetNetwork {
-        guard let persistedSubnet, let cidr = try? CIDRv4(persistedSubnet) else { return try VmnetNetwork() }
-        // A restore must get its old subnet back (vmnet may still be releasing it: retry); a fresh
-        // start that asked for one that is taken just falls back to vmnet's default.
-        let attempts = restoring ? 10 : 1
-        for attempt in 1...attempts {
-            do { return try VmnetNetwork(subnet: cidr) } catch {
-                if attempt == attempts { note("subnet \(persistedSubnet) unavailable (\(error.localizedDescription)); using a new one") }
-                try? await Task.sleep(for: .milliseconds(300))
+        if let persistedSubnet, let cidr = try? CIDRv4(persistedSubnet) {
+            // A restore must get its old subnet back (vmnet may still be releasing it: retry); a fresh
+            // start that asked for one that is taken falls back to a free one.
+            let attempts = restoring ? 10 : 1
+            for attempt in 1...attempts {
+                do {
+                    let net = try VmnetNetwork(subnet: cidr)
+                    SubnetPool.reserve(net.subnet.description)
+                    return net
+                } catch {
+                    if attempt == attempts { note("subnet \(persistedSubnet) unavailable (\(error.localizedDescription)); using a new one") }
+                    try? await Task.sleep(for: .milliseconds(300))
+                }
             }
         }
-        return try VmnetNetwork()
+        let net = try SubnetPool.makeNetwork()
+        note("network: vmnet subnet \(net.subnet.description) (picked automatically — free on this Mac)")
+        return net
+    }
+
+    deinit {
+        if let n = network { SubnetPool.release(n.subnet.description) }
     }
 
     /// The baked disk for this sandbox's recipe — a cache hit, or a bake (timed events, progress in
@@ -1069,8 +1082,10 @@ public actor Sandbox {
         note("no prepared disk yet — baking one\(pkgs.isEmpty ? "" : " (\(pkgs.joined(separator: ", ")))") (one-time, needs network)…")
         let t0 = ContinuousClock.now
         let proxy = try spec.isProxied ? EgressProxy(policy: .bake, ca: nil, log: egress?.log ?? ConnectionLog()) : nil
+        let bakeNet = spec.networking ? try SubnetPool.makeNetwork() : nil
+        defer { if let bakeNet { SubnetPool.release(bakeNet.subnet.description) } }
         var mgr = try await ContainerManager(kernel: kernel, initfsReference: spec.initfsReference, imageStore: store,
-                                             network: spec.networking ? try VmnetNetwork() : nil)
+                                             network: bakeNet)
         let id = layout.bakeContainerID
         try? mgr.delete(id)
         let spec = self.spec

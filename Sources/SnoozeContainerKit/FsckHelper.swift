@@ -32,8 +32,9 @@ struct FsckHelper {
         let golden = StoreLayout(spec: helperSpec).golden(for: helperSpec).deletingPathExtension()
             .appendingPathExtension("fsck.ext4")
         if !FileManager.default.fileExists(atPath: golden.path) {
-            var bakeMgr = try await ContainerManager(kernel: kernel, initfsReference: initfsReference, imageStore: store,
-                                                     network: try VmnetNetwork())
+            let net = try SubnetPool.makeNetwork()                  // 583: a free subnet, never vmnet's default
+            defer { SubnetPool.release(net.subnet.description) }
+            var bakeMgr = try await ContainerManager(kernel: kernel, initfsReference: initfsReference, imageStore: store, network: net)
             try await bakeHelperDisk(&bakeMgr, image: image, into: golden)
         }
         let id = "fsck-\(UUID().uuidString.prefix(8).lowercased())"

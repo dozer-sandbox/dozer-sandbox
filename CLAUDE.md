@@ -49,6 +49,7 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
 | `KernelProvider.swift` | The pinned Linux kernel (`KernelArtifact.recommended`): override → verified cache → byte-identical seed → download + verify archive + extract + verify kernel |
 | `Resources/deckhold` | The committed static aarch64-linux-musl guest binary — see `Guest/deckhold/PROVENANCE.md` |
 | `Guest/deckhold/` | deckhold's C source, `build.sh` (pinned Zig 0.16.0 + ghostty `b988efc`), `PROVENANCE.md` |
+| `SubnetPool.swift` | 583: automatic vmnet subnets for NAT sandboxes and bakes (free on the Mac, unique in the process) |
 | `NetworkPolicy.swift` | 580: `NetworkMode`, `NetworkPolicy` (presets, ordered rules, DNS gating), `EgressRule`, IPv4 CIDR |
 | `EgressProxy.swift` | 580: the host proxy (vsock listener; CONNECT / plain HTTP / redirected TCP / DNS; decrypted tunnels via NIOSSL on `EmbeddedChannel`; `TLSUpstream` verified by Security.framework); `Wire` socket plumbing; `DNSMessage` |
 | `Credentials.swift` | 580: `CredentialBinding`, `CredentialVault` (secrets in memory, placeholders, the byte-exact head rewrite); `HTTPHead` |
@@ -72,8 +73,11 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
 - **One vmnet network per `Sandbox`, and never vmnet's default subnet beside another process.** Each
   Start used to create a new vmnet network (after a handful the guest had no route out); it is now
   created once and reused. Two processes that both take the default can get the same subnet and the
-  same guest addresses — the NAT then silently drops one (the gateway still answers ping). Hosts that
-  run beside others set `SandboxSpec.subnet`; the test hosts pin 192.168.201/202.0/24.
+  same guest addresses — the NAT then silently drops one (the gateway still answers ping). Since 583
+  the library never takes the default: with no `SandboxSpec.subnet` a NAT sandbox (and a NAT bake)
+  gets a free /24 from 192.168.100–199 (`SubnetPool`: none a host interface is on, none this process
+  holds, tried from a random start); an explicit subnet stays an override. The test hosts still pin
+  192.168.201/202.0/24. `hardening subnets` is the test.
 - **Every sandbox VM uses the ONE shared event-loop group** (`SharedEventLoop.group`, 583). Left to
   itself `VZVirtualMachineInstance` makes an 8-thread group and shuts it down only in its own `stop()`,
   which Deep Sleep never calls — each VM instance a host made kept 8 threads + 8 kqueues forever (582;

@@ -109,6 +109,12 @@ the viewer's size, then the program's own bytes. That is why a session survives 
 program cannot trap). The wire protocol and the snapshot recipe are documented in
 [`Guest/deckhold/deckhold.c`](Guest/deckhold/deckhold.c).
 
+**NAT subnets (583).** A `.nat` sandbox whose spec names no `subnet` gets a free vmnet /24 of its
+own from 192.168.100–199.0/24 — never one a network interface of the Mac is already on (the LAN, a
+VPN, another process's vmnet bridge), never one this process holds — instead of vmnet's default,
+which two processes could both take (the NAT then silently drops one). `SandboxSpec.subnet` stays an
+override; a restore keeps the subnet its guest was addressed from. Proxied sandboxes have no NIC.
+
 **Network (580): proxied sandboxes.** `SandboxSpec(…, network: .proxied(.agent))` boots a VM with
 **no network interface** — only `lo`. The guest's only way out is `snoozenet` (a small static guest
 binary, `Guest/snoozenet/`) relaying over vsock to `sandbox.egress`, an `EgressProxy` running in

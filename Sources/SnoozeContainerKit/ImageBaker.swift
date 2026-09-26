@@ -139,8 +139,11 @@ public struct ImageBaker: Sendable {
         }
         events(.note("baking image \(recipe.name) \(key.prefix(12)) from \(recipe.base) (one-time per recipe, needs network)…"))
         let store = try ImageStore(path: storeRoot)
+        // 583: a NAT bake gets a free subnet of its own, never vmnet's default.
+        let bakeNet = inputs.egress == nil ? try SubnetPool.makeNetwork() : nil
+        defer { if let bakeNet { SubnetPool.release(bakeNet.subnet.description) } }
         var mgr = try await ContainerManager(kernel: inputs.kernel, initfsReference: inputs.initfsReference,
-                                             imageStore: store, network: inputs.egress == nil ? try VmnetNetwork() : nil)
+                                             imageStore: store, network: bakeNet)
         let hadBase = (try? await store.get(reference: recipe.base, pull: false)) != nil
         let image = try await timed("base \(hadBase ? "ready (cached)" : "pulled") — \(recipe.base.split(separator: "@").first ?? "")") {
             try await store.get(reference: recipe.base, pull: true)
