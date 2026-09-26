@@ -256,13 +256,6 @@ extension Sandbox {
         return out
     }
 
-    /// Run `script` as root in the helper VM (Alpine + e2fsprogs) with this sandbox's directory at
-    /// /fsck — for tests (e.g. a `dumpe2fs` cross-check).
-    @_spi(Testing) public func runDiskTool(_ script: String) async throws -> ExecResult {
-        guard phase == .off else { throw SandboxError.invalidPhase(operation: "run a disk tool", phase: phase) }
-        return try await fsckHelper().run(script, sharing: layout.sandboxDirectory)
-    }
-
     // MARK: helpers
 
     /// The root disk, then the state disk (if any).

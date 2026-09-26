@@ -44,7 +44,10 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
 | `DeckholdProtocol.swift` | Frame codec, `deckhold ls` parser, `GuestCommand` (every guest argv; the share re-mount script) |
 | `StoreLayout.swift` | Storage layout under `storeRoot`; `PersistedSandbox` (what a new process needs to restore) |
 | `DeckholdBinary.swift` | Finds the resource without `Bundle.module` |
-| `ImageRecipe.swift`, `ImageBaker.swift` | Recipes (base@digest + steps + verify + persist dirs), the two agent recipes, the baked-disk cache |
+| `ImageRecipe.swift`, `ImageBaker.swift` | Recipes (base@digest + steps + verify + persist dirs + `journalMiB`), the two agent recipes, the baked-disk cache; 587: base disks (`images/bases/`, flattened once per base key) and clone-tree bakes (`ImageManifest.parent`) |
+| `EXT4Inspector.swift` | 587: an ext4 image FILE read on the host — `has_journal`, clean state, the free-block bitmaps (== `dumpe2fs`'s list) |
+| `DiskAccounting.swift` | 587: per-disk unique / shared-with-parent / garbage / extents from APFS's extent map (`F_LOG2PHYS_EXT`), PRIVATESIZE cross-check; range helpers |
+| `Maintenance.swift` | 587: `reclaim()`, `rederive()`, `maintenanceAdvice()` (586's thresholds), `checkDisks()` — stopped sandboxes only |
 | `RestorePoints.swift`, `FsckHelper.swift` | Restore points, custom images; e2fsck of a running-taken copy in a helper VM (on the file, over virtio-fs) |
 | `KernelProvider.swift` | The pinned Linux kernel (`KernelArtifact.recommended`): override → verified cache → byte-identical seed → download + verify archive + extract + verify kernel |
 | `Resources/deckhold` | The committed static aarch64-linux-musl guest binary — see `Guest/deckhold/PROVENANCE.md` |
@@ -120,15 +123,32 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   new `KernelArtifact` (URL + archive sha256 + member + kernel sha256) and `make test-vm` twice — a
   snapshot must be restored with the kernel it was taken under.
 - **Restore points are disk-only APFS clones** (owner ruling: no live forks). A copy of a RUNNING
-  VM is crash-consistent at best — the ext4 disks have no journal — so it is marked `needsFsck` and
-  the next boot from it runs e2fsck first (`FsckHelper`). e2fsck runs on the image FILE over virtio-fs:
-  a container's device cgroup refuses a raw block node even to a privileged exec.
-- **A kept disk that was not cleanly unmounted is e2fsck'd before it cold-boots** (583). Deep Sleep
-  stops the VM at the VZ level, so a discarded snapshot (`discardRestorableState`), a failed restore,
-  a crash while running or a VZ-level stop fallback leaves a disk that was never unmounted — and the
-  ext4 has no journal (582: 12 of 15 such cold boots failed with `EXT4-fs error … doubly allocated`).
-  `keptDiskNeedsFsck` decides (last durable phase ≠ off, a snapshot beside the disk, or the mark);
-  `hardening discard` is the regression test.
+  VM is crash-consistent at best, so it is marked `needsFsck` and the next boot from it runs e2fsck
+  first (`FsckHelper`) — journal or not. e2fsck runs on the image FILE over virtio-fs: a container's
+  device cgroup refuses a raw block node even to a privileged exec.
+- **A kept disk that was not cleanly unmounted is replayed or e2fsck'd before it cold-boots** (583,
+  587). Deep Sleep stops the VM at the VZ level, so a discarded snapshot (`discardRestorableState`),
+  a failed restore, a crash while running or a VZ-level stop fallback leaves a disk that was never
+  unmounted. A JOURNALED disk (587's default, 16 MiB) is replayed by the kernel on mount — no mark,
+  no e2fsck (`lineage journal`: 15/15 clean, ~380 ms). A journal-less one (`journalMiB: nil`, and
+  every pre-587 disk) is marked and e2fsck'd (582: 12 of 15 such cold boots failed with `EXT4-fs
+  error … doubly allocated`). `keptDiskNeedsFsck(_:snapshotPresent:journaled:)` decides from the
+  disks' superblocks (`disksJournaled`); `hardening discard` pins the journal-less path.
+- **The journal is a key input** (587): `ImageRecipe.journalMiB` is in the bake key and the base key,
+  `SandboxSpec.journalMiB` in the prepared-disk key (a journal-less one keeps its pre-587 key, and so
+  does the e2fsck helper's). A record written before 587 decodes as `nil` = no journal — its disks
+  have none. Never default a DECODED value to 16.
+- **Deep Sleep and Stop sync the guest first** (587, `.syncGuest`, best effort): a discarded Deep
+  Sleep lost the last ~5 s of writes in every journal mode (586). It also records `df` usage for
+  `DiskAccounting`'s fallback garbage.
+- **Mount options are not VM inputs** (587): `discard` on the root and state disks goes to the guest's
+  mount only (Containerization maps only `ro` into the VZ attachment), so a snapshot taken before 587
+  restores unchanged (`lineage compat-wake`).
+- **Children never depend on a parent's FILE** (587): a base, an image and a sandbox are APFS clones;
+  deleting or re-deriving a parent never changes a child (`lineage children`). Maintenance
+  (`reclaim`/`rederive`) touches only blocks ext4 marks free, refuses any disk that is not cleanly
+  unmounted (its bitmaps would be stale), and `rederive` replaces the root disk only by an atomic
+  rename after verifying the new one.
 - **Metadata dates have fractional seconds** (`ImageBaker.encoder`): restore points taken within one
   second must sort in the order they were taken.
 - **A proxied VM has NO NIC; the host proxy is the only way out** (580). The guest shim decides
@@ -169,7 +189,10 @@ an executable target, `snooze-vmtest`, that `make test-vm`:
 
 It prints one `PASS`/`FAIL` line per check and `vmtest: ALL PASS` last. Modes: `all` (default),
 `network` (580, `make test-vm-network`: the claude-code image proxied; live-prompt check SKIPs
-without `ANTHROPIC_API_KEY`), `netdebug --script '…'`, `lifecycle`, `crash` (spawns itself as `crash-save` — start, session, sleep to disk, exit without
+without `ANTHROPIC_API_KEY`), `lineage [part]` (587, `make test-vm-lineage`: bake, discard, sync,
+journal, nojournal, accounting, reclaim, rederive, children; then `compat-wake` / `compat-discard`
+after the v0.4.0 host's `crash-save` — the Makefile builds that host once from the tag into
+`V040_DIR`), `netdebug --script '…'`, `lifecycle`, `crash` (spawns itself as `crash-save` — start, session, sleep to disk, exit without
 stopping — then restores in the parent), `crash-restore`.
 
 - **Store:** `VMTEST_STORE` (default `$TMPDIR/snooze-vmtest-store`) — a SCRATCH store, never an app's

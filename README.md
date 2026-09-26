@@ -68,16 +68,78 @@ else; 583: a program a session started less than `settle` — 3 s — ago gets t
 disk (what you installed is still there); Reset to image starts again from a fresh clone of the
 prepared disk; Delete removes everything the sandbox has on disk. A disk that was not cleanly
 unmounted — `Sandbox.discardRestorableState(for:)` (a deep-slept VM is stopped without unmounting it),
-a failed restore, a crash while running — is checked with `e2fsck` before its next cold boot (583;
-the ext4 has no journal, and booting such a disk as it is corrupted it in 12 of 15 tries in 582). Guest: `exec(argv)` (no shell unless you pass one), `sessions()` (`deckhold ls`),
-`screenText(name)` (`deckhold dump`), `bootConsole()`.
+a failed restore, a crash while running — is replayed from its **journal** on the next cold boot, or,
+on a journal-less disk, checked with `e2fsck` first (583; see **Journal** below). Deep Sleep and Stop
+`sync` the guest first, so a discarded Deep Sleep loses nothing written before it. Guest: `exec(argv)`
+(no shell unless you pass one), `sessions()` (`deckhold ls`), `screenText(name)` (`deckhold dump`),
+`bootConsole()`.
 
 **Images** (`ImageRecipe`, `ImageBaker`, `AgentRecipes.claudeCode` / `.pi`): no layered images and
-no Dockerfile — a digest-pinned OCI base is read once and flattened to one ext4 disk, the install
-steps run inside a VM booted from it, a credential-free check verifies the result, and the disk is
-kept read-only in the store, keyed by recipe + kernel + deckhold. A sandbox with `spec.recipe`
-APFS-clones it as its root and gets a per-sandbox **state disk** for the agent's login/state (it
-survives Stop, Reset to image and re-bakes). Credentials go to `openSession(environment:)` only.
+no Dockerfile — a digest-pinned OCI base is flattened to one ext4 **base disk** once, every bake
+starts from an APFS clone of it, the install steps run inside a VM booted from that clone, a
+credential-free check verifies the result, `fstrim /` runs last, and the disk is kept read-only in
+the store, keyed by recipe + kernel + deckhold. A sandbox with `spec.recipe` APFS-clones it as its
+root and gets a per-sandbox **state disk** for the agent's login/state (it survives Stop, Reset to
+image and re-bakes). Credentials go to `openSession(environment:)` only.
+
+**Lineage (587): base → image → sandbox, as APFS clones.**
+
+```
+<store>/images/bases/<key12>/root.ext4 + manifest.json   an OCI base, flattened ONCE (digest + capacity + journal + formatter)
+<store>/images/<name>/<key12>/root.ext4 + manifest.json  an image: a clone of its base + the bake (manifest.parent = the base key)
+<store>/sandboxes/<name>/rootfs.ext4                     a sandbox: a clone of its image (PersistedSandbox.rootImage)
+```
+
+- Measured (M3, `make test-vm-lineage`): with the `node` base flattened (33 s, once), claude-code
+  bakes in **16 s** and pi in **15 s** (a fresh flatten each was ~50 s in 586). Both images share
+  **256 MiB** of the 278 MiB base; each further image on it costs only its own blocks.
+- Children never depend on their parent's FILE: deleting or re-baking a base or an image leaves every
+  image and sandbox cloned from it exactly as it was (`ImageBaker.deleteBase`, `lineage children`).
+- Every image key resolves to its disk: `StoreLayout.imageDisk(forKey:)` (`name@key12`, `custom:…`,
+  `base:…`, a prepared-disk key). `CustomImage.baseImage` is such a key.
+- A pre-587 store re-bakes each image once (the key includes the lineage format and the journal).
+
+**Journal (587): on by default, 16 MiB — a toggle.** `ImageRecipe.journalMiB` (the image's root and
+every sandbox's state disk) and `SandboxSpec.journalMiB` (the lab's prepared disk): default 16, `nil`
+= no journal. 586/587 measured it: after Deep Sleep → discard, a journaled disk cold-boots by
+journal replay in **~380 ms** with no e2fsck (15/15 `e2fsck -fn` clean afterwards); a journal-less
+one goes through the helper VM's `e2fsck` (~1,030 ms), as before 587. The cost: 16 MiB per base
+(shared) and up to 16 MiB per sandbox once the ring wraps; `fsync`-heavy work ~1.7× slower
+(0.16 vs 0.09 ms per fsync), metadata-heavy work (many small files + `sync`) ~3× faster. Records
+written before 587 decode as journal-less (their disks are); `PersistedSandbox.rootJournaled` /
+`stateJournaled` say what each disk has. A copy taken while running (a running restore point, a
+custom image from one) is still e2fsck'd on its first boot, journal or not.
+
+**TRIM (587).** The root and state disks mount with `discard`: a block the guest frees is punched
+out of the host file at once (300 MiB written and deleted in a running sandbox leaves 0 MiB behind).
+Every bake ends with `fstrim /` — claude-code's image came out 89 MiB (14 %) and pi's 81 MiB (16 %)
+smaller for ~60 ms.
+
+**Accounting (587): `DiskAccounting.measure(store:)`** — every disk of a store (bases, images, custom
+images, prepared disks, sandbox root and state disks, restore points) with its `allocatedBytes`,
+`uniqueBytes` (what deleting it frees), `sharedWithParentBytes` (its lineage parent), `privateBytes`
+(APFS's own number — they agree to 0.0 MiB on every disk), `extentsPerGiB`, and `garbageBytes`: the
+host file's data in blocks ext4 considers free (exact, from the disk's bitmaps, on a cleanly unmounted
+disk; otherwise allocated − the guest's `df` recorded at the last Stop / Deep Sleep,
+`PersistedSandbox.guestUsedMiB`). It reads APFS's extent map (`F_LOG2PHYS_EXT`): ~5 ms per disk.
+Measure stopped disks, on one volume.
+
+**Maintenance (587), stopped sandboxes only** (a running or sleeping one, or a disk not cleanly
+unmounted, is refused):
+
+- `reclaim()` punches ext4's free blocks out of the root and state disks' host files — the churn a
+  guest deleted without discard (a pre-587 disk, or a remount). 800 MiB → 0 in ~25 ms; the free list
+  equals `dumpe2fs`'s, the disk boots identically, `e2fsck -fn` is clean.
+- `rederive()` rebuilds the root disk as a fresh clone of its image plus only the blocks whose
+  content differs, skipping free blocks — re-sharing blocks that were rewritten with the image's own
+  bytes and dropping the garbage (147 MiB shared again, 200 MiB of garbage gone, in 0.8 s). The new
+  disk is verified (every in-use block reads the same; `e2fsck -fn` clean) before an atomic rename;
+  any failure leaves the original. The state disk and restore points are untouched.
+- `maintenanceAdvice()` says which is worth it (`MaintenanceAdvice.thresholds`, from 586): garbage
+  > 25 % of the allocation or > 512 MiB → reclaim; lost identical sharing > 64 MiB or > 10 % of the
+  image → rederive. Fragmentation never triggers anything (586: 1000 extents/GiB cost no boot, wake
+  or read time on the SSD).
+- `checkDisks()` runs `e2fsck -fn` (read-only) on the disks in the helper VM.
 
 **Memory (583): a woken sandbox gives back what it does not use.** The Mac charges a VM for every
 guest page it has ever touched, and restoring a snapshot touches them all: woken from Deep Sleep, a
@@ -96,8 +158,8 @@ inflated balloon does not restore. A sandbox deep-slept by an older build wakes 
 `probes/583-*/wake-memory` in the workspace; `hardening memory` is the regression test.
 
 **Restore points** (disk only, no memory): `takeRestorePoint` (an APFS clone of the root + state
-disks — instant; from a running VM: sync → pause → clone → resume, marked for `e2fsck` on the next
-boot, since the ext4 has no journal), `revert(to:)` (takes a "before revert" point first),
+disks — instant; from a running VM: sync → pause → clone → resume, crash-consistent at best, so
+marked for `e2fsck` on the next boot), `revert(to:)` (takes a "before revert" point first),
 `fork(_:as:)` (a new, cold-booted sandbox), `deleteRestorePoint` (any, in any order), and
 `saveAsImage` (a read-only **custom** image with its provenance, bootable via `spec.customImage`).
 
@@ -229,6 +291,8 @@ make audit            # import allowlist, one exact dependency, no host brand, d
 make deckhold         # rebuild the guest binary (pinned Zig + ghostty; first run ~3.5 min)
 make deckhold-verify  # rebuild from scratch and check the committed bytes match
 make test-vm-network  # 580: a proxied (no-NIC) sandbox end to end, then a bake under the bake preset
+make test-vm-lineage  # 587: warm-base bakes, journal / discard / sync, accounting, reclaim, rederive, then a
+                      #      sandbox deep-slept by v0.4.0 (its test host built once from the tag) — LINEAGE=part for one
 make snoozenet        # rebuild the snoozenet guest binary (pinned Zig; no ghostty) + refresh PROVENANCE.md
 make snoozenet-verify # rebuild snoozenet and check the committed bytes match
 ```

@@ -36,7 +36,7 @@ DECKHOLD_RES := Sources/SnoozeContainerKit/Resources/deckhold
 SNOOZENET_OUT := Guest/snoozenet/out/snoozenet
 SNOOZENET_RES := Sources/SnoozeContainerKit/Resources/snoozenet
 
-.PHONY: help build test audit test-vm test-vm-agents test-vm-network test-vm-hardening vmtest-host kernel deckhold deckhold-verify snoozenet snoozenet-verify
+.PHONY: help build test audit test-vm test-vm-agents test-vm-network test-vm-hardening test-vm-lineage v040-host vmtest-host kernel deckhold deckhold-verify snoozenet snoozenet-verify
 
 help: ## Show this help
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) | sed 's/:.*## /\t/' | expand -t 22
@@ -62,6 +62,27 @@ test-vm-network: vmtest-host ## 580 proxied network: no NIC, policy, DNS, UDP, c
 
 test-vm-hardening: vmtest-host ## 583 regression tests: discard → cold boot (e2fsck), 200 Deep Sleep cycles with flat threads/fds/footprint, 16 concurrent wakes (HARDENING=discard|leak|concurrent for one)
 	perl -e 'alarm shift; exec @ARGV' 2400 $(VMTEST_BIN) hardening $(HARDENING) --store "$(VMTEST_STORE)"
+
+# 587: item 10 needs a sandbox deep-slept by the LAST release. Its test host is built from the tag
+# (git archive, no checkout touched) into V040_DIR, once; its own `crash-save` leaves vmtest-crash
+# deep asleep in the store, and this build's `lineage compat-*` wakes / discards it.
+V040_TAG ?= v0.4.0
+V040_DIR ?= $(or $(TMPDIR),/tmp/)snooze-$(V040_TAG)-src
+V040_BIN := $(V040_DIR)/.build/debug/snooze-vmtest
+
+v040-host: ## Build + sign the $(V040_TAG) test host from the tag (once, into V040_DIR)
+	@if [ ! -x "$(V040_BIN)" ]; then \
+	  rm -rf "$(V040_DIR)" && mkdir -p "$(V040_DIR)" && git archive $(V040_TAG) | tar -x -C "$(V040_DIR)" && \
+	  (cd "$(V040_DIR)" && swift build $(SWIFT_BUILD_SYSTEM) -j $(JOBS) --product snooze-vmtest) ; fi
+	codesign --force --sign - --entitlements Scripts/vmtest.entitlements $(V040_BIN)
+
+test-vm-lineage: vmtest-host v040-host ## 587 image lineage: warm-base bakes, journal, discard, sync, accounting, reclaim, rederive (LINEAGE=part), then v0.4.0 compat
+	perl -e 'alarm shift; exec @ARGV' 3600 $(VMTEST_BIN) lineage $(LINEAGE) --store "$(VMTEST_STORE)"
+	@if [ -z "$(LINEAGE)" ]; then \
+	  perl -e 'alarm shift; exec @ARGV' 600 $(V040_BIN) crash-save --store "$(VMTEST_STORE)" && \
+	  perl -e 'alarm shift; exec @ARGV' 600 $(VMTEST_BIN) lineage compat-wake --store "$(VMTEST_STORE)" && \
+	  perl -e 'alarm shift; exec @ARGV' 600 $(V040_BIN) crash-save --store "$(VMTEST_STORE)" && \
+	  perl -e 'alarm shift; exec @ARGV' 600 $(VMTEST_BIN) lineage compat-discard --store "$(VMTEST_STORE)" ; fi
 
 kernel: vmtest-host ## Fetch + verify the pinned Linux kernel into the cache (KERNEL_CACHE=dir; no VM)
 	perl -e 'alarm shift; exec @ARGV' 900 $(VMTEST_BIN) kernel --store "$(VMTEST_STORE)"

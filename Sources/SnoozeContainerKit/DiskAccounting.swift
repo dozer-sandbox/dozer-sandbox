@@ -314,10 +314,10 @@ public enum DiskAccounting {
 
     // MARK: ranges (byte offset, length) — sorted and disjoint unless said otherwise
 
-    static func total(_ r: [(Int64, Int64)]) -> Int64 { r.reduce(0) { $0 + $1.1 } }
+    public static func total(_ r: [(Int64, Int64)]) -> Int64 { r.reduce(0) { $0 + $1.1 } }
 
     /// Sort and merge touching/overlapping ranges.
-    static func merge(_ r: [(Int64, Int64)]) -> [(Int64, Int64)] {
+    public static func merge(_ r: [(Int64, Int64)]) -> [(Int64, Int64)] {
         var out: [(Int64, Int64)] = []
         for (o, l) in r.sorted(by: { $0.0 < $1.0 }) where l > 0 {
             if let last = out.last, last.0 + last.1 >= o {
@@ -328,7 +328,7 @@ public enum DiskAccounting {
     }
 
     /// `a` ∩ `b`.
-    static func intersect(_ a: [(Int64, Int64)], _ b: [(Int64, Int64)]) -> [(Int64, Int64)] {
+    public static func intersect(_ a: [(Int64, Int64)], _ b: [(Int64, Int64)]) -> [(Int64, Int64)] {
         var out: [(Int64, Int64)] = []
         var i = 0, j = 0
         while i < a.count, j < b.count {
@@ -340,7 +340,7 @@ public enum DiskAccounting {
     }
 
     /// `a` − `b`.
-    static func subtract(_ a: [(Int64, Int64)], _ b: [(Int64, Int64)]) -> [(Int64, Int64)] {
+    public static func subtract(_ a: [(Int64, Int64)], _ b: [(Int64, Int64)]) -> [(Int64, Int64)] {
         var out: [(Int64, Int64)] = []
         var j = 0
         for (s0, l) in a {
