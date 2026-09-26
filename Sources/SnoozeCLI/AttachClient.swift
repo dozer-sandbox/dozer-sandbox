@@ -4,7 +4,8 @@
 // while the session lives on in the guest, so the client reconnects and the host holds it until the
 // sandbox runs again. When the host says the session is over (`ClientWire` notice) it exits with
 // the program's exit code. Ctrl-] (or --detach-key) detaches; so does closing the terminal, or
-// end-of-file on a stdin that is not a terminal.
+// SIGTERM / SIGINT. A stdin that is not a terminal is typed until it ends, then the client keeps
+// showing the session until the program exits (so `snooze run NAME -- CMD < /dev/null` works).
 import ArgumentParser
 import Darwin
 import Foundation
@@ -14,10 +15,33 @@ import SnoozeHost
 nonisolated(unsafe) private var savedTermios = termios()
 nonisolated(unsafe) private var rawMode = false
 nonisolated(unsafe) private var socketFD: Int32 = -1
+/// Keys typed before the FIRST connection is up (typing ahead of `up`/`run`): sent once it is.
+/// After that nothing is queued — a held client's keys are dropped (never typed into a frozen guest).
+nonisolated(unsafe) private var typedAhead: Data? = Data()
 private let socketLock = NSLock()
 
-private func setSocket(_ fd: Int32) { socketLock.lock(); socketFD = fd; socketLock.unlock() }
+private func setSocket(_ fd: Int32) {
+    socketLock.lock()
+    socketFD = fd
+    let early = fd >= 0 ? typedAhead : nil
+    if fd >= 0 { typedAhead = nil }
+    socketLock.unlock()
+    if let early, !early.isEmpty { UnixSocket.writeAll(fd, early) }
+}
 private func currentSocket() -> Int32 { socketLock.lock(); defer { socketLock.unlock() }; return socketFD }
+
+/// Send keys, or keep them for the first connection (bounded).
+private func typeOrKeep(_ bytes: Data) {
+    socketLock.lock()
+    if socketFD < 0, typedAhead != nil {
+        if typedAhead!.count + bytes.count <= 65536 { typedAhead!.append(bytes) }
+        socketLock.unlock()
+        return
+    }
+    let fd = socketFD
+    socketLock.unlock()
+    if fd >= 0 { UnixSocket.writeAll(fd, bytes) }
+}
 
 private func restoreTTY() { if rawMode { tcsetattr(STDIN_FILENO, TCSANOW, &savedTermios) } }
 
@@ -69,7 +93,7 @@ enum AttachClient {
             if fd >= 0 { UnixSocket.writeAll(fd, Data(ClientWire.resize(terminalSize()))) }
         }
         winch.resume()
-        for sig in [SIGTERM, SIGHUP] {
+        for sig in [SIGTERM, SIGHUP, SIGINT] where !(sig == SIGINT && rawMode) {
             signal(sig, SIG_IGN)
             let s = DispatchSource.makeSignalSource(signal: sig, queue: .global())
             s.setEventHandler { finish(0) }
@@ -83,7 +107,12 @@ enum AttachClient {
             while true {
                 let n = read(STDIN_FILENO, &buf, buf.count)
                 if n < 0 && errno == EINTR { continue }
-                if n <= 0 { finish(0) }                   // end of input: detach
+                if n <= 0 {
+                    // A terminal that went away: detach. A pipe or file that ran out: stop typing,
+                    // keep showing the session until it ends (SIGTERM / Ctrl-C detaches).
+                    if rawMode { finish(0) }
+                    return
+                }
                 var bytes = Array(buf[0..<n])
                 if let k = detachKey, let i = bytes.firstIndex(of: k) {
                     bytes = Array(bytes[..<i])
@@ -92,8 +121,7 @@ enum AttachClient {
                     if !quiet { say("detached — the session keeps running (snooze attach \(sandbox)\(session.map { " \($0)" } ?? ""))") }
                     finish(0)
                 }
-                let fd = currentSocket()
-                if fd >= 0 { UnixSocket.writeAll(fd, Data(bytes)) }
+                typeOrKeep(Data(bytes))
             }
         }
 

@@ -74,7 +74,8 @@ let package = Package(
         // `Scripts/vmtest.entitlements`, and runs under a watchdog. See CLAUDE.md.
         .executableTarget(
             name: "snooze-vmtest",
-            dependencies: ["SnoozeContainerKit", .product(name: "Containerization", package: "containerization")],
+            // SnoozeHost (585): the `cli` mode decodes the real binary's --json output with its types.
+            dependencies: ["SnoozeContainerKit", "SnoozeHost", .product(name: "Containerization", package: "containerization")],
             path: "Sources/snooze-vmtest"
         ),
         // 585 — the per-user host behind the `snooze` CLI: it owns every running VM, the egress

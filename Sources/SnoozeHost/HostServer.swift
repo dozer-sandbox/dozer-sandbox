@@ -171,8 +171,9 @@ public final class HostServer: @unchecked Sendable {
             let conn = HostConnection(fd: c)
             let accepted: Bool = lock.withLock {
                 if stopping { return false }
+                // Counted while open (an attach or a stream keeps the host up); a short request that
+                // came and went — `ls`, `host status` — does not restart the idle clock.
                 connections += 1
-                idleSince = nil
                 return true
             }
             guard accepted else { conn.close(); continue }
@@ -327,11 +328,12 @@ public final class HostServer: @unchecked Sendable {
                     }
                     do {
                         let c = try await sandbox.attach(session, size: state.size)
+                        // Adopted BEFORE the answer: the client sends what it typed ahead as soon as it reads it.
+                        guard state.adopt(c) else { c.close(); return }
                         if !announced {
                             conn.send(.success(.object(["state": .string("attached"), "session": .string(session), "sandbox": .string(name)])))
                             announced = true
                         }
-                        guard state.adopt(c) else { c.close(); return }
                         await core.sessionAttached(name, session: session, ms: ms(since: t0))
                         await Self.pump(c, to: conn, state: state, core: core, sandbox: name, session: session)
                         return

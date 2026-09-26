@@ -391,8 +391,11 @@ struct HostRun: AsyncParsableCommand {
             do { try HostLauncher.spawn(store: store, extra: idleTimeout.map { ["--idle-timeout", String($0)] } ?? []) } catch let e as HostError {
                 throw fail(e, g)
             }
+            guard HostClient.waitForHost(store: store) else {
+                throw fail(HostError(.unavailable, "the host did not start — see \(store.logFile.path)"), g)
+            }
         }
-        let st = try decode(try call(HostRequest(.ping), g), HostStatus.self, g)
+        let st = try decode(try call(HostRequest(.ping), g, autostart: false), HostStatus.self, g)
         if g.json { Out.json(st) } else { Out.stdout(describe(st)) }
     }
 }

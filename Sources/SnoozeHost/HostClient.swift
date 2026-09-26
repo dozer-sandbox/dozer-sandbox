@@ -84,6 +84,16 @@ public final class HostClient {
         throw HostError(.unavailable, "the host did not answer within \(Int(waitSeconds)) s — \(lastLogLines(store))")
     }
 
+    /// Wait for a host that is starting to answer its socket.
+    public static func waitForHost(store: SnoozeStore, seconds: Double = 90) -> Bool {
+        let deadline = Date().addingTimeInterval(seconds)
+        while Date() < deadline {
+            if let fd = UnixSocket.connect(store.socket.path) { close(fd); return true }
+            usleep(30_000)
+        }
+        return false
+    }
+
     static func lastLogLines(_ store: SnoozeStore, _ n: Int = 3) -> String {
         guard let s = try? String(contentsOf: store.logFile, encoding: .utf8) else { return "see \(store.logFile.path)" }
         return s.split(separator: "\n").suffix(n).joined(separator: " | ")

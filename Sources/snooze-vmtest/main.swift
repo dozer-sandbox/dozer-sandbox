@@ -13,6 +13,8 @@
 //          network        580: a proxied sandbox (no NIC) on the claude-code image — policy, DNS, redirected
 //                         TCP, UDP blocked, placeholder credentials + the sandbox CA, method/path rules,
 //                         sleep to disk → wake, Stop → Start, the log's export; then a bake under the bake preset
+//          cli            585: the snooze CLI end to end — the real signed binary (--snooze PATH), every
+//                         call a separate process (CLISuite.swift; `make test-cli`)
 //          hardening [discard|leak|concurrent]
 //                         583: the regression tests for the 582 hazards (HardeningSuite.swift)
 //          kernel         only resolve the pinned kernel (fetch + verify into the cache; no VM,
@@ -876,6 +878,8 @@ Task {
             check(true, String(format: "kernel ready at %@ (%.1f s)", url.path, Date().timeIntervalSince(t0)))
             print("vmtest: ALL PASS")
             exit(0)
+        case "cli":
+            try await cliSuite()
         case "lifecycle":
             try await lifecycleSuite()
         case "crash":
