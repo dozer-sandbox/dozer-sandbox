@@ -126,7 +126,7 @@ public final class HostServer: @unchecked Sendable {
                 return false
             }
             if exit {
-                HostLog.line(String(format: "idle for %.1f min with nothing running — exiting", idleTimeoutMinutes))
+                HostLog.line("idle for \(idleTimeoutMinutes.formatted()) min with nothing running — exiting")
                 await shutdown(prepare: false, reply: nil)
             }
         }

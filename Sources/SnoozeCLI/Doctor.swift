@@ -23,7 +23,7 @@ struct Doctor: AsyncParsableCommand {
         if g.json { Out.json(checks) } else {
             for c in checks {
                 let mark = switch c.status { case .ok: "ok  "; case .warn: "warn"; case .fail: "FAIL" }
-                Out.stdout("\(mark)  \(c.check.padding(toLength: 13, withPad: " ", startingAt: 0)) \(c.detail)\n")
+                Out.stdout("\(mark)  \(c.check.padding(toLength: 15, withPad: " ", startingAt: 0)) \(c.detail)\n")
             }
         }
         if checks.contains(where: { $0.status == .fail }) { throw ExitCode(SnoozeExit.failed) }

@@ -12,7 +12,10 @@ public enum HostLauncher {
         if let u = Bundle.main.executableURL?.resolvingSymlinksInPath() { return u.path }
         var size: UInt32 = 4096
         var buf = [CChar](repeating: 0, count: Int(size))
-        if _NSGetExecutablePath(&buf, &size) == 0 { return URL(fileURLWithPath: String(cString: buf)).resolvingSymlinksInPath().path }
+        if _NSGetExecutablePath(&buf, &size) == 0 {
+            let path = String(decoding: buf.prefix(while: { $0 != 0 }).map { UInt8(bitPattern: $0) }, as: UTF8.self)
+            return URL(fileURLWithPath: path).resolvingSymlinksInPath().path
+        }
         return CommandLine.arguments[0]
     }
 
