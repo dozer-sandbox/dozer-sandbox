@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+# docs-drift-check.sh — cheap check that the CLI reference (589) still names every real `snooze`
+# subcommand, and nothing it no longer has.
+#
+# Cheap on purpose: it diffs COMMAND NAMES only (not flags or help text — that would need a real
+# ArgumentParser --help parser, and the name is the part that actually goes stale: 585 added the
+# whole CLI, 588 added `account` and `key policy`, both exactly new names this check would catch).
+#
+# It builds the UNSIGNED debug `snooze` — `--help` needs no entitlement, only booting a VM does —
+# and walks the top level plus every subcommand group's --help, extracting each subcommand's
+# canonical name (aliases ignored) from ArgumentParser's own SUBCOMMANDS listing. That set is
+# diffed against Scripts/docs-known-commands.txt, the list the CLI reference article documents.
+set -euo pipefail
+
+PACKAGE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+KNOWN="$PACKAGE/Scripts/docs-known-commands.txt"
+BIN="$PACKAGE/.build/debug/snooze"
+CMD_GROUPS="image point net key account host"   # NOT "GROUPS" — bash reserves that name for the
+                                                  # caller's group-membership array; assigning to
+                                                  # it silently no-ops and $GROUPS then reads back
+                                                  # as one numeric gid (macOS: 20, "staff").
+
+fail() {
+    printf 'x docs-drift-check: %s\n' "$1" >&2
+    exit 1
+}
+
+[[ -f "$KNOWN" ]] || fail "missing $KNOWN"
+
+echo "docs-drift-check: building the CLI (unsigned — --help needs no entitlement) …"
+(cd "$PACKAGE" && swift build -j 8 --product snooze) >/dev/null
+
+[[ -x "$BIN" ]] || fail "missing $BIN after build"
+
+# Extract subcommand names from a `--help` SUBCOMMANDS: block: lines indented exactly two spaces,
+# name is the leading identifier (a following comma or "(default)" — an alias or the default
+# marker — is dropped, so only the canonical name is tracked). Portable (BSD) sed, no gawk-only
+# 3-arg match().
+names_from_help() {
+    "$BIN" "$@" --help 2>&1 \
+      | sed -n '/^SUBCOMMANDS:/,/^[[:space:]]*$/p' \
+      | sed -n 's/^  \([A-Za-z0-9_-][A-Za-z0-9_-]*\).*/\1/p'
+}
+
+actual=$(mktemp)
+trap 'rm -f "$actual"' EXIT
+
+names_from_help >> "$actual"
+for g in $CMD_GROUPS; do
+    names_from_help "$g" | sed "s#^#${g}/#" >> "$actual"
+done
+sort -u "$actual" -o "$actual"
+
+known=$(grep -v '^#' "$KNOWN" | grep -v '^[[:space:]]*$' | sort -u)
+
+missing_from_docs=$(comm -23 "$actual" <(printf '%s\n' "$known"))
+stale_in_docs=$(comm -13 "$actual" <(printf '%s\n' "$known"))
+
+if [[ -n "$missing_from_docs" || -n "$stale_in_docs" ]]; then
+    [[ -z "$missing_from_docs" ]] || printf 'x docs-drift-check: the CLI has commands the reference does not document:\n%s\n' "$missing_from_docs" >&2
+    [[ -z "$stale_in_docs" ]] || printf 'x docs-drift-check: the reference documents commands the CLI no longer has:\n%s\n' "$stale_in_docs" >&2
+    printf 'Update Articles/CLIReference.md and Scripts/docs-known-commands.txt together.\n' >&2
+    exit 1
+fi
+
+printf 'ok docs-drift-check: %d command names match the CLI exactly (top level + %s)\n' "$(wc -l < "$actual" | tr -d ' ')" "$CMD_GROUPS"

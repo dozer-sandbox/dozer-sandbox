@@ -1,0 +1,57 @@
+# The `snooze` command names the CLI reference (SnoozeContainerKit.docc/Articles/CLIReference.md)
+# documents. One per line: a top-level command name, or "group/subcommand". Checked against the
+# real CLI's --help output by Scripts/docs-drift-check.sh (`make docs-drift-check`). Aliases
+# ("cold-boot", "suspend", "hibernate", …) are not tracked here — only canonical names.
+create
+up
+start
+pause
+resume
+sleep
+deep-sleep
+wake
+shutdown
+reset
+rm
+ls
+inspect
+sessions
+attach
+run
+exec
+image
+point
+net
+key
+account
+metrics
+doctor
+host
+events
+image/ls
+image/bake
+image/rm
+image/pull
+image/push
+point/take
+point/ls
+point/revert
+point/fork
+point/rm
+point/save-image
+net/policy
+net/log
+key/set
+key/rm
+key/ls
+key/policy
+account/ls
+account/add
+account/verify
+account/rm
+account/default
+account/use
+account/keepalive
+host/start
+host/stop
+host/status

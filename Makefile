@@ -49,7 +49,20 @@ CLITEST_STORE ?= $(or $(TMPDIR),/tmp/)snooze-clitest-store
 # 588: the Claude-credentials suite's scratch store (the claude-code image is cloned from the vmtest store).
 CLAUDETEST_STORE ?= $(or $(TMPDIR),/tmp/)snooze-claudetest-store
 
-.PHONY: help build test audit test-vm test-vm-agents test-vm-network test-vm-hardening test-vm-lineage v040-host vmtest-host kernel deckhold deckhold-verify snoozenet snoozenet-verify cli install-cli test-cli test-vm-claude
+# ── Documentation site (589) ──────────────────────────────────────────────────
+# Built directly with `xcrun docc` — no swift-docc-plugin dependency: Scripts/audit.sh's dependency
+# allowlist (step 3) checks every `.package(url:)` in Package.swift, and the plugin needs one for a
+# build-time-only tool on a package whose whole point is a short, audited dependency list.
+# `swift package dump-symbol-graph` is a first-class SwiftPM subcommand, so this needs nothing the
+# plugin would add. See changes/589-i139-SNOOZE-DOCS-SITE/589.01-PLAN.md (workspace repo).
+DOCC_CATALOG      := Sources/SnoozeContainerKit/SnoozeContainerKit.docc
+DOCC_SYMBOLS_ALL  := .build/out/symbolgraph
+DOCC_SYMBOLS_LIB  := .build/docc-symbolgraph-lib
+DOCC_OUT         ?= .docc-build
+DOCC_BASE_PATH   ?= /SnoozeContainerKit/
+DOCC_PREVIEW_PORT ?= 8000
+
+.PHONY: help build test audit test-vm test-vm-agents test-vm-network test-vm-hardening test-vm-lineage v040-host vmtest-host kernel deckhold deckhold-verify snoozenet snoozenet-verify cli install-cli test-cli test-vm-claude docs docs-preview docs-drift-check
 
 help: ## Show this help
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) | sed 's/:.*## /\t/' | expand -t 22
@@ -143,3 +156,26 @@ snoozenet: ## Rebuild the snoozenet guest binary (580), install it as the commit
 snoozenet-verify: ## Rebuild snoozenet from scratch and check the committed bytes match
 	FORCE=1 Guest/snoozenet/build.sh
 	@cmp $(SNOOZENET_OUT) $(SNOOZENET_RES) && echo "ok snoozenet: the committed binary is exactly what the pinned source builds"
+
+docs-drift-check: ## 589: the CLI reference's documented command names vs real `snooze --help` (cheap; names only)
+	@Scripts/docs-drift-check.sh
+
+docs: docs-drift-check ## 589: build the static docs site (DocC) into DOCC_OUT (default .docc-build); DOCC_BASE_PATH for hosting (default /SnoozeContainerKit/)
+	swift package dump-symbol-graph --minimum-access-level public
+	@rm -rf "$(DOCC_SYMBOLS_LIB)" && mkdir -p "$(DOCC_SYMBOLS_LIB)"
+	cp "$(DOCC_SYMBOLS_ALL)/SnoozeContainerKit.symbols.json" "$(DOCC_SYMBOLS_LIB)/"
+	rm -rf "$(DOCC_OUT)"
+	xcrun docc convert "$(DOCC_CATALOG)" \
+	  --analyze \
+	  --fallback-display-name SnoozeContainerKit \
+	  --fallback-bundle-identifier org.snoozecontainerkit.docs \
+	  --fallback-bundle-version 1.0.0 \
+	  --additional-symbol-graph-dir "$(DOCC_SYMBOLS_LIB)" \
+	  --output-path "$(DOCC_OUT)" \
+	  --transform-for-static-hosting \
+	  --hosting-base-path "$(DOCC_BASE_PATH)"
+	@echo "ok docs: built $(DOCC_OUT) (hosting base path $(DOCC_BASE_PATH))"
+
+docs-preview: docs ## 589: build, then serve the docs site locally (127.0.0.1:DOCC_PREVIEW_PORT, default 8000)
+	@echo "docs-preview: http://127.0.0.1:$(DOCC_PREVIEW_PORT)/documentation/snoozecontainerkit/  (Ctrl-C to stop)"
+	python3 -m http.server $(DOCC_PREVIEW_PORT) --bind 127.0.0.1 --directory "$(DOCC_OUT)"
