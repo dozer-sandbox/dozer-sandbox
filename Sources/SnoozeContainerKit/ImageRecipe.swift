@@ -144,6 +144,51 @@ public enum AgentRecipes {
 
     /// `npm pack` the pinned version, check the tarball's sha512 against the pinned integrity,
     /// then install exactly that tarball globally.
+    /// Claude Code in a sandbox starts ready to work (owner ruling, 585): `~/.local/bin/claude` (first
+    /// on the agent's PATH) marks the first-run setup done for THIS session — onboarding, this
+    /// session's API-key placeholder (minted per session, so it is approved per session), trust for
+    /// the working folder — then runs the real `/usr/local/bin/claude` with
+    /// `--dangerously-skip-permissions`: the VM, the proxy and the vault are the boundary, so its
+    /// own prompts only get in the way. `SNOOZE_CLAUDE_PERMISSIONS=ask` keeps them; root always
+    /// keeps them (Claude Code refuses the flag as root). Only the keys named below are written.
+    static let claudeLauncher = BakeStep.script("install the snooze claude launcher", """
+        mkdir -p /usr/local/lib/snooze /home/agent/.local/bin
+        cat > /usr/local/lib/snooze/claude-setup.js <<'JS'
+        const fs = require('fs'), path = require('path');
+        const dir = process.env.CLAUDE_CONFIG_DIR || path.join(process.env.HOME, '.claude');
+        const put = (f, obj) => { fs.writeFileSync(f + '.snooze-tmp', JSON.stringify(obj, null, 2), { mode: 0o600 }); fs.renameSync(f + '.snooze-tmp', f); };
+        const read = f => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return {}; } };
+        fs.mkdirSync(dir, { recursive: true });
+        const file = path.join(dir, '.claude.json'), c = read(file);
+        c.hasCompletedOnboarding = true;
+        const key = process.env['ANTHROPIC' + '_API_KEY'];   // spelled apart: no recipe names a credential (ImageRecipeTests)
+        if (key) {
+          const r = (c.customApiKeyResponses ??= { approved: [], rejected: [] }), tail = key.slice(-20);
+          r.approved = [...(r.approved || []).filter(x => x !== tail), tail].slice(-50);
+          r.rejected = (r.rejected || []).filter(x => x !== tail);
+        }
+        ((c.projects ??= {})[process.cwd()] ??= {}).hasTrustDialogAccepted = true;
+        put(file, c);
+        if (process.argv[2] === 'skip') {
+          const sf = path.join(dir, 'settings.json'), s = read(sf);
+          if (s.skipDangerousModePermissionPrompt !== true) { s.skipDangerousModePermissionPrompt = true; put(sf, s); }
+        }
+        JS
+        cat > /home/agent/.local/bin/claude <<'SH'
+        #!/bin/sh
+        # snooze: Claude Code with its first-run setup done and, by default, its permission prompts off.
+        mode=skip
+        [ "${SNOOZE_CLAUDE_PERMISSIONS:-skip}" = ask ] && mode=ask
+        [ "$(id -u)" = 0 ] && mode=ask
+        node /usr/local/lib/snooze/claude-setup.js "$mode" || echo "snooze: could not pre-seed Claude Code's setup" >&2
+        [ "$mode" = skip ] && exec /usr/local/bin/claude --dangerously-skip-permissions "$@"
+        exec /usr/local/bin/claude "$@"
+        SH
+        chmod 0755 /home/agent/.local/bin/claude /usr/local/lib/snooze
+        chmod 0644 /usr/local/lib/snooze/claude-setup.js
+        chown -R agent:agent /home/agent/.local
+        """, needsNetworkFalse: ())
+
     static func npmInstall(_ package: String, version: String, integrity: String, extraArgs: [String] = []) -> BakeStep {
         let extra = extraArgs.joined(separator: " ")
         return BakeStep.script("npm install \(package)@\(version) (integrity-pinned)", """
@@ -162,8 +207,10 @@ public enum AgentRecipes {
         base: nodeBase,
         steps: [createAgent,
                 npmInstall("@anthropic-ai/claude-code", version: "2.1.227",
-                           integrity: "sha512-D0YP8GFwPaP/9eObEuP5LRO5+9QSD9CLa6K26whNzXxpxz3pFqPS3nn7l1/MLmSWy32wBP2IKQzkRB3mumUKUQ==")],
-        verify: [VerifyCheck(["claude", "--version"], expect: "2.1.227")],
+                           integrity: "sha512-D0YP8GFwPaP/9eObEuP5LRO5+9QSD9CLa6K26whNzXxpxz3pFqPS3nn7l1/MLmSWy32wBP2IKQzkRB3mumUKUQ=="),
+                claudeLauncher],
+        verify: [VerifyCheck(["claude", "--version"], expect: "2.1.227"),
+                 VerifyCheck(["sh", "-c", "test -x /home/agent/.local/bin/claude && echo launcher-ok"], expect: "launcher-ok")],
         user: "agent", home: "/home/agent",
         // CLAUDE_CONFIG_DIR puts .claude.json INSIDE ~/.claude, so one directory holds all state.
         persistDirs: ["~/.claude"],

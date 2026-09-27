@@ -126,21 +126,16 @@ start Claude Code:
 snooze up try
 ```
 
-Claude Code starts in `/workspace`. Answer its first-run questions:
+Claude Code opens straight at its prompt in `/workspace`, with no first-run setup screens: the
+image's launcher marks onboarding done, approves this session's key placeholder and trusts the
+folder. It runs with **bypass permissions on** (the status line says so), because the sandbox is
+the safety boundary. It won't stop to ask before writing files or running commands.
 
-- Choose a theme: **Enter**.
-- "Detected a custom API key … Do you want to use this API key?": the highlighted default is
-  **No**. Press **↑** to choose **1. Yes**, then **Enter**. The key it shows (`sk-ant-...` plus a
-  suffix) is the sandbox's placeholder, not your key.
-- The security notes and "trust this folder": **Enter**.
-
-Then ask it something, for example "create hello.txt saying hi". The file appears in
+Ask it something, for example "create hello.txt saying hi, then run ls -l". The file appears in
 `~/snooze-try` on your Mac.
 
-If you answered No by mistake, Claude Code shows its login-method screen. End it and open a fresh
-session: `snooze sessions try` shows the `claude` PID (say 25), then run
-`snooze exec try -- sh -c 'kill 25'` and `snooze up try`. (`exec` runs programs with no shell in
-front, so shell builtins such as `kill` need `sh -c`. The Debian image has no `pkill`.)
+To keep Claude Code's own permission prompts, start it with
+`snooze run try -e SNOOZE_CLAUDE_PERMISSIONS=ask -- claude`.
 
 **Ctrl-]** detaches. Then check what the sandbox actually has:
 

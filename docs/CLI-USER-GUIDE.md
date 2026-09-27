@@ -93,6 +93,17 @@ The agent images run their agent as a normal user in `/workspace`, and they keep
 and history (`~/.claude`, `~/.pi/agent`) on a separate state disk. That disk survives shutdown,
 reset and re-bakes.
 
+**Claude Code starts ready to work.** The claude-code image's `claude` is a small launcher. Before
+running the real Claude Code it:
+
+- marks the first-run setup done: onboarding, this session's key placeholder approved, and the
+  working folder trusted;
+- passes `--dangerously-skip-permissions`, so there are no approval prompts. The VM, the proxy and
+  the key vault are the boundary.
+
+`-e SNOOZE_CLAUDE_PERMISSIONS=ask` (on `run` or `exec`) keeps Claude Code's own prompts, and a
+`claude` run as root always keeps them.
+
 Keys never enter the sandbox:
 
 ```bash

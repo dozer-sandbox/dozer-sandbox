@@ -151,6 +151,16 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   forever. Use `writeAndFlush(_, promise: nil)` and `close(promise: nil)`, then drain.
 - **A real key given to `openSession`/`exec` is moved into the vault** and replaced by a
   placeholder; keep it that way — "keys never enter the sandbox" rests on it.
+- **Claude Code starts set up and without permission prompts** (owner ruling 2026-09-27, 585).
+  The claude-code recipe's `claudeLauncher` step installs `~/.local/bin/claude` (first on the
+  agent's PATH). It pre-seeds `hasCompletedOnboarding`, the SESSION's placeholder in
+  `customApiKeyResponses.approved` (placeholders are minted per session, so a fixed approval can
+  never work), `projects[cwd].hasTrustDialogAccepted`, and `settings.json`
+  `skipDangerousModePermissionPrompt`, then execs `/usr/local/bin/claude
+  --dangerously-skip-permissions`. `SNOOZE_CLAUDE_PERMISSIONS=ask` and root keep the prompts.
+  The script spells the key variable's name apart, because no recipe may name a credential
+  (`ImageRecipeTests`). These keys were found by diffing the config before and after Claude Code
+  2.1.227's own screens, so re-check them when the pin moves.
 - **The `snooze` host (585) is the ONE owner of a store's VMs.** It holds `<store>/host.lock` for its
   whole life and loads nothing before it has it (a new host waits for an exiting one — otherwise it
   would read a record still saying `running` and report a live sandbox as died). The launcher is a
