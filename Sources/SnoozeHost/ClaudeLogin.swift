@@ -388,7 +388,7 @@ public struct ClaudeLoginStatus: Codable, Equatable, Sendable {
     }
 
     static func span(_ t: TimeInterval) -> String {
-        let m = Int(t / 60)
+        let m = Int((t / 60).rounded())      // expiresAt is stored in ms: 7199.999 s reads as 2 h 0 min
         if m < 60 { return "\(max(m, 0)) min" }
         if m < 60 * 48 { return "\(m / 60) h \(m % 60) min" }
         return "\(m / 1440) days"

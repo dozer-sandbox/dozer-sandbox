@@ -178,7 +178,7 @@ final class AccountTests: XCTestCase {
         keychain.put(svc, claudeItem("sk-ant-oat01-OLD", expires: now.addingTimeInterval(-7200)))
         st = ClaudeLoginStatus.check(keychain: keychain, home: home, binary: { "/fake/claude" })
         XCTAssertTrue(st.problem(now: now)!.message.contains("expired 2 h 0 min ago"), "E4: \(st.problem(now: now)!.message)")
-        keychain.put(svc, claudeItem("sk-ant-oat01-GOOD", expires: now.addingTimeInterval(3 * 3600 + 29 * 60 + 30)))
+        keychain.put(svc, claudeItem("sk-ant-oat01-GOOD", expires: now.addingTimeInterval(3 * 3600 + 29 * 60)))
         st = ClaudeLoginStatus.check(keychain: keychain, home: home, binary: { "/fake/claude" })
         XCTAssertNil(st.problem(now: now))
         XCTAssertEqual(st.summary(now: now), "Claude Max (default_claude_max_20x) · owner@example.com · Org · access expires in 3 h 29 min")
