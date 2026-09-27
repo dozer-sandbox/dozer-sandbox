@@ -97,6 +97,67 @@ struct Doctor: AsyncParsableCommand {
         }
         let metricsOK = fm.fileExists(atPath: store.metrics.path)
         out.append(DoctorCheck(check: "metrics", status: .ok, detail: metricsOK ? store.metrics.path : "none yet"))
+        out += claudeChecks(store: store, keychain: SystemKeychain())
+        return out
+    }
+
+    /// 588: the Mac's Claude Code, its login(s), and the store's accounts. Reads only: `claude
+    /// --version`, the keychain item (parsed in memory, never printed), attributes of the others.
+    static func claudeChecks(store: SnoozeStore, keychain: KeychainAccess, now: Date = Date(),
+                             binary: (() -> String?)? = nil, home: URL = FileManager.default.homeDirectoryForCurrentUser,
+                             listItems: Bool = true) -> [DoctorCheck] {
+        var out: [DoctorCheck] = []
+        let st = ClaudeLoginStatus.check(configDir: nil, keychain: keychain, probeBinary: true, home: home, binary: binary)
+        if let b = st.binary {
+            out.append(DoctorCheck(check: "claude", status: .ok, detail: "Claude Code \(st.version ?? "?") (\(b))"))
+        } else {
+            out.append(DoctorCheck(check: "claude", status: .warn, detail: "Claude Code isn't installed on this Mac — needed only for the mac account (the Mac's own login)"))
+        }
+        let accounts = AccountStore(store: store).load()
+        let macInUse = accounts.defaultAccount == "mac"
+        switch st.state {
+        case .signedIn:
+            let expired = st.expiresAt.map { $0 <= now } ?? false
+            let soon = st.expiresAt.map { !expired && $0.timeIntervalSince(now) < 15 * 60 } ?? false
+            var detail = st.summary(now: now)
+            if expired {
+                detail += " — it renews only while Claude Code runs on this Mac: open it (any prompt); sandboxes using it get \"login expired\" until then"
+            } else {
+                detail += " · renews while Claude Code runs on this Mac"
+                if soon, !ClaudeLogin.isClaudeRunning() { detail += " — and none is running now" }
+            }
+            out.append(DoctorCheck(check: "claude login", status: expired || soon ? .warn : .ok, detail: detail))
+        default:
+            let p = st.problem(now: now)?.message ?? st.state.rawValue
+            out.append(DoctorCheck(check: "claude login", status: macInUse ? .warn : .ok, detail: p + (macInUse ? "" : " (not used: the default account is \(accounts.defaultAccount))")))
+        }
+        if listItems {
+            let items = keychain.items(servicePrefix: ClaudeLogin.baseService)
+            if items.count > 1 {
+                var known: [String: String] = [ClaudeLogin.baseService: "default (~/.claude)"]
+                for a in accounts.accounts where a.kind == .mac { known[ClaudeLogin.service(configDir: a.configDir)] = a.configDir ?? "default (~/.claude)" }
+                let list = items.map { i -> String in
+                    let name = i.service == ClaudeLogin.baseService ? "default" : String(i.service.dropFirst(ClaudeLogin.baseService.count + 1))
+                    let modified = i.modified.map { " written \($0.formatted(date: .abbreviated, time: .omitted))" } ?? ""
+                    return "\(name) (\(known[i.service] ?? "unknown dir")\(modified))"
+                }
+                out.append(DoctorCheck(check: "claude logins", status: .ok, detail: "\(items.count) in the keychain: " + list.joined(separator: " · ")))
+            }
+        }
+        let rows = accounts.accounts.map { a -> String in
+            var s = a.name + (accounts.defaultAccount == a.name ? " (default)" : "")
+            switch a.kind {
+            case .mac: s += a.configDir.map { " (Mac login, \($0))" } ?? ""
+            case .setupToken: s += " (setup-token" + (a.expiresAt.map { ", expires \($0.formatted(date: .abbreviated, time: .omitted))" } ?? "") + ")"
+            case .apiKey: s += " (api-key)"
+            }
+            return s
+        }
+        let expiring = accounts.accounts.filter { a in a.kind != .mac && (a.expiresAt.map { $0.timeIntervalSince(now) < 30 * 86_400 } ?? false) }
+        out.append(DoctorCheck(check: "accounts", status: expiring.isEmpty ? .ok : .warn,
+                               detail: rows.joined(separator: " · ") + (accounts.defaultAccount == "none" ? " · default: none" : "")
+                               + (accounts.keepalive ? " · keep-alive on" : "")
+                               + (expiring.isEmpty ? "" : " — \(expiring.map(\.name).joined(separator: ", ")) expire\(expiring.count == 1 ? "s" : "") within 30 days: claude setup-token, then snooze account add NAME --setup-token --force")))
         return out
     }
 

@@ -12,13 +12,17 @@ struct List: AsyncParsableCommand {
         let rows = try decode(try await query(HostRequest(.ls), g), [SandboxInfo].self, g)
         if g.json { Out.json(rows); return }
         if rows.isEmpty { Out.stdout("no sandboxes — snooze up NAME --image lab|claude-code|pi\n"); return }
-        var t = [["NAME", "IMAGE", "PHASE", "RAM", "DISK", "SESSIONS", "NETWORK"]]
+        var t = [["NAME", "IMAGE", "PHASE", "RAM", "DISK", "SESSIONS", "NETWORK", "ACCOUNT"]]
         for r in rows {
             var phase = Out.phaseLabel(r.phase) + (r.busy ? "…" : "")
             if r.diedWithHost == true { phase += " (died with host)" }
-            let net = r.network + ((r.deniedConnections ?? 0) > 0 ? " (\(r.deniedConnections!) denied)" : "")
+            var net = r.network + ((r.deniedConnections ?? 0) > 0 ? " (\(r.deniedConnections!) denied)" : "")
+            if let n = r.foreignCredentials, n > 0 { net += " · own key" + (n > 1 ? " ×\(n)" : "") }
+            var account = r.account ?? "—"
+            if let s = r.credentialState, s != "ok" { account += " (\(s))" }
+            if r.credentialPolicy == "strict" { account += " · strict" }
             t.append([r.name, r.image, phase, Out.mib(r.ramHeldMiB), SnoozeImages.formatBytes(r.diskBytes),
-                      r.sessions.map(String.init) ?? "—", net])
+                      r.sessions.map(String.init) ?? "—", net, account])
         }
         Out.stdout(Out.table(t, rightAligned: [3, 4, 5]))
     }

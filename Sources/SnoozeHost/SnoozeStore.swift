@@ -91,6 +91,15 @@ public struct SandboxConfig: Codable, Equatable, Sendable {
     public var credentialSources: [String: String]
     /// The previous host died while this sandbox ran (cleared by the next start).
     public var diedWithHostAt: Date?
+    /// 588: the Anthropic account — `default` (follow the store's default account), a name
+    /// (pinned), or nil (none: only a key given with `key set`).
+    public var account: String?
+    /// 588: `allow` or `strict` for a credential the guest supplies itself; nil: automatic
+    /// (strict when the account is not a Mac login, allow otherwise).
+    public var credentialPolicy: String?
+    /// 588 (D8): sha256 of every live placeholder → its binding, so a session that survives a host
+    /// restart keeps working. Never a placeholder, never a secret.
+    public var placeholderHashes: [String: String]?
 
     public init(name: String, image: String, spec: SandboxSpec, workspace: String?, createdAt: Date = Date(),
                 credentialSources: [String: String] = [:], diedWithHostAt: Date? = nil) {

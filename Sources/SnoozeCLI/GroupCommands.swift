@@ -250,7 +250,7 @@ struct NetLog: AsyncParsableCommand {
 struct KeyCommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(commandName: "key",
         abstract: "Credentials held by the host's proxy — the sandbox only ever sees a placeholder.",
-        subcommands: [KeySet.self, KeyRemove.self, KeyList.self])
+        subcommands: [KeySet.self, KeyRemove.self, KeyList.self, KeyPolicy.self])
 }
 
 struct KeySet: AsyncParsableCommand {
@@ -274,7 +274,10 @@ struct KeySet: AsyncParsableCommand {
             r.binding = CredentialBinding.claudeOAuth.id
             r.source = ClaudeLogin.source
             let rows = try decode(try call(r, g), [CredentialRow].self, g)
-            if g.json { Out.json(rows) } else { Out.stdout("\(name) uses this Mac's Claude login (held by the host and kept current; never in the sandbox)\n") }
+            if g.json { Out.json(rows) } else {
+                let exp = rows.first { $0.account != nil }?.expiresAt.map { " (access expires \($0.formatted(date: .omitted, time: .shortened)))" } ?? ""
+                Out.stdout("\(name) uses this Mac's Claude login — the account mac: held by the host, renewed while Claude Code runs on this Mac\(exp); never in the sandbox\n")
+            }
             return
         }
         let secret: String
@@ -330,9 +333,45 @@ struct KeyList: AsyncParsableCommand {
     func run() async throws {
         let rows = try decode(try await query(HostRequest(.keyList, name: name), g), [CredentialRow].self, g)
         if g.json { Out.json(rows); return }
-        var t = [["KEY", "HOSTS", "SET", "SOURCE"]]
-        for c in rows { t.append([c.binding, c.hosts.joined(separator: ","), c.set ? "yes" : "no", c.source ?? "—"]) }
-        Out.stdout(Out.table(t))
+        Out.stdout(KeyList.render(rows))
+    }
+
+    static func render(_ rows: [CredentialRow]) -> String {
+        var t = [["KEY", "HOSTS", "SET", "SOURCE", "STATE", "EXPIRES", "POLICY"]]
+        for c in rows {
+            t.append([c.binding, c.hosts.joined(separator: ","), c.set ? "yes" : "no", c.source ?? "—", c.state ?? "—",
+                      c.expiresAt.map { $0.formatted(date: .abbreviated, time: .shortened) } ?? "—", c.policy ?? "—"])
+        }
+        var out = Out.table(t)
+        let foreign = rows.flatMap { $0.foreign ?? [] }
+        if !foreign.isEmpty {
+            out += "\nthe guest used its own credential(s) — fingerprints, never values:\n"
+            var f = [["KIND", "PREFIX", "FINGERPRINT", "HEADER", "REQUESTS", "FIRST SEEN", "LAST SEEN"]]
+            for x in foreign {
+                f.append([x.kind + (x.matches.map { " (= \($0))" } ?? ""), x.prefix + "…", x.fingerprint, x.header, "\(x.requests)",
+                          x.firstSeen.formatted(date: .omitted, time: .standard), x.lastSeen.formatted(date: .omitted, time: .standard)])
+            }
+            out += Out.table(f)
+        }
+        return out
+    }
+}
+
+struct KeyPolicy: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(commandName: "policy",
+        abstract: "What the proxy does with a credential the guest supplies itself: allow (and flag), strict (refuse), or auto.",
+        discussion: "auto (the default): strict when the sandbox uses an account that is not the Mac login, allow otherwise. Strict also denies the Claude sign-in hosts, so a /login inside the sandbox cannot finish.")
+    @OptionGroup var g: GlobalOptions
+    @Argument var name: String
+    @Argument(help: "allow, strict or auto.") var policy: String
+
+    func validate() throws { guard ["allow", "strict", "auto"].contains(policy) else { throw ValidationError("allow, strict or auto") } }
+
+    func run() async throws {
+        var r = HostRequest(.keyPolicy, name: name)
+        r.policy = policy
+        let rows = try decode(try call(r, g), [CredentialRow].self, g)
+        if g.json { Out.json(rows) } else { Out.stdout("\(name): key policy \(rows.first?.policy ?? policy)\(policy == "auto" ? " (auto)" : "")\n") }
     }
 }
 

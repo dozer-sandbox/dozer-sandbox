@@ -34,6 +34,11 @@ public actor HostCore {
     private let metrics: MetricsStore?
     private let metricsRun: Int64
     nonisolated let hub = HostEventHub()
+    /// 588: the store's accounts (metadata only), the keychain / verifier / Claude probes (fakes in
+    /// tests), and ONE watcher per Mac login in use.
+    public nonisolated let accountStore: AccountStore
+    nonisolated let services: CredentialServices
+    var watchers: [String: LoginWatcher] = [:]
 
     /// Actor-confined: one per sandbox.
     final class Managed {
@@ -41,8 +46,8 @@ public actor HostCore {
         var config: SandboxConfig
         var eventTask: Task<Void, Never>?
         var networkTask: Task<Void, Never>?
-        /// Keeps a `--claude-login` credential current with the Mac's own Claude Code login.
-        var loginTask: Task<Void, Never>? { didSet { oldValue?.cancel() } }
+        /// 588: the Mac-login watcher this sandbox follows (nil: none).
+        var watcher: LoginWatcher?
         /// The metrics row of the action running now (library steps hang under it).
         var actionRow: Int64?
         var lastAction: (row: Int64, at: Date)?
@@ -57,14 +62,16 @@ public actor HostCore {
         var name: String { config.name }
     }
 
-    private var managed: [String: Managed] = [:]
+    var managed: [String: Managed] = [:]
     /// Names being created right now (so two `create`s cannot race).
     private var creating: Set<String> = []
 
-    public init(store: SnoozeStore, readOnly: Bool, version: String) {
+    public init(store: SnoozeStore, readOnly: Bool, version: String, services: CredentialServices = .system) {
         self.store = store
         self.readOnly = readOnly
         self.version = version
+        self.services = services
+        self.accountStore = AccountStore(store: store)
         if readOnly {
             metrics = nil
             metricsRun = 0
@@ -86,7 +93,14 @@ public actor HostCore {
     }
 
     @discardableResult
-    private func adopt(_ cfg: SandboxConfig) throws -> Managed {
+    private func adopt(_ config: SandboxConfig) throws -> Managed {
+        var cfg = config
+        // 588: `key set --claude-login` (0aab331) is the Mac account now.
+        if cfg.credentialSources[CredentialBinding.claudeOAuth.id] == ClaudeLogin.source {
+            cfg.credentialSources[CredentialBinding.claudeOAuth.id] = nil
+            cfg.account = "mac"
+            if !readOnly { try? cfg.write(store.configFile(cfg.name)) }
+        }
         let sb = try Sandbox(spec: cfg.spec)
         let m = Managed(sandbox: sb, config: cfg)
         managed[cfg.name] = m
@@ -116,9 +130,8 @@ public actor HostCore {
                     if let secret = Keychain.read(service: service), let sb { sb.setCredential(.anthropic, secret: secret) }
                 }
             }
-            if cfg.credentialSources[CredentialBinding.claudeOAuth.id] == ClaudeLogin.source {
-                m.loginTask = ClaudeLogin.keepFresh(sb)
-            }
+            installCredentialHooks(m)
+            applyAccount(m)
         }
         return m
     }
@@ -267,7 +280,10 @@ public actor HostCore {
                            diskBytes: allocatedBytes(m.sandbox.layout.sandboxDirectory), sessions: sessionCount,
                            network: egress.map { $0.policy.preset ?? "custom" } ?? m.config.networkName,
                            deniedConnections: egress?.log.deniedCount, workspace: m.config.workspace,
-                           createdAt: m.config.createdAt, diedWithHost: m.config.diedWithHostAt == nil ? nil : true)
+                           createdAt: m.config.createdAt, diedWithHost: m.config.diedWithHostAt == nil ? nil : true,
+                           account: accountName(m), credentialState: readOnly ? nil : credentialState(m, binding: nil),
+                           credentialPolicy: egress == nil ? nil : effectivePolicy(m, accountStore.load()).rawValue,
+                           foreignCredentials: egress.map { $0.vault.foreignSightings.count }.flatMap { $0 == 0 ? nil : $0 })
     }
 
     // MARK: requests
@@ -330,9 +346,27 @@ public actor HostCore {
             guard let log = m.sandbox.egress?.log else { throw HostError(.invalid, "\(m.name) is not proxied (network \(m.config.networkName)) — it has no connection log") }
             return try JSONValue(encoding: log.records.filter { r.deniedOnly != true || $0.verdict == .denied })
         case .keySet, .keyRm:
-            return try JSONValue(encoding: try setKey(r))
+            return try JSONValue(encoding: try await setKey(r))
         case .keyList:
             return try JSONValue(encoding: credentials(try get(r.name)))
+        case .keyPolicy:
+            return try JSONValue(encoding: try setPolicy(r))
+        case .accountList:
+            return try JSONValue(encoding: await accountRows())
+        case .accountAdd:
+            return try JSONValue(encoding: try await addAccount(r))
+        case .accountRemove:
+            return try JSONValue(encoding: try await removeAccount(r))
+        case .accountDefault:
+            return try JSONValue(encoding: try await setDefaultAccount(r))
+        case .accountUse:
+            let m = try get(r.name)
+            guard let a = r.account, !a.isEmpty else { throw HostError(.invalid, "which account? (a name, default or none)") }
+            return try JSONValue(encoding: try await useAccount(m, a))
+        case .accountVerify:
+            return try JSONValue(encoding: try await verifyAccount(r))
+        case .accountKeepalive:
+            return try JSONValue(encoding: try setKeepalive(r))
         case .attach, .events, .hostStop:
             throw HostError(.invalid, "\(r.op.rawValue) is handled by the server")
         }
@@ -357,7 +391,21 @@ public actor HostCore {
         creating.insert(name)
         defer { creating.remove(name) }
         let (spec, image) = try SnoozeImages.spec(name: name, options: o, store: store)
-        let cfg = SandboxConfig(name: name, image: image, spec: spec, workspace: spec.shares.first?.hostPath)
+        var cfg = SandboxConfig(name: name, image: image, spec: spec, workspace: spec.shares.first?.hostPath)
+        // 588: a proxied sandbox follows the store's default account unless told otherwise.
+        if spec.network.policy != nil {
+            switch o.account {
+            case nil, "default": cfg.account = "default"
+            case "none": cfg.account = nil
+            case let a?:
+                guard accountStore.load().accounts.contains(where: { $0.name == a }) else {
+                    throw HostError(.notFound, "no account \(a) (snooze account ls)")
+                }
+                cfg.account = a
+            }
+        } else if let a = o.account, a != "none", a != "default" {
+            throw HostError(.invalid, "--account needs a proxied network (agent, open, …): the credential lives in the host's proxy")
+        }
         try cfg.write(store.configFile(name))
         let m = try adopt(cfg)
         metrics?.record(run: metricsRun, action: "create", sandbox: name, image: image, phaseAfter: "off", startedAt: Date(), durationMs: 0,
@@ -476,6 +524,7 @@ public actor HostCore {
             try? m.config.write(store.configFile(m.name))
         }
         if op == .rm {
+            detachWatcher(m)
             m.eventTask?.cancel()
             m.networkTask?.cancel()
             managed[m.name] = nil
@@ -661,10 +710,31 @@ public actor HostCore {
                              hasRootDisk: m.sandbox.hasRootDisk, defaultSession: m.config.defaultSession.name)
     }
 
-    private func credentials(_ m: Managed) -> [CredentialRow] {
+    func credentials(_ m: Managed) -> [CredentialRow] {
         guard let vault = m.sandbox.egress?.vault else { return [] }
-        return vault.allBindings.map {
-            CredentialRow(binding: $0.id, hosts: $0.hosts, set: vault.hasSecret($0.id), source: m.config.credentialSources[$0.id])
+        let file = accountStore.load()
+        let account = resolvedAccount(m, file)
+        let policy = effectivePolicy(m, file).rawValue
+        let sightings = vault.foreignSightings
+        let inUse: String? = {
+            if case .record(let a) = account { return a.kind.binding.id }
+            return vault.allBindings.first { vault.hasSecret($0.id) }?.id
+        }()
+        return vault.allBindings.enumerated().map { i, b in
+            var row = CredentialRow(binding: b.id, hosts: b.hosts, set: vault.hasSecret(b.id), source: m.config.credentialSources[b.id])
+            row.policy = policy
+            if case .record(let a) = account, a.kind.binding.id == b.id {
+                row.source = "account:\(a.name)"
+                row.account = a.name
+            } else if case .missing(let n) = account, b.id == CredentialBinding.claudeOAuth.id {
+                row.account = n
+            }
+            if b.id == inUse || (inUse == nil && i == 0) {
+                row.state = readOnly ? nil : credentialState(m, binding: b.id)
+                row.expiresAt = vault.expiry(b.id)
+                row.foreign = sightings.isEmpty ? nil : sightings
+            }
+            return row
         }
     }
 
@@ -826,7 +896,7 @@ public actor HostCore {
             throw HostError(.invalid, "\(m.name) is not proxied (network \(m.config.networkName)) — it has no policy")
         }
         if isPolicyQuery(r) { return egress.policy }
-        var p = egress.policy
+        var p = Self.withoutSignInBlock(egress.policy)
         if let preset = r.preset {
             guard let np = NetworkPolicy.presets[preset] else { throw HostError(.invalid, "unknown preset \(preset) — locked, bake, agent or open") }
             p = np
@@ -842,7 +912,7 @@ public actor HostCore {
             p.preset = nil
         }
         for h in r.allow ?? [] { p.allow(host: h, note: "snooze net policy") }
-        m.sandbox.setNetworkPolicy(p)
+        m.sandbox.setNetworkPolicy(Self.withSignInBlock(p, strict: egress.vault.foreignPolicy == .strict))
         m.config.spec.network = .proxied(p)
         try m.config.write(store.configFile(m.name))
         metrics?.record(run: metricsRun, action: "network policy", sandbox: m.name, image: m.config.image, startedAt: Date(), durationMs: 0,
@@ -853,7 +923,7 @@ public actor HostCore {
 
     // MARK: credentials
 
-    private func setKey(_ r: HostRequest) throws -> [CredentialRow] {
+    private func setKey(_ r: HostRequest) async throws -> [CredentialRow] {
         let m = try get(r.name)
         guard m.sandbox.egress != nil else {
             throw HostError(.invalid, "\(m.name) is not proxied (network \(m.config.networkName)): a key would have to enter the sandbox — create it with a proxied network (agent, open, …)")
@@ -864,37 +934,36 @@ public actor HostCore {
         case CredentialBinding.claudeOAuth.id: binding = .claudeOAuth
         case let other: throw HostError(.invalid, "unknown credential \(other) — anthropic or claude-oauth")
         }
+        // 588 (D10): `key set --claude-login` is `account use NAME mac`; `key rm --claude-login`
+        // of an account-managed sandbox is `account use NAME none`.
+        if binding.id == CredentialBinding.claudeOAuth.id, r.op == .keySet, r.source == ClaudeLogin.source {
+            return try await useAccount(m, "mac")
+        }
+        if binding.id == CredentialBinding.claudeOAuth.id, r.op == .keyRm, m.config.account != nil {
+            return try await useAccount(m, "none")
+        }
         // One Anthropic credential at a time: Claude Code prefers ANTHROPIC_API_KEY over an OAuth
-        // token when both are in its environment, so setting one forgets the other.
+        // token when both are in its environment, so setting one forgets the other — and a key
+        // given here replaces the sandbox's account.
         let other: CredentialBinding = binding.id == CredentialBinding.anthropic.id ? .claudeOAuth : .anthropic
         if r.op == .keySet {
-            let secret: String
-            if binding.id == CredentialBinding.claudeOAuth.id && r.source == ClaudeLogin.source {
-                guard let t = ClaudeLogin.read() else {
-                    throw HostError(.notFound, "no Claude Code login on this Mac (keychain item \"\(ClaudeLogin.service)\") — run claude and /login first")
-                }
-                secret = t.accessToken
-                m.loginTask = ClaudeLogin.keepFresh(m.sandbox)
-            } else {
-                guard let s = r.secret?.trimmingCharacters(in: .whitespacesAndNewlines), !s.isEmpty else {
-                    throw HostError(.invalid, "an empty key")
-                }
-                secret = s
-                if binding.id == CredentialBinding.claudeOAuth.id { m.loginTask = nil }
+            guard let s = r.secret?.trimmingCharacters(in: .whitespacesAndNewlines), !s.isEmpty else {
+                throw HostError(.invalid, "an empty key")
             }
-            m.sandbox.setCredential(binding, secret: secret)
+            m.config.account = nil
+            detachWatcher(m)
+            m.sandbox.setCredential(binding, secret: s, expiresAt: nil, environment: [:], notice: nil)
             m.config.credentialSources[binding.id] = r.source ?? "stdin"
-            m.sandbox.setCredential(other, secret: nil)
+            m.sandbox.setCredential(other, secret: nil, expiresAt: nil, environment: [:], notice: nil)
             m.config.credentialSources[other.id] = nil
-            if other.id == CredentialBinding.claudeOAuth.id { m.loginTask = nil }
             note(m.name, "\(binding.id) set (from \(r.source ?? "stdin"); memory only — sessions get a placeholder)")
         } else {
-            m.sandbox.setCredential(binding, secret: nil)
+            m.sandbox.setCredential(binding, secret: nil, expiresAt: nil, environment: [:], notice: nil)
             m.config.credentialSources[binding.id] = nil
-            if binding.id == CredentialBinding.claudeOAuth.id { m.loginTask = nil }
             note(m.name, "\(binding.id) removed")
         }
         try m.config.write(store.configFile(m.name))
+        applyPolicy(m, accountStore.load())
         return credentials(m)
     }
 }
@@ -919,76 +988,5 @@ public enum HostLog {
         lock.lock()
         FileHandle.standardOutput.write(Data("\(f.string(from: Date())) \(s)\n".utf8))
         lock.unlock()
-    }
-}
-
-/// Reads a generic password with `/usr/bin/security` (the item the user stored; never written by
-/// snooze). A timeout guards against a keychain prompt nobody answers.
-/// The Mac's own Claude Code login (`snooze key set NAME --claude-login`). Claude Code keeps its
-/// subscription OAuth credentials in the login keychain; the host reads only the ACCESS token
-/// (short-lived, ~8 h) through `/usr/bin/security` — the tool Claude Code writes the item with, so
-/// no keychain dialog — and never the refresh token: a sandbox that refreshed would rotate it
-/// and sign the Mac out (Deckosaurus' 488 finding). The Mac's Claude Code refreshes the item
-/// itself; `keepFresh` re-reads it so the vault follows.
-public enum ClaudeLogin {
-    public static let service = "Claude Code-credentials"
-    /// The `CredentialRow.source` / `SandboxConfig.credentialSources` value.
-    public static let source = "claude-login"
-
-    public struct Token: Sendable {
-        public var accessToken: String
-        public var expiresAt: Date?
-    }
-
-    public static func read() -> Token? {
-        guard let raw = Keychain.read(service: service) else { return nil }
-        let data = Data(raw.utf8)
-        let hex: Data? = {                                 // some versions store it hex-encoded
-            var d = Data(); var it = raw.makeIterator()
-            while let a = it.next(), let b = it.next() { guard let v = UInt8(String([a, b]), radix: 16) else { return nil }; d.append(v) }
-            return d
-        }()
-        for candidate in [data, hex].compactMap({ $0 }) {
-            guard let obj = try? JSONSerialization.jsonObject(with: candidate) as? [String: Any],
-                  let o = obj["claudeAiOauth"] as? [String: Any],
-                  let t = o["accessToken"] as? String, !t.isEmpty else { continue }
-            return Token(accessToken: t, expiresAt: (o["expiresAt"] as? Double).map { Date(timeIntervalSince1970: $0 / 1000) })
-        }
-        return nil
-    }
-
-    /// Re-read the Mac's login every 2 minutes and hand a changed access token to the sandbox's vault.
-    static func keepFresh(_ sandbox: Sandbox) -> Task<Void, Never> {
-        Task.detached { [weak sandbox] in
-            var last: String?
-            while !Task.isCancelled {
-                if let t = read(), t.accessToken != last, let sandbox {
-                    sandbox.setCredential(.claudeOAuth, secret: t.accessToken)
-                    last = t.accessToken
-                }
-                if sandbox == nil { return }
-                try? await Task.sleep(for: .seconds(120))
-            }
-        }
-    }
-}
-
-public enum Keychain {
-    public static func read(service: String, timeout: TimeInterval = 5) -> String? {
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: "/usr/bin/security")
-        p.arguments = ["find-generic-password", "-s", service, "-w"]
-        let out = Pipe()
-        p.standardOutput = out
-        p.standardError = FileHandle.nullDevice
-        p.standardInput = FileHandle.nullDevice
-        do { try p.run() } catch { return nil }
-        let deadline = Date().addingTimeInterval(timeout)
-        while p.isRunning && Date() < deadline { usleep(20_000) }
-        if p.isRunning { p.terminate(); return nil }
-        guard p.terminationStatus == 0 else { return nil }
-        let s = String(decoding: out.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        return s.isEmpty ? nil : s
     }
 }

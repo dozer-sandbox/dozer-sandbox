@@ -23,6 +23,9 @@ struct CreateArguments: ParsableArguments {
     @Option(name: .long, help: "vmnet subnet for --network nat (default: a free one, picked for you).")
     var subnet: String?
 
+    @Option(name: .long, help: "The Anthropic account a proxied sandbox uses (snooze account ls), or none. Default: follow the store's default account.")
+    var account: String?
+
     func options(defaultImage: String? = nil) throws -> CreateOptions {
         guard let img = image ?? defaultImage else { throw ValidationError("--image is required: lab, claude-code, pi or a custom image") }
         var mem: UInt64?
@@ -31,10 +34,10 @@ struct CreateArguments: ParsableArguments {
             mem = v
         }
         if let c = cpus, c < 1 { throw ValidationError("--cpus must be at least 1") }
-        return CreateOptions(image: img, cpus: cpus, memoryMiB: mem, workspace: workspace, network: network, subnet: subnet)
+        return CreateOptions(image: img, cpus: cpus, memoryMiB: mem, workspace: workspace, network: network, subnet: subnet, account: account)
     }
 
-    var givenAny: Bool { image != nil || cpus != nil || memory != nil || workspace != nil || network != nil || subnet != nil }
+    var givenAny: Bool { image != nil || cpus != nil || memory != nil || workspace != nil || network != nil || subnet != nil || account != nil }
 }
 
 struct Create: AsyncParsableCommand {

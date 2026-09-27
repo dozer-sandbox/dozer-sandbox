@@ -34,13 +34,19 @@ public enum HostOp: String, Codable, Sendable, CaseIterable {
     case imageList = "image-ls", imageBake = "image-bake", imageRm = "image-rm"
     case netPolicy = "net-policy", netLog = "net-log"
     case keySet = "key-set", keyRm = "key-rm", keyList = "key-ls"
+    /// 588: what the proxy does with a credential the guest supplied itself (allow | strict).
+    case keyPolicy = "key-policy"
+    /// 588: named Anthropic credentials (the Mac login, setup tokens, API keys).
+    case accountList = "account-ls", accountAdd = "account-add", accountRemove = "account-rm"
+    case accountDefault = "account-default", accountUse = "account-use", accountVerify = "account-verify"
+    case accountKeepalive = "account-keepalive"
     case events
     case hostStop = "host-stop"
 
     /// Operations that only read — answered from the store in-process when no host is running.
     public var isReadOnly: Bool {
         switch self {
-        case .ping, .ls, .inspect, .pointList, .imageList, .keyList: true
+        case .ping, .ls, .inspect, .pointList, .imageList, .keyList, .accountList: true
         case .netPolicy: false        // decided per request (a change needs the host)
         default: false
         }
@@ -59,9 +65,12 @@ public struct CreateOptions: Codable, Equatable, Sendable {
     public var network: String?
     /// vmnet subnet for `--network nat` (default: a free one, picked by the library).
     public var subnet: String?
+    /// 588: the account a proxied sandbox uses — a name, `none`, or nil (follow the store default).
+    public var account: String?
 
     public init(image: String, cpus: Int? = nil, memoryMiB: UInt64? = nil, workspace: String? = nil,
-                network: String? = nil, subnet: String? = nil) {
+                network: String? = nil, subnet: String? = nil, account: String? = nil) {
+        self.account = account
         self.image = image
         self.cpus = cpus
         self.memoryMiB = memoryMiB
@@ -107,6 +116,17 @@ public struct HostRequest: Codable, Equatable, Sendable {
     public var binding: String?
     public var secret: String?
     public var source: String?
+    /// 588 account-* / key-policy: the account, its kind (`setup-token`, `api-key`, `mac`), plan,
+    /// Claude config dir, adopted keychain service; the policy; verify (default true); force; on/off.
+    public var account: String?
+    public var accountKind: String?
+    public var plan: String?
+    public var configDir: String?
+    public var keychainService: String?
+    public var policy: String?
+    public var verify: Bool?
+    public var force: Bool?
+    public var enabled: Bool?
 
     public init(_ op: HostOp, name: String? = nil) {
         v = HostProtocol.version
@@ -270,10 +290,22 @@ public struct SandboxInfo: Codable, Equatable, Sendable {
     public var createdAt: Date?
     /// The sandbox was running when the previous host died: its disk gets e2fsck at the next start.
     public var diedWithHost: Bool?
+    /// 588: the Anthropic account it uses (nil: none), the credential's state (`ok`,
+    /// `expires-soon`, `expired`, `signed-out`, `held`, `missing`…), the proxy policy for the
+    /// guest's own credentials, and how many such credentials it has seen.
+    public var account: String?
+    public var credentialState: String?
+    public var credentialPolicy: String?
+    public var foreignCredentials: Int?
 
     public init(name: String, image: String, phase: String, busy: Bool, cpus: Int, memoryMiB: UInt64, ramHeldMiB: UInt64,
                 memoryReturnedMiB: UInt64, diskBytes: Int64, sessions: Int?, network: String, deniedConnections: Int?,
-                workspace: String?, createdAt: Date?, diedWithHost: Bool?) {
+                workspace: String?, createdAt: Date?, diedWithHost: Bool?, account: String? = nil, credentialState: String? = nil,
+                credentialPolicy: String? = nil, foreignCredentials: Int? = nil) {
+        self.account = account
+        self.credentialState = credentialState
+        self.credentialPolicy = credentialPolicy
+        self.foreignCredentials = foreignCredentials
         self.name = name
         self.image = image
         self.phase = phase
@@ -378,8 +410,28 @@ public struct CredentialRow: Codable, Equatable, Sendable {
     public var binding: String
     public var hosts: [String]
     public var set: Bool
-    /// `stdin` or `keychain:<service>`.
+    /// `stdin` or `keychain:<service>`, or (588) `account:<name>`.
     public var source: String?
+    /// 588: the account behind it, its state, when it expires, the foreign-credential policy, and
+    /// every credential the guest used that snooze never issued (fingerprints, never values).
+    public var account: String?
+    public var state: String?
+    public var expiresAt: Date?
+    public var policy: String?
+    public var foreign: [ForeignCredential]?
+
+    public init(binding: String, hosts: [String], set: Bool, source: String?, account: String? = nil, state: String? = nil,
+                expiresAt: Date? = nil, policy: String? = nil, foreign: [ForeignCredential]? = nil) {
+        self.binding = binding
+        self.hosts = hosts
+        self.set = set
+        self.source = source
+        self.account = account
+        self.state = state
+        self.expiresAt = expiresAt
+        self.policy = policy
+        self.foreign = foreign
+    }
 }
 
 /// `ping` / `host status`.
