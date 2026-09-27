@@ -1,26 +1,26 @@
 import Foundation
 import SnoozeHost
 
-/// "Open in Terminal" (590 phase 2, owner ruling D10: Terminal.app only). The page asks
-/// (`POST /api/v1/sandboxes/{name}/terminal`, CSRF-checked); this process asks Terminal.app to run
+/// "Open in Terminal" (590 phase 2). The page asks (`POST /api/v1/sandboxes/{name}/terminal`,
+/// CSRF-checked); this process writes a one-shot `.command` file and hands it to LaunchServices
+/// (`/usr/bin/open`), which opens it in the user's DEFAULT app for `.command` files — Terminal, or
+/// iTerm2 / Ghostty when they are the handler (owner, 2026-09-28: "instead of applescript, cant we
+/// use a URL to open the default terminal?"). No AppleScript, so no Automation permission, and a
+/// document open never adds Terminal's default window (the AppleScript path opened TWO windows
+/// when Terminal was not running). The file runs
 ///
+///     rm -f -- "$0"
 ///     exec '<this snooze>' attach NAME [SESSION] --store '<store>'
 ///
 /// No ticket (unlike DeckStack 503's `terminal attach`): `snooze attach` redeems nothing — the
-/// terminal runs as the same user, whose host.sock it already may open. So the Apple Event carries
-/// no capability and no secret: a fixed verb, a name and a session that passed their allowlists,
-/// and single-quoted paths. The command reaches AppleScript as an ARGUMENT of a fixed script
-/// (`on run argv`), never spliced into its source.
+/// terminal runs as the same user, whose host.sock it already may open. The file holds no
+/// capability and no secret: a fixed verb, a name and a session that passed their allowlists, and
+/// single-quoted paths. It is 0700 in a 0700 per-user directory and deletes itself as it starts.
 public enum TerminalHandoff {
-    /// The fixed script. `item 1 of argv` is the command; nothing else varies.
-    public static let script = """
-    on run argv
-        tell application "Terminal"
-            activate
-            do script (item 1 of argv)
-        end tell
-    end run
-    """
+    /// The file's text for `command`.
+    public static func commandFile(_ command: String) -> String {
+        "#!/bin/sh\n# snooze: open a session in this terminal (this file deletes itself)\nrm -f -- \"$0\"\n\(command)\n"
+    }
 
     public static func command(executable: String, store: SnoozeStore, sandbox: String, session: String?) -> String {
         var c = "exec \(shellQuote(executable)) attach \(sandbox)"
@@ -33,31 +33,41 @@ public enum TerminalHandoff {
         public var errorDescription: String? { message }
     }
 
-    /// Run the fixed script with `osascript` (20 s: the first use waits on macOS's Automation prompt).
+    /// A 0700 per-user directory for the one-shot files (under the per-user temporary directory).
+    static func handoffDirectory() throws -> URL {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("snooze-terminal-\(getuid())", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: dir.path)
+        return dir
+    }
+
+    /// Write the one-shot `.command` file (0700) and open it with the user's default app for it.
     @Sendable public static func openInTerminalApp(_ command: String) throws {
+        let dir = try handoffDirectory()
+        let file = dir.appendingPathComponent("snooze-attach-\(UUID().uuidString.prefix(8)).command")
+        guard FileManager.default.createFile(atPath: file.path, contents: Data(commandFile(command).utf8),
+                                             attributes: [.posixPermissions: 0o700]) else {
+            throw Failure(message: "could not write the terminal hand-off file in \(dir.path)")
+        }
         let p = Process()
-        p.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-        p.arguments = ["-"] + [command]
-        let input = Pipe(), errors = Pipe()
-        p.standardInput = input
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+        p.arguments = [file.path]
+        let errors = Pipe()
+        p.standardInput = FileHandle.nullDevice
         p.standardOutput = FileHandle.nullDevice
         p.standardError = errors
         try p.run()
-        input.fileHandleForWriting.write(Data(script.utf8))
-        try input.fileHandleForWriting.close()
         let deadline = Date().addingTimeInterval(20)
         while p.isRunning && Date() < deadline { usleep(50_000) }
-        if p.isRunning {
-            p.terminate()
-            throw Failure(message: "Terminal did not answer within 20 s — is macOS asking whether snooze may control Terminal? Allow it, then try again.")
-        }
+        if p.isRunning { p.terminate() }
         guard p.terminationStatus == 0 else {
+            try? FileManager.default.removeItem(at: file)
             let err = String(decoding: errors.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-            if err.contains("-1743") || err.lowercased().contains("not authorized") {
-                throw Failure(message: "macOS did not allow snooze to control Terminal: System Settings › Privacy & Security › Automation — allow Terminal for the app that runs snooze ui, then try again.")
-            }
-            throw Failure(message: "Terminal could not be opened (osascript exit \(p.terminationStatus)).")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            throw Failure(message: "no app opened the terminal hand-off (open: \(err.isEmpty ? "exit \(p.terminationStatus)" : err)) — is a terminal app set to open .command files?")
         }
+        // A handler that never runs the file must not leave it behind for long.
+        DispatchQueue.global().asyncAfter(deadline: .now() + 120) { try? FileManager.default.removeItem(at: file) }
     }
 }
 

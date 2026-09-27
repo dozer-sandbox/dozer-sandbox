@@ -246,9 +246,11 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
 - **An action is an operation**: 202 at once, the host call in `WebOperations` (≤ 8 running), its
   progress and outcome as SSE `op` events. The outcome is a line written from the result — never
   the result passed through.
-- **Open in Terminal** runs ONE fixed AppleScript (`TerminalHandoff.script`) with the command as its
-  argument — `exec '<snooze>' attach NAME [SESSION] --store '<store>'`, names allowlisted, paths
-  quoted — never spliced into script source, never a command from the browser.
+- **Open in Terminal** writes a one-shot `.command` file (0700, in a 0700 per-user directory; it
+  runs `rm -f -- "$0"` then `exec '<snooze>' attach NAME [SESSION] --store '<store>'`, names
+  allowlisted, paths quoted) and `open`s it, so the user's DEFAULT app for `.command` files runs it
+  (Terminal, iTerm2, Ghostty). No AppleScript, so no Automation permission and no second window
+  (the AppleScript version opened two when Terminal was not running). Never a command from the browser.
 - **`open-session` is serialized per sandbox** (`HostCore.sessionGate`, a `KeyedGate` held across
   its awaits — the actor alone is re-entrant) and idempotent: a concurrent or repeated open of one
   session answers "already running", and a deckhold "Address in use" re-lists and answers with the

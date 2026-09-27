@@ -316,9 +316,9 @@ guest; each sandbox's page lists its sessions.
 
 Two things are CLI-only on purpose: **a secret is never typed into the browser**. Add an account
 (`snooze account add`) or set a key (`snooze key set`) in a terminal; the page shows the command.
-And there is no shell in the browser: a terminal is Terminal.app. The first time, macOS asks
-whether the app running `snooze ui` may control Terminal (System Settings › Privacy & Security ›
-Automation).
+And there is no shell in the browser. **Open in Terminal** opens `snooze attach` in your default
+terminal app: whatever opens `.command` files on this Mac (Terminal, or iTerm2 / Ghostty if you've
+made them the handler). No permission prompt.
 
 | | |
 |---|---|
@@ -374,7 +374,7 @@ The kernel and subnet variables are read when a sandbox is created, and become p
 | A package install fails | The policy: `snooze net log NAME --denied`, then `snooze net policy NAME --allow HOST`. |
 | A sandbox shows as died | The host crashed while it ran. `snooze start NAME` checks the disk and cold-boots it. |
 | The UI says "sign in with a new link" | Its link was used or expired, or the UI restarted. `snooze ui link`. |
-| Open in Terminal says macOS did not allow it | System Settings › Privacy & Security › Automation: allow Terminal for the app that runs `snooze ui` (Terminal itself, iTerm…). |
+| Open in Terminal says no app opened it | Make a terminal app the handler for `.command` files (Finder › Get Info on any `.command` file › Open with › Change All…). |
 | `snooze ui` says the resources are missing | `SnoozeContainerKit_SnoozeWeb.bundle` must sit beside the executable. Reinstall with `make install-cli`. |
 | Anything else | `<store>/host.log` and `snooze events`. |
 

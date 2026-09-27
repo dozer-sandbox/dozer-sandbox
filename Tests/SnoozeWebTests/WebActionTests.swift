@@ -196,9 +196,18 @@ final class WebActionTests: XCTestCase {
         XCTAssertEqual(c, "exec /Users/me/.local/libexec/snooze/snooze attach demo worker --store '/Users/me/My Store'")
         let q = TerminalHandoff.command(executable: "/tmp/it's/snooze", store: SnoozeStore(root: URL(fileURLWithPath: "/s;rm -rf ~")), sandbox: "d", session: nil)
         XCTAssertEqual(q, "exec '/tmp/it'\\''s/snooze' attach d --store '/s;rm -rf ~'")
-        // The script takes the command as an argument; nothing is spliced into its source.
-        XCTAssertTrue(TerminalHandoff.script.contains("do script (item 1 of argv)"))
-        XCTAssertFalse(TerminalHandoff.script.contains("attach"))
+        // The one-shot .command file deletes itself first, then runs exactly the command.
+        let f = TerminalHandoff.commandFile(q)
+        XCTAssertTrue(f.hasPrefix("#!/bin/sh\n"))
+        XCTAssertEqual(f.components(separatedBy: "\n").filter { !$0.isEmpty && !$0.hasPrefix("#") },
+                       ["rm -f -- \"$0\"", q])
+    }
+
+    /// The hand-off directory is private to this user (0700), whatever it was before.
+    func testTheTerminalHandoffDirectoryIsPrivate() throws {
+        let dir = try TerminalHandoff.handoffDirectory()
+        let mode = try XCTUnwrap(FileManager.default.attributesOfItem(atPath: dir.path)[.posixPermissions] as? Int)
+        XCTAssertEqual(mode & 0o777, 0o700)
     }
 
     // MARK: metrics
