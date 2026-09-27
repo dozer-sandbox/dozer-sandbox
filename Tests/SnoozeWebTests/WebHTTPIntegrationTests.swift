@@ -283,7 +283,7 @@ final class WebHTTPIntegrationTests: XCTestCase {
         } catch let e as HostError {
             XCTAssertEqual(e.code, .notFound)
         }
-        let m = try await data.metrics()
+        let m = try await data.metrics(WebMetricsQuery())
         XCTAssertFalse(m.available)
         XCTAssertNil(data.hostEvents())
         XCTAssertFalse(store.hostIsRunning())
@@ -347,9 +347,55 @@ final class FakeData: SnoozeWebData, @unchecked Sendable {
 
     func images() async throws -> [WebImage] { [] }
     func accounts() async throws -> WebAccounts { WebAccounts(accounts: [], defaultAccount: "mac", keepalive: false) }
-    func metrics() async throws -> WebMetrics { WebMetrics(available: false, runs: 0, rows: 0, sessions: 0, networkMinutes: 0, summary: []) }
+    private(set) var metricsQueries: [WebMetricsQuery] = []
+    func metrics(_ q: WebMetricsQuery) async throws -> WebMetrics {
+        lock.withLock { metricsQueries.append(q) }
+        return WebMetrics(available: false, runs: 0, rows: 0, sessions: 0, networkMinutes: 0, summary: [])
+    }
+    func metricsCSV(_ q: WebMetricsQuery) async throws -> Data { Data("id,action\n1,'=cmd\n".utf8) }
     func doctor() async throws -> [WebDoctorCheck] { [WebDoctorCheck(check: "macOS", status: "ok", detail: "fake")] }
     func hostEvents() -> AsyncStream<HostEvent>? { nil }
+
+    // phase 2
+    private(set) var performed: [HostRequest] = []
+    private(set) var terminalCommands: [String] = []
+    /// While set, `perform` waits (to hold operations open).
+    var hold: Bool {
+        get { lock.withLock { _hold } }
+        set { lock.withLock { _hold = newValue } }
+    }
+    private var _hold = false
+    var failWith: HostError?
+
+    func perform(_ r: HostRequest, onEvent: @escaping @Sendable (HostEvent) -> Void) async throws -> JSONValue {
+        lock.withLock { performed.append(r) }
+        onEvent(HostEvent(kind: .step, sandbox: r.name, text: "fake step one", milliseconds: 5))
+        while hold { try await Task.sleep(for: .milliseconds(20)) }
+        if let e = lock.withLock({ failWith }) { throw e }
+        if HostOp.lifecycle.contains(r.op) {
+            let json = #"{"name":"\#(r.name ?? "")","operation":"\#(r.op.rawValue)","phaseBefore":"running","phase":"paused","changed":true,"milliseconds":2}"#
+            return try JSONDecoder().decode(JSONValue.self, from: Data(json.utf8))
+        }
+        return .null
+    }
+
+    func policyPreview(_ name: String, _ edit: WebPolicyEdit) async throws -> WebPolicyPreview {
+        let live = NetworkPolicy.presets["bake"]!
+        return WebPolicyPreview(before: try HostCore.editedPolicy(live, HostRequest(.netPolicy, name: name)),
+                                after: try HostCore.editedPolicy(live, edit.request(name)))
+    }
+
+    func openTerminal(_ name: String, session: String?) async throws -> String {
+        guard name == "demo" else { throw HostError(.notFound, "no sandbox \(name)") }
+        let c = TerminalHandoff.command(executable: "/opt/snooze/bin/snooze", store: SnoozeStore(root: URL(fileURLWithPath: storePath)),
+                                        sandbox: name, session: session)
+        lock.withLock { terminalCommands.append(c) }
+        return "Terminal opened"
+    }
+}
+
+extension HostOp {
+    static let lifecycle: Set<HostOp> = [.start, .wake, .pause, .resume, .sleep, .deepSleep, .shutdown, .reset, .rm]
 }
 
 // MARK: raw HTTP

@@ -28,14 +28,16 @@
       </nav>
       <div class="side-foot">
         <div class="live" id="live"><span class="dot" aria-hidden="true"></span><span id="live-text">connecting…</span></div>
-        <div class="readonly">Read-only · phase 1</div>
+        <div class="version" id="version"></div>
         <button type="button" class="link-button" id="sign-out" hidden>Sign out</button>
       </div>
     </aside>
     <main id="main" tabindex="-1">
       <div class="notice" id="notice" hidden></div>
-      <section id="view" aria-live="polite"></section>
+      <div class="ops" id="ops" hidden aria-live="polite"></div>
+      <section id="view"></section>
     </main>
   </div>
+  <div class="toasts" id="toasts" aria-live="assertive"></div>
 </body>
 </html>

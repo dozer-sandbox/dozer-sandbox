@@ -890,13 +890,11 @@ public actor HostCore {
 
     // MARK: network
 
-    private func netPolicy(_ r: HostRequest) throws -> NetworkPolicy {
-        let m = try get(r.name)
-        guard let egress = m.sandbox.egress else {
-            throw HostError(.invalid, "\(m.name) is not proxied (network \(m.config.networkName)) — it has no policy")
-        }
-        if isPolicyQuery(r) { return egress.policy }
-        var p = Self.withoutSignInBlock(egress.policy)
+    /// What a `net-policy` change makes of `current` (the live policy): the preset, removals, denies,
+    /// allows, in that order — the policy that is kept (without the strict sign-in block, which is
+    /// re-derived). Pure, so `snooze ui`'s preview (590) shows exactly what the change will do.
+    public static func editedPolicy(_ current: NetworkPolicy, _ r: HostRequest) throws -> NetworkPolicy {
+        var p = withoutSignInBlock(current)
         if let preset = r.preset {
             guard let np = NetworkPolicy.presets[preset] else { throw HostError(.invalid, "unknown preset \(preset) — locked, bake, agent or open") }
             p = np
@@ -912,6 +910,16 @@ public actor HostCore {
             p.preset = nil
         }
         for h in r.allow ?? [] { p.allow(host: h, note: "snooze net policy") }
+        return p
+    }
+
+    private func netPolicy(_ r: HostRequest) throws -> NetworkPolicy {
+        let m = try get(r.name)
+        guard let egress = m.sandbox.egress else {
+            throw HostError(.invalid, "\(m.name) is not proxied (network \(m.config.networkName)) — it has no policy")
+        }
+        if isPolicyQuery(r) { return egress.policy }
+        let p = try Self.editedPolicy(egress.policy, r)
         m.sandbox.setNetworkPolicy(Self.withSignInBlock(p, strict: egress.vault.foreignPolicy == .strict))
         m.config.spec.network = .proxied(p)
         try m.config.write(store.configFile(m.name))

@@ -55,6 +55,7 @@ public enum WebRejection: String, Error, Equatable, Sendable {
     case notFound = "not-found"
     case tooManyStreams = "too-many-streams"
     case tooManyConnections = "too-many-connections"
+    case tooManyOperations = "too-many-operations"
     case unavailable
 
     public var status: Int {
@@ -65,7 +66,7 @@ public enum WebRejection: String, Error, Equatable, Sendable {
         case .unsupportedMediaType: 415
         case .malformedAuthorization, .bootstrapRejected, .bootstrapUsed, .unauthenticated, .sessionExpired: 401
         case .notFound: 404
-        case .tooManyStreams, .tooManyConnections, .unavailable: 503
+        case .tooManyStreams, .tooManyConnections, .tooManyOperations, .unavailable: 503
         }
     }
 
@@ -86,6 +87,7 @@ public enum WebRejection: String, Error, Equatable, Sendable {
         case .notFound: "not found"
         case .tooManyStreams: "too many live-update streams are open"
         case .tooManyConnections: "too many connections"
+        case .tooManyOperations: "too many operations are running — wait for one to finish"
         case .unavailable: "the snooze host did not answer"
         }
     }

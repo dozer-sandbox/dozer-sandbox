@@ -20,6 +20,7 @@ public final class SnoozeWebServer: @unchecked Sendable {
     let data: SnoozeWebData
     let hub: SSEHub
     let monitor: WebMonitor
+    let operations: WebOperations
     private let capability: WebBootstrapCapability
     private let listener: NIOAsyncChannel<NIOAsyncChannel<HTTPServerRequestPart, HTTPServerResponsePart>, Never>
     private let lock = NSLock()
@@ -41,6 +42,7 @@ public final class SnoozeWebServer: @unchecked Sendable {
         sessions = WebSessionStore(bootstrap: capability, limits: limits)
         hub = SSEHub(maxClients: limits.maximumSSEClients, capacity: limits.maximumBufferedSSEEvents)
         monitor = WebMonitor(data: data, hub: hub, pollInterval: pollInterval)
+        operations = WebOperations(data: data, hub: hub, monitor: monitor)
     }
 
     /// Bind the listener (loopback, ephemeral). `run()` then serves.
@@ -143,7 +145,7 @@ public final class SnoozeWebServer: @unchecked Sendable {
                         try await write(outbound, head, error(.bodyTooLarge), isHead: isHead, keepAlive: false)
                         return
                     }
-                    switch await respond(head, bodyBytes: body.readableBytes) {
+                    switch await respond(head, body: Data(body.readableBytesView)) {
                     case .stream(let client):
                         try await stream(client, conn: conn, outbound: outbound, head: head)
                         return
@@ -202,21 +204,25 @@ public final class SnoozeWebServer: @unchecked Sendable {
                                   contentType: Self.header(h, "content-type"), bodyByteCount: bodyBytes)
     }
 
-    func respond(_ head: HTTPRequestHead, bodyBytes: Int) async -> Reply {
+    func respond(_ head: HTTPRequestHead, body: Data) async -> Reply {
         guard let method = WebHTTPMethod(rawValue: head.method.rawValue) else {
             let e = error(.methodNotAllowed)
             return .response(e.0, e.1, e.2)
         }
-        let md = metadata(head, method: method, bodyBytes: bodyBytes)
+        let md = metadata(head, method: method, bodyBytes: body.count)
         do {
             // A duplicated Host or Origin header is not "the" header: `header()` gives nil, refused here.
             try WebSecurity.checkListener(md, origin, originRequired: false)
             if head.headers["origin"].count > 1 { throw WebRejection.originRejected }
             guard let route = WebRoute.parse(method: method, target: head.uri) else { throw WebRejection.notFound }
-            return try await dispatch(route, md)
+            return try await dispatch(route, md, body: body)
         } catch let r as WebRejection {
             let e = error(r)
             return .response(e.0, e.1, e.2)
+        } catch let e as WebAction.Invalid {
+            return .response(400, [("Content-Type", "application/json; charset=utf-8")], Self.errorBody("invalid", e.message))
+        } catch let e as TerminalHandoff.Failure {
+            return .response(502, [("Content-Type", "application/json; charset=utf-8")], Self.errorBody("terminal", e.message))
         } catch let e as HostError {
             let status = switch e.code {
             case .notFound: 404
@@ -232,11 +238,31 @@ public final class SnoozeWebServer: @unchecked Sendable {
         }
     }
 
+    /// Actions, the preview and the terminal take a JSON object, always — never a form, never empty.
+    static func requireJSONBody(_ md: WebRequestMetadata) throws {
+        guard md.bodyByteCount > 0 else { throw WebAction.Invalid("a JSON body is required") }
+        guard let t = md.contentType?.lowercased(), t == "application/json" || t.hasPrefix("application/json;") else {
+            throw WebRejection.unsupportedMediaType
+        }
+    }
+
+    /// A sub-route's body (only the action's own fields) as the action it is: `action` and `sandbox`
+    /// come from the route, never from the body.
+    static func withAction(_ action: String, sandbox: String, _ body: Data) throws -> Data {
+        guard let obj = try? JSONSerialization.jsonObject(with: body), var d = obj as? [String: Any] else {
+            throw WebAction.Invalid("the body must be a JSON object")
+        }
+        guard d["action"] == nil, d["sandbox"] == nil else { throw WebAction.Invalid("action and sandbox come from the path") }
+        d["action"] = action
+        d["sandbox"] = sandbox
+        return try JSONSerialization.data(withJSONObject: d)
+    }
+
     private func sessionInfo(_ s: WebSession) -> WebSessionInfo {
         WebSessionInfo(csrf: s.csrfToken, expiresAt: s.expiresAt, serverRun: serverRun, store: data.storePath, version: version)
     }
 
-    private func dispatch(_ route: WebRoute, _ md: WebRequestMetadata) async throws -> Reply {
+    private func dispatch(_ route: WebRoute, _ md: WebRequestMetadata, body: Data) async throws -> Reply {
         let cookieName = WebSecurity.cookieName(origin)
         switch route {
         case .index, .asset:
@@ -280,8 +306,29 @@ public final class SnoozeWebServer: @unchecked Sendable {
             return json(try await data.images())
         case .accounts:
             return json(try await data.accounts())
-        case .metrics:
-            return json(try await data.metrics())
+        case .metrics(let q):
+            return json(try await data.metrics(q))
+        case .metricsCSV(let q):
+            return .response(200, [("Content-Type", "text/csv; charset=utf-8"),
+                                   ("Content-Disposition", "attachment; filename=\"snooze-metrics.csv\"")], try await data.metricsCSV(q))
+        case .operations:
+            return json(operations.recent)
+        case .actions:
+            try Self.requireJSONBody(md)
+            let action = try WebAction.decode(body)
+            return json(try operations.start(action), status: 202)
+        case .policyPreview(let name):
+            try Self.requireJSONBody(md)
+            guard case .netPolicy(_, let edit) = try WebAction.decode(Self.withAction("net-policy", sandbox: name, body)) else {
+                throw WebRejection.notFound
+            }
+            return json(try await data.policyPreview(name, edit))
+        case .terminal(let name):
+            try Self.requireJSONBody(md)
+            guard case .openSession(_, let session, nil) = try WebAction.decode(Self.withAction("open-session", sandbox: name, body)) else {
+                throw WebAction.Invalid("terminal: only a session may be given")
+            }
+            return json(["message": try await data.openTerminal(name, session: session)])
         case .events:
             return json(await monitor.recent)
         case .doctor:

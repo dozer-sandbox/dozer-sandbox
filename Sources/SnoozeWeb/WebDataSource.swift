@@ -3,8 +3,8 @@ import Foundation
 import SnoozeContainerKit
 import SnoozeHost
 
-/// Everything the UI can show, as typed reads. The server knows nothing else: it has no path to a
-/// VM, a keychain or a file except through these calls (tests substitute a fake).
+/// Everything the UI can show and do, as typed calls. The server knows nothing else: it has no path
+/// to a VM, a keychain or a file except through these calls (tests substitute a fake).
 public protocol SnoozeWebData: Sendable {
     var storePath: String { get }
     func overview() async throws -> WebOverview
@@ -13,11 +13,65 @@ public protocol SnoozeWebData: Sendable {
     func network(_ name: String) async throws -> WebNetwork
     func images() async throws -> [WebImage]
     func accounts() async throws -> WebAccounts
-    func metrics() async throws -> WebMetrics
+    func metrics(_ q: WebMetricsQuery) async throws -> WebMetrics
+    /// Every row of the filter, as CSV (cells that a spreadsheet would run as a formula are defused).
+    func metricsCSV(_ q: WebMetricsQuery) async throws -> Data
     func doctor() async throws -> [WebDoctorCheck]
     /// The host's event stream, while a host runs (nil when none does). The stream ends when the
     /// host goes away or the task consuming it is cancelled.
     func hostEvents() -> AsyncStream<HostEvent>?
+    /// Phase 2: one host operation (a `WebAction`'s request), starting the host when needed, its
+    /// progress lines passed to `onEvent`. Returns the host's result.
+    func perform(_ r: HostRequest, onEvent: @escaping @Sendable (HostEvent) -> Void) async throws -> JSONValue
+    /// What a policy edit would make of the sandbox's policy (nothing changes).
+    func policyPreview(_ name: String, _ edit: WebPolicyEdit) async throws -> WebPolicyPreview
+    /// Open Terminal.app attached to the sandbox's session. Returns a line for the page.
+    func openTerminal(_ name: String, session: String?) async throws -> String
+}
+
+/// `GET /api/v1/metrics[.csv]?image=…&days=…&steps=0|1`.
+public struct WebMetricsQuery: Equatable, Sendable {
+    public var image: String?
+    public var days: Double?
+    public var steps: Bool
+
+    public init(image: String? = nil, days: Double? = nil, steps: Bool = false) {
+        self.image = image
+        self.days = days
+        self.steps = steps
+    }
+
+    public var filter: MetricsFilter {
+        MetricsFilter(image: image, since: days.map { Date().addingTimeInterval(-$0 * 86_400) }, includeSteps: steps)
+    }
+
+    /// From a query string: only these three keys, each by its rule; anything else is not a route.
+    public static func parse(_ query: String?) -> WebMetricsQuery? {
+        var q = WebMetricsQuery()
+        guard let query, !query.isEmpty else { return q }
+        for pair in query.split(separator: "&") {
+            let kv = pair.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false).map(String.init)
+            guard kv.count == 2 else { return nil }
+            switch kv[0] {
+            case "image":
+                if kv[1].isEmpty { continue }
+                // `custom:NAME` arrives as custom%3ANAME (the only escape accepted).
+                let v = kv[1].replacingOccurrences(of: "%3A", with: ":").replacingOccurrences(of: "%3a", with: ":")
+                guard v.range(of: "^(custom:)?[a-z0-9][a-z0-9-]{0,39}$", options: .regularExpression) != nil else { return nil }
+                q.image = v
+            case "days":
+                if kv[1].isEmpty { continue }
+                guard let d = Double(kv[1]), d > 0, d <= 3650 else { return nil }
+                q.days = d
+            case "steps":
+                guard kv[1] == "0" || kv[1] == "1" else { return nil }
+                q.steps = kv[1] == "1"
+            default:
+                return nil
+            }
+        }
+        return q
+    }
 }
 
 /// The real source: a CLIENT of the store's host (`<store>/host.sock`, the same JSON-lines protocol
@@ -34,9 +88,17 @@ public final class HostWebData: SnoozeWebData, @unchecked Sendable {
     private let lock = NSLock()
     private var doctorCache: (Date, [WebDoctorCheck])?
 
-    public init(store: SnoozeStore, version: String, doctor: @escaping @Sendable () -> [WebDoctorCheck]) {
+    /// The `snooze` executable Terminal runs (this process's own, symlinks resolved).
+    let executable: String
+    let terminalLauncher: @Sendable (String) throws -> Void
+
+    public init(store: SnoozeStore, version: String, executable: String = HostLauncher.executablePath,
+                terminal: @escaping @Sendable (String) throws -> Void = TerminalHandoff.openInTerminalApp,
+                doctor: @escaping @Sendable () -> [WebDoctorCheck]) {
         self.store = store
         self.version = version
+        self.executable = executable
+        terminalLauncher = terminal
         doctorChecks = doctor
     }
 
@@ -121,7 +183,7 @@ public final class HostWebData: SnoozeWebData, @unchecked Sendable {
         return WebAccounts(accounts: rows.map(WebAccount.init), defaultAccount: file.defaultAccount, keepalive: file.keepalive)
     }
 
-    public func metrics() async throws -> WebMetrics {
+    public func metrics(_ q: WebMetricsQuery) async throws -> WebMetrics {
         let url = store.metrics
         guard FileManager.default.fileExists(atPath: url.path) else {
             return WebMetrics(available: false, runs: 0, rows: 0, sessions: 0, networkMinutes: 0, summary: [])
@@ -130,8 +192,43 @@ public final class HostWebData: SnoozeWebData, @unchecked Sendable {
             let m = try MetricsStore(url: url)
             let c = m.counts()
             return WebMetrics(available: true, runs: c.runs, rows: c.events, sessions: c.sessions, networkMinutes: c.networkMinutes,
-                              summary: m.summary(MetricsFilter(includeSteps: false)).map(WebMetricsRow.init))
+                              summary: m.summary(q.filter).map(WebMetricsRow.init))
         }
+    }
+
+    public func metricsCSV(_ q: WebMetricsQuery) async throws -> Data {
+        let url = store.metrics
+        guard FileManager.default.fileExists(atPath: url.path) else { return Data(MetricsStore.csv([]).utf8) }
+        return try await blocking {
+            let events = try MetricsStore(url: url).events(q.filter).map(WebCSV.defuse)
+            return Data(MetricsStore.csv(events).utf8)
+        }
+    }
+
+    // MARK: phase 2 — actions
+
+    public func perform(_ r: HostRequest, onEvent: @escaping @Sendable (HostEvent) -> Void) async throws -> JSONValue {
+        let store = self.store
+        let m = try await blocking { try HostClient.request(r, store: store, autostart: true, onEvent: onEvent) }
+        if m.ok == true { return m.result ?? .null }
+        throw m.error ?? HostError(.failed, "the host gave no reason")
+    }
+
+    public func policyPreview(_ name: String, _ edit: WebPolicyEdit) async throws -> WebPolicyPreview {
+        let d = try await query(HostRequest(.inspect, name: name)).0.decode(SandboxDetail.self)
+        guard let live = d.policy else { throw HostError(.invalid, "\(name) is not proxied (network \(d.info.network)) — it has no policy") }
+        // `before` without the strict sign-in block, like `after`: the host re-derives that block.
+        let before = try HostCore.editedPolicy(live, HostRequest(.netPolicy, name: name))
+        return WebPolicyPreview(before: before, after: try HostCore.editedPolicy(live, edit.request(name)))
+    }
+
+    public func openTerminal(_ name: String, session: String?) async throws -> String {
+        // The sandbox must exist (a clear 404 rather than a Terminal tab that says so).
+        _ = try await query(HostRequest(.inspect, name: name))
+        let command = TerminalHandoff.command(executable: executable, store: store, sandbox: name, session: session)
+        let launch = terminalLauncher
+        try await blocking { try launch(command) }
+        return "Terminal opened: \(session.map { "\(name) \($0)" } ?? name)"
     }
 
     /// `snooze doctor`'s checks, at most every 30 s (it runs `claude --version` and reads the keychain's

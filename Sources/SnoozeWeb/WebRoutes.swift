@@ -5,9 +5,10 @@ import Foundation
 /// sandbox name is the library's own rule: 1–40 of [a-z0-9-], not starting with `-`), so no
 /// request text reaches the host that the host would not accept from the CLI.
 ///
-/// Phase 1 is READ-ONLY: the only unsafe routes are the session's own (bootstrap, renew, sign out).
-/// There is deliberately no generic command, exec, file-read, URL-open or PTY route — and none may
-/// be added: a later phase adds TYPED operations, one case each.
+/// The unsafe routes are the session's own (bootstrap, renew, sign out) and, since phase 2, the
+/// typed actions (`WebAction`: a closed enum, each exactly one `HostOp`), the policy preview and
+/// Terminal.app. There is deliberately no generic command, exec, file-read, URL-open, proxy or PTY
+/// route — and none may be added: a new capability is a new TYPED case.
 public enum WebRoute: Equatable, Sendable {
     // static
     case index
@@ -24,20 +25,31 @@ public enum WebRoute: Equatable, Sendable {
     case sandboxNetwork(String)    // GET /api/v1/sandboxes/{name}/network
     case images                    // GET /api/v1/images
     case accounts                  // GET /api/v1/accounts
-    case metrics                   // GET /api/v1/metrics
+    case metrics(WebMetricsQuery)  // GET /api/v1/metrics?image=&days=&steps=
+    case metricsCSV(WebMetricsQuery) // GET /api/v1/metrics.csv?…  (a download)
     case events                    // GET /api/v1/events
     case doctor                    // GET /api/v1/doctor
     case stream                    // GET /api/v1/stream   (server-sent events)
+    // phase 2 — actions (every one: exact Origin + X-Snooze-CSRF + a JSON body)
+    case actions                   // POST /api/v1/actions   ({"action": <closed enum>, …} → one HostOp)
+    case operations                // GET  /api/v1/operations (the UI's recent operations)
+    case policyPreview(String)     // POST /api/v1/sandboxes/{name}/network/preview (changes nothing)
+    case terminal(String)          // POST /api/v1/sandboxes/{name}/terminal (Terminal.app, fixed script)
 
     public var isStatic: Bool {
         switch self { case .index, .asset: true; default: false }
     }
 
-    /// Parse a request target. The query string is ignored (no route reads one); anything else
-    /// unusual — percent-encoding, dot segments, a trailing slash, a double slash — is not a route.
+    /// Parse a request target. Only the metrics routes read a query string (three keys, each by its
+    /// rule — anything else there is not a route); the others ignore it. Anything unusual in the
+    /// path — percent-encoding, dot segments, a trailing slash, a double slash — is not a route.
     public static func parse(method: WebHTTPMethod, target: String) -> WebRoute? {
         var path = target
-        if let q = path.firstIndex(of: "?") { path = String(path[..<q]) }
+        var query: String?
+        if let q = path.firstIndex(of: "?") {
+            query = String(path[path.index(after: q)...])
+            path = String(path[..<q])
+        }
         guard path.hasPrefix("/"), !path.contains("%"), !path.contains("//"), path.count <= 256 else { return nil }
         if path == "/" { return method.isSafe ? .index : nil }
         let parts = path.dropFirst().split(separator: "/", omittingEmptySubsequences: false).map(String.init)
@@ -50,6 +62,11 @@ public enum WebRoute: Equatable, Sendable {
         case (.get, 1) where rest[0] == "session": return .sessionInfo
         case (.delete, 1) where rest[0] == "session": return .sessionEnd
         case (.post, 2) where rest == ["session", "renew"]: return .sessionRenew
+        case (.post, 1) where rest[0] == "actions": return .actions
+        case (.post, 4) where rest[0] == "sandboxes" && isSandboxName(rest[1]) && rest[2] == "network" && rest[3] == "preview":
+            return .policyPreview(rest[1])
+        case (.post, 3) where rest[0] == "sandboxes" && isSandboxName(rest[1]) && rest[2] == "terminal":
+            return .terminal(rest[1])
         default: break
         }
         guard method == .get else { return nil }
@@ -59,7 +76,9 @@ public enum WebRoute: Equatable, Sendable {
             case "overview": return .overview
             case "images": return .images
             case "accounts": return .accounts
-            case "metrics": return .metrics
+            case "metrics": return WebMetricsQuery.parse(query).map(WebRoute.metrics)
+            case "metrics.csv": return WebMetricsQuery.parse(query).map(WebRoute.metricsCSV)
+            case "operations": return .operations
             case "events": return .events
             case "doctor": return .doctor
             case "stream": return .stream

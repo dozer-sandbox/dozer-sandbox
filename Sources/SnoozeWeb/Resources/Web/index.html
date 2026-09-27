@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="referrer" content="no-referrer">
   <title>snooze</title>
-  <link rel="stylesheet" href="/assets/app-087968ac5b4abc23.css">
-  <script src="/assets/app-35d433c605a923c0.js" defer></script>
+  <link rel="stylesheet" href="/assets/app-72946f9f5e475615.css">
+  <script src="/assets/app-73e62e261b9118bb.js" defer></script>
 </head>
 <body>
   <div class="shell">
@@ -28,14 +28,16 @@
       </nav>
       <div class="side-foot">
         <div class="live" id="live"><span class="dot" aria-hidden="true"></span><span id="live-text">connecting…</span></div>
-        <div class="readonly">Read-only · phase 1</div>
+        <div class="version" id="version"></div>
         <button type="button" class="link-button" id="sign-out" hidden>Sign out</button>
       </div>
     </aside>
     <main id="main" tabindex="-1">
       <div class="notice" id="notice" hidden></div>
-      <section id="view" aria-live="polite"></section>
+      <div class="ops" id="ops" hidden aria-live="polite"></div>
+      <section id="view"></section>
     </main>
   </div>
+  <div class="toasts" id="toasts" aria-live="assertive"></div>
 </body>
 </html>
