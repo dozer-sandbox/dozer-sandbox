@@ -1,5 +1,6 @@
 import Foundation
 
+/// Every error a `Sandbox` operation can throw.
 public enum SandboxError: Error, LocalizedError, Equatable {
     case invalidSpec(String)
     /// `op` is not allowed in `phase` (see `LifecyclePlanner`).
@@ -45,6 +46,8 @@ public enum SandboxEvent: Sendable, Equatable {
     case status(SandboxStatus)
 }
 
+/// A snapshot of a sandbox's live readouts (`Sandbox.status`): phase, whether an operation is in
+/// progress, RAM held, and snapshot size.
 public struct SandboxStatus: Sendable, Equatable {
     public var phase: Phase
     /// A lifecycle operation is in progress.

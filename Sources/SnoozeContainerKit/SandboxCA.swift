@@ -11,6 +11,8 @@ import X509
 // the certificate, which is installed into its trust store at every fresh boot. Deleting the
 // sandbox deletes its CA. ECDSA P-256 throughout.
 
+/// One certificate authority per sandbox (580): signs the leaf certificates the proxy presents
+/// for hosts it decrypts. The private key never leaves the Mac; the guest gets only the certificate.
 public final class SandboxCA: @unchecked Sendable {
     public let certificatePEM: String
     let certificate: Certificate

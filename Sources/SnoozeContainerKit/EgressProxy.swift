@@ -24,6 +24,9 @@ import Security
 // through untouched — WebSockets, HTTP/2 and gRPC included. A client that pins its server's
 // certificate fails loudly on a decrypted host, which is why only bound hosts are decrypted.
 
+/// The host half of a proxied sandbox's network (580): the only way out of a VM with no network
+/// interface — every connection and DNS question the guest's `snoozenet` relays over vsock
+/// arrives here, is judged against a `NetworkPolicy`, logged, and (for bound hosts) decrypted.
 public final class EgressProxy: @unchecked Sendable {
     /// The vsock port `snoozenet` dials (host CID 2).
     public static let vsockPort: UInt32 = 5800

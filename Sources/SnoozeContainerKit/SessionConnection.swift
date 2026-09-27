@@ -17,6 +17,7 @@ public enum SessionOutput: Sendable, Equatable {
     case detached(DetachReason)
 }
 
+/// Why a session connection ended without the session itself ending.
 public enum DetachReason: String, Sendable, Equatable {
     /// `close()` was called.
     case closedByClient

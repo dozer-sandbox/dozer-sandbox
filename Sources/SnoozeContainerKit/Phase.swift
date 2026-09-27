@@ -94,6 +94,8 @@ public enum LifecycleOperation: String, Sendable, CaseIterable {
     @available(*, deprecated, renamed: "shutDown") public static var stop: Self { .shutDown }
 }
 
+/// One step of a lifecycle operation, as data (`LifecyclePlanner`) — so the invariants above are
+/// unit tests, not prose.
 public enum LifecycleStep: Equatable, Sendable {
     /// VZ pause through the instance (also pauses the package's time syncer).
     case pauseVM
@@ -145,6 +147,8 @@ public enum LifecycleStep: Equatable, Sendable {
     case persistState
 }
 
+/// Turns a `LifecycleOperation` into the ordered `LifecycleStep`s it takes, and the `Phase` it
+/// leaves the sandbox in when it succeeds.
 public enum LifecyclePlanner {
     /// The phase an operation leaves the sandbox in when it succeeds.
     public static func target(of op: LifecycleOperation) -> Phase {

@@ -117,6 +117,7 @@ public struct ImageRecipe: Sendable, Codable, Equatable {
     }
 }
 
+/// One command an image bake runs inside the VM, in order (`ImageRecipe.steps`).
 public struct BakeStep: Sendable, Codable, Equatable {
     public var name: String
     public var argv: [String]
@@ -144,6 +145,7 @@ public struct BakeStep: Sendable, Codable, Equatable {
     }
 }
 
+/// A credential-free command a bake runs after its steps, to confirm the result (`ImageRecipe.verify`).
 public struct VerifyCheck: Sendable, Codable, Equatable {
     public var argv: [String]
     public var expect: String?

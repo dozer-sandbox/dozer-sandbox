@@ -476,6 +476,7 @@ public final class CredentialVault: @unchecked Sendable {
     }
 }
 
+/// What `CredentialVault.rewrite(head:host:)` decided to do with one HTTP request's head bytes.
 public enum CredentialDecision: Sendable, Equatable {
     case passThrough([UInt8])
     case swapped([UInt8], binding: String)

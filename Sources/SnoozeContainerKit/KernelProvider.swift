@@ -39,6 +39,7 @@ public protocol KernelFetching: Sendable {
     func fetch(_ url: URL, to destination: URL, progress: @escaping @Sendable (Int64, Int64?) -> Void) async throws
 }
 
+/// What can go wrong fetching or verifying the pinned Linux kernel (`KernelProvider`).
 public enum KernelError: Error, LocalizedError, Equatable {
     case checksumMismatch(what: String, expected: String, actual: String)
     case overrideMissing(String)

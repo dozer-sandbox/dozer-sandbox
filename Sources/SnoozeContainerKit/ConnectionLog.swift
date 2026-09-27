@@ -4,6 +4,8 @@ import Foundation
 // path (for requests the proxy reads — never the query string), the rule that decided, the
 // verdict, bytes each way and timing. Never a body, a header value, a prompt or a credential.
 
+/// One connection judged by a proxied sandbox's egress policy — metadata only, never a body,
+/// header value, prompt or credential (580).
 public struct ConnectionRecord: Sendable, Codable, Equatable, Identifiable {
     public enum Kind: String, Sendable, Codable {
         /// A DNS question the guest asked (answered on the Mac, or refused).

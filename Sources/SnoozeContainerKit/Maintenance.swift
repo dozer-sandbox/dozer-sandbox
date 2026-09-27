@@ -15,11 +15,13 @@ import Foundation
 /// read time on the SSD). A running, paused or sleeping sandbox refuses with `invalidPhase`; a disk
 /// that was not cleanly unmounted refuses too (start it and shut it down first).
 
+/// One of the two remedies `maintenanceAdvice()` can recommend for a stopped sandbox's disks.
 public enum MaintenanceAction: String, Sendable, Codable, Equatable {
     case reclaim
     case rederive
 }
 
+/// What `maintenanceAdvice()` found for one sandbox's disks, and why (`reasons`).
 public struct MaintenanceAdvice: Sendable, Equatable {
     /// 586's thresholds (constants): garbage > 25 % of the allocation or > 512 MiB → reclaim; lost
     /// identical sharing > 64 MiB or > 10 % of the image → re-derive. Each is a strict "greater than".
@@ -73,6 +75,7 @@ public struct MaintenanceAdvice: Sendable, Equatable {
     static func mib(_ b: Int64) -> Double { Double(b) / 1_048_576 }
 }
 
+/// What `reclaim()` did to one disk: its allocation and garbage before and after.
 public struct ReclaimResult: Sendable, Equatable {
     public var disk: String
     public var allocatedBefore: Int64
@@ -83,6 +86,8 @@ public struct ReclaimResult: Sendable, Equatable {
     public var milliseconds: Double
 }
 
+/// What `rederive()` did: the root disk's allocation, sharing with its image, and garbage, before
+/// and after.
 public struct RederiveResult: Sendable, Equatable {
     public var allocatedBefore: Int64
     public var allocatedAfter: Int64
@@ -100,6 +105,7 @@ public struct RederiveResult: Sendable, Equatable {
     public var milliseconds: Double
 }
 
+/// One disk's `e2fsck -fn` result, from `checkDisks()`.
 public struct DiskCheck: Sendable, Equatable {
     public var disk: String
     /// `e2fsck -fn` exited 0.
