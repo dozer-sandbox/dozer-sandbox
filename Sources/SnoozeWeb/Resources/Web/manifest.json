@@ -5,7 +5,7 @@
       "mimeType" : "text/html; charset=utf-8",
       "publicPath" : "/",
       "resourcePath" : "index.html",
-      "sha256" : "9a5f1e161ec7bd19b6cf29503e28beba13d24316d23942cc157545b0405862df"
+      "sha256" : "024af17228af716949e9f6aa12da087c1775137ae7cfcd99369aac7d11e922ec"
     },
     {
       "cachePolicy" : "public, max-age=31536000, immutable",
