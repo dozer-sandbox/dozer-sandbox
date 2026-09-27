@@ -20,14 +20,18 @@ public struct RestorePoint: Sendable, Codable, Equatable, Identifiable {
     public var parent: String?
     /// Which prepared/baked/custom image the disk was first cloned from.
     public var sourceImage: String?
-    /// `running`: taken from a live VM (sync → pause → clone → resume). The root ext4 has no
-    /// journal, so that copy is crash-consistent at best — the first boot from it runs e2fsck.
+    /// `running`: taken from a live VM (sync → pause → clone → resume). That copy is
+    /// crash-consistent at best: a journaled ext4 replays its journal on the first boot, a
+    /// journal-less one (before 587, or `journalMiB: nil`) needs e2fsck first.
     public var takenWhile: TakenWhile
     public var hasStateDisk: Bool
     /// Taken by the library itself (e.g. "before revert to …").
     public var automatic: Bool
+    /// 587: every disk in the point has an ext4 journal (nil: taken before this was recorded —
+    /// treated as journal-less, which is always safe).
+    public var journaled: Bool?
 
-    public var needsFsck: Bool { takenWhile == .running }
+    public var needsFsck: Bool { takenWhile == .running && journaled != true }
 
     public init(id: String, name: String, note: String, createdAt: Date, parent: String?, sourceImage: String?,
                 takenWhile: TakenWhile, hasStateDisk: Bool, automatic: Bool) {

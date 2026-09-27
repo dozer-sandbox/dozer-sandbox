@@ -8,7 +8,10 @@ import SnoozeHost
 /// host (`snooze host`), which the first command that needs it starts and which exits when nothing
 /// has run for a while; read-only commands answer from the store when no host is running.
 public struct SnoozeCommand: AsyncParsableCommand {
-    public static let version = "0.5.0"
+    /// The release this build ships as — the package's semver tag. Bump it with the tag (it was left
+    /// at 0.5.0 through v0.6.0 and v0.7.0; `snooze ui`'s host card showed it, 590). The host and
+    /// `doctor` compare it to the running host's.
+    public static let version = "0.8.1"
 
     public static let configuration = CommandConfiguration(
         commandName: "snooze",
@@ -28,7 +31,7 @@ public struct SnoozeCommand: AsyncParsableCommand {
             Shutdown.self, Reset.self, Remove.self,
             List.self, Inspect.self, Sessions.self, Attach.self, Run.self, Exec.self,
             ImageCommand.self, PointCommand.self, NetCommand.self, KeyCommand.self, AccountCommand.self,
-            MetricsCommand.self, Doctor.self, HostCommand.self, Events.self,
+            MetricsCommand.self, Doctor.self, HostCommand.self, Events.self, UICommand.self,
         ]
     )
 

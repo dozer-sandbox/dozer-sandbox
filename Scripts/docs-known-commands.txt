@@ -55,3 +55,6 @@ account/keepalive
 host/start
 host/stop
 host/status
+ui
+ui/link
+ui/serve

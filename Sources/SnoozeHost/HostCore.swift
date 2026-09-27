@@ -65,6 +65,8 @@ public actor HostCore {
     var managed: [String: Managed] = [:]
     /// Names being created right now (so two `create`s cannot race).
     private var creating: Set<String> = []
+    /// 590: `open-session` is serialized per sandbox.
+    let sessionGate = KeyedGate()
 
     public init(store: SnoozeStore, readOnly: Bool, version: String, services: CredentialServices = .system) {
         self.store = store
@@ -317,7 +319,7 @@ public actor HostCore {
             return try JSONValue(encoding: try await lifecycle(r.op, name: r.name, emit: emit))
         case .ls:
             var rows: [SandboxInfo] = []
-            for m in managed.values.sorted(by: { $0.name < $1.name }) { rows.append(await info(m, sessions: true)) }
+            for m in managed.values.sorted(by: { $0.name < $1.name }) { rows.append(await info(m, sessions: r.withSessions ?? true)) }
             return try JSONValue(encoding: rows)
         case .inspect:
             return try JSONValue(encoding: try await detail(try get(r.name)))
@@ -634,7 +636,19 @@ public actor HostCore {
         return (env, workdir ?? r.workdir, runAs == "root" ? nil : runAs)
     }
 
+    /// 590: one `open-session` at a time per sandbox. This actor is re-entrant across its awaits, so
+    /// two opens of one session (two clicks while the sandbox booted — the owner's first `snooze
+    /// ui` session; or two quick `snooze run`) both saw "not running", both started `deckhold
+    /// serve`, and one failed "Address in use". Serialized, the second sees the first's session and
+    /// answers "already running".
     private func openSession(_ r: HostRequest) async throws -> SessionOpened {
+        let key = try get(r.name).name
+        await sessionGate.lock(key)
+        defer { sessionGate.unlock(key) }
+        return try await openSessionLocked(r)
+    }
+
+    private func openSessionLocked(_ r: HostRequest) async throws -> SessionOpened {
         let m = try get(r.name)
         try await ensureRunning(m, wake: r.wake ?? true)
         let list = try await m.sandbox.sessions()
@@ -645,7 +659,10 @@ public actor HostCore {
         if let s = r.session {
             try GuestCommand.validateSessionName(s)
             if live.contains(s) {
-                if r.argv != nil { throw HostError(.exists, "session \(s) is already running in \(m.name) — attach to it, or pick another name") }
+                // The same program again (a repeated click, a retried `run`) is the session already running.
+                if let a = r.argv, list.first(where: { $0.name == s && !$0.isEnded })?.command != a.joined(separator: " ") {
+                    throw HostError(.exists, "session \(s) is already running in \(m.name) — attach to it, or pick another name")
+                }
                 return SessionOpened(name: m.name, session: s, created: false)
             }
             session = s
@@ -670,6 +687,12 @@ public actor HostCore {
             try await m.sandbox.openSession(session, argv: argv, environment: r.environment ?? [:], workingDirectory: r.workdir ?? workdir,
                                             user: r.user, size: size)
         } catch {
+            // deckhold refuses a second holder of a name ("Address in use"): someone else (a program
+            // in the guest, another client) started it meanwhile. That session is the answer.
+            if let now = try? await m.sandbox.sessions(), now.contains(where: { $0.name == session && !$0.isEnded }) {
+                note(m.name, "session \(session) was started meanwhile — using it")
+                return SessionOpened(name: m.name, session: session, created: false)
+            }
             metrics?.record(run: metricsRun, action: "session open", sandbox: m.name, image: m.config.image, startedAt: started,
                             durationMs: ms(since: t0), ok: false, error: error.localizedDescription, detail: ["session": session])
             throw error
@@ -890,13 +913,11 @@ public actor HostCore {
 
     // MARK: network
 
-    private func netPolicy(_ r: HostRequest) throws -> NetworkPolicy {
-        let m = try get(r.name)
-        guard let egress = m.sandbox.egress else {
-            throw HostError(.invalid, "\(m.name) is not proxied (network \(m.config.networkName)) — it has no policy")
-        }
-        if isPolicyQuery(r) { return egress.policy }
-        var p = Self.withoutSignInBlock(egress.policy)
+    /// What a `net-policy` change makes of `current` (the live policy): the preset, removals, denies,
+    /// allows, in that order — the policy that is kept (without the strict sign-in block, which is
+    /// re-derived). Pure, so `snooze ui`'s preview (590) shows exactly what the change will do.
+    public static func editedPolicy(_ current: NetworkPolicy, _ r: HostRequest) throws -> NetworkPolicy {
+        var p = withoutSignInBlock(current)
         if let preset = r.preset {
             guard let np = NetworkPolicy.presets[preset] else { throw HostError(.invalid, "unknown preset \(preset) — locked, bake, agent or open") }
             p = np
@@ -912,6 +933,16 @@ public actor HostCore {
             p.preset = nil
         }
         for h in r.allow ?? [] { p.allow(host: h, note: "snooze net policy") }
+        return p
+    }
+
+    private func netPolicy(_ r: HostRequest) throws -> NetworkPolicy {
+        let m = try get(r.name)
+        guard let egress = m.sandbox.egress else {
+            throw HostError(.invalid, "\(m.name) is not proxied (network \(m.config.networkName)) — it has no policy")
+        }
+        if isPolicyQuery(r) { return egress.policy }
+        let p = try Self.editedPolicy(egress.policy, r)
         m.sandbox.setNetworkPolicy(Self.withSignInBlock(p, strict: egress.vault.foreignPolicy == .strict))
         m.config.spec.network = .proxied(p)
         try m.config.write(store.configFile(m.name))

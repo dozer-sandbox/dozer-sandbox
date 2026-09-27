@@ -281,6 +281,58 @@ The host is started for you by the first command that needs it. It runs detached
 | `snooze host [--foreground] [--idle-timeout MIN]` | Run it by hand (in the foreground, it logs to the terminal). |
 | **If it crashes** | The next command starts a new one. Sleeping sandboxes are restored with their sessions. Deep-sleeping ones are untouched. Ones that were running are reported as died (`ls`; `inspect` shows `diedWithHost`), and their disk is checked with `e2fsck` at the next start. |
 
+## The web UI
+
+`snooze ui` is a dashboard in your browser for everything in the store, and it can do most of
+what the CLI does. (The maintenance and disk-accounting views come later.)
+
+```bash
+snooze ui                 # serve it, and open it in your default browser
+snooze ui --print-url     # the same, but print the link instead of opening a browser
+snooze ui link            # another browser or tab on the UI that is already running
+```
+
+It shows every sandbox (phase, RAM held, disk, sessions, network, account), each sandbox's
+sessions, restore points, network policy and connection log, keys and their state, the images,
+the Claude accounts, the metrics, `snooze doctor`, and the host's activity as it happens.
+
+What you can do from it:
+
+| Page | Actions |
+|---|---|
+| **Sandboxes** | New sandbox (image, network, account, CPUs, memory, workspace folder). Per sandbox: start, pause, resume, sleep, deep sleep, wake, shut down, reset, remove. |
+| **A sandbox** | Open in Terminal (Terminal.app attaches to a session); open the image's session, or run a command in a new detached session; take a restore point, and revert, fork, save as an image or delete one; edit the network policy, with a preview of exactly what changes; set the key policy and the account; remove a key. |
+| **Images** | Bake a built-in image; remove one. |
+| **Accounts & keys** | Make an account the default; verify one; remove one; keep-alive on or off. |
+| **Metrics** | Filter by image, time and steps; download the rows as CSV. |
+
+Shut down, reset, remove, revert and every delete ask you to **type the name** first. An
+operation's progress shows in the sandbox's row and in the Operations list while it runs (the
+host's latest step and the seconds so far — a first start in a store downloads and bakes its image
+and can take two minutes), and the page updates when it ends. The session buttons wait until the
+sandbox can take a session, and clicking an action again while it runs does nothing more (it is
+already under way). The list has no session count, since counting asks every session inside the
+guest; each sandbox's page lists its sessions.
+
+Two things are CLI-only on purpose: **a secret is never typed into the browser**. Add an account
+(`snooze account add`) or set a key (`snooze key set`) in a terminal; the page shows the command.
+And there is no shell in the browser. **Open in Terminal** opens `snooze attach` in your default
+terminal app: whatever opens `.command` files on this Mac (Terminal, or iTerm2 / Ghostty if you've
+made them the handler). No permission prompt.
+
+| | |
+|---|---|
+| **Where** | `http://127.0.0.1:<port>`, a port the system picks. Only this Mac can reach it. |
+| **Signing in** | The link it opens (or prints) works **once**, for **five minutes**. It signs that browser in until you close the UI or sign out. Another browser or tab needs another link: `snooze ui link`, or run `snooze ui` again. Treat a printed link like a password — anyone with it signs in to your UI. |
+| **Stopping** | Ctrl-C in the terminal that runs it. Signing out and stopping both end every browser's session. |
+| **One per store** | Each store has at most one UI. `--store` (or `$SNOOZE_STORE`) picks the store, as for every command. |
+| **The host** | The UI is a client of the host, like the CLI. Looking never starts a host: with none running, the UI reads the store (nothing is live). It follows the host's events only while a sandbox is live, so an open UI never keeps an idle host from exiting. |
+| **Terminals** | Open in Terminal runs `snooze attach NAME [SESSION] --store …` in a new Terminal tab (waking the sandbox if it sleeps). The page also shows that command to copy. |
+| **Secrets** | Never shown. Keys and accounts appear as a state, a source name (`keychain:…`, `account:mac`) and a fingerprint. |
+
+`--print-url` prints only to a terminal (not with `--json`, not into a pipe or a file), because the
+link is a key to the UI.
+
 ## Scripting
 
 - `--json` on every command: JSON on stdout; errors as `{"error":{"code","message"}}`. Fields are
@@ -321,6 +373,9 @@ The kernel and subnet variables are read when a sandbox is created, and become p
 | An agent says it has no key / 401 | `snooze key ls NAME`. A stdin key is gone after the host stopped, so set it again or use `--keychain`. |
 | A package install fails | The policy: `snooze net log NAME --denied`, then `snooze net policy NAME --allow HOST`. |
 | A sandbox shows as died | The host crashed while it ran. `snooze start NAME` checks the disk and cold-boots it. |
+| The UI says "sign in with a new link" | Its link was used or expired, or the UI restarted. `snooze ui link`. |
+| Open in Terminal says no app opened it | Make a terminal app the handler for `.command` files (Finder › Get Info on any `.command` file › Open with › Change All…). |
+| `snooze ui` says the resources are missing | `SnoozeContainerKit_SnoozeWeb.bundle` must sit beside the executable. Reinstall with `make install-cli`. |
 | Anything else | `<store>/host.log` and `snooze events`. |
 
 ## Not yet

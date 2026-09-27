@@ -127,6 +127,11 @@ public struct HostRequest: Codable, Equatable, Sendable {
     public var verify: Bool?
     public var force: Bool?
     public var enabled: Bool?
+    /// 590 `ls`: false leaves out each running sandbox's live-session count (`sessions: nil`). The
+    /// count asks every session's holder in the guest (`deckhold ls` connects to each), so a poller
+    /// — `snooze ui`'s, every 3 s — must not pay it (it grew a guest log by 600 KB in 9 hours).
+    /// nil or true: counted, as before.
+    public var withSessions: Bool?
 
     public init(_ op: HostOp, name: String? = nil) {
         v = HostProtocol.version

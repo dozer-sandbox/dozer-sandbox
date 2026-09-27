@@ -104,7 +104,9 @@ struct Run: AsyncParsableCommand {
         r.rows = size.rows
         let opened = try decode(try call(r, g), SessionOpened.self, g)
         if detach || g.json {
-            if g.json { Out.json(opened) } else { Out.stdout("session \(opened.session) started in \(name) — snooze attach \(name) \(opened.session)\n") }
+            if g.json { Out.json(opened) } else {
+                Out.stdout("session \(opened.session) \(opened.created ? "started" : "is already running") in \(name) — snooze attach \(name) \(opened.session)\n")
+            }
             return
         }
         AttachClient.run(store: g.snoozeStore, sandbox: name, session: opened.session, wake: true, detachKey: key, quiet: g.quiet)

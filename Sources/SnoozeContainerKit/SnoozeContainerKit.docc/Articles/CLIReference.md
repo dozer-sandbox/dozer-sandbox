@@ -192,6 +192,20 @@ no host runs, so **looking never starts one**. If it crashes, the next command s
 sleeping sandboxes are restored with their sessions, deep-sleeping ones are untouched, and running
 ones are reported as died with their disk checked at the next start.
 
+### The web UI
+
+```bash
+snooze ui [serve] [--open | --print-url] [--store DIR]   # a local dashboard for everything above; Ctrl-C stops it
+snooze ui link [--store DIR]                             # a fresh one-use sign-in link for the running UI
+```
+
+A browser dashboard for sandboxes, images, accounts, metrics, activity and doctor, with the
+lifecycle and every other action. It listens on `127.0.0.1` only. Each link works once and is
+exchanged for a strict session cookie; `Host` and `Origin` are checked exactly. Secrets are never
+entered in the browser: add keys and accounts with the CLI. **Open in Terminal** runs
+`snooze attach` in your default terminal app. The UI is a client of the host, like any other
+command, so it can't do anything the CLI can't.
+
 ### Numbers and diagnostics
 
 ```bash

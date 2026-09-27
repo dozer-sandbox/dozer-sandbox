@@ -14,6 +14,8 @@
 #   4. No app-brand literal (a bundle id, a product or storage directory name) survives.
 #   5. The committed deckhold binary is the one Guest/deckhold/PROVENANCE.md records.
 #   6. The committed snoozenet binary is the one Guest/snoozenet/PROVENANCE.md records.
+#   7. (590) The web UI's committed assets are exactly what Sources/SnoozeWeb/WebSource builds, and
+#      its modules stay where they belong (NIOHTTP1 in SnoozeWeb; LaunchServices in `snooze ui`).
 # (No Linux seam check: this package is macOS-only by nature — Virtualization.framework + vmnet.)
 set -euo pipefail
 
@@ -32,7 +34,10 @@ fail() {
 # ── 1. Import allowlist ──────────────────────────────────────────────────────
 # 585: + the CLI's own targets (SnoozeHost, SnoozeCLI), the system SQLite3 (the host's metrics) and
 # ArgumentParser — each confined below to where it belongs.
-ALLOWED='Foundation|Darwin|os|CryptoKit|Security|NIOCore|NIOEmbedded|NIOPosix|NIOSSL|X509|SwiftASN1|Virtualization|Containerization|ContainerizationArchive|ContainerizationEXT4|SystemPackage|ContainerizationError|ContainerizationExtras|ContainerizationOCI|ContainerizationOS|SnoozeContainerKit|SnoozeHost|SnoozeCLI|SQLite3|ArgumentParser'
+# 590: + SnoozeWeb (the `snooze ui` target), NIOHTTP1 (swift-nio's own HTTP/1.1 codec — the same
+# package, no new dependency) and CoreServices (LaunchServices opens the browser without putting the
+# one-use link in a process argument) — each confined in step 1b.
+ALLOWED='Foundation|Darwin|os|CryptoKit|Security|NIOCore|NIOEmbedded|NIOPosix|NIOSSL|X509|SwiftASN1|Virtualization|Containerization|ContainerizationArchive|ContainerizationEXT4|SystemPackage|ContainerizationError|ContainerizationExtras|ContainerizationOCI|ContainerizationOS|SnoozeContainerKit|SnoozeHost|SnoozeCLI|SQLite3|ArgumentParser|SnoozeWeb|NIOHTTP1|CoreServices'
 BAD=$(grep -rhoE --include='*.swift' '^[[:space:]]*(@[A-Za-z_]+[[:space:]]+)*(public[[:space:]]+)?import[[:space:]]+[A-Za-z_][A-Za-z0-9_.]*' \
         "$PACKAGE/Sources" \
       | sed -E 's/.*import[[:space:]]+//' \
@@ -46,7 +51,7 @@ fi
 
 # ── 1b. (585) Confinement: the LIBRARY imports none of the CLI's additions, and only the CLI's
 #        command targets import ArgumentParser (the host needs no argument parsing) ─────────────
-LEAK=$(grep -rlE --include='*.swift' '^[[:space:]]*import[[:space:]]+(ArgumentParser|SQLite3|SnoozeHost|SnoozeCLI)([[:space:]]|$)' \
+LEAK=$(grep -rlE --include='*.swift' '^[[:space:]]*import[[:space:]]+(ArgumentParser|SQLite3|SnoozeHost|SnoozeCLI|SnoozeWeb|NIOHTTP1|CoreServices)([[:space:]]|$)' \
         "$PACKAGE/Sources/SnoozeContainerKit" || true)
 [[ -z "$LEAK" ]] || fail "the library imports a CLI-only module:
 $LEAK"
@@ -54,6 +59,18 @@ AP=$(grep -rlE --include='*.swift' '^[[:space:]]*import[[:space:]]+ArgumentParse
       | grep -vE "/Sources/(SnoozeCLI|snooze)/" || true)
 [[ -z "$AP" ]] || fail "ArgumentParser is imported outside Sources/SnoozeCLI and Sources/snooze:
 $AP"
+
+# 590: the HTTP codec only in the web target; LaunchServices only in the `snooze ui` command; the
+#      host never imports the web layer (the UI is a CLIENT of the host, never inside it).
+H1=$(grep -rlE --include='*.swift' '^[[:space:]]*import[[:space:]]+NIOHTTP1([[:space:]]|$)' "$PACKAGE/Sources" | grep -vE "/Sources/SnoozeWeb/" || true)
+[[ -z "$H1" ]] || fail "NIOHTTP1 is imported outside Sources/SnoozeWeb:
+$H1"
+CS=$(grep -rlE --include='*.swift' '^[[:space:]]*import[[:space:]]+CoreServices([[:space:]]|$)' "$PACKAGE/Sources" | grep -vE "/Sources/SnoozeCLI/UICommand.swift$" || true)
+[[ -z "$CS" ]] || fail "CoreServices is imported outside Sources/SnoozeCLI/UICommand.swift:
+$CS"
+WH=$(grep -rlE --include='*.swift' '^[[:space:]]*import[[:space:]]+SnoozeWeb([[:space:]]|$)' "$PACKAGE/Sources/SnoozeHost" || true)
+[[ -z "$WH" ]] || fail "the host imports the web UI (the UI is a client of the host):
+$WH"
 
 # ── 2. Denylist ──────────────────────────────────────────────────────────────
 ALTS=$(grep -v '^#' "$DENYLIST" | grep -v '^$' | paste -sd'|' -)
@@ -102,7 +119,11 @@ NSHA=$(shasum -a 256 "$NBIN" | awk '{print $1}')
 grep -qF "| sha256 (auto) | \`$NSHA\` |" "$PACKAGE/Guest/snoozenet/PROVENANCE.md" \
     || fail "Resources/snoozenet ($NSHA) is not the binary Guest/snoozenet/PROVENANCE.md records — run make snoozenet"
 
+# ── 7. (590) The web UI's committed assets match their sources ───────────────
+swift "$PACKAGE/Scripts/build-web-assets.swift" --check >/dev/null || fail "Sources/SnoozeWeb/Resources/Web is stale — run make web-assets and commit it"
+
 printf 'ok audit: SnoozeContainerKit imports only its allowlist (Foundation/Security/Virtualization/Containerization/NIO/X509),\n'
 printf '          depends only on apple/containerization (exact) + the apple/* packages it already resolves\n'
 printf '          (TLS; ArgumentParser for the CLI targets only),\n'
-printf '          carries no host brand, and deckhold + snoozenet match their provenance\n'
+printf '          carries no host brand, deckhold + snoozenet match their provenance,\n'
+printf '          and the web UI (NIOHTTP1, confined) ships exactly the assets its sources build\n'

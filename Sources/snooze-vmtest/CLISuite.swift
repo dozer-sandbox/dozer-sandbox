@@ -296,6 +296,21 @@ func cliSuite() async throws {
         r = h.run(["exec", "clia", "--", "test", "-e", "/root/after-p1"])
         check(r.code == 1, "the file written after p1 is gone")
 
+        // 590: the owner clicked "open session" twice while a sandbox booted; two `deckhold serve`s
+        // raced and one failed "Address in use". Four processes open the same session at once:
+        // all succeed, and there is exactly one session.
+        print("cli: concurrent opens of one session")
+        let runs = LockedArray<CLIRun>()
+        DispatchQueue.concurrentPerform(iterations: 4) { _ in
+            runs.append(h.run(["run", "clia", "--session", "dup", "-d", "--", "sleep", "600"]))
+        }
+        let dups = h.sessions("clia").filter { $0.name == "dup" }
+        check(runs.all.count == 4 && runs.all.allSatisfy { $0.code == 0 },
+              "4 concurrent `run --session dup -d` all succeed (exits \(runs.all.map(\.code)))")
+        check(dups.count == 1 && dups.first?.ended == false, "exactly one dup session, running (\(dups.count))")
+        r = h.run(["run", "clia", "--session", "dup", "-d", "--", "sleep", "601"])
+        check(r.code == SnoozeCLIExit.exists, "a DIFFERENT program under the same name is still refused (exit \(r.code))")
+
         print("cli: two sandboxes at once")
         r = h.run(["create", "clib", "--image", "lab", "--memory", "512M", "--workspace", ws.path])
         check(r.code == 0, "create clib")
@@ -379,4 +394,13 @@ func cliSuite() async throws {
 /// The CLI's own exit codes the suite checks (the CLI target is not linked here).
 enum SnoozeCLIExit {
     static let failed: Int32 = 1
+    static let exists: Int32 = 4
+}
+
+/// An array appended to from several threads.
+final class LockedArray<T>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var items: [T] = []
+    func append(_ x: T) { lock.withLock { items.append(x) } }
+    var all: [T] { lock.withLock { items } }
 }

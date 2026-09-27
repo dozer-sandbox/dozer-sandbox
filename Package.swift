@@ -86,10 +86,25 @@ let package = Package(
             dependencies: ["SnoozeContainerKit"],
             path: "Sources/SnoozeHost"
         ),
+        // 590 — `snooze ui`: the local web UI. A CLIENT of the host (host.sock), served by swift-nio's
+        // own HTTP/1.1 codec (NIOHTTP1 — part of swift-nio, already resolved; no new package) on
+        // 127.0.0.1 only. The page is vanilla HTML/CSS/JS from WebSource/, compiled into the
+        // content-hashed, digest-manifested Resources/Web by Scripts/build-web-assets.swift and
+        // committed (`make web-assets`; `make web-assets-check` fails on drift). Not a product.
+        .target(
+            name: "SnoozeWeb",
+            dependencies: ["SnoozeHost", "SnoozeContainerKit",
+                           .product(name: "NIOCore", package: "swift-nio"),
+                           .product(name: "NIOPosix", package: "swift-nio"),
+                           .product(name: "NIOHTTP1", package: "swift-nio")],
+            path: "Sources/SnoozeWeb",
+            exclude: ["WebSource"],
+            resources: [.copy("Resources/Web")]
+        ),
         // 585 — the commands (swift-argument-parser), the attach client, the human/JSON output.
         .target(
             name: "SnoozeCLI",
-            dependencies: ["SnoozeHost", "SnoozeContainerKit",
+            dependencies: ["SnoozeHost", "SnoozeContainerKit", "SnoozeWeb",
                            .product(name: "ArgumentParser", package: "swift-argument-parser")],
             path: "Sources/SnoozeCLI"
         ),
@@ -102,6 +117,12 @@ let package = Package(
             name: "SnoozeCLITests",
             dependencies: ["SnoozeCLI", "SnoozeHost", "SnoozeContainerKit"],
             path: "Tests/SnoozeCLITests"
+        ),
+        // 590 — the web UI's security rules as unit tests, and a real listener driven over HTTP.
+        .testTarget(
+            name: "SnoozeWebTests",
+            dependencies: ["SnoozeWeb", "SnoozeHost", "SnoozeContainerKit"],
+            path: "Tests/SnoozeWebTests"
         ),
         .testTarget(
             name: "SnoozeContainerKitTests",

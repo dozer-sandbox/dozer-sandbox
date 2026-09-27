@@ -313,9 +313,13 @@ public actor Sandbox {
         case .booting, .failed: throw SandboxError.invalidPhase(operation: "take a restore point", phase: phase)
         }
         let persisted = identity ?? PersistedSandbox.read(from: layout.persistedState)
-        let rp = RestorePoint(id: RestorePoint.newID(), name: name, note: note, createdAt: Date(), parent: persisted?.restorePoint,
-                              sourceImage: persisted?.rootImage, takenWhile: taken,
-                              hasStateDisk: fm.fileExists(atPath: layout.stateDisk.path), automatic: automatic)
+        var point = RestorePoint(id: RestorePoint.newID(), name: name, note: note, createdAt: Date(), parent: persisted?.restorePoint,
+                                 sourceImage: persisted?.rootImage, takenWhile: taken,
+                                 hasStateDisk: fm.fileExists(atPath: layout.stateDisk.path), automatic: automatic)
+        // A journaled disk replays on its first boot; only a journal-less one needs e2fsck (587).
+        point.journaled = EXT4Inspector.hasJournal(layout.rootfs)
+            && (!point.hasStateDisk || EXT4Inspector.hasJournal(layout.stateDisk))
+        let rp = point
         let dir = layout.restorePointDirectory(rp.id)
         try fm.createDirectory(at: dir, withIntermediateDirectories: true)
         let clone: () throws -> Void = { [layout] in
