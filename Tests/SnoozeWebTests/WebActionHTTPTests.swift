@@ -63,6 +63,24 @@ final class WebActionHTTPTests: XCTestCase {
         XCTAssertTrue(fake.performed.isEmpty, "nothing reached the host")
     }
 
+    /// Every action over HTTP: refused without CSRF, then accepted with it and sent to the host as
+    /// exactly its one HostOp.
+    func testEveryActionOverHTTP() throws {
+        let workspace = FileManager.default.temporaryDirectory.path
+        for (name, sample) in WebActionTests.samples.sorted(by: { $0.key < $1.key }) {
+            let body = sample.replacingOccurrences(of: "\"image\":\"lab\",", with: "\"image\":\"lab\",\"workspace\":\"\(workspace)\",")
+            let before = fake.performed.count
+            XCTAssertEqual(try post("/api/v1/actions", body, headers: ["Cookie": cookie, "Origin": origin, "Content-Type": "application/json"]).status, 403, "\(name) without CSRF")
+            let r = try post("/api/v1/actions", body)
+            XCTAssertEqual(r.status, 202, "\(name): \(r.text)")
+            let deadline = Date().addingTimeInterval(5)
+            while fake.performed.count == before && Date() < deadline { usleep(10_000) }
+            XCTAssertEqual(fake.performed.last?.op, try WebAction.decode(Data(body.utf8)).hostOp, name)
+            while try get("/api/v1/operations", ["Cookie": cookie]).text.contains("\"state\":\"running\"") && Date() < deadline { usleep(10_000) }
+        }
+        XCTAssertEqual(fake.performed.count, WebActionTests.samples.count)
+    }
+
     func testAnInvalidOrUnconfirmedActionIs400AndNeverReachesTheHost() throws {
         for body in [#"{"action":"exec","sandbox":"demo","argv":["id"]}"#, #"{"action":"rm","sandbox":"demo"}"#,
                      #"{"action":"rm","sandbox":"demo","confirm":"other"}"#, #"{"action":"pause","sandbox":"demo","x":1}"#,
