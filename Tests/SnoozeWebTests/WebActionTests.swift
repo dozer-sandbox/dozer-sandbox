@@ -178,6 +178,16 @@ final class WebActionTests: XCTestCase {
         XCTAssertThrowsError(try HostCore.editedPolicy(live, WebPolicyEdit(preset: "wide", allow: [], deny: [], remove: []).request("a")))
     }
 
+    /// Nit 4: the account column is "n/a" unless the sandbox's policy can reach the API.
+    func testTheAccountMattersOnlyWhenThePolicyReachesTheAPI() throws {
+        XCTAssertTrue(HostWebData.reachesAccountAPI(NetworkPolicy.presets["agent"]!))
+        XCTAssertTrue(HostWebData.reachesAccountAPI(NetworkPolicy.presets["open"]!))
+        XCTAssertFalse(HostWebData.reachesAccountAPI(NetworkPolicy.presets["bake"]!))
+        XCTAssertFalse(HostWebData.reachesAccountAPI(NetworkPolicy.presets["locked"]!))
+        let custom = try HostCore.editedPolicy(NetworkPolicy.presets["bake"]!, WebPolicyEdit(preset: nil, allow: ["api.anthropic.com"], deny: [], remove: []).request("a"))
+        XCTAssertTrue(HostWebData.reachesAccountAPI(custom))
+    }
+
     // MARK: Terminal
 
     func testTheTerminalCommandIsFixedAndQuoted() {

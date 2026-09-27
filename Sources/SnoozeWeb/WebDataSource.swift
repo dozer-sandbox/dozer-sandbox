@@ -137,7 +137,13 @@ public final class HostWebData: SnoozeWebData, @unchecked Sendable {
 
     public func overview() async throws -> WebOverview {
         let (v, fromHost) = try await query(HostRequest(.ls))
-        let rows = try v.decode([SandboxInfo].self).map(WebSandboxRow.init)
+        var rows = try v.decode([SandboxInfo].self).map(WebSandboxRow.init)
+        for i in rows.indices {
+            // The sandbox's own policy decides (a custom one may or may not reach the API).
+            if let p = SandboxConfig.read(store.configFile(rows[i].name))?.spec.network.policy {
+                rows[i].accountApplies = Self.reachesAccountAPI(p)
+            }
+        }
         let st = fromHost ? await hostStatus() : nil
         let host = WebHost(running: st != nil, version: st?.version, pid: st?.pid, startedAt: st?.startedAt,
                            idleTimeoutMinutes: st?.idleTimeoutMinutes, idleSeconds: st?.idleSeconds,
@@ -149,7 +155,15 @@ public final class HostWebData: SnoozeWebData, @unchecked Sendable {
 
     public func sandbox(_ name: String) async throws -> WebSandboxDetail {
         let d = try await query(HostRequest(.inspect, name: name)).0.decode(SandboxDetail.self)
-        return WebSandboxDetail(d, attachCommand: attachCommand(name))
+        var w = WebSandboxDetail(d, attachCommand: attachCommand(name))
+        w.info.accountApplies = d.policy.map(Self.reachesAccountAPI) ?? false
+        return w
+    }
+
+    /// Whether a proxied sandbox's policy lets a connection reach Anthropic's API — only then does
+    /// its account matter (590: lab/bake sandboxes showed the store's `mac` account, which is noise).
+    static func reachesAccountAPI(_ p: NetworkPolicy) -> Bool {
+        CredentialBinding.anthropic.hosts.contains { p.evaluateConnection(host: $0, port: 443).kind != .deny }
     }
 
     public func sessions(_ name: String) async throws -> [WebSessionRow] {

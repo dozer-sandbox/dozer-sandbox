@@ -127,6 +127,8 @@ function trackOp(op) {
   paintRowOps();
   if (op.state !== 'running' && (!before || before.state === 'running')) {
     if (op.state === 'failed') toast(op.label + ': ' + op.text, true);
+    // The sandbox this page shows is gone: back to the list (route() refreshes) instead of a 404.
+    if (op.state === 'done' && op.action === 'rm' && state.view === 'sandbox' && state.param === op.sandbox) { location.hash = '#/overview'; return; }
     refresh(false);
   }
 }
@@ -136,7 +138,8 @@ function toast(text, bad) {
   setTimeout(() => t.remove(), bad ? 9000 : 4000);
 }
 function renderOps() {
-  const list = [...state.ops.values()].slice(-6).reverse();
+  // Running ones, and what finished in the last 10 minutes (the newest six).
+  const list = [...state.ops.values()].filter((o) => o.state === 'running' || Date.now() - new Date(o.startedAt).getTime() < 600000).slice(-6).reverse();
   const box = $('ops');
   if (!list.length) { box.hidden = true; return; }
   box.hidden = false;
@@ -601,7 +604,7 @@ async function viewSandbox() {
       card('RAM held', mib(i.ramHeldMiB), 'of ' + mib(i.memoryMiB) + (i.memoryReturnedMiB ? ' · balloon returned ' + mib(i.memoryReturnedMiB) : '')),
       card('Disk', bytes(i.diskBytes), d.snapshotBytes ? 'snapshot ' + bytes(d.snapshotBytes) : (d.hasRootDisk ? 'root disk kept' : 'no root disk yet')),
       card('CPUs', String(d.cpus)),
-      card('Sessions', i.sessions === null || i.sessions === undefined ? '—' : String(i.sessions), running ? '' : 'listed while it runs')),
+      card('Sessions', d.sessions ? String(d.sessions.filter((s) => !s.ended).length) : '—', running ? '' : 'listed while it runs')),
     h('h2', null, 'Terminal'),
     h('div', { class: 'panel' }, h('div', { class: 'cmd' }, h('code', null, d.attachCommand), copy,
       btn('Open in Terminal', terminal(null), { primary: true, title: 'Terminal.app attaches to the ' + d.defaultSession + ' session (waking the sandbox if it sleeps)' })),

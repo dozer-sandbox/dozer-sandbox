@@ -46,8 +46,9 @@ public struct WebSandboxRow: Codable, Equatable, Sendable {
     public var credentialState: String?
     public var credentialPolicy: String?
     public var foreignCredentials: Int?
-    /// Whether the account can matter: only a proxied network that may reach Anthropic's API (the
-    /// agent and open presets, or a custom policy) uses one. lab/bake/locked show "n/a" (590 nit).
+    /// Whether the account can matter: only a proxied network whose policy may reach Anthropic's
+    /// API uses one (the data source decides from the sandbox's policy; this default is by preset).
+    /// bake/locked/nat/none show "n/a" (590 nit).
     public var accountApplies: Bool
 
     public init(_ i: SandboxInfo) {

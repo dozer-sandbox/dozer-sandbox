@@ -283,8 +283,8 @@ The host is started for you by the first command that needs it. It runs detached
 
 ## The web UI
 
-`snooze ui` is a dashboard in your browser for everything in the store. It is **read-only** for
-now: it shows, it changes nothing. (Actions, terminals and the maintenance views come later.)
+`snooze ui` is a dashboard in your browser for everything in the store, and it can do most of
+what the CLI does. (The maintenance and disk-accounting views come later.)
 
 ```bash
 snooze ui                 # serve it, and open it in your default browser
@@ -296,6 +296,26 @@ It shows every sandbox (phase, RAM held, disk, sessions, network, account), each
 sessions, restore points, network policy and connection log, keys and their state, the images,
 the Claude accounts, the metrics, `snooze doctor`, and the host's activity as it happens.
 
+What you can do from it:
+
+| Page | Actions |
+|---|---|
+| **Sandboxes** | New sandbox (image, network, account, CPUs, memory, workspace folder). Per sandbox: start, pause, resume, sleep, deep sleep, wake, shut down, reset, remove. |
+| **A sandbox** | Open in Terminal (Terminal.app attaches to a session); open the image's session, or run a command in a new detached session; take a restore point, and revert, fork, save as an image or delete one; edit the network policy, with a preview of exactly what changes; set the key policy and the account; remove a key. |
+| **Images** | Bake a built-in image; remove one. |
+| **Accounts & keys** | Make an account the default; verify one; remove one; keep-alive on or off. |
+| **Metrics** | Filter by image, time and steps; download the rows as CSV. |
+
+Shut down, reset, remove, revert and every delete ask you to **type the name** first. An
+operation's progress shows in the sandbox's row and in the Operations list while it runs, and the
+page updates when it ends.
+
+Two things are CLI-only on purpose: **a secret is never typed into the browser**. Add an account
+(`snooze account add`) or set a key (`snooze key set`) in a terminal; the page shows the command.
+And there is no shell in the browser: a terminal is Terminal.app. The first time, macOS asks
+whether the app running `snooze ui` may control Terminal (System Settings › Privacy & Security ›
+Automation).
+
 | | |
 |---|---|
 | **Where** | `http://127.0.0.1:<port>`, a port the system picks. Only this Mac can reach it. |
@@ -303,7 +323,7 @@ the Claude accounts, the metrics, `snooze doctor`, and the host's activity as it
 | **Stopping** | Ctrl-C in the terminal that runs it. Signing out and stopping both end every browser's session. |
 | **One per store** | Each store has at most one UI. `--store` (or `$SNOOZE_STORE`) picks the store, as for every command. |
 | **The host** | The UI is a client of the host, like the CLI. Looking never starts a host: with none running, the UI reads the store (nothing is live). It follows the host's events only while a sandbox is live, so an open UI never keeps an idle host from exiting. |
-| **Terminals** | Each sandbox's page shows the `snooze attach …` command to copy into a terminal. |
+| **Terminals** | Open in Terminal runs `snooze attach NAME [SESSION] --store …` in a new Terminal tab (waking the sandbox if it sleeps). The page also shows that command to copy. |
 | **Secrets** | Never shown. Keys and accounts appear as a state, a source name (`keychain:…`, `account:mac`) and a fingerprint. |
 
 `--print-url` prints only to a terminal (not with `--json`, not into a pipe or a file), because the
@@ -350,6 +370,7 @@ The kernel and subnet variables are read when a sandbox is created, and become p
 | A package install fails | The policy: `snooze net log NAME --denied`, then `snooze net policy NAME --allow HOST`. |
 | A sandbox shows as died | The host crashed while it ran. `snooze start NAME` checks the disk and cold-boots it. |
 | The UI says "sign in with a new link" | Its link was used or expired, or the UI restarted. `snooze ui link`. |
+| Open in Terminal says macOS did not allow it | System Settings › Privacy & Security › Automation: allow Terminal for the app that runs `snooze ui` (Terminal itself, iTerm…). |
 | `snooze ui` says the resources are missing | `SnoozeContainerKit_SnoozeWeb.bundle` must sit beside the executable. Reinstall with `make install-cli`. |
 | Anything else | `<store>/host.log` and `snooze events`. |
 
