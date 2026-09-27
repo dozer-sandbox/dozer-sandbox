@@ -33,7 +33,7 @@ final class WebOperations: @unchecked Sendable {
     func start(_ action: WebAction) throws -> WebOperation {
         let verb = action.hostOp == .openSession ? "open-session" : action.hostRequest.op.rawValue
         let op = WebOperation(id: String(WebRandom.token().prefix(12)), action: verb, label: action.label, sandbox: action.sandbox,
-                              state: "running", text: "started", startedAt: Date(), milliseconds: nil)
+                              state: "running", text: "requested — waiting for the host", startedAt: Date(), milliseconds: nil)
         let key = action.dedupeKey
         try lock.withLock {
             // The same action on the same thing is already under way (a double click, a second tab).

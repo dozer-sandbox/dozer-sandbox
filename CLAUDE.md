@@ -249,6 +249,15 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
 - **Open in Terminal** runs ONE fixed AppleScript (`TerminalHandoff.script`) with the command as its
   argument — `exec '<snooze>' attach NAME [SESSION] --store '<store>'`, names allowlisted, paths
   quoted — never spliced into script source, never a command from the browser.
+- **`open-session` is serialized per sandbox** (`HostCore.sessionGate`, a `KeyedGate` held across
+  its awaits — the actor alone is re-entrant) and idempotent: a concurrent or repeated open of one
+  session answers "already running", and a deckhold "Address in use" re-lists and answers with the
+  session that won. (590: two clicks during a first boot started two `deckhold serve`s.)
+  `KeyedGateTests`, and `test-cli`'s "concurrent opens of one session".
+- **A poller never counts sessions**: `ls` with `withSessions: false`. Counting runs `deckhold ls`,
+  which connects to every session's holder — each connect is a line in the guest's
+  `/run/deckhold/NAME.log` (tmpfs); the UI's 3 s poll grew one by 600 KB in 9 hours. A repeat of an
+  in-flight action (same `WebAction.dedupeKey`) is 409.
 - **The policy preview is the host's own function** (`HostCore.editedPolicy`), so the preview is
   exactly what `net-policy` applies. **Metrics CSV cells are defused** against spreadsheet formulas.
 - **The UI is a CLIENT of the host** (host.sock) in its own process — it never owns a VM, and the

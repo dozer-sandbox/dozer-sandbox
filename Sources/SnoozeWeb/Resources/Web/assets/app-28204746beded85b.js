@@ -132,7 +132,8 @@ function trackOp(op) {
   renderOps();
   paintRowOps();
   // A new operation: re-render, so its sandbox's buttons are disabled while it runs.
-  if (!before && op.state === 'running') refresh(false);
+  // (Not for a removal: the page it would refetch is about to be gone.)
+  if (!before && op.state === 'running' && op.action !== 'rm') refresh(false);
   if (op.state !== 'running' && (!before || before.state === 'running')) {
     if (op.state === 'failed') toast(op.label + ': ' + op.text, true);
     // The sandbox this page shows is gone: back to the list (route() refreshes) instead of a 404.
@@ -164,10 +165,14 @@ function paintRowOps() {
   for (const el of document.querySelectorAll('[data-op-for]')) {
     const name = el.dataset.opFor;
     const ops = [...state.ops.values()].filter((o) => o.sandbox === name);
-    const o = ops[ops.length - 1];
+    // While something runs, the OLDEST running operation (a start that others wait behind) — its
+    // steps are the news; otherwise the newest outcome.
+    const running = ops.filter((o) => o.state === 'running');
+    const o = running.length ? running[0] : ops[ops.length - 1];
     const fresh = o && (o.state === 'running' || Date.now() - new Date(o.startedAt).getTime() < 60000);
     const secs = o ? Math.max(0, Math.round((Date.now() - new Date(o.startedAt).getTime()) / 1000)) : 0;
-    const text = !fresh ? '' : o.state === 'running' ? '… ' + o.action + ' · ' + secs + ' s — ' + o.text : (o.state === 'done' ? '✓ ' : '✕ ') + o.text;
+    const more = running.length > 1 ? ' · then ' + running.slice(1).map((x) => x.action).join(', ') : '';
+    const text = !fresh ? '' : o.state === 'running' ? '… ' + o.action + ' · ' + secs + ' s — ' + o.text + more : (o.state === 'done' ? '✓ ' : '✕ ') + o.text;
     el.textContent = text;
     el.className = (el.dataset.banner ? 'op-banner' : 'row-op') + (fresh ? ' op-' + o.state : '') + (fresh ? '' : ' empty-op');
   }

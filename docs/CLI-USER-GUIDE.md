@@ -307,8 +307,12 @@ What you can do from it:
 | **Metrics** | Filter by image, time and steps; download the rows as CSV. |
 
 Shut down, reset, remove, revert and every delete ask you to **type the name** first. An
-operation's progress shows in the sandbox's row and in the Operations list while it runs, and the
-page updates when it ends.
+operation's progress shows in the sandbox's row and in the Operations list while it runs (the
+host's latest step and the seconds so far — a first start in a store downloads and bakes its image
+and can take two minutes), and the page updates when it ends. The session buttons wait until the
+sandbox can take a session, and clicking an action again while it runs does nothing more (it is
+already under way). The list has no session count, since counting asks every session inside the
+guest; each sandbox's page lists its sessions.
 
 Two things are CLI-only on purpose: **a secret is never typed into the browser**. Add an account
 (`snooze account add`) or set a key (`snooze key set`) in a terminal; the page shows the command.
