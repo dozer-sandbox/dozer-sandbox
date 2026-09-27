@@ -110,6 +110,12 @@ async function api(path, opts = {}) {
 // ── actions ─────────────────────────────────────────────────────────────────
 // One typed action → one host operation. Answers at once; progress arrives as SSE `op` events.
 async function act(body) {
+  // No repeat of what is already under way (the server refuses it too — 409).
+  const label = body.action + (body.sandbox ? ' ' + body.sandbox : '');
+  if ([...state.ops.values()].some((o) => o.state === 'running' && o.label === label && o.action === body.action)) {
+    toast(label + ' is already under way', false);
+    return null;
+  }
   try {
     const op = await api('actions', { method: 'POST', json: body });
     trackOp(op);
@@ -125,6 +131,8 @@ function trackOp(op) {
   if (state.ops.size > 60) state.ops.delete(state.ops.keys().next().value);
   renderOps();
   paintRowOps();
+  // A new operation: re-render, so its sandbox's buttons are disabled while it runs.
+  if (!before && op.state === 'running') refresh(false);
   if (op.state !== 'running' && (!before || before.state === 'running')) {
     if (op.state === 'failed') toast(op.label + ': ' + op.text, true);
     // The sandbox this page shows is gone: back to the list (route() refreshes) instead of a 404.
@@ -150,16 +158,21 @@ function renderOps() {
       h('span', { class: 'op-text' }, o.text + (o.milliseconds ? ' · ' + ms(o.milliseconds) : '')))));
 }
 /// The newest operation of each sandbox, shown under its name in the list (live, without a refetch).
+/// A running operation counts its seconds, so a two-minute first start (pull, flatten, bake) is
+/// visibly alive; the text is the host's latest step.
 function paintRowOps() {
   for (const el of document.querySelectorAll('[data-op-for]')) {
     const name = el.dataset.opFor;
     const ops = [...state.ops.values()].filter((o) => o.sandbox === name);
     const o = ops[ops.length - 1];
     const fresh = o && (o.state === 'running' || Date.now() - new Date(o.startedAt).getTime() < 60000);
-    el.textContent = fresh ? (o.state === 'running' ? '… ' : o.state === 'done' ? '✓ ' : '✕ ') + o.text : '';
-    el.className = 'row-op' + (fresh ? ' op-' + o.state : '');
+    const secs = o ? Math.max(0, Math.round((Date.now() - new Date(o.startedAt).getTime()) / 1000)) : 0;
+    const text = !fresh ? '' : o.state === 'running' ? '… ' + o.action + ' · ' + secs + ' s — ' + o.text : (o.state === 'done' ? '✓ ' : '✕ ') + o.text;
+    el.textContent = text;
+    el.className = (el.dataset.banner ? 'op-banner' : 'row-op') + (fresh ? ' op-' + o.state : '') + (fresh ? '' : ' empty-op');
   }
 }
+function opRunningFor(name) { return [...state.ops.values()].some((o) => o.sandbox === name && o.state === 'running'); }
 
 // ── dialogs (forms live outside the view) ───────────────────────────────────
 // fields: [{name, label, type: text|number|select|textarea|checkbox, options, value, placeholder, help, required}]
@@ -465,7 +478,7 @@ function lifecycle(verb, name) {
   else act({ action: verb, sandbox: name });
 }
 function lifecycleButtons(s, all) {
-  const busy = s.busy || [...state.ops.values()].some((o) => o.sandbox === s.name && o.state === 'running');
+  const busy = s.busy || s.phase === 'booting' || opRunningFor(s.name);
   const verbs = verbsFor(s.phase);
   const extra = all ? ['reset', 'rm'] : [];
   return h('div', { class: 'actions' }, [...verbs, ...extra].map((v) => {
@@ -492,7 +505,6 @@ async function viewOverview() {
     h('td', null, phasePill(s.phase, s.phaseLabel, s.busy), s.diedWithHost ? h('div', { class: 'st-warn' }, 'died with its host') : null),
     h('td', { class: 'num' }, h('div', null, s.ramHeldMiB ? mib(s.ramHeldMiB) : '—'), h('div', { class: 'muted' }, 'of ' + mib(s.memoryMiB)), meter(s.ramHeldMiB, s.memoryMiB)),
     h('td', { class: 'num' }, bytes(s.diskBytes)),
-    h('td', { class: 'num' }, s.sessions === null || s.sessions === undefined ? '—' : String(s.sessions)),
     h('td', null, s.network, s.deniedConnections ? h('div', { class: 'st-warn' }, s.deniedConnections + ' denied') : null),
     s.accountApplies
       ? h('td', null, s.account || '—', s.credentialState ? h('div', { class: s.credentialState === 'ok' ? 'st-ok' : 'st-warn' }, s.credentialState) : null,
@@ -506,10 +518,11 @@ async function viewOverview() {
       hostCard(o.host),
       card('Sandboxes', String(o.totals.sandboxes), o.totals.live + ' with a VM'),
       card('RAM held', mib(o.totals.ramHeldMiB), 'charged to this Mac now'),
-      card('Disk', bytes(o.totals.diskBytes), 'allocated, all sandboxes'),
-      card('Sessions', String(o.totals.sessions), 'in running sandboxes')),
+      card('Disk', bytes(o.totals.diskBytes), 'allocated, all sandboxes')),
     h('h2', null, 'All sandboxes'),
-    panel(table(['Sandbox', 'Phase', 'RAM held', 'Disk', 'Sessions', 'Network', 'Account', ''], rows, [2, 3, 4]),
+    // No session column: counting sessions asks every session's holder in the guest, and this list
+    // is kept live — sessions are on each sandbox's page (590 bug 3).
+    panel(table(['Sandbox', 'Phase', 'RAM held', 'Disk', 'Network', 'Account', ''], rows, [2, 3]),
       'No sandboxes yet — New sandbox, or snooze create NAME --image lab'));
 }
 
@@ -543,6 +556,11 @@ async function viewSandbox() {
   const [d, net, accounts] = await Promise.all([api('sandboxes/' + name), api('sandboxes/' + name + '/network'), api('accounts').catch(() => ({ accounts: [] }))]);
   const i = d.info;
   const running = i.phase === 'running';
+  // Sessions need a VM: running, or one a session request wakes (paused, asleep, deep asleep) — never
+  // while off, failed, booting, busy or while another operation on it runs (590 bug 2).
+  const sessionsReady = ['running', 'paused', 'asleep', 'deepAsleep'].includes(i.phase) && !i.busy && !opRunningFor(name);
+  const whyNot = sessionsReady ? null : i.phase === 'off' || i.phase === 'failed' ? 'Start it first' : 'Wait until it is running';
+  const gated = (b) => { if (!sessionsReady) { b.disabled = true; b.title = whyNot; } return b; };
   const fact = (k, v) => h('div', null, h('div', { class: 'k' }, k), h('div', { class: 'v' }, v));
   const copy = btn('Copy', async (ev) => {
     const b = ev.currentTarget;
@@ -561,7 +579,7 @@ async function viewSandbox() {
     h('td', { class: 'mono' }, s.command),
     h('td', { class: 'num' }, s.cols ? s.cols + '×' + s.rows : '—'),
     h('td', { class: 'num' }, String(s.clients)),
-    h('td', null, s.ended ? null : btn('Open in Terminal', terminal(s.name), { small: true }))));
+    h('td', null, s.ended ? null : gated(btn('Open in Terminal', terminal(s.name), { small: true })))));
   const points = d.restorePoints.map((p) => h('tr', null,
     h('td', null, p.name, h('div', { class: 'muted mono' }, p.id)),
     h('td', null, full(p.createdAt), h('div', { class: 'muted' }, when(p.createdAt))),
@@ -599,7 +617,8 @@ async function viewSandbox() {
   return h('div', null,
     h('p', { class: 'sub' }, h('a', { href: '#/overview' }, '← Sandboxes')),
     h('div', { class: 'head' }, h('h1', null, name, ' ', phasePill(i.phase, i.phaseLabel, i.busy)), lifecycleButtons(i, true)),
-    h('p', { class: 'sub' }, i.image + ' · created ' + when(i.createdAt), ' ', h('span', { 'data-op-for': name })),
+    h('p', { class: 'sub' }, i.image + ' · created ' + when(i.createdAt)),
+    h('div', { 'data-op-for': name, 'data-banner': '1', role: 'status' }),
     h('div', { class: 'cards' },
       card('RAM held', mib(i.ramHeldMiB), 'of ' + mib(i.memoryMiB) + (i.memoryReturnedMiB ? ' · balloon returned ' + mib(i.memoryReturnedMiB) : '')),
       card('Disk', bytes(i.diskBytes), d.snapshotBytes ? 'snapshot ' + bytes(d.snapshotBytes) : (d.hasRootDisk ? 'root disk kept' : 'no root disk yet')),
@@ -607,17 +626,17 @@ async function viewSandbox() {
       card('Sessions', d.sessions ? String(d.sessions.filter((s) => !s.ended).length) : '—', running ? '' : 'listed while it runs')),
     h('h2', null, 'Terminal'),
     h('div', { class: 'panel' }, h('div', { class: 'cmd' }, h('code', null, d.attachCommand), copy,
-      btn('Open in Terminal', terminal(null), { primary: true, title: 'Terminal.app attaches to the ' + d.defaultSession + ' session (waking the sandbox if it sleeps)' })),
+      gated(btn('Open in Terminal', terminal(null), { primary: true, title: 'Terminal.app attaches to the ' + d.defaultSession + ' session (waking the sandbox if it sleeps)' }))),
       h('div', { class: 'empty' }, 'Attaches to the ' + d.defaultSession + ' session; Ctrl-] detaches, the session keeps running. The first time, macOS asks whether snooze may control Terminal.')),
     h('div', { class: 'head' }, h('h2', null, 'Sessions'), h('div', { class: 'actions' },
-      btn('Open the ' + d.defaultSession + ' session', () => act({ action: 'open-session', sandbox: name }), { small: true, title: 'Start the image’s own session if it is not running (wakes a sleeping sandbox)' }),
-      btn('Run detached…', () => dialog('Run a command in ' + name, 'A new session running the command — no shell in front (say bash -lc \'…\' for one). It runs inside the sandbox; attach to see it.',
+      gated(btn('Open the ' + d.defaultSession + ' session', () => act({ action: 'open-session', sandbox: name }), { small: true, title: 'Start the image’s own session if it is not running (wakes a sleeping sandbox)' })),
+      gated(btn('Run detached…', () => dialog('Run a command in ' + name, 'A new session running the command — no shell in front (say bash -lc \'…\' for one). It runs inside the sandbox; attach to see it.',
         [{ name: 'session', label: 'Session name', placeholder: 'e.g. worker', required: true },
          { name: 'command', label: 'Command', placeholder: 'sleep 600', required: true }], 'Run', async (v) => {
           const argv = splitArgs(v.command);
           if (!argv.length) throw new Error('the command is empty');
           await actOrThrow({ action: 'open-session', sandbox: name, session: v.session, argv });
-        }), { small: true }))),
+        }), { small: true })))),
     panel(table(['Session', 'State', 'Command', 'Size', 'Viewers', ''], sessions, [3, 4]),
       running ? 'No sessions.' : 'Sessions are listed while the sandbox runs.'),
     h('div', { class: 'head' }, h('h2', null, 'Restore points'), h('div', { class: 'actions' },
@@ -836,6 +855,7 @@ async function viewDoctor() {
     if (!/^#\/[a-z]/.test(location.hash)) history.replaceState(null, '', location.pathname + '#/overview');
     route();
     connect();
+    setInterval(() => { if ([...state.ops.values()].some((o) => o.state === 'running')) paintRowOps(); }, 1000);
     setInterval(paintRowOps, 15000);
   }
 })();

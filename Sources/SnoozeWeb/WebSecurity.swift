@@ -56,12 +56,14 @@ public enum WebRejection: String, Error, Equatable, Sendable {
     case tooManyStreams = "too-many-streams"
     case tooManyConnections = "too-many-connections"
     case tooManyOperations = "too-many-operations"
+    case alreadyRunning = "already-running"
     case unavailable
 
     public var status: Int {
         switch self {
         case .hostRejected, .originRejected, .crossSite, .csrfRejected: 403
         case .methodNotAllowed: 405
+        case .alreadyRunning: 409
         case .bodyTooLarge: 413
         case .unsupportedMediaType: 415
         case .malformedAuthorization, .bootstrapRejected, .bootstrapUsed, .unauthenticated, .sessionExpired: 401
@@ -88,6 +90,7 @@ public enum WebRejection: String, Error, Equatable, Sendable {
         case .tooManyStreams: "too many live-update streams are open"
         case .tooManyConnections: "too many connections"
         case .tooManyOperations: "too many operations are running — wait for one to finish"
+        case .alreadyRunning: "that is already under way — see its progress in Operations"
         case .unavailable: "the snooze host did not answer"
         }
     }

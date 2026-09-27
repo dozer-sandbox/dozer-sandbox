@@ -65,6 +65,13 @@ public enum WebAction: Equatable, Sendable {
         }
     }
 
+    /// Two actions with the same key must not run at once: the same operation on the same sandbox
+    /// (and session, point, image or account). A double-clicked "open session" is one operation.
+    public var dedupeKey: String {
+        let r = hostRequest
+        return [r.op.rawValue, r.name ?? "", r.session ?? "", r.point ?? r.pointName ?? "", r.image ?? "", r.account ?? ""].joined(separator: "|")
+    }
+
     /// A short label for the progress line ("deep-sleep lab1").
     public var label: String {
         let r = hostRequest

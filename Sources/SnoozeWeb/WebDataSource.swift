@@ -136,7 +136,11 @@ public final class HostWebData: SnoozeWebData, @unchecked Sendable {
     }
 
     public func overview() async throws -> WebOverview {
-        let (v, fromHost) = try await query(HostRequest(.ls))
+        // Never the per-sandbox session count: it connects to every session's holder in the guest,
+        // and this is polled every 3 s (590 bug 3). Sessions are listed on a sandbox's own page.
+        var ls = HostRequest(.ls)
+        ls.withSessions = false
+        let (v, fromHost) = try await query(ls)
         var rows = try v.decode([SandboxInfo].self).map(WebSandboxRow.init)
         for i in rows.indices {
             // The sandbox's own policy decides (a custom one may or may not reach the API).

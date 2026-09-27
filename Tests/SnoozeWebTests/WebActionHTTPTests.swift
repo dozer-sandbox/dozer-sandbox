@@ -139,6 +139,23 @@ final class WebActionHTTPTests: XCTestCase {
         fake.hold = false
     }
 
+    /// 590 bug 2: a double-clicked action is one operation — the repeat is 409 while the first runs;
+    /// another sandbox, or another session, is not blocked.
+    func testARepeatOfAnInFlightActionIsRefused() throws {
+        fake.hold = true
+        XCTAssertEqual(try post("/api/v1/actions", #"{"action":"open-session","sandbox":"demo"}"#).status, 202)
+        let again = try post("/api/v1/actions", #"{"action":"open-session","sandbox":"demo"}"#)
+        XCTAssertEqual(again.status, 409)
+        XCTAssertTrue(again.text.contains("already-running"))
+        XCTAssertEqual(try post("/api/v1/actions", #"{"action":"open-session","sandbox":"demo","session":"other"}"#).status, 202)
+        XCTAssertEqual(try post("/api/v1/actions", #"{"action":"open-session","sandbox":"demo2"}"#).status, 202)
+        fake.hold = false
+        let deadline = Date().addingTimeInterval(5)
+        while try get("/api/v1/operations", ["Cookie": cookie]).text.contains("\"state\":\"running\"") && Date() < deadline { usleep(20_000) }
+        XCTAssertEqual(try post("/api/v1/actions", #"{"action":"open-session","sandbox":"demo"}"#).status, 202, "once it finished, it may run again")
+        XCTAssertEqual(fake.performed.count, 4)
+    }
+
     // MARK: preview, terminal
 
     func testThePolicyPreviewChangesNothing() throws {

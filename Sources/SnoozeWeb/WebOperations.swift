@@ -18,6 +18,9 @@ final class WebOperations: @unchecked Sendable {
     private let lock = NSLock()
     private var ops: [WebOperation] = []
     private var running = 0
+    private var lastProgress: [String: Date] = [:]
+    /// What runs now, by `WebAction.dedupeKey` — a repeat of an in-flight action is refused (409).
+    private var inFlight: Set<String> = []
 
     init(data: SnoozeWebData, hub: SSEHub, monitor: WebMonitor) {
         self.data = data
@@ -31,8 +34,12 @@ final class WebOperations: @unchecked Sendable {
         let verb = action.hostOp == .openSession ? "open-session" : action.hostRequest.op.rawValue
         let op = WebOperation(id: String(WebRandom.token().prefix(12)), action: verb, label: action.label, sandbox: action.sandbox,
                               state: "running", text: "started", startedAt: Date(), milliseconds: nil)
+        let key = action.dedupeKey
         try lock.withLock {
+            // The same action on the same thing is already under way (a double click, a second tab).
+            guard !inFlight.contains(key) else { throw WebRejection.alreadyRunning }
             guard running < maxRunning else { throw WebRejection.tooManyOperations }
+            inFlight.insert(key)
             running += 1
             ops.append(op)
             if ops.count > keep { ops.removeFirst(ops.count - keep) }
@@ -55,16 +62,30 @@ final class WebOperations: @unchecked Sendable {
                 o.text = outcome.1
                 o.milliseconds = ms
             }
-            lock.withLock { running -= 1 }
+            lock.withLock {
+                running -= 1
+                inFlight.remove(key)
+                lastProgress[op.id] = nil
+            }
             if let final { hub.broadcast("op", final) }
             await monitor.poke()
         }
         return op
     }
 
-    /// A progress line from the host (download progress only at its end, like the activity feed).
+    /// A progress line from the host. Download progress ("pulling …: 312 MiB of 640 MiB") is passed
+    /// on at most once a second, so a two-minute first start (a pull, a flatten, a bake) visibly
+    /// moves instead of looking stuck (590 bug 2).
     private func progress(_ id: String, _ e: HostEvent) {
-        guard e.kind != .progress || (e.completedBytes ?? 0) == (e.totalBytes ?? -1) else { return }
+        if e.kind == .progress {
+            let now = Date()
+            let due: Bool = lock.withLock {
+                if let last = lastProgress[id], now.timeIntervalSince(last) < 1 { return false }
+                lastProgress[id] = now
+                return true
+            }
+            guard due || (e.completedBytes ?? 0) == (e.totalBytes ?? -1) else { return }
+        }
         let text = WebActivity(seq: 0, e).text
         if let o = update(id, { o in if o.state == "running" { o.text = text } }), o.state == "running" { hub.broadcast("op", o) }
     }
