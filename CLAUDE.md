@@ -56,7 +56,8 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
 | `Credentials.swift` | 580: `CredentialBinding`, `CredentialVault` (secrets in memory, placeholders, the byte-exact head rewrite); `HTTPHead` |
 | `SandboxCA.swift`, `HTTPRequestReader.swift`, `ConnectionLog.swift` | 580: the per-sandbox CA + leaves; request/body framing; the metadata-only log |
 | `Resources/snoozenet`, `Guest/snoozenet/` | 580: the guest half of a proxied network — C source, `build.sh` (the same pinned Zig), `PROVENANCE.md` |
-| `Sources/snooze-vmtest/` | The VM integration suite (entitled executable); `NetworkSuite.swift` is `network`; `CLISuite.swift` is `cli` (585, `make test-cli`) |
+| `Sources/snooze-vmtest/` | The VM integration suite (entitled executable); `NetworkSuite.swift` is `network`; `CLISuite.swift` is `cli` (585, `make test-cli`); `ClaudeSuite.swift` is `claude` (588, `make test-vm-claude`) |
+| `Sources/SnoozeHost/ClaudeLogin.swift`, `Accounts.swift`, `LoginWatcher.swift`, `HostCore+Accounts.swift` | 588: the Mac's Claude Code login (read-only), the keychain through `/usr/bin/security`, accounts (`<store>/accounts.json`, never a secret), ONE watcher per Mac login, the keep-alive, key policy |
 | `Sources/SnoozeHost/HostProtocol.swift` | 585: the host protocol (JSON lines, `HostOp`, results) — fields only ever added |
 | `Sources/SnoozeHost/HostCore.swift` | 585: the host's model — every sandbox as a `Sandbox`, every operation, crash recovery, metrics rows; also used read-only in-process |
 | `Sources/SnoozeHost/HostServer.swift` | 585: `snooze host` — the lock, the socket, the attach relay (held clients), streams, idle exit, quit = Deep Sleep |
@@ -173,6 +174,24 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
 - **The attach relay adopts the session BEFORE it answers**, and the client sends what was typed
   ahead of its first connection once it reads that answer (keys typed right after `up` were lost
   otherwise — the first `test-cli` run). After that, keys for a held (sleeping) sandbox are dropped, never queued for a frozen guest.
+- **Snooze never holds, uses or writes Claude Code's refresh token, and never writes a
+  `Claude Code-credentials*` item** (588). It reads the Mac login's ACCESS token only; the Mac's
+  Claude Code is the one writer of that token family (a second holder forks it — codecks 488
+  rejected a copied `.credentials.json` for this, and for its silent fall-through to API billing).
+  Renewal is the Mac's: the only thing snooze may do is run the Mac's own `claude -p` (the
+  keep-alive, opt-in). Every secret snooze writes to the keychain goes on `security -i`'s STDIN.
+- **Never inject our credential beside the guest's own** (588: the prototype added the Mac's bearer
+  token next to a guest `x-api-key`). Every auth header a host's bindings use counts as "a
+  credential is present"; a connection that carried the guest's own credential gets nothing
+  injected afterwards. `testNeverInjectBesideTheGuestsOwnCredential` and `make test-vm-claude`.
+- **A foreign credential is a fingerprint, never a value** — 12 hex of sha256, kind, a prefix of at
+  most 13 characters — in the log, events, `key ls` and `ls`.
+- **Placeholders persist as sha256 hashes** (`snooze.json` `placeholderHashes`, D8) so a session
+  survives a host restart; `shutdown`/`reset`/`rm` revoke them. A stdin key is still memory-only:
+  after a host restart a sandbox holding only one has no secret, and the proxy stops decrypting.
+- **No silent fallback between accounts.** A missing, expired, signed-out or held credential is
+  answered by the proxy itself (401, an Anthropic-shaped JSON error Claude Code shows) with what
+  to do — never another account's or an API key's.
 - **virtio-fs caches:** deleting a file on the HOST that the guest has cached is not visible at once
   — tests use fresh file names (this cost an afternoon of chasing a non-bug).
 
@@ -185,6 +204,7 @@ make audit     # Scripts/audit.sh
 make test-vm   # the VM integration suite — see below
 make cli       # 585: build + sign .build/debug/snooze
 make test-cli  # 585: the signed snooze from separate processes, scratch store $TMPDIR/snooze-clitest-store
+make test-vm-claude  # 588: Claude credentials through the proxy with a FAKE key (SNOOZE_TEST_CLAUDE_LOGIN=1 adds this Mac's login, read-only)
 ```
 
 ### The VM integration tests need an ENTITLED host — how

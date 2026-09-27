@@ -104,31 +104,119 @@ running the real Claude Code it:
 `-e SNOOZE_CLAUDE_PERMISSIONS=ask` (on `run` or `exec`) keeps Claude Code's own prompts, and a
 `claude` run as root always keeps them.
 
-Keys never enter the sandbox:
+Keys never enter the sandbox. The host's proxy holds each credential and puts it into requests to
+Anthropic on their way out. Inside the sandbox, `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` is
+a `snz_cred_…` placeholder. A credential is never a command-line argument, so it never lands in
+shell history or `ps`.
+
+### Claude accounts
+
+A sandbox on a proxied network uses one **account**:
+
+| kind | what it is | where the secret lives | renewal |
+|---|---|---|---|
+| `mac` (built in) | this Mac's own Claude Code login | Claude Code's own keychain item, read-only for snooze | the Mac's Claude Code renews it |
+| `setup-token` | a `claude setup-token` token (a Claude subscription, valid 1 year) | the login keychain, `snooze-claude:NAME` | none: add a new one before it expires |
+| `api-key` | an Anthropic API key | the login keychain, `snooze-anthropic:NAME` (or an item you name) | none |
+
+```bash
+snooze account ls                                   # accounts, state, expiry, which sandboxes use them — never a secret
+snooze account add work --setup-token --plan max    # paste the token `claude setup-token` printed (no echo), or pipe it in
+snooze account add ci --api-key                     # an API key (prompt or stdin), or: --keychain SERVICE
+snooze account use NAME work                        # this sandbox uses work; open sessions switch on their next request
+snooze account use NAME default                     # follow the store's default again (none: no credential)
+snooze account default work                         # every sandbox that follows the default moves to work
+snooze account verify work                          # one tiny request to api.anthropic.com
+snooze account rm work [--force]                    # also deletes the keychain item snooze made
+snooze create NAME --image claude-code --account work
+```
+
+- **A new proxied sandbox follows the store's default account, `mac` out of the box.** Sign in
+  on the Mac once (`claude`) and every sandbox can use your subscription, with nothing to paste.
+- **Claude Code in the sandbox shows your plan.** The guest gets `CLAUDE_CODE_SUBSCRIPTION_TYPE`
+  and `CLAUDE_CODE_RATE_LIMIT_TIER` (not secrets). So a Max login shows "Claude Max" and defaults
+  to Opus, as it does on the Mac. For a setup token, say the plan with `--plan`.
+- **A setup token needs no Mac login and no renewal for a year.** Use one for long-running
+  sandboxes, or when a sandbox should bill another subscription. `doctor` warns 30 days before it
+  expires.
+- **No silent fallback.** A missing, expired or held credential is refused with a message saying
+  what to do. The sandbox never switches to another account or to an API key by itself.
+- `snooze key set NAME --claude-login` still works: it is `account use NAME mac`.
+  `key set NAME --anthropic` gives the sandbox a key of its own and takes it off its account.
+
+### The Mac's login: how renewal works
+
+Snooze reads only the **access token** of the Mac's Claude Code login, never the refresh token.
+The Mac's Claude Code is the one program that renews the login, so the two can never fork it. The
+access token lives about 8 hours. Claude Code renews it when a `claude` process runs on the Mac
+within 5 minutes of expiry; `claude auth status` does not renew it.
+
+- The host re-reads the login every 2 minutes: one read per login, however many sandboxes use it.
+  A renewed token reaches every sandbox, and their sessions keep working without a restart.
+- **The login expired** (say, nothing ran Claude Code on the Mac overnight). The proxy re-reads
+  once. If the login is still expired, it answers with a message that Claude Code in the sandbox
+  shows: "this Mac's Claude login expired at 04:59 — open Claude Code on the Mac (any prompt), then
+  retry". The session recovers by itself when the Mac renews.
+- **Keep-alive (off by default):** `snooze account keepalive on`. Within 10 minutes of expiry, if a
+  sandbox used the Mac login in the last 15 minutes and no Claude Code runs on the Mac, the host
+  runs the Mac's own `claude -p ok --model haiku` once. Claude Code's normal startup renews the login
+  under its own lock, at the cost of one tiny turn on your subscription.
+- **The Mac signs out:** the sandboxes' token is cleared at once, and requests get "this Mac's Claude
+  Code signed out".
+- **A different account signs in on the Mac:** sandboxes on `mac` are **held** and don't silently
+  switch identity or billing. `snooze account use NAME mac` follows the new account.
+- **A locked keychain** keeps the last token and warns (`snooze events`).
+- **Several Claude config dirs** (`CLAUDE_CONFIG_DIR`): Claude Code keeps one keychain item per
+  directory. `snooze account add work-mac --claude-login --config-dir ~/.claude-work` adds another
+  one. `snooze doctor` lists every Claude login item in the keychain (attributes only).
+
+`snooze doctor` checks that Claude Code is installed, whether it is signed in with a subscription
+(or an API key, or not at all), the plan, who is signed in, and when the access token expires.
+`account use … mac` makes the same checks and changes nothing when they fail.
+
+### A credential the guest brings itself
+
+The proxy decrypts api.anthropic.com anyway, so it sees every credential. A **credential snooze
+never issued**, such as a guest `/login` or a pasted key, is classified by the **key policy**:
+
+```bash
+snooze key policy NAME allow    # pass it, and flag it
+snooze key policy NAME strict   # refuse it
+snooze key policy NAME auto     # the default: strict for a setup-token or api-key account, allow for mac
+```
+
+- **allow:** the request goes through. The net log says `own credential (oauth sk-ant-oat01…, fp
+  ab12cd34ef56)`, `ls` marks the sandbox `own key`, `key ls` lists the fingerprints, and an event is
+  recorded once per credential. A fingerprint is the first 12 hex of the credential's sha256,
+  never the value. Snooze's own credential is never added to a request that carries the guest's.
+- **strict:** refused with 403 and an explanation that Claude Code shows. The Claude sign-in hosts
+  are denied too, so a `/login` in the sandbox can't finish. This pins a sandbox to its account,
+  for billing and multi-account setups.
+
+What Claude Code in a sandbox does:
+
+- It never tries to refresh the placeholder (it holds no refresh token).
+- `/logout` only clears local files. It has no effect on the Mac or the sandbox's credential.
+- `/login` warns that `CLAUDE_CODE_OAUTH_TOKEN` overrides it. A login it completes is ignored while
+  the placeholder is set, and the key policy flags or refuses it once used.
+
+### Keys given directly, and restarts
 
 ```bash
 snooze key set NAME --anthropic                       # prompt (no echo), or: … < keyfile
 snooze key set NAME --anthropic --keychain SERVICE    # read from a keychain generic password
-snooze key ls NAME                                    # which keys it has, never their values
+snooze key ls NAME                                    # keys, account, state, expiry, policy, foreign fingerprints
 snooze key rm NAME --anthropic
 ```
 
-The host's proxy holds the key and adds it to requests to Anthropic on their way out. Inside,
-`ANTHROPIC_API_KEY` is a `snz_cred_…` placeholder. The key is never accepted as a command-line
-argument, so it never lands in shell history or `ps`.
-
-- **No API key? Use your Claude subscription:** `snooze key set NAME --claude-login`. The host
-  reads this Mac's own Claude Code login from the keychain: the short-lived access token only,
-  never the refresh token, so the Mac stays signed in. The host re-reads it every 2 minutes, so it
-  follows the refreshes the Mac's Claude Code makes. Inside, `CLAUDE_CODE_OAUTH_TOKEN` is a
-  placeholder, and the proxy swaps the token into `Authorization: Bearer` on the way to Anthropic.
-  Log in on the Mac first (`claude`, then `/login`). One Anthropic credential at a time: setting
-  the login forgets an API key, and the reverse. Claude Code can't see the subscription type from
-  a token, so it shows "Claude API" and picks its general default model; use `/model` to change.
 - **A key from stdin or the prompt lasts while the host runs.** When the host stops (idle exit,
-  `host stop`, a reboot), set it again.
-- **A keychain key** is read again whenever a new host loads the sandbox. To store one:
-  `security add-generic-password -s snooze-anthropic -a "$USER" -w` (it prompts for the key).
+  `host stop`, a reboot), set it again. Accounts and keychain keys are read again whenever a new
+  host loads the sandbox.
+- **Sessions survive a host restart with their credentials.** The sandbox's `snooze.json` keeps
+  a sha256 of each live placeholder, never the placeholder itself, so a session that deep-slept
+  through `host stop` keeps working in the new host. `shutdown`, `reset` and `rm` revoke them.
+- To store a key in the keychain yourself: `security add-generic-password -s snooze-anthropic -a
+  "$USER" -w` (it prompts for the key).
 
 ## Network
 

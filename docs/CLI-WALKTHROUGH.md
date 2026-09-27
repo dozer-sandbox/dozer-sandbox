@@ -108,7 +108,11 @@ mkdir -p ~/snooze-try && cd ~/snooze-try
 snooze create try --image claude-code --workspace ~/snooze-try
 ```
 
-Give it your key. Pick one of the two ways; the key is **never** typed as an argument.
+**Signed in to Claude Code on this Mac with a Claude subscription?** Then there is nothing to do:
+a new sandbox uses the Mac's own login (the account `mac`), and Claude Code in it shows your plan.
+Check with `snooze doctor` (the `claude login` line) and `snooze account ls`. Skip to `snooze up
+try` below. To use an API key instead, give it your key. Pick one of the two ways; the key is
+**never** typed as an argument.
 
 ```bash
 # (a) for this session: paste at the prompt (no echo), or pipe it from a file
@@ -158,7 +162,8 @@ snooze host status                    # no host
 snooze ls                             # still answers (read from the store, no host started)
 ```
 
-If you used key option (a), set the key again now. The host that held it is gone.
+If you used key option (a), set the key again now. The host that held it is gone. (The Mac login
+and a keychain key are read again by the new host, and a session that was running keeps working.)
 
 ```bash
 snooze up try                         # a new host starts, wakes `try`, reattaches
