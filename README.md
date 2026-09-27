@@ -119,7 +119,8 @@ smaller for ~60 ms.
 **Accounting (587): `DiskAccounting.measure(store:)`** — every disk of a store (bases, images, custom
 images, prepared disks, sandbox root and state disks, restore points) with its `allocatedBytes`,
 `uniqueBytes` (what deleting it frees), `sharedWithParentBytes` (its lineage parent), `privateBytes`
-(APFS's own number — they agree to 0.0 MiB on every disk), `extentsPerGiB`, and `garbageBytes`: the
+(APFS's own number — they agree to 0.0 MiB on every disk, unless a file outside the store is a clone
+of one inside it: `uniqueBytes` is scoped to the STORE, APFS's number to the whole volume), `extentsPerGiB`, and `garbageBytes`: the
 host file's data in blocks ext4 considers free (exact, from the disk's bitmaps, on a cleanly unmounted
 disk; otherwise allocated − the guest's `df` recorded at the last Stop / Deep Sleep,
 `PersistedSandbox.guestUsedMiB`). It reads APFS's extent map (`F_LOG2PHYS_EXT`): ~5 ms per disk.

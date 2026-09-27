@@ -261,19 +261,26 @@ func lineageAccounting() async throws {
         check(r.parent != nil && (r.sharedWithParentBytes ?? 0) > 300 << 20 && own >= 100 << 20 && r.uniqueBytes < 1 << 20,
               "the sandbox's root shares \(mb(r.sharedWithParentBytes ?? 0)) with its image; its own \(mb(own)) is shared with its restore point (unique \(mb(r.uniqueBytes)))")
     }
-    var worst: Int64 = 0, compared = 0
+    var worst: Int64 = 0, compared = 0, outside = 0
     for d in rep.disks {
         let priv = d.privateBytes ?? -1
-        let diff = priv < 0 ? 0 : abs(d.uniqueBytes - priv)
-        if priv >= 0 { compared += 1; worst = max(worst, diff) }
+        // DiskAccounting is per STORE; APFS's private size is per VOLUME. Other suites' scratch
+        // stores (test-cli, test-vm-claude) clone their images from this store, so such a file is
+        // fully shared outside it: APFS says 0 private while the store-scoped answer is "unique".
+        // Only whole files that this suite does not create can be in that state; they are named, not compared.
+        let sharedOutside = priv == 0 && d.uniqueBytes > 0
+            && ![.sandboxRoot, .sandboxState, .restorePointRoot].contains(d.kind)
+        if sharedOutside { outside += 1; info("  \(d.name): fully shared with a file outside this store (another store's clone) — not compared") }
+        let diff = priv < 0 || sharedOutside ? 0 : abs(d.uniqueBytes - priv)
+        if priv >= 0 && !sharedOutside { compared += 1; worst = max(worst, diff) }
         info(String(format: "%-44@ %-17@ alloc %8.1f  unique %8.1f  private %8.1f  shared-w-parent %8@  garbage %8@  %5.0f ext/GiB",
                     String(d.name.prefix(44)), d.kind.rawValue, mbD(d.allocatedBytes), mbD(d.uniqueBytes), mbD(priv),
                     d.sharedWithParentBytes.map { String(format: "%.1f", mbD($0)) } ?? "-",
                     d.garbageBytes.map { String(format: "%.1f", mbD($0)) } ?? "-", d.extentsPerGiB))
         if diff > 1 << 20 { info("  ↑ differs by \(mb(diff))") }
     }
-    check(compared == rep.disks.count && worst <= 1 << 20,
-          "unique bytes match APFS PRIVATESIZE within 1 MiB on all \(compared)/\(rep.disks.count) disks (worst \(mb(worst)))")
+    check(compared + outside == rep.disks.count && compared > 0 && worst <= 1 << 20,
+          "unique bytes match APFS PRIVATESIZE within 1 MiB on all \(compared) store-local disks (worst \(mb(worst)); \(outside) shared with another store, not compared)")
     let per10 = rep.milliseconds / Double(max(rep.disks.count, 1)) * 10
     check(per10 < 100, String(format: "measured %d disks (%.0f MiB allocated, union %.0f MiB) in %.1f ms — %.1f ms per 10 disks (< 100)",
                               rep.disks.count, mbD(rep.disks.reduce(0) { $0 + $1.allocatedBytes }), mbD(rep.unionBytes), rep.milliseconds, per10))
