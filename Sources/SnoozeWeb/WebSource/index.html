@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>snooze</title>
+  <link rel="stylesheet" href="/app.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <div class="shell">
+    <aside class="side" aria-label="Sections">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">z</span>
+        <div>
+          <div class="brand-name">snooze</div>
+          <div class="brand-store" id="store-path">—</div>
+        </div>
+      </div>
+      <nav id="nav">
+        <a href="#/overview" data-view="overview">Sandboxes</a>
+        <a href="#/images" data-view="images">Images</a>
+        <a href="#/accounts" data-view="accounts">Accounts &amp; keys</a>
+        <a href="#/metrics" data-view="metrics">Metrics</a>
+        <a href="#/activity" data-view="activity">Activity</a>
+        <a href="#/doctor" data-view="doctor">Doctor</a>
+      </nav>
+      <div class="side-foot">
+        <div class="live" id="live"><span class="dot" aria-hidden="true"></span><span id="live-text">connecting…</span></div>
+        <div class="readonly">Read-only · phase 1</div>
+        <button type="button" class="link-button" id="sign-out" hidden>Sign out</button>
+      </div>
+    </aside>
+    <main id="main" tabindex="-1">
+      <div class="notice" id="notice" hidden></div>
+      <section id="view" aria-live="polite"></section>
+    </main>
+  </div>
+</body>
+</html>

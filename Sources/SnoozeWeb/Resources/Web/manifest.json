@@ -1,0 +1,26 @@
+{
+  "assets" : [
+    {
+      "cachePolicy" : "no-store",
+      "mimeType" : "text/html; charset=utf-8",
+      "publicPath" : "/",
+      "resourcePath" : "index.html",
+      "sha256" : "8b9ffa580e624cff8c02089914cd74936b40db430fa01cbbe72bbdf51b46a8ce"
+    },
+    {
+      "cachePolicy" : "public, max-age=31536000, immutable",
+      "mimeType" : "text/css; charset=utf-8",
+      "publicPath" : "/assets/app-087968ac5b4abc23.css",
+      "resourcePath" : "assets/app-087968ac5b4abc23.css",
+      "sha256" : "087968ac5b4abc2356fbd7fa52c98638c39eedcb0d1dc78032c5bfa95203c3cd"
+    },
+    {
+      "cachePolicy" : "public, max-age=31536000, immutable",
+      "mimeType" : "application/javascript; charset=utf-8",
+      "publicPath" : "/assets/app-35d433c605a923c0.js",
+      "resourcePath" : "assets/app-35d433c605a923c0.js",
+      "sha256" : "35d433c605a923c0e9ae0d08c64c27380536ca654b7d3bd95f133275e8b52ee8"
+    }
+  ],
+  "version" : 1
+}

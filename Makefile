@@ -49,7 +49,7 @@ CLITEST_STORE ?= $(or $(TMPDIR),/tmp/)snooze-clitest-store
 # 588: the Claude-credentials suite's scratch store (the claude-code image is cloned from the vmtest store).
 CLAUDETEST_STORE ?= $(or $(TMPDIR),/tmp/)snooze-claudetest-store
 
-.PHONY: help build test audit test-vm test-vm-agents test-vm-network test-vm-hardening test-vm-lineage v040-host vmtest-host kernel deckhold deckhold-verify snoozenet snoozenet-verify cli install-cli test-cli test-vm-claude
+.PHONY: help build test audit web-assets web-assets-check test-vm test-vm-agents test-vm-network test-vm-hardening test-vm-lineage v040-host vmtest-host kernel deckhold deckhold-verify snoozenet snoozenet-verify cli install-cli test-cli test-vm-claude
 
 help: ## Show this help
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) | sed 's/:.*## /\t/' | expand -t 22
@@ -57,8 +57,17 @@ help: ## Show this help
 build: ## Build every product (and the VM test host)
 	swift build $(SWIFT_BUILD_SYSTEM) -j $(JOBS)
 
-test: ## Unit tests — no VM, no entitlement (never --parallel)
+test: web-assets-check ## Unit tests — no VM, no entitlement (never --parallel); first, the web assets' drift check
 	swift test $(SWIFT_BUILD_SYSTEM) -j $(JOBS)
+
+# 590: `snooze ui`'s front end. WebSource/ is what people edit; Resources/Web is generated from it
+# (content-hashed, digest manifest) and COMMITTED. The check fails when they differ — run by `make
+# test` and Scripts/audit.sh (CI runs both), so a stale bundle cannot ship.
+web-assets: ## Regenerate Sources/SnoozeWeb/Resources/Web from WebSource/ (commit the result)
+	swift Scripts/build-web-assets.swift
+
+web-assets-check: ## Fail when the committed web assets are not exactly what WebSource/ builds
+	swift Scripts/build-web-assets.swift --check
 
 audit: ## Neutrality audit: import allowlist, one remote dependency, no host brand
 	@Scripts/audit.sh
@@ -113,8 +122,9 @@ install-cli: ## Build snooze (release), sign it, install into PREFIX (default ~/
 	swift build $(SWIFT_BUILD_SYSTEM) -j $(JOBS) -c release --product snooze
 	codesign --force --sign - --entitlements Scripts/snooze.entitlements .build/release/snooze
 	mkdir -p "$(PREFIX)/bin" "$(PREFIX)/libexec/snooze"
-	rm -rf "$(PREFIX)/libexec/snooze/SnoozeContainerKit_SnoozeContainerKit.bundle"
+	rm -rf "$(PREFIX)/libexec/snooze/SnoozeContainerKit_SnoozeContainerKit.bundle" "$(PREFIX)/libexec/snooze/SnoozeContainerKit_SnoozeWeb.bundle"
 	cp -R .build/release/SnoozeContainerKit_SnoozeContainerKit.bundle "$(PREFIX)/libexec/snooze/"
+	cp -R .build/release/SnoozeContainerKit_SnoozeWeb.bundle "$(PREFIX)/libexec/snooze/"
 	cp .build/release/snooze "$(PREFIX)/libexec/snooze/snooze"
 	codesign --force --sign - --entitlements Scripts/snooze.entitlements "$(PREFIX)/libexec/snooze/snooze"
 	ln -sf "$(PREFIX)/libexec/snooze/snooze" "$(PREFIX)/bin/snooze"

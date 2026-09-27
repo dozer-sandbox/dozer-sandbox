@@ -271,6 +271,7 @@ command but cannot boot a VM (`snooze doctor` says so).
 | `snooze key policy NAME allow\|strict\|auto` | 588: a credential the guest brings itself (a guest `/login`, a pasted key) — allow and flag it (fingerprint in `net log`, `ls`, `key ls`, events), or refuse it with an explanation and deny the sign-in hosts. `auto`: strict for a non-`mac` account. |
 | `snooze metrics [--csv] [--image X] [--days N] [--no-steps]` | Every action's timing (count, median, p90, min, max, failures) from `<store>/metrics.sqlite` — SandboxLab's schema. |
 | `snooze doctor` · `snooze events [NAME]` | Checks · follow the host's phases, steps and notes. |
+| `snooze ui [--open\|--print-url]` · `snooze ui link` | 590: a local web dashboard of the whole store — sandboxes, sessions, restore points, network policy and log, keys and accounts (fingerprints only), images, metrics, doctor, live activity. **Read-only** (phase 1). Loopback only, on a port the OS picks; the browser signs in with a one-use, five-minute link (opened for you, or printed on the terminal with `--print-url`); `ui link` mints another for the running UI. A client of the host like every command; one UI per store; Ctrl-C stops it. |
 | `snooze host [--foreground] [--idle-timeout MIN]` · `host stop` · `host status` | The host (normally started for you) · Deep Sleep everything and stop it · is one running (never starts one). |
 
 Every command takes `--json` (machine-readable output on stdout; errors as `{"error":{"code","message"}}`),
@@ -329,7 +330,7 @@ thin client of that socket.
 | Package | Pin | Why |
 |---|---|---|
 | apple/containerization | **exact** 0.47.0 | the VM runtime; the sleep design leans on its internals' shape |
-| apple/swift-nio (NIOCore, NIOEmbedded, NIOPosix) | from 2.103.0 | 580: drives TLS synchronously on the proxy's connection threads (`EmbeddedChannel`); 583: one shared `MultiThreadedEventLoopGroup` for every VM's vminitd clients |
+| apple/swift-nio (NIOCore, NIOEmbedded, NIOPosix; 590: NIOHTTP1) | from 2.103.0 | 580: drives TLS synchronously on the proxy's connection threads (`EmbeddedChannel`); 583: one shared `MultiThreadedEventLoopGroup` for every VM's vminitd clients; 590: `snooze ui`'s HTTP/1.1 server (`NIOHTTP1` is a module of the same package — no new dependency; imported only by `Sources/SnoozeWeb`, which the audit enforces) |
 | apple/swift-nio-ssl (NIOSSL) | from 2.37.5 | 580: terminates and re-originates TLS for bound hosts with **in-memory** keys — Network.framework and Secure Transport need a `SecIdentity`, i.e. a keychain (prompts for an ad-hoc-signed app, and a leaf key per host on disk) |
 | apple/swift-certificates (X509), apple/swift-asn1 | from 1.21.0 / 1.7.3 | 580: issues the per-sandbox CA and its per-host leaves |
 
@@ -378,7 +379,9 @@ This package owns no brand and no directory name: the host passes `storeRoot`. N
 
 ```bash
 make build            # swift build (with the build-system pin Xcode 27 needs)
-make test             # unit tests — no VM
+make test             # unit tests — no VM (runs make web-assets-check first)
+make web-assets       # 590: rebuild snooze ui's content-hashed assets from Sources/SnoozeWeb/WebSource (commit them)
+make web-assets-check # 590: fail when the committed web assets are not exactly what WebSource/ builds
 make test-vm          # the VM integration suite: lifecycle, crash restore, restore points (entitled test host)
 make test-vm-agents   # the claude-code and pi images: bake/cache, start, sessions, sleep → wake, state disk
 make kernel           # fetch + verify the pinned kernel into the cache (KERNEL_CACHE=dir), no VM
