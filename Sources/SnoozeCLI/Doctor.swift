@@ -134,12 +134,12 @@ struct Doctor: AsyncParsableCommand {
         if listItems {
             let items = keychain.items(servicePrefix: ClaudeLogin.baseService)
             if items.count > 1 {
-                var known: [String: String] = [ClaudeLogin.baseService: "default (~/.claude)"]
-                for a in accounts.accounts where a.kind == .mac { known[ClaudeLogin.service(configDir: a.configDir)] = a.configDir ?? "default (~/.claude)" }
+                var known: [String: String] = [ClaudeLogin.baseService: "~/.claude"]
+                for a in accounts.accounts where a.kind == .mac { known[ClaudeLogin.service(configDir: a.configDir)] = a.configDir ?? "~/.claude" }
                 let list = items.map { i -> String in
                     let name = i.service == ClaudeLogin.baseService ? "default" : String(i.service.dropFirst(ClaudeLogin.baseService.count + 1))
                     let modified = i.modified.map { " written \($0.formatted(date: .abbreviated, time: .omitted))" } ?? ""
-                    return "\(name) (\(known[i.service] ?? "unknown dir")\(modified))"
+                    return "\(name) (\(known[i.service] ?? "unknown dir")\(modified.isEmpty ? "" : ",")\(modified))"
                 }
                 out.append(DoctorCheck(check: "claude logins", status: .ok, detail: "\(items.count) in the keychain: " + list.joined(separator: " · ")))
             }

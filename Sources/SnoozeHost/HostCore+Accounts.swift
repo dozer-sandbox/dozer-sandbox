@@ -281,12 +281,15 @@ extension HostCore {
         }
         m.config.account = value == "none" ? nil : value
         m.config.credentialSources = [:]
-        if value == "none" {
-            m.sandbox.setCredential(.anthropic, secret: nil, expiresAt: nil, environment: [:], notice: nil)
-            m.sandbox.setCredential(.claudeOAuth, secret: nil, expiresAt: nil, environment: [:], notice: nil)
-        }
         try m.config.write(store.configFile(m.name))
         applyAccount(m)
+        if value == "none" {
+            // Sessions still hold placeholders: tell them why their requests fail (E20), rather
+            // than let the proxy stop decrypting (a TLS error in the guest).
+            let why = "\(m.name) has no Anthropic account now — snooze account use \(m.name) ACCOUNT (open sessions recover without a restart)"
+            m.sandbox.setCredential(.anthropic, secret: nil, expiresAt: nil, environment: [:], notice: why)
+            m.sandbox.setCredential(.claudeOAuth, secret: nil, expiresAt: nil, environment: [:], notice: why)
+        }
         try m.config.write(store.configFile(m.name))
         note(m.name, value == "none" ? "no Anthropic account (sessions get no credential)"
              : "uses the account \(target)\(value == "default" ? " (the default)" : "") — open sessions switch on their next request")
