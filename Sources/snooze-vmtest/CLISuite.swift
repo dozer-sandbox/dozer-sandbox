@@ -208,6 +208,8 @@ func cliSuite() async throws {
     if h.hostRunning { h.run(["host", "stop"]) }
 
     do {
+        // 588: this scratch store's proxied sandboxes follow no account — the suite never reads the Mac's login.
+        check(h.run(["account", "default", "none"]).code == 0, "account default none")
         print("cli: doctor")
         let doctor = h.run(["doctor", "--json"])
         check(doctor.out.contains("\"check\" : \"entitlement\"") && !doctor.out.contains("\"status\" : \"fail\""),

@@ -46,8 +46,10 @@ PREFIX        ?= $(HOME)/.local
 # The CLI's VM integration suite drives the REAL signed binary from separate processes, in a
 # SCRATCH store (never ~/Library/Application Support/SnoozeContainerKit).
 CLITEST_STORE ?= $(or $(TMPDIR),/tmp/)snooze-clitest-store
+# 588: the Claude-credentials suite's scratch store (the claude-code image is cloned from the vmtest store).
+CLAUDETEST_STORE ?= $(or $(TMPDIR),/tmp/)snooze-claudetest-store
 
-.PHONY: help build test audit test-vm test-vm-agents test-vm-network test-vm-hardening vmtest-host kernel deckhold deckhold-verify snoozenet snoozenet-verify cli install-cli test-cli
+.PHONY: help build test audit test-vm test-vm-agents test-vm-network test-vm-hardening vmtest-host kernel deckhold deckhold-verify snoozenet snoozenet-verify cli install-cli test-cli test-vm-claude
 
 help: ## Show this help
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) | sed 's/:.*## /\t/' | expand -t 22
@@ -97,6 +99,9 @@ install-cli: ## Build snooze (release), sign it, install into PREFIX (default ~/
 
 test-cli: cli vmtest-host ## 585 CLI suite: the signed snooze from separate processes (up/exec/run/attach, lifecycle, points, two sandboxes, kill -9 host, idle exit)
 	perl -e 'alarm shift; exec @ARGV' 1500 $(VMTEST_BIN) cli --snooze $(CLI_BIN) --store "$(CLITEST_STORE)"
+
+test-vm-claude: cli vmtest-host ## 588 Claude credentials: the proxy's classifier (allow/strict), a placeholder across a host restart, revoke on shutdown, no token on disk — a FAKE key, nobody's login (SNOOZE_TEST_CLAUDE_LOGIN=1 adds this Mac's login, read-only)
+	perl -e 'alarm shift; exec @ARGV' 1500 $(VMTEST_BIN) claude --snooze $(CLI_BIN) --store "$(CLAUDETEST_STORE)"
 
 deckhold: ## Rebuild the deckhold guest binary, install it as the committed resource, refresh PROVENANCE.md
 	Guest/deckhold/build.sh

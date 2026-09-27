@@ -880,6 +880,8 @@ Task {
             exit(0)
         case "cli":
             try await cliSuite()
+        case "claude":
+            try await claudeSuite()
         case "lifecycle":
             try await lifecycleSuite()
         case "crash":
