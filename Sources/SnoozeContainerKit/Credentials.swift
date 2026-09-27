@@ -58,6 +58,13 @@ public struct CredentialBinding: Sendable, Codable, Equatable, Identifiable {
     public static let anthropic = CredentialBinding(id: "anthropic", hosts: ["api.anthropic.com"], header: .xAPIKey,
                                                     environmentVariable: "ANTHROPIC_API_KEY")
 
+    /// A Claude subscription login: an OAuth ACCESS token, `Authorization: Bearer` on
+    /// api.anthropic.com, `CLAUDE_CODE_OAUTH_TOKEN` in the guest. Only the access token is ever
+    /// held — never the refresh token, which the Mac's own Claude Code keeps using (a sandbox that
+    /// refreshed it would sign the Mac out).
+    public static let claudeOAuth = CredentialBinding(id: "claude-oauth", hosts: ["api.anthropic.com"], header: .bearer,
+                                                      environmentVariable: "CLAUDE_CODE_OAUTH_TOKEN")
+
     public func covers(_ host: String) -> Bool { hosts.contains(host.lowercased()) }
 }
 
@@ -118,7 +125,10 @@ public final class CredentialVault: @unchecked Sendable {
     /// The environment a session gets: one fresh placeholder per binding that names a variable.
     public func sessionEnvironment() -> [String: String] {
         var env: [String: String] = [:]
-        for b in allBindings { if let v = b.environmentVariable, let t = mint(b.id) { env[v] = t } }
+        // Only bindings that hold a secret (as `Sandbox.guestEnvironment` does): a placeholder with
+        // nothing behind it would only be refused, and it would steer a tool that prefers one
+        // variable (Claude Code: ANTHROPIC_API_KEY over CLAUDE_CODE_OAUTH_TOKEN) the wrong way.
+        for b in allBindings where hasSecret(b.id) { if let v = b.environmentVariable, let t = mint(b.id) { env[v] = t } }
         return env
     }
 
@@ -135,7 +145,12 @@ public final class CredentialVault: @unchecked Sendable {
         // Every placeholder anywhere in the head is checked, not only in the bound header.
         let text = String(decoding: head, as: UTF8.self)
         let tokens = Self.placeholderTokens(in: text)
-        let binding = bindings.values.first { $0.covers(h) && secrets[$0.id] != nil }
+        // The binding is the one whose placeholder the request carries; with none, the first
+        // bound one for this host (injection). Two bindings can cover one host — an Anthropic API
+        // key and a Claude subscription login — so "first for the host" alone would be arbitrary.
+        let carried = tokens.lazy.compactMap { self.placeholders[$0] }.compactMap { self.bindings[$0] }
+            .first { $0.covers(h) && self.secrets[$0.id] != nil }
+        let binding = carried ?? bindings.values.sorted { $0.id < $1.id }.first { $0.covers(h) && secrets[$0.id] != nil }
         for t in tokens {
             guard let bid = placeholders[t] else { return .reject("an unknown or revoked credential placeholder") }
             guard let b = bindings[bid], b.covers(h) else { return .reject("a credential placeholder for \(bindings[bid]?.hosts.joined(separator: ",") ?? bid), sent to \(h)") }

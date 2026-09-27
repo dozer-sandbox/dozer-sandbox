@@ -117,6 +117,14 @@ The host's proxy holds the key and adds it to requests to Anthropic on their way
 `ANTHROPIC_API_KEY` is a `snz_cred_…` placeholder. The key is never accepted as a command-line
 argument, so it never lands in shell history or `ps`.
 
+- **No API key? Use your Claude subscription:** `snooze key set NAME --claude-login`. The host
+  reads this Mac's own Claude Code login from the keychain: the short-lived access token only,
+  never the refresh token, so the Mac stays signed in. The host re-reads it every 2 minutes, so it
+  follows the refreshes the Mac's Claude Code makes. Inside, `CLAUDE_CODE_OAUTH_TOKEN` is a
+  placeholder, and the proxy swaps the token into `Authorization: Bearer` on the way to Anthropic.
+  Log in on the Mac first (`claude`, then `/login`). One Anthropic credential at a time: setting
+  the login forgets an API key, and the reverse. Claude Code can't see the subscription type from
+  a token, so it shows "Claude API" and picks its general default model; use `/model` to change.
 - **A key from stdin or the prompt lasts while the host runs.** When the host stops (idle exit,
   `host stop`, a reboot), set it again.
 - **A keychain key** is read again whenever a new host loads the sandbox. To store one:

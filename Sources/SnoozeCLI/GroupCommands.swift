@@ -261,12 +261,22 @@ struct KeySet: AsyncParsableCommand {
     @Argument var name: String
     @Flag(name: .long, help: "Anthropic's API key (api.anthropic.com, x-api-key; ANTHROPIC_API_KEY in the guest is a placeholder).") var anthropic = false
     @Option(name: .long, help: "Read it from this keychain item (a generic password's service name).") var keychain: String?
+    @Flag(name: .long, help: "Use this Mac's own Claude Code login (a Claude subscription) instead of an API key: the host reads its access token from the keychain and keeps it current; the guest's CLAUDE_CODE_OAUTH_TOKEN is a placeholder.") var claudeLogin = false
 
     func validate() throws {
-        if !anthropic { throw ValidationError("which key? --anthropic") }
+        if anthropic == claudeLogin { throw ValidationError("which key? --anthropic or --claude-login") }
+        if claudeLogin && keychain != nil { throw ValidationError("--claude-login reads Claude Code's own keychain item; --keychain is for --anthropic") }
     }
 
     func run() async throws {
+        if claudeLogin {
+            var r = HostRequest(.keySet, name: name)
+            r.binding = CredentialBinding.claudeOAuth.id
+            r.source = ClaudeLogin.source
+            let rows = try decode(try call(r, g), [CredentialRow].self, g)
+            if g.json { Out.json(rows) } else { Out.stdout("\(name) uses this Mac's Claude login (held by the host and kept current; never in the sandbox)\n") }
+            return
+        }
         let secret: String
         let source: String
         if let service = keychain {
@@ -303,12 +313,13 @@ struct KeyRemove: AsyncParsableCommand {
     @OptionGroup var g: GlobalOptions
     @Argument var name: String
     @Flag(name: .long) var anthropic = false
-    func validate() throws { if !anthropic { throw ValidationError("which key? --anthropic") } }
+    @Flag(name: .long) var claudeLogin = false
+    func validate() throws { if anthropic == claudeLogin { throw ValidationError("which key? --anthropic or --claude-login") } }
     func run() async throws {
         var r = HostRequest(.keyRm, name: name)
-        r.binding = CredentialBinding.anthropic.id
+        r.binding = claudeLogin ? CredentialBinding.claudeOAuth.id : CredentialBinding.anthropic.id
         let rows = try decode(try call(r, g), [CredentialRow].self, g)
-        if g.json { Out.json(rows) } else { Out.stdout("anthropic key removed from \(name)\n") }
+        if g.json { Out.json(rows) } else { Out.stdout("\(r.binding!) removed from \(name)\n") }
     }
 }
 

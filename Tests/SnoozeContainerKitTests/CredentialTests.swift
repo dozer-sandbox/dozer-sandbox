@@ -34,6 +34,24 @@ final class CredentialTests: XCTestCase {
         }
     }
 
+    /// Two bindings on one host (an API key and a Claude login): the request's own placeholder
+    /// decides which secret goes in, and in which header.
+    func testTwoBindingsOnOneHostSwapByTheCarriedPlaceholder() throws {
+        let v = vault()
+        v.set(.claudeOAuth, secret: "sk-ant-oat01-REAL-ACCESS")
+        let oauth = try XCTUnwrap(v.mint(CredentialBinding.claudeOAuth.id))
+        let d = v.rewrite(head: head("POST /v1/messages HTTP/1.1\nHost: api.anthropic.com\nAuthorization: Bearer \(oauth)\n\n"),
+                          host: "api.anthropic.com")
+        XCTAssertEqual(d, .swapped(head("POST /v1/messages HTTP/1.1\nHost: api.anthropic.com\nAuthorization: Bearer sk-ant-oat01-REAL-ACCESS\n\n"),
+                                   binding: "claude-oauth"))
+        let key = try XCTUnwrap(v.mint(CredentialBinding.anthropic.id))
+        let k = v.rewrite(head: head("POST /v1/messages HTTP/1.1\nHost: api.anthropic.com\nx-api-key: \(key)\n\n"), host: "api.anthropic.com")
+        XCTAssertEqual(k, .swapped(head("POST /v1/messages HTTP/1.1\nHost: api.anthropic.com\nx-api-key: \(secret)\n\n"), binding: "anthropic"))
+        // Only the binding holding a secret gets a placeholder in a session's environment.
+        v.set(.anthropic, secret: nil)
+        XCTAssertEqual(Set(v.sessionEnvironment().keys), ["CLAUDE_CODE_OAUTH_TOKEN", "GH_TOKEN"])
+    }
+
     func testSwapIsByteExact() throws {
         let v = vault()
         let t = try XCTUnwrap(v.mint("anthropic"))

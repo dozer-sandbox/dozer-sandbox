@@ -41,6 +41,8 @@ public actor HostCore {
         var config: SandboxConfig
         var eventTask: Task<Void, Never>?
         var networkTask: Task<Void, Never>?
+        /// Keeps a `--claude-login` credential current with the Mac's own Claude Code login.
+        var loginTask: Task<Void, Never>? { didSet { oldValue?.cancel() } }
         /// The metrics row of the action running now (library steps hang under it).
         var actionRow: Int64?
         var lastAction: (row: Int64, at: Date)?
@@ -113,6 +115,9 @@ public actor HostCore {
                 Task.detached { [weak sb] in
                     if let secret = Keychain.read(service: service), let sb { sb.setCredential(.anthropic, secret: secret) }
                 }
+            }
+            if cfg.credentialSources[CredentialBinding.claudeOAuth.id] == ClaudeLogin.source {
+                m.loginTask = ClaudeLogin.keepFresh(sb)
             }
         }
         return m
@@ -853,20 +858,41 @@ public actor HostCore {
         guard m.sandbox.egress != nil else {
             throw HostError(.invalid, "\(m.name) is not proxied (network \(m.config.networkName)): a key would have to enter the sandbox — create it with a proxied network (agent, open, …)")
         }
-        guard r.binding == nil || r.binding == CredentialBinding.anthropic.id else {
-            throw HostError(.invalid, "unknown credential \(r.binding ?? "") — anthropic")
+        let binding: CredentialBinding
+        switch r.binding ?? CredentialBinding.anthropic.id {
+        case CredentialBinding.anthropic.id: binding = .anthropic
+        case CredentialBinding.claudeOAuth.id: binding = .claudeOAuth
+        case let other: throw HostError(.invalid, "unknown credential \(other) — anthropic or claude-oauth")
         }
+        // One Anthropic credential at a time: Claude Code prefers ANTHROPIC_API_KEY over an OAuth
+        // token when both are in its environment, so setting one forgets the other.
+        let other: CredentialBinding = binding.id == CredentialBinding.anthropic.id ? .claudeOAuth : .anthropic
         if r.op == .keySet {
-            guard let secret = r.secret?.trimmingCharacters(in: .whitespacesAndNewlines), !secret.isEmpty else {
-                throw HostError(.invalid, "an empty key")
+            let secret: String
+            if binding.id == CredentialBinding.claudeOAuth.id && r.source == ClaudeLogin.source {
+                guard let t = ClaudeLogin.read() else {
+                    throw HostError(.notFound, "no Claude Code login on this Mac (keychain item \"\(ClaudeLogin.service)\") — run claude and /login first")
+                }
+                secret = t.accessToken
+                m.loginTask = ClaudeLogin.keepFresh(m.sandbox)
+            } else {
+                guard let s = r.secret?.trimmingCharacters(in: .whitespacesAndNewlines), !s.isEmpty else {
+                    throw HostError(.invalid, "an empty key")
+                }
+                secret = s
+                if binding.id == CredentialBinding.claudeOAuth.id { m.loginTask = nil }
             }
-            m.sandbox.setCredential(.anthropic, secret: secret)
-            m.config.credentialSources[CredentialBinding.anthropic.id] = r.source ?? "stdin"
-            note(m.name, "anthropic key set (from \(r.source ?? "stdin"); memory only — sessions get a placeholder)")
+            m.sandbox.setCredential(binding, secret: secret)
+            m.config.credentialSources[binding.id] = r.source ?? "stdin"
+            m.sandbox.setCredential(other, secret: nil)
+            m.config.credentialSources[other.id] = nil
+            if other.id == CredentialBinding.claudeOAuth.id { m.loginTask = nil }
+            note(m.name, "\(binding.id) set (from \(r.source ?? "stdin"); memory only — sessions get a placeholder)")
         } else {
-            m.sandbox.setCredential(.anthropic, secret: nil)
-            m.config.credentialSources[CredentialBinding.anthropic.id] = nil
-            note(m.name, "anthropic key removed")
+            m.sandbox.setCredential(binding, secret: nil)
+            m.config.credentialSources[binding.id] = nil
+            if binding.id == CredentialBinding.claudeOAuth.id { m.loginTask = nil }
+            note(m.name, "\(binding.id) removed")
         }
         try m.config.write(store.configFile(m.name))
         return credentials(m)
@@ -898,6 +924,55 @@ public enum HostLog {
 
 /// Reads a generic password with `/usr/bin/security` (the item the user stored; never written by
 /// snooze). A timeout guards against a keychain prompt nobody answers.
+/// The Mac's own Claude Code login (`snooze key set NAME --claude-login`). Claude Code keeps its
+/// subscription OAuth credentials in the login keychain; the host reads only the ACCESS token
+/// (short-lived, ~8 h) through `/usr/bin/security` — the tool Claude Code writes the item with, so
+/// no keychain dialog — and never the refresh token: a sandbox that refreshed would rotate it
+/// and sign the Mac out (Deckosaurus' 488 finding). The Mac's Claude Code refreshes the item
+/// itself; `keepFresh` re-reads it so the vault follows.
+public enum ClaudeLogin {
+    public static let service = "Claude Code-credentials"
+    /// The `CredentialRow.source` / `SandboxConfig.credentialSources` value.
+    public static let source = "claude-login"
+
+    public struct Token: Sendable {
+        public var accessToken: String
+        public var expiresAt: Date?
+    }
+
+    public static func read() -> Token? {
+        guard let raw = Keychain.read(service: service) else { return nil }
+        let data = Data(raw.utf8)
+        let hex: Data? = {                                 // some versions store it hex-encoded
+            var d = Data(); var it = raw.makeIterator()
+            while let a = it.next(), let b = it.next() { guard let v = UInt8(String([a, b]), radix: 16) else { return nil }; d.append(v) }
+            return d
+        }()
+        for candidate in [data, hex].compactMap({ $0 }) {
+            guard let obj = try? JSONSerialization.jsonObject(with: candidate) as? [String: Any],
+                  let o = obj["claudeAiOauth"] as? [String: Any],
+                  let t = o["accessToken"] as? String, !t.isEmpty else { continue }
+            return Token(accessToken: t, expiresAt: (o["expiresAt"] as? Double).map { Date(timeIntervalSince1970: $0 / 1000) })
+        }
+        return nil
+    }
+
+    /// Re-read the Mac's login every 2 minutes and hand a changed access token to the sandbox's vault.
+    static func keepFresh(_ sandbox: Sandbox) -> Task<Void, Never> {
+        Task.detached { [weak sandbox] in
+            var last: String?
+            while !Task.isCancelled {
+                if let t = read(), t.accessToken != last, let sandbox {
+                    sandbox.setCredential(.claudeOAuth, secret: t.accessToken)
+                    last = t.accessToken
+                }
+                if sandbox == nil { return }
+                try? await Task.sleep(for: .seconds(120))
+            }
+        }
+    }
+}
+
 public enum Keychain {
     public static func read(service: String, timeout: TimeInterval = 5) -> String? {
         let p = Process()

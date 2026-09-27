@@ -58,6 +58,7 @@ public actor Sandbox {
         if let policy = spec.network.policy {
             let proxy = try EgressProxy(policy: policy, ca: nil)
             proxy.vault.set(.anthropic, secret: nil)
+            proxy.vault.set(.claudeOAuth, secret: nil)   // so a real token passed in the environment is vaulted too
             egress = proxy
         } else {
             egress = nil
