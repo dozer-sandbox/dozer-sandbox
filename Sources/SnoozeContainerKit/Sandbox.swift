@@ -59,6 +59,7 @@ public actor Sandbox {
         if let policy = spec.network.policy {
             let proxy = try EgressProxy(policy: policy, ca: nil)
             proxy.vault.set(.anthropic, secret: nil)
+            proxy.vault.set(.claudeOAuth, secret: nil)   // so a real token passed in the environment is vaulted too
             egress = proxy
         } else {
             egress = nil
@@ -1225,6 +1226,13 @@ public actor Sandbox {
         egress?.vault.set(binding, secret: secret)
     }
 
+    /// 588: a secret with its expiry, the non-secret variables a session gets beside its
+    /// placeholder, and — without a secret — why (the proxy's 401 text).
+    public nonisolated func setCredential(_ binding: CredentialBinding, secret: String?, expiresAt: Date?,
+                                          environment: [String: String], notice: String?) {
+        egress?.vault.set(binding, secret: secret, expiresAt: expiresAt, environment: environment, notice: notice)
+    }
+
     /// The environment a proxied sandbox's command gets: the proxy + CA variables, then the
     /// caller's (which win) — except that a real credential in a bound variable is moved into the
     /// vault and replaced by a placeholder, so it never reaches the guest.
@@ -1241,6 +1249,7 @@ public actor Sandbox {
         if placeholders {
             for b in egress.vault.allBindings where egress.vault.hasSecret(b.id) {
                 if let v = b.environmentVariable, let t = egress.vault.mint(b.id) { env[v] = t }
+                env.merge(egress.vault.sessionExtras(b.id)) { a, _ in a }
             }
         }
         env.merge(callerEnv) { _, caller in caller }

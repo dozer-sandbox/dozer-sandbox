@@ -5,3 +5,6 @@
 Guest/deckhold/out/
 /*.xcodeproj
 Guest/snoozenet/out/
+
+# Codex hook state (per machine; never tracked)
+.codex/hooks/.history-state.json

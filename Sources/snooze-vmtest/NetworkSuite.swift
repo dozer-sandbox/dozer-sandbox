@@ -85,8 +85,10 @@ func networkSuite() async throws {
           "the anthropic placeholder sent to api.github.com → 403 from the proxy, logged (\(wrong.output.replacingOccurrences(of: "\n", with: " ")))")
     let own = try await sh("curl -s -m 30 -o /dev/null -w '%{http_code}' https://api.anthropic.com/v1/models -H 'x-api-key: sk-ant-tools-own-credential' -H 'anthropic-version: 2023-06-01'")
     await sleepS(0.4)
-    check(own.output == "401" && log.records.last { $0.path == "/v1/models" }?.credential == nil,
-          "a tool's own credential passes through untouched (HTTP \(own.output))")
+    // 588: untouched on the wire, but flagged — its kind and fingerprint, never its value.
+    let ownRec = log.records.last { $0.path == "/v1/models" }?.credential
+    check(own.output == "401" && ownRec?.hasPrefix("own credential (other") == true && ownRec?.contains("tools-own") == false,
+          "a tool's own credential passes through untouched and is flagged (HTTP \(own.output); \(ownRec ?? "no verdict"))")
 
     // Claude Code with a placeholder-only environment.
     m = mark(log)

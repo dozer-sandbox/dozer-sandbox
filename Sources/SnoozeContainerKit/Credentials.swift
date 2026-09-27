@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 // Feature 580 Phase 2 — credentials that never enter the sandbox.
@@ -9,7 +10,10 @@ import Foundation
 //   - no auth header at all                                   → the secret is injected (Omnigent's
 //                                                               default "swap-on-access" mode);
 //   - a placeholder minted for ANOTHER host, or unknown       → 403 and a log entry (leak guard);
-//   - a real-looking credential the tool supplied itself      → passed through untouched.
+//   - a real-looking credential the tool supplied itself      → (588) classified by kind and
+//                                                               fingerprint: passed through and
+//                                                               flagged, or (strict) refused — and
+//                                                               NEVER gets our secret injected beside it.
 // The secret lives only in the host process (never written to disk, never in the guest).
 
 /// Where a secret goes on the wire.
@@ -58,7 +62,93 @@ public struct CredentialBinding: Sendable, Codable, Equatable, Identifiable {
     public static let anthropic = CredentialBinding(id: "anthropic", hosts: ["api.anthropic.com"], header: .xAPIKey,
                                                     environmentVariable: "ANTHROPIC_API_KEY")
 
+    /// A Claude subscription login: an OAuth ACCESS token, `Authorization: Bearer` on
+    /// api.anthropic.com, `CLAUDE_CODE_OAUTH_TOKEN` in the guest. Only the access token is ever
+    /// held — never the refresh token, which the Mac's own Claude Code keeps using (a sandbox that
+    /// refreshed it would sign the Mac out).
+    public static let claudeOAuth = CredentialBinding(id: "claude-oauth", hosts: ["api.anthropic.com"], header: .bearer,
+                                                      environmentVariable: "CLAUDE_CODE_OAUTH_TOKEN")
+
     public func covers(_ host: String) -> Bool { hosts.contains(host.lowercased()) }
+}
+
+/// What the proxy does with a credential the guest supplied itself (588) — a real-looking key or
+/// token in an auth header that snooze never issued (a guest `/login`, a pasted key).
+public enum ForeignCredentialPolicy: String, Sendable, Codable, CaseIterable {
+    /// Pass it through, and flag it (log verdict, a sighting with a fingerprint).
+    case allow
+    /// Refuse it (403 with an explanation): the sandbox is pinned to the credential snooze holds.
+    case strict
+}
+
+/// A credential the guest used that snooze never issued. Never the value: its kind, the prefix up
+/// to its version (`sk-ant-oat01`), and the first 12 hex of its sha256.
+public struct ForeignCredential: Sendable, Codable, Equatable {
+    /// `oauth`, `api-key`, `admin-key` or `other`.
+    public var kind: String
+    public var prefix: String
+    public var fingerprint: String
+    /// The header it came in (`authorization`, `x-api-key`).
+    public var header: String
+    public var firstSeen: Date
+    public var lastSeen: Date
+    public var requests: Int
+    /// When it is also a credential snooze holds under a name (an account), that name.
+    public var matches: String?
+
+    public init(kind: String, prefix: String, fingerprint: String, header: String, firstSeen: Date, lastSeen: Date,
+                requests: Int, matches: String? = nil) {
+        self.kind = kind
+        self.prefix = prefix
+        self.fingerprint = fingerprint
+        self.header = header
+        self.firstSeen = firstSeen
+        self.lastSeen = lastSeen
+        self.requests = requests
+        self.matches = matches
+    }
+
+    /// `own credential (oauth sk-ant-oat01…, fp ab12cd34ef56)`.
+    public var label: String {
+        "own credential (\(kind) \(prefix)…, fp \(fingerprint)\(matches.map { " — same as account \($0)" } ?? ""))"
+    }
+}
+
+/// Fingerprints and kinds of credential values (never the value itself).
+public enum CredentialFingerprint {
+    /// First 12 hex of sha256 of the value (without a `Bearer ` scheme).
+    public static func of(_ value: String) -> String {
+        let v = bare(value)
+        return SHA256.hash(data: Data(v.utf8)).map { String(format: "%02x", $0) }.joined().prefix(12).description
+    }
+
+    /// sha256 hex of a placeholder (what is persisted so a new host knows it — never the placeholder).
+    public static func placeholderHash(_ token: String) -> String {
+        SHA256.hash(data: Data(token.utf8)).map { String(format: "%02x", $0) }.joined()
+    }
+
+    static func bare(_ value: String) -> String {
+        let t = value.trimmingCharacters(in: .whitespaces)
+        if t.lowercased().hasPrefix("bearer ") { return String(t.dropFirst(7)).trimmingCharacters(in: .whitespaces) }
+        return t
+    }
+
+    /// `oauth` / `api-key` / `admin-key` / `other`.
+    public static func kind(_ value: String) -> String {
+        let v = bare(value)
+        if v.hasPrefix("sk-ant-oat") { return "oauth" }
+        if v.hasPrefix("sk-ant-api") { return "api-key" }
+        if v.hasPrefix("sk-ant-admin") { return "admin-key" }
+        return "other"
+    }
+
+    /// The value up to its version (`sk-ant-oat01`), at most 13 characters; `?` for anything else.
+    public static func prefix(_ value: String) -> String {
+        let v = bare(value)
+        guard v.hasPrefix("sk-") else { return "?" }
+        let parts = v.split(separator: "-", maxSplits: 3, omittingEmptySubsequences: false)
+        return String(parts.prefix(3).joined(separator: "-").prefix(13))
+    }
 }
 
 /// The host-side vault: secrets (memory only), bindings, and the placeholders minted for them.
@@ -67,6 +157,12 @@ public struct CredentialBinding: Sendable, Codable, Equatable, Identifiable {
 /// start — so a token is never shared between sessions or sandboxes, and `revokeAll` (on stop)
 /// kills every token at once. A token is reusable for that session's requests (an SDK sends its
 /// key on every request); "single-use" here means single ISSUE, never reused or re-issued.
+///
+/// **588.** A placeholder's sha256 can be handed to a NEW vault (`restorePlaceholderHashes`) so a
+/// session that survived a host restart keeps working; a secret can carry an expiry, a notice
+/// (why it is missing — the proxy's 401 text) and non-secret session variables; a credential the
+/// guest supplied itself is classified, flagged or (strict) refused, and never gets our secret
+/// injected beside it.
 public final class CredentialVault: @unchecked Sendable {
     public static let placeholderPrefix = "snz_cred_"
 
@@ -75,6 +171,37 @@ public final class CredentialVault: @unchecked Sendable {
     private var secrets: [String: String] = [:]
     /// token → binding id
     private var placeholders: [String: String] = [:]
+    /// sha256(token) → binding id: placeholders a previous host minted (588, D8).
+    private var restoredHashes: [String: String] = [:]
+    private var expiries: [String: Date] = [:]
+    private var notices: [String: String] = [:]
+    private var extras: [String: [String: String]] = [:]
+    private var lastUse: [String: Date] = [:]
+    private var sightings: [String: ForeignCredential] = [:]
+    private var labels: [String: String] = [:]
+    private var _policy: ForeignCredentialPolicy = .allow
+    private var _strictNotice: String?
+
+    /// Called (from a proxy thread, never under the vault's lock) when a secret about to be used
+    /// has expired, or the upstream answered 401 to a request that carried it: the owner re-reads
+    /// its source and `set`s the secret again (or not). Then the request is decided again.
+    public var onStale: (@Sendable (String) -> Void)? {
+        get { lock.lock(); defer { lock.unlock() }; return _onStale }
+        set { lock.lock(); _onStale = newValue; lock.unlock() }
+    }
+    private var _onStale: (@Sendable (String) -> Void)?
+    /// The first sighting of each foreign credential (by fingerprint).
+    public var onForeign: (@Sendable (ForeignCredential) -> Void)? {
+        get { lock.lock(); defer { lock.unlock() }; return _onForeign }
+        set { lock.lock(); _onForeign = newValue; lock.unlock() }
+    }
+    private var _onForeign: (@Sendable (ForeignCredential) -> Void)?
+    /// Placeholders were minted or revoked (the owner persists `placeholderHashes`).
+    public var onPlaceholdersChanged: (@Sendable () -> Void)? {
+        get { lock.lock(); defer { lock.unlock() }; return _onPlaceholders }
+        set { lock.lock(); _onPlaceholders = newValue; lock.unlock() }
+    }
+    private var _onPlaceholders: (@Sendable () -> Void)?
 
     public init() {}
 
@@ -82,13 +209,31 @@ public final class CredentialVault: @unchecked Sendable {
         lock.lock(); defer { lock.unlock() }
         bindings[binding.id] = binding
         secrets[binding.id] = secret.flatMap { $0.isEmpty ? nil : $0 }
+        if secrets[binding.id] != nil { notices[binding.id] = nil }
+    }
+
+    /// A secret with its expiry, the non-secret variables a session gets beside its placeholder
+    /// (e.g. `CLAUDE_CODE_SUBSCRIPTION_TYPE`), and — when there is no secret — why (`notice`: the
+    /// proxy answers a request that needs it with 401 and this text).
+    public func set(_ binding: CredentialBinding, secret: String?, expiresAt: Date?, environment: [String: String] = [:],
+                    notice: String? = nil) {
+        lock.lock(); defer { lock.unlock() }
+        bindings[binding.id] = binding
+        secrets[binding.id] = secret.flatMap { $0.isEmpty ? nil : $0 }
+        expiries[binding.id] = expiresAt
+        extras[binding.id] = environment.isEmpty ? nil : environment
+        notices[binding.id] = notice
     }
 
     public func remove(_ id: String) {
         lock.lock(); defer { lock.unlock() }
         bindings[id] = nil
         secrets[id] = nil
+        expiries[id] = nil
+        extras[id] = nil
+        notices[id] = nil
         placeholders = placeholders.filter { $0.value != id }
+        restoredHashes = restoredHashes.filter { $0.value != id }
     }
 
     public var allBindings: [CredentialBinding] {
@@ -97,67 +242,222 @@ public final class CredentialVault: @unchecked Sendable {
     }
 
     public func hasSecret(_ id: String) -> Bool { lock.lock(); defer { lock.unlock() }; return secrets[id] != nil }
+    public func expiry(_ id: String) -> Date? { lock.lock(); defer { lock.unlock() }; return expiries[id] }
+    public func notice(_ id: String) -> String? { lock.lock(); defer { lock.unlock() }; return notices[id] }
+    /// When a request last used binding `id`'s secret (swapped or injected).
+    public func lastUsed(_ id: String) -> Date? { lock.lock(); defer { lock.unlock() }; return lastUse[id] }
+    /// The non-secret session variables of binding `id` (when it holds a secret).
+    public func sessionExtras(_ id: String) -> [String: String] {
+        lock.lock(); defer { lock.unlock() }
+        return secrets[id] == nil ? [:] : (extras[id] ?? [:])
+    }
+
+    /// What the proxy does with a credential the guest supplied itself, and (strict) what the
+    /// refusal says (`{fp}` is replaced by the credential's fingerprint).
+    public var foreignPolicy: ForeignCredentialPolicy {
+        get { lock.lock(); defer { lock.unlock() }; return _policy }
+        set { lock.lock(); _policy = newValue; lock.unlock() }
+    }
+    public var strictNotice: String? {
+        get { lock.lock(); defer { lock.unlock() }; return _strictNotice }
+        set { lock.lock(); _strictNotice = newValue; lock.unlock() }
+    }
+
+    /// Names for fingerprints of credentials the owner holds (the log says "same as account X").
+    public func setFingerprintLabels(_ l: [String: String]) { lock.lock(); labels = l; lock.unlock() }
+
+    /// Every foreign credential seen since this vault was made, oldest first.
+    public var foreignSightings: [ForeignCredential] {
+        lock.lock(); defer { lock.unlock() }
+        return sightings.values.sorted { $0.firstSeen < $1.firstSeen }
+    }
 
     /// Hosts whose TLS the proxy must decrypt (a binding with a secret covers them).
     public var boundHosts: Set<String> {
         lock.lock(); defer { lock.unlock() }
-        return Set(bindings.values.filter { secrets[$0.id] != nil }.flatMap(\.hosts))
+        return Set(bindings.values.filter { secrets[$0.id] != nil || notices[$0.id] != nil }.flatMap(\.hosts))
     }
 
     /// A fresh placeholder for binding `id` (nil if there is no such binding).
     public func mint(_ id: String) -> String? {
-        lock.lock(); defer { lock.unlock() }
-        guard bindings[id] != nil else { return nil }
+        lock.lock()
+        guard bindings[id] != nil else { lock.unlock(); return nil }
         var raw = [UInt8](repeating: 0, count: 24)
         _ = SecRandomCopyBytesShim.fill(&raw)
         let token = Self.placeholderPrefix + raw.map { String(format: "%02x", $0) }.joined()
         placeholders[token] = id
+        let cb = _onPlaceholders
+        lock.unlock()
+        cb?()
         return token
     }
 
-    /// The environment a session gets: one fresh placeholder per binding that names a variable.
+    /// The environment a session gets: one fresh placeholder per binding that names a variable,
+    /// plus each binding's non-secret session variables.
     public func sessionEnvironment() -> [String: String] {
         var env: [String: String] = [:]
-        for b in allBindings { if let v = b.environmentVariable, let t = mint(b.id) { env[v] = t } }
+        // Only bindings that hold a secret (as `Sandbox.guestEnvironment` does): a placeholder with
+        // nothing behind it would only be refused, and it would steer a tool that prefers one
+        // variable (Claude Code: ANTHROPIC_API_KEY over CLAUDE_CODE_OAUTH_TOKEN) the wrong way.
+        for b in allBindings where hasSecret(b.id) {
+            if let v = b.environmentVariable, let t = mint(b.id) { env[v] = t }
+            env.merge(sessionExtras(b.id)) { a, _ in a }
+        }
         return env
     }
 
-    public func revokeAll() { lock.lock(); placeholders.removeAll(); lock.unlock() }
+    public func revokeAll() {
+        lock.lock()
+        placeholders.removeAll()
+        restoredHashes.removeAll()
+        let cb = _onPlaceholders
+        lock.unlock()
+        cb?()
+    }
 
-    public var livePlaceholderCount: Int { lock.lock(); defer { lock.unlock() }; return placeholders.count }
+    public var livePlaceholderCount: Int { lock.lock(); defer { lock.unlock() }; return placeholders.count + restoredHashes.count }
 
-    /// What to do with one request's headers, bound for `host`. Pure: returns the decision and the
-    /// rewritten head (byte-for-byte identical except for the one header value it changes).
-    public func rewrite(head: [UInt8], host: String) -> CredentialDecision {
+    /// sha256(placeholder) → binding id, for every live placeholder (what a new host needs).
+    public var placeholderHashes: [String: String] {
+        lock.lock(); defer { lock.unlock() }
+        var out = restoredHashes
+        for (t, b) in placeholders { out[CredentialFingerprint.placeholderHash(t)] = b }
+        return out
+    }
+
+    /// Placeholders a previous vault minted, by hash: they are honoured as if minted here.
+    public func restorePlaceholderHashes(_ hashes: [String: String]) {
+        lock.lock(); restoredHashes.merge(hashes) { a, _ in a }; lock.unlock()
+    }
+
+    /// The upstream answered 401 to a request that carried binding `id`'s secret: re-read it.
+    public func upstreamRejected(_ id: String) {
+        let cb = onStale
+        cb?(id)
+    }
+
+    private func bindingFor(token t: String) -> String? {
+        placeholders[t] ?? restoredHashes[CredentialFingerprint.placeholderHash(t)]
+    }
+
+    /// What to do with one request's headers, bound for `host`. Pure but for the sightings and the
+    /// last-use times it records: returns the decision and the rewritten head (byte-for-byte
+    /// identical except for the one header value it changes). `inject: false` — the connection
+    /// has carried the guest's own credential — never adds our secret to a request without one.
+    public func rewrite(head: [UInt8], host: String, inject: Bool = true, now: Date = Date()) -> CredentialDecision {
+        var d = decide(head: head, host: host, inject: inject, now: now, staleCheck: true)
+        if case .stale(let id) = d {
+            onStale?(id)
+            d = decide(head: head, host: host, inject: inject, now: now, staleCheck: false)
+        }
+        let out = d.publicDecision
+        if case .foreign(_, let f) = out, f.requests == 1, let cb = onForeign { cb(f) }
+        return out
+    }
+
+    private enum Internal {
+        case decided(CredentialDecision)
+        case stale(String)
+        var publicDecision: CredentialDecision {
+            switch self {
+            case .decided(let d): d
+            case .stale: .passThrough([])   // never returned: `rewrite` decides again
+            }
+        }
+    }
+
+    private func decide(head: [UInt8], host: String, inject: Bool, now: Date, staleCheck: Bool) -> Internal {
         lock.lock(); defer { lock.unlock() }
         let h = host.lowercased()
         let parsed = HTTPHead(head)
         // Every placeholder anywhere in the head is checked, not only in the bound header.
         let text = String(decoding: head, as: UTF8.self)
         let tokens = Self.placeholderTokens(in: text)
-        let binding = bindings.values.first { $0.covers(h) && secrets[$0.id] != nil }
         for t in tokens {
-            guard let bid = placeholders[t] else { return .reject("an unknown or revoked credential placeholder") }
-            guard let b = bindings[bid], b.covers(h) else { return .reject("a credential placeholder for \(bindings[bid]?.hosts.joined(separator: ",") ?? bid), sent to \(h)") }
-            if secrets[bid] == nil { return .reject("a placeholder for \(bid), which has no secret on this Mac") }
-            _ = b
+            guard let bid = bindingFor(token: t) else { return .decided(.reject("an unknown or revoked credential placeholder")) }
+            guard let b = bindings[bid], b.covers(h) else {
+                return .decided(.reject("a credential placeholder for \(bindings[bid]?.hosts.joined(separator: ",") ?? bid), sent to \(h)"))
+            }
+            if secrets[bid] == nil {
+                if let n = notices[bid] { return .decided(.refuse(401, n)) }
+                return .decided(.reject("a placeholder for \(bid), which has no secret on this Mac right now"))
+            }
         }
-        guard let binding, let secret = secrets[binding.id] else { return .passThrough(head) }
+        // The binding is the one whose placeholder the request carries; with none, the first
+        // bound one for this host (injection). Two bindings can cover one host — an Anthropic API
+        // key and a Claude subscription login — so "first for the host" alone would be arbitrary.
+        let carried = tokens.lazy.compactMap { self.bindingFor(token: $0) }.compactMap { self.bindings[$0] }
+            .first { $0.covers(h) && self.secrets[$0.id] != nil }
+        let forHost = bindings.values.filter { $0.covers(h) }.sorted { $0.id < $1.id }
+        // 588: EVERY auth header any binding of this host uses (plus Authorization) counts as "a
+        // credential is present" — a guest `x-api-key` must never get our bearer token beside it.
+        var authHeaders = Set(forHost.map(\.header.headerName))
+        if !forHost.isEmpty { authHeaders.insert("authorization") }
+        let present = (parsed?.fields ?? []).filter { authHeaders.contains($0.name) }
+        let foreignField = present.first { f in
+            let value = String(decoding: head[f.valueRange], as: UTF8.self)
+            return !value.isEmpty && !tokens.contains { value.contains($0) }
+        }
+        if let f = foreignField, carried == nil {
+            let value = String(decoding: head[f.valueRange], as: UTF8.self)
+            let fp = CredentialFingerprint.of(value)
+            var s = sightings[fp] ?? ForeignCredential(kind: CredentialFingerprint.kind(value), prefix: CredentialFingerprint.prefix(value),
+                                                         fingerprint: fp, header: f.name, firstSeen: now, lastSeen: now, requests: 0,
+                                                         matches: labels[fp])
+            s.lastSeen = now
+            s.requests += 1
+            sightings[fp] = s
+            if _policy == .strict {
+                let msg = (_strictNotice ?? "this sandbox is pinned to the credential snooze holds for it; it refused the request's own credential (fp {fp})")
+                    .replacingOccurrences(of: "{fp}", with: fp)
+                return .decided(.refuse(403, msg))
+            }
+            return .decided(.foreign(head, s))
+        }
+        let binding = carried ?? (present.isEmpty && inject ? forHost.first { secrets[$0.id] != nil } : nil)
+        guard let binding, let secret = secrets[binding.id] else {
+            // Nothing to do — but a request with no credential while the credential is unavailable
+            // gets the reason, not a confusing upstream 401.
+            if present.isEmpty, inject, let b = forHost.first(where: { notices[$0.id] != nil }), let n = notices[b.id] {
+                return .decided(.refuse(401, n))
+            }
+            return .decided(.passThrough(head))
+        }
+        lastUse[binding.id] = now          // "a sandbox is using it" — also when it has expired (the keep-alive)
+        if let exp = expiries[binding.id], exp <= now {
+            if staleCheck, _onStale != nil { return .stale(binding.id) }
+            return .decided(.refuse(401, notices[binding.id]
+                ?? "the credential snooze holds for this sandbox (\(binding.id)) expired at \(Self.clock(exp)) and has not been renewed"))
+        }
         let name = binding.header.headerName
         if let field = parsed?.field(named: name) {
             let value = String(decoding: head[field.valueRange], as: UTF8.self)
-            guard let t = tokens.first(where: { value.contains($0) }), placeholders[t] == binding.id else {
-                return .passThrough(head)            // the tool's own credential: untouched
+            guard let t = tokens.first(where: { value.contains($0) }), bindingFor(token: t) == binding.id else {
+                return .decided(.passThrough(head))
             }
             let newValue = Array(value.replacingOccurrences(of: t, with: secret).utf8)
             var out = head
             out.replaceSubrange(field.valueRange, with: newValue)
-            return .swapped(out, binding: binding.id)
+            return .decided(.swapped(out, binding: binding.id))
         }
-        guard let parsed else { return .passThrough(head) }
+        guard let parsed else { return .decided(.passThrough(head)) }
+        // The placeholder rode in another header than the binding's (e.g. a Bearer placeholder
+        // for an x-api-key binding): replace that header's value and name.
+        if let f = present.first(where: { f in tokens.contains { String(decoding: head[f.valueRange], as: UTF8.self).contains($0) } }) {
+            var out = head
+            out.replaceSubrange(f.nameRange.lowerBound..<f.valueRange.upperBound,
+                                with: Array("\(Self.canonical(name)): \(binding.header.value(secret))".utf8))
+            return .decided(.swapped(out, binding: binding.id))
+        }
         var out = head
         out.insert(contentsOf: Array("\(Self.canonical(name)): \(binding.header.value(secret))\r\n".utf8), at: parsed.endOfFields)
-        return .injected(out, binding: binding.id)
+        return .decided(.injected(out, binding: binding.id))
+    }
+
+    static func clock(_ d: Date) -> String {
+        let f = DateFormatter()
+        f.dateFormat = "HH:mm"
+        return f.string(from: d)
     }
 
     static func canonical(_ name: String) -> String {
@@ -180,12 +480,18 @@ public enum CredentialDecision: Sendable, Equatable {
     case passThrough([UInt8])
     case swapped([UInt8], binding: String)
     case injected([UInt8], binding: String)
+    /// A credential the guest supplied itself, passed through and flagged (588).
+    case foreign([UInt8], ForeignCredential)
+    /// 403, plain text: a placeholder where it must not be (the leak guard).
     case reject(String)
+    /// The proxy answers itself, with an Anthropic-shaped JSON error (Claude Code shows its
+    /// message): 401 when our credential is unavailable or expired, 403 for a strict refusal.
+    case refuse(Int, String)
 
     public var head: [UInt8]? {
         switch self {
-        case .passThrough(let h), .swapped(let h, _), .injected(let h, _): h
-        case .reject: nil
+        case .passThrough(let h), .swapped(let h, _), .injected(let h, _), .foreign(let h, _): h
+        case .reject, .refuse: nil
         }
     }
 }

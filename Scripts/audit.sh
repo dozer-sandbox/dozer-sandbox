@@ -9,7 +9,8 @@
 #   2. No denylisted import (Scripts/import-denylist.txt) — belt and braces for the UI frameworks.
 #   3. The manifest's remote dependencies are on an allowlist: apple/containerization pinned EXACT,
 #      plus (580) swift-nio, swift-nio-ssl, swift-certificates, swift-asn1 — apple/* packages that
-#      containerization already resolves, used by the egress proxy's TLS (README "Dependencies").
+#      containerization already resolves, used by the egress proxy's TLS (README "Dependencies"),
+#      and (585) swift-argument-parser for the `snooze` CLI — imported only by its command targets.
 #   4. No app-brand literal (a bundle id, a product or storage directory name) survives.
 #   5. The committed deckhold binary is the one Guest/deckhold/PROVENANCE.md records.
 #   6. The committed snoozenet binary is the one Guest/snoozenet/PROVENANCE.md records.
@@ -29,7 +30,9 @@ fail() {
 [[ -f "$DENYLIST" ]] || fail "missing import denylist"
 
 # ── 1. Import allowlist ──────────────────────────────────────────────────────
-ALLOWED='Foundation|Darwin|os|CryptoKit|Security|NIOCore|NIOEmbedded|NIOPosix|NIOSSL|X509|SwiftASN1|Virtualization|Containerization|ContainerizationArchive|ContainerizationEXT4|SystemPackage|ContainerizationError|ContainerizationExtras|ContainerizationOCI|ContainerizationOS|SnoozeContainerKit'
+# 585: + the CLI's own targets (SnoozeHost, SnoozeCLI), the system SQLite3 (the host's metrics) and
+# ArgumentParser — each confined below to where it belongs.
+ALLOWED='Foundation|Darwin|os|CryptoKit|Security|NIOCore|NIOEmbedded|NIOPosix|NIOSSL|X509|SwiftASN1|Virtualization|Containerization|ContainerizationArchive|ContainerizationEXT4|SystemPackage|ContainerizationError|ContainerizationExtras|ContainerizationOCI|ContainerizationOS|SnoozeContainerKit|SnoozeHost|SnoozeCLI|SQLite3|ArgumentParser'
 BAD=$(grep -rhoE --include='*.swift' '^[[:space:]]*(@[A-Za-z_]+[[:space:]]+)*(public[[:space:]]+)?import[[:space:]]+[A-Za-z_][A-Za-z0-9_.]*' \
         "$PACKAGE/Sources" \
       | sed -E 's/.*import[[:space:]]+//' \
@@ -40,6 +43,17 @@ if [[ -n "$BAD" ]]; then
     printf '    %s\n' $BAD >&2
     exit 1
 fi
+
+# ── 1b. (585) Confinement: the LIBRARY imports none of the CLI's additions, and only the CLI's
+#        command targets import ArgumentParser (the host needs no argument parsing) ─────────────
+LEAK=$(grep -rlE --include='*.swift' '^[[:space:]]*import[[:space:]]+(ArgumentParser|SQLite3|SnoozeHost|SnoozeCLI)([[:space:]]|$)' \
+        "$PACKAGE/Sources/SnoozeContainerKit" || true)
+[[ -z "$LEAK" ]] || fail "the library imports a CLI-only module:
+$LEAK"
+AP=$(grep -rlE --include='*.swift' '^[[:space:]]*import[[:space:]]+ArgumentParser([[:space:]]|$)' "$PACKAGE/Sources" \
+      | grep -vE "/Sources/(SnoozeCLI|snooze)/" || true)
+[[ -z "$AP" ]] || fail "ArgumentParser is imported outside Sources/SnoozeCLI and Sources/snooze:
+$AP"
 
 # ── 2. Denylist ──────────────────────────────────────────────────────────────
 ALTS=$(grep -v '^#' "$DENYLIST" | grep -v '^$' | paste -sd'|' -)
@@ -53,7 +67,10 @@ fi
 
 # ── 3. The dependency allowlist: containerization pinned exactly, plus (580) the four apple/*
 #       packages containerization already resolves, for the egress proxy's TLS ────────────────
+# 585: + swift-argument-parser (apple/*, also already resolved by containerization) for the snooze
+# CLI's command targets only — step 1b keeps it out of the library and the host.
 ALLOWED_DEPS='https://github.com/apple/containerization.git
+https://github.com/apple/swift-argument-parser.git
 https://github.com/apple/swift-asn1.git
 https://github.com/apple/swift-certificates.git
 https://github.com/apple/swift-nio-ssl.git
@@ -86,5 +103,6 @@ grep -qF "| sha256 (auto) | \`$NSHA\` |" "$PACKAGE/Guest/snoozenet/PROVENANCE.md
     || fail "Resources/snoozenet ($NSHA) is not the binary Guest/snoozenet/PROVENANCE.md records — run make snoozenet"
 
 printf 'ok audit: SnoozeContainerKit imports only its allowlist (Foundation/Security/Virtualization/Containerization/NIO/X509),\n'
-printf '          depends only on apple/containerization (exact) + the apple/* TLS packages it already resolves,\n'
+printf '          depends only on apple/containerization (exact) + the apple/* packages it already resolves\n'
+printf '          (TLS; ArgumentParser for the CLI targets only),\n'
 printf '          carries no host brand, and deckhold + snoozenet match their provenance\n'

@@ -21,11 +21,17 @@ statically linked into the **committed guest binary** `Sources/SnoozeContainerKi
 
 ## Swift package dependencies (host side)
 
-One direct dependency, pinned exactly; everything below it is transitive.
+The direct dependencies are apple/containerization, pinned exactly, and five apple/* packages it
+already resolves (declared so the code that imports them names them: swift-nio, swift-nio-ssl,
+swift-certificates and swift-asn1 for the 580 egress proxy; swift-argument-parser for the 585
+`snooze` CLI only). Declaring them added nothing to `Package.resolved`; everything below is the
+same resolved set. The `snooze` executable additionally links the system `SQLite3` library (macOS,
+public domain).
 
 | Component | Licence | Notes |
 |---|---|---|
 | [apple/containerization](https://github.com/apple/containerization) 0.47.0 | Apache-2.0 | the VM + container runtime; the direct dependency |
+| [apple/swift-argument-parser](https://github.com/apple/swift-argument-parser) 1.8.2 | Apache-2.0 | 585: the `snooze` CLI's command line (direct for the CLI targets only) |
 | grpc-swift-2, grpc-swift-nio-transport, grpc-swift-protobuf | Apache-2.0 | vminitd client transport |
 | swift-nio, swift-nio-extras, swift-nio-http2, swift-nio-ssl, swift-nio-transport-services | Apache-2.0 | |
 | swift-protobuf | Apache-2.0 | |
@@ -33,7 +39,7 @@ One direct dependency, pinned exactly; everything below it is transitive.
 | swift-crypto, swift-certificates, swift-asn1 | Apache-2.0 | |
 | swift-log, swift-distributed-tracing, swift-service-context, swift-service-lifecycle, swift-configuration | Apache-2.0 | |
 | swift-collections, swift-algorithms, swift-async-algorithms, swift-atomics, swift-numerics, swift-system | Apache-2.0 | |
-| swift-argument-parser, swift-http-types, swift-http-structured-headers | Apache-2.0 | |
+| swift-http-types, swift-http-structured-headers | Apache-2.0 | |
 | [zstd](https://github.com/facebook/zstd) 1.5.7 | BSD-3-Clause OR GPL-2.0 | dual-licensed upstream; used under BSD-3-Clause |
 
 ## The Linux kernel (downloaded at run time, not in this repository)

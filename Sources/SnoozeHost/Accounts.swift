@@ -1,0 +1,189 @@
+import Foundation
+import SnoozeContainerKit
+
+// 588 — named Anthropic credentials the host holds for its sandboxes (the multi-account model).
+//
+//   mac          the Mac's own Claude Code login (one per Claude config dir; `mac` is built in).
+//                Read-only for snooze; renewed by the Mac's Claude Code.
+//   setup-token  a `claude setup-token` token (1 year, user:inference, no refresh token), kept in
+//                the login keychain as `snooze-claude:<name>`.
+//   api-key      an Anthropic API key, in `snooze-anthropic:<name>` (or an item the user names).
+//
+// `<store>/accounts.json` holds the metadata — names, kinds, keychain service names, plans,
+// identities, fingerprints, dates, the store's default account and the keep-alive switch — and
+// NEVER a secret. A sandbox follows the store default or pins one account; there is no silent
+// fallback to another account or to an API key.
+
+public enum AccountKind: String, Codable, Sendable, CaseIterable {
+    case mac
+    case setupToken = "setup-token"
+    case apiKey = "api-key"
+
+    /// The vault binding its secret goes in.
+    public var binding: CredentialBinding { self == .apiKey ? .anthropic : .claudeOAuth }
+}
+
+public struct AccountRecord: Codable, Equatable, Sendable {
+    public var name: String
+    public var kind: AccountKind
+    /// setup-token / api-key: the keychain item holding the secret.
+    public var keychainService: String?
+    /// The item was the user's before snooze knew it (`--keychain SERVICE`): never deleted by snooze.
+    public var adopted: Bool?
+    /// mac: the Claude config dir (nil: the default one).
+    public var configDir: String?
+    /// `max`, `pro`, `team`, `enterprise` — the guest's CLAUDE_CODE_SUBSCRIPTION_TYPE.
+    public var plan: String?
+    public var tier: String?
+    /// mac: the identity sandboxes follow (a different account signing in on the Mac holds them).
+    public var identity: ClaudeIdentity?
+    /// First 12 hex of the secret's sha256 (so the log can recognise it in a guest's hands).
+    public var fingerprint: String?
+    public var addedAt: Date
+    public var expiresAt: Date?
+    public var verifiedAt: Date?
+    /// `verified`, `rejected: …`, `unverified: …`.
+    public var verification: String?
+
+    public init(name: String, kind: AccountKind, keychainService: String? = nil, adopted: Bool? = nil, configDir: String? = nil,
+                plan: String? = nil, tier: String? = nil, identity: ClaudeIdentity? = nil, fingerprint: String? = nil,
+                addedAt: Date = Date(), expiresAt: Date? = nil, verifiedAt: Date? = nil, verification: String? = nil) {
+        self.name = name
+        self.kind = kind
+        self.keychainService = keychainService
+        self.adopted = adopted
+        self.configDir = configDir
+        self.plan = plan
+        self.tier = tier
+        self.identity = identity
+        self.fingerprint = fingerprint
+        self.addedAt = addedAt
+        self.expiresAt = expiresAt
+        self.verifiedAt = verifiedAt
+        self.verification = verification
+    }
+
+    /// The built-in Mac login.
+    public static let mac = AccountRecord(name: "mac", kind: .mac, addedAt: Date(timeIntervalSince1970: 0))
+}
+
+public struct AccountsFile: Codable, Equatable, Sendable {
+    public var version = 1
+    /// The account a sandbox that follows the default uses (`none`: no credential).
+    public var defaultAccount: String = "mac"
+    /// D3: run the Mac's own `claude` near expiry while a sandbox uses the Mac login (off by default).
+    public var keepalive: Bool = false
+    public var accounts: [AccountRecord] = []
+
+    public init() {}
+}
+
+/// `<store>/accounts.json`.
+public struct AccountStore: Sendable {
+    public let url: URL
+    public init(store: SnoozeStore) { url = store.root.appendingPathComponent("accounts.json") }
+
+    public static let reserved: Set<String> = ["default", "none"]
+    public static let setupTokenPrefix = "snooze-claude:"
+    public static let apiKeyPrefix = "snooze-anthropic:"
+    /// A setup token lives one year (`claude setup-token`: 31 536 000 s).
+    public static let setupTokenLifetime: TimeInterval = 31_536_000
+
+    public func load() -> AccountsFile {
+        var f = (try? Data(contentsOf: url)).flatMap { try? HostWire.decoder.decode(AccountsFile.self, from: $0) } ?? AccountsFile()
+        if !f.accounts.contains(where: { $0.name == "mac" }) { f.accounts.insert(.mac, at: 0) }
+        return f
+    }
+
+    public func save(_ f: AccountsFile) throws {
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try HostWire.prettyEncoder.encode(f).write(to: url, options: .atomic)
+        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+    }
+
+    public static func validateName(_ n: String) throws {
+        guard n.range(of: "^[a-z0-9][a-z0-9-]{0,39}$", options: .regularExpression) != nil else {
+            throw HostError(.invalid, "an account name is 1–40 characters of a-z 0-9 - (got \(n))")
+        }
+        guard !reserved.contains(n) else { throw HostError(.invalid, "\(n) is reserved — pick another account name") }
+    }
+
+    /// A pasted setup token: `CLAUDE_CODE_OAUTH_TOKEN=` and quotes removed, and any whitespace a
+    /// terminal wrapped into it (a token has none) — codecks 488's normalisation.
+    public static func normalizeToken(_ raw: String) -> String? {
+        var v = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        for assignment in ["CLAUDE_CODE_OAUTH_TOKEN=", "ANTHROPIC_API_KEY="] {
+            if let r = v.range(of: assignment) { v = String(v[r.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines) }
+        }
+        if v.count >= 2, (v.first == "\"" && v.last == "\"") || (v.first == "'" && v.last == "'") { v.removeFirst(); v.removeLast() }
+        let compact = String(v.unicodeScalars.filter { !CharacterSet.whitespacesAndNewlines.contains($0) }.map(Character.init))
+        return compact.count >= 20 ? compact : nil
+    }
+}
+
+/// `account ls` — never a secret.
+public struct AccountRow: Codable, Equatable, Sendable {
+    public var name: String
+    public var kind: String
+    public var plan: String?
+    public var identity: String?
+    public var expiresAt: Date?
+    public var verification: String?
+    public var isDefault: Bool
+    public var usedBy: [String]
+    /// `ok`, `expires-soon`, `expired`, `signed-out`, `missing`, `locked`…
+    public var state: String
+    public var keychainService: String?
+    public var fingerprint: String?
+}
+
+// MARK: verification
+
+public enum AccountVerification: Equatable, Sendable {
+    case verified
+    /// The API said 401/403: the credential is bad.
+    case rejected(String)
+    /// Network, 5xx, quota — says nothing about the credential.
+    case unavailable(String)
+}
+
+public protocol AccountVerifying: Sendable {
+    func verify(kind: AccountKind, secret: String) async -> AccountVerification
+}
+
+/// One minimal request, from the host, to api.anthropic.com only: `POST /v1/messages`, haiku,
+/// `max_tokens: 1`, the credential in its header. 200 verified · 401/403 rejected · else unavailable.
+public struct AnthropicVerifier: AccountVerifying {
+    public init() {}
+
+    public func verify(kind: AccountKind, secret: String) async -> AccountVerification {
+        var req = URLRequest(url: URL(string: "https://api.anthropic.com/v1/messages")!)
+        req.httpMethod = "POST"
+        req.timeoutInterval = 30
+        req.setValue("application/json", forHTTPHeaderField: "content-type")
+        req.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
+        if kind == .apiKey {
+            req.setValue(secret, forHTTPHeaderField: "x-api-key")
+        } else {
+            req.setValue("Bearer \(secret)", forHTTPHeaderField: "Authorization")
+            req.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
+        }
+        req.httpBody = Data(#"{"model":"claude-haiku-4-5","max_tokens":1,"messages":[{"role":"user","content":"hi"}]}"#.utf8)
+        let cfg = URLSessionConfiguration.ephemeral
+        cfg.urlCache = nil
+        let session = URLSession(configuration: cfg)
+        defer { session.finishTasksAndInvalidate() }
+        do {
+            let (data, resp) = try await session.data(for: req)
+            let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+            let msg = ((try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? [String: Any])?["message"] as? String
+            switch code {
+            case 200: return .verified
+            case 401, 403: return .rejected(msg ?? "HTTP \(code)")
+            default: return .unavailable("HTTP \(code)" + (msg.map { ": \($0)" } ?? ""))
+            }
+        } catch {
+            return .unavailable(error.localizedDescription)
+        }
+    }
+}

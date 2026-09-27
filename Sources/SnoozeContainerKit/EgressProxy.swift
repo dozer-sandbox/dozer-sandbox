@@ -413,6 +413,11 @@ public final class EgressProxy: @unchecked Sendable {
         var guestOpen = true
         var closing = false
         var current: ConnectionRecord?
+        // 588: once this connection carried the guest's own credential, none of its requests gets
+        // ours injected (Claude Code's telemetry rides the same connection without auth).
+        var foreignOnConnection = false
+        // The binding whose secret the last request carried: a 401 answer makes the owner re-read it.
+        var awaitingStatus: String?
         defer {
             // Never `finish()`: it waits on close(), and NIOSSL's close waits for the peer's
             // close_notify — a thread blocked forever per tunnel.
@@ -447,7 +452,8 @@ public final class EgressProxy: @unchecked Sendable {
                         reject(Self.denial(host: "\(host) \(h.method) \(path)", rule: v.rule))
                         return
                     }
-                    let decision = vault.rewrite(head: raw, host: host)
+                    let decision = vault.rewrite(head: raw, host: host, inject: !foreignOnConnection)
+                    awaitingStatus = nil
                     switch decision {
                     case .reject(let why):
                         r.verdict = .denied; r.open = false; r.credential = "rejected: \(why)"
@@ -455,8 +461,16 @@ public final class EgressProxy: @unchecked Sendable {
                         current = nil
                         reject(Self.forbidden(why))
                         return
-                    case .swapped(_, let b): r.credential = "swapped \(b)"
-                    case .injected(_, let b): r.credential = "injected \(b)"
+                    case .refuse(let code, let why):
+                        r.verdict = .denied; r.open = false
+                        r.credential = code == 401 ? "unavailable: \(why)" : "refused: \(why)"
+                        log.upsert(r)
+                        current = nil
+                        reject(Self.refusal(code, why))
+                        return
+                    case .swapped(_, let b): r.credential = "swapped \(b)"; awaitingStatus = b
+                    case .injected(_, let b): r.credential = "injected \(b)"; awaitingStatus = b
+                    case .foreign(_, let f): r.credential = f.label; foreignOnConnection = true
                     case .passThrough: break
                     }
                     if upstream == nil {
@@ -514,6 +528,15 @@ public final class EgressProxy: @unchecked Sendable {
             if let u = upstream, p[1].revents != 0 {
                 switch u.receive() {
                 case .data(let plain):
+                    if let b = awaitingStatus, !plain.isEmpty {
+                        awaitingStatus = nil
+                        // "HTTP/1.1 401 " — our secret was refused upstream: re-read it before the
+                        // guest sees the answer, so its retry carries the renewed one.
+                        if plain.count >= 12, Array(plain[9..<12]) == Array("401".utf8) {
+                            vault.upstreamRejected(b)
+                            current?.detail = "upstream 401 — the credential was re-read"
+                        }
+                    }
                     if !plain.isEmpty {
                         rec.bytesDown += plain.count
                         current?.bytesDown += plain.count
@@ -565,6 +588,16 @@ public final class EgressProxy: @unchecked Sendable {
 
     static func forbidden(_ why: String) -> [UInt8] {
         response(403, "refused by the sandbox proxy: \(why)\n", extra: "X-Sandbox-Policy: credential\r\n")
+    }
+
+    /// The proxy's own answer in the shape of an Anthropic API error, so a client shows its message
+    /// (588: an unavailable or expired credential → 401; a strict refusal → 403).
+    static func refusal(_ code: Int, _ message: String) -> [UInt8] {
+        let type = code == 401 ? "authentication_error" : "permission_error"
+        let obj: [String: Any] = ["type": "error", "error": ["type": type, "message": "snooze: " + message]]
+        let b = (try? JSONSerialization.data(withJSONObject: obj, options: [.sortedKeys, .withoutEscapingSlashes])).map(Array.init) ?? []
+        let reason = code == 401 ? "Unauthorized" : "Forbidden"
+        return Array("HTTP/1.1 \(code) \(reason)\r\nContent-Type: application/json\r\nX-Sandbox-Policy: credential\r\nConnection: close\r\nContent-Length: \(b.count)\r\n\r\n".utf8) + b
     }
 
     static func response(_ code: Int, _ body: String, extra: String = "") -> [UInt8] {
