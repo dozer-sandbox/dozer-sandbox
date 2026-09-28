@@ -68,7 +68,7 @@ struct Doctor: AsyncParsableCommand {
         if !store.socketPathFits {
             out.append(DoctorCheck(check: "socket", status: .fail, detail: "\(store.socket.path) is over 103 bytes — use a shorter --store"))
         }
-        let kernelDir = ProcessInfo.processInfo.environment["SNOOZE_KERNEL_CACHE"].flatMap { $0.isEmpty ? nil : URL(fileURLWithPath: $0) }
+        let kernelDir = SnoozeSettings.load().string(SettingKey.kernelCache).map { URL(fileURLWithPath: ($0 as NSString).expandingTildeInPath) }
             ?? store.layout("_").kernels
         let kernel = KernelProvider(cacheDirectory: kernelDir).cachedKernel
         out.append(DoctorCheck(check: "kernel", status: fm.fileExists(atPath: kernel.path) ? .ok : .warn,
@@ -118,7 +118,7 @@ struct Doctor: AsyncParsableCommand {
         } else {
             out.append(DoctorCheck(check: "claude", status: .warn, detail: "Claude Code isn't installed on this Mac — needed only for the mac account (the Mac's own login)"))
         }
-        let accounts = AccountStore(store: store).load()
+        let accounts = AccountStore(store: store, settings: .load()).load()
         let macInUse = accounts.defaultAccount == "mac"
         switch st.state {
         case .signedIn:

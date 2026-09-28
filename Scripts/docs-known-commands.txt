@@ -59,3 +59,10 @@ host/status
 ui
 ui/link
 ui/serve
+config
+config/show
+config/get
+config/set
+config/unset
+config/init
+config/path

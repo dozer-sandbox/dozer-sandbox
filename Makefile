@@ -70,6 +70,11 @@ help: ## Show this help
 build: ## Build every product (and the VM test host)
 	swift build $(SWIFT_BUILD_SYSTEM) -j $(JOBS)
 
+# 591: the settings file (dzr.toml under XDG_CONFIG_HOME) of every test run is a scratch one — the
+# owner's own ~/.config never shapes a test (the CLI suites set their own, under their scratch store).
+TEST_XDG ?= $(or $(TMPDIR),/tmp/)snooze-unit-xdg
+test test-vm test-vm-agents test-vm-network test-vm-hardening test-vm-lineage test-vm-upgrade test-cli test-vm-claude kernel: export XDG_CONFIG_HOME := $(TEST_XDG)
+
 test: web-assets-check ## Unit tests — no VM, no entitlement (never --parallel); first, the web assets' drift check
 	swift test $(SWIFT_BUILD_SYSTEM) -j $(JOBS)
 

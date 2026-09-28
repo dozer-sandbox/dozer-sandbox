@@ -31,7 +31,7 @@ public struct SnoozeCommand: AsyncParsableCommand {
             Shutdown.self, Reset.self, Remove.self,
             List.self, Inspect.self, Sessions.self, Attach.self, Run.self, Exec.self,
             ImageCommand.self, PointCommand.self, NetCommand.self, KeyCommand.self, AccountCommand.self,
-            MetricsCommand.self, Doctor.self, HostCommand.self, Events.self, Console.self, UICommand.self,
+            MetricsCommand.self, Doctor.self, HostCommand.self, Events.self, Console.self, UICommand.self, ConfigCommand.self,
         ]
     )
 
@@ -40,7 +40,7 @@ public struct SnoozeCommand: AsyncParsableCommand {
 
 /// Options every command takes.
 public struct GlobalOptions: ParsableArguments {
-    @Option(name: .long, help: "The store directory (default $SNOOZE_STORE, else ~/Library/Application Support/SnoozeContainerKit).")
+    @Option(name: .long, help: "The store directory (default $SNOOZE_STORE, else the settings' store.path, else ~/Library/Application Support/SnoozeContainerKit).")
     public var store: String?
 
     @Flag(name: .long, help: "Machine-readable output (JSON on stdout).")

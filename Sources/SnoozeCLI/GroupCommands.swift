@@ -420,16 +420,16 @@ struct HostCommand: AsyncParsableCommand {
         defaultSubcommand: HostRun.self)
 }
 
-/// The idle timeout: --idle-timeout, else $SNOOZE_HOST_IDLE, else 5 minutes.
+/// The idle timeout: --idle-timeout, else $SNOOZE_HOST_IDLE, else the settings' `host.idle_timeout_minutes`, else 5.
 func idleTimeout(_ option: Double?) -> Double {
-    option ?? ProcessInfo.processInfo.environment["SNOOZE_HOST_IDLE"].flatMap(Double.init) ?? 5
+    SnoozeSettings.load().idleTimeoutMinutes(flag: option)
 }
 
 struct HostRun: AsyncParsableCommand {
     static let configuration = CommandConfiguration(commandName: "start", abstract: "Start the host (detached, unless --foreground).")
     @OptionGroup var g: GlobalOptions
     @Flag(name: .long, help: "Run in this process (logs on stdout) instead of detached.") var foreground = false
-    @Option(name: .long, help: "Minutes with nothing running before the host exits; 0 = never (default 5, or $SNOOZE_HOST_IDLE).") var idleTimeout: Double?
+    @Option(name: .long, help: "Minutes with nothing running before the host exits; 0 = never (default $SNOOZE_HOST_IDLE, else the settings' host.idle_timeout_minutes, else 5).") var idleTimeout: Double?
 
     func run() async throws {
         let store = g.snoozeStore

@@ -59,6 +59,8 @@ final class CLIHarness: @unchecked Sendable {
         var e = ProcessInfo.processInfo.environment
         e["SNOOZE_STORE"] = store.path
         e["SNOOZE_HOST_IDLE"] = "30"          // the suite stops the host itself; the idle test sets its own
+        // 591: the settings file is the suite's own (under the scratch store) — never the owner's ~/.config.
+        e["XDG_CONFIG_HOME"] = store.appendingPathComponent("xdg").path
         let vmtestKernels = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("snooze-vmtest-store/kernels")
         if (e["SNOOZE_KERNEL_CACHE"] ?? "").isEmpty,
            FileManager.default.fileExists(atPath: vmtestKernels.appendingPathComponent(KernelArtifact.recommended.fileName).path) {
@@ -214,6 +216,9 @@ func cliSuite() async throws {
         let doctor = h.run(["doctor", "--json"])
         check(doctor.out.contains("\"check\" : \"entitlement\"") && !doctor.out.contains("\"status\" : \"fail\""),
               "doctor: the binary carries the virtualization entitlement, nothing fails (exit \(doctor.code))")
+
+        print("cli: config (591 settings)")
+        cliConfigChecks(h)
 
         print("cli: create + up (attached)")
         let c = h.run(["create", "clia", "--image", "lab", "--memory", "512M", "--workspace", ws.path])
@@ -389,6 +394,45 @@ func cliSuite() async throws {
     }
     cleanUp()
     check(!h.hostRunning, "cleanup: no host left running")
+}
+
+/// 591: `snooze config` from a separate process, on the harness's scratch XDG_CONFIG_HOME — no VM.
+func cliConfigChecks(_ h: CLIHarness) {
+    let xdg = URL(fileURLWithPath: h.env["XDG_CONFIG_HOME"] ?? "/nonexistent")
+    let file = xdg.appendingPathComponent("dozer-sandbox/dzr.toml")
+    try? FileManager.default.removeItem(at: xdg)
+    var r = h.run(["config", "path"])
+    check(r.code == 0 && r.out == file.path + "\n", "config path: \(r.out.trimmingCharacters(in: .newlines))")
+    r = h.run(["config", "init"])
+    let template = (try? String(contentsOf: file, encoding: .utf8)) ?? ""
+    check(r.code == 0 && SnoozeSettings.schema.allSatisfy { template.contains("\n# \($0.name) = \(TOML.render($0.defaultValue))\n") },
+          "config init: dzr.toml lists all \(SnoozeSettings.schema.count) settings, each commented at its default")
+    var st = stat()
+    check(stat(file.path, &st) == 0 && st.st_mode & 0o777 == 0o600, "the file is 0600")
+    r = h.run(["config", "set", "ui.boot_view_on_start", "false"])
+    let text = (try? String(contentsOf: file, encoding: .utf8)) ?? ""
+    check(r.code == 0 && text.contains("\nboot_view_on_start = false\n") && text.contains("\n# confirm_shutdown = true\n"),
+          "config set ui.boot_view_on_start false: that line uncommented, the rest still at their defaults")
+    r = h.run(["config", "get", "ui.boot_view_on_start"])
+    check(r.code == 0 && r.out == "false\n", "config get: false")
+    let report = h.run(["config", "show", "--json"])
+    let rep = try? JSONDecoder().decode(SettingsReport.self, from: report.outData)
+    check(rep?.settings.first { $0.key == "ui.boot_view_on_start" }?.source == .file, "config show --json: source file")
+    check(rep?.settings.first { $0.key == "host.idle_timeout_minutes" }?.source == .env, "SNOOZE_HOST_IDLE (the harness's) shows as source env")
+    check(rep?.settings.first { $0.key == "store.path" }?.source == .env, "SNOOZE_STORE shows as source env")
+    let flagged = h.run(["config", "get", "store.path", "--store", "/tmp/elsewhere", "--json"])
+    check(flagged.out.contains("\"source\" : \"flag\""), "--store shows as source flag")
+    r = h.run(["config", "set", "ui.terminal_font_size", "200"])
+    check(r.code == 64 && r.err.contains("9–32"), "config set: out of range → usage error (\(r.code))")
+    r = h.run(["config", "set", "ui.nope", "1"])
+    check(r.code == 64 && r.err.contains("unknown setting"), "config set: unknown key → usage error")
+    r = h.run(["config", "unset", "ui.boot_view_on_start"])
+    check(r.code == 0 && h.run(["config", "get", "ui.boot_view_on_start"]).out == "true\n", "config unset: back to the default")
+    // An unknown key in the file is a warning, never a failure.
+    try? ((try? String(contentsOf: file, encoding: .utf8)) ?? "").appending("\n[later]\nthing = 1\n").write(to: file, atomically: true, encoding: .utf8)
+    r = h.run(["config", "show"])
+    check(r.code == 0 && r.err.contains("unknown setting later.thing"), "an unknown key: a warning on stderr, exit 0")
+    try? FileManager.default.removeItem(at: xdg)
 }
 
 /// The CLI's own exit codes the suite checks (the CLI target is not linked here).

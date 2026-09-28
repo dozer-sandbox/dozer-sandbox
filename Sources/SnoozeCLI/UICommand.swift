@@ -78,7 +78,9 @@ struct UIServe: AsyncParsableCommand {
             Doctor.checks(store: store).map { WebDoctorCheck(check: $0.check, status: $0.status.rawValue, detail: $0.detail) }
         }
         let server: SnoozeWebServer
-        do { server = try await SnoozeWebServer.bind(data: data, assets: assets, version: SnoozeCommand.version) } catch {
+        // 591: the Settings page edits the settings file this process's environment names.
+        let settings = WebSettingsStore(environment: ProcessInfo.processInfo.environment, flags: configFlags(g))
+        do { server = try await SnoozeWebServer.bind(data: data, assets: assets, version: SnoozeCommand.version, settings: settings) } catch {
             throw fail(HostError(.unavailable, "could not listen on 127.0.0.1: \(error)"), g)
         }
         let listenFD: Int32
