@@ -25,6 +25,9 @@ public struct WebAssets: Sendable {
     static let allowedTypes: Set<String> = [
         "text/html; charset=utf-8", "text/css; charset=utf-8", "application/javascript; charset=utf-8", "image/svg+xml",
     ]
+    /// 591: types only a VENDORED file may have (the terminal engine's WebAssembly). The page's own
+    /// code is never WebAssembly.
+    static let vendorOnlyTypes: Set<String> = ["application/wasm"]
     static let immutable = "public, max-age=31536000, immutable"
 
     /// From the resource bundle beside the executable (or the test bundle), like `DeckholdBinary` —
@@ -50,7 +53,11 @@ public struct WebAssets: Sendable {
     }
 
     private struct Manifest: Decodable {
-        struct Entry: Decodable { let publicPath, resourcePath, mimeType, sha256, cachePolicy: String }
+        struct Entry: Decodable {
+            let publicPath, resourcePath, mimeType, sha256, cachePolicy: String
+            /// 591: `page` or `vendor` (absent in a 590 manifest: page).
+            let `class`: String?
+        }
         let version: Int
         let assets: [Entry]
     }
@@ -65,7 +72,14 @@ public struct WebAssets: Sendable {
         var out: [String: WebAsset] = [:]
         for e in m.assets {
             guard isSafePublicPath(e.publicPath), isSafeResourcePath(e.resourcePath) else { throw WebAssetError.unsafePath }
-            guard allowedTypes.contains(e.mimeType) else { throw WebAssetError.unsupportedType }
+            let vendor: Bool
+            switch e.class ?? "page" {
+            case "page": vendor = false
+            case "vendor": vendor = true
+            default: throw WebAssetError.malformedManifest
+            }
+            guard allowedTypes.contains(e.mimeType) || (vendor && vendorOnlyTypes.contains(e.mimeType)) else { throw WebAssetError.unsupportedType }
+            guard !vendor || e.publicPath.hasPrefix("/assets/vendor-") else { throw WebAssetError.unsafePath }
             guard e.publicPath == "/" ? e.cachePolicy == "no-store" : e.cachePolicy == immutable else { throw WebAssetError.malformedManifest }
             guard out[e.publicPath] == nil else { throw WebAssetError.malformedManifest }
             guard let data = try? Data(contentsOf: webRoot.appendingPathComponent(e.resourcePath)) else {

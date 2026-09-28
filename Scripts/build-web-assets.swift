@@ -3,21 +3,30 @@
 // Scripts/build-web-assets.swift). Dependency-free and deterministic: no Node, no package manager,
 // no network.
 //
-//   Sources/SnoozeWeb/WebSource/{index.html, app.css, app.js}   what people edit
+//   Sources/SnoozeWeb/WebSource/{index.html, app.css, app.js}   the page's OWN code (what people edit)
+//   Sources/SnoozeWeb/WebSource/vendor/<package>/               591: VENDORED third-party files, each
+//                                                               byte-identical to its registry tarball
+//                                                               and pinned in that directory's VENDOR.json
 //   Sources/SnoozeWeb/Resources/Web/                           what ships (COMMITTED, generated):
 //       index.html                  referencing the hashed names
 //       assets/app-<sha16>.css      content-hashed
 //       assets/app-<sha16>.js
-//       manifest.json               every file's public path, type, cache policy and sha256
+//       assets/<publicName>-<sha16>.{js,wasm}   vendored, content-hashed, bytes unchanged
+//       licences/<package>-<file>   each vendored package's licence (in the bundle, not served)
+//       manifest.json               every served file's public path, type, cache policy, sha256, class
 //
 //   swift Scripts/build-web-assets.swift           regenerate Resources/Web (make web-assets)
 //   swift Scripts/build-web-assets.swift --check   fail when Resources/Web is not exactly what the
 //                                                  sources produce (make web-assets-check — run by
-//                                                  make test and Scripts/audit.sh, which DeckStack's
-//                                                  never was)
+//                                                  make test and Scripts/audit.sh)
 //
-// It also refuses a page the CSP would break: inline script, inline style or an event-handler
-// attribute in index.html, and any external URL in the three sources.
+// Two classes of file, two sets of rules (591.01-DESIGN.md §3):
+//   · the page's own code must be what the CSP and the XSS rule allow: no inline script, inline
+//     style or event-handler attribute in index.html, no external URL anywhere, no innerHTML in app.js;
+//   · a vendored file is admitted by PROVENANCE, not content: its sha256 must equal VENDOR.json's
+//     pin, its licence must be on the allowlist, and no unlisted file may sit in its directory. Its
+//     bytes are never rewritten. The page's rules are not applied to it (minified third-party code
+//     would fail them) and are not loosened for the page's own files either.
 import CryptoKit
 import Foundation
 
@@ -37,6 +46,8 @@ struct Asset: Codable {
     let mimeType: String
     let sha256: String
     let cachePolicy: String
+    /// `page` (this package's own code) or `vendor` (a pinned third-party file).
+    let `class`: String
 }
 
 struct Manifest: Codable {
@@ -44,7 +55,36 @@ struct Manifest: Codable {
     let assets: [Asset]
 }
 
+/// `WebSource/vendor/<package>/VENDOR.json`.
+struct Vendor: Decodable {
+    struct File: Decodable {
+        let file: String
+        let fromTarball: String
+        let sha256: String
+        /// `script` (served as JavaScript), `wasm` (served as application/wasm), `licence` (bundled only).
+        let serve: String
+        let publicName: String?
+        /// What index.html writes for it (rewritten to the hashed public path).
+        let indexReference: String?
+    }
+    let package: String
+    let version: String
+    let tarball: String
+    let tarballIntegrity: String
+    let tarballSha256: String
+    let licence: String
+    let licenceFile: String
+    let files: [File]
+}
+
+/// Licences a vendored file may carry (SPDX). Anything else needs this list changed on purpose.
+let allowedLicences: Set<String> = ["MIT", "BSD-2-Clause", "BSD-3-Clause", "Apache-2.0", "ISC"]
+
 func sha256(_ d: Data) -> String { SHA256.hash(data: d).map { String(format: "%02x", $0) }.joined() }
+
+func isPlainName(_ s: String) -> Bool {
+    !s.isEmpty && s != "." && s != ".." && s.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || ".-_".contains($0)) }
+}
 
 func main() throws {
     let args = Array(CommandLine.arguments.dropFirst())
@@ -53,6 +93,12 @@ func main() throws {
     let package = URL(fileURLWithPath: #filePath).standardizedFileURL.deletingLastPathComponent().deletingLastPathComponent()
     let sources = package.appendingPathComponent("Sources/SnoozeWeb/WebSource")
     let output = package.appendingPathComponent("Sources/SnoozeWeb/Resources/Web")
+    let fm = FileManager.default
+
+    // Nothing but the three page files and vendor/ lives in WebSource: a stray file is a mistake.
+    let top = Set((try? fm.contentsOfDirectory(atPath: sources.path)) ?? []).subtracting([".DS_Store"])
+    let unexpectedTop = top.subtracting(["index.html", "app.css", "app.js", "vendor"])
+    guard unexpectedTop.isEmpty else { throw Failure.source("unexpected files in WebSource: \(unexpectedTop.sorted())") }
 
     func read(_ name: String) throws -> Data {
         guard let d = try? Data(contentsOf: sources.appendingPathComponent(name)) else { throw Failure.source("missing \(sources.path)/\(name)") }
@@ -61,7 +107,8 @@ func main() throws {
     }
     let css = try read("app.css"), js = try read("app.js"), indexSource = String(decoding: try read("index.html"), as: UTF8.self)
 
-    // CSP conformance: `script-src 'self'; style-src 'self'` — so nothing inline, nothing external.
+    // ── The page's own code: CSP conformance (`script-src 'self'; style-src 'self'`), nothing inline,
+    //    nothing external, no innerHTML.
     guard indexSource.contains("href=\"/app.css\""), indexSource.contains("src=\"/app.js\"") else {
         throw Failure.source("index.html must reference /app.css and /app.js exactly")
     }
@@ -84,26 +131,88 @@ func main() throws {
         throw Failure.source("app.js uses innerHTML — render with textContent only (590.01-DESIGN.md: sandbox-controlled text is untrusted)")
     }
 
+    let immutable = "public, max-age=31536000, immutable"
+    var expected: [String: Data] = [:]
+    var assets: [Asset] = []
+    var index = indexSource
+
+    // ── Vendored packages (591): provenance, not content.
+    let vendorRoot = sources.appendingPathComponent("vendor")
+    let packages = ((try? fm.contentsOfDirectory(atPath: vendorRoot.path)) ?? []).filter { $0 != ".DS_Store" }.sorted()
+    for pkg in packages {
+        guard isPlainName(pkg) else { throw Failure.source("vendor/\(pkg): not a plain directory name") }
+        let dir = vendorRoot.appendingPathComponent(pkg)
+        guard let vd = try? Data(contentsOf: dir.appendingPathComponent("VENDOR.json")) else {
+            throw Failure.source("vendor/\(pkg) has no VENDOR.json — a vendored file is admitted only with its pin")
+        }
+        let v: Vendor
+        do { v = try JSONDecoder().decode(Vendor.self, from: vd) } catch { throw Failure.source("vendor/\(pkg)/VENDOR.json: \(error)") }
+        guard v.package == pkg else { throw Failure.source("vendor/\(pkg)/VENDOR.json names package \(v.package)") }
+        guard allowedLicences.contains(v.licence) else { throw Failure.source("vendor/\(pkg): licence \(v.licence) is not on the allowlist") }
+        guard v.tarball.hasPrefix("https://registry.npmjs.org/"), v.tarballIntegrity.hasPrefix("sha512-"), v.tarballSha256.count == 64 else {
+            throw Failure.source("vendor/\(pkg): the tarball must be the registry's, with its sha512 integrity and sha256")
+        }
+        guard v.files.contains(where: { $0.file == v.licenceFile && $0.serve == "licence" }) else {
+            throw Failure.source("vendor/\(pkg): the licence file must be listed (serve: licence)")
+        }
+        let listed = Set(v.files.map(\.file))
+        let present = Set(((try? fm.contentsOfDirectory(atPath: dir.path)) ?? []).filter { $0 != ".DS_Store" })
+        let unlisted = present.subtracting(listed).subtracting(["VENDOR.json"])
+        guard unlisted.isEmpty else { throw Failure.source("vendor/\(pkg) holds files VENDOR.json does not pin: \(unlisted.sorted())") }
+        for f in v.files {
+            guard isPlainName(f.file) else { throw Failure.source("vendor/\(pkg): bad file name \(f.file)") }
+            guard let data = try? Data(contentsOf: dir.appendingPathComponent(f.file)) else { throw Failure.source("vendor/\(pkg)/\(f.file) is missing") }
+            guard sha256(data) == f.sha256 else {
+                throw Failure.source("vendor/\(pkg)/\(f.file) is not the pinned file (sha256 differs from VENDOR.json) — vendored bytes are never edited")
+            }
+            switch f.serve {
+            case "licence":
+                expected["licences/\(pkg)-\(f.file)"] = data
+            case "script", "wasm":
+                guard let name = f.publicName, isPlainName(name), name.hasPrefix("vendor-"), let ref = f.indexReference, ref.hasPrefix("/vendor/") else {
+                    throw Failure.source("vendor/\(pkg)/\(f.file): a served file needs publicName (vendor-…) and indexReference (/vendor/…)")
+                }
+                guard index.contains("\"\(ref)\"") else { throw Failure.source("index.html does not reference \(ref)") }
+                let ext = f.serve == "script" ? "js" : "wasm"
+                let path = "assets/\(name)-\(f.sha256.prefix(16)).\(ext)"
+                index = index.replacingOccurrences(of: "\"\(ref)\"", with: "\"/\(path)\"")
+                expected[path] = data
+                assets.append(Asset(publicPath: "/" + path, resourcePath: path,
+                                    mimeType: f.serve == "script" ? "application/javascript; charset=utf-8" : "application/wasm",
+                                    sha256: f.sha256, cachePolicy: immutable, class: "vendor"))
+            default:
+                throw Failure.source("vendor/\(pkg)/\(f.file): serve must be script, wasm or licence")
+            }
+        }
+    }
+    if let stray = index.range(of: #""/vendor/[^"]*""#, options: .regularExpression) {
+        throw Failure.source("index.html references \(index[stray]), which no VENDOR.json serves")
+    }
+
+    // ── The page's own files.
     let cssPath = "assets/app-\(sha256(css).prefix(16)).css"
     let jsPath = "assets/app-\(sha256(js).prefix(16)).js"
-    let index = Data(indexSource
+    let indexData = Data(index
         .replacingOccurrences(of: "href=\"/app.css\"", with: "href=\"/\(cssPath)\"")
         .replacingOccurrences(of: "src=\"/app.js\"", with: "src=\"/\(jsPath)\"").utf8)
-    let immutable = "public, max-age=31536000, immutable"
-    let assets = [
-        Asset(publicPath: "/", resourcePath: "index.html", mimeType: "text/html; charset=utf-8", sha256: sha256(index), cachePolicy: "no-store"),
-        Asset(publicPath: "/" + cssPath, resourcePath: cssPath, mimeType: "text/css; charset=utf-8", sha256: sha256(css), cachePolicy: immutable),
-        Asset(publicPath: "/" + jsPath, resourcePath: jsPath, mimeType: "application/javascript; charset=utf-8", sha256: sha256(js), cachePolicy: immutable),
-    ].sorted { $0.publicPath < $1.publicPath }
+    assets += [
+        Asset(publicPath: "/", resourcePath: "index.html", mimeType: "text/html; charset=utf-8", sha256: sha256(indexData), cachePolicy: "no-store", class: "page"),
+        Asset(publicPath: "/" + cssPath, resourcePath: cssPath, mimeType: "text/css; charset=utf-8", sha256: sha256(css), cachePolicy: immutable, class: "page"),
+        Asset(publicPath: "/" + jsPath, resourcePath: jsPath, mimeType: "application/javascript; charset=utf-8", sha256: sha256(js), cachePolicy: immutable, class: "page"),
+    ]
+    assets.sort { $0.publicPath < $1.publicPath }
     let enc = JSONEncoder()
     enc.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
     var manifest = try enc.encode(Manifest(version: 1, assets: assets))
     manifest.append(10)
-    let expected: [String: Data] = ["index.html": index, cssPath: css, jsPath: js, "manifest.json": manifest]
+    expected["index.html"] = indexData
+    expected[cssPath] = css
+    expected[jsPath] = js
+    expected["manifest.json"] = manifest
 
     var existing: [String: Data] = [:]
     let base = output.resolvingSymlinksInPath().path + "/"
-    if let e = FileManager.default.enumerator(at: output, includingPropertiesForKeys: [.isRegularFileKey]) {
+    if let e = fm.enumerator(at: output, includingPropertiesForKeys: [.isRegularFileKey]) {
         while let u = e.nextObject() as? URL {
             guard (try? u.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true else { continue }
             let path = u.resolvingSymlinksInPath().path
@@ -117,19 +226,19 @@ func main() throws {
             let changed = want.intersection(have).filter { expected[$0] != existing[$0] }.sorted()
             throw Failure.stale("x web assets are stale (missing \(want.subtracting(have).sorted()), changed \(changed), unexpected \(have.subtracting(want).sorted())) — run make web-assets and commit Sources/SnoozeWeb/Resources/Web")
         }
-        print("ok web assets: Resources/Web is exactly what WebSource/ builds (\(expected.count) files)")
+        print("ok web assets: Resources/Web is exactly what WebSource/ builds (\(expected.count) files, \(packages.count) vendored package(s) at their pins)")
         return
     }
     let tmp = output.deletingLastPathComponent().appendingPathComponent(".Web.generating-\(UUID().uuidString)")
-    try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
-    defer { try? FileManager.default.removeItem(at: tmp) }
+    try fm.createDirectory(at: tmp, withIntermediateDirectories: true)
+    defer { try? fm.removeItem(at: tmp) }
     for (path, data) in expected {
         let dest = tmp.appendingPathComponent(path)
-        try FileManager.default.createDirectory(at: dest.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try fm.createDirectory(at: dest.deletingLastPathComponent(), withIntermediateDirectories: true)
         try data.write(to: dest, options: .atomic)
     }
-    if FileManager.default.fileExists(atPath: output.path) { try FileManager.default.removeItem(at: output) }
-    try FileManager.default.moveItem(at: tmp, to: output)
+    if fm.fileExists(atPath: output.path) { try fm.removeItem(at: output) }
+    try fm.moveItem(at: tmp, to: output)
     print("generated \(expected.count) web assets in \(output.path)")
 }
 
