@@ -368,14 +368,15 @@ final class WebTerminalBridge: @unchecked Sendable {
 
     /// One input frame. False when the socket was closed for it.
     private func input(_ raw: [UInt8]) async -> Bool {
-        guard grant.mode == .interactive else { return true }              // a watcher's bytes never reach the host
-        let bytes = WebTerminalWire.sanitizeInput(raw)
-        guard !bytes.isEmpty else { return true }
-        let within = lock.withLock { budget.take(bytes.count) }
+        // The budget counts every byte a page sends, watch-only included (a flood is a flood).
+        let within = lock.withLock { budget.take(raw.count) }
         guard within else {
             await end(.policyViolation, "input-over-cap")
             return false
         }
+        guard grant.mode == .interactive else { return true }              // a watcher's bytes never reach the host
+        let bytes = WebTerminalWire.sanitizeInput(raw)
+        guard !bytes.isEmpty else { return true }
         let (att, p): ((any WebTerminalAttachment)?, String?) = lock.withLock { (attachment, phase) }
         if p == Phase.running.rawValue, let att {
             att.send(bytes)

@@ -42,6 +42,12 @@ public domain).
 | swift-http-types, swift-http-structured-headers | Apache-2.0 | |
 | [zstd](https://github.com/facebook/zstd) 1.5.7 | BSD-3-Clause OR GPL-2.0 | dual-licensed upstream; used under BSD-3-Clause |
 
+## The web UI's terminal engine (vendored, served to the browser)
+
+| Component | Licence | Notes |
+|---|---|---|
+| [ghostty-web](https://github.com/coder/ghostty-web) 0.4.0 (Coder), which embeds Ghostty's VT parser compiled to WebAssembly | MIT (ghostty-web); MIT (Ghostty) | 591: `Sources/SnoozeWeb/WebSource/vendor/ghostty-web/` — `ghostty-web.umd.cjs` and `ghostty-vt.wasm`, byte-identical to the npm registry tarball (`VENDOR.json` pins its integrity and each file's sha256). Served by `snooze ui` to the browser only; the licence text ships in the resource bundle (`Resources/Web/licences/`). |
+
 ## The Linux kernel (downloaded at run time, not in this repository)
 
 | Component | Licence | Notes |

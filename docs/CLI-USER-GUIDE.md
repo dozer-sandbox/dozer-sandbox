@@ -314,11 +314,31 @@ sandbox can take a session, and clicking an action again while it runs does noth
 already under way). The list has no session count, since counting asks every session inside the
 guest; each sandbox's page lists its sessions.
 
-Two things are CLI-only on purpose: **a secret is never typed into the browser**. Add an account
+One thing is CLI-only on purpose: **a secret is never typed into the browser**. Add an account
 (`snooze account add`) or set a key (`snooze key set`) in a terminal; the page shows the command.
-And there is no shell in the browser. **Open in Terminal** opens `snooze attach` in your default
-terminal app: whatever opens `.command` files on this Mac (Terminal, or iTerm2 / Ghostty if you've
-made them the handler). No permission prompt.
+
+**Terminals in the browser** (the **Terminals** page). **Open here** on a sandbox's page attaches
+to its own session (starting it if needed); each session row has **Open** and **Watch**; **New
+terminal…** attaches to any session or starts a new one running a command. Terminals are tabs, and
+**Split** shows two side by side (⇄ moves a tab to the other side). Closing a tab only closes the
+view — the session keeps running, as Ctrl-] does in `snooze attach`.
+
+- **Watch** is read-only: nothing you type reaches the session, and it never resizes it.
+- **A sleeping sandbox.** When the sandbox is paused, asleep, in deep sleep or shut down, the
+  terminal is covered with its state and one button. **Any key you type wakes it** (or resumes it)
+  and the screen comes back where it was. What your terminal answers by itself — focus changes,
+  cursor-position and colour replies — never wakes it. A watcher's keys never wake it either.
+- **Paste** is filtered like Ghostty's: control characters that could run commands become spaces.
+  A paste with line breaks into a program that did not ask for bracketed paste, or over 64 KiB,
+  asks first; over 1 MiB is refused.
+- **Links** in terminal output are not clickable, and a program inside the sandbox can never read
+  or set your clipboard. Cmd-C copies a selection (so does selecting with the mouse); Cmd-V pastes.
+  Cmd shortcuts belong to the browser (Cmd-W closes the tab — the session runs on).
+- An open terminal keeps the host running, as `snooze attach` does.
+
+**Open in Terminal** opens `snooze attach` in your default terminal app instead: whatever opens
+`.command` files on this Mac (Terminal, or iTerm2 / Ghostty if you've made them the handler). No
+permission prompt.
 
 | | |
 |---|---|
@@ -327,7 +347,7 @@ made them the handler). No permission prompt.
 | **Stopping** | Ctrl-C in the terminal that runs it. Signing out and stopping both end every browser's session. |
 | **One per store** | Each store has at most one UI. `--store` (or `$SNOOZE_STORE`) picks the store, as for every command. |
 | **The host** | The UI is a client of the host, like the CLI. Looking never starts a host: with none running, the UI reads the store (nothing is live). It follows the host's events only while a sandbox is live, so an open UI never keeps an idle host from exiting. |
-| **Terminals** | Open in Terminal runs `snooze attach NAME [SESSION] --store …` in a new Terminal tab (waking the sandbox if it sleeps). The page also shows that command to copy. |
+| **Terminals** | In the page: each terminal is opened with a one-use ticket over a WebSocket on the same loopback address, and only for a signed-in browser. Open in Terminal runs `snooze attach NAME [SESSION] --store …` in a new Terminal tab (waking the sandbox if it sleeps). The page also shows that command to copy. |
 | **Secrets** | Never shown. Keys and accounts appear as a state, a source name (`keychain:…`, `account:mac`) and a fingerprint. |
 
 `--print-url` prints only to a terminal (not with `--json`, not into a pipe or a file), because the
@@ -374,6 +394,8 @@ The kernel and subnet variables are read when a sandbox is created, and become p
 | A package install fails | The policy: `snooze net log NAME --denied`, then `snooze net policy NAME --allow HOST`. |
 | A sandbox shows as died | The host crashed while it ran. `snooze start NAME` checks the disk and cold-boots it. |
 | The UI says "sign in with a new link" | Its link was used or expired, or the UI restarted. `snooze ui link`. |
+| A browser terminal says "Disconnected" | The UI stopped, the browser signed out, or the tab was silent for a long time. Reconnect (or a new link: `snooze ui link`). |
+| A browser terminal will not type Chinese/Japanese/Korean | Its engine's input-method support is incomplete; use Open in Terminal for now. |
 | Open in Terminal says no app opened it | Make a terminal app the handler for `.command` files (Finder › Get Info on any `.command` file › Open with › Change All…). |
 | `snooze ui` says the resources are missing | `SnoozeContainerKit_SnoozeWeb.bundle` must sit beside the executable. Reinstall with `make install-cli`. |
 | Anything else | `<store>/host.log` and `snooze events`. |
