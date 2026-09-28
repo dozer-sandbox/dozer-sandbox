@@ -228,6 +228,27 @@ public enum AgentRecipes {
         chown -R agent:agent /home/agent/.local
         """, needsNetworkFalse: ())
 
+    /// The tools an interactive developer shell (and an agent) expects, which Debian's `-slim`
+    /// base leaves out (owner, 591: "top/ps: command not found"; git was missing too). Installed
+    /// from Debian's signed archive through the bake proxy. The same list for every agent image:
+    /// it is the class baseline until base-layer images (one baked "dev base" that agent images
+    /// clone) replace it.
+    public static let devBaselinePackages = ["procps", "git", "less", "jq", "unzip", "openssh-client",
+                                             "ca-certificates", "curl", "vim-tiny", "ripgrep", "python3"]
+
+    static let devBaseline = BakeStep.script("install the developer baseline (\(devBaselinePackages.joined(separator: " ")))", """
+        export DEBIAN_FRONTEND=noninteractive
+        apt-get update -qq
+        apt-get install -y -qq --no-install-recommends \(devBaselinePackages.joined(separator: " ")) >/dev/null
+        rm -rf /var/lib/apt/lists/*
+        """)
+
+    /// What the baseline must provide, checked after every agent bake.
+    static let devBaselineVerify: [VerifyCheck] = [
+        VerifyCheck(["sh", "-c", "for t in ps top git less jq unzip ssh curl vi rg python3; do command -v $t >/dev/null || { echo missing $t; exit 1; }; done; echo baseline-ok"],
+                    expect: "baseline-ok"),
+    ]
+
     static func npmInstall(_ package: String, version: String, integrity: String, extraArgs: [String] = []) -> BakeStep {
         let extra = extraArgs.joined(separator: " ")
         return BakeStep.script("npm install \(package)@\(version) (integrity-pinned)", """
@@ -244,12 +265,13 @@ public enum AgentRecipes {
     public static let claudeCode = ImageRecipe(
         name: "claude-code",
         base: nodeBase,
-        steps: [createAgent,
+        steps: [createAgent, devBaseline,
                 npmInstall("@anthropic-ai/claude-code", version: "2.1.227",
                            integrity: "sha512-D0YP8GFwPaP/9eObEuP5LRO5+9QSD9CLa6K26whNzXxpxz3pFqPS3nn7l1/MLmSWy32wBP2IKQzkRB3mumUKUQ=="),
                 claudeLauncher],
         verify: [VerifyCheck(["claude", "--version"], expect: "2.1.227"),
-                 VerifyCheck(["sh", "-c", "test -x /home/agent/.local/bin/claude && echo launcher-ok"], expect: "launcher-ok")],
+                 VerifyCheck(["sh", "-c", "test -x /home/agent/.local/bin/claude && echo launcher-ok"], expect: "launcher-ok")]
+            + devBaselineVerify,
         user: "agent", home: "/home/agent",
         // CLAUDE_CONFIG_DIR puts .claude.json INSIDE ~/.claude, so one directory holds all state.
         persistDirs: ["~/.claude"],
@@ -260,11 +282,11 @@ public enum AgentRecipes {
     public static let pi = ImageRecipe(
         name: "pi",
         base: nodeBase,
-        steps: [createAgent,
+        steps: [createAgent, devBaseline,
                 npmInstall("@earendil-works/pi-coding-agent", version: "0.84.1",
                            integrity: "sha512-ncAqFrG+iybuPGOhMiZoEHkEzTpJgz3guYD32pD+M7ucc0WeHmauP6wa7qwP8V/KWvsZDVNa5XGsdZ7fkC7w7A==",
                            extraArgs: ["--ignore-scripts"])],
-        verify: [VerifyCheck(["pi", "--version"], expect: "0.84.1")],
+        verify: [VerifyCheck(["pi", "--version"], expect: "0.84.1")] + devBaselineVerify,
         user: "agent", home: "/home/agent",
         persistDirs: ["~/.pi/agent"],
         sessionEnvironment: ["PI_CODING_AGENT_DIR": "/home/agent/.pi/agent",
