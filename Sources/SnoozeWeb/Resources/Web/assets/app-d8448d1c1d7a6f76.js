@@ -1252,23 +1252,35 @@ function paintTabs() { if (state.view === 'terminals') renderTerminals(); }
 function renderTerminals() {
   const root = $('terminals');
   if (!termUI.built) {
-    termUI.splitBtn = btn('Split', () => {
-      termUI.split = !termUI.split;
-      if (!termUI.split) {
-        for (const t of terminals.values()) t.pane = 0;
-        termUI.selected[0] = termUI.selected[0] ?? termUI.selected[1];
-        termUI.selected[1] = null;
-        termUI.focusedPane = 0;
-      }
+    // Split is a split button (owner, 591): the main part splits and ALWAYS fills the right pane
+    // with the chosen kind (or, when split, unsplits); the ▾ menu picks the kind — and when already
+    // split, adds that kind to the right pane at once.
+    const unsplit = () => {
+      termUI.split = false;
+      for (const t of terminals.values()) t.pane = 0;
+      termUI.selected[0] = termUI.selected[0] ?? termUI.selected[1];
+      termUI.selected[1] = null;
+      termUI.focusedPane = 0;
       renderTerminals();
-      // A new pane opens a NEW shell (next to the terminal on the left, same sandbox) — never a
-      // second view of the same session.
-      const left = terminals.get(termUI.selected[0]);
-      if (termUI.split && left && ![...terminals.values()].some((t) => t.pane === 1)) {
-        termUI.focusedPane = 1;
-        newShellTerminal(left.sandbox, 1).catch((e) => toast(e.message || String(e), true));
-      }
-    }, { title: 'Show two terminals side by side — a new shell opens on the right' });
+    };
+    termUI.splitMain = btn('Split', () => {
+      if (termUI.split) unsplit();
+      else splitWith(termUI.splitKind).catch((e) => toast(e.message || String(e), true));
+    }, { title: 'Two terminals side by side — the right one is a ' + SPLIT_KINDS[termUI.splitKind] });
+    termUI.splitMenu = h('div', { class: 'menu', role: 'menu', hidden: true },
+      Object.entries(SPLIT_KINDS).map(([kind, label]) => h('button', { type: 'button', role: 'menuitem', class: 'menu-item', 'data-kind': kind,
+        on: { click: (ev) => {
+          ev.stopPropagation();
+          termUI.splitMenu.hidden = true;
+          termUI.splitKind = kind;
+          try { localStorage.setItem('snooze.ui.splitKind', kind); } catch (_) { /* per-browser convenience only */ }
+          paintSplitButton();
+          splitWith(kind).catch((e) => toast(e.message || String(e), true));
+        } } }, label)));
+    const caret = h('button', { type: 'button', class: 'btn split-caret', title: 'What the split adds', 'aria-haspopup': 'menu',
+      on: { click: (ev) => { ev.stopPropagation(); termUI.splitMenu.hidden = !termUI.splitMenu.hidden; } } }, '▾');
+    document.addEventListener('click', () => { termUI.splitMenu.hidden = true; });
+    termUI.splitBtn = h('div', { class: 'split-button' }, termUI.splitMain, caret, termUI.splitMenu);
     termUI.panes = [0, 1].map((i) => {
       const strip = h('div', { class: 'tabs', role: 'tablist' });
       const body = h('div', { class: 'term-body' });
@@ -1287,7 +1299,7 @@ function renderTerminals() {
     termUI.built = true;
   }
   termUI.grid.classList.toggle('split', termUI.split);
-  termUI.splitBtn.textContent = termUI.split ? 'Unsplit' : 'Split';
+  paintSplitButton();
   termUI.panes[1].root.hidden = !termUI.split;
   termUI.panes.forEach((p, i) => {
     const mine = [...terminals.values()].filter((t) => t.pane === i);
@@ -1318,6 +1330,39 @@ function tabElement(t, pane) {
   const close = h('button', { type: 'button', class: 'tab-x', title: 'Close this terminal (the session keeps running)', 'aria-label': 'Close ' + label,
     on: { click: () => closeTerminal(t.id) } }, '×');
   return h('div', { class: 'tab-wrap' }, select, move, close);
+}
+
+/// What a split adds on the right (the Split button's ▾ menu). Remembered per browser.
+const SPLIT_KINDS = {
+  shell: 'new shell',
+  watch: 'watch of the left terminal’s session (read-only)',
+  attach: 'second view of the left terminal’s session (shared)',
+  dialog: 'terminal you choose (New terminal…)',
+};
+termUI.splitKind = (() => { try { const k = localStorage.getItem('snooze.ui.splitKind'); return SPLIT_KINDS[k] ? k : 'shell'; } catch (_) { return 'shell'; } })();
+function paintSplitButton() {
+  if (!termUI.splitMain) return;
+  termUI.splitMain.textContent = termUI.split ? 'Unsplit' : 'Split';
+  termUI.splitMain.title = termUI.split ? 'Back to one pane (the right pane’s terminals move left)'
+                                        : 'Two terminals side by side — the right one is a ' + SPLIT_KINDS[termUI.splitKind];
+  for (const item of termUI.splitMenu.children) {
+    item.textContent = (item.dataset.kind === termUI.splitKind ? '✓ ' : '   ') + (termUI.split ? 'Add a ' : 'Split with a ') + SPLIT_KINDS[item.dataset.kind];
+  }
+}
+/// Split (if needed) and fill the right pane with `kind` — so a split always creates something.
+/// With no terminal on the left there is nothing to watch, attach to or put a shell beside: the
+/// New terminal dialog opens instead (for the right pane).
+async function splitWith(kind) {
+  const left = terminals.get(termUI.selected[0]) || [...terminals.values()].find((t) => t.pane === 0);
+  if (!termUI.split) { termUI.split = true; renderTerminals(); }
+  termUI.focusedPane = 1;
+  if (kind === 'dialog' || !left) { await newTerminalDialog(); return; }
+  if (kind === 'watch' || kind === 'attach') {
+    if (!left.session) throw new Error('the left terminal has no session yet — wait for it to start');
+    openTerminal(left.sandbox, left.session, kind === 'watch' ? 'watch' : 'interactive', 1);
+    return;
+  }
+  await newShellTerminal(left.sandbox, 1);
 }
 
 async function newTerminalDialog() {
