@@ -28,6 +28,7 @@ metrics
 doctor
 host
 events
+console
 image/ls
 image/bake
 image/rm

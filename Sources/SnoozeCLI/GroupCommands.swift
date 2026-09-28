@@ -492,6 +492,43 @@ struct HostStatusCommand: AsyncParsableCommand {
     }
 }
 
+/// 591 — `snooze console NAME [--follow]`: the sandbox's boot console (kernel + vminitd). The web
+/// UI's boot view reads the same stream (the UI never gets an operation the CLI lacks).
+struct Console: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+        abstract: "Show a sandbox's boot console (the kernel and init); --follow keeps printing it as it boots (Ctrl-C stops).")
+    @OptionGroup var g: GlobalOptions
+    @Argument(help: "The sandbox.") var name: String
+    @Flag(name: [.short, .long], help: "Keep printing new lines (across a restart) until Ctrl-C.") var follow = false
+
+    /// The console is written by the guest: its control characters never reach this terminal.
+    static func printable(_ s: String) -> String {
+        String(String.UnicodeScalarView(s.unicodeScalars.map { u in
+            (u.value < 0x20 && u.value != 0x09) || (0x7F...0x9F).contains(u.value) ? "?" : u
+        }))
+    }
+
+    func run() async throws {
+        guard follow else {
+            var r = HostRequest(.console, name: name)
+            r.follow = false
+            let c = try decode(try await query(r, g), BootConsoleLines.self, g)
+            if g.json { Out.json(c) } else { Out.stdout(c.lines.map { Self.printable($0) + "\n" }.joined()) }
+            return
+        }
+        let client: HostClient
+        do { client = try HostClient.connect(store: g.snoozeStore, autostart: true) } catch let e as HostError { throw fail(e, g) }
+        var r = HostRequest(.console, name: name)
+        r.follow = true
+        try client.send(r)
+        while let m = try client.next() {
+            if let e = m.error { throw fail(e, g) }
+            guard let e = m.event, e.kind == .console else { continue }
+            if g.json { Out.jsonLine(e) } else { Out.stdout(Self.printable(e.text ?? "") + "\n") }
+        }
+    }
+}
+
 struct Events: AsyncParsableCommand {
     static let configuration = CommandConfiguration(abstract: "Follow what the host does: phases, timed steps, notes (Ctrl-C stops).")
     @OptionGroup var g: GlobalOptions

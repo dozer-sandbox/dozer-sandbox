@@ -42,6 +42,10 @@ public enum HostOp: String, Codable, Sendable, CaseIterable {
     case accountKeepalive = "account-keepalive"
     case events
     case hostStop = "host-stop"
+    /// 591: a sandbox's boot console (the kernel + vminitd serial log, `Sandbox.bootLogURL`) —
+    /// its lines so far as the result, or, with `follow`, `console` event lines as they are
+    /// written, until the client hangs up (a stream, like `events`).
+    case console
 
     /// Operations that only read — answered from the store in-process when no host is running.
     public var isReadOnly: Bool {
@@ -197,7 +201,8 @@ public struct HostError: Codable, Equatable, Sendable, Error, LocalizedError {
 /// A progress or stream line: a sandbox's phase change, timed step, note or download progress,
 /// or (net-log --follow) a connection record.
 public struct HostEvent: Codable, Equatable, Sendable {
-    public enum Kind: String, Codable, Sendable { case phase, step, note, progress, connection, host }
+    /// 591: `console` — one line of a sandbox's boot console (guest-written text: display it as data).
+    public enum Kind: String, Codable, Sendable { case phase, step, note, progress, connection, host, console }
     public var kind: Kind
     public var time: Date
     public var sandbox: String?
@@ -245,7 +250,7 @@ public struct HostEvent: Codable, Equatable, Sendable {
         case .connection:
             guard let c = connection else { return who }
             return who + "\(c.verdict.rawValue) \(c.kind.rawValue) \(c.target)" + (c.method.map { " \($0) \(c.path ?? "")" } ?? "")
-        case .note, .host: return who + (text ?? "")
+        case .note, .host, .console: return who + (text ?? "")
         }
     }
 }

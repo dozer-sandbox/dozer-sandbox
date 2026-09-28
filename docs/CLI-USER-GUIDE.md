@@ -359,6 +359,8 @@ link is a key to the UI.
   only ever added.
 - `-q` prints no progress. `-v` prints every step (by default only operations slower than a second
   show their steps, on stderr).
+- `snooze console NAME [--follow]` prints the sandbox's boot console (the kernel and init); with
+  `--follow` it keeps printing as it boots (the web UI's boot view shows the same lines).
 - `snooze events [NAME]` follows phases and timed steps live. `snooze metrics [--csv] [--image X]
   [--days N]` shows every action's count, median, p90, min, max and failures.
 

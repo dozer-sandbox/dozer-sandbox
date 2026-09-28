@@ -206,6 +206,8 @@ public final class HostServer: @unchecked Sendable {
             }
         case .netLog where req.follow == true:
             netLogFollow(conn, reader: reader, request: req)
+        case .console where req.follow == true:
+            consoleFollow(conn, reader: reader, request: req)
         case .hostStop:
             Task.detached { [self] in await self.shutdown(prepare: true, reply: conn) }
         case .ping:
@@ -263,6 +265,27 @@ public final class HostServer: @unchecked Sendable {
             }
         }
         watchHangup(conn, reader: reader) {}
+    }
+
+    /// 591 `console --follow`: the boot console's lines (its newest 256 KiB first), then each new
+    /// line as it is written — across a cold boot's recreated log — until the client hangs up.
+    private func consoleFollow(_ conn: HostConnection, reader: LineReader, request req: HostRequest) {
+        let task = Task.detached { [core] in
+            do {
+                let (url, name) = try await core.bootLogURL(req.name)
+                var tail = BootConsoleTail(url: url)
+                while !Task.isCancelled {
+                    for line in tail.poll() {
+                        if !conn.send(HostMessage(event: HostEvent(kind: .console, sandbox: name, text: line))) { return }
+                    }
+                    try? await Task.sleep(for: .milliseconds(200))
+                }
+            } catch {
+                conn.send(.failure(HostError.from(error)))
+                conn.shutdownIO()
+            }
+        }
+        watchHangup(conn, reader: reader) { task.cancel() }
     }
 
     // MARK: attach relay

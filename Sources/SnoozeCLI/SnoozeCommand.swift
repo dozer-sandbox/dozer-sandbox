@@ -31,7 +31,7 @@ public struct SnoozeCommand: AsyncParsableCommand {
             Shutdown.self, Reset.self, Remove.self,
             List.self, Inspect.self, Sessions.self, Attach.self, Run.self, Exec.self,
             ImageCommand.self, PointCommand.self, NetCommand.self, KeyCommand.self, AccountCommand.self,
-            MetricsCommand.self, Doctor.self, HostCommand.self, Events.self, UICommand.self,
+            MetricsCommand.self, Doctor.self, HostCommand.self, Events.self, Console.self, UICommand.self,
         ]
     )
 

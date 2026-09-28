@@ -295,7 +295,8 @@ public actor HostCore {
         guard r.v <= HostProtocol.version else {
             return .failure(HostError(.version, "this host speaks protocol \(HostProtocol.version), the request is \(r.v) — restart it (snooze host stop)"))
         }
-        if readOnly && !(r.op.isReadOnly || (r.op == .netPolicy && isPolicyQuery(r)) || r.op == .sessions || (r.op == .netLog && r.follow != true)) {
+        if readOnly && !(r.op.isReadOnly || (r.op == .netPolicy && isPolicyQuery(r)) || r.op == .sessions || (r.op == .netLog && r.follow != true)
+                         || (r.op == .console && r.follow != true)) {
             return .failure(HostError(.unavailable, "\(r.op.rawValue) needs the host"))
         }
         do {
@@ -369,9 +370,19 @@ public actor HostCore {
             return try JSONValue(encoding: try await verifyAccount(r))
         case .accountKeepalive:
             return try JSONValue(encoding: try setKeepalive(r))
+        case .console:
+            // 591: the lines so far (`--follow` is the server's stream).
+            let m = try get(r.name)
+            return try JSONValue(encoding: BootConsoleLines(name: m.name, lines: BootConsoleTail.lines(of: m.sandbox.bootLogURL)))
         case .attach, .events, .hostStop:
             throw HostError(.invalid, "\(r.op.rawValue) is handled by the server")
         }
+    }
+
+    /// 591: where a sandbox's boot console is written (for the `console --follow` stream).
+    public func bootLogURL(_ name: String?) throws -> (URL, String) {
+        let m = try get(name)
+        return (m.sandbox.bootLogURL, m.name)
     }
 
     public func status(connections: Int = 0, idleSeconds: Double? = nil, idleTimeoutMinutes: Double = 0,

@@ -212,6 +212,7 @@ command, so it can't do anything the CLI can't.
 snooze metrics [--csv] [--image X] [--days N] [--no-steps]   # count, median, p90, min, max, failures
 snooze doctor                                                  # macOS, Apple silicon, entitlement, kernel, store, host, Claude login
 snooze events [NAME]                                           # follow phases and timed steps live
+snooze console NAME [--follow]                                 # the boot console (kernel + init); --follow keeps printing it
 ```
 
 ### Scripting
