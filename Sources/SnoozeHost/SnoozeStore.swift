@@ -17,10 +17,14 @@ public struct SnoozeStore: Sendable, Equatable {
 
     public init(root: URL) { self.root = root.standardizedFileURL }
 
-    /// `--store`, else `$SNOOZE_STORE`, else `~/Library/Application Support/SnoozeContainerKit`.
+    /// `--store`, else `$SNOOZE_STORE`, else the settings file's `store.path`, else
+    /// `~/Library/Application Support/SnoozeContainerKit`.
     public static func resolve(_ option: String?, environment: [String: String] = ProcessInfo.processInfo.environment) -> SnoozeStore {
         if let o = option, !o.isEmpty { return SnoozeStore(root: URL(fileURLWithPath: (o as NSString).expandingTildeInPath)) }
         if let e = environment["SNOOZE_STORE"], !e.isEmpty { return SnoozeStore(root: URL(fileURLWithPath: (e as NSString).expandingTildeInPath)) }
+        if let f = SnoozeSettings.load(environment: environment).fileValues[SettingKey.storePath], case .string(let p) = f, !p.isEmpty {
+            return SnoozeStore(root: URL(fileURLWithPath: (p as NSString).expandingTildeInPath))
+        }
         return SnoozeStore(root: FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Application Support/SnoozeContainerKit"))
     }
@@ -175,12 +179,15 @@ public enum SnoozeImages {
         }
     }
 
-    /// The spec `snooze create` makes. `environment` supplies the kernel (`SNOOZE_KERNEL`,
-    /// `SNOOZE_KERNEL_CACHE`) and a default NAT subnet (`SNOOZE_SUBNET`).
+    /// The spec `snooze create` makes. What the options leave out comes from the settings (591):
+    /// `environment` names the settings file and overrides it — the kernel (`SNOOZE_KERNEL`,
+    /// `SNOOZE_KERNEL_CACHE`), a default NAT subnet (`SNOOZE_SUBNET`) — then `dzr.toml`
+    /// (`defaults.cpus`, `images.<image>.memory_mib` / `.network`, …), then the defaults.
     public static func spec(name: String, options o: CreateOptions, store: SnoozeStore,
                             environment env: [String: String] = ProcessInfo.processInfo.environment) throws -> (SandboxSpec, String) {
-        let kernelPath = env["SNOOZE_KERNEL"].flatMap { $0.isEmpty ? nil : $0 }
-        let kernelCache = env["SNOOZE_KERNEL_CACHE"].flatMap { $0.isEmpty ? nil : URL(fileURLWithPath: $0) }
+        let settings = SnoozeSettings.load(environment: env)
+        let kernelPath = settings.string(SettingKey.kernelPath).map { ($0 as NSString).expandingTildeInPath }
+        let kernelCache = settings.string(SettingKey.kernelCache).map { URL(fileURLWithPath: ($0 as NSString).expandingTildeInPath) }
         var shares: [Share] = []
         if let ws = o.workspace {
             let path = URL(fileURLWithPath: (ws as NSString).expandingTildeInPath).standardizedFileURL.path
@@ -202,10 +209,12 @@ public enum SnoozeImages {
             recipe = c.recipe
             imageName = "custom:\(c.name)"
         }
-        let network = try networkMode(o.network ?? defaultNetwork(o.image, recipe: recipe))
-        let subnet = o.subnet ?? env["SNOOZE_SUBNET"].flatMap { $0.isEmpty ? nil : $0 }
+        let section = SnoozeSettings.imageSection(recipeName: recipe?.name)
+        let network = try networkMode(o.network ?? settings.string(SettingKey.network(section)) ?? defaultNetwork(o.image, recipe: recipe))
+        let subnet = o.subnet ?? settings.string(SettingKey.natSubnet)
         var spec = SandboxSpec(name: name, storeRoot: store.root, kernelPath: kernelPath, kernelCacheDirectory: kernelCache,
-                               cpus: o.cpus ?? 2, memoryMiB: o.memoryMiB ?? (recipe == nil ? 1024 : 2048), rootfsMiB: 1024,
+                               cpus: o.cpus ?? settings.int(SettingKey.cpus),
+                               memoryMiB: o.memoryMiB ?? UInt64(settings.int(SettingKey.memory(section))), rootfsMiB: 1024,
                                bakePackages: recipe == nil && customKey == nil ? ["bash", "ncurses"] : [],
                                shares: shares, subnet: network == .nat ? subnet : nil,
                                recipe: recipe, customImage: customKey)

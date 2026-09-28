@@ -68,12 +68,13 @@ public actor HostCore {
     /// 590: `open-session` is serialized per sandbox.
     let sessionGate = KeyedGate()
 
-    public init(store: SnoozeStore, readOnly: Bool, version: String, services: CredentialServices = .system) {
+    public init(store: SnoozeStore, readOnly: Bool, version: String, services: CredentialServices = .system,
+                newStoreKeepalive: Bool = false) {
         self.store = store
         self.readOnly = readOnly
         self.version = version
         self.services = services
-        self.accountStore = AccountStore(store: store)
+        self.accountStore = AccountStore(store: store, newStoreKeepalive: newStoreKeepalive)
         if readOnly {
             metrics = nil
             metricsRun = 0
@@ -676,6 +677,18 @@ public actor HostCore {
         return (env, workdir ?? r.workdir, runAs == "root" ? nil : runAs)
     }
 
+    /// 591: the settings' `claude.permissions` reaches the guest's claude launcher as
+    /// `SNOOZE_CLAUDE_PERMISSIONS` — only in a claude-code sandbox, only when it is not the default
+    /// (`skip`), and never over the caller's own `-e SNOOZE_CLAUDE_PERMISSIONS=…`.
+    static func withClaudePermissions(_ env: [String: String], recipe: String?,
+                                      settings: @autoclosure () -> SnoozeSettings = .load()) -> [String: String] {
+        guard recipe == "claude-code", env["SNOOZE_CLAUDE_PERMISSIONS"] == nil else { return env }
+        guard let mode = settings().string(SettingKey.claudePermissions), mode != "skip" else { return env }
+        var e = env
+        e["SNOOZE_CLAUDE_PERMISSIONS"] = mode
+        return e
+    }
+
     /// 590: one `open-session` at a time per sandbox. This actor is re-entrant across its awaits, so
     /// two opens of one session (two clicks while the sandbox booted — the owner's first `snooze
     /// ui` session; or two quick `snooze run`) both saw "not running", both started `deckhold
@@ -724,7 +737,9 @@ public actor HostCore {
         let t0 = ContinuousClock.now
         let started = Date()
         do {
-            try await m.sandbox.openSession(session, argv: argv, environment: r.environment ?? [:], workingDirectory: r.workdir ?? workdir,
+            try await m.sandbox.openSession(session, argv: argv,
+                                            environment: Self.withClaudePermissions(r.environment ?? [:], recipe: m.config.spec.recipe?.name),
+                                            workingDirectory: r.workdir ?? workdir,
                                             user: r.user, size: size)
         } catch {
             // deckhold refuses a second holder of a name ("Address in use"): someone else (a program
@@ -752,7 +767,8 @@ public actor HostCore {
         let m = try get(r.name)
         guard let argv = r.argv, !argv.isEmpty else { throw HostError(.invalid, "exec needs a command (snooze exec NAME -- CMD…)") }
         try await ensureRunning(m, wake: r.wake ?? true)
-        let ctx = Self.execContext(config: m.config, environment: r.environment ?? [:], workdir: r.workdir, user: r.user)
+        let ctx = Self.execContext(config: m.config, environment: Self.withClaudePermissions(r.environment ?? [:], recipe: m.config.spec.recipe?.name),
+                                   workdir: r.workdir, user: r.user)
         let t0 = ContinuousClock.now
         let res = try await m.sandbox.exec(argv, environment: ctx.environment, workingDirectory: ctx.workdir, user: ctx.user,
                                            timeoutSeconds: r.timeoutSeconds ?? 120)

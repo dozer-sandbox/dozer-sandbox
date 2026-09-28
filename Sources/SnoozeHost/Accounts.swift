@@ -81,7 +81,18 @@ public struct AccountsFile: Codable, Equatable, Sendable {
 /// `<store>/accounts.json`.
 public struct AccountStore: Sendable {
     public let url: URL
-    public init(store: SnoozeStore) { url = store.root.appendingPathComponent("accounts.json") }
+    /// 591: the keep-alive of a store that has no accounts.json yet (the settings' `host.keepalive`);
+    /// once a store saved its own choice (`snooze account keepalive`), that wins.
+    public let newStoreKeepalive: Bool
+    public init(store: SnoozeStore, newStoreKeepalive: Bool = false) {
+        url = store.root.appendingPathComponent("accounts.json")
+        self.newStoreKeepalive = newStoreKeepalive
+    }
+
+    /// The store's accounts, with the settings' `host.keepalive` for a store that has not chosen.
+    public init(store: SnoozeStore, settings: SnoozeSettings) {
+        self.init(store: store, newStoreKeepalive: settings.bool(SettingKey.keepalive))
+    }
 
     public static let reserved: Set<String> = ["default", "none"]
     public static let setupTokenPrefix = "snooze-claude:"
@@ -90,7 +101,9 @@ public struct AccountStore: Sendable {
     public static let setupTokenLifetime: TimeInterval = 31_536_000
 
     public func load() -> AccountsFile {
-        var f = (try? Data(contentsOf: url)).flatMap { try? HostWire.decoder.decode(AccountsFile.self, from: $0) } ?? AccountsFile()
+        var fresh = AccountsFile()
+        if !FileManager.default.fileExists(atPath: url.path) { fresh.keepalive = newStoreKeepalive }
+        var f = (try? Data(contentsOf: url)).flatMap { try? HostWire.decoder.decode(AccountsFile.self, from: $0) } ?? fresh
         if !f.accounts.contains(where: { $0.name == "mac" }) { f.accounts.insert(.mac, at: 0) }
         return f
     }

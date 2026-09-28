@@ -34,7 +34,9 @@ public final class HostServer: @unchecked Sendable {
         self.store = store
         self.idleTimeoutMinutes = idleTimeoutMinutes
         self.version = version
-        core = HostCore(store: store, readOnly: false, version: version)
+        // 591: the settings' keep-alive for a store that has not chosen (read once, at start).
+        core = HostCore(store: store, readOnly: false, version: version,
+                        newStoreKeepalive: SnoozeSettings.load().bool(SettingKey.keepalive))
     }
 
     public enum StartError: Error, LocalizedError {
