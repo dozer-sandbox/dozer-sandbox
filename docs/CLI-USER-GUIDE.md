@@ -324,9 +324,17 @@ terminal…** attaches to any session or starts a new one running a command. Ter
 view — the session keeps running, as Ctrl-] does in `snooze attach`.
 
 - **Watch** is read-only: nothing you type reaches the session, and it never resizes it.
+- **Watch it boot.** **Start** (or **Open here** on a shut-down sandbox) opens a terminal that shows
+  the start as it happens — snooze's timed steps (on a first start, the download and the bake) and
+  the kernel's boot console — and then becomes the image's own session in the same pane, with the
+  boot log kept in the scrollback. `snooze console NAME [--follow]` shows the same console in a
+  terminal.
+- **A new terminal is a new shell.** **New terminal…** and **Split** start a new shell session
+  (`shell-2`, `shell-3`, …); attaching to or watching a session that already runs is a choice in the
+  New terminal dialog. Two tabs on one session are marked "shared with tab N".
 - **A sleeping sandbox.** When the sandbox is paused, asleep, in deep sleep or shut down, the
   terminal is covered with its state and one button. **Any key you type wakes it** (or resumes it)
-  and the screen comes back where it was. What your terminal answers by itself — focus changes,
+  and the screen comes back where it was, with a note of how long it took ("woke in 0.5 s"). What your terminal answers by itself — focus changes,
   cursor-position and colour replies — never wakes it. A watcher's keys never wake it either.
 - **Paste** is filtered like Ghostty's: control characters that could run commands become spaces.
   A paste with line breaks into a program that did not ask for bracketed paste, or over 64 KiB,
@@ -334,7 +342,9 @@ view — the session keeps running, as Ctrl-] does in `snooze attach`.
 - **Links** in terminal output are not clickable, and a program inside the sandbox can never read
   or set your clipboard. Cmd-C copies a selection (so does selecting with the mouse); Cmd-V pastes.
   Cmd shortcuts belong to the browser (Cmd-W closes the tab — the session runs on).
-- An open terminal keeps the host running, as `snooze attach` does.
+- An open terminal keeps the host running, as `snooze attach` does; the dashboard alone does not.
+- The terminal itself runs in an isolated frame of the page: whatever a sandbox prints can never
+  reach your UI session, its cookie or the other terminals.
 
 **Open in Terminal** opens `snooze attach` in your default terminal app instead: whatever opens
 `.command` files on this Mac (Terminal, or iTerm2 / Ghostty if you've made them the handler). No

@@ -9,7 +9,7 @@
 //   page → frame   {t:'init', wasm: ArrayBuffer, mode}   once: compile the engine (one WASM instance)
 //                  {t:'write', data: ArrayBuffer}         terminal bytes to draw
 //                  {t:'paste', text}                      a paste the PAGE made safe (and confirmed)
-//                  {t:'focus'}
+//                  {t:'focus'} · {t:'keep-scrollback'} (after a boot view, before the session's screen)
 //   frame → page   {t:'ready'} · {t:'opened', cols, rows} · {t:'data', s} (keys, reports)
 //                  {t:'resize', cols, rows} · {t:'title', s} · {t:'paste', text, bracketed}
 //                  {t:'paste-too-big', bytes} · {t:'failed'} (the engine did not load)
@@ -44,8 +44,10 @@ async function init(wasm, m) {
   const { instance } = await WebAssembly.instantiate(wasm, { env: { log: () => {} } });
   const engine = new GhosttyWeb.Ghostty(instance);
   const host = document.getElementById('term');
+  // `scrollback` is BYTES in 0.4.0's WASM (upstream #140), not lines: the default 10 000 kept ~10 KB,
+  // too little for a boot log. 4 MiB.
   term = new GhosttyWeb.Terminal({ ghostty: engine, fontSize: 13, fontFamily: 'ui-monospace, "SF Mono", Menlo, monospace',
-                                   theme: THEME, cursorBlink: false, disableStdin: mode === 'watch' });
+                                   theme: THEME, cursorBlink: false, disableStdin: mode === 'watch', scrollback: 4 * 1024 * 1024 });
   term.open(host);
   const fit = new GhosttyWeb.FitAddon();
   term.loadAddon(fit);
@@ -107,7 +109,7 @@ function valid(m) {
     case 'init': return !term && m.wasm instanceof ArrayBuffer && (m.mode === 'interactive' || m.mode === 'watch') && Object.keys(m).length === 3;
     case 'write': return !!term && m.data instanceof ArrayBuffer && m.data.byteLength <= MAX_WRITE && Object.keys(m).length === 2;
     case 'paste': return !!term && typeof m.text === 'string' && m.text.length <= MAX_PASTE && Object.keys(m).length === 2;
-    case 'focus': return !!term && Object.keys(m).length === 1;
+    case 'focus': case 'keep-scrollback': return !!term && Object.keys(m).length === 1;
     default: return false;
   }
 }
@@ -119,6 +121,9 @@ window.addEventListener('message', (ev) => {
     case 'write': term.write(new Uint8Array(m.data)); break;
     case 'paste': if (mode === 'interactive') term.paste(m.text); break;
     case 'focus': term.focus(); break;
+    // After the boot view: the screen (the boot log's end) scrolls into the scrollback before the
+    // session's first screen replaces it — the terminal alone knows how tall it is.
+    case 'keep-scrollback': term.write('\x1b[999;1H' + '\r\n'.repeat(term.rows)); break;
   }
 });
 

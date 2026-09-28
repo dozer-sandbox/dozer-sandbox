@@ -311,6 +311,7 @@ final class WebTerminalHTTPTests: XCTestCase {
         fake.phase = "running"
         fake.emit(HostEvent(kind: .phase, sandbox: "demo", text: "running", phase: "running"))
         try readUntil("── the ")
+        _ = try ws.readText(containing: #""t":"boot-done""#)
         wait("open-session and the attach") { fake.performedOps.contains(.openSession) && fake.attachCount == 2 }
         XCTAssertNil(fake.performed.first { $0.op == .openSession }?.argv, "the image's own session")
         a.feed(Data(WebTerminalWire.snapshotPrefix + Array("$ ".utf8)))

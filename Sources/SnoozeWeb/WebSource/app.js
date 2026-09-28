@@ -498,8 +498,16 @@ function lifecycle(verb, name) {
 /// 591 — Start shows the boot: a terminal pane streams the host's steps and the kernel's console,
 /// then becomes the image's own session (the UI process does the switch; the boot stays in the scrollback).
 async function startWithBootView(name) {
-  const op = await act({ action: 'start', sandbox: name });
-  if (op) openTerminal(name, null, 'interactive');
+  // The terminal first: once the UI process shows it waiting on the shut-down sandbox, it is following
+  // the host's events — then the start, so not one step is missed (a warm start takes half a second).
+  const before = new Set(terminals.keys());
+  openTerminal(name, null, 'interactive');
+  const t = [...terminals.values()].find((x) => !before.has(x.id));
+  const end = Date.now() + 15000;
+  while (t && Date.now() < end && !t.closed && !t.errorText && !(t.state && ['shutDown', 'failed', 'boot'].includes(t.state.cover.kind))) {
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  await act({ action: 'start', sandbox: name });
 }
 function lifecycleButtons(s, all) {
   const busy = s.busy || s.phase === 'booting' || opRunningFor(s.name);
@@ -1055,6 +1063,9 @@ function onTerminalMessage(t, ev) {
       clearTimeout(t.noticeTimer);
       t.noticeTimer = setTimeout(() => { n.hidden = true; }, 4000);
     }
+  } else if (m.t === 'boot-done') {
+    toFrame(t, { t: 'keep-scrollback' });           // the boot log's end scrolls into the scrollback
+    return;
   } else if (m.t === 'ended') {
     t.ended = true;
     t.endText = m.text || (m.ending === 'exited' ? 'exit ' + m.code : m.ending);

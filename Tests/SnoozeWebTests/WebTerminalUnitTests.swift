@@ -182,9 +182,10 @@ final class WebTerminalUnitTests: XCTestCase {
 
     func testTheFirstSnapshotAfterABootKeepsTheScrollback() {
         let snap = WebTerminalWire.snapshotPrefix + Array("\u{1B}[1;1H$ ".utf8)
-        let kept = WebTerminalWire.keepingScrollback(snap[...], rows: 3)
-        XCTAssertEqual(String(decoding: kept, as: UTF8.self), "\u{1B}[?1049l\u{1B}[!p\u{1B}[0m\r\n\r\n\r\n\u{1B}[H\u{1B}[2J\u{1B}[1;1H$ ")
-        XCTAssertEqual(WebTerminalWire.keepingScrollback(Array("plain".utf8)[...], rows: 3), Array("plain".utf8), "anything else is untouched")
+        let kept = WebTerminalWire.keepingScrollback(snap[...])
+        XCTAssertEqual(String(decoding: kept, as: UTF8.self), "\u{1B}[?1049l\u{1B}[!p\u{1B}[0m\u{1B}[H\u{1B}[2J\u{1B}[1;1H$ ",
+                       "a soft reset and a clear SCREEN — no full reset, no ED 3")
+        XCTAssertEqual(WebTerminalWire.keepingScrollback(Array("plain".utf8)[...]), Array("plain".utf8), "anything else is untouched")
     }
 
     // MARK: the 541 rule — SandboxLab's cases, unchanged

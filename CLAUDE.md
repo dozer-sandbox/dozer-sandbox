@@ -310,15 +310,43 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   allowlist). The compiler checks the pins, refuses unlisted files and never rewrites vendored bytes;
   the page's own rules are unchanged for `index.html`/`app.css`/`app.js`. `application/wasm` is served
   only for a `vendor` manifest entry. To update: new tarball from the registry → same files → new
-  `VENDOR.json` → `make web-assets` → the browser probe.
-- **The CSP gained exactly `'wasm-unsafe-eval'`** — never `'unsafe-eval'`, `'unsafe-inline'` or `data:`
-  in `connect-src` (the engine's inlined WASM is NOT used: the page loads the vendored `.wasm` from its
-  own origin).
-- **The page wraps the engine** (ghostty-web 0.4.0 fails the bar alone): one WASM instance PER terminal,
-  Cmd/Ctrl-clicks dropped and `window.open` refused (no link opens), the engine's paste handler never
-  runs (our port of Ghostty 1.3.0's paste `encode`, confirm/refuse thresholds), drops refused, focus
-  reports sent by the page (the engine does not). The browser probe
-  (`probes/591-i146-SNOOZE-WEB-TERMINAL/browser-terminal.mjs`) proves each; re-run it on any engine bump.
+  `VENDOR.json` → `make web-assets` → the browser probe. The page has TWO documents (`index.html` → `/`,
+  `terminal.html` → `/terminal-frame`), each with its one script and style; the page-code rules apply to
+  all six files.
+- **An open terminal keeps the host alive** (T3: an explicit attach, like `snooze attach` — even held on
+  a deep-asleep sandbox); the dashboard alone still lets it idle out (`t3-host-alive.mjs`).
+- **The engine runs ONLY in a sandboxed, opaque-origin iframe** (owner ruling T2): `/terminal-frame`
+  (`terminal.html` + `frame.js` + `frame.css`), loaded with `sandbox="allow-scripts"` only — no cookie,
+  storage, same-origin access, popups or forms. Its CSP (`WebSecurity.frameHeaders`) allows
+  `'wasm-unsafe-eval'` and `connect-src 'none'`: the PAGE fetches the vendored `.wasm` and posts each
+  frame its own copy (one instance per terminal), and keeps the WebSocket. The page's CSP gained only
+  `frame-src 'self'` (no WebAssembly in the page). The frame's script/style and the engine's script are
+  served to the opaque origin without the Origin/Fetch-Metadata checks and with CORP `cross-origin`
+  (`WebAssets.isFrameAsset`); every other file keeps the page's rules. A response's own header
+  REPLACES a default of that name (the frame's CSP/XFO) — never a second copy.
+- **The frame protocol is closed and checked on both sides** (frame.js `valid`, app.js
+  `validFrameMessage`): source window, opaque origin, known type, exact fields, typed and capped;
+  anything else is dropped and counted. Page → frame: init / write / paste / focus / keep-scrollback.
+  Frame → page: ready / opened / data / resize / title / paste / paste-too-big / failed.
+- **The frame wraps the engine** (ghostty-web 0.4.0 fails the bar alone): Cmd/Ctrl-clicks dropped and
+  `window.open` refused (no link opens; the sandbox has no popups either), the engine's paste handler
+  never runs (the frame sends the text to the page, which applies our port of Ghostty 1.3.0's paste
+  `encode` and the confirm/refuse thresholds, then posts it back), drops refused, focus reports sent
+  by the frame (the engine does not), `scrollback` given in BYTES (upstream #140). The browser probe
+  (`probes/591-i146-SNOOZE-WEB-TERMINAL/browser-terminal.mjs`) proves each, and that the frame cannot
+  read a cookie, fetch, open a socket or reach the page; re-run it on any engine bump.
+- **The boot view** (owner request): an off/failed/booting sandbox's terminal waits (cover with Start),
+  follows the host's events BEFORE saying so (the page starts the sandbox only once the terminal waits —
+  `startWithBootView`), then writes the host's steps/progress and — from "VM created" — the `console
+  --follow` stream into the pane as inert text (`WebTerminalWire.bootText`: every control character
+  removed; 1000 B lines; 1 MiB in all). When it runs: the image's own session is opened (`open-session`,
+  when the terminal asked for none), the streams are stopped AND drained, `boot-done` tells the page to
+  scroll the screen into the scrollback, and the first SNAPSHOT's full reset is rewritten to a soft
+  reset + clear screen (`keepingScrollback`) — the boot log stays above the session. A wake reports
+  "woke in N s" (a state `notice`).
+- **`console` is a host op and a CLI command** (`snooze console NAME [--follow]`, D5): the lines so far
+  (in-process when no host runs), or a stream of `console` events tailing `Sandbox.bootLogURL` across a
+  cold boot's recreated log (`BootConsoleTail`). The CLI never prints the guest's control characters.
 
 ## Verifying changes
 

@@ -91,14 +91,14 @@ public enum WebTerminalWire {
     }
 
     /// deckhold's SNAPSHOT starts by resetting the viewer and clearing its scrollback. After a boot
-    /// view the scrollback holds the boot log, so the FIRST snapshot's prefix is rewritten: a soft
-    /// reset, `rows` new lines (the boot log scrolls into the scrollback), then home + clear screen.
+    /// view the scrollback holds the boot log, so the FIRST snapshot's prefix is rewritten to a soft
+    /// reset + home + clear SCREEN (never the full reset, never ED 3). Before it, the page tells the
+    /// terminal to scroll its screen into the scrollback (`boot-done`): only the terminal knows its
+    /// real height.
     public static let snapshotPrefix: [UInt8] = Array("\u{1B}[?1049l\u{1B}c\u{1B}[H\u{1B}[2J\u{1B}[3J".utf8)
-    public static func keepingScrollback(_ bytes: ArraySlice<UInt8>, rows: Int) -> [UInt8] {
+    public static func keepingScrollback(_ bytes: ArraySlice<UInt8>) -> [UInt8] {
         guard bytes.starts(with: snapshotPrefix) else { return Array(bytes) }
-        let lead = Array("\u{1B}[?1049l\u{1B}[!p\u{1B}[0m".utf8) + Array(repeating: Array("\r\n".utf8), count: max(1, rows)).flatMap { $0 }
-            + Array("\u{1B}[H\u{1B}[2J".utf8)
-        return lead + bytes.dropFirst(snapshotPrefix.count)
+        return Array("\u{1B}[?1049l\u{1B}[!p\u{1B}[0m\u{1B}[H\u{1B}[2J".utf8) + bytes.dropFirst(snapshotPrefix.count)
     }
 
     /// The host's line after the notice ("[snooze] the shell session has ended (exit 0)"), without the tag.

@@ -258,12 +258,11 @@ final class WebTerminalBridge: @unchecked Sendable {
                 let out = pending[..<(pending.count - hold)]
                 if !out.isEmpty {
                     // After a boot view, the first SNAPSHOT keeps the boot log in the scrollback.
-                    let keep: Int? = lock.withLock {
-                        guard rewriteSnapshot else { return nil }
-                        rewriteSnapshot = false
-                        return grant.mode == .watch ? 50 : Int(size.rows)
+                    let keep: Bool = lock.withLock {
+                        defer { rewriteSnapshot = false }
+                        return rewriteSnapshot
                     }
-                    if let rows = keep { await sendBinary(WebTerminalWire.keepingScrollback(out, rows: rows)[...]) } else { await sendBinary(out) }
+                    if keep { await sendBinary(WebTerminalWire.keepingScrollback(out)[...]) } else { await sendBinary(out) }
                     let lifted: Bool = lock.withLock {
                         guard awaitingScreen else { return false }
                         awaitingScreen = false
@@ -329,9 +328,11 @@ final class WebTerminalBridge: @unchecked Sendable {
             awaitingScreen = true
             screenDeadline = nil
         }
+        // Follow the host's events BEFORE saying "shut down": the page starts the sandbox only once it
+        // sees this terminal waiting, so no step of the start is missed.
+        startBootEvents()
         await pushState()
         let name = grant.sandbox
-        defer { stopBootStreams() }
         while !isEnded {
             startBootEvents()
             let ph = lock.withLock { phase }
@@ -339,7 +340,7 @@ final class WebTerminalBridge: @unchecked Sendable {
             if ph == Phase.running.rawValue { break }
             try? await Task.sleep(for: .milliseconds(200))
         }
-        if isEnded { return false }
+        if isEnded { await stopBootStreams(); return false }
         if lock.withLock({ bootView }) {
             // A boot too quick for its step to be seen: the console still shows (from its start).
             startBootConsole()
@@ -353,10 +354,12 @@ final class WebTerminalBridge: @unchecked Sendable {
                 await bootWrite("[snooze] could not open the session: \(HostError.from(error).message)", dim: true)
             }
         }
-        stopBootStreams()
+        await stopBootStreams()
         if lock.withLock({ bootView }) {
             let s = lock.withLock { session } ?? "default"
             await bootWrite("── the \(s) session ──", dim: false, bold: true)
+            // The page scrolls the terminal's screen (the end of the boot log) into its scrollback.
+            await sendText(#"{"t":"boot-done"}"#)
             lock.withLock {
                 bootView = false
                 rewriteSnapshot = true
@@ -420,13 +423,17 @@ final class WebTerminalBridge: @unchecked Sendable {
         lock.withLock { if bootConsoleTask == nil { bootConsoleTask = t } else { t.cancel() } }
     }
 
-    private func stopBootStreams() {
+    /// Stop the boot streams AND wait for their last writes, so nothing of the boot lands after the
+    /// switch into the session.
+    private func stopBootStreams() async {
         let (a, b): (Task<Void, Never>?, Task<Void, Never>?) = lock.withLock {
             defer { bootEvents = nil; bootConsoleTask = nil }
             return (bootEvents, bootConsoleTask)
         }
         a?.cancel()
         b?.cancel()
+        await a?.value
+        await b?.value
     }
 
     /// One line of the boot view: inert text (no control character survives), capped per line and in all.
