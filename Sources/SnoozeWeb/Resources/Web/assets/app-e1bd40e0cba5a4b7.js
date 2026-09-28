@@ -650,6 +650,8 @@ async function viewSandbox() {
       gated(btn('Open in Terminal', terminal(null), { title: 'Terminal.app attaches to the ' + d.defaultSession + ' session (waking the sandbox if it sleeps)' }))),
       h('div', { class: 'empty' }, 'Attaches to the ' + d.defaultSession + ' session; Ctrl-] detaches, the session keeps running. Open here keeps it in the Terminals view; Open in Terminal uses your default terminal app.')),
     h('div', { class: 'head' }, h('h2', null, 'Sessions'), h('div', { class: 'actions' },
+      gated(btn('New shell', () => newShellTerminal(name).catch((e) => toast(e.message || String(e), true)),
+        { small: true, title: 'A new shell session (shell-2, shell-3, …) in a browser terminal' })),
       gated(btn('Open the ' + d.defaultSession + ' session', () => act({ action: 'open-session', sandbox: name }), { small: true, title: 'Start the image’s own session if it is not running (wakes a sleeping sandbox)' })),
       gated(btn('Run detached…', () => dialog('Run a command in ' + name, 'A new session running the command — no shell in front (say bash -lc \'…\' for one). It runs inside the sandbox; attach to see it.',
         [{ name: 'session', label: 'Session name', placeholder: 'e.g. worker', required: true },
@@ -917,8 +919,8 @@ async function waitForOp(op, seconds = 300) {
   return null;
 }
 
-async function openTerminal(sandbox, session, mode) {
-  const t = { id: termUI.nextId++, sandbox, session, mode, pane: termUI.split ? termUI.focusedPane : 0,
+async function openTerminal(sandbox, session, mode, pane) {
+  const t = { id: termUI.nextId++, sandbox, session, mode, pane: termUI.split ? (pane ?? termUI.focusedPane) : 0,
               ws: null, term: null, state: null, ended: false, endText: '', errorText: '', disconnected: '',
               closed: false, focused: false, title: '', pinger: null, coverAction: null };
   t.els = terminalElements(t);
@@ -1201,7 +1203,14 @@ function renderTerminals() {
         termUI.focusedPane = 0;
       }
       renderTerminals();
-    }, { title: 'Show two terminals side by side' });
+      // A new pane opens a NEW shell (next to the terminal on the left, same sandbox) — never a
+      // second view of the same session.
+      const left = terminals.get(termUI.selected[0]);
+      if (termUI.split && left && ![...terminals.values()].some((t) => t.pane === 1)) {
+        termUI.focusedPane = 1;
+        newShellTerminal(left.sandbox, 1).catch((e) => toast(e.message || String(e), true));
+      }
+    }, { title: 'Show two terminals side by side — a new shell opens on the right' });
     termUI.panes = [0, 1].map((i) => {
       const strip = h('div', { class: 'tabs', role: 'tablist' });
       const body = h('div', { class: 'term-body' });
@@ -1235,11 +1244,17 @@ function renderTerminals() {
 }
 function tabElement(t, pane) {
   const phase = t.ended || t.errorText || t.disconnected ? 'ended' : (t.state && t.state.phase) || 'unknown';
-  const label = t.sandbox + ' · ' + (t.session || '…');
+  // Tabs are numbered (1, 2, …) so a shared session can say which tab it is shared with.
+  const order = [...terminals.keys()];
+  const num = order.indexOf(t.id) + 1;
+  const label = num + ' · ' + t.sandbox + ' · ' + (t.session || '…');
+  const twins = t.session && !t.ended ? [...terminals.values()].filter((o) => o.id !== t.id && !o.ended && o.sandbox === t.sandbox && o.session === t.session) : [];
+  const shared = twins.length ? h('span', { class: 'tag shared', title: 'Two views of ONE session: what is typed in either shows in both' },
+    'shared with tab ' + twins.map((o) => order.indexOf(o.id) + 1).join(', ')) : null;
   const select = h('button', { type: 'button', role: 'tab', class: 'tab' + (t.id === termUI.selected[pane] ? ' active' : ''),
                                title: t.title ? t.title + ' — ' + label : label, 'data-term': String(t.id),
                                on: { click: () => { termUI.selected[pane] = t.id; renderTerminals(); focusTerm(t); } } },
-    h('span', { class: 'tab-dot ph-' + phase, 'aria-hidden': 'true' }), label, t.mode === 'watch' ? h('span', { class: 'tag' }, 'watch') : null);
+    h('span', { class: 'tab-dot ph-' + phase, 'aria-hidden': 'true' }), label, t.mode === 'watch' ? h('span', { class: 'tag' }, 'watch') : null, shared);
   const move = termUI.split ? h('button', { type: 'button', class: 'tab-x', title: 'Move to the other pane',
     on: { click: () => { t.pane = 1 - t.pane; termUI.selected[t.pane] = t.id; renderTerminals(); focusTerm(t); } } }, '⇄') : null;
   const close = h('button', { type: 'button', class: 'tab-x', title: 'Close this terminal (the session keeps running)', 'aria-label': 'Close ' + label,
@@ -1252,28 +1267,77 @@ async function newTerminalDialog() {
   try { o = await api('overview'); state.overview = o; } catch (_) { /* the last one */ }
   const names = o ? o.sandboxes.map((s) => s.name) : [];
   if (!names.length) { toast('No sandboxes yet — create one first', true); return; }
-  dialog('New terminal', 'A terminal in this browser. Leave the session empty for the image’s own (started if it is not running). A command starts a NEW session running it — no shell in front (say bash -l for one).', [
-    { name: 'sandbox', label: 'Sandbox', type: 'select', options: names, value: termUI.lastSandbox || names[0] },
-    { name: 'session', label: 'Session', placeholder: 'empty: the image’s own' },
-    { name: 'command', label: 'Command for a new session (optional)', placeholder: 'e.g. bash -l' },
-    { name: 'mode', label: 'Mode', type: 'select', options: [['interactive', 'interactive'], ['watch', 'watch only — nothing typed reaches it']] },
+  const first = termUI.lastSandbox && names.includes(termUI.lastSandbox) ? termUI.lastSandbox : names[0];
+  // What to open: a NEW shell by default (591 owner feedback: an empty form must never mirror an
+  // existing session); attaching to or watching a running session is an explicit choice.
+  const d = dialog('New terminal', 'A new shell session by default. To see a session that already runs, pick Attach or Watch.', [
+    { name: 'sandbox', label: 'Sandbox', type: 'select', options: names, value: first },
+    { name: 'what', label: 'Open', type: 'select', options: [['new', 'New shell'], ['command', 'New session running a command…']] },
+    { name: 'session', label: 'Session name (new session only)', placeholder: 'e.g. worker' },
+    { name: 'command', label: 'Command (new session only)', placeholder: 'e.g. htop — no shell in front (say bash -lc \'…\' for one)' },
   ], 'Open', async (v) => {
     termUI.lastSandbox = v.sandbox;
-    let open = null;
-    if (v.command) {
+    const pane = termUI.split ? termUI.focusedPane : 0;
+    if (v.what === 'new') { await newShellTerminal(v.sandbox, pane); return; }
+    if (v.what === 'command') {
       const argv = splitArgs(v.command);
       if (!argv.length) throw new Error('the command is empty');
       if (!v.session) throw new Error('a new session needs a name');
-      open = { action: 'open-session', sandbox: v.sandbox, session: v.session, argv };
-    } else if (!v.session && v.mode === 'interactive') {
-      open = { action: 'open-session', sandbox: v.sandbox };
-    }
-    if (open) {
-      const done = await waitForOp(await actOrThrow(open));
+      const done = await waitForOp(await actOrThrow({ action: 'open-session', sandbox: v.sandbox, session: v.session, argv }));
       if (!done || done.state !== 'done') throw new Error(done ? done.text : 'the session did not start in time');
+      if (!done.text.startsWith('started')) throw new Error('a session named ' + v.session + ' already runs — pick another name, or Attach to it');
+      openTerminal(v.sandbox, v.session, 'interactive', pane);
+      return;
     }
-    openTerminal(v.sandbox, v.session || null, v.mode);
+    const m = /^(attach|watch):(.+)$/.exec(v.what);
+    if (!m) throw new Error('pick what to open');
+    openTerminal(v.sandbox, m[2], m[1] === 'watch' ? 'watch' : 'interactive', pane);
   });
+  const sandboxSel = d.querySelector('[name="sandbox"]'), whatSel = d.querySelector('[name="what"]');
+  const nameField = d.querySelector('[name="session"]').closest('label'), cmdField = d.querySelector('[name="command"]').closest('label');
+  const showFields = () => { const c = whatSel.value === 'command'; nameField.hidden = !c; cmdField.hidden = !c; };
+  // The running sessions of the chosen sandbox, as explicit Attach / Watch choices.
+  const loadSessions = async () => {
+    for (const o of [...whatSel.options]) if (o.value.includes(':')) o.remove();
+    let rows = [];
+    try { rows = await api('sandboxes/' + sandboxSel.value + '/sessions'); } catch (_) { /* not running: none to attach to */ }
+    for (const s of rows.filter((r) => !r.ended)) {
+      whatSel.append(h('option', { value: 'attach:' + s.name }, 'Attach to ' + s.name + ' (' + s.command + ')'));
+      whatSel.append(h('option', { value: 'watch:' + s.name }, 'Watch ' + s.name + ' (read-only)'));
+    }
+    showFields();
+  };
+  sandboxSel.addEventListener('change', loadSessions);
+  whatSel.addEventListener('change', showFields);
+  loadSessions();
+}
+
+/// A NEW shell session in `sandbox` — `shell-2`, `shell-3`, … (the next name not taken), running a
+/// login shell — opened with the ordinary open-session action (one HostOp; its idempotency unchanged:
+/// a name that turns out to be taken answers "already running", and the next name is tried).
+async function newShellTerminal(sandbox, pane) {
+  let rows = [], detail = null;
+  try { [detail, rows] = await Promise.all([api('sandboxes/' + sandbox), api('sandboxes/' + sandbox + '/sessions')]); } catch (_) { /* asleep: listed after the wake */ }
+  const argv = loginShell(detail, rows);
+  const taken = new Set(rows.map((r) => r.name));
+  for (let n = 2, tries = 0; tries < 20; n++) {
+    const name = 'shell-' + n;
+    if (taken.has(name)) continue;
+    tries++;
+    const op = await actOrThrow({ action: 'open-session', sandbox, session: name, argv });
+    const done = await waitForOp(op);
+    if (!done || done.state !== 'done') throw new Error(done ? done.text : 'the session did not start in time');
+    if (done.text.startsWith('started')) { openTerminal(sandbox, name, 'interactive', pane); return; }
+    taken.add(name);                                   // it already ran (a sandbox that was asleep): the next one
+  }
+  throw new Error('no free shell-N name');
+}
+/// `bash -l` where the image has bash (the built-in images, and custom images made from them; or
+/// any running session that is bash), else `sh -l`.
+function loginShell(detail, rows) {
+  const image = detail && detail.info ? detail.info.image : '';
+  const hasBash = ['lab', 'claude-code', 'pi'].includes(image) || rows.some((r) => /(^|\/)bash(\s|$)/.test(r.command));
+  return hasBash ? ['bash', '-l'] : ['sh', '-l'];
 }
 
 // ── start ───────────────────────────────────────────────────────────────────
