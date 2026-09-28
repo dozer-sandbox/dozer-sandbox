@@ -360,7 +360,29 @@ final class FakeData: SnoozeWebData, @unchecked Sendable {
     }
     func metricsCSV(_ q: WebMetricsQuery) async throws -> Data { Data("id,action\n1,'=cmd\n".utf8) }
     func doctor() async throws -> [WebDoctorCheck] { [WebDoctorCheck(check: "macOS", status: "ok", detail: "fake")] }
-    func hostEvents() -> AsyncStream<HostEvent>? { nil }
+    // 591: scripted host events and boot console (only after `hostUp`: nil before, as with no host).
+    var hostUp: Bool {
+        get { lock.withLock { _hostUp } }
+        set { lock.withLock { _hostUp = newValue } }
+    }
+    private var _hostUp = false
+    private var eventSinks: [AsyncStream<HostEvent>.Continuation] = []
+    private var consoleSinks: [AsyncStream<String>.Continuation] = []
+    func hostEvents() -> AsyncStream<HostEvent>? {
+        guard hostUp else { return nil }
+        let (s, c) = AsyncStream<HostEvent>.makeStream()
+        lock.withLock { eventSinks.append(c) }
+        return s
+    }
+    func bootConsole(_ name: String) -> AsyncStream<String>? {
+        guard hostUp else { return nil }
+        let (s, c) = AsyncStream<String>.makeStream()
+        lock.withLock { consoleSinks.append(c) }
+        return s
+    }
+    var consoleSubscribers: Int { lock.withLock { consoleSinks.count } }
+    func emit(_ e: HostEvent) { for c in lock.withLock({ eventSinks }) { c.yield(e) } }
+    func console(_ line: String) { for c in lock.withLock({ consoleSinks }) { c.yield(line) } }
 
     // phase 2
     private(set) var performed: [HostRequest] = []
@@ -404,6 +426,11 @@ final class FakeData: SnoozeWebData, @unchecked Sendable {
     private(set) var attaches: [(name: String, session: String?, size: TermSize)] = []
     func script(_ a: FakeAttachment...) { lock.withLock { _attachments += a } }
     var attachCount: Int { lock.withLock { attaches.count } }
+    var attachError: HostError? {
+        get { lock.withLock { _attachError } }
+        set { lock.withLock { _attachError = newValue } }
+    }
+    private var _attachError: HostError?
     var performedOps: [HostOp] { lock.withLock { performed.map(\.op) } }
 
     func attachTerminal(_ name: String, session: String?, size: TermSize) async throws -> any WebTerminalAttachment {
@@ -411,6 +438,7 @@ final class FakeData: SnoozeWebData, @unchecked Sendable {
             attaches.append((name, session, size))
             return _attachments.isEmpty ? nil : _attachments.removeFirst()
         }
+        if let e = lock.withLock({ _attachError }) { throw e }
         guard let next else { throw HostError(.invalidPhase, "\(name) is off — `snooze start \(name)` boots it") }
         return next
     }

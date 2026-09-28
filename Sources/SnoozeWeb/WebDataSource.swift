@@ -30,6 +30,8 @@ public protocol SnoozeWebData: Sendable {
     /// 591: attach to a session (nil: the image's own) for a browser terminal — the host's `attach`
     /// with `wake: false`, exactly as the CLI sends it. `size` 0×0 keeps the session's size (watch).
     func attachTerminal(_ name: String, session: String?, size: TermSize) async throws -> any WebTerminalAttachment
+    /// 591: the boot console as it is written (the host's `console --follow`); nil when no host runs.
+    func bootConsole(_ name: String) -> AsyncStream<String>?
 }
 
 /// `GET /api/v1/metrics[.csv]?image=…&days=…&steps=0|1`.
@@ -280,6 +282,27 @@ public final class HostWebData: SnoozeWebData, @unchecked Sendable {
             }
             cont.finish()
             _ = client                                   // closed (deinit) once the reader is done
+        }
+        return stream
+    }
+
+    /// 591: `console NAME --follow` — the boot console's lines as they are written (the CLI's
+    /// `snooze console --follow`). Nil when no host runs. Ends when the stream is cancelled.
+    public func bootConsole(_ name: String) -> AsyncStream<String>? {
+        guard store.hostIsRunning(), let client = try? HostClient.connect(store: store, autostart: false) else { return nil }
+        var r = HostRequest(.console, name: name)
+        r.follow = true
+        do { try client.send(r) } catch { return nil }
+        let (stream, cont) = AsyncStream<String>.makeStream(bufferingPolicy: .bufferingNewest(4096))
+        let fd = client.fd
+        cont.onTermination = { _ in Darwin.shutdown(fd, SHUT_RDWR) }
+        Thread.detachNewThread {
+            while let m = try? client.next() {
+                if m.ok == false { break }
+                if let e = m.event, e.kind == .console { cont.yield(e.text ?? "") }
+            }
+            cont.finish()
+            _ = client
         }
         return stream
     }

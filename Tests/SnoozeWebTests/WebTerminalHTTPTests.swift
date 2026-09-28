@@ -207,12 +207,13 @@ final class WebTerminalHTTPTests: XCTestCase {
     }
 
     func testARefusedAttachIsAnErrorFrame() throws {
-        // No scripted attachment: the fake answers like a host for a sandbox that is off.
+        // A session that is not there (an off sandbox is the boot view instead — see below).
+        fake.attachError = HostError(.notFound, "no session nope in demo")
         let (cookie, csrf) = try signIn()
-        let ws = try socket(try ticket(cookie, csrf), cookie: cookie)
+        let ws = try socket(try ticket(cookie, csrf, body: #"{"mode":"interactive","session":"nope"}"#), cookie: cookie)
         XCTAssertEqual(ws.status, 101)
         let e = try ws.readText(containing: #""t":"error""#)
-        XCTAssertTrue(e.contains("invalid-phase"), e)
+        XCTAssertTrue(e.contains("not-found"), e)
         XCTAssertEqual(try ws.readClose(), 1000)
     }
 
@@ -237,6 +238,73 @@ final class WebTerminalHTTPTests: XCTestCase {
         usleep(200_000)
         XCTAssertEqual(fake.performedOps, [.wake])
         XCTAssertEqual(a.sent, [], "keys for a sleeping sandbox are dropped, never queued")
+        ws.close()
+    }
+
+    // MARK: 591 polish — the boot view, the wake note
+
+    func testAnOffSandboxShowsItsBootThenTheImagesSessionInTheSamePane() throws {
+        fake.phase = "off"
+        let (cookie, csrf) = try signIn()
+        let ws = try socket(try ticket(cookie, csrf), cookie: cookie)            // nothing scripted: the attach says "off"
+        XCTAssertEqual(ws.status, 101)
+        _ = try ws.readText(containing: #""kind":"shutDown""#)
+        // A start begins: the host runs, its events and the console flow.
+        fake.hostUp = true
+        usleep(400_000)                                                         // the bridge subscribes (it polls every 200 ms)
+        fake.emit(HostEvent(kind: .phase, sandbox: "demo", text: "booting", phase: "booting"))
+        _ = try ws.readText(containing: #""kind":"boot""#)
+        var seen = ""
+        func readUntil(_ needle: String) throws {
+            let end = Date().addingTimeInterval(5)
+            while !seen.contains(needle) {
+                guard Date() < end else { XCTFail("no \(needle) in \(seen.debugDescription)"); throw POSIXError(.ETIMEDOUT) }
+                let (op, p) = try ws.readFrame(seconds: 5)
+                if op == 2 { seen += String(decoding: p, as: UTF8.self) }
+            }
+        }
+        try readUntil("── starting demo ──")
+        fake.emit(HostEvent(kind: .step, sandbox: "demo", text: "downloading images", milliseconds: nil))
+        fake.emit(HostEvent(kind: .progress, sandbox: "demo", text: "pulling alpine", completedBytes: 5 << 20, totalBytes: 5 << 20))
+        fake.emit(HostEvent(kind: .step, sandbox: "demo", text: "VM created and booted", milliseconds: 252))
+        wait("the console subscription") { fake.consoleSubscribers >= 1 }
+        fake.console("[    0.000000] Linux version 6.18")
+        fake.console("evil \u{1B}]52;c;cHduZWQ=\u{07}\u{1B}]8;;javascript:x\u{1B}\\link\u{9B}2J done")
+        try readUntil("done")
+        XCTAssertTrue(seen.contains("[snooze] downloading images"))
+        XCTAssertTrue(seen.contains("pulling alpine: 5 MiB of 5 MiB"), "first-start progress shows")
+        XCTAssertTrue(seen.contains("[snooze] VM created and booted — 252 ms"))
+        XCTAssertTrue(seen.contains("[    0.000000] Linux version 6.18"))
+        XCTAssertTrue(seen.contains("evil ]52;c;cHduZWQ=]8;;javascript:x\\link2J done"), "guest console text is inert: no ESC, BEL or C1 survives")
+        // It runs: the image's own session is opened, then attached in the same pane.
+        let a = FakeAttachment(.attached(session: "shell"))
+        fake.script(a)
+        fake.phase = "running"
+        fake.emit(HostEvent(kind: .phase, sandbox: "demo", text: "running", phase: "running"))
+        try readUntil("── the ")
+        wait("open-session and the attach") { fake.performedOps.contains(.openSession) && fake.attachCount == 2 }
+        XCTAssertNil(fake.performed.first { $0.op == .openSession }?.argv, "the image's own session")
+        a.feed(Data(WebTerminalWire.snapshotPrefix + Array("$ ".utf8)))
+        let snap = try ws.readBinary()
+        XCTAssertTrue(snap.starts(with: Array("\u{1B}[?1049l\u{1B}[!p".utf8)), "the first SNAPSHOT keeps the boot log in the scrollback")
+        XCTAssertFalse(String(decoding: snap, as: UTF8.self).contains("\u{1B}c"), "no full reset")
+        XCTAssertFalse(String(decoding: snap, as: UTF8.self).contains("\u{1B}[3J"), "the scrollback is not cleared")
+        _ = try ws.readText(containing: #""kind":"none""#)
+        ws.close()
+    }
+
+    func testAWakeByKeySaysHowLongItTook() throws {
+        fake.phase = "deepAsleep"
+        let a = FakeAttachment(.held(session: "shell", phase: "deepAsleep"))
+        let (ws, _, _) = try open(a)
+        _ = try ws.readText(containing: #""kind":"deepAsleep""#)
+        try ws.sendBinary(Array("x".utf8))
+        wait("the wake") { fake.performedOps == [.wake] }
+        usleep(300_000)
+        fake.phase = "running"
+        a.feed("\u{1B}cscreen")                                                   // the host attached it: the SNAPSHOT
+        let s = try ws.readText(containing: #""notice":"woke in "#)
+        XCTAssertTrue(s.contains(#""kind":"none""#), s)
         ws.close()
     }
 

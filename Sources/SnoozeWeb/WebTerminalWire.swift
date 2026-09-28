@@ -69,6 +69,38 @@ public enum WebTerminalWire {
         return 0
     }
 
+    // MARK: 591 — the boot view
+
+    /// The most the boot view writes into one pane (the console is guest-written).
+    public static let maximumBootBytes = 1 << 20
+    public static let maximumBootLineBytes = 1000
+
+    /// One line of the boot view as inert text: every control character (C0 but tab, ESC, DEL, C1)
+    /// is removed, so guest-written console text can never be an escape sequence — no OSC 8 link,
+    /// no OSC 52, no mode change — and the line is capped.
+    public static func bootText(_ s: String) -> String {
+        var out = String.UnicodeScalarView()
+        var bytes = 0
+        for u in s.unicodeScalars {
+            if (u.value < 0x20 && u.value != 0x09) || (0x7F...0x9F).contains(u.value) { continue }
+            bytes += String(u).utf8.count
+            if bytes > maximumBootLineBytes { break }
+            out.append(u == "\t" ? " " : u)
+        }
+        return String(out)
+    }
+
+    /// deckhold's SNAPSHOT starts by resetting the viewer and clearing its scrollback. After a boot
+    /// view the scrollback holds the boot log, so the FIRST snapshot's prefix is rewritten: a soft
+    /// reset, `rows` new lines (the boot log scrolls into the scrollback), then home + clear screen.
+    public static let snapshotPrefix: [UInt8] = Array("\u{1B}[?1049l\u{1B}c\u{1B}[H\u{1B}[2J\u{1B}[3J".utf8)
+    public static func keepingScrollback(_ bytes: ArraySlice<UInt8>, rows: Int) -> [UInt8] {
+        guard bytes.starts(with: snapshotPrefix) else { return Array(bytes) }
+        let lead = Array("\u{1B}[?1049l\u{1B}[!p\u{1B}[0m".utf8) + Array(repeating: Array("\r\n".utf8), count: max(1, rows)).flatMap { $0 }
+            + Array("\u{1B}[H\u{1B}[2J".utf8)
+        return lead + bytes.dropFirst(snapshotPrefix.count)
+    }
+
     /// The host's line after the notice ("[snooze] the shell session has ended (exit 0)"), without the tag.
     public static func endingText(_ bytes: ArraySlice<UInt8>) -> String {
         guard let bel = bytes.firstIndex(of: 0x07) else { return "" }
@@ -194,7 +226,11 @@ public enum TerminalInputClassifier {
 public struct WebTerminalCover: Equatable, Encodable, Sendable {
     public enum Kind: String, Encodable, Sendable {
         case none, paused, asleep, deepAsleep, shutDown, failed, working, reattaching
+        /// 591: the boot view — no cover; the pane itself shows the boot as it happens.
+        case boot
     }
+
+    static let boot = WebTerminalCover(kind: .boot, headline: "", detail: nil, action: nil, spinner: false, since: nil, elapsedVerb: nil)
     public enum Action: String, Encodable, Sendable { case resume = "Resume", wake = "Wake", start = "Start" }
 
     public let kind: Kind
@@ -279,6 +315,8 @@ enum WebTerminalMessage {
         let phase: String?
         let reportsIgnored: Int
         let keystrokeWakes: Int
+        /// 591: a one-line note the page shows briefly ("woke in 0.4 s").
+        var notice: String? = nil
     }
     struct Ended: Encodable {
         let t = "ended"

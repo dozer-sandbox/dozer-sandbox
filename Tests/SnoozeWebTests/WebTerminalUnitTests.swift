@@ -172,6 +172,21 @@ final class WebTerminalUnitTests: XCTestCase {
         }
     }
 
+    // MARK: 591 polish — the boot view's text and the kept scrollback
+
+    func testBootTextIsInertAndCapped() {
+        XCTAssertEqual(WebTerminalWire.bootText("a\u{1B}[31mred\u{07}\u{9B}2J\u{7F}\r\n\tz"), "a[31mred2J z")
+        XCTAssertEqual(WebTerminalWire.bootText("\u{1B}]52;c;eA==\u{1B}\\"), "]52;c;eA==\\")
+        XCTAssertEqual(WebTerminalWire.bootText(String(repeating: "é", count: 900)).utf8.count, 1000)
+    }
+
+    func testTheFirstSnapshotAfterABootKeepsTheScrollback() {
+        let snap = WebTerminalWire.snapshotPrefix + Array("\u{1B}[1;1H$ ".utf8)
+        let kept = WebTerminalWire.keepingScrollback(snap[...], rows: 3)
+        XCTAssertEqual(String(decoding: kept, as: UTF8.self), "\u{1B}[?1049l\u{1B}[!p\u{1B}[0m\r\n\r\n\r\n\u{1B}[H\u{1B}[2J\u{1B}[1;1H$ ")
+        XCTAssertEqual(WebTerminalWire.keepingScrollback(Array("plain".utf8)[...], rows: 3), Array("plain".utf8), "anything else is untouched")
+    }
+
     // MARK: the 541 rule — SandboxLab's cases, unchanged
 
     private func c(_ s: String) -> TerminalInputClass { TerminalInputClassifier.classify(Data(s.utf8)) }
