@@ -192,6 +192,35 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   would read a record still saying `running` and report a live sandbox as died). The launcher is a
   detached child with ONLY stdin/stdout/stderr (`POSIX_SPAWN_CLOEXEC_DEFAULT`): a host that inherited
   a caller's pipe kept a test harness waiting on EOF. No launchd agent.
+- **An update must never cost a sleeping sandbox its sessions** (591 incident: `make install-cli`
+  overwrote the installed `snooze` IN PLACE while a host ran from it; macOS invalidated the process's
+  code and VZ refused every VM with "Internal Virtualization error"; quitting that host then ran the stop
+  steps on two failed wakes and deleted their snapshots). The rules that came of it:
+  - **Install by rename, never in place** (`install-cli`: copy + sign as `.snooze.new`, `mv` over): a
+    running host keeps its own file (inode). e1af862.
+  - **A quit keeps a failed wake's snapshot** (`prepareForExit`, `.failed` with a restorable state) —
+    only Shut Down discards one. e1af862.
+  - **A host knows its own program** (`ExecutableIdentity`: path, inode, device, size, mtime, cdhash at
+    start; `SecCodeCheckValidity` of itself). Overwritten (or its code invalid) → every error of a VM op
+    becomes "this host's program was updated underneath it — `snooze host stop`, then retry"
+    (`HostCore.explain`, also on attach), `host status` carries `executableChange`/`executableNote`, and
+    `doctor` FAILS. Replaced by rename → a note; and a host whose program changed exits by itself once
+    nothing is live and no client is connected (`idleLoop`), so the next command runs the new build.
+  - **Every snapshot records its VM** (`PersistedSandbox.vmLayout`, `VMLayout.of` in
+    `PinnedIdentity.configureVZ`: platform + machine id, CPUs, memory, kernel sha256 + file, disks in
+    order with read-only, NICs + MAC, balloon, vsock, serial/console, share tags, entropy, other devices;
+    the command line and `recordedBy` are informational). A wake builds FROM THE RECORD where this build
+    controls it (583's balloon; 591's kernel: the recorded file, or any cached `vmlinux*` with its sha256
+    — `VMLayout.kernelForRestore`) and compares the VM it is about to restore into with the record
+    BEFORE VZ is asked: a difference throws `snapshotNeedsOtherBuild` (keep it asleep and wake it with
+    the build that slept it, or Shut Down), and the snapshot is kept. A record without a layout (pre-591)
+    is best effort, as before. `VMLayoutTests`.
+  - **`make test-vm-upgrade`** (a /ship gate for any release that touches the VM, the host or the
+    install): the previous release tag's `snooze` (built once from the tag, `prev-cli`) sleeps a lab and
+    a pi sandbox with a running session and markers; this build wakes them — same session pid, screen,
+    file — and then its own recorded layout; then the incident (the running host's file overwritten
+    in place: the host says so, `host stop` keeps the snapshot, this build wakes it) and an idle host
+    replaced by rename exiting by itself.
 - **Looking never starts the host.** Read-only commands answer from the store in-process
   (`HostCore(readOnly: true)`) unless a host runs — or a record says a VM was live when its host went
   away, which only a host can recover. A short request does not reset the idle clock; an open
@@ -361,6 +390,7 @@ make test-vm   # the VM integration suite — see below
 make cli       # 585: build + sign .build/debug/snooze
 make test-cli  # 585: the signed snooze from separate processes, scratch store $TMPDIR/snooze-clitest-store
 make test-vm-claude  # 588: Claude credentials through the proxy with a FAKE key (SNOOZE_TEST_CLAUDE_LOGIN=1 adds this Mac's login, read-only)
+make test-vm-upgrade # 591: the previous release sleeps sandboxes, this build wakes them; the in-place overwrite incident (scratch store $TMPDIR/snooze-upgrade-store)
 ```
 
 ### The VM integration tests need an ENTITLED host — how

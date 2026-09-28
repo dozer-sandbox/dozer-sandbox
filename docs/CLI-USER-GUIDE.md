@@ -280,6 +280,33 @@ The host is started for you by the first command that needs it. It runs detached
 | `snooze host stop` | Deep-sleeps everything that runs, then exits. The next command starts a new host; `wake`, `attach`, `up` and `exec` bring each sandbox back. |
 | `snooze host [--foreground] [--idle-timeout MIN]` | Run it by hand (in the foreground, it logs to the terminal). |
 | **If it crashes** | The next command starts a new one. Sleeping sandboxes are restored with their sessions. Deep-sleeping ones are untouched. Ones that were running are reported as died (`ls`; `inspect` shows `diedWithHost`), and their disk is checked with `e2fsck` at the next start. |
+| **If its program changes** | A host knows the file it runs from. If an update wrote into that file while it ran, macOS stops trusting it and refuses its virtual machines: every start or wake then says "this host's program was updated underneath it — `snooze host stop`, then retry", and `host status` and `doctor` say so too. An update that puts a new file in place (as `make install-cli` does) is harmless: the host keeps running its own copy, `host status` notes it, and once nothing runs and nobody is attached it exits by itself so the next command runs the new build. |
+
+### Updating snooze
+
+```bash
+make install-cli          # the new build goes in next to the running one — nothing running is touched
+snooze host stop          # sandboxes that run deep-sleep; the host of the old build exits
+snooze wake NAME          # (or attach / up / the web UI) — each wakes on the new build, sessions and all
+```
+
+A sandbox that was asleep when you updated wakes on the new build with its programs and sessions
+where they were. Each snapshot records the exact virtual machine it was taken in (CPUs, memory,
+disks, network card, devices, the kernel), and a wake rebuilds that machine — with the kernel it
+slept under, even after an update pins a newer one. If a new build can no longer build the same
+machine, the wake refuses instead of risking the snapshot, and says so: keep it asleep and wake it
+with the snooze that slept it, or Shut Down (below).
+
+### If a wake fails
+
+1. `snooze host stop`, then wake again. Nothing is lost by trying: a wake that fails keeps its
+   snapshot, and so does quitting the host after it.
+2. Read what it says. "Updated underneath it" is the host's own program (step 1 fixes it). "Put to
+   sleep by snooze X in a virtual machine this build cannot rebuild" means waking it needs snooze X.
+3. Last resort: `snooze shutdown NAME`, then `snooze start NAME`. This discards the snapshot, so
+   running programs and their sessions end, but the disk is kept — files, installed packages, and an
+   agent's own history on the state disk. For Claude Code, `claude --continue` in the new session
+   picks the last conversation back up.
 
 ## The web UI
 
