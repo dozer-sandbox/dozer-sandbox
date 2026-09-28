@@ -624,6 +624,15 @@ public actor Sandbox {
         case .deepAsleep:
             for c in connections.values { c.detach(.sandboxSleeping) }
             connections.removeAll()
+        case .failed where Self.restorableState(for: spec) != nil:
+            // A wake that FAILED keeps its snapshot ("Shut Down discards it"), and a quit is not a
+            // Shut Down: leave the snapshot and the record alone so the next process tries the wake
+            // again. (591: a host whose own executable had been replaced under it could start no VM;
+            // quitting it ran the stop steps here and deleted two sandboxes' snapshots — their
+            // running sessions were lost.) The failed boot was already abandoned.
+            for c in connections.values { c.detach(.sandboxSleeping) }
+            connections.removeAll()
+            note("quit after a failed wake: the snapshot is kept — the next launch tries the wake again (Shut Down discards it)")
         case .booting, .failed:
             await runStopSteps(from: phase)
             setPhase(.off)

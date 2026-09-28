@@ -138,10 +138,17 @@ install-cli: ## Build snooze (release), sign it, install into PREFIX (default ~/
 	rm -rf "$(PREFIX)/libexec/snooze/SnoozeContainerKit_SnoozeContainerKit.bundle" "$(PREFIX)/libexec/snooze/SnoozeContainerKit_SnoozeWeb.bundle"
 	cp -R .build/release/SnoozeContainerKit_SnoozeContainerKit.bundle "$(PREFIX)/libexec/snooze/"
 	cp -R .build/release/SnoozeContainerKit_SnoozeWeb.bundle "$(PREFIX)/libexec/snooze/"
-	cp .build/release/snooze "$(PREFIX)/libexec/snooze/snooze"
-	codesign --force --sign - --entitlements Scripts/snooze.entitlements "$(PREFIX)/libexec/snooze/snooze"
+	@# NEVER overwrite the executable in place: a running `snooze host` executes that very file, and
+	@# rewriting it invalidates the running process's code signature — the Virtualization framework
+	@# then refuses every VM it asks for ("Internal Virtualization error", 591). Copy + sign under a
+	@# temporary name and RENAME over the old one: a running host keeps its original file (inode).
+	cp .build/release/snooze "$(PREFIX)/libexec/snooze/.snooze.new"
+	codesign --force --sign - --entitlements Scripts/snooze.entitlements "$(PREFIX)/libexec/snooze/.snooze.new"
+	mv -f "$(PREFIX)/libexec/snooze/.snooze.new" "$(PREFIX)/libexec/snooze/snooze"
 	ln -sf "$(PREFIX)/libexec/snooze/snooze" "$(PREFIX)/bin/snooze"
 	@echo "installed $(PREFIX)/bin/snooze — run: snooze doctor"
+	@"$(PREFIX)/libexec/snooze/snooze" host status 2>/dev/null | grep -q '^host .* running' \
+	  && echo "note: a snooze host is running the PREVIOUS build (it keeps working); \`snooze host stop\` switches to this one — sandboxes deep-sleep and wake on it" || true
 
 test-cli: cli vmtest-host ## 585 CLI suite: the signed snooze from separate processes (up/exec/run/attach, lifecycle, points, two sandboxes, kill -9 host, idle exit)
 	perl -e 'alarm shift; exec @ARGV' 1500 $(VMTEST_BIN) cli --snooze $(CLI_BIN) --store "$(CLITEST_STORE)"
