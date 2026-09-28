@@ -19,8 +19,28 @@
   --mono: ui-monospace, "SF Mono", Menlo, monospace;
   color-scheme: light dark;
 }
+/* 591: ui.theme — auto follows macOS; light / dark set data-theme on <html>. */
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #141412;
+  --panel: #1d1c1a;
+  --ink: #ecebe6;
+  --muted: #9c998f;
+  --line: #2f2e2a;
+  --accent: #748ffc;
+  --run: #51cf66;
+  --pause: #fcc419;
+  --sleep: #b197fc;
+  --deep: #91a7ff;
+  --off: #868e96;
+  --fail: #ff6b6b;
+  --bar: #2b3263;
+  --bar-strong: #748ffc;
+  --code: #26251f;
+}
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --bg: #141412;
     --panel: #1d1c1a;
     --ink: #ecebe6;
@@ -243,6 +263,27 @@ main.main-terms { padding-bottom: 16px; display: flex; flex-direction: column; h
 @keyframes tc-spin { to { transform: rotate(360deg); } }
 .term-wrap[data-cover="ended"] .term-cover, .term-wrap[data-cover="error"] .term-cover { align-items: flex-end; background: none; backdrop-filter: none; }
 .term-wrap[data-cover="ended"] .tc-box, .term-wrap[data-cover="error"] .tc-box { margin-bottom: 14px; }
+/* 591: Settings */
+.settings { padding: 0; }
+.setting { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 14px; align-items: center; padding: 12px 16px; border-top: 1px solid var(--line); }
+.setting:first-child { border-top: 0; }
+.setting-name { margin-bottom: 2px; }
+.setting-name code { font-weight: 600; }
+.setting-meta { font-size: 12.5px; margin-top: 2px; }
+.setting-control { display: flex; gap: 8px; align-items: center; justify-content: flex-end; }
+.setting-control input[type="number"], .setting-control input[type="text"], .setting-control select {
+  font: inherit; padding: 5px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--ink); }
+.setting-control input[type="number"] { width: 7em; }
+.setting-control input[type="text"] { width: 16em; }
+.setting-control input[type="checkbox"] { width: 18px; height: 18px; }
+.setting-value { background: var(--code); padding: 2px 6px; border-radius: 4px; }
+.pill.src { font-weight: 500; font-size: 11px; margin-left: 4px; }
+.src-default { color: var(--off); }
+.src-file { color: var(--accent); }
+.src-env, .src-flag { color: var(--pause); }
+ul.plain { margin: 0; padding: 12px 16px 12px 32px; }
+.notice ul.plain { padding: 0 0 0 18px; }
+@media (max-width: 760px) { .setting { grid-template-columns: minmax(0, 1fr); } .setting-control { justify-content: flex-start; } }
 .paste-preview { background: var(--code); border-radius: 8px; padding: 8px 10px; font-family: var(--mono); font-size: 12px; max-height: 160px; overflow: auto; white-space: pre-wrap; word-break: break-all; }
 @media (max-width: 760px) {
   main.main-terms { height: auto; min-height: 100vh; }

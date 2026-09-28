@@ -44,6 +44,9 @@ public enum WebRoute: Equatable, Sendable {
     // 591 — browser terminals (591.01-DESIGN.md §4): a one-use ticket, then the socket it opens.
     case terminalTicket(String)    // POST /api/v1/sandboxes/{name}/terminal-ticket (CSRF; {mode, session?, cols?, rows?})
     case terminalSocket(String)    // GET  /api/v1/sandboxes/{name}/terminal-socket (WebSocket upgrade + the ticket)
+    // 591 settings — dzr.toml: the report, and ONE typed change (closed schema, CSRF).
+    case settings                  // GET  /api/v1/settings
+    case settingsChange            // POST /api/v1/settings  ({key, value} | {key, reset: true})
 
     public var isStatic: Bool {
         switch self { case .index, .asset, .terminalFrame: true; default: false }
@@ -73,6 +76,7 @@ public enum WebRoute: Equatable, Sendable {
         case (.delete, 1) where rest[0] == "session": return .sessionEnd
         case (.post, 2) where rest == ["session", "renew"]: return .sessionRenew
         case (.post, 1) where rest[0] == "actions": return .actions
+        case (.post, 1) where rest[0] == "settings": return .settingsChange
         case (.post, 4) where rest[0] == "sandboxes" && isSandboxName(rest[1]) && rest[2] == "network" && rest[3] == "preview":
             return .policyPreview(rest[1])
         case (.post, 3) where rest[0] == "sandboxes" && isSandboxName(rest[1]) && rest[2] == "terminal":
@@ -94,6 +98,7 @@ public enum WebRoute: Equatable, Sendable {
             case "events": return .events
             case "doctor": return .doctor
             case "stream": return .stream
+            case "settings": return .settings
             default: return nil
             }
         case 2 where rest[0] == "sandboxes" && isSandboxName(rest[1]):

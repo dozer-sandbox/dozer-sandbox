@@ -6,7 +6,8 @@
 // compromise by hostile terminal output cannot reach the API, the CSRF token or the session. The
 // page owns the WebSocket; this frame only draws and reports keys, over a narrow message protocol:
 //
-//   page → frame   {t:'init', wasm: ArrayBuffer, mode}   once: compile the engine (one WASM instance)
+//   page → frame   {t:'init', wasm: ArrayBuffer, mode, fontSize}   once: compile the engine (one WASM
+//                                                          instance); fontSize 9–32 (ui.terminal_font_size)
 //                  {t:'write', data: ArrayBuffer}         terminal bytes to draw
 //                  {t:'paste', text}                      a paste the PAGE made safe (and confirmed)
 //                  {t:'focus'} · {t:'keep-scrollback'} (after a boot view, before the session's screen)
@@ -37,7 +38,7 @@ window.open = function refuseToOpen() { return null; };
 function toPage(msg) { window.parent.postMessage(msg, '*'); }
 function quietly(fn, fallback) { try { return fn(); } catch (_) { return fallback; } }
 
-async function init(wasm, m) {
+async function init(wasm, m, fontSize) {
   mode = m;
   // The page fetched the engine's WebAssembly from its own origin; this frame compiles it
   // ('wasm-unsafe-eval') into its OWN instance — no fetch from here (connect-src 'none').
@@ -46,7 +47,7 @@ async function init(wasm, m) {
   const host = document.getElementById('term');
   // `scrollback` is BYTES in 0.4.0's WASM (upstream #140), not lines: the default 10 000 kept ~10 KB,
   // too little for a boot log. 4 MiB.
-  term = new GhosttyWeb.Terminal({ ghostty: engine, fontSize: 13, fontFamily: 'ui-monospace, "SF Mono", Menlo, monospace',
+  term = new GhosttyWeb.Terminal({ ghostty: engine, fontSize, fontFamily: 'ui-monospace, "SF Mono", Menlo, monospace',
                                    theme: THEME, cursorBlink: false, disableStdin: mode === 'watch', scrollback: 4 * 1024 * 1024 });
   term.open(host);
   const fit = new GhosttyWeb.FitAddon();
@@ -106,7 +107,8 @@ function guard(root) {
 function valid(m) {
   if (!m || typeof m !== 'object' || typeof m.t !== 'string') return false;
   switch (m.t) {
-    case 'init': return !term && m.wasm instanceof ArrayBuffer && (m.mode === 'interactive' || m.mode === 'watch') && Object.keys(m).length === 3;
+    case 'init': return !term && m.wasm instanceof ArrayBuffer && (m.mode === 'interactive' || m.mode === 'watch')
+                        && Number.isInteger(m.fontSize) && m.fontSize >= 9 && m.fontSize <= 32 && Object.keys(m).length === 4;
     case 'write': return !!term && m.data instanceof ArrayBuffer && m.data.byteLength <= MAX_WRITE && Object.keys(m).length === 2;
     case 'paste': return !!term && typeof m.text === 'string' && m.text.length <= MAX_PASTE && Object.keys(m).length === 2;
     case 'focus': case 'keep-scrollback': return !!term && Object.keys(m).length === 1;
@@ -117,7 +119,7 @@ window.addEventListener('message', (ev) => {
   if (ev.source !== window.parent || !valid(ev.data)) { frameStats.dropped++; return; }
   const m = ev.data;
   switch (m.t) {
-    case 'init': init(m.wasm, m.mode).catch(() => toPage({ t: 'failed' })); break;
+    case 'init': init(m.wasm, m.mode, m.fontSize).catch(() => toPage({ t: 'failed' })); break;
     case 'write': term.write(new Uint8Array(m.data)); break;
     case 'paste': if (mode === 'interactive') term.paste(m.text); break;
     case 'focus': term.focus(); break;

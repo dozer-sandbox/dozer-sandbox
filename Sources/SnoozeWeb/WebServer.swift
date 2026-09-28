@@ -27,6 +27,8 @@ public final class SnoozeWebServer: @unchecked Sendable {
     let operations: WebOperations
     let tickets: WebTerminalTicketStore
     let terminals: WebTerminalHub
+    /// 591: dzr.toml as this process sees it.
+    public let settings: WebSettingsStore
     private let gate: UpgradeGate
     private let capability: WebBootstrapCapability
     private let listener: NIOAsyncChannel<Accepted, Never>
@@ -83,8 +85,9 @@ public final class SnoozeWebServer: @unchecked Sendable {
 
     private init(origin: WebOrigin, version: String, limits: WebLimits, assets: WebAssets, data: SnoozeWebData,
                  capability: WebBootstrapCapability, pollInterval: Duration, gate: UpgradeGate,
-                 listener: NIOAsyncChannel<Accepted, Never>) {
+                 listener: NIOAsyncChannel<Accepted, Never>, settings: WebSettingsStore) {
         self.origin = origin
+        self.settings = settings
         self.version = version
         self.limits = limits
         self.assets = assets
@@ -104,8 +107,11 @@ public final class SnoozeWebServer: @unchecked Sendable {
         operations.onChange = { ops in terminals.operationsChanged(ops) }
     }
 
-    /// Bind the listener (loopback, ephemeral). `run()` then serves.
+    /// Bind the listener (loopback, ephemeral). `run()` then serves. `settings`: the settings file this
+    /// UI reads and writes (591) — `snooze ui` passes its own environment; the default reads no file
+    /// (every setting at its default: tests that do not test settings never see a real one).
     public static func bind(data: SnoozeWebData, assets: WebAssets, version: String, limits: WebLimits = .standard,
+                            settings: WebSettingsStore = WebSettingsStore(environment: [:]),
                             capability: WebBootstrapCapability = .make(), pollInterval: Duration = .seconds(3),
                             group: EventLoopGroup = MultiThreadedEventLoopGroup.singleton) async throws -> SnoozeWebServer {
         let address = WebLoopbackAddress()
@@ -142,7 +148,8 @@ public final class SnoozeWebServer: @unchecked Sendable {
             throw WebConfigurationError.invalidOrigin
         }
         let server = SnoozeWebServer(origin: try WebOrigin(port: port), version: version, limits: limits, assets: assets, data: data,
-                                     capability: capability, pollInterval: pollInterval, gate: gate, listener: listener)
+                                     capability: capability, pollInterval: pollInterval, gate: gate, listener: listener,
+                                     settings: settings)
         gate.server = server
         return server
     }
@@ -487,11 +494,17 @@ public final class SnoozeWebServer: @unchecked Sendable {
         case .terminalTicket(let name):
             // 591: CSRF-checked (an unsafe method), then a one-use ticket bound to this session.
             try Self.requireJSONBody(md)
+            guard settings.terminalsEnabled else { throw WebRejection.terminalsOff }
             let r = try WebTerminalTicketRequest.decode(body)
             let t = try await tickets.mint(cookie: cookie, sandbox: name, session: r.session, mode: r.mode, size: r.size)
             return json(WebTerminalTicketInfo(ticket: t, expiresInSeconds: Int(tickets.lifetime), session: r.session, mode: r.mode))
         case .terminalSocket:
             throw WebRejection.upgradeRequired            // answered in respond(); never dispatched
+        case .settings:
+            return json(settings.report())
+        case .settingsChange:
+            try Self.requireJSONBody(md)
+            return json(try settings.apply(try WebSettingChange.decode(body)))
         case .events:
             return json(await monitor.recent)
         case .doctor:

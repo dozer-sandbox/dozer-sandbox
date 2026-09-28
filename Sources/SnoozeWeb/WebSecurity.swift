@@ -66,10 +66,12 @@ public enum WebRejection: String, Error, Equatable, Sendable {
     case tooManyTickets = "too-many-tickets"
     case tooManyTerminals = "too-many-terminals"
     case upgradeRequired = "upgrade-required"
+    /// 591 settings: `ui.terminals = false`.
+    case terminalsOff = "terminals-off"
 
     public var status: Int {
         switch self {
-        case .hostRejected, .originRejected, .crossSite, .csrfRejected: 403
+        case .hostRejected, .originRejected, .crossSite, .csrfRejected, .terminalsOff: 403
         case .methodNotAllowed: 405
         case .alreadyRunning: 409
         case .bodyTooLarge: 413
@@ -109,6 +111,7 @@ public enum WebRejection: String, Error, Equatable, Sendable {
         case .tooManyTickets: "too many terminal tickets are waiting — close some terminals"
         case .tooManyTerminals: "too many terminals are open — close one first"
         case .upgradeRequired: "the terminal socket is a WebSocket, opened as the first request of a connection"
+        case .terminalsOff: "browser terminals are off (Settings: ui.terminals) — Open in Terminal still works"
         }
     }
 }

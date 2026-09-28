@@ -26,6 +26,7 @@ const state = {
   deniedOnly: false,
   signedOut: false,
   metricsFilter: { image: '', days: '', steps: false },
+  settings: null,          // 591: {report, byKey} from GET /api/v1/settings
 };
 
 // ── tiny DOM helpers (text only) ────────────────────────────────────────────
@@ -311,6 +312,110 @@ function adopt(info) {
   $('sign-out').hidden = false;
   scheduleRenew();
 }
+// ── settings (591) ──────────────────────────────────────────────────────────
+// dzr.toml, as the UI process reads it (GET /api/v1/settings, every value with its default, source and
+// description). A change is one typed, CSRF-checked POST {key, value} or {key, reset: true}; the
+// server checks the key against its closed schema and the value against the key's type and range,
+// writes the file, and answers the new report — the page re-reads it, so a ui.* setting applies at once.
+function setting(key, fallback) {
+  const r = state.settings && state.settings.byKey[key];
+  return r ? r.value : fallback;
+}
+function adoptSettings(report) {
+  state.settings = { report, byKey: Object.fromEntries(report.settings.map((r) => [r.key, r])) };
+  const theme = setting('ui.theme', 'auto');
+  if (theme === 'light' || theme === 'dark') document.documentElement.dataset.theme = theme;
+  else delete document.documentElement.dataset.theme;
+  const split = setting('ui.split_default', 'shell');
+  termUI.splitKind = SPLIT_KINDS[split] ? split : 'shell';
+  paintSplitButton();
+}
+async function loadSettings() {
+  try { adoptSettings(await api('settings')); } catch (_) { /* the defaults, until the next read */ }
+}
+async function saveSetting(key, value) { adoptSettings(await api('settings', { method: 'POST', json: { key, value } })); }
+async function resetSetting(key) { adoptSettings(await api('settings', { method: 'POST', json: { key, reset: true } })); }
+
+const SETTING_SECTIONS = {
+  ui: 'This UI', host: 'The host', store: 'The store', claude: 'Claude Code', defaults: 'New sandboxes',
+  'images.lab': 'New lab sandboxes', 'images.claude-code': 'New claude-code sandboxes', 'images.pi': 'New pi sandboxes', kernel: 'The kernel',
+};
+function shownValue(v) { return typeof v === 'string' ? (v === '' ? '""  (automatic)' : v) : String(v); }
+async function viewSettings() {
+  adoptSettings(await api('settings'));
+  const rep = state.settings.report;
+  const sections = [];
+  for (const r of rep.settings) {
+    let s = sections.find((x) => x.name === r.section);
+    if (!s) sections.push(s = { name: r.section, rows: [] });
+    s.rows.push(r);
+  }
+  const warnings = rep.warnings.filter((w) => !rep.error || !w.startsWith(rep.error));
+  return h('div', null, h('h1', null, 'Settings'),
+    h('p', { class: 'sub' }, 'Written to ', h('code', null, rep.path || 'no file (neither XDG_CONFIG_HOME nor HOME is set)'),
+      rep.exists ? '' : ' — not written yet: the first change writes it, with every setting listed at its default',
+      '. A command-line flag wins, then the environment, then this file, then the default; ', h('code', null, 'snooze config show'), ' prints the same.'),
+    rep.error ? h('div', { class: 'notice bad' }, rep.error + ' — nothing in it applies, and the UI will not overwrite it. Fix it (or remove it) first.') : null,
+    warnings.length ? h('div', { class: 'notice' }, h('ul', { class: 'plain' }, warnings.map((w) => h('li', null, w)))) : null,
+    sections.flatMap((sec) => [
+      h('h2', null, SETTING_SECTIONS[sec.name] || sec.name, ' ', h('code', { class: 'muted' }, '[' + sec.name + ']')),
+      h('div', { class: 'panel settings' }, sec.rows.map(settingRow)),
+    ]),
+    h('h2', null, 'Not settable, by design'),
+    panel(h('ul', { class: 'plain' }, rep.notSettable.map((n) => h('li', null, n)))));
+}
+function settingRow(r) {
+  const source = h('span', { class: 'pill src src-' + r.source, title: r.source === 'file' ? 'set in the file' : r.source === 'default' ? 'not set: the default' : (r.note || '') },
+    r.source === 'env' ? 'env ' + r.environment : r.source);
+  const reset = r.editable && r.source === 'file'
+    ? btn('Default', () => changeSetting(r.key, null), { small: true, title: 'Comment it out in the file: the default (' + shownValue(r.defaultValue) + ') applies' }) : null;
+  return h('div', { class: 'setting', 'data-key': r.key },
+    h('div', { class: 'setting-main' },
+      h('div', { class: 'setting-name' }, h('code', null, r.name), ' ', source),
+      h('div', null, r.description),
+      h('div', { class: 'muted setting-meta' }, 'default ', h('code', null, shownValue(r.defaultValue)), ' · ', r.appliesNote,
+        r.note ? h('div', null, r.note) : null)),
+    h('div', { class: 'setting-control' }, settingControl(r), reset));
+}
+function settingControl(r) {
+  if (!r.editable) return h('code', { class: 'setting-value', title: r.note || '' }, shownValue(r.value));
+  let input;
+  if (r.type === 'bool') {
+    input = h('input', { type: 'checkbox', 'aria-label': r.key });
+    input.checked = r.value === true;
+    input.addEventListener('change', () => changeSetting(r.key, input.checked));
+  } else if (r.type === 'choice') {
+    input = h('select', { 'aria-label': r.key }, r.choices.map((c) => {
+      const o = h('option', { value: c }, c);
+      if (c === r.value) o.selected = true;
+      return o;
+    }));
+    input.addEventListener('change', () => changeSetting(r.key, input.value));
+  } else if (r.type === 'int') {
+    input = h('input', { type: 'number', min: String(r.min), max: String(r.max), step: '1', 'aria-label': r.key });
+    input.value = String(r.value);
+    input.addEventListener('change', () => {
+      const n = Number(input.value);
+      if (!isInt(n, r.min, r.max)) { toast(r.key + ' is a whole number, ' + r.min + '–' + r.max, true); input.value = String(r.value); return; }
+      changeSetting(r.key, n);
+    });
+  } else {
+    input = h('input', { type: 'text', spellcheck: 'false', autocomplete: 'off', 'aria-label': r.key, placeholder: '"" = automatic' });
+    input.value = String(r.value);
+    input.addEventListener('change', () => changeSetting(r.key, input.value.trim()));
+  }
+  return input;
+}
+async function changeSetting(key, value) {
+  try {
+    if (value === null) await resetSetting(key); else await saveSetting(key, value);
+    toast(key + (value === null ? ' is the default again' : ' saved'), false);
+  } catch (e) {
+    toast(e.message || String(e), true);
+  }
+  refresh(false);
+}
+
 function scheduleRenew() {
   clearTimeout(state.renewTimer);
   const half = Math.max(30000, (state.expiresAt.getTime() - Date.now()) / 2);
@@ -360,7 +465,8 @@ function connect() {
     try { for (const o of await api('operations')) state.ops.set(o.id, o); renderOps(); } catch (_) { /* */ }
     refresh(true);
   });
-  es.addEventListener('changed', () => refresh(false));
+  // The Settings page is not about the store's live state: re-rendering it would drop a half-typed value.
+  es.addEventListener('changed', () => { if (state.view !== 'settings') refresh(false); });
   es.addEventListener('op', (ev) => { try { trackOp(JSON.parse(ev.data)); } catch (_) { /* */ } });
   es.addEventListener('activity', (ev) => {
     try {
@@ -423,7 +529,7 @@ async function refresh(scrollTop) {
   refreshing = true;
   try {
     const views = { overview: viewOverview, sandbox: viewSandbox, images: viewImages, accounts: viewAccounts,
-                    metrics: viewMetrics, activity: viewActivity, doctor: viewDoctor };
+                    metrics: viewMetrics, activity: viewActivity, doctor: viewDoctor, settings: viewSettings };
     const fn = views[state.view] || viewOverview;
     const node = await fn();
     if (node && !state.signedOut) {
@@ -491,32 +597,26 @@ function verbsFor(phase) {
   }
 }
 /// Shut Down keeps the disk, so it asks with a plain confirmation (and can stop asking); Reset and
-/// Remove destroy data and keep the typed name. The "don't ask again" choice is this browser's
-/// only (localStorage), a convenience that is simply ignored where storage is unavailable.
-const SKIP_SHUTDOWN_CONFIRM = 'snooze.ui.skipShutdownConfirm';
-function skipShutdownConfirm(set) {
-  try {
-    if (set === undefined) return localStorage.getItem(SKIP_SHUTDOWN_CONFIRM) === '1';
-    if (set) localStorage.setItem(SKIP_SHUTDOWN_CONFIRM, '1'); else localStorage.removeItem(SKIP_SHUTDOWN_CONFIRM);
-  } catch (_) { /* no storage: always ask */ }
-  return false;
-}
+/// Remove destroy data and keep the typed name. "Don't ask again" is the setting ui.confirm_shutdown
+/// (dzr.toml — every browser, and the Settings page turns it back on).
 function confirmShutdown(name) {
   const body = { action: 'shutdown', sandbox: name };
-  if (skipShutdownConfirm()) { act(body); return; }
+  if (!setting('ui.confirm_shutdown', true)) { act(body); return; }
   dialog('Shut down ' + name + '?', DESTRUCTIVE.shutdown + ' Start cold-boots the same disk.', [
-    { name: 'dontAsk', label: 'Don’t ask again in this browser', type: 'checkbox' },
+    { name: 'dontAsk', label: 'Don’t ask again', type: 'checkbox', help: 'Sets ui.confirm_shutdown = false in the settings (Settings turns it back on).' },
   ], 'Shut down', async (v) => {
-    if (v.dontAsk) skipShutdownConfirm(true);
+    if (v.dontAsk) await saveSetting('ui.confirm_shutdown', false).catch((e) => toast('The setting was not saved: ' + (e.message || e), true));
     return await actOrThrow(body);
   }, { danger: true });
 }
 function lifecycle(verb, name) {
   if (verb === 'shutdown') confirmShutdown(name);
   else if (DESTRUCTIVE[verb]) confirmAction(VERBS[verb][0] + ' ' + name, DESTRUCTIVE[verb], name, { action: verb, sandbox: name });
-  else if (verb === 'start') startWithBootView(name);
+  else if (verb === 'start' && bootViewOnStart()) startWithBootView(name);
   else act({ action: verb, sandbox: name });
 }
+/// The settings' ui.boot_view_on_start (and a boot view needs browser terminals).
+function bootViewOnStart() { return setting('ui.boot_view_on_start', true) && setting('ui.terminals', true); }
 /// 591 — Start shows the boot: a terminal pane streams the host's steps and the kernel's console,
 /// then becomes the image's own session (the UI process does the switch; the boot stays in the scrollback).
 async function startWithBootView(name) {
@@ -587,12 +687,12 @@ async function createDialog() {
     { name: 'sandbox', label: 'Name', placeholder: 'a-z 0-9 -', required: true },
     { name: 'image', label: 'Image', type: 'select', options: images.length ? images.map((i) => [i.name, i.name + (i.kind === 'custom' ? ' (custom)' : '')]) : ['lab', 'claude-code', 'pi'] },
     { name: 'network', label: 'Network', type: 'select', value: '',
-      options: [['', 'default (agent for agent images, bake for lab)'], ['agent', 'agent — proxied, Anthropic + registries'], ['bake', 'bake — proxied, package registries'],
+      options: [['', 'default (per image, Settings)'],['agent', 'agent — proxied, Anthropic + registries'], ['bake', 'bake — proxied, package registries'],
         ['locked', 'locked — proxied, nothing'], ['open', 'open — proxied, everything (logged)'], ['nat', 'nat — a real interface (vmnet)'], ['none', 'none']] },
     { name: 'account', label: 'Account', type: 'select', value: '',
       options: [['', 'the store default'], ['none', 'none'], ...accounts.accounts.map((a) => [a.name, a.name + ' (' + a.kind + ')'])] },
-    { name: 'cpus', label: 'CPUs', type: 'number', min: 1, max: 64, placeholder: 'default' },
-    { name: 'memoryMiB', label: 'Memory (MiB)', type: 'number', min: 256, placeholder: 'default (1024, or 2048 for agents)' },
+    { name: 'cpus', label: 'CPUs', type: 'number', min: 1, max: 64, placeholder: 'default (' + setting('defaults.cpus', 2) + ', Settings)' },
+    { name: 'memoryMiB', label: 'Memory (MiB)', type: 'number', min: 256, placeholder: 'default (per image, Settings)' },
     { name: 'workspace', label: 'Workspace (a folder on this Mac, shared at /workspace)', placeholder: '/Users/you/code/project' },
   ], 'Create', async (v) => {
     const body = { action: 'create', sandbox: v.sandbox, image: v.image };
@@ -684,7 +784,7 @@ async function viewSandbox() {
     h('h2', null, 'Terminal'),
     h('div', { class: 'panel' }, h('div', { class: 'cmd' }, h('code', null, d.attachCommand), copy,
       ((b) => { if (i.busy || i.phase === 'booting' || opRunningFor(name)) { b.disabled = true; b.title = 'Wait until it is running'; } return b; })(
-        btn('Open here', () => (i.phase === 'off' || i.phase === 'failed' ? startWithBootView(name) : openDefaultTerminal(name)),
+        btn('Open here', () => ((i.phase === 'off' || i.phase === 'failed') && bootViewOnStart() ? startWithBootView(name) : openDefaultTerminal(name)),
           { primary: true, title: 'A terminal in this browser on the ' + d.defaultSession + ' session (a shut-down sandbox starts, and you watch it boot)' })),
       gated(btn('Open in Terminal', terminal(null), { title: 'Terminal.app attaches to the ' + d.defaultSession + ' session (waking the sandbox if it sleeps)' }))),
       h('div', { class: 'empty' }, 'Attaches to the ' + d.defaultSession + ' session; Ctrl-] detaches, the session keeps running. Open here keeps it in the Terminals view; Open in Terminal uses your default terminal app.')),
@@ -986,6 +1086,7 @@ window.addEventListener('message', (ev) => {
 
 /// Open the image's own session (starting it when needed — an explicit request), then attach.
 async function openDefaultTerminal(name) {
+  if (!terminalsAllowed()) return;
   const op = await act({ action: 'open-session', sandbox: name });
   if (!op) return;
   const done = await waitForOp(op);
@@ -1001,7 +1102,15 @@ async function waitForOp(op, seconds = 300) {
   return null;
 }
 
+/// The setting ui.terminals: off, the UI opens no browser terminal (and the server refuses a ticket).
+function terminalsAllowed() {
+  if (setting('ui.terminals', true)) return true;
+  toast('Browser terminals are off (Settings → ui.terminals). Open in Terminal still works.', true);
+  return false;
+}
+
 async function openTerminal(sandbox, session, mode, pane) {
+  if (!terminalsAllowed()) return;
   const t = { id: termUI.nextId++, sandbox, session, mode, pane: termUI.split ? (pane ?? termUI.focusedPane) : 0,
               ws: null, frame: null, cols: 80, rows: 24, state: null, ended: false, endText: '', errorText: '', disconnected: '',
               closed: false, title: '', pinger: null, coverAction: null, onReady: null, onOpened: null, onFailed: null };
@@ -1018,7 +1127,8 @@ async function openTerminal(sandbox, session, mode, pane) {
     const wasm = await engineBytes();
     if (t.closed) return;
     const opened = new Promise((resolve, reject) => { t.onOpened = resolve; t.onFailed = reject; });
-    t.onReady = () => toFrame(t, { t: 'init', wasm: wasm.slice(0), mode });
+    const fontSize = setting('ui.terminal_font_size', 13);
+    t.onReady = () => toFrame(t, { t: 'init', wasm: wasm.slice(0), mode, fontSize: isInt(fontSize, 9, 32) ? fontSize : 13 });
     // The engine's frame: an opaque origin (allow-scripts only — no same-origin, no popups, no forms).
     t.frame = h('iframe', { class: 'term-frame', src: '/terminal-frame', sandbox: 'allow-scripts', allow: 'clipboard-write',
                             referrerpolicy: 'no-referrer', name: 'term-' + t.id, title: 'Terminal: ' + sandbox + ' · ' + (session || 'default') });
@@ -1273,7 +1383,8 @@ function renderTerminals() {
           ev.stopPropagation();
           termUI.splitMenu.hidden = true;
           termUI.splitKind = kind;
-          try { localStorage.setItem('snooze.ui.splitKind', kind); } catch (_) { /* per-browser convenience only */ }
+          // The choice is the setting ui.split_default (dzr.toml), not this browser's.
+          if (setting('ui.split_default', 'shell') !== kind) saveSetting('ui.split_default', kind).catch((e) => toast('The setting was not saved: ' + (e.message || e), true));
           paintSplitButton();
           splitWith(kind).catch((e) => toast(e.message || String(e), true));
         } } }, label)));
@@ -1339,7 +1450,7 @@ const SPLIT_KINDS = {
   attach: 'second view of the left terminal’s session (shared)',
   dialog: 'terminal you choose (New terminal…)',
 };
-termUI.splitKind = (() => { try { const k = localStorage.getItem('snooze.ui.splitKind'); return SPLIT_KINDS[k] ? k : 'shell'; } catch (_) { return 'shell'; } })();
+termUI.splitKind = 'shell';   // until the settings load (ui.split_default)
 function paintSplitButton() {
   if (!termUI.splitMain) return;
   termUI.splitMain.textContent = termUI.split ? 'Unsplit' : 'Split';
@@ -1419,6 +1530,7 @@ async function newTerminalDialog() {
 /// login shell — opened with the ordinary open-session action (one HostOp; its idempotency unchanged:
 /// a name that turns out to be taken answers "already running", and the next name is tried).
 async function newShellTerminal(sandbox, pane) {
+  if (!terminalsAllowed()) return;
   let rows = [], detail = null;
   try { [detail, rows] = await Promise.all([api('sandboxes/' + sandbox), api('sandboxes/' + sandbox + '/sessions')]); } catch (_) { /* asleep: listed after the wake */ }
   const argv = loginShell(detail, rows);
@@ -1447,6 +1559,7 @@ function loginShell(detail, rows) {
 (async () => {
   if (await bootstrap()) {
     if (!/^#\/[a-z]/.test(location.hash)) history.replaceState(null, '', location.pathname + '#/overview');
+    await loadSettings();
     route();
     connect();
     setInterval(() => { if ([...state.ops.values()].some((o) => o.state === 'running')) paintRowOps(); }, 1000);
