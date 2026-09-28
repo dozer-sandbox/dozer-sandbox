@@ -206,6 +206,28 @@ entered in the browser: add keys and accounts with the CLI. **Open in Terminal**
 `snooze attach` in your default terminal app. The UI is a client of the host, like any other
 command, so it can't do anything the CLI can't.
 
+### Settings
+
+```bash
+snooze config [show]          # every setting: its effective value, its source (flag, env, file, default) and default
+snooze config get KEY         # one value (--json: with its source and default)
+snooze config set KEY VALUE   # write it to the file (checked against its type and range)
+snooze config unset KEY       # back to the default (commented out again)
+snooze config init            # write the file: every setting listed, commented out at its default
+snooze config path            # ${XDG_CONFIG_HOME:-~/.config}/dozer-sandbox/dzr.toml
+```
+
+One settings file, `dzr.toml`, lists every setting grouped in sections (`[ui]`, `[host]`,
+`[store]`, `[claude]`, `[defaults]`, `[images.lab]`, `[images.claude-code]`, `[images.pi]`,
+`[kernel]`), each with a description and `# key = default` commented out; only what you set is
+uncommented. Precedence: a command-line flag, then its environment variable, then the file, then
+the default. `ui.boot_view_on_start` (default `true`) makes Start in the web UI open a terminal on
+the boot; the UI's **Settings** page edits the same file (a host path, or a value the environment
+sets, is read-only there). The file is written whole, atomically, `0600`; an unknown key is a
+warning, and a file that doesn't parse is ignored (and never overwritten) until it's fixed. Not
+settable, by design: the web UI's security limits and checks, the terminal's paste cap and tickets,
+the guest binaries, and credentials.
+
 ### Numbers and diagnostics
 
 ```bash
@@ -218,8 +240,9 @@ snooze console NAME [--follow]                                 # the boot consol
 ### Scripting
 
 Every command takes `--json` (machine-readable output; errors as
-`{"error":{"code","message"}}`), `--store DIR` (default `$SNOOZE_STORE`, else
-`~/Library/Application Support/SnoozeContainerKit`), `-v` (every progress step) and `-q` (none).
+`{"error":{"code","message"}}`), `--store DIR` (default `$SNOOZE_STORE`, else the settings'
+`store.path`, else `~/Library/Application Support/SnoozeContainerKit`), `-v` (every progress step)
+and `-q` (none).
 JSON documents only ever gain fields.
 
 | exit code | meaning |
@@ -235,12 +258,13 @@ JSON documents only ever gain fields.
 | 64 | usage |
 | *program's own* | `exec`, `run`, `attach` (125 = snooze itself failed) |
 
-| environment | |
-|---|---|
-| `SNOOZE_STORE` | the store directory |
-| `SNOOZE_HOST_IDLE` | host idle timeout, minutes |
-| `SNOOZE_KERNEL_CACHE` / `SNOOZE_KERNEL` | a shared kernel cache / an explicit kernel |
-| `SNOOZE_SUBNET` | default subnet for `--network nat` |
+| environment | overrides the setting | |
+|---|---|---|
+| `SNOOZE_STORE` | `store.path` | the store directory |
+| `SNOOZE_HOST_IDLE` | `host.idle_timeout_minutes` | host idle timeout, minutes |
+| `SNOOZE_KERNEL_CACHE` / `SNOOZE_KERNEL` | `kernel.cache` / `kernel.path` | a shared kernel cache / an explicit kernel |
+| `SNOOZE_SUBNET` | `defaults.nat_subnet` | default subnet for `--network nat` |
+| `XDG_CONFIG_HOME` | — | where `dozer-sandbox/dzr.toml` is (default `~/.config`) |
 
 ### Troubleshooting
 

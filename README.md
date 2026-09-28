@@ -276,7 +276,7 @@ command but cannot boot a VM (`snooze doctor` says so).
 | `snooze host [--foreground] [--idle-timeout MIN]` · `host stop` · `host status` | The host (normally started for you) · Deep Sleep everything and stop it · is one running (never starts one). |
 
 Every command takes `--json` (machine-readable output on stdout; errors as `{"error":{"code","message"}}`),
-`--store DIR` (default `$SNOOZE_STORE`, else `~/Library/Application Support/SnoozeContainerKit`),
+`--store DIR` (default `$SNOOZE_STORE`, else the settings' `store.path`, else `~/Library/Application Support/SnoozeContainerKit`),
 `-v` (every progress step; by default only an operation slower than a second shows its steps, on
 stderr) and `-q`. JSON documents only ever gain fields. Phases on the wire are `off`, `booting`,
 `running`, `paused`, `asleep`, `deepAsleep`, `failed`.
@@ -289,6 +289,12 @@ stderr) and `-q`. JSON documents only ever gain fields. Phases on the wire are `
 never); `SNOOZE_KERNEL_CACHE` / `SNOOZE_KERNEL` (a shared kernel cache / an explicit kernel, as for
 the library's tests); `SNOOZE_SUBNET` (the default subnet of a `--network nat` sandbox). They are
 read when a sandbox is created (the kernel and subnet are then part of its spec).
+
+**Settings (591):** `${XDG_CONFIG_HOME:-~/.config}/dozer-sandbox/dzr.toml` — every setting listed
+with its default commented out; `snooze config show|get|set|unset|init|path`, and the web UI's
+Settings page. Precedence: a flag, then the environment variable above, then the file, then the
+default (`snooze config show` names each value's source). The docs: `docs/CLI-USER-GUIDE.md`
+"Settings".
 
 ### The host
 

@@ -334,7 +334,8 @@ What you can do from it:
 | **Metrics** | Filter by image, time and steps; download the rows as CSV. |
 
 Reset, remove, revert and every delete ask you to **type the name** first. Shut down keeps the
-disk, so it asks with a plain confirmation, which you can tell not to ask again in that browser. An
+disk, so it asks with a plain confirmation; "don't ask again" sets the setting
+`ui.confirm_shutdown = false` (the **Settings** page turns it back on). An
 operation's progress shows in the sandbox's row and in the Operations list while it runs (the
 host's latest step and the seconds so far — a first start in a store downloads and bakes its image
 and can take two minutes), and the page updates when it ends. The session buttons wait until the
@@ -356,7 +357,7 @@ view — the session keeps running, as Ctrl-] does in `snooze attach`.
   the start as it happens — snooze's timed steps (on a first start, the download and the bake) and
   the kernel's boot console — and then becomes the image's own session in the same pane, with the
   boot log kept in the scrollback. `snooze console NAME [--follow]` shows the same console in a
-  terminal.
+  terminal. Turn it off with the setting `ui.boot_view_on_start = false`: Start then just starts.
 - **A new terminal is a new shell.** **New terminal…** and **Split** start a new shell session
   (`shell-2`, `shell-3`, …); attaching to or watching a session that already runs is a choice in the
   New terminal dialog. Two tabs on one session are marked "shared with tab N".
@@ -391,6 +392,58 @@ permission prompt.
 `--print-url` prints only to a terminal (not with `--json`, not into a pipe or a file), because the
 link is a key to the UI.
 
+## Settings
+
+Settings live in one file, `~/.config/dozer-sandbox/dzr.toml` (under `$XDG_CONFIG_HOME` when that
+is set). It lists every setting, grouped in sections, each with a description and its default
+commented out:
+
+```toml
+[ui]
+
+# Start opens a terminal on the boot sequence (the kernel console) until the sandbox is up; false:
+# Start just starts it.
+# (boolean; applies at once (the UI re-reads it))
+# boot_view_on_start = true
+```
+
+Uncomment a line to set it — or let snooze write it:
+
+```bash
+snooze config                               # every setting: value, source (flag / env / file / default), default
+snooze config set ui.boot_view_on_start false
+snooze config get ui.boot_view_on_start     # false
+snooze config unset ui.boot_view_on_start   # back to the default
+snooze config init                          # write the file with everything commented out
+snooze config path
+```
+
+The web UI's **Settings** page shows the same list — each setting's value, default, description
+and where the value came from — and changes a value in place. A `[ui]` setting applies at once;
+the others say when they apply (the next sandbox created, the next session, or after
+`snooze host stop`).
+
+| Section | Settings |
+|---|---|
+| `[ui]` | `boot_view_on_start` (true), `confirm_shutdown` (true), `split_default` (`shell` · `watch` · `attach` · `dialog`), `terminals` (true), `terminal_font_size` (13), `theme` (`auto` · `light` · `dark`) |
+| `[host]` | `idle_timeout_minutes` (5; `$SNOOZE_HOST_IDLE`), `keepalive` (false — for a store that has not chosen with `snooze account keepalive`) |
+| `[store]` | `path` (`--store`, `$SNOOZE_STORE`) |
+| `[claude]` | `permissions` (`skip` · `ask`) — Claude Code's own prompts in a claude-code sandbox; `-e SNOOZE_CLAUDE_PERMISSIONS=…` on `run`/`exec` still wins |
+| `[defaults]` | `cpus` (2), `nat_subnet` (a free one; `$SNOOZE_SUBNET`) |
+| `[images.lab]` · `[images.claude-code]` · `[images.pi]` | `memory_mib` (1024 · 2048 · 2048), `network` (`bake` · `agent` · `agent`) — a custom image follows the image it was saved from |
+| `[kernel]` | `path` (`$SNOOZE_KERNEL`), `cache` (`$SNOOZE_KERNEL_CACHE`) |
+
+- **Precedence:** a command-line flag, then its environment variable, then the file, then the
+  default. A value the environment sets is read-only on the Settings page (change it where it is
+  set), and so is a host path (`store.path`, `kernel.*`: `snooze config set`).
+- **The file is snooze's.** `set`, `unset`, `init` and the Settings page rewrite it whole from the
+  list of settings (atomically, readable only by you): comments you add are not kept. A key it
+  doesn't know is a warning and is kept; a file that doesn't parse is ignored — with the line that
+  is wrong — and never overwritten until you fix it.
+- **Not settable, on purpose:** the web UI's limits and checks (session and link lifetimes, request
+  and connection caps, Host/Origin/CSRF, the content policy), the terminal's one-use tickets and
+  paste limits, the guest binaries, and any credential. `ui.terminals` can only take something away.
+
 ## Scripting
 
 - `--json` on every command: JSON on stdout; errors as `{"error":{"code","message"}}`. Fields are
@@ -415,14 +468,16 @@ link is a key to the UI.
 | 64 | usage |
 | *program's own* | `exec`, `run`, `attach` (125 = snooze itself failed) |
 
-| environment | |
-|---|---|
-| `SNOOZE_STORE` | the store directory |
-| `SNOOZE_HOST_IDLE` | host idle timeout, minutes |
-| `SNOOZE_KERNEL_CACHE` / `SNOOZE_KERNEL` | a shared kernel cache / an explicit kernel |
-| `SNOOZE_SUBNET` | default subnet for `--network nat` |
+| environment | overrides the setting | |
+|---|---|---|
+| `SNOOZE_STORE` | `store.path` | the store directory |
+| `SNOOZE_HOST_IDLE` | `host.idle_timeout_minutes` | host idle timeout, minutes |
+| `SNOOZE_KERNEL_CACHE` / `SNOOZE_KERNEL` | `kernel.cache` / `kernel.path` | a shared kernel cache / an explicit kernel |
+| `SNOOZE_SUBNET` | `defaults.nat_subnet` | default subnet for `--network nat` |
+| `XDG_CONFIG_HOME` | — | where `dozer-sandbox/dzr.toml` is (default `~/.config`) |
 
-The kernel and subnet variables are read when a sandbox is created, and become part of it.
+The kernel, subnet and `[defaults]` / `[images.*]` settings are read (by the host) when a sandbox
+is created, and become part of it.
 
 ## Troubleshooting
 
