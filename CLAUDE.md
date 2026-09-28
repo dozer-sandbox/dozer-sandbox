@@ -242,8 +242,10 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   **exactly one `HostOp`** the CLI also sends — the web layer adds no host operation.
   `WebActionTests.testEveryActionIsExactlyOneAllowedHostOp` pins the set; `exec`, `attach`, `key-set`,
   `account-add` and `host-stop` are never reachable AS AN ACTION (591: `attach` is reachable only
-  through the ticketed terminal socket below). Destructive ones (shutdown, reset, rm,
-  point revert/rm, image rm, account rm) carry `confirm` equal to the name. **No secret is ever an
+  through the ticketed terminal socket below). Destructive ones (reset, rm,
+  point revert/rm, image rm, account rm) carry `confirm` equal to the name. Shutdown keeps the disk,
+  so it carries no `confirm` (owner, 591): the page asks with a plain dialog that can stop asking
+  (per browser, localStorage). **No secret is ever an
   input** (owner ruling D3): keys and accounts are added with the CLI.
 - **An action is an operation**: 202 at once, the host call in `WebOperations` (≤ 8 running), its
   progress and outcome as SSE `op` events. The outcome is a line written from the result — never

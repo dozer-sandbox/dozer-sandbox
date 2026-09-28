@@ -19,7 +19,7 @@ final class WebActionTests: XCTestCase {
         "start": #"{"action":"start","sandbox":"a"}"#, "wake": #"{"action":"wake","sandbox":"a"}"#,
         "pause": #"{"action":"pause","sandbox":"a"}"#, "resume": #"{"action":"resume","sandbox":"a"}"#,
         "sleep": #"{"action":"sleep","sandbox":"a"}"#, "deep-sleep": #"{"action":"deep-sleep","sandbox":"a"}"#,
-        "shutdown": #"{"action":"shutdown","sandbox":"a","confirm":"a"}"#, "reset": #"{"action":"reset","sandbox":"a","confirm":"a"}"#,
+        "shutdown": #"{"action":"shutdown","sandbox":"a"}"#, "reset": #"{"action":"reset","sandbox":"a","confirm":"a"}"#,
         "rm": #"{"action":"rm","sandbox":"a","confirm":"a"}"#,
         "open-session": #"{"action":"open-session","sandbox":"a","session":"worker","argv":["sleep","60"]}"#,
         "point-take": #"{"action":"point-take","sandbox":"a","point":"p1","note":"before"}"#,
@@ -132,7 +132,9 @@ final class WebActionTests: XCTestCase {
     }
 
     func testDestructiveActionsNeedTheTypedName() throws {
-        for verb in ["shutdown", "reset", "rm"] {
+        // 591: Shut Down keeps the disk — a plain confirmation in the page, no typed name.
+        XCTAssertNil(try decode(#"{"action":"shutdown","sandbox":"a"}"#).confirmationTarget)
+        for verb in ["reset", "rm"] {
             invalid(#"{"action":"\#(verb)","sandbox":"a"}"#)
             invalid(#"{"action":"\#(verb)","sandbox":"a","confirm":"b"}"#)
             invalid(#"{"action":"\#(verb)","sandbox":"a","confirm":"A"}"#)

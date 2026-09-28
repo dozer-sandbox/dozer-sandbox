@@ -490,8 +490,30 @@ function verbsFor(phase) {
     default: return [];
   }
 }
+/// Shut Down keeps the disk, so it asks with a plain confirmation (and can stop asking); Reset and
+/// Remove destroy data and keep the typed name. The "don't ask again" choice is this browser's
+/// only (localStorage), a convenience that is simply ignored where storage is unavailable.
+const SKIP_SHUTDOWN_CONFIRM = 'snooze.ui.skipShutdownConfirm';
+function skipShutdownConfirm(set) {
+  try {
+    if (set === undefined) return localStorage.getItem(SKIP_SHUTDOWN_CONFIRM) === '1';
+    if (set) localStorage.setItem(SKIP_SHUTDOWN_CONFIRM, '1'); else localStorage.removeItem(SKIP_SHUTDOWN_CONFIRM);
+  } catch (_) { /* no storage: always ask */ }
+  return false;
+}
+function confirmShutdown(name) {
+  const body = { action: 'shutdown', sandbox: name };
+  if (skipShutdownConfirm()) { act(body); return; }
+  dialog('Shut down ' + name + '?', DESTRUCTIVE.shutdown + ' Start cold-boots the same disk.', [
+    { name: 'dontAsk', label: 'Don’t ask again in this browser', type: 'checkbox' },
+  ], 'Shut down', async (v) => {
+    if (v.dontAsk) skipShutdownConfirm(true);
+    return await actOrThrow(body);
+  }, { danger: true });
+}
 function lifecycle(verb, name) {
-  if (DESTRUCTIVE[verb]) confirmAction(VERBS[verb][0] + ' ' + name, DESTRUCTIVE[verb], name, { action: verb, sandbox: name });
+  if (verb === 'shutdown') confirmShutdown(name);
+  else if (DESTRUCTIVE[verb]) confirmAction(VERBS[verb][0] + ' ' + name, DESTRUCTIVE[verb], name, { action: verb, sandbox: name });
   else if (verb === 'start') startWithBootView(name);
   else act({ action: verb, sandbox: name });
 }

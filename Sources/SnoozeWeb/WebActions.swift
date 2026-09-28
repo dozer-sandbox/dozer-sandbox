@@ -57,7 +57,8 @@ public enum WebAction: Equatable, Sendable {
     /// name the person typed).
     public var confirmationTarget: String? {
         switch self {
-        case .lifecycle(let op, let n) where [.shutdown, .reset, .rm].contains(op): n
+        // Shut Down keeps the disk (owner, 591: a plain confirmation, not a typed name).
+        case .lifecycle(let op, let n) where [.reset, .rm].contains(op): n
         case .pointRevert(let n, _), .pointRemove(let n, _): n
         case .imageRemove(let i): i
         case .accountRemove(let a): a
@@ -186,7 +187,7 @@ public enum WebAction: Equatable, Sendable {
             "account-verify": ["account"],
             "account-rm": ["account", "confirm"],
         ]
-        for (verb, op) in lifecycleOps { f[verb] = [.shutdown, .reset, .rm].contains(op) ? ["sandbox", "confirm"] : ["sandbox"] }
+        for (verb, op) in lifecycleOps { f[verb] = [.reset, .rm].contains(op) ? ["sandbox", "confirm"] : ["sandbox"] }
         return f
     }()
 

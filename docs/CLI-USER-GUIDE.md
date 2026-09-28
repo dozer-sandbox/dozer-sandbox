@@ -306,7 +306,8 @@ What you can do from it:
 | **Accounts & keys** | Make an account the default; verify one; remove one; keep-alive on or off. |
 | **Metrics** | Filter by image, time and steps; download the rows as CSV. |
 
-Shut down, reset, remove, revert and every delete ask you to **type the name** first. An
+Reset, remove, revert and every delete ask you to **type the name** first. Shut down keeps the
+disk, so it asks with a plain confirmation, which you can tell not to ask again in that browser. An
 operation's progress shows in the sandbox's row and in the Operations list while it runs (the
 host's latest step and the seconds so far — a first start in a store downloads and bakes its image
 and can take two minutes), and the page updates when it ends. The session buttons wait until the
