@@ -95,9 +95,16 @@ func main() throws {
     let output = package.appendingPathComponent("Sources/SnoozeWeb/Resources/Web")
     let fm = FileManager.default
 
-    // Nothing but the three page files and vendor/ lives in WebSource: a stray file is a mistake.
+    // The page's own documents, each with its one stylesheet and one script (591: the terminal
+    // engine's sandboxed frame is the second document).
+    let documents: [(file: String, publicPath: String, css: String, js: String)] = [
+        ("index.html", "/", "app", "app"),
+        ("terminal.html", "/terminal-frame", "frame", "frame"),
+    ]
+    // Nothing but those files and vendor/ lives in WebSource: a stray file is a mistake.
     let top = Set((try? fm.contentsOfDirectory(atPath: sources.path)) ?? []).subtracting([".DS_Store"])
-    let unexpectedTop = top.subtracting(["index.html", "app.css", "app.js", "vendor"])
+    let known = Set(documents.flatMap { [$0.file, $0.css + ".css", $0.js + ".js"] } + ["vendor"])
+    let unexpectedTop = top.subtracting(known)
     guard unexpectedTop.isEmpty else { throw Failure.source("unexpected files in WebSource: \(unexpectedTop.sorted())") }
 
     func read(_ name: String) throws -> Data {
@@ -105,36 +112,44 @@ func main() throws {
         guard String(data: d, encoding: .utf8) != nil else { throw Failure.source("\(name) is not UTF-8") }
         return d
     }
-    let css = try read("app.css"), js = try read("app.js"), indexSource = String(decoding: try read("index.html"), as: UTF8.self)
 
     // ── The page's own code: CSP conformance (`script-src 'self'; style-src 'self'`), nothing inline,
     //    nothing external, no innerHTML.
-    guard indexSource.contains("href=\"/app.css\""), indexSource.contains("src=\"/app.js\"") else {
-        throw Failure.source("index.html must reference /app.css and /app.js exactly")
-    }
+    var docText: [String: String] = [:]
+    var styles: [String: Data] = [:], scripts: [String: Data] = [:]
     let inline: [(String, String)] = [
         ("<script>", "an inline <script>"), ("<style", "a <style> element"), (" style=", "a style= attribute"),
         ("javascript:", "a javascript: URL"),
     ]
-    for (needle, what) in inline where indexSource.lowercased().contains(needle) {
-        throw Failure.source("index.html has \(what) — the CSP refuses it")
+    for d in documents {
+        let text = String(decoding: try read(d.file), as: UTF8.self)
+        guard text.contains("href=\"/\(d.css).css\""), text.contains("src=\"/\(d.js).js\"") else {
+            throw Failure.source("\(d.file) must reference /\(d.css).css and /\(d.js).js exactly")
+        }
+        for (needle, what) in inline where text.lowercased().contains(needle) {
+            throw Failure.source("\(d.file) has \(what) — the CSP refuses it")
+        }
+        if text.range(of: #"\son[a-z]+\s*="#, options: .regularExpression) != nil {
+            throw Failure.source("\(d.file) has an event-handler attribute (on…=) — the CSP refuses it; use addEventListener")
+        }
+        docText[d.file] = text
+        styles[d.css] = try read(d.css + ".css")
+        scripts[d.js] = try read(d.js + ".js")
     }
-    if indexSource.range(of: #"\son[a-z]+\s*="#, options: .regularExpression) != nil {
-        throw Failure.source("index.html has an event-handler attribute (on…=) — the CSP refuses it; use addEventListener in app.js")
-    }
-    for (name, text) in [("index.html", indexSource), ("app.css", String(decoding: css, as: UTF8.self)), ("app.js", String(decoding: js, as: UTF8.self))] {
+    let pageFiles = docText.map { ($0.key, $0.value) } + styles.map { ($0.key + ".css", String(decoding: $0.value, as: UTF8.self)) }
+        + scripts.map { ($0.key + ".js", String(decoding: $0.value, as: UTF8.self)) }
+    for (name, text) in pageFiles {
         if text.range(of: #"(https?:)?//[a-z0-9.-]+\.[a-z]{2,}/"#, options: [.regularExpression, .caseInsensitive]) != nil {
             throw Failure.source("\(name) references an external URL — the UI loads nothing from outside its own origin")
         }
-    }
-    if String(decoding: js, as: UTF8.self).contains("innerHTML") || String(decoding: js, as: UTF8.self).contains("insertAdjacentHTML") {
-        throw Failure.source("app.js uses innerHTML — render with textContent only (590.01-DESIGN.md: sandbox-controlled text is untrusted)")
+        if name.hasSuffix(".js"), text.contains("innerHTML") || text.contains("insertAdjacentHTML") {
+            throw Failure.source("\(name) uses innerHTML — render with textContent only (590.01-DESIGN.md: sandbox-controlled text is untrusted)")
+        }
     }
 
     let immutable = "public, max-age=31536000, immutable"
     var expected: [String: Data] = [:]
     var assets: [Asset] = []
-    var index = indexSource
 
     // ── Vendored packages (591): provenance, not content.
     let vendorRoot = sources.appendingPathComponent("vendor")
@@ -172,10 +187,10 @@ func main() throws {
                 guard let name = f.publicName, isPlainName(name), name.hasPrefix("vendor-"), let ref = f.indexReference, ref.hasPrefix("/vendor/") else {
                     throw Failure.source("vendor/\(pkg)/\(f.file): a served file needs publicName (vendor-…) and indexReference (/vendor/…)")
                 }
-                guard index.contains("\"\(ref)\"") else { throw Failure.source("index.html does not reference \(ref)") }
+                guard docText.values.contains(where: { $0.contains("\"\(ref)\"") }) else { throw Failure.source("no document references \(ref)") }
                 let ext = f.serve == "script" ? "js" : "wasm"
                 let path = "assets/\(name)-\(f.sha256.prefix(16)).\(ext)"
-                index = index.replacingOccurrences(of: "\"\(ref)\"", with: "\"/\(path)\"")
+                for (k, v) in docText { docText[k] = v.replacingOccurrences(of: "\"\(ref)\"", with: "\"/\(path)\"") }
                 expected[path] = data
                 assets.append(Asset(publicPath: "/" + path, resourcePath: path,
                                     mimeType: f.serve == "script" ? "application/javascript; charset=utf-8" : "application/wasm",
@@ -185,29 +200,34 @@ func main() throws {
             }
         }
     }
-    if let stray = index.range(of: #""/vendor/[^"]*""#, options: .regularExpression) {
-        throw Failure.source("index.html references \(index[stray]), which no VENDOR.json serves")
+    for (file, text) in docText {
+        if let stray = text.range(of: #""/vendor/[^"]*""#, options: .regularExpression) {
+            throw Failure.source("\(file) references \(text[stray]), which no VENDOR.json serves")
+        }
     }
 
     // ── The page's own files.
-    let cssPath = "assets/app-\(sha256(css).prefix(16)).css"
-    let jsPath = "assets/app-\(sha256(js).prefix(16)).js"
-    let indexData = Data(index
-        .replacingOccurrences(of: "href=\"/app.css\"", with: "href=\"/\(cssPath)\"")
-        .replacingOccurrences(of: "src=\"/app.js\"", with: "src=\"/\(jsPath)\"").utf8)
-    assets += [
-        Asset(publicPath: "/", resourcePath: "index.html", mimeType: "text/html; charset=utf-8", sha256: sha256(indexData), cachePolicy: "no-store", class: "page"),
-        Asset(publicPath: "/" + cssPath, resourcePath: cssPath, mimeType: "text/css; charset=utf-8", sha256: sha256(css), cachePolicy: immutable, class: "page"),
-        Asset(publicPath: "/" + jsPath, resourcePath: jsPath, mimeType: "application/javascript; charset=utf-8", sha256: sha256(js), cachePolicy: immutable, class: "page"),
-    ]
+    for d in documents {
+        let css = styles[d.css]!, js = scripts[d.js]!
+        let cssPath = "assets/\(d.css)-\(sha256(css).prefix(16)).css"
+        let jsPath = "assets/\(d.js)-\(sha256(js).prefix(16)).js"
+        let docData = Data(docText[d.file]!
+            .replacingOccurrences(of: "href=\"/\(d.css).css\"", with: "href=\"/\(cssPath)\"")
+            .replacingOccurrences(of: "src=\"/\(d.js).js\"", with: "src=\"/\(jsPath)\"").utf8)
+        assets += [
+            Asset(publicPath: d.publicPath, resourcePath: d.file, mimeType: "text/html; charset=utf-8", sha256: sha256(docData), cachePolicy: "no-store", class: "page"),
+            Asset(publicPath: "/" + cssPath, resourcePath: cssPath, mimeType: "text/css; charset=utf-8", sha256: sha256(css), cachePolicy: immutable, class: "page"),
+            Asset(publicPath: "/" + jsPath, resourcePath: jsPath, mimeType: "application/javascript; charset=utf-8", sha256: sha256(js), cachePolicy: immutable, class: "page"),
+        ]
+        expected[d.file] = docData
+        expected[cssPath] = css
+        expected[jsPath] = js
+    }
     assets.sort { $0.publicPath < $1.publicPath }
     let enc = JSONEncoder()
     enc.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
     var manifest = try enc.encode(Manifest(version: 1, assets: assets))
     manifest.append(10)
-    expected["index.html"] = indexData
-    expected[cssPath] = css
-    expected[jsPath] = js
     expected["manifest.json"] = manifest
 
     var existing: [String: Data] = [:]

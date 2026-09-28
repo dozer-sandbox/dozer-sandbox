@@ -218,7 +218,11 @@ main.main-terms { padding-bottom: 16px; display: flex; flex-direction: column; h
 .term-empty[hidden] { display: none; }
 .term-wrap { position: absolute; inset: 0; }
 .term-wrap[hidden] { display: none; }
-.term-host { position: absolute; inset: 6px 0 0 8px; overflow: hidden; outline: none; }
+.term-frame-host { position: absolute; inset: 0; }
+.term-frame { display: block; width: 100%; height: 100%; border: 0; background: #16171c; }
+.term-notice { position: absolute; top: 8px; right: 12px; padding: 3px 10px; border-radius: 999px; font-size: 12px;
+  background: color-mix(in srgb, #1d1f2b 92%, transparent); color: #c5cbff; pointer-events: none; }
+.term-notice[hidden] { display: none; }
 .term-cover { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; pointer-events: none;
   background: color-mix(in srgb, #16171c 55%, transparent); backdrop-filter: blur(1px); }
 .term-cover[hidden] { display: none; }

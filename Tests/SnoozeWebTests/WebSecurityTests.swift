@@ -135,12 +135,20 @@ final class WebSecurityTests: XCTestCase {
         XCTAssertTrue(h["content-security-policy"]!.contains("default-src 'none'"))
         XCTAssertTrue(h["content-security-policy"]!.contains("script-src 'self'"))
         XCTAssertTrue(h["content-security-policy"]!.contains("frame-ancestors 'none'"))
-        // 591: the ONE unsafe-shaped token is 'wasm-unsafe-eval' (the terminal engine compiles its
-        // WebAssembly); never 'unsafe-eval' or 'unsafe-inline', never data: for connections.
+        // 591 (T2): the PAGE gains only `frame-src 'self'` (its own terminal frame) and compiles no
+        // WebAssembly; the frame alone may ('wasm-unsafe-eval'), and it can connect to nothing.
         let csp = h["content-security-policy"]!
-        XCTAssertFalse(csp.replacingOccurrences(of: "'wasm-unsafe-eval'", with: "").contains("unsafe"))
-        XCTAssertTrue(csp.contains("script-src 'self' 'wasm-unsafe-eval';"))
+        XCTAssertFalse(csp.contains("unsafe"))
+        XCTAssertTrue(csp.contains("script-src 'self';"))
         XCTAssertTrue(csp.contains("connect-src 'self';"))
+        XCTAssertTrue(csp.contains("frame-src 'self';"))
+        let f = Dictionary(uniqueKeysWithValues: WebSecurity.frameHeaders.map { ($0.0.lowercased(), $0.1) })
+        let fcsp = f["content-security-policy"]!
+        XCTAssertFalse(fcsp.replacingOccurrences(of: "'wasm-unsafe-eval'", with: "").contains("unsafe"))
+        for part in ["default-src 'none'", "script-src 'self' 'wasm-unsafe-eval';", "connect-src 'none';", "frame-ancestors 'self';", "img-src 'none';"] {
+            XCTAssertTrue(fcsp.contains(part), part)
+        }
+        XCTAssertEqual(f["x-frame-options"], "SAMEORIGIN")
         XCTAssertEqual(h["x-frame-options"], "DENY")
         XCTAssertEqual(h["x-content-type-options"], "nosniff")
         XCTAssertEqual(h["referrer-policy"], "no-referrer")
@@ -265,16 +273,24 @@ final class WebSecurityTests: XCTestCase {
         let a = try WebAssets.load()
         XCTAssertNotNil(a.assets["/"])
         XCTAssertEqual(a.assets["/"]?.cachePolicy, "no-store")
+        let documents: Set<String> = ["/", WebAssets.frameDocument]
         for (path, asset) in a.assets {
             XCTAssertEqual(WebAssets.sha256Hex(asset.data), asset.sha256, path)
-            // 591: the page's own files are app-*; vendored ones vendor-* (pinned, WebTerminalUnitTests).
-            if path != "/" {
-                XCTAssertTrue(path.hasPrefix("/assets/app-") || path.hasPrefix("/assets/vendor-"), path)
+            // 591: the page's files are app-*, the terminal frame's frame-*, vendored ones vendor-*.
+            if documents.contains(path) {
+                XCTAssertEqual(asset.cachePolicy, "no-store", path)
+            } else {
+                XCTAssertTrue(path.hasPrefix("/assets/app-") || path.hasPrefix("/assets/frame-") || path.hasPrefix("/assets/vendor-"), path)
                 XCTAssertEqual(asset.cachePolicy, WebAssets.immutable)
             }
         }
+        // Every asset is referenced by one of the two documents.
+        let docs = documents.map { String(decoding: a.assets[$0]!.data, as: UTF8.self) }
+        for path in a.assets.keys where !documents.contains(path) {
+            XCTAssertTrue(docs.contains { $0.contains("\"\(path)\"") }, "a document references \(path)")
+        }
         let index = String(decoding: a.assets["/"]!.data, as: UTF8.self)
-        for path in a.assets.keys where path != "/" { XCTAssertTrue(index.contains("\"\(path)\""), "index.html references \(path)") }
+        XCTAssertFalse(index.contains("vendor-ghostty-web"), "591 T2: the page never loads the engine — only its frame does")
     }
 
     /// The drift check, in the test suite too: the committed Resources/Web must be exactly what
@@ -284,13 +300,13 @@ final class WebSecurityTests: XCTestCase {
         let src = root.appendingPathComponent("Sources/SnoozeWeb/WebSource")
         let web = root.appendingPathComponent("Sources/SnoozeWeb/Resources/Web")
         let loaded = try WebAssets.load(webRoot: web)
-        for (name, ext) in [("app", "css"), ("app", "js")] {
+        for (name, ext) in [("app", "css"), ("app", "js"), ("frame", "css"), ("frame", "js")] {
             let d = try Data(contentsOf: src.appendingPathComponent("\(name).\(ext)"))
             let path = "/assets/\(name)-\(WebAssets.sha256Hex(d).prefix(16)).\(ext)"
             XCTAssertEqual(loaded.assets[path]?.data, d, "stale \(name).\(ext) — run make web-assets")
         }
-        // index + app.css + app.js, and (591) the terminal engine's script and WebAssembly.
-        XCTAssertEqual(loaded.assets.count, 5)
+        // index + app.css + app.js; (591) the terminal frame + frame.css + frame.js; the engine's script and WebAssembly.
+        XCTAssertEqual(loaded.assets.count, 8)
         XCTAssertEqual(loaded.assets.keys.filter { $0.hasPrefix("/assets/vendor-") }.count, 2)
     }
 

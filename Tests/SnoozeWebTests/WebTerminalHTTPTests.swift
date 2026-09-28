@@ -241,6 +241,35 @@ final class WebTerminalHTTPTests: XCTestCase {
         ws.close()
     }
 
+    // MARK: 591 polish — the engine's sandboxed frame (T2)
+
+    func testTheTerminalFrameHasItsOwnPolicyAndOnlyItsFilesAreLoadableFromAnOpaqueOrigin() throws {
+        let f = try request("/terminal-frame", ["Sec-Fetch-Site": "same-origin", "Sec-Fetch-Dest": "iframe"])
+        XCTAssertEqual(f.status, 200)
+        XCTAssertEqual(f.header("x-frame-options"), "SAMEORIGIN")
+        let csp = try XCTUnwrap(f.header("content-security-policy"))
+        XCTAssertTrue(csp.contains("connect-src 'none'") && csp.contains("frame-ancestors 'self'") && csp.contains("'wasm-unsafe-eval'"), csp)
+        XCTAssertEqual(f.header("cache-control"), "no-store")
+        XCTAssertEqual(try request("/terminal-frame", method: "POST").status, 404)
+        let assets = try WebAssets.load().assets.keys
+        let frameJS = try XCTUnwrap(assets.first { $0.hasPrefix("/assets/frame-") && $0.hasSuffix(".js") })
+        let engine = try XCTUnwrap(assets.first { $0.hasPrefix("/assets/vendor-ghostty-web-") })
+        let appJS = try XCTUnwrap(assets.first { $0.hasPrefix("/assets/app-") && $0.hasSuffix(".js") })
+        let wasm = try XCTUnwrap(assets.first { $0.hasSuffix(".wasm") })
+        // What the opaque-origin frame loads: cross-site, Origin null — served, with CORP cross-origin.
+        for p in [frameJS, engine] {
+            let r = try request(p, ["Sec-Fetch-Site": "cross-site", "Origin": "null"])
+            XCTAssertEqual(r.status, 200, p)
+            XCTAssertEqual(r.header("cross-origin-resource-policy"), "cross-origin", p)
+            XCTAssertEqual(try request(p, ["Host": "evil.example"]).status, 403, "the Host check still comes first")
+        }
+        // Everything else keeps the page's rules: no cross-site load, CORP same-origin.
+        for p in [appJS, wasm, "/"] {
+            XCTAssertEqual(try request(p, ["Sec-Fetch-Site": "cross-site"]).status, 403, p)
+            XCTAssertEqual(try request(p).header("cross-origin-resource-policy"), "same-origin", p)
+        }
+    }
+
     // MARK: 591 polish — the boot view, the wake note
 
     func testAnOffSandboxShowsItsBootThenTheImagesSessionInTheSamePane() throws {

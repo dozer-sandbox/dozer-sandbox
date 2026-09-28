@@ -492,7 +492,14 @@ function verbsFor(phase) {
 }
 function lifecycle(verb, name) {
   if (DESTRUCTIVE[verb]) confirmAction(VERBS[verb][0] + ' ' + name, DESTRUCTIVE[verb], name, { action: verb, sandbox: name });
+  else if (verb === 'start') startWithBootView(name);
   else act({ action: verb, sandbox: name });
+}
+/// 591 — Start shows the boot: a terminal pane streams the host's steps and the kernel's console,
+/// then becomes the image's own session (the UI process does the switch; the boot stays in the scrollback).
+async function startWithBootView(name) {
+  const op = await act({ action: 'start', sandbox: name });
+  if (op) openTerminal(name, null, 'interactive');
 }
 function lifecycleButtons(s, all) {
   const busy = s.busy || s.phase === 'booting' || opRunningFor(s.name);
@@ -646,7 +653,9 @@ async function viewSandbox() {
       card('Sessions', d.sessions ? String(d.sessions.filter((s) => !s.ended).length) : '—', running ? '' : 'listed while it runs')),
     h('h2', null, 'Terminal'),
     h('div', { class: 'panel' }, h('div', { class: 'cmd' }, h('code', null, d.attachCommand), copy,
-      gated(btn('Open here', () => openDefaultTerminal(name), { primary: true, title: 'A terminal in this browser on the ' + d.defaultSession + ' session (started if it is not running)' })),
+      ((b) => { if (i.busy || i.phase === 'booting' || opRunningFor(name)) { b.disabled = true; b.title = 'Wait until it is running'; } return b; })(
+        btn('Open here', () => (i.phase === 'off' || i.phase === 'failed' ? startWithBootView(name) : openDefaultTerminal(name)),
+          { primary: true, title: 'A terminal in this browser on the ' + d.defaultSession + ' session (a shut-down sandbox starts, and you watch it boot)' })),
       gated(btn('Open in Terminal', terminal(null), { title: 'Terminal.app attaches to the ' + d.defaultSession + ' session (waking the sandbox if it sleeps)' }))),
       h('div', { class: 'empty' }, 'Attaches to the ' + d.defaultSession + ' session; Ctrl-] detaches, the session keeps running. Open here keeps it in the Terminals view; Open in Terminal uses your default terminal app.')),
     h('div', { class: 'head' }, h('h2', null, 'Sessions'), h('div', { class: 'actions' },
@@ -874,26 +883,25 @@ async function viewDoctor() {
 
 // ── terminals (591) ─────────────────────────────────────────────────────────
 // Browser terminals on the host's attach relay (591.01-DESIGN.md). Rules this section keeps:
-//   · the engine (vendored ghostty-web 0.4.0, pinned by digest) gets ONE WebAssembly instance per
-//     terminal, so one terminal's engine memory can never touch another's (upstream #141);
-//   · links in terminal output are never opened: a Cmd/Ctrl click is dropped before the engine sees
-//     it, and this page has no use for window.open (upstream #194: any OSC 8 scheme, unchecked);
+//   · the engine (vendored ghostty-web 0.4.0, pinned by digest) runs ONLY in a sandboxed, opaque-origin
+//     iframe per terminal (/terminal-frame, frame.js — owner ruling T2): it has no cookie, no API, no
+//     CSRF token and can connect to nothing; this page owns the WebSocket and talks to the frame over a
+//     narrow, checked postMessage protocol. One frame = one WASM instance (upstream #141);
+//   · links are never opened (the frame drops Cmd/Ctrl clicks, and its sandbox has no popups);
 //   · a paste is made safe HERE (Ghostty 1.3.0's encode: unsafe control characters become spaces),
-//     confirmed when unsafe or large and refused over 1 MiB — the engine's own paste handler never
-//     runs (CVE-2026-26982, upstream #193);
+//     confirmed when unsafe or large and refused over 1 MiB (CVE-2026-26982, upstream #193);
 //   · the ticket lives only in connectTerminal's memory for the moment it takes to open the socket;
 //   · guest text (a title, the ended line) is shown with textContent only;
 //   · what wakes a sandbox is decided by the UI process (the 541 rule), never here: every key and
 //     every report is sent, and the server says what it did.
 const terminals = new Map();
-const termUI = { built: false, split: false, selected: [null, null], focusedPane: 0, nextId: 1, lastSandbox: null };
+const termUI = { built: false, split: false, selected: [null, null], focusedPane: 0, nextId: 1, lastSandbox: null, dropped: 0 };
 const PASTE_CONFIRM_BYTES = 64 * 1024;
 const PASTE_MAX_BYTES = 1024 * 1024;
 const INPUT_CHUNK = 16 * 1024;
-const TERM_THEME = { background: '#16171c', foreground: '#e3e5ea', cursor: '#c9ccd6', selectionBackground: '#3b4a6b' };
 const utf8 = new TextEncoder();
 
-// This page never opens windows — so a terminal link cannot open one either.
+// This page never opens windows.
 window.open = function refuseToOpen() { return null; };
 
 function wasmURL() {
@@ -901,6 +909,50 @@ function wasmURL() {
   return m ? m.getAttribute('content') : null;
 }
 function quietly(fn, fallback) { try { return fn(); } catch (_) { return fallback; } }
+/// The engine's WebAssembly, fetched once from this origin; each frame gets its own copy to compile.
+let engineWasm = null;
+function engineBytes() {
+  if (!engineWasm) engineWasm = fetch(wasmURL(), { credentials: 'omit' }).then((r) => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.arrayBuffer(); });
+  return engineWasm;
+}
+function toFrame(t, msg, transfer) {
+  if (t.frame && t.frame.contentWindow) t.frame.contentWindow.postMessage(msg, '*', transfer || []);
+}
+
+// ── the frame protocol, page side: only our frames (by window), only an opaque origin, only these
+// messages with typed, capped fields. Anything else is dropped and counted.
+const isInt = (v, lo, hi) => Number.isInteger(v) && v >= lo && v <= hi;
+function validFrameMessage(m) {
+  if (!m || typeof m !== 'object' || Array.isArray(m) || typeof m.t !== 'string') return false;
+  const n = Object.keys(m).length;
+  switch (m.t) {
+    case 'ready': case 'failed': return n === 1;
+    case 'opened': case 'resize': return n === 3 && isInt(m.cols, 1, 1000) && isInt(m.rows, 1, 500);
+    case 'data': return n === 2 && typeof m.s === 'string' && m.s.length <= 65536;
+    case 'title': return n === 2 && typeof m.s === 'string' && m.s.length <= 200;
+    case 'paste': return n === 3 && typeof m.text === 'string' && m.text.length <= PASTE_MAX_BYTES && typeof m.bracketed === 'boolean';
+    case 'paste-too-big': return n === 2 && isInt(m.bytes, 0, Number.MAX_SAFE_INTEGER);
+    default: return false;
+  }
+}
+window.addEventListener('message', (ev) => {
+  const t = [...terminals.values()].find((x) => x.frame && x.frame.contentWindow === ev.source);
+  if (!t || ev.origin !== 'null' || !validFrameMessage(ev.data)) { termUI.dropped++; return; }
+  const m = ev.data;
+  switch (m.t) {
+    case 'ready': if (t.onReady) { t.onReady(); t.onReady = null; } break;
+    case 'opened': t.cols = m.cols; t.rows = m.rows; if (t.onOpened) { t.onOpened(); t.onOpened = null; } break;
+    case 'failed': if (t.onFailed) { t.onFailed(new Error('the terminal engine did not load')); t.onFailed = null; } break;
+    case 'data': sendInput(t, m.s); break;
+    case 'resize':
+      t.cols = m.cols; t.rows = m.rows;
+      if (t.mode === 'interactive') sendJSON(t, { t: 'resize', cols: m.cols, rows: m.rows });
+      break;
+    case 'title': t.title = m.s.slice(0, 120); paintTabs(); break;
+    case 'paste': safePaste(t, m.text, m.bracketed); break;
+    case 'paste-too-big': toast('That paste is too big — a terminal takes at most 1 MiB at once', true); break;
+  }
+});
 
 /// Open the image's own session (starting it when needed — an explicit request), then attach.
 async function openDefaultTerminal(name) {
@@ -921,8 +973,8 @@ async function waitForOp(op, seconds = 300) {
 
 async function openTerminal(sandbox, session, mode, pane) {
   const t = { id: termUI.nextId++, sandbox, session, mode, pane: termUI.split ? (pane ?? termUI.focusedPane) : 0,
-              ws: null, term: null, state: null, ended: false, endText: '', errorText: '', disconnected: '',
-              closed: false, focused: false, title: '', pinger: null, coverAction: null };
+              ws: null, frame: null, cols: 80, rows: 24, state: null, ended: false, endText: '', errorText: '', disconnected: '',
+              closed: false, title: '', pinger: null, coverAction: null, onReady: null, onOpened: null, onFailed: null };
   t.els = terminalElements(t);
   terminals.set(t.id, t);
   termUI.selected[t.pane] = t.id;
@@ -932,36 +984,32 @@ async function openTerminal(sandbox, session, mode, pane) {
   // The body must be laid out before the engine measures it.
   await new Promise((r) => setTimeout(r, 0));
   renderTerminals();
-  let engine;
   try {
-    engine = await GhosttyWeb.Ghostty.load(wasmURL());          // our own origin; one instance per terminal
+    const wasm = await engineBytes();
+    if (t.closed) return;
+    const opened = new Promise((resolve, reject) => { t.onOpened = resolve; t.onFailed = reject; });
+    t.onReady = () => toFrame(t, { t: 'init', wasm: wasm.slice(0), mode });
+    // The engine's frame: an opaque origin (allow-scripts only — no same-origin, no popups, no forms).
+    t.frame = h('iframe', { class: 'term-frame', src: '/terminal-frame', sandbox: 'allow-scripts', allow: 'clipboard-write',
+                            referrerpolicy: 'no-referrer', name: 'term-' + t.id, title: 'Terminal: ' + sandbox + ' · ' + (session || 'default') });
+    t.els.host.append(t.frame);
+    await opened;
   } catch (e) {
     t.errorText = 'the terminal engine did not load (' + (e.message || e) + ')';
     paintCover(t);
     return;
   }
   if (t.closed) return;
-  const term = new GhosttyWeb.Terminal({ ghostty: engine, fontSize: 13, fontFamily: 'ui-monospace, "SF Mono", Menlo, monospace',
-                                         theme: TERM_THEME, cursorBlink: false, disableStdin: mode === 'watch' });
-  t.term = term;
-  term.open(t.els.host);
-  const fit = new GhosttyWeb.FitAddon();
-  term.loadAddon(fit);
-  fit.fit();
-  fit.observeResize();
-  term.onData((s) => sendInput(t, s));
-  term.onResize((d) => { if (t.mode === 'interactive') sendJSON(t, { t: 'resize', cols: d.cols, rows: d.rows }); });
-  term.onTitleChange((s) => { t.title = String(s).slice(0, 120); paintTabs(); });
   connectTerminal(t);
-  term.focus();
+  focusTerm(t);
 }
 
 async function connectTerminal(t) {
   const body = { mode: t.mode };
   if (t.session) body.session = t.session;
-  if (t.mode === 'interactive' && t.term) {
-    body.cols = Math.max(2, Math.min(1000, t.term.cols));
-    body.rows = Math.max(1, Math.min(500, t.term.rows));
+  if (t.mode === 'interactive') {
+    body.cols = Math.max(2, Math.min(1000, t.cols));
+    body.rows = Math.max(1, Math.min(500, t.rows));
   }
   let ticket;
   try {
@@ -990,7 +1038,7 @@ async function connectTerminal(t) {
 
 function onTerminalMessage(t, ev) {
   if (typeof ev.data !== 'string') {
-    if (t.term) t.term.write(new Uint8Array(ev.data));
+    toFrame(t, { t: 'write', data: ev.data }, [ev.data]);
     return;
   }
   let m;
@@ -998,6 +1046,15 @@ function onTerminalMessage(t, ev) {
   if (m.t === 'state') {
     t.state = m;
     if (m.session) t.session = m.session;
+    // "woke in 0.4 s": one line over the screen, for a few seconds.
+    if (typeof m.notice === 'string' && m.notice) {
+      const n = t.els.note;
+      n.textContent = m.notice.slice(0, 80);
+      n.hidden = false;
+      t.els.wrap.dataset.notice = n.textContent;
+      clearTimeout(t.noticeTimer);
+      t.noticeTimer = setTimeout(() => { n.hidden = true; }, 4000);
+    }
   } else if (m.t === 'ended') {
     t.ended = true;
     t.endText = m.text || (m.ending === 'exited' ? 'exit ' + m.code : m.ending);
@@ -1036,63 +1093,29 @@ function closeTerminal(id) {
   t.closed = true;
   clearInterval(t.pinger);
   if (t.ws) { try { t.ws.close(1000, 'closed'); } catch (_) { /* */ } }
-  if (t.term) quietly(() => t.term.dispose());         // its own engine instance goes with it
-  t.els.wrap.remove();
+  t.els.wrap.remove();                                 // its frame — and its engine instance — go with it
   terminals.delete(id);
   for (const p of [0, 1]) if (termUI.selected[p] === id) termUI.selected[p] = null;
   renderTerminals();
 }
-function focusTerm(t) { if (t.term) quietly(() => t.term.focus()); }
+function focusTerm(t) {
+  if (!t.frame) return;
+  quietly(() => t.frame.focus());
+  toFrame(t, { t: 'focus' });
+}
 
-// ── a terminal's elements, and the guards around the engine
+// ── a terminal's elements: the frame's host, and the cover over it (the guards live in the frame)
 function terminalElements(t) {
-  const host = h('div', { class: 'term-host' });
+  const host = h('div', { class: 'term-frame-host' });
+  const note = h('div', { class: 'term-notice', role: 'status', hidden: true });
   const spin = h('div', { class: 'tc-spin', 'aria-hidden': 'true' });
   const head = h('div', { class: 'tc-head' });
   const detail = h('div', { class: 'tc-detail' });
   const action = h('button', { type: 'button', class: 'btn small tc-act' });
   action.addEventListener('click', (ev) => { ev.stopPropagation(); coverAction(t); });
   const cover = h('div', { class: 'term-cover', role: 'status', 'aria-live': 'polite' }, h('div', { class: 'tc-box' }, spin, head, detail, action));
-  const wrap = h('div', { class: 'term-wrap', 'data-terminal': String(t.id) }, host, cover);
-  // Links: never activated. The engine opens a link on a Cmd/Ctrl click — drop those clicks first.
-  for (const type of ['click', 'auxclick', 'mousedown', 'mouseup']) {
-    wrap.addEventListener(type, (ev) => {
-      if ((ev.metaKey || ev.ctrlKey) && ev.target !== action) { ev.preventDefault(); ev.stopPropagation(); }
-    }, true);
-  }
-  // Paste: ours, never the engine's. Drop (drag-and-drop text) is refused outright.
-  wrap.addEventListener('paste', (ev) => {
-    ev.preventDefault();
-    ev.stopPropagation();
-    const text = ev.clipboardData ? ev.clipboardData.getData('text/plain') : '';
-    if (text) safePaste(t, text);
-  }, true);
-  wrap.addEventListener('drop', (ev) => { ev.preventDefault(); ev.stopPropagation(); }, true);
-  // Keys: Cmd-C copies a selection; Cmd-V pastes (through the paste event above); every other
-  // Cmd-chord belongs to the browser and never reaches the guest.
-  wrap.addEventListener('keydown', (ev) => {
-    if (!ev.metaKey) return;
-    if (ev.code === 'KeyV') return;
-    if (ev.code === 'KeyC' && t.term && quietly(() => t.term.hasSelection(), false)) {
-      const s = t.term.getSelection();
-      ev.preventDefault();
-      navigator.clipboard.writeText(s).catch(() => toast('Copy was refused by the browser', true));
-    }
-    ev.stopPropagation();
-  }, true);
-  // Focus reports (DEC 1004) — the engine tracks the mode but does not send them. They are
-  // reports: the UI process never wakes a sandbox for one.
-  wrap.addEventListener('focusin', () => {
-    if (t.focused) return;
-    t.focused = true;
-    if (t.term && quietly(() => t.term.hasFocusEvents(), false)) sendInput(t, '\x1b[I');
-  });
-  wrap.addEventListener('focusout', (ev) => {
-    if (ev.relatedTarget && wrap.contains(ev.relatedTarget)) return;
-    t.focused = false;
-    if (t.term && quietly(() => t.term.hasFocusEvents(), false)) sendInput(t, '\x1b[O');
-  });
-  return { wrap, host, cover, spin, head, detail, action };
+  const wrap = h('div', { class: 'term-wrap', 'data-terminal': String(t.id) }, host, cover, note);
+  return { wrap, host, cover, spin, head, detail, action, note };
 }
 
 // ── paste (Ghostty 1.3.0's `encode`, after xterm): these become a space, in either paste mode —
@@ -1107,22 +1130,23 @@ function encodePaste(raw) {
   }
   return { text: out, replaced };
 }
-function safePaste(t, raw) {
-  if (t.mode !== 'interactive' || !t.term) return;
+/// A paste the frame caught (with whether the program turned on bracketed paste): made safe here,
+/// asked about when unsafe or large, then handed back to the frame to type.
+function safePaste(t, raw, bracketed) {
+  if (t.mode !== 'interactive' || !t.frame) return;
   const size = utf8.encode(raw).length;
   if (size > PASTE_MAX_BYTES) { toast('That paste is ' + bytes(size) + ' — a terminal takes at most 1 MiB at once', true); return; }
-  const bracketed = quietly(() => t.term.hasBracketedPaste(), false);
   const { text, replaced } = encodePaste(raw);
   const reasons = [];
   if (replaced) reasons.push(replaced + ' control character' + (replaced === 1 ? ' was' : 's were') + ' replaced with spaces.');
   if (!bracketed && text.includes('\r')) reasons.push('It has line breaks and the program did not turn on bracketed paste — each line may run as a command.');
   if (size > PASTE_CONFIRM_BYTES) reasons.push('It is large (' + bytes(size) + ').');
-  if (!reasons.length) { t.term.paste(text); return; }
+  if (!reasons.length) { toFrame(t, { t: 'paste', text }); return; }
   const lines = text.split('\r');
   const d = h('dialog', { class: 'dlg paste-dialog' });
   const ok = h('button', { type: 'button', class: 'btn primary' }, 'Paste');
   const cancel = h('button', { type: 'button', class: 'btn' }, 'Cancel');
-  ok.addEventListener('click', () => { d.close(); t.term.paste(text); focusTerm(t); });
+  ok.addEventListener('click', () => { d.close(); toFrame(t, { t: 'paste', text }); focusTerm(t); });
   cancel.addEventListener('click', () => { d.close(); focusTerm(t); });
   d.append(h('form', { method: 'dialog' },
     h('h2', null, 'Paste ' + lines.length + ' line' + (lines.length === 1 ? '' : 's') + ' (' + bytes(size) + ') into ' + t.sandbox + '?'),
@@ -1166,7 +1190,8 @@ function paintCover(t) {
   e.wrap.dataset.phase = (t.state && t.state.phase) || '';
   e.wrap.dataset.reports = String((t.state && t.state.reportsIgnored) || 0);
   e.wrap.dataset.wakes = String((t.state && t.state.keystrokeWakes) || 0);
-  e.cover.hidden = kind === 'none';
+  // The boot view draws the boot in the terminal itself: no cover.
+  e.cover.hidden = kind === 'none' || kind === 'boot';
   e.head.textContent = headline;
   e.detail.textContent = detail;
   e.detail.hidden = !detail;

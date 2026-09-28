@@ -80,7 +80,7 @@ public struct WebAssets: Sendable {
             }
             guard allowedTypes.contains(e.mimeType) || (vendor && vendorOnlyTypes.contains(e.mimeType)) else { throw WebAssetError.unsupportedType }
             guard !vendor || e.publicPath.hasPrefix("/assets/vendor-") else { throw WebAssetError.unsafePath }
-            guard e.publicPath == "/" ? e.cachePolicy == "no-store" : e.cachePolicy == immutable else { throw WebAssetError.malformedManifest }
+            guard documents.contains(e.publicPath) ? e.cachePolicy == "no-store" : e.cachePolicy == immutable else { throw WebAssetError.malformedManifest }
             guard out[e.publicPath] == nil else { throw WebAssetError.malformedManifest }
             guard let data = try? Data(contentsOf: webRoot.appendingPathComponent(e.resourcePath)) else {
                 throw WebAssetError.resourceMissing(e.resourcePath)
@@ -96,8 +96,21 @@ public struct WebAssets: Sendable {
 
     public static func sha256Hex(_ d: Data) -> String { SHA256.hash(data: d).map { String(format: "%02x", $0) }.joined() }
 
+    /// 591: the two documents — the page, and the terminal engine's sandboxed frame.
+    public static let frameDocument = "/terminal-frame"
+    static let documents: Set<String> = ["/", frameDocument]
+
+    /// 591: what the sandboxed (opaque-origin) terminal frame loads: its own script and style and the
+    /// engine's script. Those requests come from an opaque origin — `Sec-Fetch-Site: cross-site`, no
+    /// cookie — so they are answered without the Origin/Fetch-Metadata checks and with
+    /// `Cross-Origin-Resource-Policy: cross-origin`. They are public, static and hold no secret; the
+    /// frame fetches nothing else (its CSP has `connect-src 'none'`: the WASM bytes come from the page).
+    public static func isFrameAsset(_ publicPath: String) -> Bool {
+        publicPath.hasPrefix("/assets/frame-") || publicPath.hasPrefix("/assets/vendor-ghostty-web-")
+    }
+
     static func isSafePublicPath(_ p: String) -> Bool {
-        guard p == "/" || p.hasPrefix("/assets/"), !p.contains(".."), !p.contains("//") else { return false }
+        guard documents.contains(p) || p.hasPrefix("/assets/"), !p.contains(".."), !p.contains("//") else { return false }
         return p.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || "/.-_".contains($0)) }
     }
 

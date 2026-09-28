@@ -299,7 +299,9 @@ public final class SnoozeWebServer: @unchecked Sendable {
                        _ r: (Int, [(String, String)], Data), isHead: Bool, keepAlive: Bool) async throws {
         var h = HTTPHeaders()
         for (k, v) in WebSecurity.responseHeaders { h.add(name: k, value: v) }
-        for (k, v) in r.1 { h.add(name: k, value: v) }
+        // A response's own header REPLACES a default of that name (591: the frame's CSP and XFO,
+        // the frame assets' CORP) — never a second, conflicting copy.
+        for (k, v) in r.1 { h.replaceOrAdd(name: k, value: v) }
         if !h.contains(name: "cache-control") { h.add(name: "Cache-Control", value: "no-store") }
         h.add(name: "Content-Length", value: String(r.2.count))
         if !keepAlive { h.add(name: "Connection", value: "close") }
@@ -346,6 +348,14 @@ public final class SnoozeWebServer: @unchecked Sendable {
         }
         let md = metadata(head, method: method, bodyBytes: body.count)
         do {
+            // 591: the sandboxed terminal frame (an opaque origin) loads its script, style and the
+            // engine: exact Host, GET/HEAD, no body — the Origin and Fetch-Metadata checks cannot apply
+            // to an opaque origin, and these files are public and static.
+            if md.host == origin.authority, case .asset(let p)? = WebRoute.parse(method: method, target: head.uri), WebAssets.isFrameAsset(p) {
+                guard md.bodyByteCount == 0 else { throw WebRejection.bodyTooLarge }
+                guard let a = assets.assets[p] else { throw WebRejection.notFound }
+                return .response(200, [("Content-Type", a.mimeType), ("Cache-Control", a.cachePolicy)] + WebSecurity.frameAssetHeaders, a.data)
+            }
             // A duplicated Host or Origin header is not "the" header: `header()` gives nil, refused here.
             try WebSecurity.checkListener(md, origin, originRequired: false)
             if head.headers["origin"].count > 1 { throw WebRejection.originRejected }
@@ -410,6 +420,10 @@ public final class SnoozeWebServer: @unchecked Sendable {
             let path = if case .asset(let p) = route { p } else { "/" }
             guard let a = assets.assets[path] else { throw WebRejection.notFound }
             return .response(200, [("Content-Type", a.mimeType), ("Cache-Control", a.cachePolicy)], a.data)
+        case .terminalFrame:
+            try WebSecurity.validateStatic(md, origin)
+            guard let a = assets.assets[WebAssets.frameDocument] else { throw WebRejection.notFound }
+            return .response(200, [("Content-Type", a.mimeType), ("Cache-Control", a.cachePolicy)] + WebSecurity.frameHeaders, a.data)
         case .sessionBootstrap:
             let cap = try WebSecurity.validateBootstrap(md, origin, limit: limits.maximumRequestBodyBytes)
             let s = try await sessions.exchange(cap)
@@ -422,7 +436,7 @@ public final class SnoozeWebServer: @unchecked Sendable {
         let session = md.method.isSafe ? try await sessions.authenticate(cookie)
                                        : try await sessions.authenticateMutation(cookie, csrf: md.csrfToken)
         switch route {
-        case .index, .asset, .sessionBootstrap:
+        case .index, .asset, .sessionBootstrap, .terminalFrame:
             throw WebRejection.notFound
         case .sessionInfo:
             return json(sessionInfo(session))

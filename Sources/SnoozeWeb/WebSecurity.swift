@@ -217,12 +217,11 @@ public enum WebSecurity {
     }
 
     /// On EVERY response, success or refusal. No `Access-Control-Allow-*` is ever added.
-    /// 591: `'wasm-unsafe-eval'` lets the vendored terminal engine COMPILE its WebAssembly (loaded
-    /// from this origin) — it is the one token the terminals added; never `'unsafe-eval'`, never
-    /// `'unsafe-inline'`, never `data:` in `connect-src`. `connect-src 'self'` covers the terminal
-    /// WebSocket (`ws://127.0.0.1:<port>`, CSP3).
+    /// 591: the page may frame ITS OWN terminal frame (`frame-src 'self'`) — the one token the
+    /// terminals added to the page. `connect-src 'self'` covers the terminal WebSocket
+    /// (`ws://127.0.0.1:<port>`, CSP3). The engine runs only in the frame, under `frameCSP`.
     public static let responseHeaders: [(String, String)] = [
-        ("Content-Security-Policy", "default-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'; object-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; connect-src 'self'; img-src 'self' data:; font-src 'self'; manifest-src 'none'"),
+        ("Content-Security-Policy", "default-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'; object-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; font-src 'self'; frame-src 'self'; manifest-src 'none'"),
         ("X-Content-Type-Options", "nosniff"),
         ("X-Frame-Options", "DENY"),
         ("Referrer-Policy", "no-referrer"),
@@ -231,4 +230,17 @@ public enum WebSecurity {
         ("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=(), usb=(), clipboard-read=()"),
         ("Pragma", "no-cache"),
     ]
+
+    /// 591 (owner ruling T2) — the terminal frame's document: loaded only into the page's sandboxed
+    /// (`allow-scripts` only → an opaque origin: no cookie, no storage, no same-origin access) iframe.
+    /// The engine may compile WebAssembly (`'wasm-unsafe-eval'`, never `'unsafe-eval'`), and it can
+    /// connect to NOTHING (`connect-src 'none'`: the page hands it the WASM bytes and the terminal's
+    /// bytes by postMessage). Framed only by this origin.
+    public static let frameHeaders: [(String, String)] = [
+        ("Content-Security-Policy", "default-src 'none'; base-uri 'none'; frame-ancestors 'self'; form-action 'none'; object-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; connect-src 'none'; img-src 'none'; font-src 'none'; frame-src 'none'; manifest-src 'none'"),
+        ("X-Frame-Options", "SAMEORIGIN"),
+    ]
+
+    /// 591 — the frame's own script and style and the engine's script are loaded by an opaque origin.
+    public static let frameAssetHeaders: [(String, String)] = [("Cross-Origin-Resource-Policy", "cross-origin")]
 }
