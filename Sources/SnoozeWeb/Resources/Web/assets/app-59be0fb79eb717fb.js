@@ -328,6 +328,10 @@ function signedOut(message) {
   setLive('bad', 'signed out');
   $('sign-out').hidden = true;
   $('ops').hidden = true;
+  // 591: the server closes this session's terminals; the page forgets them.
+  for (const t of [...terminals.values()]) closeTerminal(t.id);
+  $('terminals').hidden = true;
+  $('view').hidden = false;
   const view = $('view');
   view.replaceChildren(h('div', { class: 'signed-out' },
     h('h1', null, 'Sign in with a new link'),
@@ -400,6 +404,13 @@ function route() {
   for (const a of document.querySelectorAll('#nav a')) {
     a.classList.toggle('active', a.dataset.view === state.view || (state.view === 'sandbox' && a.dataset.view === 'overview'));
   }
+  // 591: the terminals live in their own section, never re-rendered by refresh() (a live update
+  // must not steal a terminal's focus or reparent its canvas).
+  const onTerminals = state.view === 'terminals';
+  $('terminals').hidden = !onTerminals;
+  $('view').hidden = onTerminals;
+  $('main').classList.toggle('main-terms', onTerminals);
+  if (onTerminals) { renderTerminals(); return; }
   refresh(true);
 }
 window.addEventListener('hashchange', () => { if (!state.signedOut) route(); });
@@ -407,6 +418,7 @@ window.addEventListener('hashchange', () => { if (!state.signedOut) route(); });
 let refreshing = false, again = false;
 async function refresh(scrollTop) {
   if (state.signedOut) return;
+  if (state.view === 'terminals') { renderTerminals(); return; }
   if (refreshing) { again = true; return; }
   refreshing = true;
   try {
@@ -584,7 +596,10 @@ async function viewSandbox() {
     h('td', { class: 'mono' }, s.command),
     h('td', { class: 'num' }, s.cols ? s.cols + '×' + s.rows : '—'),
     h('td', { class: 'num' }, String(s.clients)),
-    h('td', null, s.ended ? null : gated(btn('Open in Terminal', terminal(s.name), { small: true })))));
+    h('td', null, s.ended ? null : h('div', { class: 'actions' },
+      btn('Open', () => openTerminal(name, s.name, 'interactive'), { small: true, title: 'A terminal on this session, here in the browser' }),
+      btn('Watch', () => openTerminal(name, s.name, 'watch'), { small: true, title: 'Watch only: nothing you type reaches the session, and it never resizes it' }),
+      gated(btn('Open in Terminal', terminal(s.name), { small: true }))))));
   const points = d.restorePoints.map((p) => h('tr', null,
     h('td', null, p.name, h('div', { class: 'muted mono' }, p.id)),
     h('td', null, full(p.createdAt), h('div', { class: 'muted' }, when(p.createdAt))),
@@ -631,8 +646,9 @@ async function viewSandbox() {
       card('Sessions', d.sessions ? String(d.sessions.filter((s) => !s.ended).length) : '—', running ? '' : 'listed while it runs')),
     h('h2', null, 'Terminal'),
     h('div', { class: 'panel' }, h('div', { class: 'cmd' }, h('code', null, d.attachCommand), copy,
-      gated(btn('Open in Terminal', terminal(null), { primary: true, title: 'Terminal.app attaches to the ' + d.defaultSession + ' session (waking the sandbox if it sleeps)' }))),
-      h('div', { class: 'empty' }, 'Attaches to the ' + d.defaultSession + ' session; Ctrl-] detaches, the session keeps running. Open in Terminal uses your default terminal app.')),
+      gated(btn('Open here', () => openDefaultTerminal(name), { primary: true, title: 'A terminal in this browser on the ' + d.defaultSession + ' session (started if it is not running)' })),
+      gated(btn('Open in Terminal', terminal(null), { title: 'Terminal.app attaches to the ' + d.defaultSession + ' session (waking the sandbox if it sleeps)' }))),
+      h('div', { class: 'empty' }, 'Attaches to the ' + d.defaultSession + ' session; Ctrl-] detaches, the session keeps running. Open here keeps it in the Terminals view; Open in Terminal uses your default terminal app.')),
     h('div', { class: 'head' }, h('h2', null, 'Sessions'), h('div', { class: 'actions' },
       gated(btn('Open the ' + d.defaultSession + ' session', () => act({ action: 'open-session', sandbox: name }), { small: true, title: 'Start the image’s own session if it is not running (wakes a sleeping sandbox)' })),
       gated(btn('Run detached…', () => dialog('Run a command in ' + name, 'A new session running the command — no shell in front (say bash -lc \'…\' for one). It runs inside the sandbox; attach to see it.',
@@ -854,6 +870,412 @@ async function viewDoctor() {
     panel(table(['', 'Check', 'Detail'], rows)));
 }
 
+// ── terminals (591) ─────────────────────────────────────────────────────────
+// Browser terminals on the host's attach relay (591.01-DESIGN.md). Rules this section keeps:
+//   · the engine (vendored ghostty-web 0.4.0, pinned by digest) gets ONE WebAssembly instance per
+//     terminal, so one terminal's engine memory can never touch another's (upstream #141);
+//   · links in terminal output are never opened: a Cmd/Ctrl click is dropped before the engine sees
+//     it, and this page has no use for window.open (upstream #194: any OSC 8 scheme, unchecked);
+//   · a paste is made safe HERE (Ghostty 1.3.0's encode: unsafe control characters become spaces),
+//     confirmed when unsafe or large and refused over 1 MiB — the engine's own paste handler never
+//     runs (CVE-2026-26982, upstream #193);
+//   · the ticket lives only in connectTerminal's memory for the moment it takes to open the socket;
+//   · guest text (a title, the ended line) is shown with textContent only;
+//   · what wakes a sandbox is decided by the UI process (the 541 rule), never here: every key and
+//     every report is sent, and the server says what it did.
+const terminals = new Map();
+const termUI = { built: false, split: false, selected: [null, null], focusedPane: 0, nextId: 1, lastSandbox: null };
+const PASTE_CONFIRM_BYTES = 64 * 1024;
+const PASTE_MAX_BYTES = 1024 * 1024;
+const INPUT_CHUNK = 16 * 1024;
+const TERM_THEME = { background: '#16171c', foreground: '#e3e5ea', cursor: '#c9ccd6', selectionBackground: '#3b4a6b' };
+const utf8 = new TextEncoder();
+
+// This page never opens windows — so a terminal link cannot open one either.
+window.open = function refuseToOpen() { return null; };
+
+function wasmURL() {
+  const m = document.querySelector('meta[name="snooze-ghostty-wasm"]');
+  return m ? m.getAttribute('content') : null;
+}
+function quietly(fn, fallback) { try { return fn(); } catch (_) { return fallback; } }
+
+/// Open the image's own session (starting it when needed — an explicit request), then attach.
+async function openDefaultTerminal(name) {
+  const op = await act({ action: 'open-session', sandbox: name });
+  if (!op) return;
+  const done = await waitForOp(op);
+  if (done && done.state === 'done') openTerminal(name, null, 'interactive');
+}
+async function waitForOp(op, seconds = 300) {
+  const end = Date.now() + seconds * 1000;
+  while (Date.now() < end) {
+    const o = state.ops.get(op.id);
+    if (o && o.state !== 'running') return o;
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  return null;
+}
+
+async function openTerminal(sandbox, session, mode) {
+  const t = { id: termUI.nextId++, sandbox, session, mode, pane: termUI.split ? termUI.focusedPane : 0,
+              ws: null, term: null, state: null, ended: false, endText: '', errorText: '', disconnected: '',
+              closed: false, focused: false, title: '', pinger: null, coverAction: null };
+  t.els = terminalElements(t);
+  terminals.set(t.id, t);
+  termUI.selected[t.pane] = t.id;
+  paintCover(t);
+  if (location.hash !== '#/terminals') location.hash = '#/terminals';
+  else renderTerminals();
+  // The body must be laid out before the engine measures it.
+  await new Promise((r) => setTimeout(r, 0));
+  renderTerminals();
+  let engine;
+  try {
+    engine = await GhosttyWeb.Ghostty.load(wasmURL());          // our own origin; one instance per terminal
+  } catch (e) {
+    t.errorText = 'the terminal engine did not load (' + (e.message || e) + ')';
+    paintCover(t);
+    return;
+  }
+  if (t.closed) return;
+  const term = new GhosttyWeb.Terminal({ ghostty: engine, fontSize: 13, fontFamily: 'ui-monospace, "SF Mono", Menlo, monospace',
+                                         theme: TERM_THEME, cursorBlink: false, disableStdin: mode === 'watch' });
+  t.term = term;
+  term.open(t.els.host);
+  const fit = new GhosttyWeb.FitAddon();
+  term.loadAddon(fit);
+  fit.fit();
+  fit.observeResize();
+  term.onData((s) => sendInput(t, s));
+  term.onResize((d) => { if (t.mode === 'interactive') sendJSON(t, { t: 'resize', cols: d.cols, rows: d.rows }); });
+  term.onTitleChange((s) => { t.title = String(s).slice(0, 120); paintTabs(); });
+  connectTerminal(t);
+  term.focus();
+}
+
+async function connectTerminal(t) {
+  const body = { mode: t.mode };
+  if (t.session) body.session = t.session;
+  if (t.mode === 'interactive' && t.term) {
+    body.cols = Math.max(2, Math.min(1000, t.term.cols));
+    body.rows = Math.max(1, Math.min(500, t.term.rows));
+  }
+  let ticket;
+  try {
+    ticket = (await api('sandboxes/' + t.sandbox + '/terminal-ticket', { method: 'POST', json: body })).ticket;
+  } catch (e) {
+    t.errorText = e.message || String(e);
+    paintCover(t);
+    paintTabs();
+    return;
+  }
+  if (t.closed) return;
+  // The ticket rides in the subprotocol list, never in the URL; it works once, within 30 s.
+  const ws = new WebSocket('ws://' + location.host + '/api/v1/sandboxes/' + t.sandbox + '/terminal-socket',
+                           ['snooze-terminal.v1', 'snooze-ticket.' + ticket]);
+  ticket = null;
+  ws.binaryType = 'arraybuffer';
+  t.ws = ws;
+  t.opened = false;
+  ws.addEventListener('open', () => {
+    t.opened = true;
+    t.pinger = setInterval(() => sendJSON(t, { t: 'ping' }), 25000);
+  });
+  ws.addEventListener('message', (ev) => onTerminalMessage(t, ev));
+  ws.addEventListener('close', (ev) => onTerminalClose(t, ws, ev));
+}
+
+function onTerminalMessage(t, ev) {
+  if (typeof ev.data !== 'string') {
+    if (t.term) t.term.write(new Uint8Array(ev.data));
+    return;
+  }
+  let m;
+  try { m = JSON.parse(ev.data); } catch (_) { return; }
+  if (m.t === 'state') {
+    t.state = m;
+    if (m.session) t.session = m.session;
+  } else if (m.t === 'ended') {
+    t.ended = true;
+    t.endText = m.text || (m.ending === 'exited' ? 'exit ' + m.code : m.ending);
+  } else if (m.t === 'error') {
+    t.errorText = m.message || m.code;
+  }
+  paintCover(t);
+  paintTabs();
+}
+
+function onTerminalClose(t, ws, ev) {
+  if (t.ws === ws) t.ws = null;
+  clearInterval(t.pinger);
+  if (t.closed || t.ended || t.errorText) return;
+  if (ev.reason === 'session-ended') return;            // signedOut() follows
+  t.disconnected = !t.opened ? 'the terminal socket was refused — open it again'
+    : ev.reason === 'shutdown' ? 'the snooze ui process stopped'
+    : ev.reason === 'idle' ? 'closed after a long silence'
+    : 'the socket closed (' + (ev.reason || ev.code) + ')';
+  paintCover(t);
+  paintTabs();
+}
+
+function sendJSON(t, obj) {
+  if (t.ws && t.ws.readyState === WebSocket.OPEN) t.ws.send(JSON.stringify(obj));
+}
+function sendInput(t, s) {
+  if (t.mode !== 'interactive' || !t.ws || t.ws.readyState !== WebSocket.OPEN) return;
+  const b = utf8.encode(s);
+  for (let i = 0; i < b.length; i += INPUT_CHUNK) t.ws.send(b.subarray(i, i + INPUT_CHUNK));
+}
+
+function closeTerminal(id) {
+  const t = terminals.get(id);
+  if (!t) return;
+  t.closed = true;
+  clearInterval(t.pinger);
+  if (t.ws) { try { t.ws.close(1000, 'closed'); } catch (_) { /* */ } }
+  if (t.term) quietly(() => t.term.dispose());         // its own engine instance goes with it
+  t.els.wrap.remove();
+  terminals.delete(id);
+  for (const p of [0, 1]) if (termUI.selected[p] === id) termUI.selected[p] = null;
+  renderTerminals();
+}
+function focusTerm(t) { if (t.term) quietly(() => t.term.focus()); }
+
+// ── a terminal's elements, and the guards around the engine
+function terminalElements(t) {
+  const host = h('div', { class: 'term-host' });
+  const spin = h('div', { class: 'tc-spin', 'aria-hidden': 'true' });
+  const head = h('div', { class: 'tc-head' });
+  const detail = h('div', { class: 'tc-detail' });
+  const action = h('button', { type: 'button', class: 'btn small tc-act' });
+  action.addEventListener('click', (ev) => { ev.stopPropagation(); coverAction(t); });
+  const cover = h('div', { class: 'term-cover', role: 'status', 'aria-live': 'polite' }, h('div', { class: 'tc-box' }, spin, head, detail, action));
+  const wrap = h('div', { class: 'term-wrap', 'data-terminal': String(t.id) }, host, cover);
+  // Links: never activated. The engine opens a link on a Cmd/Ctrl click — drop those clicks first.
+  for (const type of ['click', 'auxclick', 'mousedown', 'mouseup']) {
+    wrap.addEventListener(type, (ev) => {
+      if ((ev.metaKey || ev.ctrlKey) && ev.target !== action) { ev.preventDefault(); ev.stopPropagation(); }
+    }, true);
+  }
+  // Paste: ours, never the engine's. Drop (drag-and-drop text) is refused outright.
+  wrap.addEventListener('paste', (ev) => {
+    ev.preventDefault();
+    ev.stopPropagation();
+    const text = ev.clipboardData ? ev.clipboardData.getData('text/plain') : '';
+    if (text) safePaste(t, text);
+  }, true);
+  wrap.addEventListener('drop', (ev) => { ev.preventDefault(); ev.stopPropagation(); }, true);
+  // Keys: Cmd-C copies a selection; Cmd-V pastes (through the paste event above); every other
+  // Cmd-chord belongs to the browser and never reaches the guest.
+  wrap.addEventListener('keydown', (ev) => {
+    if (!ev.metaKey) return;
+    if (ev.code === 'KeyV') return;
+    if (ev.code === 'KeyC' && t.term && quietly(() => t.term.hasSelection(), false)) {
+      const s = t.term.getSelection();
+      ev.preventDefault();
+      navigator.clipboard.writeText(s).catch(() => toast('Copy was refused by the browser', true));
+    }
+    ev.stopPropagation();
+  }, true);
+  // Focus reports (DEC 1004) — the engine tracks the mode but does not send them. They are
+  // reports: the UI process never wakes a sandbox for one.
+  wrap.addEventListener('focusin', () => {
+    if (t.focused) return;
+    t.focused = true;
+    if (t.term && quietly(() => t.term.hasFocusEvents(), false)) sendInput(t, '\x1b[I');
+  });
+  wrap.addEventListener('focusout', (ev) => {
+    if (ev.relatedTarget && wrap.contains(ev.relatedTarget)) return;
+    t.focused = false;
+    if (t.term && quietly(() => t.term.hasFocusEvents(), false)) sendInput(t, '\x1b[O');
+  });
+  return { wrap, host, cover, spin, head, detail, action };
+}
+
+// ── paste (Ghostty 1.3.0's `encode`, after xterm): these become a space, in either paste mode —
+// NUL, ENQ, EOT, BS, ESC, DEL, and the line-discipline characters (^C ^\ ^U ^Z ^Q ^S ^V ^W ^R ^O ^Y
+// ^T); C1 controls too. A newline is sent as CR (what a terminal sends for Return).
+const UNSAFE_PASTE = new Set([0x00, 0x03, 0x04, 0x05, 0x08, 0x0f, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x19, 0x1a, 0x1b, 0x1c, 0x7f]);
+function encodePaste(raw) {
+  let out = '', replaced = 0;
+  for (const ch of raw.replace(/\r\n|\n/g, '\r')) {
+    const c = ch.codePointAt(0);
+    if (UNSAFE_PASTE.has(c) || (c >= 0x80 && c <= 0x9f)) { out += ' '; replaced++; } else out += ch;
+  }
+  return { text: out, replaced };
+}
+function safePaste(t, raw) {
+  if (t.mode !== 'interactive' || !t.term) return;
+  const size = utf8.encode(raw).length;
+  if (size > PASTE_MAX_BYTES) { toast('That paste is ' + bytes(size) + ' — a terminal takes at most 1 MiB at once', true); return; }
+  const bracketed = quietly(() => t.term.hasBracketedPaste(), false);
+  const { text, replaced } = encodePaste(raw);
+  const reasons = [];
+  if (replaced) reasons.push(replaced + ' control character' + (replaced === 1 ? ' was' : 's were') + ' replaced with spaces.');
+  if (!bracketed && text.includes('\r')) reasons.push('It has line breaks and the program did not turn on bracketed paste — each line may run as a command.');
+  if (size > PASTE_CONFIRM_BYTES) reasons.push('It is large (' + bytes(size) + ').');
+  if (!reasons.length) { t.term.paste(text); return; }
+  const lines = text.split('\r');
+  const d = h('dialog', { class: 'dlg paste-dialog' });
+  const ok = h('button', { type: 'button', class: 'btn primary' }, 'Paste');
+  const cancel = h('button', { type: 'button', class: 'btn' }, 'Cancel');
+  ok.addEventListener('click', () => { d.close(); t.term.paste(text); focusTerm(t); });
+  cancel.addEventListener('click', () => { d.close(); focusTerm(t); });
+  d.append(h('form', { method: 'dialog' },
+    h('h2', null, 'Paste ' + lines.length + ' line' + (lines.length === 1 ? '' : 's') + ' (' + bytes(size) + ') into ' + t.sandbox + '?'),
+    ...reasons.map((r) => h('p', { class: 'sub' }, r)),
+    h('pre', { class: 'paste-preview' }, lines.slice(0, 5).join('\n').slice(0, 2000) + (lines.length > 5 ? '\n…' : '')),
+    h('div', { class: 'dlg-buttons' }, cancel, ok)));
+  d.addEventListener('close', () => d.remove());
+  document.body.append(d);
+  d.showModal();
+  ok.focus();
+}
+
+// ── the cover (the UI process derives it; this only draws it)
+function elapsedText(verb, since) {
+  if (!verb || !since) return null;
+  const s = Math.floor((Date.now() - new Date(since).getTime()) / 1000);
+  if (s < 60) return null;
+  const m = Math.floor(s / 60);
+  if (m < 60) return verb + ' ' + m + ' min';
+  const hr = Math.floor(m / 60);
+  if (hr < 24) return verb + ' ' + hr + ' h';
+  return verb + ' ' + Math.floor(hr / 24) + ' d';
+}
+function paintCover(t) {
+  const e = t.els;
+  let kind = 'none', headline = '', detail = '', action = null, spinner = false;
+  if (t.errorText) { kind = 'error'; headline = 'This terminal could not open'; detail = t.errorText; }
+  else if (t.ended) { kind = 'ended'; headline = 'The session ended'; detail = t.endText; }
+  else if (t.disconnected) { kind = 'disconnected'; headline = 'Disconnected'; detail = t.disconnected; action = 'Reconnect'; }
+  else if (!t.state) { kind = 'reattaching'; headline = 'Attaching…'; spinner = true; }
+  else {
+    const c = t.state.cover;
+    kind = c.kind;
+    headline = c.headline;
+    const el = elapsedText(c.elapsedVerb, c.since);
+    detail = [c.detail, el].filter(Boolean).join(' · ');
+    action = c.action || null;
+    spinner = !!c.spinner;
+  }
+  e.wrap.dataset.cover = kind;
+  e.wrap.dataset.phase = (t.state && t.state.phase) || '';
+  e.wrap.dataset.reports = String((t.state && t.state.reportsIgnored) || 0);
+  e.wrap.dataset.wakes = String((t.state && t.state.keystrokeWakes) || 0);
+  e.cover.hidden = kind === 'none';
+  e.head.textContent = headline;
+  e.detail.textContent = detail;
+  e.detail.hidden = !detail;
+  e.spin.hidden = !spinner;
+  e.action.hidden = !action;
+  e.action.textContent = action || '';
+  e.action.title = action === 'Reconnect' ? 'Open the terminal again' : action ? action + ' — so does any key typed in the terminal' : '';
+  t.coverAction = action;
+}
+function coverAction(t) {
+  const a = t.coverAction;
+  if (a === 'Reconnect') {
+    t.disconnected = '';
+    t.state = null;
+    paintCover(t);
+    connectTerminal(t);
+  } else if (a) {
+    act({ action: { Resume: 'resume', Wake: 'wake', Start: 'start' }[a], sandbox: t.sandbox });
+  }
+  focusTerm(t);
+}
+
+// ── the Terminals view: tabs, and a split
+function paintTabs() { if (state.view === 'terminals') renderTerminals(); }
+function renderTerminals() {
+  const root = $('terminals');
+  if (!termUI.built) {
+    termUI.splitBtn = btn('Split', () => {
+      termUI.split = !termUI.split;
+      if (!termUI.split) {
+        for (const t of terminals.values()) t.pane = 0;
+        termUI.selected[0] = termUI.selected[0] ?? termUI.selected[1];
+        termUI.selected[1] = null;
+        termUI.focusedPane = 0;
+      }
+      renderTerminals();
+    }, { title: 'Show two terminals side by side' });
+    termUI.panes = [0, 1].map((i) => {
+      const strip = h('div', { class: 'tabs', role: 'tablist' });
+      const body = h('div', { class: 'term-body' });
+      const empty = h('div', { class: 'empty term-empty' }, 'No terminal here. Open one from a sandbox’s page (Open here, or a session’s Open / Watch), or New terminal….');
+      const pane = h('div', { class: 'term-pane', 'data-pane': String(i) }, strip, body);
+      body.append(empty);
+      pane.addEventListener('focusin', () => { termUI.focusedPane = i; });
+      pane.addEventListener('mousedown', () => { termUI.focusedPane = i; });
+      return { root: pane, strip, body, empty };
+    });
+    termUI.grid = h('div', { class: 'term-grid' }, termUI.panes[0].root, termUI.panes[1].root);
+    root.replaceChildren(
+      h('div', { class: 'head' }, h('h1', null, 'Terminals'),
+        h('div', { class: 'actions' }, btn('New terminal…', () => newTerminalDialog(), { primary: true }), termUI.splitBtn)),
+      termUI.grid);
+    termUI.built = true;
+  }
+  termUI.grid.classList.toggle('split', termUI.split);
+  termUI.splitBtn.textContent = termUI.split ? 'Unsplit' : 'Split';
+  termUI.panes[1].root.hidden = !termUI.split;
+  termUI.panes.forEach((p, i) => {
+    const mine = [...terminals.values()].filter((t) => t.pane === i);
+    if (!mine.some((t) => t.id === termUI.selected[i])) termUI.selected[i] = mine.length ? mine[mine.length - 1].id : null;
+    p.strip.replaceChildren(...mine.map((t) => tabElement(t, i)));
+    p.empty.hidden = mine.length > 0;
+    for (const t of mine) {
+      if (t.els.wrap.parentNode !== p.body) p.body.append(t.els.wrap);
+      t.els.wrap.hidden = t.id !== termUI.selected[i];
+    }
+  });
+}
+function tabElement(t, pane) {
+  const phase = t.ended || t.errorText || t.disconnected ? 'ended' : (t.state && t.state.phase) || 'unknown';
+  const label = t.sandbox + ' · ' + (t.session || '…');
+  const select = h('button', { type: 'button', role: 'tab', class: 'tab' + (t.id === termUI.selected[pane] ? ' active' : ''),
+                               title: t.title ? t.title + ' — ' + label : label, 'data-term': String(t.id),
+                               on: { click: () => { termUI.selected[pane] = t.id; renderTerminals(); focusTerm(t); } } },
+    h('span', { class: 'tab-dot ph-' + phase, 'aria-hidden': 'true' }), label, t.mode === 'watch' ? h('span', { class: 'tag' }, 'watch') : null);
+  const move = termUI.split ? h('button', { type: 'button', class: 'tab-x', title: 'Move to the other pane',
+    on: { click: () => { t.pane = 1 - t.pane; termUI.selected[t.pane] = t.id; renderTerminals(); focusTerm(t); } } }, '⇄') : null;
+  const close = h('button', { type: 'button', class: 'tab-x', title: 'Close this terminal (the session keeps running)', 'aria-label': 'Close ' + label,
+    on: { click: () => closeTerminal(t.id) } }, '×');
+  return h('div', { class: 'tab-wrap' }, select, move, close);
+}
+
+async function newTerminalDialog() {
+  let o = state.overview;
+  try { o = await api('overview'); state.overview = o; } catch (_) { /* the last one */ }
+  const names = o ? o.sandboxes.map((s) => s.name) : [];
+  if (!names.length) { toast('No sandboxes yet — create one first', true); return; }
+  dialog('New terminal', 'A terminal in this browser. Leave the session empty for the image’s own (started if it is not running). A command starts a NEW session running it — no shell in front (say bash -l for one).', [
+    { name: 'sandbox', label: 'Sandbox', type: 'select', options: names, value: termUI.lastSandbox || names[0] },
+    { name: 'session', label: 'Session', placeholder: 'empty: the image’s own' },
+    { name: 'command', label: 'Command for a new session (optional)', placeholder: 'e.g. bash -l' },
+    { name: 'mode', label: 'Mode', type: 'select', options: [['interactive', 'interactive'], ['watch', 'watch only — nothing typed reaches it']] },
+  ], 'Open', async (v) => {
+    termUI.lastSandbox = v.sandbox;
+    let open = null;
+    if (v.command) {
+      const argv = splitArgs(v.command);
+      if (!argv.length) throw new Error('the command is empty');
+      if (!v.session) throw new Error('a new session needs a name');
+      open = { action: 'open-session', sandbox: v.sandbox, session: v.session, argv };
+    } else if (!v.session && v.mode === 'interactive') {
+      open = { action: 'open-session', sandbox: v.sandbox };
+    }
+    if (open) {
+      const done = await waitForOp(await actOrThrow(open));
+      if (!done || done.state !== 'done') throw new Error(done ? done.text : 'the session did not start in time');
+    }
+    openTerminal(v.sandbox, v.session || null, v.mode);
+  });
+}
+
 // ── start ───────────────────────────────────────────────────────────────────
 (async () => {
   if (await bootstrap()) {
@@ -862,5 +1284,6 @@ async function viewDoctor() {
     connect();
     setInterval(() => { if ([...state.ops.values()].some((o) => o.state === 'running')) paintRowOps(); }, 1000);
     setInterval(paintRowOps, 15000);
+    setInterval(() => { for (const t of terminals.values()) paintCover(t); }, 30000);   // "asleep 7 min"
   }
 })();

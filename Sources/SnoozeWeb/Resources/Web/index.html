@@ -6,8 +6,10 @@
   <meta name="referrer" content="no-referrer">
   <link rel="icon" href="data:,">
   <title>snooze</title>
-  <link rel="stylesheet" href="/assets/app-59131db58cef4bbe.css">
-  <script src="/assets/app-aa5c38a10cfa2cfe.js" defer></script>
+  <meta name="snooze-ghostty-wasm" content="/assets/vendor-ghostty-vt-d6f0326f1874ad2c.wasm">
+  <link rel="stylesheet" href="/assets/app-98d104ffb13ba1d4.css">
+  <script src="/assets/vendor-ghostty-web-5464be03cef979ca.js" defer></script>
+  <script src="/assets/app-59be0fb79eb717fb.js" defer></script>
 </head>
 <body>
   <div class="shell">
@@ -21,6 +23,7 @@
       </div>
       <nav id="nav">
         <a href="#/overview" data-view="overview">Sandboxes</a>
+        <a href="#/terminals" data-view="terminals">Terminals</a>
         <a href="#/images" data-view="images">Images</a>
         <a href="#/accounts" data-view="accounts">Accounts &amp; keys</a>
         <a href="#/metrics" data-view="metrics">Metrics</a>
@@ -37,6 +40,7 @@
       <div class="notice" id="notice" hidden></div>
       <div class="ops" id="ops" hidden aria-live="polite"></div>
       <section id="view"></section>
+      <section id="terminals" class="terms" hidden></section>
     </main>
   </div>
   <div class="toasts" id="toasts" aria-live="assertive"></div>

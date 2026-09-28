@@ -135,7 +135,12 @@ final class WebSecurityTests: XCTestCase {
         XCTAssertTrue(h["content-security-policy"]!.contains("default-src 'none'"))
         XCTAssertTrue(h["content-security-policy"]!.contains("script-src 'self'"))
         XCTAssertTrue(h["content-security-policy"]!.contains("frame-ancestors 'none'"))
-        XCTAssertFalse(h["content-security-policy"]!.contains("unsafe"))
+        // 591: the ONE unsafe-shaped token is 'wasm-unsafe-eval' (the terminal engine compiles its
+        // WebAssembly); never 'unsafe-eval' or 'unsafe-inline', never data: for connections.
+        let csp = h["content-security-policy"]!
+        XCTAssertFalse(csp.replacingOccurrences(of: "'wasm-unsafe-eval'", with: "").contains("unsafe"))
+        XCTAssertTrue(csp.contains("script-src 'self' 'wasm-unsafe-eval';"))
+        XCTAssertTrue(csp.contains("connect-src 'self';"))
         XCTAssertEqual(h["x-frame-options"], "DENY")
         XCTAssertEqual(h["x-content-type-options"], "nosniff")
         XCTAssertEqual(h["referrer-policy"], "no-referrer")
@@ -262,7 +267,11 @@ final class WebSecurityTests: XCTestCase {
         XCTAssertEqual(a.assets["/"]?.cachePolicy, "no-store")
         for (path, asset) in a.assets {
             XCTAssertEqual(WebAssets.sha256Hex(asset.data), asset.sha256, path)
-            if path != "/" { XCTAssertTrue(path.hasPrefix("/assets/app-")); XCTAssertEqual(asset.cachePolicy, WebAssets.immutable) }
+            // 591: the page's own files are app-*; vendored ones vendor-* (pinned, WebTerminalUnitTests).
+            if path != "/" {
+                XCTAssertTrue(path.hasPrefix("/assets/app-") || path.hasPrefix("/assets/vendor-"), path)
+                XCTAssertEqual(asset.cachePolicy, WebAssets.immutable)
+            }
         }
         let index = String(decoding: a.assets["/"]!.data, as: UTF8.self)
         for path in a.assets.keys where path != "/" { XCTAssertTrue(index.contains("\"\(path)\""), "index.html references \(path)") }
@@ -280,7 +289,9 @@ final class WebSecurityTests: XCTestCase {
             let path = "/assets/\(name)-\(WebAssets.sha256Hex(d).prefix(16)).\(ext)"
             XCTAssertEqual(loaded.assets[path]?.data, d, "stale \(name).\(ext) — run make web-assets")
         }
-        XCTAssertEqual(loaded.assets.count, 3)
+        // index + app.css + app.js, and (591) the terminal engine's script and WebAssembly.
+        XCTAssertEqual(loaded.assets.count, 5)
+        XCTAssertEqual(loaded.assets.keys.filter { $0.hasPrefix("/assets/vendor-") }.count, 2)
     }
 
     func testAnAlteredAssetRefusesToLoad() throws {

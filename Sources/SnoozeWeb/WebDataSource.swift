@@ -27,6 +27,9 @@ public protocol SnoozeWebData: Sendable {
     func policyPreview(_ name: String, _ edit: WebPolicyEdit) async throws -> WebPolicyPreview
     /// Open Terminal.app attached to the sandbox's session. Returns a line for the page.
     func openTerminal(_ name: String, session: String?) async throws -> String
+    /// 591: attach to a session (nil: the image's own) for a browser terminal — the host's `attach`
+    /// with `wake: false`, exactly as the CLI sends it. `size` 0×0 keeps the session's size (watch).
+    func attachTerminal(_ name: String, session: String?, size: TermSize) async throws -> any WebTerminalAttachment
 }
 
 /// `GET /api/v1/metrics[.csv]?image=…&days=…&steps=0|1`.
@@ -247,6 +250,11 @@ public final class HostWebData: SnoozeWebData, @unchecked Sendable {
         let launch = terminalLauncher
         try await blocking { try launch(command) }
         return "Terminal opened: \(session.map { "\(name) \($0)" } ?? name)"
+    }
+
+    public func attachTerminal(_ name: String, session: String?, size: TermSize) async throws -> any WebTerminalAttachment {
+        let store = self.store
+        return try await blocking { try HostTerminalAttachment.open(store: store, sandbox: name, session: session, size: size) }
     }
 
     /// `snooze doctor`'s checks, at most every 30 s (it runs `claude --version` and reads the keychain's

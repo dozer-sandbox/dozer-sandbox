@@ -8,7 +8,10 @@ import Foundation
 /// The unsafe routes are the session's own (bootstrap, renew, sign out) and, since phase 2, the
 /// typed actions (`WebAction`: a closed enum, each exactly one `HostOp`), the policy preview and
 /// Terminal.app. There is deliberately no generic command, exec, file-read, URL-open, proxy or PTY
-/// route — and none may be added: a new capability is a new TYPED case.
+/// route — and none may be added: a new capability is a new TYPED case. 591's terminal socket is
+/// not a PTY route: it ATTACHES to a session the host already holds (the CLI's `attach`), only with
+/// a one-use ticket minted by a CSRF-checked POST, and a new session is still the typed
+/// `open-session` action.
 public enum WebRoute: Equatable, Sendable {
     // static
     case index
@@ -35,6 +38,9 @@ public enum WebRoute: Equatable, Sendable {
     case operations                // GET  /api/v1/operations (the UI's recent operations)
     case policyPreview(String)     // POST /api/v1/sandboxes/{name}/network/preview (changes nothing)
     case terminal(String)          // POST /api/v1/sandboxes/{name}/terminal (Terminal.app, fixed script)
+    // 591 — browser terminals (591.01-DESIGN.md §4): a one-use ticket, then the socket it opens.
+    case terminalTicket(String)    // POST /api/v1/sandboxes/{name}/terminal-ticket (CSRF; {mode, session?, cols?, rows?})
+    case terminalSocket(String)    // GET  /api/v1/sandboxes/{name}/terminal-socket (WebSocket upgrade + the ticket)
 
     public var isStatic: Bool {
         switch self { case .index, .asset: true; default: false }
@@ -67,6 +73,8 @@ public enum WebRoute: Equatable, Sendable {
             return .policyPreview(rest[1])
         case (.post, 3) where rest[0] == "sandboxes" && isSandboxName(rest[1]) && rest[2] == "terminal":
             return .terminal(rest[1])
+        case (.post, 3) where rest[0] == "sandboxes" && isSandboxName(rest[1]) && rest[2] == "terminal-ticket":
+            return .terminalTicket(rest[1])
         default: break
         }
         guard method == .get else { return nil }
@@ -90,6 +98,7 @@ public enum WebRoute: Equatable, Sendable {
             switch rest[2] {
             case "sessions": return .sandboxSessions(rest[1])
             case "network": return .sandboxNetwork(rest[1])
+            case "terminal-socket": return .terminalSocket(rest[1])
             default: return nil
             }
         default:

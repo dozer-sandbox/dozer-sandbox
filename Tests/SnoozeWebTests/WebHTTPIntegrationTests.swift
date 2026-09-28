@@ -311,10 +311,16 @@ final class FakeData: SnoozeWebData, @unchecked Sendable {
     let storePath = "/tmp/fake-store"
 
     func bump() { lock.withLock { generation += 1 } }
+    /// 591: the phase the overview reports (nil: running, then paused after `bump()`).
+    var phase: String? {
+        get { lock.withLock { _phase } }
+        set { lock.withLock { _phase = newValue } }
+    }
+    private var _phase: String?
 
     func overview() async throws -> WebOverview {
-        let g = lock.withLock { generation }
-        let info = SandboxInfo(name: "demo", image: "lab", phase: g == 0 ? "running" : "paused", busy: false, cpus: 2, memoryMiB: 1024,
+        let (g, p) = lock.withLock { (generation, _phase) }
+        let info = SandboxInfo(name: "demo", image: "lab", phase: p ?? (g == 0 ? "running" : "paused"), busy: false, cpus: 2, memoryMiB: 1024,
                                ramHeldMiB: 900, memoryReturnedMiB: 124, diskBytes: 1 << 30, sessions: 1, network: "bake",
                                deniedConnections: 0, workspace: nil, createdAt: Date(timeIntervalSince1970: 0), diedWithHost: nil)
         return WebOverview(host: WebHost(running: false, version: nil, pid: nil, startedAt: nil, idleTimeoutMinutes: nil, idleSeconds: nil,
@@ -391,6 +397,53 @@ final class FakeData: SnoozeWebData, @unchecked Sendable {
                                         sandbox: name, session: session)
         lock.withLock { terminalCommands.append(c) }
         return "Terminal opened"
+    }
+
+    // 591 — browser terminals: each attach is answered by the next scripted fake (none left: refused).
+    private var _attachments: [FakeAttachment] = []
+    private(set) var attaches: [(name: String, session: String?, size: TermSize)] = []
+    func script(_ a: FakeAttachment...) { lock.withLock { _attachments += a } }
+    var attachCount: Int { lock.withLock { attaches.count } }
+    var performedOps: [HostOp] { lock.withLock { performed.map(\.op) } }
+
+    func attachTerminal(_ name: String, session: String?, size: TermSize) async throws -> any WebTerminalAttachment {
+        let next: FakeAttachment? = lock.withLock {
+            attaches.append((name, session, size))
+            return _attachments.isEmpty ? nil : _attachments.removeFirst()
+        }
+        guard let next else { throw HostError(.invalidPhase, "\(name) is off — `snooze start \(name)` boots it") }
+        return next
+    }
+}
+
+/// A scripted attach connection: the test feeds what the "host" says and reads what the bridge sent.
+final class FakeAttachment: WebTerminalAttachment, @unchecked Sendable {
+    let start: WebAttachStart
+    private let lock = NSLock()
+    private let stream: AsyncStream<Data>
+    private let continuation: AsyncStream<Data>.Continuation
+    private var iterator: AsyncStream<Data>.Iterator
+    private var _sent: [UInt8] = []
+    private(set) var closed = false
+
+    init(_ start: WebAttachStart) {
+        self.start = start
+        (stream, continuation) = AsyncStream<Data>.makeStream()
+        iterator = stream.makeAsyncIterator()
+    }
+
+    func feed(_ s: String) { continuation.yield(Data(s.utf8)) }
+    func feed(_ d: Data) { continuation.yield(d) }
+    /// The host closed the connection (a Deep Sleep, or after the ended notice).
+    func hangUp() { continuation.finish() }
+    var sent: [UInt8] { lock.withLock { _sent } }
+    var sentText: String { String(decoding: sent, as: UTF8.self) }
+
+    func read() async -> Data? { await iterator.next() }
+    func send(_ bytes: [UInt8]) { lock.withLock { _sent += bytes } }
+    func close() {
+        lock.withLock { closed = true }
+        continuation.finish()
     }
 }
 

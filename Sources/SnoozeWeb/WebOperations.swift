@@ -30,10 +30,15 @@ final class WebOperations: @unchecked Sendable {
 
     var recent: [WebOperation] { lock.withLock { ops } }
 
-    func start(_ action: WebAction) throws -> WebOperation {
+    /// 591: told whenever an operation starts or ends (the terminals' covers show a running one).
+    var onChange: (@Sendable ([WebOperation]) -> Void)?
+
+    /// `firstLine`: what the operation says until the host's first step (591: "a key typed in a
+    /// terminal — waking" for a keystroke wake).
+    func start(_ action: WebAction, firstLine: String = "requested — waiting for the host") throws -> WebOperation {
         let verb = action.hostOp == .openSession ? "open-session" : action.hostRequest.op.rawValue
         let op = WebOperation(id: String(WebRandom.token().prefix(12)), action: verb, label: action.label, sandbox: action.sandbox,
-                              state: "running", text: "requested — waiting for the host", startedAt: Date(), milliseconds: nil)
+                              state: "running", text: firstLine, startedAt: Date(), milliseconds: nil)
         let key = action.dedupeKey
         try lock.withLock {
             // The same action on the same thing is already under way (a double click, a second tab).
@@ -45,6 +50,7 @@ final class WebOperations: @unchecked Sendable {
             if ops.count > keep { ops.removeFirst(ops.count - keep) }
         }
         hub.broadcast("op", op)
+        onChange?(recent)
         let t0 = ContinuousClock.now
         let request = action.hostRequest
         Task {
@@ -68,6 +74,7 @@ final class WebOperations: @unchecked Sendable {
                 lastProgress[op.id] = nil
             }
             if let final { hub.broadcast("op", final) }
+            onChange?(recent)
             await monitor.poke()
         }
         return op

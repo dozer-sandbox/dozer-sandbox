@@ -58,6 +58,14 @@ public enum WebRejection: String, Error, Equatable, Sendable {
     case tooManyOperations = "too-many-operations"
     case alreadyRunning = "already-running"
     case unavailable
+    // 591 — the terminal socket.
+    case ticketMissing = "ticket-missing"
+    case ticketRejected = "ticket-rejected"
+    case ticketUsed = "ticket-used"
+    case ticketExpired = "ticket-expired"
+    case tooManyTickets = "too-many-tickets"
+    case tooManyTerminals = "too-many-terminals"
+    case upgradeRequired = "upgrade-required"
 
     public var status: Int {
         switch self {
@@ -67,8 +75,10 @@ public enum WebRejection: String, Error, Equatable, Sendable {
         case .bodyTooLarge: 413
         case .unsupportedMediaType: 415
         case .malformedAuthorization, .bootstrapRejected, .bootstrapUsed, .unauthenticated, .sessionExpired: 401
+        case .ticketMissing, .ticketRejected, .ticketUsed, .ticketExpired: 401
+        case .upgradeRequired: 400
         case .notFound: 404
-        case .tooManyStreams, .tooManyConnections, .tooManyOperations, .unavailable: 503
+        case .tooManyStreams, .tooManyConnections, .tooManyOperations, .unavailable, .tooManyTickets, .tooManyTerminals: 503
         }
     }
 
@@ -92,6 +102,13 @@ public enum WebRejection: String, Error, Equatable, Sendable {
         case .tooManyOperations: "too many operations are running — wait for one to finish"
         case .alreadyRunning: "that is already under way — see its progress in Operations"
         case .unavailable: "the snooze host did not answer"
+        case .ticketMissing: "a terminal needs a ticket — open it from the page"
+        case .ticketRejected: "this terminal ticket is not valid here — open the terminal again"
+        case .ticketUsed: "this terminal ticket was already used — each works once; open the terminal again"
+        case .ticketExpired: "this terminal ticket expired — open the terminal again"
+        case .tooManyTickets: "too many terminal tickets are waiting — close some terminals"
+        case .tooManyTerminals: "too many terminals are open — close one first"
+        case .upgradeRequired: "the terminal socket is a WebSocket, opened as the first request of a connection"
         }
     }
 }
@@ -155,6 +172,30 @@ public enum WebSecurity {
         return try sessionCookie(r.cookie, name: cookieName(origin))
     }
 
+    /// 591 — the subprotocol the terminal socket speaks, and the prefix that carries its ticket. The
+    /// ticket rides in `Sec-WebSocket-Protocol` so it is never in a URL (history, a Referer, a log);
+    /// the answer echoes only `terminalProtocol`.
+    public static let terminalProtocol = "snooze-terminal.v1"
+    public static let ticketProtocolPrefix = "snooze-ticket."
+
+    /// 591 — the terminal socket's upgrade (`GET …/terminal-socket` + `Upgrade: websocket`). Exact
+    /// Host; Origin REQUIRED and exact (a WebSocket carries no CSRF header, so the Origin and the
+    /// one-use ticket are the cross-site wall); Fetch Metadata; the one cookie of this port; and
+    /// exactly one ticket among the offered subprotocols, next to `terminalProtocol`. Returns the
+    /// cookie and the presented ticket (the caller consumes it against the cookie's session).
+    public static func validateTerminalUpgrade(_ r: WebRequestMetadata, _ origin: WebOrigin, subprotocols: [String]) throws -> (cookie: String, ticket: String) {
+        guard r.method == .get else { throw WebRejection.methodNotAllowed }
+        try checkListener(r, origin, originRequired: true)
+        guard r.bodyByteCount == 0 else { throw WebRejection.bodyTooLarge }
+        let cookie = try sessionCookie(r.cookie, name: cookieName(origin))
+        let offered = subprotocols.flatMap { $0.split(separator: ",") }.map { $0.trimmingCharacters(in: .whitespaces) }
+        let tickets = offered.filter { $0.hasPrefix(ticketProtocolPrefix) }.map { String($0.dropFirst(ticketProtocolPrefix.count)) }
+        guard offered.contains(terminalProtocol), tickets.count == 1, let t = tickets.first, WebRandom.isToken(t) else {
+            throw WebRejection.ticketMissing
+        }
+        return (cookie, t)
+    }
+
     /// The one cookie of this name; a duplicate (cookie tossing) or malformed value is refused.
     public static func sessionCookie(_ header: String?, name: String) throws -> String {
         guard let header else { throw WebRejection.unauthenticated }
@@ -176,8 +217,12 @@ public enum WebSecurity {
     }
 
     /// On EVERY response, success or refusal. No `Access-Control-Allow-*` is ever added.
+    /// 591: `'wasm-unsafe-eval'` lets the vendored terminal engine COMPILE its WebAssembly (loaded
+    /// from this origin) — it is the one token the terminals added; never `'unsafe-eval'`, never
+    /// `'unsafe-inline'`, never `data:` in `connect-src`. `connect-src 'self'` covers the terminal
+    /// WebSocket (`ws://127.0.0.1:<port>`, CSP3).
     public static let responseHeaders: [(String, String)] = [
-        ("Content-Security-Policy", "default-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'; object-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; font-src 'self'; manifest-src 'none'"),
+        ("Content-Security-Policy", "default-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'; object-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; connect-src 'self'; img-src 'self' data:; font-src 'self'; manifest-src 'none'"),
         ("X-Content-Type-Options", "nosniff"),
         ("X-Frame-Options", "DENY"),
         ("Referrer-Policy", "no-referrer"),

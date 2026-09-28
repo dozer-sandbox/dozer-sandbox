@@ -91,12 +91,15 @@ let package = Package(
         // 127.0.0.1 only. The page is vanilla HTML/CSS/JS from WebSource/, compiled into the
         // content-hashed, digest-manifested Resources/Web by Scripts/build-web-assets.swift and
         // committed (`make web-assets`; `make web-assets-check` fails on drift). Not a product.
+        // 591: + NIOWebSocket (also a module of swift-nio — Package.resolved unchanged) for the
+        // browser terminals' socket; the audit confines it to Sources/SnoozeWeb.
         .target(
             name: "SnoozeWeb",
             dependencies: ["SnoozeHost", "SnoozeContainerKit",
                            .product(name: "NIOCore", package: "swift-nio"),
                            .product(name: "NIOPosix", package: "swift-nio"),
-                           .product(name: "NIOHTTP1", package: "swift-nio")],
+                           .product(name: "NIOHTTP1", package: "swift-nio"),
+                           .product(name: "NIOWebSocket", package: "swift-nio")],
             path: "Sources/SnoozeWeb",
             exclude: ["WebSource"],
             resources: [.copy("Resources/Web")]

@@ -128,6 +128,8 @@ enum WebJSON {
 actor WebMonitor {
     let data: SnoozeWebData
     let hub: SSEHub
+    /// 591: open terminals keep the poll going too, and are told every sandbox's phase.
+    let terminals: WebTerminalHub?
     let pollInterval: Duration
     private var task: Task<Void, Never>?
     private var events: Task<Void, Never>?
@@ -139,9 +141,10 @@ actor WebMonitor {
     private var pokes = 0
     let activityLimit = 200
 
-    init(data: SnoozeWebData, hub: SSEHub, pollInterval: Duration) {
+    init(data: SnoozeWebData, hub: SSEHub, terminals: WebTerminalHub? = nil, pollInterval: Duration) {
         self.data = data
         self.hub = hub
+        self.terminals = terminals
         self.pollInterval = pollInterval
     }
 
@@ -163,7 +166,7 @@ actor WebMonitor {
     private func loop() async {
         var round = 0
         while !Task.isCancelled {
-            if hub.count == 0 {
+            if hub.count == 0 && (terminals?.count ?? 0) == 0 {
                 events?.cancel()
                 events = nil
                 task = nil
@@ -196,6 +199,7 @@ actor WebMonitor {
                                text: o.host.running ? "host started (pid \(o.host.pid.map(String.init) ?? "?"))" : "host exited"))
         }
         hostWasRunning = o.host.running
+        terminals?.updatePhases(o.sandboxes.map { ($0.name, $0.phase) })
         // A phase change the host's stream did not report (the UI follows it only while something is
         // live, so a wake from deep sleep happens before it re-subscribes): note it from the poll.
         let phases = Dictionary(o.sandboxes.map { ($0.name, $0.phaseLabel) }, uniquingKeysWith: { a, _ in a })

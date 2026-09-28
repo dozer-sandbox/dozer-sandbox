@@ -37,7 +37,9 @@ fail() {
 # 590: + SnoozeWeb (the `snooze ui` target), NIOHTTP1 (swift-nio's own HTTP/1.1 codec — the same
 # package, no new dependency) and CoreServices (LaunchServices opens the browser without putting the
 # one-use link in a process argument) — each confined in step 1b.
-ALLOWED='Foundation|Darwin|os|CryptoKit|Security|NIOCore|NIOEmbedded|NIOPosix|NIOSSL|X509|SwiftASN1|Virtualization|Containerization|ContainerizationArchive|ContainerizationEXT4|SystemPackage|ContainerizationError|ContainerizationExtras|ContainerizationOCI|ContainerizationOS|SnoozeContainerKit|SnoozeHost|SnoozeCLI|SQLite3|ArgumentParser|SnoozeWeb|NIOHTTP1|CoreServices'
+# 591: + NIOWebSocket (swift-nio's own WebSocket codec — the same package) for `snooze ui`'s
+# browser terminals, confined to Sources/SnoozeWeb in step 1b.
+ALLOWED='Foundation|Darwin|os|CryptoKit|Security|NIOCore|NIOEmbedded|NIOPosix|NIOSSL|X509|SwiftASN1|Virtualization|Containerization|ContainerizationArchive|ContainerizationEXT4|SystemPackage|ContainerizationError|ContainerizationExtras|ContainerizationOCI|ContainerizationOS|SnoozeContainerKit|SnoozeHost|SnoozeCLI|SQLite3|ArgumentParser|SnoozeWeb|NIOHTTP1|NIOWebSocket|CoreServices'
 BAD=$(grep -rhoE --include='*.swift' '^[[:space:]]*(@[A-Za-z_]+[[:space:]]+)*(public[[:space:]]+)?import[[:space:]]+[A-Za-z_][A-Za-z0-9_.]*' \
         "$PACKAGE/Sources" \
       | sed -E 's/.*import[[:space:]]+//' \
@@ -51,7 +53,7 @@ fi
 
 # ── 1b. (585) Confinement: the LIBRARY imports none of the CLI's additions, and only the CLI's
 #        command targets import ArgumentParser (the host needs no argument parsing) ─────────────
-LEAK=$(grep -rlE --include='*.swift' '^[[:space:]]*import[[:space:]]+(ArgumentParser|SQLite3|SnoozeHost|SnoozeCLI|SnoozeWeb|NIOHTTP1|CoreServices)([[:space:]]|$)' \
+LEAK=$(grep -rlE --include='*.swift' '^[[:space:]]*import[[:space:]]+(ArgumentParser|SQLite3|SnoozeHost|SnoozeCLI|SnoozeWeb|NIOHTTP1|NIOWebSocket|CoreServices)([[:space:]]|$)' \
         "$PACKAGE/Sources/SnoozeContainerKit" || true)
 [[ -z "$LEAK" ]] || fail "the library imports a CLI-only module:
 $LEAK"
@@ -65,6 +67,9 @@ $AP"
 H1=$(grep -rlE --include='*.swift' '^[[:space:]]*import[[:space:]]+NIOHTTP1([[:space:]]|$)' "$PACKAGE/Sources" | grep -vE "/Sources/SnoozeWeb/" || true)
 [[ -z "$H1" ]] || fail "NIOHTTP1 is imported outside Sources/SnoozeWeb:
 $H1"
+WS=$(grep -rlE --include='*.swift' '^[[:space:]]*import[[:space:]]+NIOWebSocket([[:space:]]|$)' "$PACKAGE/Sources" | grep -vE "/Sources/SnoozeWeb/" || true)
+[[ -z "$WS" ]] || fail "NIOWebSocket is imported outside Sources/SnoozeWeb:
+$WS"
 CS=$(grep -rlE --include='*.swift' '^[[:space:]]*import[[:space:]]+CoreServices([[:space:]]|$)' "$PACKAGE/Sources" | grep -vE "/Sources/SnoozeCLI/UICommand.swift$" || true)
 [[ -z "$CS" ]] || fail "CoreServices is imported outside Sources/SnoozeCLI/UICommand.swift:
 $CS"

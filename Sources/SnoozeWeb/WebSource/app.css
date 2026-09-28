@@ -190,3 +190,49 @@ dialog.dlg h2 { margin: 0; }
   .op .op-text { grid-column: 2; color: var(--muted); }
   .actions { justify-content: flex-start; }
 }
+
+/* ── 591: terminals ─────────────────────────────────────────────────────────
+   The view fills the window; each pane is a tab strip over a terminal body. The engine draws on a
+   canvas inside .term-host (its colours are the terminal theme, dark in both modes). The cover sits
+   over it, translucent, and TAKES NO CLICKS except its one button: a click focuses the terminal and
+   the next key wakes the sandbox (SandboxLab's PaneCover). */
+main.main-terms { padding-bottom: 16px; display: flex; flex-direction: column; height: 100vh; }
+.terms:not([hidden]) { display: flex; flex-direction: column; gap: 12px; flex: 1; min-height: 0; }
+.term-grid { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
+.term-grid.split { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.term-pane { display: flex; flex-direction: column; min-height: 0; min-width: 0; border: 1px solid var(--line); border-radius: var(--radius); background: #16171c; overflow: hidden; }
+.term-pane[hidden] { display: none; }
+.tabs { display: flex; gap: 2px; padding: 4px 4px 0; background: var(--panel); border-bottom: 1px solid var(--line); overflow-x: auto; min-height: 34px; }
+.tab-wrap { display: flex; align-items: center; border-radius: 7px 7px 0 0; }
+.tab-wrap:has(.tab.active) { background: #16171c; }
+.tab { font: inherit; font-size: 12.5px; border: 0; background: none; color: var(--muted); padding: 6px 8px; cursor: pointer; display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+.tab.active { color: #e3e5ea; }
+.tab-x { font: inherit; border: 0; background: none; color: var(--muted); cursor: pointer; padding: 2px 6px; border-radius: 5px; }
+.tab-x:hover { background: var(--line); color: var(--ink); }
+.tab-dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.tab-dot.ph-unknown, .tab-dot.ph-ended { color: var(--off); }
+.term-body { flex: 1; min-height: 0; position: relative; }
+.term-empty { color: #9aa0ab; }
+.term-empty[hidden] { display: none; }
+.term-wrap { position: absolute; inset: 0; }
+.term-wrap[hidden] { display: none; }
+.term-host { position: absolute; inset: 6px 0 0 8px; overflow: hidden; outline: none; }
+.term-cover { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; pointer-events: none;
+  background: color-mix(in srgb, #16171c 55%, transparent); backdrop-filter: blur(1px); }
+.term-cover[hidden] { display: none; }
+.tc-box { display: flex; flex-direction: column; align-items: center; gap: 6px; text-align: center; padding: 16px 20px; border-radius: 12px;
+  background: color-mix(in srgb, #1d1f2b 88%, transparent); color: #c5cbff; max-width: 90%; }
+.tc-head { font-weight: 600; font-size: 13.5px; }
+.tc-detail { font-size: 12px; color: #a3a8b8; }
+.tc-detail[hidden], .tc-act[hidden], .tc-spin[hidden] { display: none; }
+.tc-act { pointer-events: auto; margin-top: 4px; background: #5f6ddb; border-color: #5f6ddb; color: #fff; }
+.tc-spin { width: 18px; height: 18px; border-radius: 50%; border: 2px solid #5f6ddb; border-top-color: transparent; animation: tc-spin 0.9s linear infinite; }
+@keyframes tc-spin { to { transform: rotate(360deg); } }
+.term-wrap[data-cover="ended"] .term-cover, .term-wrap[data-cover="error"] .term-cover { align-items: flex-end; background: none; backdrop-filter: none; }
+.term-wrap[data-cover="ended"] .tc-box, .term-wrap[data-cover="error"] .tc-box { margin-bottom: 14px; }
+.paste-preview { background: var(--code); border-radius: 8px; padding: 8px 10px; font-family: var(--mono); font-size: 12px; max-height: 160px; overflow: auto; white-space: pre-wrap; word-break: break-all; }
+@media (max-width: 760px) {
+  main.main-terms { height: auto; min-height: 100vh; }
+  .terms:not([hidden]) { min-height: 70vh; }
+  .term-grid.split { grid-template-columns: minmax(0, 1fr); grid-template-rows: 1fr 1fr; }
+}

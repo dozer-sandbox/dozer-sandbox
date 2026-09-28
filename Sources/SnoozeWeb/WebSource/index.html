@@ -6,7 +6,9 @@
   <meta name="referrer" content="no-referrer">
   <link rel="icon" href="data:,">
   <title>snooze</title>
+  <meta name="snooze-ghostty-wasm" content="/vendor/ghostty-vt.wasm">
   <link rel="stylesheet" href="/app.css">
+  <script src="/vendor/ghostty-web.js" defer></script>
   <script src="/app.js" defer></script>
 </head>
 <body>
@@ -21,6 +23,7 @@
       </div>
       <nav id="nav">
         <a href="#/overview" data-view="overview">Sandboxes</a>
+        <a href="#/terminals" data-view="terminals">Terminals</a>
         <a href="#/images" data-view="images">Images</a>
         <a href="#/accounts" data-view="accounts">Accounts &amp; keys</a>
         <a href="#/metrics" data-view="metrics">Metrics</a>
@@ -37,6 +40,7 @@
       <div class="notice" id="notice" hidden></div>
       <div class="ops" id="ops" hidden aria-live="polite"></div>
       <section id="view"></section>
+      <section id="terminals" class="terms" hidden></section>
     </main>
   </div>
   <div class="toasts" id="toasts" aria-live="assertive"></div>
