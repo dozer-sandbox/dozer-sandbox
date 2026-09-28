@@ -40,12 +40,20 @@ final class ImageRecipeTests: XCTestCase {
         XCTAssertTrue(pi.contains("--ignore-scripts"))
         XCTAssertTrue(pi.contains("sha512-ncAqFrG+iybuPGOhMiZoEHkEzTpJgz3guYD32pD+M7ucc0WeHmauP6wa7qwP8V/KWvsZDVNa5XGsdZ7fkC7w7A=="))
         XCTAssertEqual(AgentRecipes.claudeCode.verify, [VerifyCheck(["claude", "--version"], expect: "2.1.227"),
-                                                        VerifyCheck(["sh", "-c", "test -x /home/agent/.local/bin/claude && echo launcher-ok"], expect: "launcher-ok")])
+                                                        VerifyCheck(["sh", "-c", "test -x /home/agent/.local/bin/claude && echo launcher-ok"], expect: "launcher-ok")]
+                                                       + AgentRecipes.devBaselineVerify)
+        // 591: every agent image carries the developer baseline (ps/top, git, rg, python3, …).
+        for r in [AgentRecipes.claudeCode, AgentRecipes.pi] {
+            let all = r.steps.map { $0.argv.joined(separator: " ") }.joined()
+            for p in ["procps", "git", "ripgrep", "python3", "jq", "less", "openssh-client", "curl"] {
+                XCTAssertTrue(all.contains(p), "\(r.name) installs \(p)")
+            }
+        }
         // 585: the launcher that starts Claude Code set up and without permission prompts.
         XCTAssertTrue(cc.contains("--dangerously-skip-permissions"))
         XCTAssertTrue(cc.contains("SNOOZE_CLAUDE_PERMISSIONS"))
         XCTAssertTrue(cc.contains("skipDangerousModePermissionPrompt"))
-        XCTAssertEqual(AgentRecipes.pi.verify, [VerifyCheck(["pi", "--version"], expect: "0.84.1")])
+        XCTAssertEqual(AgentRecipes.pi.verify, [VerifyCheck(["pi", "--version"], expect: "0.84.1")] + AgentRecipes.devBaselineVerify)
         XCTAssertEqual(AgentRecipes.claudeCode.resolvedPersistDirs, ["/home/agent/.claude"])
         XCTAssertEqual(AgentRecipes.claudeCode.sessionEnvironment["CLAUDE_CONFIG_DIR"], "/home/agent/.claude")
         XCTAssertEqual(AgentRecipes.pi.resolvedPersistDirs, ["/home/agent/.pi/agent"])
