@@ -84,6 +84,11 @@ struct Doctor: AsyncParsableCommand {
                let st = try? m.result?.decode(HostStatus.self) {
                 detail += ", \(st.version), \(st.liveSandboxes.count) running, idle timeout \(st.idleTimeoutMinutes.formatted()) min"
                 if st.version != SnoozeCommand.version { status = .warn; detail += " — this CLI is \(SnoozeCommand.version): snooze host stop" }
+                // 591: its program changed under it — overwritten in place is a failure (its VMs are refused).
+                if let note = st.executableNote {
+                    status = st.executableChange == "overwritten" ? .fail : (status == .ok ? .warn : status)
+                    detail += " — " + note
+                }
             } else {
                 status = .warn
                 detail += " but it does not answer its socket"

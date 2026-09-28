@@ -458,4 +458,9 @@ public struct HostStatus: Codable, Equatable, Sendable {
     public var connections: Int
     /// Seconds the host has been idle, when it is.
     public var idleSeconds: Double?
+    /// 591: the program file the host runs from; how it changed since the host started
+    /// (`overwritten` | `replaced` | `removed`), and what to do about it. nil: unchanged.
+    public var executable: String?
+    public var executableChange: String?
+    public var executableNote: String?
 }

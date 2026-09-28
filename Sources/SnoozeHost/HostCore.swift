@@ -302,8 +302,31 @@ public actor HostCore {
         do {
             return .success(try await perform(r, emit: emit))
         } catch {
-            return .failure(HostError.from(error))
+            return .failure(explain(error))
         }
+    }
+
+    // MARK: 591 — the host's own program
+
+    private var executable: ExecutableIdentity?
+
+    /// The file this host runs from, as it was at start (the server sets it; an in-process read-only
+    /// core has none).
+    public func setExecutable(_ e: ExecutableIdentity?) { executable = e }
+
+    /// How that file has changed since this host started (nil: it has not, or no identity is known).
+    public func executableChange() -> ExecutableIdentity.Change? {
+        guard let executable else { return nil }
+        return executable.change(now: ExecutableIdentity.of(path: executable.path), runningCodeValid: ExecutableIdentity.runningCodeIsValid())
+    }
+
+    /// An error as the client sees it. When this host's program was rewritten under it, macOS refuses
+    /// its VMs with a raw "Internal Virtualization error": say what happened and what to do instead.
+    public func explain(_ error: Error) -> HostError {
+        let e = HostError.from(error)
+        guard let executable, executableChange() == .overwritten else { return e }
+        return HostError(.failed, ExecutableIdentity.explain(.overwritten, path: executable.path)
+                                  + " (the Virtualization framework said: \(e.message.prefix(160)))")
     }
 
     func isPolicyQuery(_ r: HostRequest) -> Bool {
@@ -387,9 +410,15 @@ public actor HostCore {
 
     public func status(connections: Int = 0, idleSeconds: Double? = nil, idleTimeoutMinutes: Double = 0,
                        startedAt: Date = Date()) async -> HostStatus {
-        HostStatus(version: version, protocolVersion: HostProtocol.version, pid: getpid(), startedAt: startedAt, store: store.root.path,
-                   idleTimeoutMinutes: idleTimeoutMinutes, liveSandboxes: await liveSandboxes(), connections: connections,
-                   idleSeconds: idleSeconds)
+        var s = HostStatus(version: version, protocolVersion: HostProtocol.version, pid: getpid(), startedAt: startedAt, store: store.root.path,
+                           idleTimeoutMinutes: idleTimeoutMinutes, liveSandboxes: await liveSandboxes(), connections: connections,
+                           idleSeconds: idleSeconds)
+        s.executable = executable?.path
+        if let executable, let c = executableChange() {
+            s.executableChange = c.rawValue
+            s.executableNote = ExecutableIdentity.explain(c, path: executable.path)
+        }
+        return s
     }
 
     // MARK: create

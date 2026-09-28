@@ -458,7 +458,9 @@ func describe(_ st: HostStatus) -> String {
     s += "running sandboxes: \(st.liveSandboxes.isEmpty ? "none" : st.liveSandboxes.joined(separator: ", "))"
     s += st.idleTimeoutMinutes > 0 ? String(format: " · exits after %@ min with nothing running", st.idleTimeoutMinutes.formatted()) : " · never exits by itself"
     if let i = st.idleSeconds { s += String(format: " (idle %.0f s)", i) }
-    return s + "\n"
+    s += "\n"
+    if let note = st.executableNote { s += (st.executableChange == "overwritten" ? "PROBLEM: " : "note: ") + note + "\n" }
+    return s
 }
 
 struct HostStop: AsyncParsableCommand {

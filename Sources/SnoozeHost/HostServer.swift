@@ -59,6 +59,12 @@ public final class HostServer: @unchecked Sendable {
         try server.takeLock(waitSeconds: 60)
         HostLog.enabled = true
         HostLog.line("snooze host \(version) (pid \(getpid())) — store \(store.root.path), idle timeout \(idleTimeoutMinutes) min")
+        // 591: the VM layouts this host records name it; and it remembers the file it runs from, to
+        // tell a later "Internal Virtualization error" caused by an update underneath it.
+        VMLayout.recorder = "snooze \(version)"
+        let exe = ExecutableIdentity.of(path: HostLauncher.executablePath)
+        await server.core.setExecutable(exe)
+        HostLog.line("running from \(exe?.path ?? HostLauncher.executablePath)\(exe?.cdhash.map { " (cdhash \($0.prefix(12)))" } ?? "")")
         await server.core.load()
         do {
             server.listenFD = try UnixSocket.listen(store.socket.path)
@@ -115,6 +121,13 @@ public final class HostServer: @unchecked Sendable {
             guard timeout > 0 else { continue }
             let live = await core.liveSandboxes()
             let now = Date()
+            // 591: its program changed under it — once nothing is live and nobody is connected, exit, so
+            // the next command starts a host of the build now installed. (Nothing is lost: no VM runs;
+            // sandboxes asleep keep their snapshots — a failed wake's too, e1af862.)
+            if let change = await core.executableChange(), live.isEmpty, lock.withLock({ connections == 0 && !stopping }) {
+                HostLog.line("my program changed (\(change.rawValue)) and nothing is running — exiting so the next command runs the installed build")
+                await shutdown(prepare: false, reply: nil)
+            }
             let exit: Bool = lock.withLock {
                 guard !stopping else { return false }
                 if live.isEmpty && connections == 0 {
@@ -320,7 +333,7 @@ public final class HostServer: @unchecked Sendable {
             do {
                 (sandbox, session) = try await core.sandboxForAttach(req.name, session: req.session, wake: req.wake ?? true)
             } catch {
-                conn.send(.failure(HostError.from(error)))
+                conn.send(.failure(await core.explain(error)))
                 conn.shutdownIO()
                 return
             }
