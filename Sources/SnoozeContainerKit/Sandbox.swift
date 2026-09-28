@@ -940,6 +940,25 @@ public actor Sandbox {
         }
         // A cold boot builds a new VM, with a memory balloon; a restore keeps what the snapshot had.
         if persisted == nil { identity.memoryBalloon = true }
+        // 591: a restore boots the VM from what was RECORDED where this build controls it — the
+        // balloon (above) and the kernel file the snapshot was taken under (a later build may pin a
+        // newer kernel). A kernel this Mac no longer has refuses the wake; the snapshot is kept.
+        var vmKernel = kernel
+        let currentKernelSHA = try KernelProvider.sha256(of: kernelURL)
+        var vmKernelSHA = currentKernelSHA
+        if let persisted, let recorded = persisted.vmLayout {
+            guard let k = VMLayout.kernelForRestore(recorded: recorded, current: kernelURL, currentSHA256: currentKernelSHA,
+                                                    searchDirectories: [kernelProvider.cacheDirectory, layout.kernels]) else {
+                throw SandboxError.snapshotNeedsOtherBuild(
+                    sandbox: spec.name, recordedBy: recorded.recordedBy,
+                    differences: ["kernel: slept with \(recorded.kernelSHA256?.prefix(12) ?? "?"), which this Mac no longer has; this build's is \(currentKernelSHA.prefix(12))"])
+            }
+            if k != kernelURL {
+                note("restoring with the kernel it slept under (\(k.lastPathComponent)) — a cold boot would use this build's")
+                vmKernel = Kernel(path: k, platform: .linuxArm)
+                vmKernelSHA = recorded.kernelSHA256 ?? currentKernelSHA
+            }
+        }
         // The state disk outlives root disks (Stop, Reset to image, a re-bake); only Delete removes it.
         if let recipe = spec.recipe, !fm.fileExists(atPath: layout.stateDisk.path) {
             // 587: the state disk gets the recipe's journal setting.
@@ -993,10 +1012,12 @@ public actor Sandbox {
 
         let flag = AdoptionFlag(persisted != nil)
         let initfs = Containerization.Mount.block(format: "ext4", source: layout.initfs.path, destination: "/", options: ["ro"])
+        let recorder = VMLayoutRecorder()
         let vmm = SnoozeVMM(
-            inner: VZVirtualMachineManager(kernel: kernel, initialFilesystem: initfs, group: SharedEventLoop.group),
+            inner: VZVirtualMachineManager(kernel: vmKernel, initialFilesystem: initfs, group: SharedEventLoop.group),
             identity: PinnedIdentity(machineIdentifier: identity.machineIdentifier, macAddress: identity.macAddress,
-                                     memoryBalloon: identity.memoryBalloon == true),
+                                     memoryBalloon: identity.memoryBalloon == true, kernelSHA256: vmKernelSHA,
+                                     expected: persisted?.vmLayout, sandboxName: spec.name, recorder: recorder),
             adopt: persisted != nil ? (snapshot: layout.snapshot, flag: flag, containerID: spec.name) : nil)
         let spec = self.spec
         let bootLog = layout.bootLog
@@ -1044,6 +1065,8 @@ public actor Sandbox {
             try await timed("container process started") { try await c.start() }
         }
 
+        // 591: this VM's layout is what its next snapshot will be taken with.
+        if let l = recorder.layout { identity.vmLayout = l }
         let (inst, h): (any VirtualMachineInstance, VMHandle) = try await c.withVirtualMachineInstance { i in
             guard let v = vzInstance(of: i) else { throw SandboxError.vmUnavailable }
             return (i, VMHandle(vm: v.vzVirtualMachine, queue: v.vmQueue))

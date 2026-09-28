@@ -59,6 +59,13 @@ struct PinnedIdentity: VZInstanceExtension {
     /// restored into a VM with exactly the devices it was taken with, so this is persisted per
     /// sandbox (`PersistedSandbox.memoryBalloon`) and a VM slept by an older build restores without.
     let memoryBalloon: Bool
+    /// 591: the kernel's sha256 (recorded in the layout).
+    var kernelSHA256: String? = nil
+    /// 591: on a restore, the layout the snapshot was taken with — the new VM must match it.
+    var expected: VMLayout? = nil
+    var sandboxName: String = ""
+    /// 591: receives the layout of the VM as configured.
+    var recorder: VMLayoutRecorder? = nil
 
     func configureVZ(_ config: inout VZVirtualMachineConfiguration, allocator: any AddressAllocator<Character>,
                      storageDeviceCount: Int, mountsByID: [String: [Containerization.Mount]]) throws {
@@ -70,6 +77,13 @@ struct PinnedIdentity: VZInstanceExtension {
             for device in config.networkDevices { device.macAddress = mac }
         }
         if memoryBalloon { config.memoryBalloonDevices = [VZVirtioTraditionalMemoryBalloonDeviceConfiguration()] }
+        // 591: the VM as it will be built; a restore into a different one is refused HERE, before VZ
+        // is asked (its own refusal is an opaque "invalid argument" or "Internal Virtualization error").
+        let actual = VMLayout.of(config, kernelSHA256: kernelSHA256)
+        recorder?.layout = actual
+        if case .incompatible(let d) = VMLayout.check(recorded: expected, actual: actual) {
+            throw SandboxError.snapshotNeedsOtherBuild(sandbox: sandboxName, recordedBy: expected?.recordedBy, differences: d)
+        }
     }
 }
 

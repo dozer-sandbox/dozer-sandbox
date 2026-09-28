@@ -15,6 +15,9 @@ public enum SandboxError: Error, LocalizedError, Equatable {
     case timedOut(String)
     case restorePointNotFound(String)
     case alreadyExists(String)
+    /// 591: the snapshot was taken with a VM this build cannot reproduce (`VMLayout`): nothing was
+    /// restored, and the snapshot is kept. `recordedBy`: the build that slept it, when known.
+    case snapshotNeedsOtherBuild(sandbox: String, recordedBy: String?, differences: [String])
 
     public var errorDescription: String? {
         switch self {
@@ -29,6 +32,12 @@ public enum SandboxError: Error, LocalizedError, Equatable {
         case .timedOut(let what): "timed out: \(what)"
         case .restorePointNotFound(let id): "no restore point \(id)"
         case .alreadyExists(let what): "\(what) already exists"
+        case .snapshotNeedsOtherBuild(let name, let by, let diff):
+            "\(name) was put to sleep \(by.map { "by \($0) " } ?? "")in a virtual machine this build cannot rebuild exactly ("
+                + diff.prefix(4).joined(separator: "; ") + (diff.count > 4 ? "; …" : "")
+                + "), so its snapshot was not restored and is kept. Either keep it asleep and wake it with "
+                + (by ?? "the build that slept it")
+                + ", or Shut Down (discards the snapshot — running programs and sessions end; the disk is kept) and Start."
         }
     }
 }

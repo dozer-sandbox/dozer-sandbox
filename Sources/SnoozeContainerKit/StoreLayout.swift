@@ -94,6 +94,10 @@ public struct PersistedSandbox: Codable, Sendable, Equatable {
     /// `DiskAccounting`'s garbage is the host file's allocation beyond it.
     public var guestUsedMiB: Double?
     public var stateGuestUsedMiB: Double?
+    /// 591: the exact VM the sandbox runs in — recorded when the VM is built, persisted with every
+    /// sleep, and compared before a snapshot is restored (`VMLayout`). nil: an older record (a wake is
+    /// best effort, as before).
+    public var vmLayout: VMLayout?
 
     public init(spec: SandboxSpec, phase: Phase, machineIdentifier: Data, macAddress: String?, subnet: String?,
                 shareTags: [String: String], savedAt: Date = Date()) {
