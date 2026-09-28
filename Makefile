@@ -62,7 +62,7 @@ DOCC_OUT         ?= .docc-build
 DOCC_BASE_PATH   ?= /SnoozeContainerKit/
 DOCC_PREVIEW_PORT ?= 8000
 
-.PHONY: help build test audit web-assets web-assets-check test-vm test-vm-agents test-vm-network test-vm-hardening test-vm-lineage v040-host vmtest-host kernel deckhold deckhold-verify snoozenet snoozenet-verify cli install-cli test-cli test-vm-claude docs docs-preview docs-drift-check
+.PHONY: help build test audit web-assets web-assets-check test-vm test-vm-agents test-vm-network test-vm-hardening test-vm-lineage v040-host prev-cli test-vm-upgrade vmtest-host kernel deckhold deckhold-verify snoozenet snoozenet-verify cli install-cli test-cli test-vm-claude docs docs-preview docs-drift-check
 
 help: ## Show this help
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) | sed 's/:.*## /\t/' | expand -t 22
@@ -120,6 +120,26 @@ test-vm-lineage: vmtest-host v040-host ## 587 image lineage: warm-base bakes, jo
 	  perl -e 'alarm shift; exec @ARGV' 600 $(VMTEST_BIN) lineage compat-clean --store "$(VMTEST_STORE)" && \
 	  perl -e 'alarm shift; exec @ARGV' 600 $(V040_BIN) crash-save --store "$(VMTEST_STORE)" && \
 	  perl -e 'alarm shift; exec @ARGV' 600 $(VMTEST_BIN) lineage compat-discard --store "$(VMTEST_STORE)" ; fi
+
+# 591: an update never costs a sleeping sandbox its sessions. The PREVIOUS release's `snooze` (the
+# latest release tag this branch descends from — 587's v040-host fixture, generalized) is built once
+# from the tag (git archive, no checkout touched) into PREV_DIR and signed; it sleeps sandboxes in a
+# scratch store, and this build must wake them with their sessions. Also: a running host's program
+# overwritten in place (the 591 incident), and an idle host replaced by an update.
+PREV_TAG      ?= $(shell git describe --tags --abbrev=0 --match 'v[0-9]*' HEAD 2>/dev/null)
+PREV_DIR      ?= $(or $(TMPDIR),/tmp/)snooze-$(PREV_TAG)-cli
+PREV_BIN      := $(PREV_DIR)/.build/debug/snooze
+UPGRADE_STORE ?= $(or $(TMPDIR),/tmp/)snooze-upgrade-store
+
+prev-cli: ## Build + sign the previous release's snooze from its tag (once, into PREV_DIR)
+	@if [ -z "$(PREV_TAG)" ]; then echo "no release tag below HEAD" >&2; exit 1; fi
+	@if [ ! -x "$(PREV_BIN)" ]; then \
+	  rm -rf "$(PREV_DIR)" && mkdir -p "$(PREV_DIR)" && git archive $(PREV_TAG) | tar -x -C "$(PREV_DIR)" && \
+	  (cd "$(PREV_DIR)" && swift build $(SWIFT_BUILD_SYSTEM) -j $(JOBS) --product snooze) ; fi
+	codesign --force --sign - --entitlements "$(PREV_DIR)/Scripts/snooze.entitlements" $(PREV_BIN)
+
+test-vm-upgrade: cli vmtest-host prev-cli ## 591 upgrade: $(PREV_TAG) sleeps lab + pi sandboxes (sessions, markers), this build wakes them; the running host's program overwritten in place; an idle host replaced by an update
+	perl -e 'alarm shift; exec @ARGV' 3600 $(VMTEST_BIN) upgrade --old $(PREV_BIN) --snooze $(CLI_BIN) --store "$(UPGRADE_STORE)" --entitlements Scripts/snooze.entitlements
 
 kernel: vmtest-host ## Fetch + verify the pinned Linux kernel into the cache (KERNEL_CACHE=dir; no VM)
 	perl -e 'alarm shift; exec @ARGV' 900 $(VMTEST_BIN) kernel --store "$(VMTEST_STORE)"

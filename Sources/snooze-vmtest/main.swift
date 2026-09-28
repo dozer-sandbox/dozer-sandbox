@@ -884,6 +884,8 @@ Task {
             exit(0)
         case "cli":
             try await cliSuite()
+        case "upgrade":
+            try await upgradeSuite()
         case "claude":
             try await claudeSuite()
         case "lifecycle":
