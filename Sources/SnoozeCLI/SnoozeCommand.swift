@@ -11,7 +11,7 @@ public struct SnoozeCommand: AsyncParsableCommand {
     /// The release this build ships as — the package's semver tag. Bump it with the tag (it was left
     /// at 0.5.0 through v0.6.0 and v0.7.0; `snooze ui`'s host card showed it, 590). The host and
     /// `doctor` compare it to the running host's.
-    public static let version = "0.8.1"
+    public static let version = "0.9.0"
 
     public static let configuration = CommandConfiguration(
         commandName: "snooze",
