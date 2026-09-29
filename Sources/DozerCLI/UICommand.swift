@@ -74,7 +74,10 @@ struct UIServe: AsyncParsableCommand {
         do { assets = try WebAssets.load() } catch {
             throw fail(HostError(.failed, "the web UI's resources are missing or altered (\(error)) — \(WebAssets.bundleName) must sit beside the doz executable (make install-cli copies it)"), g)
         }
-        let data = HostWebData(store: store, version: DozerCommand.version) {
+        let data = HostWebData(store: store, version: DozerCommand.version, macLogin: {
+            // 594: the onboarding wizard's account step — is Claude Code signed in on this Mac (read-only).
+            ClaudeLoginStatus.check(configDir: nil, keychain: SystemKeychain(), probeBinary: false).state == .signedIn
+        }) {
             Doctor.checks(store: store).map { WebDoctorCheck(check: $0.check, status: $0.status.rawValue, detail: $0.detail) }
         }
         let server: DozerWebServer

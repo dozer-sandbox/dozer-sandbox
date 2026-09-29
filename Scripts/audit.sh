@@ -43,7 +43,8 @@ fail() {
 # one-use link in a process argument) — each confined in step 1b.
 # 591: + NIOWebSocket (swift-nio's own WebSocket codec — the same package) for `doz ui`'s
 # browser terminals, confined to Sources/DozerWeb in step 1b.
-ALLOWED='Foundation|Darwin|os|CryptoKit|Security|NIOCore|NIOEmbedded|NIOPosix|NIOSSL|X509|SwiftASN1|Virtualization|Containerization|ContainerizationArchive|ContainerizationEXT4|SystemPackage|ContainerizationError|ContainerizationExtras|ContainerizationOCI|ContainerizationOS|DozerKit|DozerHost|DozerCLI|SQLite3|ArgumentParser|DozerWeb|NIOHTTP1|NIOWebSocket|CoreServices'
+# 594: + Yams (the project file doz_project.yaml — owner ruling D9), confined to Sources/DozerCLI in step 1b.
+ALLOWED='Foundation|Darwin|os|CryptoKit|Security|NIOCore|NIOEmbedded|NIOPosix|NIOSSL|X509|SwiftASN1|Virtualization|Containerization|ContainerizationArchive|ContainerizationEXT4|SystemPackage|ContainerizationError|ContainerizationExtras|ContainerizationOCI|ContainerizationOS|DozerKit|DozerHost|DozerCLI|SQLite3|ArgumentParser|DozerWeb|NIOHTTP1|NIOWebSocket|CoreServices|Yams'
 BAD=$(grep -rhoE --include='*.swift' '^[[:space:]]*(@[A-Za-z_]+[[:space:]]+)*(public[[:space:]]+)?import[[:space:]]+[A-Za-z_][A-Za-z0-9_.]*' \
         "$PACKAGE/Sources" \
       | sed -E 's/.*import[[:space:]]+//' \
@@ -57,7 +58,7 @@ fi
 
 # ── 1b. (585) Confinement: the LIBRARY imports none of the CLI's additions, and only the CLI's
 #        command targets import ArgumentParser (the host needs no argument parsing) ─────────────
-LEAK=$(grep -rlE --include='*.swift' '^[[:space:]]*import[[:space:]]+(ArgumentParser|SQLite3|DozerHost|DozerCLI|DozerWeb|NIOHTTP1|NIOWebSocket|CoreServices)([[:space:]]|$)' \
+LEAK=$(grep -rlE --include='*.swift' '^[[:space:]]*import[[:space:]]+(ArgumentParser|SQLite3|DozerHost|DozerCLI|DozerWeb|NIOHTTP1|NIOWebSocket|CoreServices|Yams)([[:space:]]|$)' \
         "$PACKAGE/Sources/DozerKit" || true)
 [[ -z "$LEAK" ]] || fail "the library imports a CLI-only module:
 $LEAK"
@@ -65,6 +66,11 @@ AP=$(grep -rlE --include='*.swift' '^[[:space:]]*import[[:space:]]+ArgumentParse
       | grep -vE "/Sources/(DozerCLI|doz)/" || true)
 [[ -z "$AP" ]] || fail "ArgumentParser is imported outside Sources/DozerCLI and Sources/doz:
 $AP"
+# 594: Yams reads the project file — the CLI's commands only (never the library, the host or the web UI).
+YA=$(grep -rlE --include='*.swift' '^[[:space:]]*import[[:space:]]+Yams([[:space:]]|$)' "$PACKAGE/Sources" \
+      | grep -vE "/Sources/DozerCLI/" || true)
+[[ -z "$YA" ]] || fail "Yams is imported outside Sources/DozerCLI:
+$YA"
 
 # 590: the HTTP codec only in the web target; LaunchServices only in the `doz ui` command; the
 #      host never imports the web layer (the UI is a CLIENT of the host, never inside it).
@@ -100,13 +106,16 @@ https://github.com/apple/swift-argument-parser.git
 https://github.com/apple/swift-asn1.git
 https://github.com/apple/swift-certificates.git
 https://github.com/apple/swift-nio-ssl.git
-https://github.com/apple/swift-nio.git'
+https://github.com/apple/swift-nio.git
+https://github.com/jpsim/Yams.git'
 DEPS=$(grep -oE '\.package\(url: "[^"]+"' "$MANIFEST" | sed -E 's/.*"(.*)"/\1/' | sort -u)
 EXTRA=$(comm -23 <(printf '%s\n' "$DEPS") <(printf '%s\n' "$ALLOWED_DEPS" | sort -u))
 [[ -z "$EXTRA" ]] || fail "the manifest declares dependencies outside the allowlist (Scripts/audit.sh step 3):
 $EXTRA"
 grep -qE '\.package\(url: "https://github.com/apple/containerization.git", exact: "[0-9]+\.[0-9]+\.[0-9]+"\)' "$MANIFEST" \
     || fail "apple/containerization must be pinned with exact: (the sleep design depends on its internals' shape)"
+grep -qE '\.package\(url: "https://github.com/jpsim/Yams.git", exact: "[0-9]+\.[0-9]+\.[0-9]+"\)' "$MANIFEST" \
+    || fail "jpsim/Yams must be pinned with exact: (594, owner ruling D9 — the one non-apple dependency)"
 
 # ── 4. No host brand ─────────────────────────────────────────────────────────
 BRAND=$(grep -rnE --include='*.swift' 'com\.deckosaurus\.|com\.roundrect\.|"[^"]*(Deckosaurus|Deckolite|SandboxLab|Codeck)[^"]*"|sandboxlab' \
@@ -144,7 +153,7 @@ $STRAY"
 
 printf 'ok audit: DozerKit imports only its allowlist (Foundation/Security/Virtualization/Containerization/NIO/X509),\n'
 printf '          depends only on apple/containerization (exact) + the apple/* packages it already resolves\n'
-printf '          (TLS; ArgumentParser for the CLI targets only),\n'
+printf '          (TLS; ArgumentParser for the CLI targets only) and Yams (exact; the CLI'"'"'s project file only),\n'
 printf '          carries no host brand, deckhold + doznet match their provenance,\n'
 printf '          the web UI (NIOHTTP1, confined) ships exactly the assets its sources build,\n'
 printf '          and no file carries the pre-592 product name\n'

@@ -27,9 +27,15 @@ struct Doctor: AsyncParsableCommand {
             }
         }
         if checks.contains(where: { $0.status == .fail }) { throw ExitCode(DozerExit.failed) }
+        // 594: a store never onboarded says how to start.
+        if !g.json, OnboardingRecord.read(g.dozerStore) == nil {
+            Out.stdout("\nthis store has not been onboarded — doz onboard sets up this Mac (checks, account, settings, images)\n")
+        }
     }
 
-    static func checks(store: DozerStore) -> [DoctorCheck] {
+    /// `claude: false` (594: `doz onboard --account …`) leaves out the Claude Code checks — the ones
+    /// that run `claude --version` and read the Mac login's keychain item.
+    static func checks(store: DozerStore, claude: Bool = true) -> [DoctorCheck] {
         var out: [DoctorCheck] = []
         let v = ProcessInfo.processInfo.operatingSystemVersion
         var uts = utsname()
@@ -102,7 +108,7 @@ struct Doctor: AsyncParsableCommand {
         }
         let metricsOK = fm.fileExists(atPath: store.metrics.path)
         out.append(DoctorCheck(check: "metrics", status: .ok, detail: metricsOK ? store.metrics.path : "none yet"))
-        out += claudeChecks(store: store, keychain: SystemKeychain())
+        if claude { out += claudeChecks(store: store, keychain: SystemKeychain()) }
         return out
     }
 

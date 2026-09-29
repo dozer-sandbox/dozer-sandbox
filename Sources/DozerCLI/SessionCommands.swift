@@ -12,7 +12,8 @@ struct List: AsyncParsableCommand {
         let rows = try decode(try await query(HostRequest(.ls), g), [SandboxInfo].self, g)
         if g.json { Out.json(rows); return }
         if rows.isEmpty { Out.stdout("no sandboxes — doz up NAME --image lab|claude-code|pi\n"); return }
-        var t = [["NAME", "IMAGE", "PHASE", "RAM", "DISK", "SESSIONS", "NETWORK", "ACCOUNT"]]
+        var t = [["NAME", "IMAGE", "PHASE", "RAM", "DISK", "SESSIONS", "NETWORK", "ACCOUNT", "WORKSPACE"]]
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
         for r in rows {
             var phase = Out.phaseLabel(r.phase) + (r.busy ? "…" : "")
             if r.diedWithHost == true { phase += " (died with host)" }
@@ -21,21 +22,43 @@ struct List: AsyncParsableCommand {
             var account = r.account ?? "—"
             if let s = r.credentialState, s != "ok" { account += " (\(s))" }
             if r.credentialPolicy == "strict" { account += " · strict" }
+            // 594 (D17): no workspace is said, not left blank.
+            let ws = r.workspace.map { $0.hasPrefix(home + "/") ? "~" + $0.dropFirst(home.count) : $0 } ?? "none (private to the VM)"
             t.append([r.name, r.image, phase, Out.mib(r.ramHeldMiB), DozerImages.formatBytes(r.diskBytes),
-                      r.sessions.map(String.init) ?? "—", net, account])
+                      r.sessions.map(String.init) ?? "—", net, account, ws])
         }
         Out.stdout(Out.table(t, rightAligned: [3, 4, 5]))
     }
 }
 
 struct Inspect: AsyncParsableCommand {
-    static let configuration = CommandConfiguration(abstract: "Everything about a sandbox, as JSON.")
+    static let configuration = CommandConfiguration(abstract: "Everything about a sandbox, as JSON (--prompt: the agent's environment prompt, as its next session gets it).")
     @OptionGroup var g: GlobalOptions
     @Argument var name: String
+    @Flag(name: .long, help: "Print the environment prompt the agent gets at its next session (the facts block; --json adds the dozer skill).") var prompt = false
 
     func run() async throws {
+        if prompt {
+            let r = try decode(try await query(HostRequest(.agentPrompt, name: name), g), AgentPromptReport.self, g)
+            if g.json { Out.json(r); return }
+            Out.stdout(Self.render(r, name: name))
+            if r.enabled, r.error != nil { throw ExitCode(DozerExit.failed) }
+            return
+        }
         let v = try await query(HostRequest(.inspect, name: name), g)
         Out.json(try decode(v, SandboxDetail.self, g))
+    }
+
+    static func render(_ r: AgentPromptReport, name: String) -> String {
+        guard r.enabled else {
+            return "the environment prompt is off (agent.prompt = false) — \(name)'s agent gets no facts block and no dozer skill\n"
+        }
+        if let e = r.error {
+            return "the environment prompt of \(name) does not render: \(e)\nits sessions do not start until it does (or: doz config set agent.prompt false)\n"
+        }
+        let how = r.agent == "pi" ? "pi's --append-system-prompt \(r.promptPath)" : "Claude Code's --append-system-prompt (the launcher reads \(r.promptPath))"
+        return "the environment prompt of \(name) (\(r.layers.joined(separator: " + "))) — \(how), written at every session start:\n\n"
+            + (r.text ?? "") + "\n\nand the dozer skill, \(r.skillPath) (\((r.skill ?? "").split(separator: "\n").count) lines; --json has its text)\n"
     }
 }
 

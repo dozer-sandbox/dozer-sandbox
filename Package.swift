@@ -39,6 +39,10 @@ let package = Package(
         // package containerization 0.47.0 already resolves (Package.resolved is unchanged by
         // declaring it); only the CLI target imports it, never the library. README "Dependencies".
         .package(url: "https://github.com/apple/swift-argument-parser.git", from: "1.5.0"),
+        // 594 (owner ruling D9) — the project file `doz_project.yaml` (like dbt's dbt_project.yml) is
+        // YAML, parsed with Yams (MIT; libyaml inside), pinned EXACTLY. The one dependency that is not
+        // an apple/* package; only the CLI's command target imports it (Scripts/audit.sh).
+        .package(url: "https://github.com/jpsim/Yams.git", exact: "6.2.2"),
     ],
     targets: [
         .target(
@@ -108,7 +112,8 @@ let package = Package(
         .target(
             name: "DozerCLI",
             dependencies: ["DozerHost", "DozerKit", "DozerWeb",
-                           .product(name: "ArgumentParser", package: "swift-argument-parser")],
+                           .product(name: "ArgumentParser", package: "swift-argument-parser"),
+                           .product(name: "Yams", package: "Yams")],
             path: "Sources/DozerCLI"
         ),
         .executableTarget(
