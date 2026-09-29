@@ -1,4 +1,5 @@
 import Foundation
+import DozerKit
 import XCTest
 @testable import DozerHost
 
@@ -91,5 +92,33 @@ final class ExecutableIdentityTests: XCTestCase {
         XCTAssertEqual(st.executableChange, "overwritten")
         XCTAssertEqual(st.executable, p.path)
         XCTAssertTrue(st.executableNote?.contains("doz host stop") == true)
+
+        // 593: an ordinary host error keeps its own words, even now — never "the Virtualization framework said".
+        for plain: Error in [SandboxError.restorePointNotFound("no-such-point"), HostError(.notFound, "no restore point x in alpha"),
+                             SandboxError.alreadyExists("sandbox b"), SandboxError.invalidSpec("bad"),
+                             NSError(domain: NSPOSIXErrorDomain, code: 2, userInfo: [NSLocalizedDescriptionKey: "No such file"])] {
+            let m = await core.explain(plain).message
+            XCTAssertFalse(m.contains("updated underneath"), "\(plain) → \(m)")
+            XCTAssertFalse(m.contains("Virtualization framework said"), m)
+        }
+        let code = await core.explain(SandboxError.restorePointNotFound("p")).code
+        XCTAssertEqual(code, .notFound, "and its code")
+    }
+
+    /// 593: what counts as the Virtualization framework's error.
+    func testWhatIsAVirtualizationError() {
+        let vz = NSError(domain: "VZErrorDomain", code: 1, userInfo: [NSLocalizedDescriptionKey: "Internal Virtualization error."])
+        XCTAssertTrue(HostCore.isVirtualizationError(vz))
+        XCTAssertTrue(HostCore.isVirtualizationError(NSError(domain: "Other", code: 1, userInfo: [NSUnderlyingErrorKey: vz])), "as an underlying error")
+        XCTAssertTrue(HostCore.isVirtualizationError(NSError(domain: "Other", code: 1, userInfo: [NSMultipleUnderlyingErrorsKey: [vz]])))
+        struct Wrapper: Error { let message: String; let cause: Error? }
+        XCTAssertTrue(HostCore.isVirtualizationError(Wrapper(message: "boot failed", cause: vz)), "wrapped by a library error")
+        XCTAssertTrue(HostCore.isVirtualizationError(Wrapper(message: "The process doesn’t have the “com.apple.security.virtualization” entitlement.", cause: nil)),
+                      "the entitlement refusal of a broken signature")
+        XCTAssertFalse(HostCore.isVirtualizationError(Wrapper(message: "boot failed", cause: nil)))
+        XCTAssertFalse(HostCore.isVirtualizationError(SandboxError.restorePointNotFound("x")))
+        XCTAssertFalse(HostCore.isVirtualizationError(SandboxError.invalidPhase(operation: "wake", phase: .off)))
+        XCTAssertFalse(HostCore.isVirtualizationError(HostError(.failed, "Internal Virtualization error")), "a HostError is the host's own")
+        XCTAssertFalse(HostCore.isVirtualizationError(NSError(domain: NSCocoaErrorDomain, code: 4)))
     }
 }

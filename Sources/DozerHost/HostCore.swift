@@ -323,11 +323,47 @@ public actor HostCore {
 
     /// An error as the client sees it. When this host's program was rewritten under it, macOS refuses
     /// its VMs with a raw "Internal Virtualization error": say what happened and what to do instead.
+    /// 593: ONLY an error the Virtualization framework raised gets this — an ordinary host error (a
+    /// missing restore point, a bad name, a phase) is reported as it is, even when the program changed.
     public func explain(_ error: Error) -> HostError {
         let e = HostError.from(error)
-        guard let executable, executableChange() == .overwritten else { return e }
+        guard let executable, executableChange() == .overwritten, Self.isVirtualizationError(error) else { return e }
         return HostError(.failed, ExecutableIdentity.explain(.overwritten, path: executable.path)
                                   + " (the Virtualization framework said: \(e.message.prefix(160)))")
+    }
+
+    /// An error that came from Virtualization.framework: `VZErrorDomain` anywhere in its chain
+    /// (underlying errors, and errors a library error wraps), or the framework's own refusals of a
+    /// process whose code signature broke ("Internal Virtualization error", the entitlement). The
+    /// host's and the library's own typed errors never are.
+    static func isVirtualizationError(_ error: Error) -> Bool {
+        if error is HostError { return false }
+        if let s = error as? SandboxError {
+            switch s {
+            case .invalidPhase, .notRunning, .restorePointNotFound, .alreadyExists, .invalidSpec, .invalidSessionName: return false
+            default: break
+            }
+        }
+        var seen = 0
+        func visit(_ e: Error) -> Bool {
+            seen += 1
+            guard seen < 32 else { return false }
+            let ns = e as NSError
+            if ns.domain == "VZErrorDomain" { return true }
+            let text = ns.localizedDescription + " " + String(describing: e)
+            for marker in ["VZErrorDomain", "Internal Virtualization error", "com.apple.security.virtualization"] where text.contains(marker) {
+                return true
+            }
+            if let u = ns.userInfo[NSUnderlyingErrorKey] as? Error, visit(u) { return true }
+            if let us = ns.userInfo[NSMultipleUnderlyingErrorsKey] as? [Error], us.contains(where: visit) { return true }
+            // A library error that carries its cause (Containerization's `cause`, and the like).
+            for child in Mirror(reflecting: e).children {
+                if let inner = child.value as? Error, visit(inner) { return true }
+                if let opt = child.value as? Optional<Any>, case .some(let v) = opt, let inner = v as? Error, visit(inner) { return true }
+            }
+            return false
+        }
+        return visit(error)
     }
 
     func isPolicyQuery(_ r: HostRequest) -> Bool {
