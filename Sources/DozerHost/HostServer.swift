@@ -35,8 +35,10 @@ public final class HostServer: @unchecked Sendable {
         self.idleTimeoutMinutes = idleTimeoutMinutes
         self.version = version
         // 591: the settings' keep-alive for a store that has not chosen (read once, at start).
+        let settings = DozerSettings.load()
         core = HostCore(store: store, readOnly: false, version: version,
-                        newStoreKeepalive: DozerSettings.load().bool(SettingKey.keepalive))
+                        newStoreKeepalive: settings.bool(SettingKey.keepalive),
+                        newStoreDefaultAccount: settings.string(SettingKey.defaultAccount) ?? "mac")
     }
 
     public enum StartError: Error, LocalizedError {
@@ -121,7 +123,8 @@ public final class HostServer: @unchecked Sendable {
         while true {
             try? await Task.sleep(for: .milliseconds(Int(interval * 1000)))
             guard timeout > 0 else { continue }
-            let live = await core.liveSandboxes()
+            // 594: an image being prepared keeps the host up like a live sandbox (nobody need be attached).
+            let live = await core.liveSandboxes() + (await core.runningPreparations()).map { "prepare \($0)" }
             let now = Date()
             // 591: its program changed under it — once nothing is live and nobody is connected, exit, so
             // the next command starts a host of the build now installed. (Nothing is lost: no VM runs;

@@ -84,14 +84,19 @@ public struct AccountStore: Sendable {
     /// 591: the keep-alive of a store that has no accounts.json yet (the settings' `host.keepalive`);
     /// once a store saved its own choice (`doz account keepalive`), that wins.
     public let newStoreKeepalive: Bool
-    public init(store: DozerStore, newStoreKeepalive: Bool = false) {
+    /// 594: the default account of a store with no accounts.json yet (the settings' `defaults.account`).
+    public let newStoreDefault: String
+    public init(store: DozerStore, newStoreKeepalive: Bool = false, newStoreDefault: String = "mac") {
         url = store.root.appendingPathComponent("accounts.json")
         self.newStoreKeepalive = newStoreKeepalive
+        self.newStoreDefault = newStoreDefault
     }
 
-    /// The store's accounts, with the settings' `host.keepalive` for a store that has not chosen.
+    /// The store's accounts, with the settings' `host.keepalive` and `defaults.account` for a store
+    /// that has not chosen.
     public init(store: DozerStore, settings: DozerSettings) {
-        self.init(store: store, newStoreKeepalive: settings.bool(SettingKey.keepalive))
+        self.init(store: store, newStoreKeepalive: settings.bool(SettingKey.keepalive),
+                  newStoreDefault: settings.string(SettingKey.defaultAccount) ?? "mac")
     }
 
     public static let reserved: Set<String> = ["default", "none"]
@@ -102,7 +107,10 @@ public struct AccountStore: Sendable {
 
     public func load() -> AccountsFile {
         var fresh = AccountsFile()
-        if !FileManager.default.fileExists(atPath: url.path) { fresh.keepalive = newStoreKeepalive }
+        if !FileManager.default.fileExists(atPath: url.path) {
+            fresh.keepalive = newStoreKeepalive
+            fresh.defaultAccount = newStoreDefault
+        }
         var f = (try? Data(contentsOf: url)).flatMap { try? HostWire.decoder.decode(AccountsFile.self, from: $0) } ?? fresh
         if !f.accounts.contains(where: { $0.name == "mac" }) { f.accounts.insert(.mac, at: 0) }
         return f

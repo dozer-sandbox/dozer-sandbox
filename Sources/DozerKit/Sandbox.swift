@@ -1175,6 +1175,28 @@ public actor Sandbox {
         if let n = network { SubnetPool.release(n.subnet.description) }
     }
 
+    /// 594: what every boot of this store needs before any image — the pinned kernel (downloaded and
+    /// verified into the cache once) and the guest init disk (vminit, pulled and built once) — as
+    /// timed steps with the download's progress in the event stream. Onboarding runs it ahead of
+    /// the first start. Never touches this sandbox's own VM or disks.
+    public func prepareAssets() async throws {
+        let broadcaster = self.broadcaster
+        // The provider says what it did itself (cached and verified, copied from a seed, or downloaded).
+        let kernelURL = try await kernelProvider.resolve(override: spec.kernelPath) { e in
+            switch e {
+            case .step(let s, let ms): broadcaster.yield(.step(s, milliseconds: ms))
+            case .note(let s): broadcaster.yield(.note(s))
+            case .progress(let s, let done, let total): broadcaster.yield(.progress(s, completedBytes: done, totalBytes: total))
+            }
+        }
+        let kernel = Kernel(path: kernelURL, platform: .linuxArm)
+        let store = try ImageStore(path: spec.storeRoot)
+        let cached = FileManager.default.fileExists(atPath: layout.initfs.path)
+        try await timed("guest init image ready (vminit\(cached ? ", cached" : ": pulled + built its disk"))") {
+            _ = try await ContainerManager(kernel: kernel, initfsReference: spec.initfsReference, imageStore: store)
+        }
+    }
+
     /// The baked disk for this sandbox's imageSpec — a cache hit, or a bake (timed events, progress in
     /// the event stream). nil for a sandbox without a imageSpec. Safe to call in any phase; it never
     /// touches this sandbox's own VM or disks.

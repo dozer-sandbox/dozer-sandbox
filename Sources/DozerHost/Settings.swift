@@ -218,6 +218,12 @@ public enum SettingKey {
     public static let claudePermissions = "claude.permissions"
     public static let cpus = "defaults.cpus"
     public static let natSubnet = "defaults.nat_subnet"
+    /// 594: the image `doz up`/`doz init`/the UI's create form use when none is named; the account
+    /// a store that has not chosen one defaults to (`doz account default` wins once it has).
+    public static let defaultImage = "defaults.image"
+    public static let defaultAccount = "defaults.account"
+    /// 594 (D16): the environment prompt (the facts block and the dozer skill) — on, or off.
+    public static let agentPrompt = "agent.prompt"
     public static let kernelPath = "kernel.path"
     public static let kernelCache = "kernel.cache"
     /// `images.<lab|claude-code|pi>.memory_mib` / `.network`.
@@ -284,6 +290,15 @@ public struct DozerSettings: Sendable {
             .init("defaults", "nat_subnet", .subnet, .string(""),
                   "The vmnet subnet of a new --network nat sandbox.",
                   env: "DOZ_SUBNET", flag: "doz create --subnet", applies: .nextCreate),
+            .init("defaults", "image", .choice(["lab", "claude-code", "pi"]), .string("lab"),
+                  "The image of a new sandbox when none is named (doz up NAME, doz init, the UI's New sandbox). doz onboard writes the one you chose.",
+                  flag: "doz create --image", applies: .nextCreate),
+            .init("defaults", "account", .choice(["mac", "none"]), .string("mac"),
+                  "The Anthropic account of a store that has not chosen one: mac (this Mac's Claude Code login) or none. doz account default decides for a store once it has.",
+                  applies: .newStore),
+            .init("agent", "prompt", .bool, .bool(true),
+                  "Tell the agent where it runs: a short facts block appended to its system prompt (the sandbox, its /workspace share, the network, credentials) and the dozer skill, written at every session start. Your own template: agent-prompt.md beside this file.",
+                  applies: .nextSession),
         ]
         for (image, memory, network) in [("lab", 1024, "bake"), ("claude-code", 2048, "agent"), ("pi", 2048, "agent")] {
             s.append(.init("images.\(image)", "memory_mib", .int(256...262_144), .int(memory),

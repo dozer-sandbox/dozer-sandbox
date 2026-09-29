@@ -104,6 +104,11 @@ public struct SandboxConfig: Codable, Equatable, Sendable {
     /// 588 (D8): sha256 of every live placeholder → its binding, so a session that survives a host
     /// restart keeps working. Never a placeholder, never a secret.
     public var placeholderHashes: [String: String]?
+    /// 594 (D16): the sandbox's own layer of the environment prompt, and `append` (default) or `replace`.
+    public var agentPrompt: String?
+    public var agentPromptMode: String?
+    /// 594 (D9): the `doz_project.yaml` it was made from.
+    public var project: String?
 
     public init(name: String, image: String, spec: SandboxSpec, workspace: String?, createdAt: Date = Date(),
                 credentialSources: [String: String] = [:], diedWithHostAt: Date? = nil) {
@@ -125,6 +130,9 @@ public struct SandboxConfig: Codable, Equatable, Sendable {
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         try HostWire.prettyEncoder.encode(self).write(to: url, options: .atomic)
     }
+
+    /// Where a sandbox's own environment prompt (D16) is kept at most: 16 KiB.
+    public static let maximumAgentPromptBytes = 16 << 10
 
     /// The session `up` and `attach` use when none is named, and what it runs.
     public var defaultSession: (name: String, argv: [String]) {

@@ -1,0 +1,196 @@
+import Foundation
+import DozerKit
+
+// 594 — onboarding, the parts `doz onboard` and the UI's wizard share: which checks stop it (D5),
+// what each image costs (D2), the settings file written only when missing (D7) and the user's
+// prompt template beside it (D16). The work itself — preparing images — is the host's (`onboard`).
+
+/// One check as onboarding presents it: the doctor's finding, and whether it stops onboarding.
+public struct OnboardingCheck: Codable, Equatable, Sendable {
+    public var check: String
+    /// ok · warn · fail
+    public var status: String
+    public var detail: String
+    /// A hard check stops onboarding when it is not ok (D5); a soft one only warns.
+    public var hard: Bool
+
+    public init(check: String, status: String, detail: String, hard: Bool) {
+        self.check = check
+        self.status = status
+        self.detail = detail
+        self.hard = hard
+    }
+
+    public var blocks: Bool { hard && status == "fail" }
+}
+
+/// A built-in image as the onboarding checklist shows it (D2).
+public struct OnboardingImage: Codable, Equatable, Sendable {
+    public var name: String
+    public var summary: String
+    /// What a first preparation downloads, for people.
+    public var download: String
+    /// About how long a first preparation takes (measured on the owner's network, 2026-09-29).
+    public var estimate: String
+    /// What it needs on disk (an estimate, with its share of the common parts).
+    public var diskBytes: Int64
+    public var prepared: Bool
+    /// Ticked by default: claude-code (D2).
+    public var recommended: Bool
+}
+
+public enum Onboarding {
+    /// D5: the checks that stop onboarding when they fail. Everything else only warns (Claude Code
+    /// missing or signed out: the claude-code image still works with an account added later; vmnet:
+    /// only `--network nat` needs it).
+    public static let hardChecks: Set<String> = ["macOS", "chip", "virtualization", "entitlement", "guest tools", "socket", "store", "disk"]
+
+    /// The images onboarding offers, in order.
+    public static let images: [(name: String, summary: String, download: String, estimate: String, bytes: Int64)] = [
+        ("claude-code", "Claude Code 2.1.227 on Debian (node), with git, ripgrep, python3 and the usual tools",
+         "~80 MB base image + Claude Code + Debian packages", "~4–6 min the first time", 900 << 20),
+        ("pi", "the pi coding agent 0.84.1 on the same Debian base (shared with claude-code)",
+         "~80 MB base image (shared) + npm packages", "~10–15 min the first time", 700 << 20),
+        ("lab", "Alpine 3.20 with bash — a plain Linux shell, no agent",
+         "~4 MB", "~1 min", 100 << 20),
+    ]
+
+    /// What every first preparation needs besides the images: the kernel archive (downloaded, then
+    /// only its kernel kept), the guest init disk, and the node base (flattened once, shared).
+    public static let commonBytes: Int64 = 1_200 << 20
+    /// Room left over after the images, so a first sandbox still fits.
+    public static let headroomBytes: Int64 = 2 << 30
+
+    public static func imageOptions(_ rows: [ImageRow]) -> [OnboardingImage] {
+        images.map { i in
+            OnboardingImage(name: i.name, summary: i.summary, download: i.download, estimate: i.estimate, diskBytes: i.bytes,
+                            prepared: rows.first { $0.name == i.name }.map { $0.current ?? $0.baked } ?? false, recommended: i.name == "claude-code")
+        }
+    }
+
+    /// The disk the chosen images need (0 when all are prepared).
+    public static func requiredBytes(_ chosen: [String], prepared: Set<String>) -> Int64 {
+        let todo = chosen.filter { !prepared.contains($0) }
+        guard !todo.isEmpty else { return 0 }
+        return commonBytes + headroomBytes + todo.reduce(0) { sum, n in sum + (images.first { $0.name == n }?.bytes ?? 0) }
+    }
+
+    /// The volume a store is (or will be) on: its nearest existing directory's format and free space.
+    public static func volume(of store: DozerStore) -> (apfs: Bool, free: Int64, format: String)? {
+        var url = store.root
+        let fm = FileManager.default
+        while !fm.fileExists(atPath: url.path), url.path != "/" { url = url.deletingLastPathComponent() }
+        guard let v = try? url.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey, .volumeLocalizedFormatDescriptionKey]) else { return nil }
+        let format = v.volumeLocalizedFormatDescription ?? "?"
+        return (format.contains("APFS"), v.volumeAvailableCapacityForImportantUsage ?? 0, format)
+    }
+
+    /// The doctor's findings (`check`, `status`, `detail`) as onboarding checks: the store's own
+    /// finding is replaced by the two that matter here — APFS, and room for the chosen images.
+    public static func checks(doctor: [(check: String, status: String, detail: String)], store: DozerStore,
+                              chosen: [String], prepared: Set<String>) -> [OnboardingCheck] {
+        var out: [OnboardingCheck] = []
+        for d in doctor where d.check != "store" {
+            out.append(OnboardingCheck(check: d.check, status: d.status, detail: d.detail, hard: hardChecks.contains(d.check)))
+        }
+        if let v = volume(of: store) {
+            out.append(OnboardingCheck(check: "store", status: v.apfs ? "ok" : "fail",
+                                       detail: "\(store.root.path) — \(v.format)" + (v.apfs ? "" : " — the store must be on APFS (disks are APFS clones); pick another with --store"),
+                                       hard: true))
+            let need = requiredBytes(chosen, prepared: prepared)
+            out.append(OnboardingCheck(check: "disk", status: v.free >= need ? "ok" : "fail",
+                                       detail: "\(DozerImages.formatBytes(v.free)) free"
+                                       + (need == 0 ? "" : ", the chosen images need about \(DozerImages.formatBytes(need)) (with room for a first sandbox)")
+                                       + (v.free >= need ? "" : " — free some space, or choose fewer images"),
+                                       hard: true))
+        }
+        return out
+    }
+
+    // MARK: D6 — the Claude account
+
+    /// The account step's answers. Onboarding never logs in, never touches Claude Code's refresh
+    /// token and never writes the keychain (588): a key or a setup token is added LATER with the
+    /// CLI command it shows (it reads the secret from a no-echo prompt — never a browser field).
+    public enum Account: String, Codable, Sendable, CaseIterable {
+        /// This Mac's own Claude Code login (the built-in account `mac`) — the store default.
+        case mac
+        /// No account: sandboxes follow `none` until one is added.
+        case none
+        /// Change nothing now (the claude-code image asks at its first session).
+        case skip
+        /// Show how to add an API key / a setup token (and change nothing now).
+        case apiKey = "api-key"
+        case setupToken = "setup-token"
+
+        public var label: String {
+            switch self {
+            case .mac: "Use this Mac's Claude Code login (the account mac)"
+            case .none: "No account for now (sandboxes get none)"
+            case .skip: "Skip — decide at the first session"
+            case .apiKey: "Add an Anthropic API key (with the CLI, afterwards)"
+            case .setupToken: "Add a Claude setup token (with the CLI, afterwards)"
+            }
+        }
+    }
+
+    /// D6: what the step offers on this Mac, and its default — the Mac's login when Claude Code is
+    /// signed in on it; otherwise a key, a token, or skip.
+    public static func accountOptions(macSignedIn: Bool) -> (options: [Account], preferred: Account) {
+        macSignedIn ? ([.mac, .apiKey, .setupToken, .none, .skip], .mac) : ([.apiKey, .setupToken, .mac, .none, .skip], .skip)
+    }
+
+    /// The commands a choice that needs a secret leaves to run (nothing is run for you).
+    public static func accountCommands(_ a: Account) -> [String] {
+        switch a {
+        case .apiKey: ["doz account add work --api-key       (it asks for the key, not echoed)", "doz account default work"]
+        case .setupToken: ["claude setup-token                    (on this Mac: prints a 1-year token)",
+                           "doz account add work --setup-token   (paste it; not echoed)", "doz account default work"]
+        default: []
+        }
+    }
+
+    /// The store default a choice sets (nil: none is set).
+    public static func defaultAccount(for a: Account) -> String? {
+        switch a {
+        case .mac: "mac"
+        case .none: "none"
+        default: nil
+        }
+    }
+
+    // MARK: D7 — the settings file, only when missing
+
+    public enum ConfigOutcome: String, Codable, Sendable {
+        /// Written now, with the onboarding's answers as its only set values.
+        case written
+        /// There already was one: left exactly as it is.
+        case kept
+        /// Neither XDG_CONFIG_HOME nor HOME: there is no place for it.
+        case unavailable
+    }
+
+    /// Write doz.toml (every setting listed with its default, commented) with `defaults.image` and
+    /// `defaults.account` set — only when there is no file. An existing one is never touched.
+    public static func writeSettingsIfMissing(defaultImage: String?, account: String?,
+                                              environment: [String: String] = ProcessInfo.processInfo.environment) throws -> (ConfigOutcome, String?) {
+        guard let url = DozerSettings.fileURL(environment: environment) else { return (.unavailable, nil) }
+        var st = stat()
+        if lstat(url.path, &st) == 0 { return (.kept, url.path) }
+        var values: [String: TOMLValue] = [:]
+        if let defaultImage, let d = DozerSettings.definition(SettingKey.defaultImage) { values[d.key] = try d.validate(.string(defaultImage)) }
+        if let account, let d = DozerSettings.definition(SettingKey.defaultAccount) { values[d.key] = try d.validate(.string(account)) }
+        try DozerSettings.writeAtomically(DozerSettings.render(values: values), to: url)
+        return (.written, url.path)
+    }
+
+    /// Write the user's prompt template starter (all of it inside a comment: it changes nothing until
+    /// edited) — only when there is none.
+    public static func writePromptTemplateIfMissing(environment: [String: String] = ProcessInfo.processInfo.environment) throws -> (ConfigOutcome, String?) {
+        guard let url = AgentPrompt.userTemplateURL(environment: environment) else { return (.unavailable, nil) }
+        var st = stat()
+        if lstat(url.path, &st) == 0 { return (.kept, url.path) }
+        try DozerSettings.writeAtomically(AgentPrompt.userTemplateStarter, to: url)
+        return (.written, url.path)
+    }
+}

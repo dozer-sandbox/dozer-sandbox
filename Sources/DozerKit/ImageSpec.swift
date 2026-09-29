@@ -220,6 +220,18 @@ public enum AgentImages {
         [ "${DOZ_CLAUDE_PERMISSIONS:-skip}" = ask ] && mode=ask
         [ "$(id -u)" = 0 ] && mode=ask
         node /usr/local/lib/dozer/claude-setup.js "$mode" || echo "doz: could not pre-seed Claude Code's setup" >&2
+        # 594: the sandbox's facts, which the host writes at every session start, are appended to
+        # Claude Code's system prompt — not for a subcommand, nor when the caller gives a prompt.
+        p=/run/dozer/agent-prompt.md
+        if [ -s "$p" ]; then
+          case "$1" in
+            mcp|plugin|plugins|setup-token|doctor|update|upgrade|install|config|migrate-installer|auth|agents) ;;
+            *) case " $* " in
+                 *" --append-system-prompt"*|*" --system-prompt"*) ;;
+                 *) set -- --append-system-prompt "$(cat "$p")" "$@" ;;
+               esac ;;
+          esac
+        fi
         [ "$mode" = skip ] && exec /usr/local/bin/claude --dangerously-skip-permissions "$@"
         exec /usr/local/bin/claude "$@"
         SH

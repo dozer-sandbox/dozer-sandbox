@@ -208,6 +208,9 @@ public final class ProgressBoard: @unchecked Sendable {
 
     public var isLive: Bool { lock.withLock { !steps.isEmpty || transfer != nil || !tail.isEmpty } }
 
+    /// 594: the transfer under way (for a view that draws its own bar — the onboarding wizard).
+    public var currentTransfer: Transfer? { lock.withLock { transfer } }
+
     /// `pulling node@1a2b3c4d5e6f  ██████░░░░  87 / 142 MB  6.1 MB/s  ~9 s  (3/5 layers)`.
     public static func transferLine(_ t: Transfer, now: Date) -> String {
         var parts = [t.label]

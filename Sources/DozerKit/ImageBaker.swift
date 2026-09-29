@@ -98,6 +98,10 @@ public struct ImageBaker: Sendable {
     public static let formatterVersion = "containerization-0.47.0/EXT4Unpacker"
     /// 587: the image layout generation, part of every bake key (clone of a base + trim).
     public static let lineageFormat = "587-base-clone-v1"
+    /// 594 (D12): how many layers a base pull downloads at once. Containerization's default is 3;
+    /// the value kept is the faster of 3 and 6 as measured on fresh stores (594.02-RESULTS.md,
+    /// `doz-vmtest pullbench`). Not a key input — it changes how the bytes arrive, not what they are.
+    public static let pullConcurrency = 3
 
     public init(storeRoot: URL) { self.storeRoot = storeRoot }
 
@@ -276,7 +280,8 @@ public struct ImageBaker: Sendable {
             // 593: the pull's progress (bytes and layers), counted here and reported at most 4 times a second.
             let meter = PullMeter(label: "pulling \(Self.shortReference(imageSpec.base))", events: events)
             // linux/arm64 only: a nil platform pulls the layers of EVERY platform the index lists.
-            let img = try await store.pull(reference: imageSpec.base, platform: Platform(arch: "arm64", os: "linux"), progress: { batch in meter.add(batch) })
+            let img = try await store.pull(reference: imageSpec.base, platform: Platform(arch: "arm64", os: "linux"), progress: { batch in meter.add(batch) },
+                                           maxConcurrentDownloads: Self.pullConcurrency)
             meter.finish()
             return img
         }

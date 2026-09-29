@@ -54,11 +54,25 @@ public enum HostOp: String, Codable, Sendable, CaseIterable {
     /// 593: a new sandbox from an existing one's disk (or a restore point), with overrides
     /// (`DuplicateOptions`); the state disk starts fresh unless `copyState`.
     case duplicate
+    /// 594 (D3, D4): prepare built-in images in the host — kernel, guest init, base pull, bake — one
+    /// preparation per image at a time (a second asker joins it). `images` names them; `follow`
+    /// (default true) waits, streaming the progress; none named + follow joins what is running.
+    case prepare
+    /// 594: the preparations (running and recent), the onboarding record and the images.
+    case prepareStatus = "prepare-status"
+    /// 594: cancel preparations (`images`, or every running one).
+    case prepareCancel = "prepare-cancel"
+    /// 594 (D8): `prepare`, and the store's onboarding record once every named image is ready —
+    /// written by the host, so a detached `doz onboard` or a closed wizard still completes it.
+    case onboard
+    /// 594 (D15, D16): a sandbox's environment prompt — rendered (read), or its per-sandbox layer set
+    /// (`prompt`, `promptMode`) or cleared (`clearPrompt`).
+    case agentPrompt = "agent-prompt"
 
     /// Operations that only read — answered from the store in-process when no host is running.
     public var isReadOnly: Bool {
         switch self {
-        case .ping, .ls, .inspect, .pointList, .imageList, .keyList, .accountList, .imageTree: true
+        case .ping, .ls, .inspect, .pointList, .imageList, .keyList, .accountList, .imageTree, .prepareStatus: true
         case .netPolicy: false        // decided per request (a change needs the host)
         default: false
         }
@@ -79,6 +93,12 @@ public struct CreateOptions: Codable, Equatable, Sendable {
     public var subnet: String?
     /// 588: the account a proxied sandbox uses — a name, `none`, or nil (follow the store default).
     public var account: String?
+    /// 594 (D16): this sandbox's own layer of the environment prompt, and whether it is appended to
+    /// the template (`append`, the default) or replaces it (`replace`).
+    public var agentPrompt: String?
+    public var agentPromptMode: String?
+    /// 594 (D9): the project file this sandbox was made from (`doz up` in a folder with `doz_project.yaml`).
+    public var project: String?
 
     public init(image: String, cpus: Int? = nil, memoryMiB: UInt64? = nil, workspace: String? = nil,
                 network: String? = nil, subnet: String? = nil, account: String? = nil) {
@@ -170,6 +190,14 @@ public struct HostRequest: Codable, Equatable, Sendable {
     public var withSessions: Bool?
     /// 593 `duplicate`: the overrides (the new name is `newName`, a restore point `point`).
     public var duplicate: DuplicateOptions?
+    /// 594 `prepare` / `onboard` / `prepare-cancel`: the built-in images; who asked (shown in the
+    /// preparation's `requestedBy`).
+    public var images: [String]?
+    public var requestedBy: String?
+    /// 594 `agent-prompt`: the sandbox's own layer (text) and its mode (`append` | `replace`), or clear it.
+    public var prompt: String?
+    public var promptMode: String?
+    public var clearPrompt: Bool?
 
     public init(_ op: HostOp, name: String? = nil) {
         v = HostProtocol.version
@@ -401,6 +429,11 @@ public struct SandboxDetail: Codable, Equatable, Sendable {
     public var hasRootDisk: Bool
     /// The session `up` / `attach` use when none is named.
     public var defaultSession: String
+    /// 594 (D15, D16): the environment prompt the agent gets at its next session (nil: this image
+    /// runs no agent).
+    public var agentPrompt: AgentPromptReport?
+    /// 594: the project file it was made from (`doz_project.yaml`), when it was.
+    public var project: String?
 }
 
 /// One guest session (`deckhold ls`).
@@ -466,6 +499,9 @@ public struct ImageRow: Codable, Equatable, Sendable {
     public var allocatedBytes: Int64?
     public var note: String?
     public var fromSandbox: String?
+    /// 594: a built-in image is prepared for THIS build (its bake key, the kernel, the guest init
+    /// disk) — `baked` also counts an older build's bake. nil for a template.
+    public var current: Bool?
 }
 
 /// `key ls` (never the secret).

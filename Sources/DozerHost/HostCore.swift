@@ -67,14 +67,30 @@ public actor HostCore {
     private var creating: Set<String> = []
     /// 590: `open-session` is serialized per sandbox.
     let sessionGate = KeyedGate()
+    /// 594: the image preparation running per image (single-flight), and the recent finished ones.
+    var preparations: [String: Preparation] = [:]
+    var recentPreparations: [Preparation] = []
+    /// The work of a preparation (tests substitute one that needs no VM or network).
+    var preparationRunner: PreparationRunner = HostCore.runPreparation
+    public typealias PreparationRunner = @Sendable (String, DozerStore, @escaping @Sendable (HostEvent) -> Void) async throws -> Void
+    /// Whether an image is already prepared for this build (tests substitute one).
+    var preparedCheck: @Sendable (String, DozerStore) -> Bool = HostCore.isPrepared
+
+    /// Tests: the preparation work and the "already prepared" check.
+    public func setPreparationRunner(_ r: @escaping PreparationRunner, prepared: @escaping @Sendable (String, DozerStore) -> Bool) {
+        preparationRunner = r
+        preparedCheck = prepared
+    }
 
     public init(store: DozerStore, readOnly: Bool, version: String, services: CredentialServices = .system,
-                newStoreKeepalive: Bool = false) {
+                newStoreKeepalive: Bool = false, newStoreDefaultAccount: String? = nil) {
         self.store = store
         self.readOnly = readOnly
         self.version = version
         self.services = services
-        self.accountStore = AccountStore(store: store, newStoreKeepalive: newStoreKeepalive)
+        // 594: a store with no accounts.json follows the settings' `defaults.account`.
+        let defaultAccount = newStoreDefaultAccount ?? DozerSettings.load().string(SettingKey.defaultAccount) ?? "mac"
+        self.accountStore = AccountStore(store: store, newStoreKeepalive: newStoreKeepalive, newStoreDefault: defaultAccount)
         if readOnly {
             metrics = nil
             metricsRun = 0
@@ -232,6 +248,12 @@ public actor HostCore {
         return row
     }
 
+    /// 594: a preparation's metrics row (no sandbox: the image's).
+    func recordPreparation(_ image: String, started: Date, t0: ContinuousClock.Instant, ok: Bool, error: String?) {
+        metrics?.record(run: metricsRun, action: "prepare", sandbox: nil, image: image, startedAt: started, durationMs: ms(since: t0),
+                        ok: ok, error: error)
+    }
+
     private func finishAction(_ m: Managed, _ row: Int64?, _ t0: ContinuousClock.Instant, ok: Bool, error: Error? = nil,
                               phaseAfter: String? = nil, detail: [String: String] = [:]) {
         guard let row, let metrics else { return }
@@ -297,7 +319,7 @@ public actor HostCore {
             return .failure(HostError(.version, "this host speaks protocol \(HostProtocol.version), the request is \(r.v) — restart it (doz host stop)"))
         }
         if readOnly && !(r.op.isReadOnly || (r.op == .netPolicy && isPolicyQuery(r)) || r.op == .sessions || (r.op == .netLog && r.follow != true)
-                         || (r.op == .console && r.follow != true)) {
+                         || (r.op == .console && r.follow != true) || (r.op == .agentPrompt && r.prompt == nil && r.clearPrompt != true)) {
             return .failure(HostError(.unavailable, "\(r.op.rawValue) needs the host"))
         }
         do {
@@ -442,6 +464,16 @@ public actor HostCore {
             // 591: the lines so far (`--follow` is the server's stream).
             let m = try get(r.name)
             return try JSONValue(encoding: BootConsoleLines(name: m.name, lines: BootConsoleTail.lines(of: m.sandbox.bootLogURL)))
+        case .prepare:
+            return try JSONValue(encoding: try await prepare(r, emit: emit, onboarding: false))
+        case .onboard:
+            return try JSONValue(encoding: try await prepare(r, emit: emit, onboarding: true))
+        case .prepareStatus:
+            return try JSONValue(encoding: try prepareStatus())
+        case .prepareCancel:
+            return try JSONValue(encoding: try cancelPreparations(r))
+        case .agentPrompt:
+            return try JSONValue(encoding: try agentPrompt(r))
         case .attach, .events, .hostStop:
             throw HostError(.invalid, "\(r.op.rawValue) is handled by the server")
         }
@@ -493,6 +525,16 @@ public actor HostCore {
         } else if let a = o.account, a != "none", a != "default" {
             throw HostError(.invalid, "--account needs a proxied network (agent, open, …): the credential lives in the host's proxy")
         }
+        // 594: its own layer of the environment prompt, and the project file it came from.
+        if let text = o.agentPrompt {
+            guard text.utf8.count <= SandboxConfig.maximumAgentPromptBytes else { throw HostError(.invalid, "an agent prompt is at most 16 KiB") }
+            cfg.agentPrompt = text
+        }
+        if let mode = o.agentPromptMode {
+            guard ["append", "replace"].contains(mode) else { throw HostError(.invalid, "the agent prompt's mode is append or replace") }
+            cfg.agentPromptMode = mode
+        }
+        cfg.project = o.project
         try cfg.write(store.configFile(name))
         let m = try adopt(cfg)
         metrics?.record(run: metricsRun, action: "create", sandbox: name, image: image, phaseAfter: "off", startedAt: Date(), durationMs: 0,
@@ -589,6 +631,17 @@ public actor HostCore {
             throw HostError(.invalid, "not a lifecycle operation: \(op.rawValue)")
         }
         guard let action else { return await result(false) }
+
+        // 594 (D4): a cold start that needs an image being prepared — or never prepared — joins that
+        // preparation (one download, one bake, whoever asks), its progress on this caller's stream.
+        if op == .start, before == .off || before == .failed, let image = await imageToPrepare(m) {
+            let p = try preparation(for: image, requestedBy: "start \(m.name)")
+            let first = p.info.requestedBy.first ?? ""
+            emit(HostEvent(kind: .note, sandbox: m.name, text: first == "start \(m.name)"
+                           ? "\(image) is not prepared in this store yet — preparing it first (once: the kernel, the base image, the bake)"
+                           : "\(image) is being prepared (\(first) started it) — joining it: one download, one bake"))
+            try await follow(p, emit: emit)
+        }
 
         // Forward this sandbox's progress to the caller while the operation runs.
         let stream = sb.events()
@@ -691,6 +744,8 @@ public actor HostCore {
     /// Hibernate everything with a VM (quit = Hibernate, owner ruling 2026-09-25) — `host stop`
     /// and a SIGTERM. The next wake restores each with its sessions and pids.
     public func prepareAllForExit() async {
+        // 594: a preparation ends with the host (a bake caches nothing until it is complete).
+        await cancelAllPreparations()
         var rows: [(Managed, Int64?)] = []
         for m in managed.values {
             let before = await m.sandbox.phase
@@ -751,7 +806,7 @@ public actor HostCore {
         let list = try await m.sandbox.sessions()
         let live = Set(list.filter { !$0.isEnded }.map(\.name))
         let all = Set(list.map(\.name))
-        let argv: [String]
+        var argv: [String]
         let session: String
         if let s = r.session {
             try GuestCommand.validateSessionName(s)
@@ -775,6 +830,18 @@ public actor HostCore {
             if live.contains(d.name) { return SessionOpened(name: m.name, session: d.name, created: false) }
             session = d.name
             argv = d.argv
+        }
+        // 594 (D15): the environment prompt and the dozer skill, rendered from the sandbox's current
+        // facts and written into the guest before the program starts. pi's own session names the
+        // facts file (pi reads a file given to --append-system-prompt); Claude Code's launcher reads it.
+        if let report = agentPromptReport(m) {
+            if report.enabled, let error = report.error {
+                throw HostError(.invalid, "the agent prompt does not render — \(error). Fix it, or turn the prompt off: doz config set agent.prompt false")
+            }
+            await deliverAgentPrompt(m, report)
+            if report.agent == "pi", report.enabled, report.text != nil, argv == m.config.defaultSession.argv {
+                argv += ["--append-system-prompt", AgentPrompt.guestPromptPath]
+            }
         }
         let size = TermSize(cols: r.cols ?? 120, rows: r.rows ?? 36)
         let workdir: String? = m.config.spec.imageSpec == nil && m.config.workspace != nil ? DozerImages.workspaceGuestPath : nil
@@ -830,7 +897,8 @@ public actor HostCore {
                              restorePoints: m.sandbox.restorePoints(), credentials: credentials(m),
                              directory: m.sandbox.layout.sandboxDirectory.path, bootLog: m.sandbox.bootLogURL.path,
                              snapshotBytes: Int64(status.snapshotBytes > 0 ? status.snapshotBytes : fileSize(m.sandbox.layout.snapshot)),
-                             hasRootDisk: m.sandbox.hasRootDisk, defaultSession: m.config.defaultSession.name)
+                             hasRootDisk: m.sandbox.hasRootDisk, defaultSession: m.config.defaultSession.name,
+                             agentPrompt: agentPromptReport(m), project: m.config.project)
     }
 
     func credentials(_ m: Managed) -> [CredentialRow] {
@@ -1080,7 +1148,7 @@ public actor HostCore {
         try DozerImages.spec(name: name, options: CreateOptions(image: "lab"), store: store).0
     }
 
-    private func images() throws -> [ImageRow] {
+    func images() throws -> [ImageRow] {
         var rows: [ImageRow] = []
         let lab = try labSpec()
         let golden = StoreLayout(spec: lab).golden(for: lab)
@@ -1095,6 +1163,8 @@ public actor HostCore {
                                  bakedAt: baked?.manifest.bakedAt, allocatedBytes: baked?.manifest.allocatedBytes,
                                  note: imageSpec.verify.first?.expect.map { "\(name) \($0)" }, fromSandbox: nil))
         }
+        // 594: prepared for this build (the key it bakes now, the kernel, the guest init disk).
+        for i in rows.indices { rows[i].current = preparedCheck(rows[i].name, store) }
         for c in store.layout("_").customImages() {
             rows.append(ImageRow(name: c.name, kind: "custom", baked: true, key: c.key, bakedAt: c.createdAt, allocatedBytes: c.allocatedBytes,
                                  note: c.note.isEmpty ? nil : c.note, fromSandbox: c.fromSandbox))
@@ -1102,36 +1172,13 @@ public actor HostCore {
         return rows
     }
 
+    /// `image bake` (594: a preparation — the one running for this image is joined, not repeated).
     private func bake(_ image: String?, emit: @escaping @Sendable (HostEvent) -> Void) async throws -> ImageRow {
         guard let image else { throw HostError(.invalid, "which image? lab, claude-code or pi") }
-        let t0 = ContinuousClock.now
-        let started = Date()
-        let tmpName = "doz-image-bake"
-        if image == "lab" {
-            // The lab's prepared disk is made by its first boot: boot a throwaway sandbox, then remove it.
-            let sb = try Sandbox(spec: try labSpec(tmpName))
-            let stream = sb.events()
-            let forward = Task { for await e in stream { if let he = HostEvent(e, sandbox: image) { emit(he) } } }
-            defer { forward.cancel() }
-            do {
-                try await sb.start()
-                try await sb.delete()
-            } catch {
-                try? await sb.delete()
-                throw error
-            }
-        } else if let imageSpec = DozerImages.imageSpec(image) {
-            var spec = try DozerImages.spec(name: tmpName, options: CreateOptions(image: image), store: store).0
-            spec.imageSpec = imageSpec
-            let sb = try Sandbox(spec: spec)
-            let stream = sb.events()
-            let forward = Task { for await e in stream { if let he = HostEvent(e, sandbox: image) { emit(he) } } }
-            defer { forward.cancel() }
-            _ = try await sb.ensureImage()
-        } else {
+        guard DozerImages.builtIn.contains(image) else {
             throw HostError(.invalid, "only the built-in images bake (lab, claude-code, pi); a custom image is saved from a restore point")
         }
-        metrics?.record(run: metricsRun, action: "bake", sandbox: nil, image: image, startedAt: started, durationMs: ms(since: t0))
+        try await follow(try preparation(for: image, requestedBy: "image bake"), emit: emit)
         guard let row = try images().first(where: { $0.name == image }) else { throw HostError(.failed, "the bake left no image") }
         return row
     }
