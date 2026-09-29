@@ -129,6 +129,11 @@ final class WebOperations: @unchecked Sendable {
             return (try? v.decode(RestorePoint.self)).map { "deleted restore point \($0.name)" } ?? "restore point deleted"
         case .pointSaveImage(_, _, let image, _):
             return "saved image \(image)"
+        case .templateCreate(let name, _, let image, _):
+            return (try? v.decode(CustomImage.self)).map { "saved \(name)'s root disk as the template \(image) (\(DozerImages.formatBytes($0.allocatedBytes)); no state disk)" }
+                ?? "saved the template \(image)"
+        case .duplicate(let name, let new, _, let o):
+            return "duplicated \(name) as \(new) (state disk \(o.copyState == true ? "copied" : "fresh")) — start it to boot"
         case .imageBake(let i):
             return "\(i) baked"
         case .imageRemove(let i):

@@ -336,6 +336,47 @@ public struct WebImage: Codable, Equatable, Sendable {
     }
 }
 
+/// 593: Images › Lineage — the host's `ImageTree`, field by field (no host path: there is none in it).
+public struct WebImageTree: Codable, Equatable, Sendable {
+    public struct Node: Codable, Equatable, Sendable {
+        public var id: Int
+        public var parent: Int?
+        public var depth: Int
+        public var kind: String
+        public var name: String
+        public var detail: String?
+        public var sandbox: String?
+        public var allocatedBytes: Int64
+        public var uniqueBytes: Int64
+        public var sharedWithParentBytes: Int64?
+        public var stateAllocatedBytes: Int64?
+
+        public init(_ n: ImageTreeNode) {
+            id = n.id
+            parent = n.parent
+            depth = n.depth
+            kind = n.kind
+            name = n.name
+            detail = n.detail
+            sandbox = n.sandbox
+            allocatedBytes = n.allocatedBytes
+            uniqueBytes = n.uniqueBytes
+            sharedWithParentBytes = n.sharedWithParentBytes
+            stateAllocatedBytes = n.stateAllocatedBytes
+        }
+    }
+
+    public var nodes: [Node]
+    public var unionBytes: Int64
+    public var milliseconds: Double
+
+    public init(_ t: ImageTree) {
+        nodes = t.nodes.map(Node.init)
+        unionBytes = t.unionBytes
+        milliseconds = t.milliseconds
+    }
+}
+
 public struct WebAccount: Codable, Equatable, Sendable {
     public var name: String
     public var kind: String

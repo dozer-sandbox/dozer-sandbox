@@ -466,6 +466,8 @@ public final class DozerWebServer: @unchecked Sendable {
             return json(try await data.network(name))
         case .images:
             return json(try await data.images())
+        case .imageTree:
+            return json(try await data.imageTree())
         case .accounts:
             return json(try await data.accounts())
         case .metrics(let q):

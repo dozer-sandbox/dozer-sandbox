@@ -27,6 +27,8 @@ final class WebActionTests: XCTestCase {
         "point-fork": #"{"action":"point-fork","sandbox":"a","point":"p1","newName":"b"}"#,
         "point-rm": #"{"action":"point-rm","sandbox":"a","point":"p1","confirm":"a"}"#,
         "point-save-image": #"{"action":"point-save-image","sandbox":"a","image":"mine"}"#,
+        "template-create": #"{"action":"template-create","sandbox":"a","image":"my-tpl","note":"node + tools"}"#,
+        "duplicate": #"{"action":"duplicate","sandbox":"a","newName":"a2","workspace":"/tmp","cpus":4,"memoryMiB":2048,"network":"locked","account":"none","copyState":true}"#,
         "image-bake": #"{"action":"image-bake","image":"claude-code"}"#,
         "image-rm": #"{"action":"image-rm","image":"mine","confirm":"mine"}"#,
         "net-policy": #"{"action":"net-policy","sandbox":"a","allow":["example.com","*.example.org"],"deny":["evil.example"]}"#,
@@ -44,7 +46,40 @@ final class WebActionTests: XCTestCase {
         .create, .start, .wake, .pause, .resume, .sleep, .deepSleep, .shutdown, .reset, .rm, .openSession,
         .pointTake, .pointRevert, .pointFork, .pointRm, .pointSaveImage, .imageBake, .imageRm, .netPolicy,
         .keyPolicy, .keyRm, .accountUse, .accountDefault, .accountKeepalive, .accountVerify, .accountRemove,
+        .templateCreate, .duplicate,
     ]
+
+    /// 593: templates and duplicates — strict, and each field mapped to the host's request.
+    func testTemplatesAndDuplicatesDecodeStrictly() throws {
+        let t = try decode(Self.samples["template-create"]!)
+        XCTAssertEqual(t.hostRequest.op, .templateCreate)
+        XCTAssertEqual(t.hostRequest.image, "my-tpl")
+        XCTAssertNil(t.hostRequest.point, "no point: the current disk")
+        XCTAssertNil(t.confirmationTarget)
+        let d = try decode(Self.samples["duplicate"]!)
+        XCTAssertEqual(d.hostRequest.newName, "a2")
+        let tmp = URL(fileURLWithPath: "/tmp").resolvingSymlinksInPath().path
+        XCTAssertEqual(d.hostRequest.duplicate, DuplicateOptions(workspace: tmp, cpus: 4, memoryMiB: 2048, network: "locked", account: "none", copyState: true))
+        XCTAssertEqual(try decode(#"{"action":"duplicate","sandbox":"a","newName":"b"}"#).hostRequest.duplicate, DuplicateOptions(),
+                       "nothing given: the source's everything, a fresh state disk")
+        XCTAssertNil(try decode(#"{"action":"duplicate","sandbox":"a","newName":"b","copyState":false}"#).hostRequest.duplicate?.copyState)
+        XCTAssertNotEqual(try decode(#"{"action":"duplicate","sandbox":"a","newName":"b"}"#).dedupeKey,
+                          try decode(#"{"action":"duplicate","sandbox":"a","newName":"c"}"#).dedupeKey, "two duplicates to two names may run together")
+        invalid(#"{"action":"template-create","sandbox":"a"}"#)                                  // no name
+        invalid(#"{"action":"template-create","sandbox":"a","image":"Bad Name"}"#)
+        invalid(#"{"action":"template-create","sandbox":"a","image":"lab"}"#)                    // a built-in's name
+        invalid(#"{"action":"template-create","sandbox":"a","image":"t","state":true}"#)         // never the state disk
+        invalid(#"{"action":"duplicate","sandbox":"a"}"#)                                        // no new name
+        invalid(#"{"action":"duplicate","sandbox":"a","newName":"a"}"#)                          // onto itself
+        invalid(#"{"action":"duplicate","sandbox":"a","newName":"B"}"#)
+        invalid(#"{"action":"duplicate","sandbox":"a","newName":"b","workspace":"relative"}"#)
+        invalid(#"{"action":"duplicate","sandbox":"a","newName":"b","workspace":"/definitely/not/here/593"}"#)
+        invalid(#"{"action":"duplicate","sandbox":"a","newName":"b","copyState":"yes"}"#)
+        invalid(#"{"action":"duplicate","sandbox":"a","newName":"b","copyState":1}"#)
+        invalid(#"{"action":"duplicate","sandbox":"a","newName":"b","cpus":0}"#)
+        invalid(#"{"action":"duplicate","sandbox":"a","newName":"b","network":"host"}"#)
+        invalid(#"{"action":"duplicate","sandbox":"a","newName":"b","image":"lab"}"#)           // not a field of duplicate
+    }
 
     func testEveryActionIsExactlyOneAllowedHostOp() throws {
         XCTAssertEqual(Set(Self.samples.keys), Set(WebAction.actionNames), "a sample for every action, and no action without one")
@@ -249,6 +284,12 @@ final class WebActionTests: XCTestCase {
         }
         XCTAssertNil(WebRoute.parse(method: .get, target: "/api/v1/actions"))
         XCTAssertNil(WebRoute.parse(method: .delete, target: "/api/v1/actions"))
+        // 593: the lineage is a GET of its own; nothing near it is a route.
+        XCTAssertEqual(WebRoute.parse(method: .get, target: "/api/v1/images/tree"), .imageTree)
+        for (m, t) in [(WebHTTPMethod.post, "/api/v1/images/tree"), (.get, "/api/v1/images/tree/"), (.get, "/api/v1/images/tree/x"),
+                       (.get, "/api/v1/images/Tree"), (.delete, "/api/v1/images/tree"), (.get, "/api/v1/images/lab")] {
+            XCTAssertNil(WebRoute.parse(method: m, target: t), t)
+        }
     }
 
     func testOperationSummariesComeFromTheResultNotThroughIt() throws {

@@ -12,6 +12,8 @@ public protocol DozerWebData: Sendable {
     func sessions(_ name: String) async throws -> [WebSessionRow]
     func network(_ name: String) async throws -> WebNetwork
     func images() async throws -> [WebImage]
+    /// 593: the lineage (the host's `image-tree`; in-process from the store when no host runs).
+    func imageTree() async throws -> WebImageTree
     func accounts() async throws -> WebAccounts
     func metrics(_ q: WebMetricsQuery) async throws -> WebMetrics
     /// Every row of the filter, as CSV (cells that a spreadsheet would run as a formula are defused).
@@ -198,6 +200,10 @@ public final class HostWebData: DozerWebData, @unchecked Sendable {
 
     public func images() async throws -> [WebImage] {
         try await query(HostRequest(.imageList)).0.decode([ImageRow].self).map(WebImage.init)
+    }
+
+    public func imageTree() async throws -> WebImageTree {
+        WebImageTree(try await query(HostRequest(.imageTree)).0.decode(ImageTree.self))
     }
 
     public func accounts() async throws -> WebAccounts {

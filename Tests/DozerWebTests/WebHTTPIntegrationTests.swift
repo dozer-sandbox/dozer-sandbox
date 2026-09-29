@@ -205,6 +205,22 @@ final class WebHTTPIntegrationTests: XCTestCase {
         }
     }
 
+    /// 593: Images › Lineage — a session-only GET, projected (no host path), depth-first.
+    func testTheImageTreeIsASessionOnlyProjection() async throws {
+        try await start()
+        XCTAssertEqual(try get("/api/v1/images/tree").status, 401)
+        let (cookie, csrf) = try signIn()
+        let r = try get("/api/v1/images/tree", ["Cookie": cookie])
+        XCTAssertEqual(r.status, 200, r.text)
+        let t = try JSONDecoder().decode(WebImageTree.self, from: r.body)
+        XCTAssertEqual(t.nodes.map { "\($0.depth) \($0.kind) \($0.name)" }, ["0 base OCI base", "1 image pi", "2 sandbox demo"])
+        XCTAssertEqual(t.nodes[2].sharedWithParentBytes, 900 << 20)
+        XCTAssertFalse(r.text.contains("/s/"), "no host path reaches the browser")
+        let post = try get("/api/v1/images/tree", ["Cookie": cookie, "Origin": origin, "X-Doz-CSRF": csrf, "Content-Type": "application/json"],
+                           method: "POST", body: "{}")
+        XCTAssertEqual(post.status, 404, "not a route")
+    }
+
     // MARK: server-sent events
 
     func testTheStreamSaysHelloThenChangedAndActivity() async throws {
@@ -352,6 +368,16 @@ final class FakeData: DozerWebData, @unchecked Sendable {
     }
 
     func images() async throws -> [WebImage] { [] }
+    /// 593: base → image → a sandbox, as the host would measure it.
+    func imageTree() async throws -> WebImageTree {
+        WebImageTree(ImageTree(disks: [
+            .init(path: "/s/images/bases/b/root.ext4", kind: .base, name: "base f97ac66c1d54", allocatedBytes: 300 << 20, uniqueBytes: 10 << 20),
+            .init(path: "/s/images/pi/k/root.ext4", kind: .image, name: "pi@bf46815674ce", parentPath: "/s/images/bases/b/root.ext4",
+                  allocatedBytes: 900 << 20, uniqueBytes: 600 << 20, sharedWithParentBytes: 290 << 20),
+            .init(path: "/s/sandboxes/demo/root.ext4", kind: .sandboxRoot, name: "sandbox demo", sandbox: "demo",
+                  parentPath: "/s/images/pi/k/root.ext4", allocatedBytes: 950 << 20, uniqueBytes: 50 << 20, sharedWithParentBytes: 900 << 20),
+        ], unionBytes: 960 << 20, milliseconds: 12))
+    }
     func accounts() async throws -> WebAccounts { WebAccounts(accounts: [], defaultAccount: "mac", keepalive: false) }
     private(set) var metricsQueries: [WebMetricsQuery] = []
     func metrics(_ q: WebMetricsQuery) async throws -> WebMetrics {

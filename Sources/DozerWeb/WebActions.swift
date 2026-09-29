@@ -22,6 +22,10 @@ public enum WebAction: Equatable, Sendable {
     case pointFork(name: String, point: String, newName: String)
     case pointRemove(name: String, point: String)
     case pointSaveImage(name: String, point: String?, image: String, note: String?)
+    /// 593: a template (root disk only) from the current disk (any phase) or a restore point.
+    case templateCreate(name: String, point: String?, image: String, note: String?)
+    /// 593: a new sandbox from this one's disk, with overrides; the state disk fresh unless copied.
+    case duplicate(name: String, newName: String, point: String?, options: DuplicateOptions)
     case imageBake(String)
     case imageRemove(String)
     case netPolicy(name: String, edit: WebPolicyEdit)
@@ -46,7 +50,7 @@ public enum WebAction: Equatable, Sendable {
         switch self {
         case .create(let n, _), .lifecycle(_, let n), .openSession(let n, _, _), .pointTake(let n, _, _), .pointRevert(let n, _),
              .pointFork(let n, _, _), .pointRemove(let n, _), .pointSaveImage(let n, _, _, _), .netPolicy(let n, _), .keyPolicy(let n, _),
-             .keyRemove(let n, _), .accountUse(let n, _):
+             .keyRemove(let n, _), .accountUse(let n, _), .templateCreate(let n, _, _, _), .duplicate(let n, _, _, _):
             return n
         case .imageBake, .imageRemove, .accountDefault, .accountKeepalive, .accountVerify, .accountRemove:
             return nil
@@ -70,7 +74,7 @@ public enum WebAction: Equatable, Sendable {
     /// (and session, point, image or account). A double-clicked "open session" is one operation.
     public var dedupeKey: String {
         let r = hostRequest
-        return [r.op.rawValue, r.name ?? "", r.session ?? "", r.point ?? r.pointName ?? "", r.image ?? "", r.account ?? ""].joined(separator: "|")
+        return [r.op.rawValue, r.name ?? "", r.session ?? "", r.point ?? r.pointName ?? "", r.image ?? "", r.account ?? "", r.newName ?? ""].joined(separator: "|")
     }
 
     /// A short label for the progress line ("deep-sleep lab1").
@@ -116,6 +120,18 @@ public enum WebAction: Equatable, Sendable {
             r.point = p
             r.image = image
             r.note = note
+            return r
+        case .templateCreate(let n, let p, let image, let note):
+            var r = HostRequest(.templateCreate, name: n)
+            r.point = p
+            r.image = image
+            r.note = note
+            return r
+        case .duplicate(let n, let new, let p, let o):
+            var r = HostRequest(.duplicate, name: n)
+            r.newName = new
+            r.point = p
+            r.duplicate = o
             return r
         case .imageBake(let i):
             var r = HostRequest(.imageBake)
@@ -176,6 +192,8 @@ public enum WebAction: Equatable, Sendable {
             "point-fork": ["sandbox", "point", "newName"],
             "point-rm": ["sandbox", "point", "confirm"],
             "point-save-image": ["sandbox", "point", "image", "note"],
+            "template-create": ["sandbox", "point", "image", "note"],
+            "duplicate": ["sandbox", "newName", "point", "workspace", "cpus", "memoryMiB", "network", "account", "copyState"],
             "image-bake": ["image"],
             "image-rm": ["image", "confirm"],
             "net-policy": ["sandbox", "preset", "allow", "deny", "remove"],
@@ -221,6 +239,23 @@ public enum WebAction: Equatable, Sendable {
             a = .pointRemove(name: try f.sandbox("sandbox"), point: try f.required(f.pointRef("point"), "point"))
         case "point-save-image":
             a = .pointSaveImage(name: try f.sandbox("sandbox"), point: try f.pointRef("point"), image: try f.customImage("image"), note: try f.note("note"))
+        case "template-create":
+            let image = try f.customImage("image")
+            guard !DozerImages.builtIn.contains(image) else { throw Invalid("image: a built-in image's name is taken") }
+            a = .templateCreate(name: try f.sandbox("sandbox"), point: try f.pointRef("point"), image: image, note: try f.note("note"))
+        case "duplicate":
+            var copy: Bool?
+            if let v = d["copyState"], !(v is NSNull) {
+                guard let b = v as? Bool, CFGetTypeID(v as CFTypeRef) == CFBooleanGetTypeID() else { throw Invalid("copyState: true or false") }
+                copy = b ? true : nil
+            }
+            let o = DuplicateOptions(workspace: try f.workspace("workspace"), cpus: try f.int("cpus", 1...64),
+                                     memoryMiB: try f.int("memoryMiB", 256...262_144).map(UInt64.init),
+                                     network: try f.oneOf("network", ["agent", "bake", "locked", "open", "nat", "none"]),
+                                     account: try f.accountRef("account", allowDefault: true), copyState: copy)
+            let name = try f.sandbox("sandbox"), new = try f.sandbox("newName")
+            guard name != new else { throw Invalid("newName: a different name") }
+            a = .duplicate(name: name, newName: new, point: try f.pointRef("point"), options: o)
         case "image-bake":
             a = .imageBake(try f.required(f.oneOf("image", ["lab", "claude-code", "pi"]), "image"))
         case "image-rm":

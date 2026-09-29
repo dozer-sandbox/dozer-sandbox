@@ -30,6 +30,7 @@ public enum WebRoute: Equatable, Sendable {
     case sandboxSessions(String)   // GET /api/v1/sandboxes/{name}/sessions
     case sandboxNetwork(String)    // GET /api/v1/sandboxes/{name}/network
     case images                    // GET /api/v1/images
+    case imageTree                 // GET /api/v1/images/tree   (593: the lineage, with sizes)
     case accounts                  // GET /api/v1/accounts
     case metrics(WebMetricsQuery)  // GET /api/v1/metrics?image=&days=&steps=
     case metricsCSV(WebMetricsQuery) // GET /api/v1/metrics.csv?…  (a download)
@@ -101,6 +102,8 @@ public enum WebRoute: Equatable, Sendable {
             case "settings": return .settings
             default: return nil
             }
+        case 2 where rest == ["images", "tree"]:
+            return .imageTree
         case 2 where rest[0] == "sandboxes" && isSandboxName(rest[1]):
             return .sandbox(rest[1])
         case 3 where rest[0] == "sandboxes" && isSandboxName(rest[1]):
