@@ -223,7 +223,7 @@ connection against a policy and logs it.
 
 | `--network` | allows | default for |
 |---|---|---|
-| `agent` | Anthropic's API and sign-in hosts, plus package registries | `claude-code`, `pi` |
+| `agent` | Anthropic's API and sign-in hosts; what Claude Code reaches on its own (`downloads.claude.ai` for updates, its two Datadog error-reporting intakes `http-intake.logs.us5.datadoghq.com` and `browser-intake-us5-datadoghq.com`); GitHub over HTTPS for git and Claude Code's plugin marketplace (`github.com`, `raw.githubusercontent.com`, `codeload.github.com`, `objects.githubusercontent.com`); plus package registries | `claude-code`, `pi` |
 | `bake` | package registries only (npm, apt, apk, PyPI) | `lab` |
 | `locked` | nothing | |
 | `open` | everything, still proxied and logged | |

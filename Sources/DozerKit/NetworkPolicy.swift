@@ -46,8 +46,10 @@ public struct NetworkPolicy: Sendable, Codable, Equatable {
     /// Package registries only — what a bake needs, and nothing else.
     public static let bake = NetworkPolicy(defaultAction: .deny, rules: registryRules, preset: "bake")
 
-    /// An agent: its model API and login, plus the package registries.
-    public static let agent = NetworkPolicy(defaultAction: .deny, rules: agentAPIRules + registryRules, preset: "agent")
+    /// An agent: its model API and login, what Claude Code itself reaches (updates, error reporting,
+    /// GitHub for git and its plugin marketplace), plus the package registries.
+    public static let agent = NetworkPolicy(defaultAction: .deny, rules: agentAPIRules + claudeCodeRules + gitHubRules + registryRules,
+                                            preset: "agent")
 
     /// Everything allowed — but still proxied, DNS answered on the Mac, and every connection logged.
     public static let open = NetworkPolicy(defaultAction: .allow, rules: [], preset: "open")
@@ -61,6 +63,23 @@ public struct NetworkPolicy: Sendable, Codable, Equatable {
         EgressRule(host: "console.anthropic.com", note: "Claude sign-in"),
         EgressRule(host: "platform.claude.com", note: "Claude sign-in"),
         EgressRule(host: "claude.ai", note: "Claude sign-in"),
+    ]
+
+    /// 594 (owner: "there are some legit requests that should be allowed"): what Claude Code reaches on
+    /// its own, measured in a claude-sandbox's net log and read from Claude Code 2.1.227's binary.
+    /// Exact hosts only — never `*.datadoghq.com`: Claude Code's two Datadog intakes are both US5.
+    public static let claudeCodeRules: [EgressRule] = [
+        EgressRule(host: "downloads.claude.ai", ports: [443], note: "Claude Code updates"),
+        EgressRule(host: "http-intake.logs.us5.datadoghq.com", ports: [443], note: "Claude Code error reporting"),
+        EgressRule(host: "browser-intake-us5-datadoghq.com", ports: [443], note: "Claude Code error reporting"),
+    ]
+
+    /// GitHub over HTTPS: git, and Claude Code's official plugin marketplace (fetched at startup).
+    public static let gitHubRules: [EgressRule] = [
+        EgressRule(host: "github.com", ports: [443], note: "GitHub (git, Claude Code plugins)"),
+        EgressRule(host: "raw.githubusercontent.com", ports: [443], note: "GitHub (git, Claude Code plugins)"),
+        EgressRule(host: "codeload.github.com", ports: [443], note: "GitHub (git, Claude Code plugins)"),
+        EgressRule(host: "objects.githubusercontent.com", ports: [443], note: "GitHub (git, Claude Code plugins)"),
     ]
 
     /// npm, Debian/Ubuntu apt, Alpine apk, PyPI.

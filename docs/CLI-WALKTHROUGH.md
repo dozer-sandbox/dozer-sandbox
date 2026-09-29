@@ -205,7 +205,7 @@ To keep Claude Code's own permission prompts, start it with
 ```bash
 doz exec doz-try -- printenv ANTHROPIC_API_KEY     # doz_cred_… , a placeholder, not your key
 doz net log doz-try                                # allowed/denied connections, metadata only
-doz exec doz-try -- getent hosts example.com       # nothing: the agent policy allows only Anthropic + package registries, so the name doesn't resolve
+doz exec doz-try -- getent hosts example.com       # nothing: the agent policy allows only Anthropic, Claude Code's own hosts, GitHub + package registries, so the name doesn't resolve
 doz net log doz-try --denied
 ```
 

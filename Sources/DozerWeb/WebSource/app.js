@@ -882,7 +882,7 @@ async function createDialog() {
     { name: 'image', label: 'Image', type: 'select', value: setting('defaults.image', 'lab'),
       options: images.length ? images.map((i) => [i.name, i.name + (i.kind === 'custom' ? ' (template)' : '')]) : ['lab', 'claude-code', 'pi'] },
     { name: 'network', label: 'Network', type: 'select', value: '',
-      options: [['', 'default (per image, Settings)'],['agent', 'agent — proxied, Anthropic + registries'], ['bake', 'bake — proxied, package registries'],
+      options: [['', 'default (per image, Settings)'],['agent', 'agent — proxied, Anthropic, Claude Code, GitHub + registries'], ['bake', 'bake — proxied, package registries'],
         ['locked', 'locked — proxied, nothing'], ['open', 'open — proxied, everything (logged)'], ['nat', 'nat — a real interface (vmnet)'], ['none', 'none']] },
     { name: 'account', label: 'Account', type: 'select', value: '',
       options: [['', 'the store default'], ['none', 'none'], ...accounts.accounts.map((a) => [a.name, a.name + ' (' + a.kind + ')'])] },

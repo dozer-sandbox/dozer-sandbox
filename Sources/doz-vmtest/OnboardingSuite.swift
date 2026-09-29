@@ -236,6 +236,32 @@ func cliOnboardingSuite(binary: String) async {
     check(c.sessions("cc").first { $0.name == "claude" }?.command == "claude", "the session's command stays `claude` (the launcher adds it)")
     c.run(["rm", "cc", "--yes"])
 
+    // 594 (owner: "there are some legit requests that should be allowed"): the agent preset holds what
+    // Claude Code reaches on its own — updates, its error reporting, GitHub (plugin marketplace).
+    print("cli: a fresh claude-code sandbox's startup — no denied connections (the agent preset)")
+    let fk = "sk-ant-api03-DOZFAKE" + String(repeating: "n", count: 40)     // a FAKE key: the API answers 401
+    r = c.run(["account", "add", "fk", "--api-key", "--no-verify", "--force"], stdin: Data((fk + "\n").utf8))
+    check(r.code == 0, "account add fk --api-key (a fake key, the memory keychain)")
+    let upAt = Date()
+    r = c.run(["up", "cn", "--image", "claude-code", "--account", "fk", "--detach"], timeout: 900)
+    check(r.code == 0, "up cn --image claude-code --account fk: Claude Code starts in its session (exit \(r.code))")
+    // And started non-interactively: `claude -p` runs its startup, then fails at the API (a fake key).
+    // (stdin from /dev/null: -p off a terminal otherwise waits for stdin to end.)
+    r = c.run(["exec", "cn", "--timeout", "60", "--", "sh", "-c", "claude -p 'say ok' </dev/null"], timeout: 90)
+    print("  claude -p: exit \(r.code)")
+    // Its reporting is batched (flushed every 15–60 s): a minute and a half of both running.
+    let waitLeft = 90 - Date().timeIntervalSince(upAt)
+    if waitLeft > 0 { try? await Task.sleep(for: .seconds(waitLeft)) }
+    let seen = c.json(["net", "log", "cn"], [ConnectionRecord].self) ?? []
+    let refused = c.json(["net", "log", "cn", "--denied"], [ConnectionRecord].self)
+    print("  connections: " + Set(seen.map { "\($0.target) \($0.verdict.rawValue)" }).sorted().joined(separator: ", "))
+    check(seen.contains { $0.host == "api.anthropic.com" }, "Claude Code reached the API (\(seen.count) connection(s) logged)")
+    check(refused != nil && refused!.isEmpty,
+          "doz net log cn --denied: nothing denied" + ((refused ?? []).isEmpty ? "" : " — " + Set(refused!.map(\.target)).sorted().joined(separator: ", ")))
+    check(!c.run(["net", "log", "cn"]).out.contains(fk) && !hostLog(c).contains(fk), "the fake key is in no log")
+    c.run(["rm", "cn", "--yes"])
+    c.run(["account", "rm", "fk", "--force"])
+
     print("cli: Ctrl-C detaches onboarding; --cancel cancels (D3)")
     try? FileManager.default.removeItem(at: c.store.appendingPathComponent("images/pi"))
     let ob = try? AttachedClient(c, ["onboard", "--images", "pi", "--account", "later", "--yes"])
