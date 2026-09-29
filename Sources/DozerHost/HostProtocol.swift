@@ -54,11 +54,18 @@ public enum HostOp: String, Codable, Sendable, CaseIterable {
     /// 593: a new sandbox from an existing one's disk (or a restore point), with overrides
     /// (`DuplicateOptions`); the state disk starts fresh unless `copyState`.
     case duplicate
+    /// 593 §9 (S5): a session's last SAVED screen (`SavedScreens`: VT + text + what is known) — read
+    /// from the sandbox's directory in any phase; nothing in the guest is asked.
+    case sessionScreen = "session-screen"
+    /// 593 §9 (S1): a sandbox's terminal layout as the web UI last left it (`TerminalLayout`), and its
+    /// change. UI state kept beside `doz.json`; never a VM, never a secret.
+    case terminalLayout = "terminal-layout"
+    case terminalLayoutSet = "terminal-layout-set"
 
     /// Operations that only read — answered from the store in-process when no host is running.
     public var isReadOnly: Bool {
         switch self {
-        case .ping, .ls, .inspect, .pointList, .imageList, .keyList, .accountList, .imageTree: true
+        case .ping, .ls, .inspect, .pointList, .imageList, .keyList, .accountList, .imageTree, .sessionScreen, .terminalLayout: true
         case .netPolicy: false        // decided per request (a change needs the host)
         default: false
         }
@@ -170,6 +177,8 @@ public struct HostRequest: Codable, Equatable, Sendable {
     public var withSessions: Bool?
     /// 593 `duplicate`: the overrides (the new name is `newName`, a restore point `point`).
     public var duplicate: DuplicateOptions?
+    /// 593 `terminal-layout-set`: the layout (nil clears it).
+    public var layout: TerminalLayout?
 
     public init(_ op: HostOp, name: String? = nil) {
         v = HostProtocol.version
@@ -414,6 +423,12 @@ public struct SessionRow: Codable, Equatable, Sendable {
     public var command: String
     public var exitCode: Int32?
     public var ended: Bool
+    /// 593 §9: this row comes from the SAVED screen (the sandbox is not running — S5), not the guest.
+    public var saved: Bool?
+    /// 593 §9: when the session's screen was last saved, and why (`pause`, `sleep`, `hibernate`,
+    /// `shutdown`, `periodic`) — nil when it has none.
+    public var savedAt: Date?
+    public var savedReason: String?
 
     public init(_ s: SessionInfo) {
         name = s.name
@@ -425,6 +440,60 @@ public struct SessionRow: Codable, Equatable, Sendable {
         command = s.command
         exitCode = s.exitCode
         ended = s.isEnded
+    }
+
+    /// A saved screen as a row (the sandbox is not running).
+    public init(saved i: SavedScreenInfo) {
+        name = i.session
+        pid = i.pid
+        cols = i.cols
+        rows = i.rows
+        clients = 0
+        screen = i.screen
+        command = i.command
+        exitCode = i.exitCode
+        ended = i.ended
+        saved = true
+        savedAt = i.savedAt
+        savedReason = i.reason
+    }
+}
+
+/// 593 §9 (S5): `session-screen` — a session's last saved screen.
+public struct SessionScreen: Codable, Equatable, Sendable {
+    public var name: String
+    public var session: String
+    public var savedAt: Date
+    public var reason: String
+    public var cols: UInt16?
+    public var rows: UInt16?
+    public var screen: String?
+    public var command: String
+    public var ended: Bool
+    public var exitCode: Int32?
+    public var endedAt: Date?
+    public var truncated: Bool
+    /// The screen as plain text (control characters removed): safe to print.
+    public var text: String
+    /// The SNAPSHOT: VT bytes that redraw the screen on a blank terminal (guest bytes — render them in a
+    /// terminal engine, never print them to one).
+    public var vt: Data
+
+    public init(name: String, _ s: SavedScreen) {
+        self.name = name
+        session = s.info.session
+        savedAt = s.info.savedAt
+        reason = s.info.reason
+        cols = s.info.cols
+        rows = s.info.rows
+        screen = s.info.screen
+        command = s.info.command
+        ended = s.info.ended
+        exitCode = s.info.exitCode
+        endedAt = s.info.endedAt
+        truncated = s.info.truncated
+        text = s.text
+        vt = s.vt
     }
 }
 

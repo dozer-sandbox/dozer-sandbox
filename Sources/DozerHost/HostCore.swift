@@ -171,6 +171,8 @@ public actor HostCore {
                 try? p.write(to: layout.persistedState)
                 m.config.diedWithHostAt = Date()
                 try? m.config.write(store.configFile(m.name))
+                // 593 §9: its sessions died too — each saved screen (the last periodic one) is its last.
+                SavedScreens.markEnded(layout)
                 note(m.name, "was running when the previous host died — its programs are gone; the next start checks its disk (e2fsck)")
                 metrics?.record(run: metricsRun, action: "died with host", sandbox: m.name, image: m.config.image,
                                 phaseBefore: "running", phaseAfter: "off", startedAt: Date(), durationMs: nil, ok: false)
@@ -296,8 +298,11 @@ public actor HostCore {
         guard r.v <= HostProtocol.version else {
             return .failure(HostError(.version, "this host speaks protocol \(HostProtocol.version), the request is \(r.v) — restart it (doz host stop)"))
         }
+        // 593: `terminal-layout-set` is answered in-process too: it writes one small file of the web UI's
+        // state beside doz.json (never a VM, never a secret — like the UI's doz.toml), and a host is not
+        // started to write it. With a host running, the host writes it (serialised with `rm`).
         if readOnly && !(r.op.isReadOnly || (r.op == .netPolicy && isPolicyQuery(r)) || r.op == .sessions || (r.op == .netLog && r.follow != true)
-                         || (r.op == .console && r.follow != true)) {
+                         || (r.op == .console && r.follow != true) || r.op == .terminalLayoutSet) {
             return .failure(HostError(.unavailable, "\(r.op.rawValue) needs the host"))
         }
         do {
@@ -385,11 +390,25 @@ public actor HostCore {
         case .inspect:
             return try JSONValue(encoding: try await detail(try get(r.name)))
         case .sessions:
+            return try JSONValue(encoding: try await sessionRows(try get(r.name)))
+        case .sessionScreen:
+            // 593 §9 (S5): from the sandbox's directory, in any phase — nothing in the guest is asked.
             let m = try get(r.name)
-            guard await m.sandbox.phase == .running else {
-                throw HostError(.invalidPhase, "\(m.name) is \(PhaseName.label(await effectivePhase(m))) — its sessions are listed while it runs")
+            guard let s = r.session else { throw HostError(.invalid, "which session? (doz sessions \(m.name) --screen SESSION)") }
+            try GuestCommand.validateSessionName(s)
+            guard let saved = SavedScreens.read(m.sandbox.layout, session: s) else {
+                throw HostError(.notFound, "no saved screen of \(s) in \(m.name) — screens are saved when it pauses, sleeps, hibernates or shuts down, and every few minutes while it runs")
             }
-            return try JSONValue(encoding: try await m.sandbox.sessions().map(SessionRow.init))
+            return try JSONValue(encoding: SessionScreen(name: m.name, saved))
+        case .terminalLayout:
+            let m = try get(r.name)
+            guard let l = TerminalLayout.read(store, m.name) else { return .null }
+            return try JSONValue(encoding: l)
+        case .terminalLayoutSet:
+            let m = try get(r.name)
+            try TerminalLayout.write(r.layout, store, m.name)
+            guard let l = TerminalLayout.read(store, m.name) else { return .null }
+            return try JSONValue(encoding: l)
         case .openSession:
             return try JSONValue(encoding: try await openSession(r))
         case .exec:
@@ -606,6 +625,9 @@ public actor HostCore {
         for _ in 0..<8 { await Task.yield() }
         forward.cancel()
         finishAction(m, row, t0, ok: true, phaseAfter: (await effectivePhase(m)).rawValue)
+        // 593 §9: a reset's sessions are gone with the disk — so are its panes (its saved screens went
+        // with the library's reset).
+        if op == .reset { try? TerminalLayout.write(nil, store, m.name) }
         if [.start, .shutdown, .reset].contains(op), m.config.diedWithHostAt != nil {
             m.config.diedWithHostAt = nil
             try? m.config.write(store.configFile(m.name))
@@ -707,6 +729,41 @@ public actor HostCore {
     }
 
     // MARK: sessions
+
+    /// 593 §9: a running sandbox's sessions come from the guest (`deckhold ls`), each with when its
+    /// screen was last saved; in any other phase, from its SAVED screens (S5: `saved: true`) — so a
+    /// sleeping or shut-down sandbox's sessions are listed without waking it (and looking never starts
+    /// the host: this is answered in-process too).
+    func sessionRows(_ m: Managed) async throws -> [SessionRow] {
+        let saved = m.sandbox.savedScreens()
+        guard await m.sandbox.phase == .running else { return saved.map(SessionRow.init(saved:)) }
+        let byName = Dictionary(saved.map { ($0.session, $0) }, uniquingKeysWith: { a, _ in a })
+        return try await m.sandbox.sessions().map { s in
+            var row = SessionRow(s)
+            if let i = byName[s.name] {
+                row.savedAt = i.savedAt
+                row.savedReason = i.reason
+            }
+            return row
+        }
+    }
+
+    /// 593 §9 (S2): the light periodic capture — every `minutes` (the setting
+    /// `host.screen_capture_minutes`; 0 = off), each RUNNING sandbox's sessions that wrote something
+    /// since their last saved screen, so a crash still leaves a recent copy. One `deckhold ls` per
+    /// sandbox, then a momentary attach per changed session; serialised with the lifecycle.
+    public func captureScreensPeriodically() async {
+        for m in managed.values {
+            guard await m.sandbox.phase == .running else { continue }
+            let sb = m.sandbox
+            guard let r = await sb.captureScreens(changedOnly: true) else { continue }
+            if !r.captured.isEmpty || !r.failed.isEmpty {
+                HostLog.line("\(m.name): periodic screen capture — saved \(r.captured.joined(separator: ", "))"
+                             + (r.failed.isEmpty ? "" : "; failed \(r.failed.joined(separator: ", "))")
+                             + String(format: " (%.0f ms)", r.milliseconds))
+            }
+        }
+    }
 
     /// The environment, working directory and user an `exec` runs with — the same as a session's.
     static func execContext(config: SandboxConfig, environment: [String: String], workdir: String?,

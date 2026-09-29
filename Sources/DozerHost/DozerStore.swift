@@ -11,6 +11,7 @@ import DozerKit
 ///     <store>/host.log         the host's stdout/stderr (appended)
 ///     <store>/metrics.sqlite   lifecycle metrics (the SandboxLab schema)
 ///     <store>/sandboxes/<name>/doz.json   what `doz create` said (SandboxConfig)
+///     <store>/sandboxes/<name>/terminal-layout.json   593: the web UI's panes (TerminalLayout)
 ///     …and everything `StoreLayout` documents.
 public struct DozerStore: Sendable, Equatable {
     public let root: URL
@@ -38,6 +39,8 @@ public struct DozerStore: Sendable, Equatable {
 
     public func layout(_ name: String) -> StoreLayout { StoreLayout(root: root, name: name) }
     public func configFile(_ name: String) -> URL { layout(name).sandboxDirectory.appendingPathComponent("doz.json") }
+    /// 593 §9 (S1): the web UI's terminal layout for the sandbox (`TerminalLayout`, 0600).
+    public func terminalLayoutFile(_ name: String) -> URL { layout(name).sandboxDirectory.appendingPathComponent("terminal-layout.json") }
 
     /// The names of the sandboxes `doz create` made in this store.
     public func sandboxNames() -> [String] {

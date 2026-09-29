@@ -888,6 +888,18 @@ public actor Sandbox {
             p.savedAt = Date()
             identity = p
             try p.write(to: layout.persistedState)
+        case .captureScreens:
+            let reason = switch target {
+            case .paused: "pause"
+            case .asleep: "sleep"
+            case .hibernated: "hibernate"
+            default: "shutdown"
+            }
+            _ = await captureScreensLocked(reason: reason, changedOnly: false)
+        case .markScreensEnded:
+            SavedScreens.markEnded(layout)
+        case .removeSavedScreens:
+            if !SavedScreens.remove(layout).isEmpty { note("reset: deleted the sessions' saved screens") }
         }
         emitStatus()
     }
@@ -1470,6 +1482,132 @@ public actor Sandbox {
     public func screenText(_ name: String) async throws -> String {
         try GuestCommand.validateSessionName(name)
         return try await exec(GuestCommand.dump(name: name), timeoutSeconds: 15).output
+    }
+
+    // MARK: saved screens (593 §9)
+
+    /// Save every session's screen now (`SavedScreens`) — the periodic capture: only while running and
+    /// not busy, serialised with the lifecycle; with `changedOnly`, only sessions that wrote something
+    /// since their last saved screen. Never throws: a session that cannot be captured keeps its file.
+    public func captureScreens(changedOnly: Bool, reason: String = "periodic") async -> ScreenCaptureReport? {
+        await acquire(); defer { release() }
+        guard phase == .running, !busy else { return nil }
+        return await captureScreensLocked(reason: reason, changedOnly: changedOnly)
+    }
+
+    /// The saved screens (read from the sandbox's directory — any phase, no guest involved).
+    public nonisolated func savedScreens() -> [SavedScreenInfo] { SavedScreens.list(layout) }
+
+    /// List the guest's sessions, then attach to each for a moment: its SNAPSHOT (VT) and DUMP (text).
+    /// Bounded per session and in all; a failure is logged and keeps the previous file. A saved screen
+    /// of a session the guest no longer has (a previous boot's) is removed; one whose program exited is
+    /// marked ended (its last screen stays).
+    func captureScreensLocked(reason: String, changedOnly: Bool) async -> ScreenCaptureReport {
+        var report = ScreenCaptureReport()
+        let t0 = ContinuousClock.now
+        guard phase == .running, let container else { return report }
+        let deadline = t0 + .milliseconds(Int(SavedScreens.totalBudgetSeconds * 1000))
+        let list: [SessionInfo]
+        do {
+            let r = try await execInContainer(GuestCommand.list(), timeout: SavedScreens.perSessionTimeoutSeconds)
+            list = SessionInfo.parseList(r.output)
+        } catch {
+            note("saved screens: could not list the sessions (\(error.localizedDescription)) — the last saved screens are kept")
+            return report
+        }
+        let saved = Dictionary(SavedScreens.list(layout).map { ($0.session, $0) }, uniquingKeysWith: { a, _ in a })
+        report.removed = SavedScreens.remove(layout, keeping: Set(list.map(\.name)))
+        for s in list.prefix(SavedScreens.maximumSessions) {
+            if s.isEnded {
+                if var i = saved[s.name], !i.ended {
+                    i.ended = true
+                    i.exitCode = s.exitCode
+                    i.endedAt = Date()
+                    try? SavedScreens.update(layout, info: i)
+                }
+                report.ended.append(s.name)
+                continue
+            }
+            if changedOnly, let i = saved[s.name], !i.ended, i.bytesOut == s.bytesOut {
+                report.unchanged.append(s.name)
+                continue
+            }
+            guard ContinuousClock.now < deadline else { report.failed.append(s.name); continue }
+            do {
+                guard let shot = try await Self.captureScreen(on: container, session: s.name,
+                                                              timeout: SavedScreens.perSessionTimeoutSeconds) else {
+                    report.failed.append(s.name)
+                    continue
+                }
+                if let code = shot.exitCode {
+                    // It ended between the listing and the attach: its last saved screen (if any) stands.
+                    if var i = saved[s.name] { i.ended = true; i.exitCode = code; i.endedAt = Date(); try? SavedScreens.update(layout, info: i) }
+                    report.ended.append(s.name)
+                    continue
+                }
+                let d = SavedScreens.parseDump(shot.dump)
+                let info = SavedScreenInfo(session: s.name, savedAt: Date(), reason: reason, cols: d.cols ?? s.size?.cols,
+                                           rows: d.rows ?? s.size?.rows, screen: d.screen ?? s.screen, command: s.command,
+                                           pid: s.pid, bytesOut: s.bytesOut)
+                try SavedScreens.write(layout, info: info, vt: shot.snapshot, text: d.text)
+                report.captured.append(s.name)
+            } catch {
+                report.failed.append(s.name)
+            }
+        }
+        report.milliseconds = milliseconds(since: t0)
+        if !report.failed.isEmpty {
+            note("saved screens: could not capture \(report.failed.joined(separator: ", ")) — their last saved screens are kept")
+        }
+        if !report.captured.isEmpty || !report.failed.isEmpty {
+            broadcaster.yield(.step("saved \(report.captured.count) session screen(s)\(report.failed.isEmpty ? "" : ", \(report.failed.count) failed")",
+                                    milliseconds: report.milliseconds))
+        }
+        return report
+    }
+
+    /// What one momentary attach brought back.
+    struct CapturedScreen: Sendable {
+        var snapshot = Data()
+        var dump = ""
+        /// Set when the session had already ended (no screen).
+        var exitCode: Int32?
+    }
+
+    /// One capture: `deckhold pipe` as a non-terminal exec, written `DeckholdFrame.captureRequest`
+    /// (HELLO 0×0 — the session keeps its size, nothing is typed — then DUMP); read until the DUMP's
+    /// answer, then its stdin closes and the pipe exits. Nil: the session does not exist (or answered
+    /// nothing in time). The exec is always deleted (deletion closes its vminitd client).
+    static func captureScreen(on container: LinuxContainer, session: String, timeout: Int64) async throws -> CapturedScreen? {
+        let collector = ScreenCollector()
+        let (input, cont) = AsyncStream<Data>.makeStream(bufferingPolicy: .unbounded)
+        collector.onDone = { cont.finish() }
+        cont.yield(DeckholdFrame.captureRequest)
+        let p = try await container.exec("s-\(UUID().uuidString.prefix(12).lowercased())") { cfg in
+            cfg.arguments = GuestCommand.pipe(name: session)
+            cfg.environmentVariables = GuestCommand.environment()
+            cfg.terminal = false
+            cfg.stdin = ConnectionReader(source: input)
+            cfg.stdout = collector
+            cfg.stderr = OutputCollector()
+        }
+        do {
+            try await p.start()
+            // The guest answers in milliseconds; past the timeout, stdin closes (the pipe exits on EOF).
+            let watchdog = Task {
+                try? await Task.sleep(for: .seconds(Double(timeout)))
+                cont.finish()
+            }
+            _ = try? await p.wait(timeoutInSeconds: timeout + 2)
+            watchdog.cancel()
+            cont.finish()
+            try? await p.delete()
+        } catch {
+            cont.finish()
+            try? await p.delete()
+            throw error
+        }
+        return collector.result
     }
 
     // MARK: helpers

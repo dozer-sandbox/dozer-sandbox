@@ -78,6 +78,18 @@ public final class HostServer: @unchecked Sendable {
         server.installSignalHandlers()
         Task.detached { await server.core.recoverAfterStart() }
         Task.detached { await server.idleLoop() }
+        // 593 §9 (S2): the periodic screen capture (read once, at start — like the idle timeout).
+        let captureMinutes = DozerSettings.load().int(SettingKey.screenCapture)
+        HostLog.line(captureMinutes > 0 ? "saving session screens every \(captureMinutes) min while a sandbox runs (host.screen_capture_minutes)"
+                                        : "periodic screen capture off (host.screen_capture_minutes = 0)")
+        if captureMinutes > 0 {
+            Task.detached {
+                while true {
+                    try? await Task.sleep(for: .seconds(Double(captureMinutes) * 60))
+                    await server.core.captureScreensPeriodically()
+                }
+            }
+        }
         HostLog.line("listening on \(store.socket.path)")
         while true { try? await Task.sleep(for: .seconds(3600)) }
     }

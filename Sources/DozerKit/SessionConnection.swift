@@ -146,6 +146,55 @@ struct ConnectionReader: ReaderStream {
     func stream() -> AsyncStream<Data> { source }
 }
 
+/// 593: a screen capture's pipe stdout → its SNAPSHOT and DUMP answer (or the EXIT / NOSESSION that
+/// came instead). `onDone` fires once, when the answer is complete — the capture then closes stdin.
+final class ScreenCollector: Writer, @unchecked Sendable {
+    private let lock = NSLock()
+    private var decoder = DeckholdFrameDecoder()
+    private var snapshot: Data?
+    private var dump: String?
+    private var exitCode: Int32?
+    private var noSession = false
+    private var done = false
+    var onDone: (@Sendable () -> Void)?
+
+    func write(_ data: Data) throws {
+        var fire: (@Sendable () -> Void)?
+        lock.lock()
+        if !done {
+            do {
+                for f in try decoder.feed(data) {
+                    switch f {
+                    case .snapshot(let d): if snapshot == nil { snapshot = d }
+                    case .info(let s): dump = s
+                    case .exit(let c): exitCode = c
+                    case .noSession: noSession = true
+                    case .output, .hello, .data, .resize: break
+                    }
+                }
+            } catch {
+                noSession = true
+            }
+            if dump != nil || exitCode != nil || noSession {
+                done = true
+                fire = onDone
+            }
+        }
+        lock.unlock()
+        fire?()
+    }
+
+    func close() throws {}
+
+    /// Nil: no such session, or no screen came back in time.
+    var result: Sandbox.CapturedScreen? {
+        lock.lock(); defer { lock.unlock() }
+        if let exitCode, snapshot == nil { return Sandbox.CapturedScreen(exitCode: exitCode) }
+        guard !noSession, let snapshot, let dump else { return nil }
+        return Sandbox.CapturedScreen(snapshot: snapshot, dump: dump)
+    }
+}
+
 /// Collects an exec's output.
 final class OutputCollector: Writer, @unchecked Sendable {
     private let lock = NSLock()
