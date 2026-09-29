@@ -331,6 +331,9 @@ func cliSuite() async throws {
         let ha = h.run(["exec", "clia", "--", "hostname"]).out, hb = h.run(["exec", "clib", "--", "hostname"]).out
         check(ha == "clia\n" && hb == "clib\n", "exec reaches each: \(ha.trimmingCharacters(in: .whitespacesAndNewlines)) / \(hb.trimmingCharacters(in: .whitespacesAndNewlines))")
 
+        print("cli: an auto-started host is never in its client's process tree (593)")
+        cliHostDetachChecks(h)
+
         print("cli: progress — plain off a terminal, animated on one (593)")
         cliProgressChecks(h)
 
@@ -503,6 +506,87 @@ func cliLineageChecks(_ h: CLIHarness, ws: URL) {
     check(r.code == 2 && r.err.contains("never creates") && h.row("clie") == nil, "a workspace that does not exist is refused (never created)")
     check(h.run(["template", "rm", "clitpl", "--yes"]).code == 0 && h.json(["template", "ls"], [ImageRow].self)?.isEmpty == true, "template rm clitpl")
     check(h.row("clia")?.phase == "running", "clia still runs")
+}
+
+/// A process's parent (sysctl; nil when it is gone).
+func parentPID(_ pid: pid_t) -> pid_t? {
+    var info = kinfo_proc()
+    var size = MemoryLayout<kinfo_proc>.stride
+    var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, pid]
+    guard sysctl(&mib, 4, &info, &size, nil, 0) == 0, size > 0 else { return nil }
+    return info.kp_eproc.e_ppid
+}
+
+/// Every descendant of `root` (from `ps -A -o pid=,ppid=`).
+func descendants(of root: pid_t) -> [pid_t] {
+    let p = Process()
+    p.executableURL = URL(fileURLWithPath: "/bin/ps")
+    p.arguments = ["-A", "-o", "pid=,ppid="]
+    let o = Pipe()
+    p.standardOutput = o
+    guard (try? p.run()) != nil else { return [] }
+    let data = o.fileHandleForReading.readDataToEndOfFile()
+    p.waitUntilExit()
+    var children: [pid_t: [pid_t]] = [:]
+    for line in String(decoding: data, as: UTF8.self).split(separator: "\n") {
+        let f = line.split(separator: " ").compactMap { pid_t($0) }
+        if f.count == 2 { children[f[1], default: []].append(f[0]) }
+    }
+    var out: [pid_t] = [], queue = [root]
+    while let x = queue.popLast() { for c in children[x] ?? [] { out.append(c); queue.append(c) } }
+    return out
+}
+
+/// 593 incident (2026-09-29): a host auto-started by `doz ui` was the UI's CHILD; a tool that stopped
+/// the UI's process tree SIGTERMed it mid-hibernate and a sandbox lost its programs. Now: a client in a
+/// process group of its own starts the host; its whole group AND every descendant get SIGTERM, then
+/// SIGKILL — the host lives on (parent launchd, another session), clia runs, its session answers.
+/// Leaves clia and clib running.
+func cliHostDetachChecks(_ h: CLIHarness) {
+    h.run(["host", "stop"])
+    check(!h.hostRunning, "host stopped (clia, clib hibernated)")
+    let p = Process()
+    p.executableURL = URL(fileURLWithPath: "/usr/bin/perl")
+    // Its own process group (as a terminal's job, or a UI that a tool stops by group or tree).
+    p.arguments = ["-e", "setpgrp(0,0); exec @ARGV", h.binary, "exec", "clia", "--", "sh", "-c", "echo client-up; exec sleep 120"]
+    p.environment = h.env
+    let o = Pipe()
+    p.standardOutput = o
+    p.standardError = FileHandle.nullDevice
+    p.standardInput = FileHandle.nullDevice
+    do { try p.run() } catch { check(false, "start a client: \(error)"); return }
+    _ = PipeCollector(o.fileHandleForReading)
+    let client = p.processIdentifier
+    // (exec prints when its command ends: wait for the host and clia, the client still running.)
+    check(h.waitFor(120) { h.hostRunning && h.row("clia")?.phase == "running" } && p.isRunning,
+          "a client in its own process group (doz exec clia, still running) auto-started the host and woke clia")
+    guard let host = h.hostPID() else { check(false, "the host's pid"); p.terminate(); return }
+    let tree = descendants(of: client)
+    check(parentPID(host) == 1, "the auto-started host's parent is launchd (ppid \(parentPID(host).map(String.init) ?? "?"))")
+    check(!tree.contains(host), "the host is not among the client's descendants (\(tree.count) of them)")
+    check(getsid(host) != getsid(client) && getsid(host) != getsid(0) && getpgid(host) != client,
+          "the host has its own session (sid \(getsid(host)) — the client's \(getsid(client)), the suite's \(getsid(0))) and group")
+    if let st = h.json(["host", "status"], HostStatus.self) {
+        check(st.parentPid == 1 && st.launchedDetached == true && st.sessionID == getsid(host), "host status --json: parentPid 1, launchedDetached, its session")
+    } else { check(false, "host status --json") }
+    // Stop the client the way tools stop a process tree: its group, and each descendant — TERM, then KILL.
+    kill(-client, SIGTERM)
+    for d in tree { kill(d, SIGTERM) }
+    usleep(1_000_000)
+    kill(-client, SIGKILL)
+    for d in tree { kill(d, SIGKILL) }
+    let deadline = Date().addingTimeInterval(10)
+    while p.isRunning && Date() < deadline { usleep(50_000) }
+    check(!p.isRunning, "the client and its tree are gone (TERM, then KILL, to the group and every descendant)")
+    usleep(500_000)
+    check(kill(host, 0) == 0 && parentPID(host) == 1 && h.hostPID() == host, "the host is still alive, parent launchd (pid \(host))")
+    check(h.row("clia")?.phase == "running", "clia is still running")
+    let r = h.run(["exec", "clia", "--", "echo", "still-here"])
+    check(r.code == 0 && r.out == "still-here\n", "and it answers (exec)")
+    check(h.sessions("clia").contains { !$0.ended && $0.pid != nil }, "its sessions answer (sessions --json)")
+    let doctor = h.run(["doctor", "--json"])
+    check(doctor.out.contains("parent launchd (detached)"), "doctor reports the host's parent: launchd")
+    check(h.run(["wake", "clib"]).code == 0, "wake clib (for what follows)")
 }
 
 /// 593 §9 (S2, S4, S5, S6): saved screens on `clis` (lab): saved at pause, sleep, hibernate and

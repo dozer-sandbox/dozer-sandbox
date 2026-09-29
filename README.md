@@ -309,9 +309,11 @@ proxied sandbox's egress proxy (its policy, connection log and credential vault)
 writer, and the shared event-loop group (583), and serves `<store>/host.sock`. Every command is a
 thin client of that socket.
 
-- **Lazy.** The first command that needs it starts it as a **detached child** — its own session
-  (`setsid`), stdin `/dev/null`, output appended to `<store>/host.log`, none of the caller's other
-  file descriptors. No launchd agent: nothing is installed in `~/Library/LaunchAgents`. It holds
+- **Lazy.** The first command that needs it starts it **fully detached** — through an intermediate
+  that exits, so its parent is launchd and it is in no caller's process tree (stopping a client, its
+  group or its tree never stops the host — 593), its own session (`setsid`), stdin `/dev/null`,
+  output appended to `<store>/host.log`, none of the caller's other file descriptors. `doz doctor`
+  shows its parent. No launchd agent: nothing is installed in `~/Library/LaunchAgents`. It holds
   `<store>/host.lock` (flock) for its whole life, so there is never a second host for a store, and a
   new one waits for an exiting one to finish before it loads anything.
 - **Idle exit.** It exits once no sandbox has a VM (booting, running, paused or asleep) and no

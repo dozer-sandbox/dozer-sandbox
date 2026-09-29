@@ -585,4 +585,10 @@ public struct HostStatus: Codable, Equatable, Sendable {
     public var executable: String?
     public var executableChange: String?
     public var executableNote: String?
+    /// 593: the host's parent (1 = launchd: fully detached, as every auto-started host must be — never in
+    /// a client's process tree), its session id, and whether the launcher started it (false: someone ran
+    /// `doz host start --foreground` themselves, on purpose).
+    public var parentPid: Int32?
+    public var sessionID: Int32?
+    public var launchedDetached: Bool?
 }

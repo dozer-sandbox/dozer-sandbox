@@ -240,6 +240,17 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   overrides, credentials; `ui.terminals` can only take away. Tests use a scratch XDG_CONFIG_HOME
   (the Makefile's test targets export one; the CLI harness sets its own under its store); the web
   server's default `WebSettingsStore(environment: [:])` reads no file.
+- **A host never lives in a client's process tree** (593 incident, 2026-09-29: a host auto-started by
+  `doz ui` was the UI's CHILD — own session, but its descendant; a tool that stopped the UI's tree
+  SIGTERMed the host mid-hibernate and a sandbox lost its programs). `HostLauncher.spawn` is the ONE
+  way a host is started for a client (`HostClient.connect(autostart:)`, `doz host start`): a double
+  spawn — an intermediate `doz host start --launch-detached` (own session) spawns the host
+  (`--foreground --launched`, own session and group, stdin /dev/null, stdout+stderr the log, no other
+  descriptor), prints its pid and exits, so the host's parent is launchd (1). The client still waits
+  for its socket. Only a person's `doz host start --foreground` runs in a caller's tree. `host status`
+  carries `parentPid`, `sessionID`, `launchedDetached`; `doctor` warns when a launched host's parent
+  isn't 1. `make test-cli` (`cliHostDetachChecks`) kills a client's group and every descendant (TERM,
+  then KILL) and checks the host, a running sandbox and its session survive.
 - **Looking never starts the host.** Read-only commands answer from the store in-process
   (`HostCore(readOnly: true)`) unless a host runs — or a record says a VM was live when its host went
   away, which only a host can recover. A short request does not reset the idle clock; an open

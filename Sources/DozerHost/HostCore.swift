@@ -478,6 +478,11 @@ public actor HostCore {
                            idleTimeoutMinutes: idleTimeoutMinutes, liveSandboxes: await liveSandboxes(), connections: connections,
                            idleSeconds: idleSeconds)
         s.executable = executable?.path
+        if !readOnly {
+            s.parentPid = getppid()
+            s.sessionID = getsid(0)
+            s.launchedDetached = HostServer.launchedDetached
+        }
         if let executable, let c = executableChange() {
             s.executableChange = c.rawValue
             s.executableNote = ExecutableIdentity.explain(c, path: executable.path)

@@ -84,6 +84,17 @@ struct Doctor: AsyncParsableCommand {
                let st = try? m.result?.decode(HostStatus.self) {
                 detail += ", \(st.version), \(st.liveSandboxes.count) running, idle timeout \(st.idleTimeoutMinutes.formatted()) min"
                 if st.version != DozerCommand.version { status = .warn; detail += " — this CLI is \(DozerCommand.version): doz host stop" }
+                // 593: a host never lives in a client's process tree (stopping that tree killed one mid-save).
+                if let pp = st.parentPid {
+                    if pp == 1 {
+                        detail += ", parent launchd (detached)"
+                    } else if st.launchedDetached == false {
+                        detail += ", parent \(pp) — run in the foreground on purpose (doz host start --foreground)"
+                    } else {
+                        if status == .ok { status = .warn }
+                        detail += ", parent \(pp), NOT launchd — it lives in another process's tree, and stopping that tree stops it: doz host stop, then let a command start it again"
+                    }
+                }
                 // 591: its program changed under it — overwritten in place is a failure (its VMs are refused).
                 if let note = st.executableNote {
                     status = st.executableChange == "overwritten" ? .fail : (status == .ok ? .warn : status)

@@ -50,8 +50,13 @@ public final class HostServer: @unchecked Sendable {
         }
     }
 
-    /// Run the host in this process until it exits (never returns).
-    public static func run(store: DozerStore, idleTimeoutMinutes: Double, version: String) async throws -> Never {
+    /// 593: this host was started by `HostLauncher` (fully detached), not by a person's `--foreground`.
+    nonisolated(unsafe) public static var launchedDetached: Bool = false
+
+    /// Run the host in this process until it exits (never returns). `launched`: started by
+    /// `HostLauncher` (its parent is launchd); false: a person ran `doz host start --foreground`.
+    public static func run(store: DozerStore, idleTimeoutMinutes: Double, version: String, launched: Bool = false) async throws -> Never {
+        launchedDetached = launched
         setvbuf(stdout, nil, _IOLBF, 0)
         signal(SIGPIPE, SIG_IGN)
         signal(SIGHUP, SIG_IGN)
@@ -61,6 +66,8 @@ public final class HostServer: @unchecked Sendable {
         try server.takeLock(waitSeconds: 60)
         HostLog.enabled = true
         HostLog.line("doz host \(version) (pid \(getpid())) — store \(store.root.path), idle timeout \(idleTimeoutMinutes) min")
+        HostLog.line(launched ? "detached: parent \(getppid())\(getppid() == 1 ? " (launchd)" : " — NOT launchd"), session \(getsid(0))"
+                              : "in the foreground (parent \(getppid())): it lives in that terminal's process tree")
         // 591: the VM layouts this host records name it; and it remembers the file it runs from, to
         // tell a later "Internal Virtualization error" caused by an update underneath it.
         VMLayout.recorder = "doz \(version)"
