@@ -113,6 +113,10 @@ public struct WebSessionRow: Codable, Equatable, Sendable {
     public var command: String
     public var exitCode: Int32?
     public var ended: Bool
+    /// 593 §9: from the saved screen (the sandbox is not running), and when/why it was saved.
+    public var saved: Bool
+    public var savedAt: Date?
+    public var savedReason: String?
 
     public init(_ s: SessionRow) {
         name = s.name
@@ -124,6 +128,9 @@ public struct WebSessionRow: Codable, Equatable, Sendable {
         command = s.command
         exitCode = s.exitCode
         ended = s.ended
+        saved = s.saved ?? false
+        savedAt = s.savedAt
+        savedReason = s.savedReason
     }
 }
 

@@ -221,6 +221,73 @@ final class WebHTTPIntegrationTests: XCTestCase {
         XCTAssertEqual(post.status, 404, "not a route")
     }
 
+    /// 593 §9 (S3): a saved screen is a session-only GET, projected (VT as base64, no host path).
+    func testASavedScreenIsASessionOnlyProjection() async throws {
+        try await start()
+        XCTAssertEqual(try get("/api/v1/sandboxes/demo/sessions/shell/screen").status, 401)
+        let (cookie, csrf) = try signIn()
+        let r = try get("/api/v1/sandboxes/demo/sessions/shell/screen", ["Cookie": cookie])
+        XCTAssertEqual(r.status, 200, r.text)
+        let s = try WebJSON.decoder.decode(WebSavedScreen.self, from: r.body)
+        XCTAssertEqual(s.session, "shell")
+        XCTAssertEqual(s.reason, "hibernate")
+        XCTAssertEqual(Data(base64Encoded: s.vt), Data("\u{1B}c$ hi\r\n".utf8))
+        XCTAssertFalse(r.text.contains("fake-store"), "no host path reaches the browser")
+        XCTAssertEqual(try get("/api/v1/sandboxes/demo/sessions/other/screen", ["Cookie": cookie]).status, 404)
+        for p in ["/api/v1/sandboxes/demo/sessions/..%2f/screen", "/api/v1/sandboxes/demo/sessions/.x/screen",
+                  "/api/v1/sandboxes/demo/sessions/shell/screen/", "/api/v1/sandboxes/demo/sessions/shell"] {
+            XCTAssertEqual(try get(p, ["Cookie": cookie]).status, 404, p)
+        }
+        let post = try get("/api/v1/sandboxes/demo/sessions/shell/screen", ["Cookie": cookie, "Origin": origin, "X-Doz-CSRF": csrf,
+                                                                           "Content-Type": "application/json"], method: "POST", body: "{}")
+        XCTAssertEqual(post.status, 404, "reading only")
+    }
+
+    /// 593 §9 (S1): the layout — read with the cookie; changed only with Origin + CSRF + a strict JSON body.
+    func testTheTerminalLayoutIsReadWithTheCookieAndChangedWithCSRFAndAStrictBody() async throws {
+        try await start()
+        XCTAssertEqual(try get("/api/v1/sandboxes/demo/layout").status, 401)
+        let (cookie, csrf) = try signIn()
+        let none = try get("/api/v1/sandboxes/demo/layout", ["Cookie": cookie])
+        XCTAssertEqual(none.status, 200)
+        XCTAssertEqual(none.text, "null")
+        let body = #"{"split":true,"focusedPane":1,"panes":[{"tabs":[{"session":"shell","mode":"interactive"}],"selected":0},{"tabs":[{"session":"shell-2","mode":"watch"}],"selected":null}]}"#
+        let json = ["Cookie": cookie, "Origin": origin, "X-Doz-CSRF": csrf, "Content-Type": "application/json"]
+        // CSRF and Origin, exactly as every other change.
+        var noCSRF = json; noCSRF["X-Doz-CSRF"] = nil
+        XCTAssertEqual(try get("/api/v1/sandboxes/demo/layout", noCSRF, method: "POST", body: body).status, 403)
+        var noOrigin = json; noOrigin["Origin"] = nil
+        XCTAssertEqual(try get("/api/v1/sandboxes/demo/layout", noOrigin, method: "POST", body: body).status, 403)
+        XCTAssertEqual(fake.layoutWrites, 0)
+        let ok = try get("/api/v1/sandboxes/demo/layout", json, method: "POST", body: body)
+        XCTAssertEqual(ok.status, 200, ok.text)
+        let back = try WebJSON.decoder.decode(WebTerminalLayout.self, from: try get("/api/v1/sandboxes/demo/layout", ["Cookie": cookie]).body)
+        XCTAssertEqual(back.panes.map { p in p.tabs.map { $0.session } }, [["shell"], ["shell-2"]])
+        XCTAssertEqual(back.panes[1].tabs[0].mode, "watch")
+        XCTAssertNil(back.panes[1].selected)
+        XCTAssertTrue(back.split)
+        // Strict: an unknown field anywhere, a wrong type, a bad name — 400, nothing written, no value echoed.
+        for bad in [#"{"split":false,"focusedPane":0,"panes":[{"tabs":[]}],"extra":1}"#,
+                    #"{"split":false,"focusedPane":0,"panes":[{"tabs":[],"x":1}]}"#,
+                    #"{"split":false,"focusedPane":0,"panes":[{"tabs":[{"session":"a","mode":"interactive","argv":["sh"]}]}]}"#,
+                    #"{"split":"no","focusedPane":0,"panes":[{"tabs":[]}]}"#,
+                    #"{"split":false,"focusedPane":0.5,"panes":[{"tabs":[]}]}"#,
+                    #"{"split":false,"focusedPane":0,"panes":[{"tabs":[{"session":"../../etc","mode":"interactive"}]}]}"#,
+                    #"{"split":false,"focusedPane":0,"panes":[{"tabs":[{"session":"a","mode":"type"}]}]}"#,
+                    #"{"split":true,"focusedPane":0,"panes":[{"tabs":[]}]}"#,
+                    #"{"split":false,"focusedPane":0,"panes":[]}"#,
+                    #"[1]"#] {
+            let r = try get("/api/v1/sandboxes/demo/layout", json, method: "POST", body: bad)
+            XCTAssertEqual(r.status, 400, bad)
+            XCTAssertFalse(r.text.contains("etc") || r.text.contains("argv") || r.text.contains("type\""), "no value echoed: \(r.text)")
+        }
+        XCTAssertEqual(fake.layoutWrites, 1)
+        XCTAssertEqual(try get("/api/v1/sandboxes/nope/layout", json, method: "POST", body: body).status, 404)
+        let form = try get("/api/v1/sandboxes/demo/layout", ["Cookie": cookie, "Origin": origin, "X-Doz-CSRF": csrf,
+                                                               "Content-Type": "text/plain"], method: "POST", body: body)
+        XCTAssertEqual(form.status, 415)
+    }
+
     // MARK: server-sent events
 
     func testTheStreamSaysHelloThenChangedAndActivity() async throws {
@@ -431,6 +498,28 @@ final class FakeData: DozerWebData, @unchecked Sendable {
             return try JSONDecoder().decode(JSONValue.self, from: Data(json.utf8))
         }
         return .null
+    }
+
+    // 593 §9 — session memory: one saved screen (demo/shell) and a layout kept in memory.
+    private var _layout: TerminalLayout?
+    private(set) var layoutWrites = 0
+    func sessionScreen(_ name: String, session: String) async throws -> WebSavedScreen {
+        guard name == "demo", session == "shell" else { throw HostError(.notFound, "no saved screen of \(session) in \(name)") }
+        let info = SavedScreenInfo(session: "shell", savedAt: Date(timeIntervalSince1970: 1_800_000_000), reason: "hibernate", cols: 80, rows: 24,
+                                   screen: "primary", command: "bash -l", pid: 7, bytesOut: 42, vtBytes: 9)
+        return WebSavedScreen(SessionScreen(name: name, SavedScreen(info: info, vt: Data("\u{1B}c$ hi\r\n".utf8), text: "$ hi")))
+    }
+    func terminalLayout(_ name: String) async throws -> WebTerminalLayout? {
+        guard name == "demo" else { throw HostError(.notFound, "no sandbox \(name)") }
+        return lock.withLock { _layout }.map(WebTerminalLayout.init)
+    }
+    func setTerminalLayout(_ name: String, _ layout: TerminalLayout) async throws -> WebTerminalLayout? {
+        guard name == "demo" else { throw HostError(.notFound, "no sandbox \(name)") }
+        try layout.validate()
+        var l = layout
+        l.updatedAt = Date()
+        lock.withLock { _layout = l; layoutWrites += 1 }
+        return WebTerminalLayout(l)
     }
 
     func policyPreview(_ name: String, _ edit: WebPolicyEdit) async throws -> WebPolicyPreview {

@@ -882,6 +882,8 @@ public actor HostCore {
         let i = await info(m, sessions: false)
         var sessions: [SessionRow]?
         if i.phase == Phase.running.rawValue, !i.busy, let list = try? await m.sandbox.sessions() { sessions = list.map(SessionRow.init) }
+        // 593 §9: not running — the sessions as last saved (`saved: true`), from the sandbox's directory.
+        if i.phase != Phase.running.rawValue, case let saved = m.sandbox.savedScreens(), !saved.isEmpty { sessions = saved.map(SessionRow.init(saved:)) }
         let status = await m.sandbox.status
         return SandboxDetail(info: i, spec: m.sandbox.spec, policy: m.sandbox.egress?.policy, sessions: sessions,
                              restorePoints: m.sandbox.restorePoints(), credentials: credentials(m),

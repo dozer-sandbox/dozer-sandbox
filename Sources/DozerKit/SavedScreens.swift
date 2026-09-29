@@ -71,6 +71,12 @@ public struct SavedScreen: Sendable, Equatable {
     public var info: SavedScreenInfo
     public var vt: Data
     public var text: String
+
+    public init(info: SavedScreenInfo, vt: Data, text: String) {
+        self.info = info
+        self.vt = vt
+        self.text = text
+    }
 }
 
 /// How a capture went (for the host's log and the tests).

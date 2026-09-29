@@ -48,6 +48,11 @@ public enum WebRoute: Equatable, Sendable {
     // 591 settings — doz.toml: the report, and ONE typed change (closed schema, CSRF).
     case settings                  // GET  /api/v1/settings
     case settingsChange            // POST /api/v1/settings  ({key, value} | {key, reset: true})
+    // 593 §9 — session memory (WebSessionMemory.swift): a saved screen (read), the terminal layout
+    // (read, and ONE typed CSRF-checked change).
+    case sessionScreen(String, String)  // GET  /api/v1/sandboxes/{name}/sessions/{session}/screen
+    case terminalLayout(String)         // GET  /api/v1/sandboxes/{name}/layout
+    case terminalLayoutSet(String)      // POST /api/v1/sandboxes/{name}/layout  ({split, focusedPane, panes})
 
     public var isStatic: Bool {
         switch self { case .index, .asset, .terminalFrame: true; default: false }
@@ -84,6 +89,8 @@ public enum WebRoute: Equatable, Sendable {
             return .terminal(rest[1])
         case (.post, 3) where rest[0] == "sandboxes" && isSandboxName(rest[1]) && rest[2] == "terminal-ticket":
             return .terminalTicket(rest[1])
+        case (.post, 3) where rest[0] == "sandboxes" && isSandboxName(rest[1]) && rest[2] == "layout":
+            return .terminalLayoutSet(rest[1])
         default: break
         }
         guard method == .get else { return nil }
@@ -111,11 +118,21 @@ public enum WebRoute: Equatable, Sendable {
             case "sessions": return .sandboxSessions(rest[1])
             case "network": return .sandboxNetwork(rest[1])
             case "terminal-socket": return .terminalSocket(rest[1])
+            case "layout": return .terminalLayout(rest[1])
             default: return nil
             }
+        case 5 where rest[0] == "sandboxes" && isSandboxName(rest[1]) && rest[2] == "sessions" && isSessionName(rest[3]) && rest[4] == "screen":
+            return .sessionScreen(rest[1], rest[3])
         default:
             return nil
         }
+    }
+
+    /// The host's session-name rule (`GuestCommand.validateSessionName`): 1–64 of [A-Za-z0-9._-], not
+    /// starting with `.` (so never `.` or `..` either).
+    public static func isSessionName(_ s: String) -> Bool {
+        (1...64).contains(s.count) && s.first != "."
+            && s.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || "._-".contains($0)) }
     }
 
     /// The library's sandbox-name rule (`SandboxSpec.validate`).

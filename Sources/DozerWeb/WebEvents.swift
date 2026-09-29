@@ -117,6 +117,12 @@ enum WebJSON {
         e.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
         return e
     }()
+    /// What reads `encoder`'s output back (the tests).
+    static let decoder: JSONDecoder = {
+        let d = JSONDecoder()
+        d.dateDecodingStrategy = .iso8601
+        return d
+    }()
 }
 
 /// Keeps the open pages current while at least one stream is open (nothing polls otherwise):

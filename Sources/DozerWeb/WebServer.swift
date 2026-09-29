@@ -509,6 +509,13 @@ public final class DozerWebServer: @unchecked Sendable {
         case .settingsChange:
             try Self.requireJSONBody(md)
             return json(try settings.apply(try WebSettingChange.decode(body)))
+        case .sessionScreen(let name, let session):
+            return json(try await data.sessionScreen(name, session: session))
+        case .terminalLayout(let name):
+            return json(try await data.terminalLayout(name))
+        case .terminalLayoutSet(let name):
+            try Self.requireJSONBody(md)
+            return json(try await data.setTerminalLayout(name, try WebTerminalLayout.decode(body)))
         case .events:
             return json(await monitor.recent)
         case .doctor:
