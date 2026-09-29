@@ -7,17 +7,20 @@
         access for the first bakes, and an Anthropic API key for the Claude Code section.
     }
 
-    @Section(title: "Install") {
+    @Section(title: "Install and onboard") {
         @ContentAndMedia {
-            `make install-cli` installs `~/.local/bin/doz`, which must be on your `PATH`.
-            `doctor` checks the macOS version, Apple silicon, the entitlement, the Linux kernel,
-            the store and the host — everything should say ok. Nothing runs in the background yet,
-            and nothing is ever installed in `~/Library/LaunchAgents`.
+            `make install-cli` installs `~/.local/bin/doz`, which must be on your `PATH`. Nothing
+            is ever installed in `~/Library/LaunchAgents`. `doz onboard` sets up this Mac, once:
+            the doctor's checks (a required one that fails stops it), which Claude account
+            sandboxes use (this Mac's Claude Code login, or the command to add a key later — it
+            never logs in for you), the settings file, and the images, prepared **in the host** in
+            the background: Ctrl-C detaches, `--status` follows it again, and a start of that image
+            meanwhile joins the same preparation.
         }
 
         @Steps {
             @Step {
-                Build, sign, and check the installation.
+                Build, sign, and onboard.
 
                 @Code(name: "Terminal", file: "00-install.sh")
             }
@@ -92,8 +95,10 @@
 
     @Section(title: "Claude Code, with a key it never sees") {
         @ContentAndMedia {
-            Bake the `claude-code` image ahead of time so the bake does not happen inside `up`.
-            The folder you create the sandbox on is shared at `/workspace`. If you are already
+            `doz onboard` prepared the `claude-code` image, so no bake happens inside `up`.
+            The folder you create the sandbox on is shared at `/workspace`, and Claude is told so:
+            every session starts with a short facts block about the sandbox appended to its system
+            prompt, and a `dozer` skill with the details. If you are already
             signed in to Claude Code on this Mac with a subscription, there is nothing to do — a
             new sandbox uses the Mac's own login. Otherwise, give it an API key with one of the two
             options below; the key is **never** typed as a command-line argument.
@@ -101,7 +106,8 @@
 
         @Steps {
             @Step {
-                Bake the image once, then create a sandbox on a folder of yours.
+                Check the image is prepared, create a sandbox on a folder of yours, and see what
+                Claude will be told about it.
 
                 @Code(name: "Terminal", file: "04-bake-and-create.sh")
             }

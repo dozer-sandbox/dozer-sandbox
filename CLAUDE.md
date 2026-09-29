@@ -25,7 +25,7 @@ at the root is the whole story for a consumer.
 | Product | Targets | Depends on |
 |---|---|---|
 | `DozerKit` | `DozerKit` (+ resources `deckhold`, `doznet`) | `apple/containerization` **exact** `0.47.0`: `Containerization`, `ContainerizationArchive` (the kernel tarball), `ContainerizationExtras`, `ContainerizationOCI`, `ContainerizationOS`; since 580 `swift-nio` (`NIOCore`, `NIOEmbedded`; 583 `NIOPosix`), `swift-nio-ssl` (`NIOSSL`), `swift-certificates` (`X509`), `swift-asn1` — apple/* packages containerization already resolves (README "Dependencies") |
-| `doz` (executable, 585) | `doz` → `DozerCLI` (commands) → `DozerHost` (the host + its client) | `DozerKit`; `swift-argument-parser` (`ArgumentParser`) in `DozerCLI`/`doz` ONLY; the system `SQLite3` in `DozerHost` (metrics) |
+| `doz` (executable, 585) | `doz` → `DozerCLI` (commands) → `DozerHost` (the host + its client) | `DozerKit`; `swift-argument-parser` (`ArgumentParser`) in `DozerCLI`/`doz` ONLY; the system `SQLite3` in `DozerHost` (metrics); 594: `jpsim/Yams` **exact** `6.2.2` in `DozerCLI` ONLY (`doz_project.yaml`, owner ruling D9 — the audit enforces the pin and the confinement) |
 | — (not a product) | `DozerWeb` (590) — `doz ui`'s server and page | `DozerHost`; `swift-nio` `NIOCore`/`NIOPosix`/**`NIOHTTP1`**/**`NIOWebSocket`** (591) (both ONLY here — the audit enforces it); resource `Resources/Web` (generated, committed). `DozerCLI`'s `UICommand.swift` alone imports `CoreServices` (LaunchServices opens the browser) |
 | — (not a product) | `doz-vmtest` — the entitled VM test host | `DozerKit`, `DozerHost` (the `cli` mode decodes `--json` with its types) |
 
@@ -73,6 +73,7 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
 | `Sources/DozerWeb/WebTerminal{Tickets,Wire,Attach,Bridge}.swift` | 591: browser terminals — the ticket store, frames + the 541 classifier + the cover, the host attach connection, the bridge and hub (NIOWebSocket ONLY here — the audit enforces it) |
 | `Sources/DozerHost/Settings.swift`, `TOML.swift`; `Sources/DozerCLI/ConfigCommands.swift`; `Sources/DozerWeb/WebSettings.swift` | 591 settings: the CLOSED schema (`DozerSettings.schema`), `${XDG_CONFIG_HOME:-~/.config}/dozer-sandbox/doz.toml` generated from it, our own strict TOML subset (no dependency), precedence flag > env > file > default with a source per value; `doz config`; the UI's Settings page route (`GET`/`POST /api/v1/settings`) |
 | `Sources/DozerHost/ImageTree.swift`; `Sources/DozerCLI/TemplateCommands.swift`; `Sources/doz-vmtest/TemplatesSuite.swift` | 593: the lineage (`image-tree`, built from `DiskAccounting`; `doz image ls --tree`, Images › Lineage); templates (`template-create`) and `duplicate` (`Sandbox.duplicate`); `make test-vm-templates` |
+| `Sources/DozerHost/Preparations.swift`, `Onboarding.swift`, `AgentPrompt.swift`; `Sources/DozerCLI/OnboardCommands.swift`, `ProjectFile.swift`, `Prompting.swift`, `UninstallCommand.swift`; `Sources/doz-vmtest/OnboardingSuite.swift`, `PullBench.swift` | 594: image preparation in the host (single-flight, joined, cancelled) + `onboarded.json`; onboarding's checks / account step / settings-only-when-missing; the agent's environment prompt + the `dozer` skill; `doz onboard`/`init`/`uninstall`, `doz_project.yaml` (Yams), TTY questions; `make test-cli`'s onboarding part (`make test-cli-onboarding`); `make pullbench` (D12) |
 | `Tests/DozerWebTests/` | 590: the security rules one by one, and a real listener driven with raw HTTP |
 | `Tests/DozerKitTests/` | Unit tests — no VM |
 
@@ -375,6 +376,43 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   (sync, pause, clone, resume), deleted afterwards. `duplicate`'s state disk starts fresh unless
   `copyState`; its workspace must exist and be readable (`HostCore.validatedWorkspace`) — never created.
 
+### Onboarding, projects, the agent's environment prompt (594) — design: workspace `changes/594-*/594.01-DESIGN.md`
+
+- **Image preparation is the HOST's** (`Preparations.swift`): kernel + guest init (`Sandbox.prepareAssets`)
+  + base pull + bake (the lab: its prepared disk). ONE per image name at a time (`HostCore.preparations`);
+  `onboard`, `prepare`, `image bake`, the UI and a cold `start` needing the image all JOIN the running one
+  (`follow` subscribes; the bounded event buffer is replayed to a joiner). A client going away never
+  cancels it; `prepare-cancel` does (checked between bake steps; the VM is stopped in a task of its own
+  so cancellation cannot skip the clean stop). A running preparation keeps the host up (`idleLoop`);
+  quitting the host cancels it. "Prepared" means THIS build's bake key (`HostCore.isPrepared`,
+  `ImageRow.current`) — a re-run prepares nothing. Tests substitute the work: `setPreparationRunner`.
+- **`<store>/onboarded.json`, never `state.json`** — that name at the store's root is Containerization's
+  image-store index. The HOST writes the record once every chosen image is ready, so a detached CLI
+  (Ctrl-C = detach, exit 130) or a closed wizard still completes the onboarding.
+- **Settings and the prompt template are written ONLY when missing** (`Onboarding.write…IfMissing`) — an
+  existing file is never touched, by the CLI or the UI's `POST /api/v1/onboarding/config`.
+- **The account step never logs in, never reads a refresh token for use, never writes the keychain**:
+  it sets the store default (`mac`/`none`) or shows the `doz account add` command. `doz onboard
+  --account …` skips the Claude Code checks entirely; `doz ui` under `DOZ_TEST_NO_MAC_LOGIN=1` (a test
+  seam, the probes') never looks at the Mac's login.
+- **The environment prompt** (`AgentPrompt.swift`) is rendered from the sandbox's CURRENT facts at every
+  `open-session` of a claude-code/pi sandbox and written by a root utility exec (contents base64 in the
+  script): `/run/dozer/agent-prompt.md` and ONLY the skill dir `~/.claude/skills/dozer` (pi:
+  `~/.pi/agent/skills/dozer`) — never CLAUDE.md/AGENTS.md. Claude Code gets it through its launcher
+  (`--append-system-prompt "$(cat …)"`, not for subcommands nor when the caller gives a system prompt —
+  a bake-key change); pi's own session gets `--append-system-prompt FILE` (pi reads an existing path).
+  Variables are a CLOSED list; an unknown one refuses the session with its name and file. `agent.prompt
+  = false` removes both at the next session.
+- **`doz_project.yaml`** is parsed by hand on Yams's node tree with the parser kept alive (anchors are
+  weak): a closed key set, errors with the line, anchors/aliases refused top-down (no alias expansion
+  is ever walked), one document, 64 KiB. Yams only in `Sources/DozerCLI` (audit).
+- **`doz uninstall`** removes a store only if it looks like one, the settings dir only if named
+  `dozer-sandbox`, and the installed doz only when THIS executable is `<prefix>/libexec/doz/doz` (the
+  `bin/doz` link only if it resolves to it). Never the keychain; a running `doz ui` refuses it.
+- **Tests on throwaway paths only**: `make test-cli`'s onboarding part uses `/tmp/dzo-<pid>-*` stores (a
+  socket path under 104 bytes) seeded from the vmtest store, each with its own XDG_CONFIG_HOME; the
+  wizard probe (`probes/594-*/run-wizard-probe.sh`) a fresh `/tmp/dzw-*` store.
+
 ### Browser terminals (591, on by default — owner ruling) — design: workspace `changes/591-*/591.01-DESIGN.md`
 
 - **A terminal is two steps.** `POST …/terminal-ticket` (CSRF, strict body) mints a 256-bit ticket that
@@ -455,6 +493,8 @@ make test-cli  # 585: the signed doz from separate processes, scratch store $TMP
 make test-vm-claude  # 588: Claude credentials through the proxy with a FAKE key (DOZ_TEST_CLAUDE_LOGIN=1 adds this Mac's login, read-only)
 make test-vm-upgrade # 591: the previous release sleeps sandboxes, this build wakes them; the in-place overwrite incident (scratch store $TMPDIR/doz-upgrade-store)
 make test-vm-templates # 593: templates and duplicates on pi — no state disk in a template; duplicate's workspace and fresh/copied state disk
+make test-cli-onboarding # 594: test-cli's onboarding part alone (onboard, a joining start, detach/cancel, init/up, the agent prompt, uninstall)
+make pullbench       # 594 D12: the node base pulled with 3 vs 6 concurrent layer downloads, fresh stores (network)
 ```
 
 ### The VM integration tests need an ENTITLED host — how

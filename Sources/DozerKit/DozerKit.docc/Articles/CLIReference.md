@@ -11,7 +11,7 @@ the command-line face of `DozerKit`.
 ```bash
 cd repo/lib/DozerKit
 make install-cli                  # PREFIX=~/.local by default → ~/.local/bin/doz
-doz doctor
+doz onboard                       # once: checks, the Claude account, settings, images (in the background)
 ```
 
 A VM can only be booted by a binary signed with Apple's virtualization entitlement, and `make
@@ -20,6 +20,54 @@ doctor` says so. `make cli` builds a signed debug binary at `.build/debug/doz` f
 
 > This article's command list is checked against the CLI's real subcommand tree by
 > `Scripts/docs-drift-check.sh` (`make docs-drift-check`) — see that script for how.
+
+### Setting up: onboard, init, uninstall
+
+```bash
+doz onboard [--images claude-code,pi,lab | --all-images | --no-images] [--account mac|none|skip] [--yes]
+doz onboard --status        # the onboarding record and the images; follows a preparation that runs
+doz onboard --cancel        # cancel the images being prepared
+doz init [DIR] [--name N] [--image I] [--cpus N] [--memory M] [--network …] [--account A] [--yes] [--force]
+doz up                      # in a folder with doz_project.yaml: that project's sandbox
+doz uninstall [--keep-store] [--keep-config] [--yes]
+```
+
+- **`onboard`** sets up this Mac, once: the doctor's checks (a *required* one that fails —
+  not Apple silicon, macOS too old, no virtualization, the entitlement, the store not on APFS, too
+  little disk for the chosen images — stops it; the rest only warn), the **Claude account** (this
+  Mac's Claude Code login when it is signed in; otherwise it shows the `doz account add` command
+  for an API key or a setup token — it never logs in, never copies Claude Code's refresh token and
+  never writes the keychain), the settings file and your prompt template (each written **only when
+  missing**), then **prepares the images** — the kernel, the guest init disk, the base image and
+  the bake, the waiting a first start would do. `claude-code` is prepared by default; `pi` and
+  `lab` are opt-in. The preparation runs **in the host**: Ctrl-C detaches (it goes on; `--status`
+  follows it again, `--cancel` stops it), and a `start` of that image meanwhile **joins it** —
+  one download, one bake. On a terminal it asks, the recommended answer pre-selected (Enter keeps
+  it); `--yes`, `--json` or no terminal ask nothing. Re-running is safe: it prepares only what is
+  missing. The store records it in `<store>/onboarded.json`.
+- **`init`** makes a folder a project: it writes **`doz_project.yaml`** (onboarding this Mac
+  first if it never was). **`up` with no name**, in that folder, creates, starts or wakes exactly
+  that sandbox, with the folder at `/workspace`, starts its `sessions` and attaches to the first.
+  The file is YAML with a closed set of keys — `version`, `name`, `image`, `cpus`, `memory`,
+  `network`, `account`, `sessions`, `agent_prompt`, `agent_prompt_mode`; an unknown key or a bad
+  value is an error naming its line.
+
+  ```yaml
+  version: 1
+  name: webapp
+  image: claude-code
+  memory: 4G
+  sessions:
+    - claude
+    - name: server
+      command: npm run dev
+  agent_prompt: |
+    The tests run with `make test`; never push to main.
+  ```
+- **`uninstall`** lists exactly what it removes — the store (every sandbox and image), the
+  settings directory, and the installed `doz` (`<prefix>/libexec/doz/` and the `<prefix>/bin/doz`
+  link) — and asks once (no terminal and no `--yes`: it refuses). It never touches the keychain
+  (it names the items `doz account add` made, and how to remove them) or Claude Code's own files.
 
 ### The lifecycle
 
@@ -54,8 +102,11 @@ doz up NAME [same options] [--session S] [-d] [-- CMD …]
   `bash -l` shell called `shell`), opening it if needed. `-d` does all that without attaching;
   `-- CMD …` opens a new session running `CMD` instead.
 - On an existing sandbox, `up`'s create options are ignored (and it says so) — a sandbox keeps the
-  image and settings it was created with. `up` defaults to `--image lab`; `create` requires
-  `--image`.
+  image and settings it was created with. `up` defaults to the settings' `defaults.image`
+  (`doz onboard` sets it; `lab` otherwise); `create` requires `--image`. With no NAME, in a
+  project folder, `up` uses `doz_project.yaml`.
+- **Without `--workspace`**, `/workspace` is private to the VM — nothing is shared with the Mac.
+  That is allowed, and said: `create` notes it, and `ls` shows `none (private to the VM)`.
 
 ### Working inside
 
@@ -81,6 +132,36 @@ placeholder, never a command-line argument.
 
 `-e DOZ_CLAUDE_PERMISSIONS=ask` (on `run`/`exec`) keeps Claude Code's own prompts; a `claude`
 run as root always keeps them.
+
+### The agent's environment prompt
+
+At every session start the host tells the agent where it runs, from the sandbox's **current**
+facts: a short **facts block** — a Dozer Sandbox VM (not a container) on the user's Mac, its name
+and size, `/workspace` shared from the Mac folder *X* or **not shared**, the network (deny by
+default through the Mac's proxy; a refused host needs the user's rule), credentials (injected; never
+log in) — appended to the agent's system prompt (Claude Code's launcher passes
+`/run/dozer/agent-prompt.md` with `--append-system-prompt`; pi's session gets
+`--append-system-prompt /run/dozer/agent-prompt.md`), and the **`dozer` skill**
+(`~/.claude/skills/dozer/SKILL.md`, pi: `~/.pi/agent/skills/dozer/`) with the details: what persists,
+restore points, the network policy, sleep and hibernation, and what the agent cannot do from
+inside. Dozer writes only those; the agent's own `CLAUDE.md` / `AGENTS.md` are never touched.
+
+```bash
+doz inspect NAME --prompt                           # what the next session gets (or why it does not render)
+doz create NAME … --agent-prompt FILE [--agent-prompt-mode append|replace]
+doz config set agent.prompt false                   # off: no facts block, no skill (removed at the next session)
+```
+
+Three layers: the built-in template, then **your own** — `agent-prompt.md` beside `doz.toml`
+(`doz onboard` writes it all commented out; text outside a comment replaces the built-in one) — then
+the sandbox's own (`--agent-prompt FILE`, or `agent_prompt` in `doz_project.yaml`), appended or
+replacing. Variables are `{{name}}` from a closed list (`sandbox.name`, `sandbox.image`,
+`sandbox.cpus`, `sandbox.memory`, `workspace.shared`, `workspace.host_path`, `workspace.guest_path`,
+`workspace.description`, `network.mode`, `network.allowed_hosts`, `network.description`,
+`account.name`, `credentials.description`, `mac.hostname`, `dozer.version`); an unknown one is an
+error — the session does not start, and `inspect --prompt` says why — never silently blank. A
+claude-code image baked before 594 has no launcher support: `doz reset NAME` (or a new sandbox)
+takes the new image.
 
 ### Accounts
 
@@ -170,9 +251,9 @@ doz point rm NAME POINT
 doz point save-image NAME [POINT] --as myimage [--note …]    # a custom image (a template)
 doz up other --image myimage
 
-doz image ls                   # built-in images and templates, and whether each is baked here
+doz image ls                   # built-in images and templates, and whether each is baked here (for this build)
 doz image ls --tree            # the lineage: OCI base → image → template → sandboxes, with sizes
-doz image bake claude-code     # bake now rather than at the first start (minutes, needs network)
+doz image bake claude-code     # prepare it now (joins a preparation already running; minutes, needs network)
 doz image rm NAME              # sandboxes already made from it keep working
 ```
 
@@ -229,6 +310,13 @@ entered in the browser: add keys and accounts with the CLI. **Open in Terminal**
 `doz attach` in your default terminal app. The UI is a client of the host, like any other
 command, so it can't do anything the CLI can't.
 
+A store that was never onboarded opens on the **setup wizard** — Welcome, Checks, Claude account,
+Images, Preparing, First sandbox, Done — the same steps as `doz onboard` (always reachable again from
+**Doctor › Run onboarding again**). Preparing runs in the host: **Continue in the background** leaves
+it running, and **Operations** lists the host's image preparations whoever started them (the CLI
+too). A sandbox's page shows its environment prompt as the next session gets it, and whether
+`/workspace` is shared; New sandbox asks for a workspace folder or an explicit "No workspace".
+
 ### Settings
 
 ```bash
@@ -241,7 +329,7 @@ doz config path            # ${XDG_CONFIG_HOME:-~/.config}/dozer-sandbox/doz.tom
 ```
 
 One settings file, `doz.toml`, lists every setting grouped in sections (`[ui]`, `[host]`,
-`[store]`, `[claude]`, `[defaults]`, `[images.lab]`, `[images.claude-code]`, `[images.pi]`,
+`[store]`, `[claude]`, `[defaults]`, `[agent]`, `[images.lab]`, `[images.claude-code]`, `[images.pi]`,
 `[kernel]`), each with a description and `# key = default` commented out; only what you set is
 uncommented. Precedence: a command-line flag, then its environment variable, then the file, then
 the default. `ui.boot_view_on_start` (default `true`) makes Start in the web UI open a terminal on
@@ -296,7 +384,9 @@ JSON documents only ever gain fields.
 | symptom | try |
 |---|---|
 | "cannot boot a VM" / entitlement | `doz doctor`; reinstall with `make install-cli` (it signs). |
-| First start is slow | It is baking the image, once per store — `doz image bake …` ahead of time; `-v` shows the steps. |
+| First start is slow | It is preparing the image, once per store — `doz onboard` (or `doz image bake …`) does it ahead of time; `-v` shows the steps. |
+| An agent's sessions do not start: "the agent prompt does not render" | A `{{variable}}` that is not on the list in `agent-prompt.md` or the sandbox's own prompt — `doz inspect NAME --prompt` names it. |
+| Start over from nothing | `doz uninstall` (it lists what goes), then `make install-cli` and `doz onboard`. |
 | An agent says it has no key / 401 | `doz key ls NAME` — a stdin key is gone after the host stopped; set it again or use `--keychain`. |
 | A package install fails | Check the policy: `doz net log NAME --denied`, then `doz net policy NAME --allow HOST`. |
 | A sandbox shows as died | The host crashed while it ran — `doz start NAME` checks the disk and cold-boots it. |

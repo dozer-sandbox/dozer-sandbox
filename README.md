@@ -241,12 +241,14 @@ A byte-identical copy already on the Mac (the `container` CLI's) seeds the cache
 
 ```bash
 make install-cli PREFIX=~/.local       # release build, signed with the virtualization entitlement
-doz doctor                          # macOS, Apple silicon, the entitlement, kernel, store, host
-doz up myproj --image claude-code --workspace ~/code/myproj   # create → boot → attach to Claude Code
+doz onboard                         # once: checks, the Claude account, settings, images prepared in the background
+cd ~/code/myproj && doz init        # this folder is a project: doz_project.yaml
+doz up                              # create → boot → attach to Claude Code, the folder at /workspace
 ```
 
-New to it: the [walkthrough](docs/CLI-WALKTHROUGH.md) (~20 min, first run end to end) and the
-[user guide](docs/CLI-USER-GUIDE.md) (concepts, every command by task, keys, network, troubleshooting).
+New to it: the [walkthrough](docs/CLI-WALKTHROUGH.md) (~25 min, from nothing installed to
+uninstalling again) and the [user guide](docs/CLI-USER-GUIDE.md) (concepts, every command by task,
+keys, network, troubleshooting). `doz ui` opens on a setup wizard when this Mac was never onboarded.
 
 `make cli` builds and signs `.build/debug/doz` for development. An unsigned `doz` runs every
 command but cannot boot a VM (`doz doctor` says so).
@@ -255,8 +257,12 @@ command but cannot boot a VM (`doz doctor` says so).
 
 | | |
 |---|---|
-| `doz create NAME --image lab\|claude-code\|pi\|<custom> [--cpus N] [--memory 2G] [--workspace DIR] [--network agent\|bake\|locked\|open\|nat\|none] [--subnet CIDR]` | Make a sandbox (off until started). `lab` is Alpine + bash (1 GiB); the agent images get 2 GiB. The workspace is shared at `/workspace`. The network defaults to **proxied** — no network interface, every connection judged by the Mac's policy and logged: `agent` for an agent image, `bake` (package registries only) for the lab. |
+| `doz onboard [--images …\|--all-images\|--no-images] [--account mac\|none\|skip] [--yes]` · `--status` · `--cancel` | 594: set up this Mac, once — the doctor's checks (required ones stop it), the Claude account (the Mac's login, or the command to add a key/token later; never a login or a keychain write), `doz.toml` + `agent-prompt.md` (only when missing), and the images prepared **in the host** (kernel, guest init, base pull, bake) with the progress view: Ctrl-C detaches, `--status` re-attaches, `--cancel` cancels. A start of an image being prepared joins that preparation. Asks on a terminal; `--yes`/`--json`/no terminal never ask. |
+| `doz init [DIR]` · `doz up` (no name) | 594: `doz_project.yaml` (YAML, closed schema: name, image, cpus, memory, network, account, sessions, agent_prompt); `up` in that folder creates/starts/wakes that sandbox with the folder at `/workspace` and starts its sessions. |
+| `doz uninstall [--keep-store] [--keep-config] [--yes]` | 594: lists exactly what goes (the store, the settings, the installed doz) and asks once; never the keychain or Claude Code's files. |
+| `doz create NAME --image lab\|claude-code\|pi\|<custom> [--cpus N] [--memory 2G] [--workspace DIR] [--network agent\|bake\|locked\|open\|nat\|none] [--subnet CIDR] [--agent-prompt FILE]` | Make a sandbox (off until started). `lab` is Alpine + bash (1 GiB); the agent images get 2 GiB. The workspace is shared at `/workspace` (without one, `/workspace` is private to the VM — said by `create`, `ls` and the agent's prompt). The network defaults to **proxied** — no network interface, every connection judged by the Mac's policy and logged: `agent` for an agent image, `bake` (package registries only) for the lab. |
 | `doz up NAME [create options] [--session S] [-d] [-- CMD…]` | Create if missing → start or wake → attach to the image's session (`claude`, `pi`, or a `bash -l` shell), opening it if it is not running (`vagrant up` / `compose up`). |
+| `doz inspect NAME --prompt` | 594: the agent's environment prompt as its next session gets it — a short facts block (the VM, `/workspace` shared or not, the proxied network, injected credentials) appended to its system prompt, plus the `dozer` skill; rendered at every session start; your `agent-prompt.md` and the sandbox's own layer; `agent.prompt = false` turns it off. |
 | `doz start NAME` [`cold-boot`] | Boot — or wake it if it is asleep, resume it if paused. |
 | `doz pause NAME` [`suspend`] · `doz resume NAME` | Guest CPU to 0 in ~1 ms, RAM kept. |
 | `doz sleep NAME` | Pause + snapshot to disk: RAM kept, and it survives a host crash. |
@@ -345,11 +351,12 @@ thin client of that socket.
 | apple/swift-nio (NIOCore, NIOEmbedded, NIOPosix; 590: NIOHTTP1) | from 2.103.0 | 580: drives TLS synchronously on the proxy's connection threads (`EmbeddedChannel`); 583: one shared `MultiThreadedEventLoopGroup` for every VM's vminitd clients; 590: `doz ui`'s HTTP/1.1 server (`NIOHTTP1` is a module of the same package — no new dependency; imported only by `Sources/DozerWeb`, which the audit enforces) |
 | apple/swift-nio-ssl (NIOSSL) | from 2.37.5 | 580: terminates and re-originates TLS for bound hosts with **in-memory** keys — Network.framework and Secure Transport need a `SecIdentity`, i.e. a keychain (prompts for an ad-hoc-signed app, and a leaf key per host on disk) |
 | apple/swift-certificates (X509), apple/swift-asn1 | from 1.21.0 / 1.7.3 | 580: issues the per-sandbox CA and its per-host leaves |
-
 | apple/swift-argument-parser (ArgumentParser) | from 1.5.0 (resolved 1.8.2) | 585: the `doz` CLI's subcommands, aliases, options and `--help`. Imported ONLY by the CLI's command targets (`Sources/DozerCLI`, `Sources/doz`) — never by the library or the host; the audit enforces it. Hand-rolling a parser for ~40 subcommands with aliases and `--` passthrough would be more code to get wrong than this Apple package. |
 
-All five are apple/* packages that containerization 0.47.0 already resolves, so declaring them
-changed nothing in `Package.resolved`. The CLI's host also uses the system `SQLite3` module for its
+| jpsim/Yams (Yams) | **exact** 6.2.2 | 594 (owner ruling D9): the project file `doz_project.yaml` is YAML, like dbt's `dbt_project.yml`. Yams (MIT, libyaml inside) is the standard Swift YAML library; pinned exactly and imported ONLY by `Sources/DozerCLI` (the audit enforces both). The project file's schema is closed and checked by hand on Yams's node tree; anchors/aliases and multiple documents are refused. |
+
+The five apple/* packages are ones containerization 0.47.0 already resolves, so declaring them
+changed nothing in `Package.resolved`; Yams is the one package that is not. The CLI's host also uses the system `SQLite3` module for its
 metrics (no package). Upstream certificates are verified with the
 Mac's own trust store (Security.framework, `SecTrustEvaluateWithError`). `Scripts/audit.sh` holds
 the import and dependency allowlists.

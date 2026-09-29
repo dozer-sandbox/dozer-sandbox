@@ -2,6 +2,9 @@
 # documents. One per line: a top-level command name, or "group/subcommand". Checked against the
 # real CLI's --help output by Scripts/docs-drift-check.sh (`make docs-drift-check`). Aliases
 # ("cold-boot", "suspend", …) are not tracked here — only canonical names.
+onboard
+init
+uninstall
 create
 up
 start
