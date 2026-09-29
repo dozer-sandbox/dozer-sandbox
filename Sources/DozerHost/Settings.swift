@@ -1,0 +1,589 @@
+import Darwin
+import Foundation
+
+// 591 settings (owner request): ONE closed, typed schema of every user-facing setting, a TOML file
+// generated from it (`${XDG_CONFIG_HOME:-~/.config}/dozer-sandbox/doz.toml` — the product is
+// Dozer Sandbox since 592), and one resolution rule everywhere:
+//
+//     a command-line flag  >  its environment variable  >  the file  >  the default
+//
+// and every value knows which of the four it came from. The file lists every setting, each with a
+// `# description` and a commented `# key = <default>`; only the values a person set are uncommented.
+// It is written whole (from the schema, never edited in place), atomically, 0600 in a 0700 directory.
+// An unknown key or a value of the wrong type is a WARNING (that line is ignored, the default applies),
+// never a crash; a file that does not parse is ignored whole, with its error, and is not overwritten.
+//
+// What is deliberately NOT a setting (`DozerSettings.notSettable`): the web UI's security limits
+// (session and link lifetimes, body and connection caps, the Host/Origin/CSRF checks, the CSP), the
+// terminal's (one-use tickets, the paste cap and confirmation), the guest-binary overrides, and any
+// credential. `ui.terminals` can only take something away (browser terminals off).
+
+/// A setting's type — closed; every value is validated against it before it is used or written.
+public enum SettingType: Sendable, Equatable {
+    case bool
+    case int(ClosedRange<Int>)
+    case choice([String])
+    /// A host path; `""` = automatic. Never editable from the web UI (it names no host path).
+    case path
+    /// An IPv4 CIDR for vmnet (`192.168.64.0/24`); `""` = a free one.
+    case subnet
+
+    public var name: String {
+        switch self {
+        case .bool: "boolean"
+        case .int(let r): "integer \(r.lowerBound)–\(r.upperBound)"
+        case .choice(let c): c.joined(separator: " | ")
+        case .path: "path (\"\" = automatic)"
+        case .subnet: "IPv4 subnet, a.b.c.d/nn (\"\" = a free one)"
+        }
+    }
+}
+
+/// Where an effective value came from.
+public enum SettingSource: String, Codable, Sendable {
+    case flag, env, file
+    case `default`
+}
+
+/// When a changed value takes effect.
+public enum SettingApplies: String, Codable, Sendable, CaseIterable {
+    case now = "now"
+    case nextCommand = "next-command"
+    case nextCreate = "next-create"
+    case nextSession = "next-session"
+    case hostRestart = "host-restart"
+    case newStore = "new-store"
+
+    public var note: String {
+        switch self {
+        case .now: "applies at once (the UI re-reads it)"
+        case .nextCommand: "applies to the next doz command (a running doz ui keeps its store)"
+        case .nextCreate: "applies to sandboxes created from now on (the host reads it at create)"
+        case .nextSession: "applies to sessions opened from now on"
+        case .hostRestart: "applies after doz host stop (the next host reads it)"
+        case .newStore: "the choice for a store that has not made one (doz account keepalive wins)"
+        }
+    }
+}
+
+public struct SettingDefinition: Sendable {
+    public let section: String
+    public let name: String
+    public let type: SettingType
+    public let defaultValue: TOMLValue
+    public let summary: String
+    /// The environment variable that overrides the file (nil: none).
+    public let environment: String?
+    /// The command-line flag that overrides both, as a person types it (nil: none).
+    public let flag: String?
+    public let applies: SettingApplies
+    /// False: the web UI shows it read-only (host paths — the UI never names one).
+    public let editableInUI: Bool
+
+    public var key: String { "\(section).\(name)" }
+
+    init(_ section: String, _ name: String, _ type: SettingType, _ defaultValue: TOMLValue, _ summary: String,
+         env: String? = nil, flag: String? = nil, applies: SettingApplies, ui: Bool = true) {
+        self.section = section
+        self.name = name
+        self.type = type
+        self.defaultValue = defaultValue
+        self.summary = summary
+        environment = env
+        self.flag = flag
+        self.applies = applies
+        editableInUI = ui
+    }
+
+    /// Check a typed value (from the file, the UI or the CLI). Throws a message that never echoes
+    /// more than the value's type.
+    public func validate(_ v: TOMLValue) throws -> TOMLValue {
+        switch (type, v) {
+        case (.bool, .bool): return v
+        case (.int(let r), .int(let i)):
+            guard r.contains(i) else { throw SettingsError("\(key) is \(r.lowerBound)–\(r.upperBound)") }
+            return v
+        case (.choice(let c), .string(let s)):
+            guard c.contains(s) else { throw SettingsError("\(key) is one of \(c.joined(separator: ", "))") }
+            return v
+        case (.path, .string(let s)):
+            guard s.utf8.count <= 1024, !s.unicodeScalars.contains(where: { $0.value < 0x20 || $0.value == 0x7F }) else {
+                throw SettingsError("\(key) is a path (at most 1024 bytes, no control characters)")
+            }
+            guard s.isEmpty || s.hasPrefix("/") || s.hasPrefix("~") else { throw SettingsError("\(key) is an absolute path (or ~/…), or \"\"") }
+            return v
+        case (.subnet, .string(let s)):
+            guard s.isEmpty || Self.isSubnet(s) else { throw SettingsError("\(key) is an IPv4 subnet like 192.168.64.0/24, or \"\"") }
+            return v
+        default:
+            throw SettingsError("\(key) is a \(type.name), not a \(v.typeName)")
+        }
+    }
+
+    /// A value as a person types it (`doz config set`, an environment variable) → typed + checked.
+    public func parse(_ text: String) throws -> TOMLValue {
+        let t = text.trimmingCharacters(in: .whitespaces)
+        switch type {
+        case .bool:
+            switch t.lowercased() {
+            case "true", "on", "yes", "1": return .bool(true)
+            case "false", "off", "no", "0": return .bool(false)
+            default: throw SettingsError("\(key) is true or false")
+            }
+        case .int:
+            guard let i = Int(t) else { throw SettingsError("\(key) is a whole number") }
+            return try validate(.int(i))
+        case .choice, .path, .subnet:
+            return try validate(.string(t))
+        }
+    }
+
+    static func isSubnet(_ s: String) -> Bool {
+        let parts = s.split(separator: "/", omittingEmptySubsequences: false)
+        guard parts.count == 2, let bits = Int(parts[1]), (8...30).contains(bits) else { return false }
+        let octets = parts[0].split(separator: ".", omittingEmptySubsequences: false)
+        return octets.count == 4 && octets.allSatisfy { o in
+            !o.isEmpty && o.count <= 3 && o.allSatisfy(\.isASCII) && Int(o).map { (0...255).contains($0) } == true
+        }
+    }
+}
+
+public struct SettingsError: Error, Equatable, Sendable, CustomStringConvertible {
+    public let message: String
+    public init(_ message: String) { self.message = message }
+    public var description: String { message }
+}
+
+/// A setting's effective value and where it came from.
+public struct ResolvedSetting: Sendable {
+    public let definition: SettingDefinition
+    public let value: TOMLValue
+    public let source: SettingSource
+    /// What the file sets, when it sets a valid value (even when a flag or the environment wins).
+    public let fileValue: TOMLValue?
+    public var key: String { definition.key }
+}
+
+/// One setting as `doz config show --json` and the UI's Settings page see it. Never a secret:
+/// the schema has none.
+public struct SettingRow: Codable, Equatable, Sendable {
+    public var key: String
+    public var section: String
+    public var name: String
+    public var value: TOMLValue
+    public var defaultValue: TOMLValue
+    public var source: SettingSource
+    public var fileValue: TOMLValue?
+    /// bool · int · choice · path · subnet
+    public var type: String
+    public var typeName: String
+    public var choices: [String]?
+    public var min: Int?
+    public var max: Int?
+    public var description: String
+    public var environment: String?
+    public var flag: String?
+    public var applies: SettingApplies
+    public var appliesNote: String
+    /// The UI may change it: not a host path, not set by the environment or a flag, the file parses.
+    public var editable: Bool
+    /// Why it is read-only in the UI, when it is.
+    public var note: String?
+}
+
+public struct SettingsReport: Codable, Equatable, Sendable {
+    public var path: String?
+    public var exists: Bool
+    public var warnings: [String]
+    public var error: String?
+    public var settings: [SettingRow]
+    public var notSettable: [String]
+}
+
+/// The names of the settings, for the code that reads them.
+public enum SettingKey {
+    public static let bootViewOnStart = "ui.boot_view_on_start"
+    public static let confirmShutdown = "ui.confirm_shutdown"
+    public static let splitDefault = "ui.split_default"
+    public static let terminals = "ui.terminals"
+    public static let terminalFontSize = "ui.terminal_font_size"
+    public static let theme = "ui.theme"
+    public static let idleTimeout = "host.idle_timeout_minutes"
+    public static let keepalive = "host.keepalive"
+    public static let storePath = "store.path"
+    public static let claudePermissions = "claude.permissions"
+    public static let cpus = "defaults.cpus"
+    public static let natSubnet = "defaults.nat_subnet"
+    public static let kernelPath = "kernel.path"
+    public static let kernelCache = "kernel.cache"
+    /// `images.<lab|claude-code|pi>.memory_mib` / `.network`.
+    public static func memory(_ image: String) -> String { "images.\(image).memory_mib" }
+    public static func network(_ image: String) -> String { "images.\(image).network" }
+}
+
+public struct DozerSettings: Sendable {
+    public static let directoryName = "dozer-sandbox"
+    public static let fileName = "doz.toml"
+
+    // MARK: the schema
+
+    static let networks = ["agent", "bake", "locked", "open", "nat", "none"]
+
+    /// Every setting, in file order. CLOSED: a key not here is unknown everywhere (file, CLI, UI).
+    public static let schema: [SettingDefinition] = {
+        var s: [SettingDefinition] = [
+            .init("ui", "boot_view_on_start", .bool, .bool(true),
+                  "Start opens a terminal on the boot sequence (the kernel console) until the sandbox is up; false: Start just starts it.",
+                  applies: .now),
+            .init("ui", "confirm_shutdown", .bool, .bool(true),
+                  "Shut Down asks first (its dialog's \"don't ask again\" sets this to false). Reset and Remove always ask for the name.",
+                  applies: .now),
+            .init("ui", "split_default", .choice(["shell", "watch", "attach", "dialog"]), .string("shell"),
+                  "What a terminal's Split opens: shell (a new shell session), watch (a read-only view of the left terminal's session), attach (a second, shared view of it), dialog (choose each time).",
+                  applies: .now),
+            .init("ui", "terminals", .bool, .bool(true),
+                  "Terminals in the browser. false: the UI opens none and refuses a terminal ticket (Terminal.app still works).",
+                  applies: .now),
+            .init("ui", "terminal_font_size", .int(9...32), .int(13),
+                  "The browser terminal's font size, in points (a terminal opened from now on).",
+                  applies: .now),
+            .init("ui", "theme", .choice(["auto", "light", "dark"]), .string("auto"),
+                  "The UI's colours: auto follows macOS.",
+                  applies: .now),
+            .init("host", "idle_timeout_minutes", .int(0...10_080), .int(5),
+                  "Minutes with nothing running before the host exits; 0 = never.",
+                  env: "DOZ_HOST_IDLE", flag: "doz host start --idle-timeout", applies: .hostRestart),
+            .init("host", "keepalive", .bool, .bool(false),
+                  "Near a Mac login's expiry, while a sandbox uses it and no Claude Code runs, the host runs the Mac's claude once to renew it.",
+                  applies: .newStore),
+            .init("store", "path", .path, .string("~/Library/Application Support/dozer-sandbox"),
+                  "The store: images, kernels, sandboxes and the host's files.",
+                  env: "DOZ_STORE", flag: "--store", applies: .nextCommand, ui: false),
+            .init("claude", "permissions", .choice(["skip", "ask"]), .string("skip"),
+                  "Claude Code in a claude-code sandbox: skip its permission prompts (the sandbox is the boundary), or ask as on a Mac.",
+                  flag: "-e DOZ_CLAUDE_PERMISSIONS=… on run/exec", applies: .nextSession),
+            .init("defaults", "cpus", .int(1...64), .int(2),
+                  "CPUs of a new sandbox.",
+                  flag: "doz create --cpus", applies: .nextCreate),
+            .init("defaults", "nat_subnet", .subnet, .string(""),
+                  "The vmnet subnet of a new --network nat sandbox.",
+                  env: "DOZ_SUBNET", flag: "doz create --subnet", applies: .nextCreate),
+        ]
+        for (image, memory, network) in [("lab", 1024, "bake"), ("claude-code", 2048, "agent"), ("pi", 2048, "agent")] {
+            s.append(.init("images.\(image)", "memory_mib", .int(256...262_144), .int(memory),
+                           "Memory (MiB) of a new \(image) sandbox (a custom image follows the image it was saved from).",
+                           flag: "doz create --memory", applies: .nextCreate))
+            s.append(.init("images.\(image)", "network", .choice(networks), .string(network),
+                           "The network of a new \(image) sandbox: agent, bake, locked, open (proxied presets), nat or none.",
+                           flag: "doz create --network", applies: .nextCreate))
+        }
+        s.append(.init("kernel", "path", .path, .string(""),
+                       "An explicit Linux kernel for new sandboxes (\"\": the pinned kernel, fetched into the cache).",
+                       env: "DOZ_KERNEL", applies: .nextCreate, ui: false))
+        s.append(.init("kernel", "cache", .path, .string(""),
+                       "Where the pinned kernel is cached (\"\": the store's own); share one between stores.",
+                       env: "DOZ_KERNEL_CACHE", applies: .nextCreate, ui: false))
+        return s
+    }()
+
+    public static func definition(_ key: String) -> SettingDefinition? { schema.first { $0.key == key } }
+
+    /// What cannot be set here, by design, and why — printed in the file and the docs.
+    public static let notSettable: [String] = [
+        "the web UI's limits: session lifetime (12 h), link lifetime (5 min), request body, connection and stream caps",
+        "the web UI's checks: exact Host, Origin + CSRF on every change, the Content-Security-Policy",
+        "the browser terminal's safety: one-use 30 s tickets, the 1 MiB paste cap and the unsafe-paste confirmation",
+        "the guest binaries (DOZ_DECKHOLD / DOZ_DOZNET are developer overrides, environment only)",
+        "credentials: keys and tokens live in the Keychain or the host's memory, never in this file",
+    ]
+
+    // MARK: the file
+
+    /// `${XDG_CONFIG_HOME:-$HOME/.config}/dozer-sandbox/doz.toml`. XDG_CONFIG_HOME counts only when
+    /// absolute (the XDG rule). Nil when neither is set (then there is no file: defaults only).
+    public static func fileURL(environment env: [String: String] = ProcessInfo.processInfo.environment) -> URL? {
+        let base: URL
+        if let x = env["XDG_CONFIG_HOME"], x.hasPrefix("/") {
+            base = URL(fileURLWithPath: x, isDirectory: true)
+        } else if let h = env["HOME"], h.hasPrefix("/") {
+            base = URL(fileURLWithPath: h, isDirectory: true).appendingPathComponent(".config", isDirectory: true)
+        } else {
+            return nil
+        }
+        return base.appendingPathComponent(directoryName, isDirectory: true).appendingPathComponent(fileName)
+    }
+
+    public let url: URL?
+    public let environment: [String: String]
+    /// The file's valid, known values (key → value).
+    public let fileValues: [String: TOMLValue]
+    /// Keys the schema does not know, kept as they were when the file is rewritten.
+    public let unknown: [TOMLEntry]
+    public let warnings: [String]
+    /// The file did not parse: none of it applies, and it is not overwritten.
+    public let fileError: String?
+    public let fileExists: Bool
+
+    /// Read the file named by `environment` (defaults only when there is none).
+    public static func load(environment: [String: String] = ProcessInfo.processInfo.environment) -> DozerSettings {
+        let url = fileURL(environment: environment)
+        guard let url else { return DozerSettings(text: nil, url: nil, environment: environment) }
+        var st = stat()
+        guard lstat(url.path, &st) == 0 else { return DozerSettings(text: nil, url: url, environment: environment) }
+        guard (st.st_mode & S_IFMT) == S_IFREG || (st.st_mode & S_IFMT) == S_IFLNK else {
+            return DozerSettings(text: nil, url: url, environment: environment, readError: "\(url.path) is not a file")
+        }
+        guard st.st_size <= off_t(TOML.maximumBytes), let data = FileManager.default.contents(atPath: url.path) else {
+            return DozerSettings(text: nil, url: url, environment: environment, readError: "\(url.path) could not be read (or is over 64 KiB)")
+        }
+        guard let text = String(data: data, encoding: .utf8) else {
+            return DozerSettings(text: nil, url: url, environment: environment, readError: "\(url.path) is not UTF-8")
+        }
+        return DozerSettings(text: text, url: url, environment: environment)
+    }
+
+    /// From a file's text (nil: no file).
+    public init(text: String?, url: URL? = nil, environment: [String: String] = [:], readError: String? = nil) {
+        self.url = url
+        self.environment = environment
+        var values: [String: TOMLValue] = [:]
+        var unknown: [TOMLEntry] = []
+        var warnings: [String] = []
+        var fileError = readError
+        if let text {
+            do {
+                for e in try TOML.parse(text) {
+                    guard let d = Self.definition(e.path) else {
+                        unknown.append(e)
+                        warnings.append("line \(e.line): unknown setting \(e.path) — ignored")
+                        continue
+                    }
+                    do { values[d.key] = try d.validate(e.value) } catch let err as SettingsError {
+                        warnings.append("line \(e.line): \(err.message) — ignored, the default applies")
+                    } catch {}
+                }
+            } catch let e as TOMLError {
+                fileError = "\(url?.lastPathComponent ?? Self.fileName) \(e.description)"
+            } catch {
+                fileError = "\(error)"
+            }
+        }
+        if let fileError {
+            values = [:]
+            unknown = []
+            warnings.insert("\(fileError) — the file is ignored until it is fixed (or removed)", at: 0)
+        }
+        fileValues = values
+        self.unknown = unknown
+        self.warnings = warnings
+        self.fileError = fileError
+        fileExists = text != nil || readError != nil
+    }
+
+    // MARK: resolution
+
+    /// A setting's effective value: `flag`, else its environment variable, else the file, else the default.
+    /// An environment value that does not parse is skipped (as if unset). A fractional environment
+    /// value of an integer setting (`DOZ_HOST_IDLE=0.5`) is kept as its text — the host reads it so.
+    public func resolve(_ key: String, flag: TOMLValue? = nil) -> ResolvedSetting {
+        guard let d = Self.definition(key) else { preconditionFailure("unknown setting \(key)") }
+        let file = fileValues[key]
+        if let flag { return ResolvedSetting(definition: d, value: flag, source: .flag, fileValue: file) }
+        if let name = d.environment, let raw = environment[name], !raw.isEmpty {
+            if let v = try? d.parse(raw) { return ResolvedSetting(definition: d, value: v, source: .env, fileValue: file) }
+            if case .int = d.type, let x = Double(raw), x >= 0 {
+                return ResolvedSetting(definition: d, value: .string(raw), source: .env, fileValue: file)
+            }
+        }
+        if let file { return ResolvedSetting(definition: d, value: file, source: .file, fileValue: file) }
+        return ResolvedSetting(definition: d, value: d.defaultValue, source: .default, fileValue: nil)
+    }
+
+    /// Every setting, resolved, in file order.
+    public var all: [ResolvedSetting] { Self.schema.map { resolve($0.key) } }
+
+    public func bool(_ key: String) -> Bool {
+        if case .bool(let b) = resolve(key).value { return b }
+        if case .bool(let b) = Self.definition(key)?.defaultValue { return b }
+        return false
+    }
+
+    public func int(_ key: String) -> Int {
+        let r = resolve(key)
+        if case .int(let i) = r.value { return i }
+        if case .string(let s) = r.value, let x = Double(s) { return Int(x) }
+        if case .int(let i) = r.definition.defaultValue { return i }
+        return 0
+    }
+
+    /// A string setting; nil when empty (`""` = automatic).
+    public func string(_ key: String) -> String? {
+        if case .string(let s) = resolve(key).value, !s.isEmpty { return s }
+        return nil
+    }
+
+    /// The host's idle timeout in minutes: `--idle-timeout`, else `$DOZ_HOST_IDLE` (fractions
+    /// allowed, as always), else the file, else 5.
+    public func idleTimeoutMinutes(flag: Double?) -> Double {
+        if let flag { return flag }
+        if let raw = environment["DOZ_HOST_IDLE"], let x = Double(raw), x >= 0 { return x }
+        return Double(int(SettingKey.idleTimeout))
+    }
+
+    /// The images section a sandbox's defaults come from: its imageSpec's (a custom image follows the
+    /// image it was saved from), `lab` without one.
+    public static func imageSection(imageSpecName: String?) -> String {
+        switch imageSpecName {
+        case nil: "lab"
+        case "claude-code": "claude-code"
+        case "pi": "pi"
+        default: "claude-code"
+        }
+    }
+
+    // MARK: reporting (doz config show --json, the UI's Settings page)
+
+    /// Every setting with its value, default, source and description. `flags`: the values this
+    /// process was given on its command line (only `store.path` can be: `--store`).
+    public func report(flags: [String: TOMLValue] = [:]) -> SettingsReport {
+        let rows = Self.schema.map { d -> SettingRow in
+            let r = resolve(d.key, flag: flags[d.key])
+            var kind = "string", choices: [String]?, lo: Int?, hi: Int?
+            switch d.type {
+            case .bool: kind = "bool"
+            case .int(let range): kind = "int"; lo = range.lowerBound; hi = range.upperBound
+            case .choice(let c): kind = "choice"; choices = c
+            case .path: kind = "path"
+            case .subnet: kind = "subnet"
+            }
+            var note: String?
+            switch r.source {
+            case .env: note = "set by $\(d.environment ?? "?") in this process's environment — change it there (the file's value, if any, is overridden)"
+            case .flag: note = "set on this process's command line (\(d.flag ?? "a flag"))"
+            case .file, .default: break
+            }
+            if !d.editableInUI, note == nil { note = "a host path — set it with: doz config set \(d.key) PATH" }
+            if fileError != nil, note == nil { note = "the settings file does not parse — fix it (or remove it) first" }
+            return SettingRow(key: d.key, section: d.section, name: d.name, value: r.value, defaultValue: d.defaultValue,
+                              source: r.source, fileValue: r.fileValue, type: kind, typeName: d.type.name, choices: choices,
+                              min: lo, max: hi, description: d.summary, environment: d.environment, flag: d.flag,
+                              applies: d.applies, appliesNote: d.applies.note,
+                              editable: d.editableInUI && r.source != .env && r.source != .flag && fileError == nil, note: note)
+        }
+        return SettingsReport(path: url?.path, exists: fileExists, warnings: warnings, error: fileError, settings: rows,
+                              notSettable: Self.notSettable)
+    }
+
+    // MARK: writing
+
+    /// Set (`value`) or clear (nil) one key and write the file. Refuses an unknown key, a bad value,
+    /// or a file that does not parse (it is the person's, and would be lost).
+    @discardableResult
+    public func writing(_ key: String, _ value: TOMLValue?) throws -> DozerSettings {
+        guard let d = Self.definition(key) else { throw SettingsError("unknown setting \(key) — doz config show lists them") }
+        var values = fileValues
+        if let value { values[key] = try d.validate(value) } else { values[key] = nil }
+        return try writingAll(values)
+    }
+
+    /// Write the file as the schema generates it, with these values (and the unknown keys kept).
+    @discardableResult
+    public func writingAll(_ values: [String: TOMLValue]) throws -> DozerSettings {
+        guard let url else { throw SettingsError("no settings file: neither XDG_CONFIG_HOME nor HOME is set") }
+        if let fileError { throw SettingsError("\(fileError) — fix it or remove it first; it was not changed") }
+        try Self.writeAtomically(Self.render(values: values, unknown: unknown), to: url)
+        return Self.load(environment: environment)
+    }
+
+    /// The file's text: a header, then every section and setting of the schema, each with its
+    /// description and its default commented out, unless `values` sets it.
+    public static func render(values: [String: TOMLValue], unknown: [TOMLEntry] = []) -> String {
+        var out = """
+        # Dozer Sandbox settings (doz.toml)
+        #
+        # Every setting is listed with its default, commented out: `# key = default`. Uncomment a line
+        # to set it. `doz config set KEY VALUE` and the UI's Settings page write this file for you;
+        # they regenerate it from the settings list, so comments you add are not kept.
+        #
+        # Precedence: a command-line flag, then the environment variable named, then this file, then
+        # the default. `doz config show` prints every value and where it came from.
+        #
+        # Not settable, by design:
+
+        """
+        for n in notSettable { out += "#   - \(n)\n" }
+        var sections: [String] = []
+        for d in schema where !sections.contains(d.section) { sections.append(d.section) }
+        for section in sections {
+            out += "\n[\(section)]\n"
+            for d in schema where d.section == section {
+                out += "\n" + wrapComment(d.summary)
+                var facts: [String] = [d.type.name]
+                if let e = d.environment { facts.append("env \(e)") }
+                if let f = d.flag { facts.append("flag \(f)") }
+                facts.append(d.applies.note)
+                out += "# (\(facts.joined(separator: "; ")))\n"
+                if let v = values[d.key] {
+                    out += "\(d.name) = \(TOML.render(v))\n"
+                } else {
+                    out += "# \(d.name) = \(TOML.render(d.defaultValue))\n"
+                }
+            }
+            let extra = unknown.filter { $0.section == section }
+            if !extra.isEmpty {
+                out += "\n# not known to this version (kept as they were):\n"
+                for e in extra { out += "\(e.key) = \(TOML.render(e.value))\n" }
+            }
+        }
+        var others: [String] = []
+        for e in unknown where !sections.contains(e.section) && !others.contains(e.section) { others.append(e.section) }
+        for section in others {
+            // A top-level unknown key cannot follow a section header; it becomes [unknown].
+            let header = section.isEmpty ? "unknown" : section
+            out += "\n# not known to this version (kept as they were):\n[\(header)]\n"
+            for e in unknown where e.section == section { out += "\(e.key) = \(TOML.render(e.value))\n" }
+        }
+        return out
+    }
+
+    static func wrapComment(_ text: String, width: Int = 98) -> String {
+        var lines: [String] = []
+        var line = "#"
+        for word in text.split(separator: " ") {
+            if line.count + 1 + word.count > width, line != "#" {
+                lines.append(line)
+                line = "#"
+            }
+            line += " " + word
+        }
+        lines.append(line)
+        return lines.joined(separator: "\n") + "\n"
+    }
+
+    /// temp file (0600, O_EXCL) in the same directory → fsync → rename; the directory is 0700.
+    static func writeAtomically(_ text: String, to url: URL) throws {
+        let dir = url.deletingLastPathComponent()
+        do {
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        } catch {
+            throw SettingsError("could not create \(dir.path): \(error.localizedDescription)")
+        }
+        guard chmod(dir.path, 0o700) == 0 else { throw SettingsError("could not make \(dir.path) private (0700)") }
+        let tmp = dir.appendingPathComponent(".\(fileName).\(getpid()).\(UInt32.random(in: .min ... .max)).tmp")
+        let fd = open(tmp.path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o600)
+        guard fd >= 0 else { throw SettingsError("could not write in \(dir.path): \(String(cString: strerror(errno)))") }
+        var ok = fchmod(fd, 0o600) == 0
+        let bytes = Array(text.utf8)
+        var written = 0
+        while ok, written < bytes.count {
+            let n = bytes[written...].withUnsafeBytes { Darwin.write(fd, $0.baseAddress, $0.count) }
+            if n <= 0 { ok = false } else { written += n }
+        }
+        ok = ok && fsync(fd) == 0
+        ok = close(fd) == 0 && ok
+        guard ok, rename(tmp.path, url.path) == 0 else {
+            unlink(tmp.path)
+            throw SettingsError("could not write \(url.path): \(String(cString: strerror(errno)))")
+        }
+    }
+}

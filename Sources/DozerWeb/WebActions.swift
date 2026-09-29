@@ -1,0 +1,434 @@
+import Foundation
+import DozerKit
+import DozerHost
+
+/// 590 phase 2 — everything the UI can DO, as a closed enum. Each case maps to exactly ONE `HostOp`
+/// (the same operation the CLI sends; the web layer adds none of its own), with every field
+/// validated here before the host sees it. The body of `POST /api/v1/actions` is decoded STRICTLY:
+/// an unknown action, an unknown field, a wrong type or a value outside its rule is a 400 — nothing
+/// is passed through.
+///
+/// Not here, on purpose: `exec` and `attach` (a terminal is Terminal.app, `WebTerminal`), `key set`
+/// and `account add` (a secret is never entered in a browser — owner ruling D3), `host stop`.
+public enum WebAction: Equatable, Sendable {
+    case create(name: String, options: CreateOptions)
+    /// start, wake, pause, resume, sleep, deep-sleep, shutdown, reset, rm.
+    case lifecycle(HostOp, name: String)
+    /// A session: the image's own when `argv` is nil, else a new one running `argv` (detached — no
+    /// shell in front, inside the sandbox only).
+    case openSession(name: String, session: String?, argv: [String]?)
+    case pointTake(name: String, point: String?, note: String?)
+    case pointRevert(name: String, point: String)
+    case pointFork(name: String, point: String, newName: String)
+    case pointRemove(name: String, point: String)
+    case pointSaveImage(name: String, point: String?, image: String, note: String?)
+    case imageBake(String)
+    case imageRemove(String)
+    case netPolicy(name: String, edit: WebPolicyEdit)
+    case keyPolicy(name: String, policy: String)
+    case keyRemove(name: String, binding: String)
+    case accountUse(name: String, account: String)
+    case accountDefault(String)
+    case accountKeepalive(Bool)
+    case accountVerify(String)
+    case accountRemove(String)
+
+    public static let lifecycleOps: [String: HostOp] = [
+        "start": .start, "wake": .wake, "pause": .pause, "resume": .resume, "sleep": .sleep, "deep-sleep": .deepSleep,
+        "shutdown": .shutdown, "reset": .reset, "rm": .rm,
+    ]
+
+    /// The one host operation this action is.
+    public var hostOp: HostOp { hostRequest.op }
+
+    /// The sandbox it acts on (progress is shown in its row).
+    public var sandbox: String? {
+        switch self {
+        case .create(let n, _), .lifecycle(_, let n), .openSession(let n, _, _), .pointTake(let n, _, _), .pointRevert(let n, _),
+             .pointFork(let n, _, _), .pointRemove(let n, _), .pointSaveImage(let n, _, _, _), .netPolicy(let n, _), .keyPolicy(let n, _),
+             .keyRemove(let n, _), .accountUse(let n, _):
+            return n
+        case .imageBake, .imageRemove, .accountDefault, .accountKeepalive, .accountVerify, .accountRemove:
+            return nil
+        }
+    }
+
+    /// Destructive actions carry `confirm`, which must equal this (the page fills it only from a
+    /// name the person typed).
+    public var confirmationTarget: String? {
+        switch self {
+        // Shut Down keeps the disk (owner, 591: a plain confirmation, not a typed name).
+        case .lifecycle(let op, let n) where [.reset, .rm].contains(op): n
+        case .pointRevert(let n, _), .pointRemove(let n, _): n
+        case .imageRemove(let i): i
+        case .accountRemove(let a): a
+        default: nil
+        }
+    }
+
+    /// Two actions with the same key must not run at once: the same operation on the same sandbox
+    /// (and session, point, image or account). A double-clicked "open session" is one operation.
+    public var dedupeKey: String {
+        let r = hostRequest
+        return [r.op.rawValue, r.name ?? "", r.session ?? "", r.point ?? r.pointName ?? "", r.image ?? "", r.account ?? ""].joined(separator: "|")
+    }
+
+    /// A short label for the progress line ("deep-sleep lab1").
+    public var label: String {
+        let r = hostRequest
+        return [r.op.rawValue, r.name ?? r.image ?? r.account].compactMap { $0 }.joined(separator: " ")
+    }
+
+    public var hostRequest: HostRequest {
+        switch self {
+        case .create(let n, let o):
+            var r = HostRequest(.create, name: n)
+            r.create = o
+            return r
+        case .lifecycle(let op, let n):
+            return HostRequest(op, name: n)
+        case .openSession(let n, let s, let argv):
+            var r = HostRequest(.openSession, name: n)
+            r.session = s
+            r.argv = argv
+            r.wake = true
+            return r
+        case .pointTake(let n, let p, let note):
+            var r = HostRequest(.pointTake, name: n)
+            r.pointName = p
+            r.note = note
+            return r
+        case .pointRevert(let n, let p):
+            var r = HostRequest(.pointRevert, name: n)
+            r.point = p
+            return r
+        case .pointFork(let n, let p, let new):
+            var r = HostRequest(.pointFork, name: n)
+            r.point = p
+            r.newName = new
+            return r
+        case .pointRemove(let n, let p):
+            var r = HostRequest(.pointRm, name: n)
+            r.point = p
+            return r
+        case .pointSaveImage(let n, let p, let image, let note):
+            var r = HostRequest(.pointSaveImage, name: n)
+            r.point = p
+            r.image = image
+            r.note = note
+            return r
+        case .imageBake(let i):
+            var r = HostRequest(.imageBake)
+            r.image = i
+            return r
+        case .imageRemove(let i):
+            var r = HostRequest(.imageRm)
+            r.image = i
+            return r
+        case .netPolicy(let n, let e):
+            return e.request(n)
+        case .keyPolicy(let n, let p):
+            var r = HostRequest(.keyPolicy, name: n)
+            r.policy = p
+            return r
+        case .keyRemove(let n, let b):
+            var r = HostRequest(.keyRm, name: n)
+            r.binding = b
+            return r
+        case .accountUse(let n, let a):
+            var r = HostRequest(.accountUse, name: n)
+            r.account = a
+            return r
+        case .accountDefault(let a):
+            var r = HostRequest(.accountDefault)
+            r.account = a
+            return r
+        case .accountKeepalive(let on):
+            var r = HostRequest(.accountKeepalive)
+            r.enabled = on
+            return r
+        case .accountVerify(let a):
+            var r = HostRequest(.accountVerify)
+            r.account = a
+            r.verify = true
+            return r
+        case .accountRemove(let a):
+            var r = HostRequest(.accountRemove)
+            r.account = a
+            return r
+        }
+    }
+
+    // MARK: strict decoding
+
+    public struct Invalid: Error, Equatable, Sendable {
+        public let message: String
+        init(_ m: String) { message = m }
+    }
+
+    /// Fields each action may carry (besides `action`).
+    static let fields: [String: Set<String>] = {
+        var f: [String: Set<String>] = [
+            "create": ["sandbox", "image", "cpus", "memoryMiB", "workspace", "network", "subnet", "account"],
+            "open-session": ["sandbox", "session", "argv"],
+            "point-take": ["sandbox", "point", "note"],
+            "point-revert": ["sandbox", "point", "confirm"],
+            "point-fork": ["sandbox", "point", "newName"],
+            "point-rm": ["sandbox", "point", "confirm"],
+            "point-save-image": ["sandbox", "point", "image", "note"],
+            "image-bake": ["image"],
+            "image-rm": ["image", "confirm"],
+            "net-policy": ["sandbox", "preset", "allow", "deny", "remove"],
+            "key-policy": ["sandbox", "policy"],
+            "key-rm": ["sandbox", "binding"],
+            "account-use": ["sandbox", "account"],
+            "account-default": ["account"],
+            "account-keepalive": ["enabled"],
+            "account-verify": ["account"],
+            "account-rm": ["account", "confirm"],
+        ]
+        for (verb, op) in lifecycleOps { f[verb] = [.reset, .rm].contains(op) ? ["sandbox", "confirm"] : ["sandbox"] }
+        return f
+    }()
+
+    public static var actionNames: [String] { fields.keys.sorted() }
+
+    /// Decode a request body. Throws `Invalid` with a fixed message (the value is never echoed).
+    public static func decode(_ body: Data) throws -> WebAction {
+        guard let obj = try? JSONSerialization.jsonObject(with: body), let d = obj as? [String: Any] else {
+            throw Invalid("the body must be a JSON object")
+        }
+        guard let verb = d["action"] as? String, let allowed = fields[verb] else { throw Invalid("unknown action") }
+        let extra = Set(d.keys).subtracting(allowed).subtracting(["action"])
+        guard extra.isEmpty else { throw Invalid("unexpected field(s) for \(verb): \(extra.sorted().joined(separator: ", "))") }
+        let f = Fields(d)
+        let a: WebAction
+        switch verb {
+        case "create":
+            let o = CreateOptions(image: try f.image("image"), cpus: try f.int("cpus", 1...64), memoryMiB: try f.int("memoryMiB", 256...262_144).map(UInt64.init),
+                                  workspace: try f.workspace("workspace"), network: try f.oneOf("network", ["agent", "bake", "locked", "open", "nat", "none"]),
+                                  subnet: try f.subnet("subnet"), account: try f.accountRef("account", allowDefault: true))
+            a = .create(name: try f.sandbox("sandbox"), options: o)
+        case "open-session":
+            a = .openSession(name: try f.sandbox("sandbox"), session: try f.session("session"), argv: try f.argv("argv"))
+        case "point-take":
+            a = .pointTake(name: try f.sandbox("sandbox"), point: try f.pointRef("point"), note: try f.note("note"))
+        case "point-revert":
+            a = .pointRevert(name: try f.sandbox("sandbox"), point: try f.required(f.pointRef("point"), "point"))
+        case "point-fork":
+            a = .pointFork(name: try f.sandbox("sandbox"), point: try f.required(f.pointRef("point"), "point"), newName: try f.sandbox("newName"))
+        case "point-rm":
+            a = .pointRemove(name: try f.sandbox("sandbox"), point: try f.required(f.pointRef("point"), "point"))
+        case "point-save-image":
+            a = .pointSaveImage(name: try f.sandbox("sandbox"), point: try f.pointRef("point"), image: try f.customImage("image"), note: try f.note("note"))
+        case "image-bake":
+            a = .imageBake(try f.required(f.oneOf("image", ["lab", "claude-code", "pi"]), "image"))
+        case "image-rm":
+            a = .imageRemove(try f.image("image"))
+        case "net-policy":
+            let e = WebPolicyEdit(preset: try f.oneOf("preset", ["locked", "bake", "agent", "open"]), allow: try f.hosts("allow"),
+                                  deny: try f.hosts("deny"), remove: try f.hosts("remove"))
+            guard !e.isEmpty else { throw Invalid("net-policy: nothing to change") }
+            a = .netPolicy(name: try f.sandbox("sandbox"), edit: e)
+        case "key-policy":
+            a = .keyPolicy(name: try f.sandbox("sandbox"), policy: try f.required(f.oneOf("policy", ["allow", "strict", "auto"]), "policy"))
+        case "key-rm":
+            a = .keyRemove(name: try f.sandbox("sandbox"),
+                           binding: try f.required(f.oneOf("binding", [CredentialBinding.anthropic.id, CredentialBinding.claudeOAuth.id]), "binding"))
+        case "account-use":
+            a = .accountUse(name: try f.sandbox("sandbox"), account: try f.required(f.accountRef("account", allowDefault: true), "account"))
+        case "account-default":
+            a = .accountDefault(try f.required(f.accountRef("account", allowDefault: false), "account"))
+        case "account-keepalive":
+            guard let on = d["enabled"] as? Bool, CFGetTypeID(d["enabled"] as CFTypeRef) == CFBooleanGetTypeID() else { throw Invalid("enabled: true or false") }
+            a = .accountKeepalive(on)
+        case "account-verify":
+            a = .accountVerify(try f.account("account"))
+        case "account-rm":
+            a = .accountRemove(try f.account("account"))
+        default:
+            guard let op = lifecycleOps[verb] else { throw Invalid("unknown action") }
+            a = .lifecycle(op, name: try f.sandbox("sandbox"))
+        }
+        if let target = a.confirmationTarget {
+            guard let c = d["confirm"] as? String, c == target else { throw Invalid("\(verb) is destructive: type the name to confirm it") }
+        }
+        return a
+    }
+
+    /// Typed field readers — each enforces the rule the CLI or the library would.
+    struct Fields {
+        let d: [String: Any]
+        init(_ d: [String: Any]) { self.d = d }
+
+        func required<T>(_ v: T?, _ key: String) throws -> T {
+            guard let v else { throw Invalid("\(key) is required") }
+            return v
+        }
+
+        func string(_ key: String, max: Int = 256) throws -> String? {
+            guard let v = d[key] else { return nil }
+            if v is NSNull { return nil }
+            guard let s = v as? String else { throw Invalid("\(key) must be a string") }
+            guard !s.isEmpty, s.count <= max, !s.unicodeScalars.contains(where: { $0.properties.generalCategory == .control }) else {
+                throw Invalid("\(key): 1–\(max) characters, no control characters")
+            }
+            return s
+        }
+
+        func matching(_ key: String, _ pattern: String, _ rule: String) throws -> String? {
+            guard let s = try string(key) else { return nil }
+            guard s.range(of: pattern, options: .regularExpression) != nil else { throw Invalid("\(key): \(rule)") }
+            return s
+        }
+
+        func sandbox(_ key: String) throws -> String {
+            guard let s = try string(key), WebRoute.isSandboxName(s) else { throw Invalid("\(key): a sandbox name, 1–40 of a-z 0-9 -") }
+            return s
+        }
+
+        func session(_ key: String) throws -> String? {
+            guard let s = try string(key, max: 64) else { return nil }
+            do { try GuestCommand.validateSessionName(s) } catch { throw Invalid("\(key): 1–64 of letters, digits . _ - (not starting with .)") }
+            return s
+        }
+
+        func image(_ key: String) throws -> String {
+            try required(matching(key, "^[a-z0-9][a-z0-9-]{0,39}$", "an image name (lab, claude-code, pi or a custom image)"), key)
+        }
+
+        func customImage(_ key: String) throws -> String {
+            try required(matching(key, "^[a-z0-9][a-z0-9-]{0,39}$", "an image name: 1–40 of a-z 0-9 -"), key)
+        }
+
+        func pointRef(_ key: String) throws -> String? {
+            try matching(key, "^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$", "a restore point's name or id")
+        }
+
+        func note(_ key: String) throws -> String? { try string(key, max: 200) }
+
+        func oneOf(_ key: String, _ values: [String]) throws -> String? {
+            guard let s = try string(key) else { return nil }
+            guard values.contains(s) else { throw Invalid("\(key): one of \(values.joined(separator: ", "))") }
+            return s
+        }
+
+        func int(_ key: String, _ range: ClosedRange<Int>) throws -> Int? {
+            guard let v = d[key], !(v is NSNull) else { return nil }
+            guard let n = v as? NSNumber, CFGetTypeID(n) != CFBooleanGetTypeID(), n.doubleValue == n.doubleValue.rounded(),
+                  range.contains(n.intValue) else { throw Invalid("\(key): a whole number \(range.lowerBound)–\(range.upperBound)") }
+            return n.intValue
+        }
+
+        func account(_ key: String) throws -> String {
+            guard let s = try string(key, max: 40), (try? AccountStore.validateName(s)) != nil || s == "mac" else {
+                throw Invalid("\(key): an account name, 1–40 of a-z 0-9 -")
+            }
+            return s
+        }
+
+        func accountRef(_ key: String, allowDefault: Bool) throws -> String? {
+            guard let s = try string(key, max: 40) else { return nil }
+            if s == "none" || (allowDefault && s == "default") { return s }
+            guard s.range(of: "^[a-z0-9][a-z0-9-]{0,39}$", options: .regularExpression) != nil, s != "default" else {
+                throw Invalid("\(key): an account name\(allowDefault ? ", default" : "") or none")
+            }
+            return s
+        }
+
+        func subnet(_ key: String) throws -> String? {
+            try matching(key, #"^(\d{1,3}\.){3}\d{1,3}/\d{1,2}$"#, "an IPv4 CIDR, like 192.168.120.0/24")
+        }
+
+        /// A host directory shared at /workspace: absolute, an existing directory (symlinks resolved).
+        func workspace(_ key: String) throws -> String? {
+            guard let s = try string(key, max: 1024) else { return nil }
+            guard s.hasPrefix("/") else { throw Invalid("\(key): an absolute path") }
+            let resolved = URL(fileURLWithPath: s).resolvingSymlinksInPath().path
+            var isDir: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: resolved, isDirectory: &isDir), isDir.boolValue else {
+                throw Invalid("\(key): not an existing directory")
+            }
+            return resolved
+        }
+
+        /// Hosts for the policy: exact, `*.domain`, `host:port`, or an IPv4 CIDR; ≤ 32.
+        func hosts(_ key: String) throws -> [String] {
+            guard let v = d[key], !(v is NSNull) else { return [] }
+            guard let a = v as? [Any], a.count <= 32 else { throw Invalid("\(key): a list of at most 32 hosts") }
+            return try a.map { x in
+                guard let s = x as? String, s.count <= 253,
+                      s.range(of: #"^(\*\.)?[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?(:\d{1,5}(,\d{1,5})*)?$|^(\d{1,3}\.){3}\d{1,3}/\d{1,2}$"#,
+                              options: .regularExpression) != nil else {
+                    throw Invalid("\(key): a host (example.com, *.example.com, host:443) or an IPv4 CIDR")
+                }
+                return s
+            }
+        }
+
+        /// A detached session's program: 1–64 arguments, no NUL, ≤ 4 KiB each, 16 KiB in all.
+        func argv(_ key: String) throws -> [String]? {
+            guard let v = d[key], !(v is NSNull) else { return nil }
+            guard let a = v as? [Any], (1...64).contains(a.count) else { throw Invalid("\(key): 1–64 arguments") }
+            let out = try a.map { x -> String in
+                guard let s = x as? String, !s.isEmpty, s.utf8.count <= 4096, !s.contains("\0") else {
+                    throw Invalid("\(key): each argument a non-empty string of at most 4 KiB")
+                }
+                return s
+            }
+            guard out.reduce(0, { $0 + $1.utf8.count }) <= 16_384 else { throw Invalid("\(key): at most 16 KiB in all") }
+            return out
+        }
+    }
+}
+
+/// A network-policy change, as `doz net policy` takes it.
+public struct WebPolicyEdit: Equatable, Sendable {
+    public var preset: String?
+    public var allow: [String]
+    public var deny: [String]
+    public var remove: [String]
+
+    public var isEmpty: Bool { preset == nil && allow.isEmpty && deny.isEmpty && remove.isEmpty }
+
+    public func request(_ name: String) -> HostRequest {
+        var r = HostRequest(.netPolicy, name: name)
+        r.preset = preset
+        r.allow = allow
+        r.deny = deny
+        r.removeHosts = remove
+        return r
+    }
+}
+
+/// `POST /api/v1/sandboxes/{name}/network/preview` — what the edit would make of the policy.
+public struct WebPolicyPreview: Codable, Equatable, Sendable {
+    public var before: WebPolicy
+    public var after: WebPolicy
+    public var added: [String]
+    public var removed: [String]
+    public var changed: Bool
+
+    public init(before b: NetworkPolicy, after a: NetworkPolicy) {
+        before = WebPolicy(b)
+        after = WebPolicy(a)
+        let bl = before.rules.map(\.label), al = after.rules.map(\.label)
+        added = al.filter { !bl.contains($0) }
+        removed = bl.filter { !al.contains($0) }
+        changed = before != after
+    }
+}
+
+/// One operation the UI started, as the page sees it (SSE `op`, `GET /api/v1/operations`).
+public struct WebOperation: Codable, Equatable, Sendable {
+    public var id: String
+    public var action: String
+    public var label: String
+    public var sandbox: String?
+    /// running, done, failed.
+    public var state: String
+    /// The latest progress line while running; the outcome after.
+    public var text: String
+    public var startedAt: Date
+    public var milliseconds: Double?
+}

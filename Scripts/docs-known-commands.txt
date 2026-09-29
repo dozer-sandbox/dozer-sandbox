@@ -1,4 +1,4 @@
-# The `snooze` command names the CLI reference (SnoozeContainerKit.docc/Articles/CLIReference.md)
+# The `doz` command names the CLI reference (DozerKit.docc/Articles/CLIReference.md)
 # documents. One per line: a top-level command name, or "group/subcommand". Checked against the
 # real CLI's --help output by Scripts/docs-drift-check.sh (`make docs-drift-check`). Aliases
 # ("cold-boot", "suspend", "hibernate", …) are not tracked here — only canonical names.

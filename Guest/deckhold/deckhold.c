@@ -1,7 +1,7 @@
 /*
  * deckhold — a guest-side PTY holder on headless libghostty-vt.
  *
- * Productised in SnoozeContainerKit (feature 578) from the reference design proven in probe 576
+ * Productised in DozerKit (feature 578) from the reference design proven in probe 576
  * (deck-factory workspace: probes/576-i91-DOCKER-SANDBOX-SUSPEND-RESUME-PROBE/sleep-poc/holder).
  * Changes since the probe: `deckhold pipe` (the host's frame transport, below), the NAME.exit
  * record a finished session leaves behind, and `ls` listing ended sessions.

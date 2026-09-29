@@ -4,10 +4,10 @@
 .tools/
 Guest/deckhold/out/
 /*.xcodeproj
-Guest/snoozenet/out/
+Guest/doznet/out/
 
-# 589: the built docs site — reproducible from SnoozeContainerKit.docc + source in under two
-# minutes (`make docs`); not committed. See changes/589-i139-SNOOZE-DOCS-SITE/589.01-PLAN.md
+# 589: the built docs site — reproducible from DozerKit.docc + source in under two
+# minutes (`make docs`); not committed. See changes/589-*/589.01-PLAN.md
 # (workspace repo) for why.
 .docc-build/
 

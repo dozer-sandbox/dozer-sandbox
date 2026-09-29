@@ -1,4 +1,4 @@
-# Contributing to SnoozeContainerKit
+# Contributing to DozerKit
 
 Features arrive here already proven: this package was productised from a probe (576's sleep POC)
 with its harness app, SandboxLab, built alongside it — so a change usually lands fully formed,

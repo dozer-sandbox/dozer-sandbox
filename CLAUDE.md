@@ -4,30 +4,30 @@ Guidance for Claude Code when working in this repo.
 
 **Process lives one level up.** `/feature`, `/plan`, `/ship`, `/fleet`, the `changes/` ledger,
 `ROADMAP.md`, `BACKLOG.md`, and `CHANGELOG.md` are workspace-level and run from `deck-factory`,
-not from here. This file holds only the code rules specific to `SnoozeContainerKit`.
+not from here. This file holds only the code rules specific to `DozerKit`.
 
 ## This is a sovereign library — release discipline is different from an app
 
-`SnoozeContainerKit` ships by **semver tag**, not by app version bumps. `swift build && swift test`
+`DozerKit` ships by **semver tag**, not by app version bumps. `swift build && swift test`
 at the root is the whole story for a consumer.
 
 - **A library never depends on an app**, and never on anything under `repo/app/*`. It has no
   sibling-library dependency at all (so no `lib()` helper and no prelaunch mirror here).
 - **A library never claims a fleet instance token.** A worktree of this library
-  (`.claude/worktrees/slot-<token>/SnoozeContainerKit`) reuses the SAME token an app slot already
+  (`.claude/worktrees/slot-<token>/DozerKit`) reuses the SAME token an app slot already
   claimed.
 - **This package's directory basename and the last path component of its remote URL must both be
-  `SnoozeContainerKit`.** SwiftPM derives package identity from them.
+  `DozerKit`.** SwiftPM derives package identity from them.
 - **A library's slot worktree is one level deeper than an app's** — ancestor-walk depth 3/7.
 
 ## Dependencies
 
 | Product | Targets | Depends on |
 |---|---|---|
-| `SnoozeContainerKit` | `SnoozeContainerKit` (+ resources `deckhold`, `snoozenet`) | `apple/containerization` **exact** `0.47.0`: `Containerization`, `ContainerizationArchive` (the kernel tarball), `ContainerizationExtras`, `ContainerizationOCI`, `ContainerizationOS`; since 580 `swift-nio` (`NIOCore`, `NIOEmbedded`; 583 `NIOPosix`), `swift-nio-ssl` (`NIOSSL`), `swift-certificates` (`X509`), `swift-asn1` — apple/* packages containerization already resolves (README "Dependencies") |
-| `snooze` (executable, 585) | `snooze` → `SnoozeCLI` (commands) → `SnoozeHost` (the host + its client) | `SnoozeContainerKit`; `swift-argument-parser` (`ArgumentParser`) in `SnoozeCLI`/`snooze` ONLY; the system `SQLite3` in `SnoozeHost` (metrics) |
-| — (not a product) | `SnoozeWeb` (590) — `snooze ui`'s server and page | `SnoozeHost`; `swift-nio` `NIOCore`/`NIOPosix`/**`NIOHTTP1`**/**`NIOWebSocket`** (591) (both ONLY here — the audit enforces it); resource `Resources/Web` (generated, committed). `SnoozeCLI`'s `UICommand.swift` alone imports `CoreServices` (LaunchServices opens the browser) |
-| — (not a product) | `snooze-vmtest` — the entitled VM test host | `SnoozeContainerKit`, `SnoozeHost` (the `cli` mode decodes `--json` with its types) |
+| `DozerKit` | `DozerKit` (+ resources `deckhold`, `doznet`) | `apple/containerization` **exact** `0.47.0`: `Containerization`, `ContainerizationArchive` (the kernel tarball), `ContainerizationExtras`, `ContainerizationOCI`, `ContainerizationOS`; since 580 `swift-nio` (`NIOCore`, `NIOEmbedded`; 583 `NIOPosix`), `swift-nio-ssl` (`NIOSSL`), `swift-certificates` (`X509`), `swift-asn1` — apple/* packages containerization already resolves (README "Dependencies") |
+| `doz` (executable, 585) | `doz` → `DozerCLI` (commands) → `DozerHost` (the host + its client) | `DozerKit`; `swift-argument-parser` (`ArgumentParser`) in `DozerCLI`/`doz` ONLY; the system `SQLite3` in `DozerHost` (metrics) |
+| — (not a product) | `DozerWeb` (590) — `doz ui`'s server and page | `DozerHost`; `swift-nio` `NIOCore`/`NIOPosix`/**`NIOHTTP1`**/**`NIOWebSocket`** (591) (both ONLY here — the audit enforces it); resource `Resources/Web` (generated, committed). `DozerCLI`'s `UICommand.swift` alone imports `CoreServices` (LaunchServices opens the browser) |
+| — (not a product) | `doz-vmtest` — the entitled VM test host | `DozerKit`, `DozerHost` (the `cli` mode decodes `--json` with its types) |
 
 The Containerization pin is EXACT on purpose: the sleep design leans on its internals' shape —
 `LinuxContainer.withVirtualMachineInstance` handing out a `VZVirtualMachineInstance`, the
@@ -39,14 +39,14 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
 
 | Path | What |
 |---|---|
-| `Sources/SnoozeContainerKit/Sandbox.swift` | The `Sandbox` actor: boot (images, golden-disk bake, APFS clone, VM), lifecycle via the planner, exec, sessions/attach |
+| `Sources/DozerKit/Sandbox.swift` | The `Sandbox` actor: boot (images, golden-disk bake, APFS clone, VM), lifecycle via the planner, exec, sessions/attach |
 | `Phase.swift` | `Phase` and `LifecyclePlanner` — each operation's steps as DATA (incl. stop / resetToImage / delete), so the invariants are unit tests |
-| `VirtualMachine.swift` | Direct VZ ops; `PinnedIdentity` (machine id + MAC); `SnoozeVMM`, `AdoptingInstance`, `AdoptingAgent` — restore into a new process |
+| `VirtualMachine.swift` | Direct VZ ops; `PinnedIdentity` (machine id + MAC); `DozerVMM`, `AdoptingInstance`, `AdoptingAgent` — restore into a new process |
 | `SessionConnection.swift` | One viewer's connection: HELLO/DATA/RESIZE out, SNAPSHOT/DATA/EXIT in; never delivers or sends after close |
 | `DeckholdProtocol.swift` | Frame codec, `deckhold ls` parser, `GuestCommand` (every guest argv; the share re-mount script) |
 | `StoreLayout.swift` | Storage layout under `storeRoot`; `PersistedSandbox` (what a new process needs to restore) |
 | `DeckholdBinary.swift` | Finds the resource without `Bundle.module` |
-| `ImageRecipe.swift`, `ImageBaker.swift` | Recipes (base@digest + steps + verify + persist dirs + `journalMiB`), the two agent recipes, the baked-disk cache; 587: base disks (`images/bases/`, flattened once per base key) and clone-tree bakes (`ImageManifest.parent`) |
+| `ImageSpec.swift`, `ImageBaker.swift` | Image specs (base@digest + steps + verify + persist dirs + `journalMiB`), the two agent image specs, the baked-disk cache; 587: base disks (`images/bases/`, flattened once per base key) and clone-tree bakes (`ImageManifest.parent`) |
 | `EXT4Inspector.swift` | 587: an ext4 image FILE read on the host — `has_journal`, clean state, the free-block bitmaps (== `dumpe2fs`'s list) |
 | `DiskAccounting.swift` | 587: per-disk unique / shared-with-parent / garbage / extents from APFS's extent map (`F_LOG2PHYS_EXT`), PRIVATESIZE cross-check; range helpers |
 | `Maintenance.swift` | 587: `reclaim()`, `rederive()`, `maintenanceAdvice()` (586's thresholds), `checkDisks()` — stopped sandboxes only |
@@ -59,21 +59,21 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
 | `EgressProxy.swift` | 580: the host proxy (vsock listener; CONNECT / plain HTTP / redirected TCP / DNS; decrypted tunnels via NIOSSL on `EmbeddedChannel`; `TLSUpstream` verified by Security.framework); `Wire` socket plumbing; `DNSMessage` |
 | `Credentials.swift` | 580: `CredentialBinding`, `CredentialVault` (secrets in memory, placeholders, the byte-exact head rewrite); `HTTPHead` |
 | `SandboxCA.swift`, `HTTPRequestReader.swift`, `ConnectionLog.swift` | 580: the per-sandbox CA + leaves; request/body framing; the metadata-only log |
-| `Resources/snoozenet`, `Guest/snoozenet/` | 580: the guest half of a proxied network — C source, `build.sh` (the same pinned Zig), `PROVENANCE.md` |
-| `Sources/snooze-vmtest/` | The VM integration suite (entitled executable); `NetworkSuite.swift` is `network`; `CLISuite.swift` is `cli` (585, `make test-cli`); `ClaudeSuite.swift` is `claude` (588, `make test-vm-claude`) |
-| `Sources/SnoozeHost/ClaudeLogin.swift`, `Accounts.swift`, `LoginWatcher.swift`, `HostCore+Accounts.swift` | 588: the Mac's Claude Code login (read-only), the keychain through `/usr/bin/security`, accounts (`<store>/accounts.json`, never a secret), ONE watcher per Mac login, the keep-alive, key policy |
-| `Sources/SnoozeHost/HostProtocol.swift` | 585: the host protocol (JSON lines, `HostOp`, results) — fields only ever added |
-| `Sources/SnoozeHost/HostCore.swift` | 585: the host's model — every sandbox as a `Sandbox`, every operation, crash recovery, metrics rows; also used read-only in-process |
-| `Sources/SnoozeHost/HostServer.swift` | 585: `snooze host` — the lock, the socket, the attach relay (held clients), streams, idle exit, quit = Deep Sleep |
-| `Sources/SnoozeHost/HostClient.swift`, `UnixSocket.swift` | 585: the detached-child launcher, the client, socket plumbing, `ClientWire` (SandboxLab's attach wire) |
-| `Sources/SnoozeHost/SnoozeStore.swift`, `Metrics.swift` | 585: the CLI store's files, `SandboxConfig` (`snooze.json`), images → specs; the metrics DB (SandboxLab's schema) |
-| `Sources/SnoozeCLI/` | 585: the commands (ArgumentParser), the attach client, `doctor`; 590: `UICommand.swift` (`snooze ui`, `ui link`) |
-| `Sources/SnoozeWeb/` | 590: `snooze ui` — `WebServer` (NIOHTTP1 on 127.0.0.1:0, SSE), `WebSecurity` + `WebSessions` + `WebConfiguration` (the checks, as pure functions), `WebRoutes` (the CLOSED route table), `WebModels` (field-by-field projections of host results), `WebDataSource` (the host client), `WebEvents` (bounded SSE hub, the monitor), `WebControl` (`ui.lock`, `ui.sock` → `ui link`), `WebAssets` (manifest + digests); phase 2: `WebActions` (the closed action enum → one HostOp each), `WebOperations` (running them, progress over SSE), `WebTerminal` (Terminal.app hand-off; CSV defusing) |
-| `Sources/SnoozeWeb/WebSource/` → `Resources/Web/` | 590: the page as authored (vanilla HTML/CSS/JS) → generated by `Scripts/build-web-assets.swift` (content-hashed, manifest), committed; 591: `vendor/ghostty-web/` (pinned, `VENDOR.json`) |
-| `Sources/SnoozeWeb/WebTerminal{Tickets,Wire,Attach,Bridge}.swift` | 591: browser terminals — the ticket store, frames + the 541 classifier + the cover, the host attach connection, the bridge and hub (NIOWebSocket ONLY here — the audit enforces it) |
-| `Sources/SnoozeHost/Settings.swift`, `TOML.swift`; `Sources/SnoozeCLI/ConfigCommands.swift`; `Sources/SnoozeWeb/WebSettings.swift` | 591 settings: the CLOSED schema (`SnoozeSettings.schema`), `${XDG_CONFIG_HOME:-~/.config}/dozer-sandbox/dzr.toml` generated from it, our own strict TOML subset (no dependency), precedence flag > env > file > default with a source per value; `snooze config`; the UI's Settings page route (`GET`/`POST /api/v1/settings`) |
-| `Tests/SnoozeWebTests/` | 590: the security rules one by one, and a real listener driven with raw HTTP |
-| `Tests/SnoozeContainerKitTests/` | Unit tests — no VM |
+| `Resources/doznet`, `Guest/doznet/` | 580: the guest half of a proxied network — C source, `build.sh` (the same pinned Zig), `PROVENANCE.md` |
+| `Sources/doz-vmtest/` | The VM integration suite (entitled executable); `NetworkSuite.swift` is `network`; `CLISuite.swift` is `cli` (585, `make test-cli`); `ClaudeSuite.swift` is `claude` (588, `make test-vm-claude`) |
+| `Sources/DozerHost/ClaudeLogin.swift`, `Accounts.swift`, `LoginWatcher.swift`, `HostCore+Accounts.swift` | 588: the Mac's Claude Code login (read-only), the keychain through `/usr/bin/security`, accounts (`<store>/accounts.json`, never a secret), ONE watcher per Mac login, the keep-alive, key policy |
+| `Sources/DozerHost/HostProtocol.swift` | 585: the host protocol (JSON lines, `HostOp`, results) — fields only ever added |
+| `Sources/DozerHost/HostCore.swift` | 585: the host's model — every sandbox as a `Sandbox`, every operation, crash recovery, metrics rows; also used read-only in-process |
+| `Sources/DozerHost/HostServer.swift` | 585: `doz host` — the lock, the socket, the attach relay (held clients), streams, idle exit, quit = Deep Sleep |
+| `Sources/DozerHost/HostClient.swift`, `UnixSocket.swift` | 585: the detached-child launcher, the client, socket plumbing, `ClientWire` (SandboxLab's attach wire) |
+| `Sources/DozerHost/DozerStore.swift`, `Metrics.swift` | 585: the CLI store's files, `SandboxConfig` (`doz.json`), images → specs; the metrics DB (SandboxLab's schema) |
+| `Sources/DozerCLI/` | 585: the commands (ArgumentParser), the attach client, `doctor`; 590: `UICommand.swift` (`doz ui`, `ui link`) |
+| `Sources/DozerWeb/` | 590: `doz ui` — `WebServer` (NIOHTTP1 on 127.0.0.1:0, SSE), `WebSecurity` + `WebSessions` + `WebConfiguration` (the checks, as pure functions), `WebRoutes` (the CLOSED route table), `WebModels` (field-by-field projections of host results), `WebDataSource` (the host client), `WebEvents` (bounded SSE hub, the monitor), `WebControl` (`ui.lock`, `ui.sock` → `ui link`), `WebAssets` (manifest + digests); phase 2: `WebActions` (the closed action enum → one HostOp each), `WebOperations` (running them, progress over SSE), `WebTerminal` (Terminal.app hand-off; CSV defusing) |
+| `Sources/DozerWeb/WebSource/` → `Resources/Web/` | 590: the page as authored (vanilla HTML/CSS/JS) → generated by `Scripts/build-web-assets.swift` (content-hashed, manifest), committed; 591: `vendor/ghostty-web/` (pinned, `VENDOR.json`) |
+| `Sources/DozerWeb/WebTerminal{Tickets,Wire,Attach,Bridge}.swift` | 591: browser terminals — the ticket store, frames + the 541 classifier + the cover, the host attach connection, the bridge and hub (NIOWebSocket ONLY here — the audit enforces it) |
+| `Sources/DozerHost/Settings.swift`, `TOML.swift`; `Sources/DozerCLI/ConfigCommands.swift`; `Sources/DozerWeb/WebSettings.swift` | 591 settings: the CLOSED schema (`DozerSettings.schema`), `${XDG_CONFIG_HOME:-~/.config}/dozer-sandbox/doz.toml` generated from it, our own strict TOML subset (no dependency), precedence flag > env > file > default with a source per value; `doz config`; the UI's Settings page route (`GET`/`POST /api/v1/settings`) |
+| `Tests/DozerWebTests/` | 590: the security rules one by one, and a real listener driven with raw HTTP |
+| `Tests/DozerKitTests/` | Unit tests — no VM |
 
 ## Rules that each cost a bug to learn (keep them, and keep their tests)
 
@@ -148,7 +148,7 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   every pre-587 disk) is marked and e2fsck'd (582: 12 of 15 such cold boots failed with `EXT4-fs
   error … doubly allocated`). `keptDiskNeedsFsck(_:snapshotPresent:journaled:)` decides from the
   disks' superblocks (`disksJournaled`); `hardening discard` pins the journal-less path.
-- **The journal is a key input** (587): `ImageRecipe.journalMiB` is in the bake key and the base key,
+- **The journal is a key input** (587): `ImageSpec.journalMiB` is in the bake key and the base key,
   `SandboxSpec.journalMiB` in the prepared-disk key (a journal-less one keeps its pre-587 key, and so
   does the e2fsck helper's). A record written before 587 decodes as `nil` = no journal — its disks
   have none. Never default a DECODED value to 16.
@@ -157,7 +157,7 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   `DiskAccounting`'s fallback garbage.
 - **Mount options are not VM inputs** (587): `discard` on the root and state disks goes to the guest's
   mount only (Containerization maps only `ro` into the VZ attachment), so a snapshot taken before 587
-  restores unchanged (`lineage compat-wake`).
+  restores unchanged (587 proved it with `lineage compat-wake`, retired in 592).
 - **Children never depend on a parent's FILE** (587): a base, an image and a sandbox are APFS clones;
   deleting or re-deriving a parent never changes a child (`lineage children`). Maintenance
   (`reclaim`/`rederive`) touches only blocks ext4 marks free, refuses any disk that is not cleanly
@@ -169,7 +169,7 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   nothing. Every boot, crash restore and wake re-registers the proxy's vsock listener
   (`listenForEgress`) — the listener happened to survive a same-process wake in the probe, but a
   crash restore is a new VM.
-- **`lo` needs a global-scope source address** (`lo:snz`, 169.254.255.254/32, set by snoozenet):
+- **`lo` needs a global-scope source address** (`lo:doz`, 169.254.255.254/32, set by doznet):
   lo's 127.0.0.1 is host-scoped, so without it an outbound socket gets source 0.0.0.0, its SYN is
   still redirected, and every later segment is dropped — a silent stall, not an error.
 - **Never `EmbeddedChannel.writeOutbound` / `.finish()` / `close().wait()` with NIOSSL in the
@@ -179,31 +179,31 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
 - **A real key given to `openSession`/`exec` is moved into the vault** and replaced by a
   placeholder; keep it that way — "keys never enter the sandbox" rests on it.
 - **Claude Code starts set up and without permission prompts** (owner ruling 2026-09-27, 585).
-  The claude-code recipe's `claudeLauncher` step installs `~/.local/bin/claude` (first on the
+  The claude-code image spec's `claudeLauncher` step installs `~/.local/bin/claude` (first on the
   agent's PATH). It pre-seeds `hasCompletedOnboarding`, the SESSION's placeholder in
   `customApiKeyResponses.approved` (placeholders are minted per session, so a fixed approval can
   never work), `projects[cwd].hasTrustDialogAccepted`, and `settings.json`
   `skipDangerousModePermissionPrompt`, then execs `/usr/local/bin/claude
-  --dangerously-skip-permissions`. `SNOOZE_CLAUDE_PERMISSIONS=ask` and root keep the prompts.
-  The script spells the key variable's name apart, because no recipe may name a credential
-  (`ImageRecipeTests`). These keys were found by diffing the config before and after Claude Code
+  --dangerously-skip-permissions`. `DOZ_CLAUDE_PERMISSIONS=ask` and root keep the prompts.
+  The script spells the key variable's name apart, because no image spec may name a credential
+  (`ImageSpecTests`). These keys were found by diffing the config before and after Claude Code
   2.1.227's own screens, so re-check them when the pin moves.
-- **The `snooze` host (585) is the ONE owner of a store's VMs.** It holds `<store>/host.lock` for its
+- **The `doz` host (585) is the ONE owner of a store's VMs.** It holds `<store>/host.lock` for its
   whole life and loads nothing before it has it (a new host waits for an exiting one — otherwise it
   would read a record still saying `running` and report a live sandbox as died). The launcher is a
   detached child with ONLY stdin/stdout/stderr (`POSIX_SPAWN_CLOEXEC_DEFAULT`): a host that inherited
   a caller's pipe kept a test harness waiting on EOF. No launchd agent.
 - **An update must never cost a sleeping sandbox its sessions** (591 incident: `make install-cli`
-  overwrote the installed `snooze` IN PLACE while a host ran from it; macOS invalidated the process's
+  overwrote the installed `doz` IN PLACE while a host ran from it; macOS invalidated the process's
   code and VZ refused every VM with "Internal Virtualization error"; quitting that host then ran the stop
   steps on two failed wakes and deleted their snapshots). The rules that came of it:
-  - **Install by rename, never in place** (`install-cli`: copy + sign as `.snooze.new`, `mv` over): a
+  - **Install by rename, never in place** (`install-cli`: copy + sign as `.doz.new`, `mv` over): a
     running host keeps its own file (inode). e1af862.
   - **A quit keeps a failed wake's snapshot** (`prepareForExit`, `.failed` with a restorable state) —
     only Shut Down discards one. e1af862.
   - **A host knows its own program** (`ExecutableIdentity`: path, inode, device, size, mtime, cdhash at
     start; `SecCodeCheckValidity` of itself). Overwritten (or its code invalid) → every error of a VM op
-    becomes "this host's program was updated underneath it — `snooze host stop`, then retry"
+    becomes "this host's program was updated underneath it — `doz host stop`, then retry"
     (`HostCore.explain`, also on attach), `host status` carries `executableChange`/`executableNote`, and
     `doctor` FAILS. Replaced by rename → a note; and a host whose program changed exits by itself once
     nothing is live and no client is connected (`idleLoop`), so the next command runs the new build.
@@ -217,16 +217,17 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
     the build that slept it, or Shut Down), and the snapshot is kept. A record without a layout (pre-591)
     is best effort, as before. `VMLayoutTests`.
   - **`make test-vm-upgrade`** (a /ship gate for any release that touches the VM, the host or the
-    install): the previous release tag's `snooze` (built once from the tag, `prev-cli`) sleeps a lab and
-    a pi sandbox with a running session and markers; this build wakes them — same session pid, screen,
+    install): the previous DozerKit release tag's `doz` (built once from the tag, `prev-cli`; until
+    the first DozerKit tag exists, a COPY of this build — 592: the pre-rename releases are not
+    expected to be compatible, owner ruling) sleeps a lab and a pi sandbox with a running session and markers; this build wakes them — same session pid, screen,
     file — and then its own recorded layout; then the incident (the running host's file overwritten
     in place: the host says so, `host stop` keeps the snapshot, this build wakes it) and an idle host
     replaced by rename exiting by itself.
-- **Settings are ONE closed schema** (591, owner request: `SnoozeSettings.schema` in
-  `Sources/SnoozeHost/Settings.swift`). A new user-facing knob is a new entry there — its type,
+- **Settings are ONE closed schema** (591, owner request: `DozerSettings.schema` in
+  `Sources/DozerHost/Settings.swift`). A new user-facing knob is a new entry there — its type,
   default, description, env var, flag and when it applies — never a new ad-hoc env read, localStorage
-  key or file. The file (`${XDG_CONFIG_HOME:-~/.config}/dozer-sandbox/dzr.toml` — Dozer Sandbox from
-  593) is GENERATED from the schema on every write (all settings listed, defaults commented, only set
+  key or file. The file (`${XDG_CONFIG_HOME:-~/.config}/dozer-sandbox/doz.toml` — Dozer Sandbox since
+  592) is GENERATED from the schema on every write (all settings listed, defaults commented, only set
   values uncommented; atomic, 0600 in a 0700 dir); the reader is our own strict TOML subset (strings,
   bools, ints; anything else refused with its line). An unknown key or bad value is a warning (the
   default applies); a file that does not parse is ignored whole and NEVER overwritten. Precedence
@@ -244,19 +245,19 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
 - **The attach relay adopts the session BEFORE it answers**, and the client sends what was typed
   ahead of its first connection once it reads that answer (keys typed right after `up` were lost
   otherwise — the first `test-cli` run). After that, keys for a held (sleeping) sandbox are dropped, never queued for a frozen guest.
-- **Snooze never holds, uses or writes Claude Code's refresh token, and never writes a
+- **Dozer never holds, uses or writes Claude Code's refresh token, and never writes a
   `Claude Code-credentials*` item** (588). It reads the Mac login's ACCESS token only; the Mac's
   Claude Code is the one writer of that token family (a second holder forks it — codecks 488
   rejected a copied `.credentials.json` for this, and for its silent fall-through to API billing).
-  Renewal is the Mac's: the only thing snooze may do is run the Mac's own `claude -p` (the
-  keep-alive, opt-in). Every secret snooze writes to the keychain goes on `security -i`'s STDIN.
+  Renewal is the Mac's: the only thing doz may do is run the Mac's own `claude -p` (the
+  keep-alive, opt-in). Every secret doz writes to the keychain goes on `security -i`'s STDIN.
 - **Never inject our credential beside the guest's own** (588: the prototype added the Mac's bearer
   token next to a guest `x-api-key`). Every auth header a host's bindings use counts as "a
   credential is present"; a connection that carried the guest's own credential gets nothing
   injected afterwards. `testNeverInjectBesideTheGuestsOwnCredential` and `make test-vm-claude`.
 - **A foreign credential is a fingerprint, never a value** — 12 hex of sha256, kind, a prefix of at
   most 13 characters — in the log, events, `key ls` and `ls`.
-- **Placeholders persist as sha256 hashes** (`snooze.json` `placeholderHashes`, D8) so a session
+- **Placeholders persist as sha256 hashes** (`doz.json` `placeholderHashes`, D8) so a session
   survives a host restart; `shutdown`/`reset`/`rm` revoke them. A stdin key is still memory-only:
   after a host restart a sandbox holding only one has no secret, and the proxy stops decrypting.
 - **No silent fallback between accounts.** A missing, expired, signed-out or held credential is
@@ -265,7 +266,7 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
 - **virtio-fs caches:** deleting a file on the HOST that the guest has cached is not visible at once
   — tests use fresh file names (this cost an afternoon of chasing a non-bug).
 
-### The web layer (`snooze ui`, 590) — its security design is workspace `changes/590-i140-SNOOZE-UI/590.01-DESIGN.md`
+### The web layer (`doz ui`, 590) — its security design is workspace `changes/590-*/590.01-DESIGN.md`
 
 - **Loopback only, an OS-picked port, nothing else representable** (`WebLoopbackAddress`). No flag,
   environment variable or config may bind another address or a fixed port.
@@ -275,12 +276,12 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   `Access-Control-Allow-*`, ever; no response reflects a request value.
 - **The link's capability lives only in a URL FRAGMENT**, is exchanged ONCE (`POST /api/v1/session`,
   `Authorization: Bearer`) for an HttpOnly `SameSite=Strict` cookie named for the port, plus a CSRF
-  token the page keeps in memory and sends as `X-Snooze-CSRF` on every unsafe request. It never
+  token the page keeps in memory and sends as `X-Doz-CSRF` on every unsafe request. It never
   enters a log, a file, an event, a JSON field or a process argument — the browser is opened through
   LaunchServices (`LSOpenCFURLRef`), never `/usr/bin/open URL`; `--print-url` prints only to a TTY.
   `WebBootstrapCapability`'s description and mirror are redacted (a struct's default description
   prints its fields — DeckStack's never-conformed version still printed through `"\(cap)"`).
-- **Typed routes only.** A new capability is a new `WebRoute` case and a typed `SnoozeWebData`
+- **Typed routes only.** A new capability is a new `WebRoute` case and a typed `DozerWebData`
   method. Never a generic command, exec, file-read, URL-open, proxy or PTY route.
 - **Actions (phase 2) are `WebAction`: a closed enum, decoded STRICTLY** (unknown action or field,
   wrong type, out-of-rule value → 400 with a fixed message that never echoes the value), each
@@ -290,13 +291,13 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   through the ticketed terminal socket below). Destructive ones (reset, rm,
   point revert/rm, image rm, account rm) carry `confirm` equal to the name. Shutdown keeps the disk,
   so it carries no `confirm` (owner, 591): the page asks with a plain dialog that can stop asking
-  (the setting `ui.confirm_shutdown`, dzr.toml — no longer localStorage). **No secret is ever an
+  (the setting `ui.confirm_shutdown`, doz.toml — no longer localStorage). **No secret is ever an
   input** (owner ruling D3): keys and accounts are added with the CLI.
 - **An action is an operation**: 202 at once, the host call in `WebOperations` (≤ 8 running), its
   progress and outcome as SSE `op` events. The outcome is a line written from the result — never
   the result passed through.
 - **Open in Terminal** writes a one-shot `.command` file (0700, in a 0700 per-user directory; it
-  runs `rm -f -- "$0"` then `exec '<snooze>' attach NAME [SESSION] --store '<store>'`, names
+  runs `rm -f -- "$0"` then `exec '<doz>' attach NAME [SESSION] --store '<store>'`, names
   allowlisted, paths quoted) and `open`s it, so the user's DEFAULT app for `.command` files runs it
   (Terminal, iTerm2, Ghostty). No AppleScript, so no Automation permission and no second window
   (the AppleScript version opened two when Terminal was not running). Never a command from the browser.
@@ -312,7 +313,7 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
 - **The policy preview is the host's own function** (`HostCore.editedPolicy`), so the preview is
   exactly what `net-policy` applies. **Metrics CSV cells are defused** against spreadsheet formulas.
 - **The UI is a CLIENT of the host** (host.sock) in its own process — it never owns a VM, and the
-  host never imports `SnoozeWeb` (audit). Looking never starts a host (the CLI's rule, incl. its
+  host never imports `DozerWeb` (audit). Looking never starts a host (the CLI's rule, incl. its
   recovery exception); the host's event stream is followed only while a sandbox is live, so an open
   UI never keeps an idle host alive.
 - **The API returns projections** (`WebModels.swift`), field by field — never a host result passed
@@ -323,18 +324,18 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   style, event-handler attributes and external URLs (the CSP would refuse them anyway).
 - **Edit `WebSource/`, then `make web-assets`, and commit `Resources/Web`.** `make web-assets-check`
   (run by `make test` and `Scripts/audit.sh`) fails on drift; `WebAssets` refuses to start on a
-  digest mismatch. `make install-cli` copies `SnoozeContainerKit_SnoozeWeb.bundle` beside the binary.
+  digest mismatch. `make install-cli` copies `DozerKit_DozerWeb.bundle` beside the binary.
 - **SSE is bounded**: ≤ `maximumSSEClients` streams (a same-session reconnect replaces its oldest),
   a bounded queue per stream that ends in `resync` (never a silent drop), heartbeats that re-check
   the session.
 
-### Browser terminals (591, on by default — owner ruling) — design: workspace `changes/591-i146-SNOOZE-WEB-TERMINAL/591.01-DESIGN.md`
+### Browser terminals (591, on by default — owner ruling) — design: workspace `changes/591-*/591.01-DESIGN.md`
 
 - **A terminal is two steps.** `POST …/terminal-ticket` (CSRF, strict body) mints a 256-bit ticket that
   works ONCE within 30 s, bound to the browser session's cookie, the sandbox, the session and the mode
   (`WebTerminalTicketStore`); `GET …/terminal-socket` upgrades only with exact Host, Origin REQUIRED,
-  Fetch Metadata, the cookie and exactly one `snooze-ticket.<t>` in `Sec-WebSocket-Protocol` (never the
-  URL; the answer echoes only `snooze-terminal.v1`). A ticket presented wrongly is spent.
+  Fetch Metadata, the cookie and exactly one `doz-ticket.<t>` in `Sec-WebSocket-Protocol` (never the
+  URL; the answer echoes only `doz-terminal.v1`). A ticket presented wrongly is spent.
 - **NIO's typed upgrader drops a refused request's head** (only what followed it reaches the HTTP
   channel): a refusal is stashed by `shouldUpgrade` and answered from there (`UpgradeGate`), with
   `Connection: close`. `WebTerminalHTTPTests.testTheUpgradeRefuses…` hangs if that regresses.
@@ -360,7 +361,7 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   `VENDOR.json` → `make web-assets` → the browser probe. The page has TWO documents (`index.html` → `/`,
   `terminal.html` → `/terminal-frame`), each with its one script and style; the page-code rules apply to
   all six files.
-- **An open terminal keeps the host alive** (T3: an explicit attach, like `snooze attach` — even held on
+- **An open terminal keeps the host alive** (T3: an explicit attach, like `doz attach` — even held on
   a deep-asleep sandbox); the dashboard alone still lets it idle out (`t3-host-alive.mjs`).
 - **The engine runs ONLY in a sandboxed, opaque-origin iframe** (owner ruling T2): `/terminal-frame`
   (`terminal.html` + `frame.js` + `frame.css`), loaded with `sandbox="allow-scripts"` only — no cookie,
@@ -380,7 +381,7 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   never runs (the frame sends the text to the page, which applies our port of Ghostty 1.3.0's paste
   `encode` and the confirm/refuse thresholds, then posts it back), drops refused, focus reports sent
   by the frame (the engine does not), `scrollback` given in BYTES (upstream #140). The browser probe
-  (`probes/591-i146-SNOOZE-WEB-TERMINAL/browser-terminal.mjs`) proves each, and that the frame cannot
+  (`probes/591-*/browser-terminal.mjs`) proves each, and that the frame cannot
   read a cookie, fetch, open a socket or reach the page; re-run it on any engine bump.
 - **The boot view** (owner request): an off/failed/booting sandbox's terminal waits (cover with Start),
   follows the host's events BEFORE saying so (the page starts the sandbox only once the terminal waits —
@@ -391,7 +392,7 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   scroll the screen into the scrollback, and the first SNAPSHOT's full reset is rewritten to a soft
   reset + clear screen (`keepingScrollback`) — the boot log stays above the session. A wake reports
   "woke in N s" (a state `notice`).
-- **`console` is a host op and a CLI command** (`snooze console NAME [--follow]`, D5): the lines so far
+- **`console` is a host op and a CLI command** (`doz console NAME [--follow]`, D5): the lines so far
   (in-process when no host runs), or a stream of `console` events tailing `Sandbox.bootLogURL` across a
   cold boot's recreated log (`BootConsoleTail`). The CLI never prints the guest's control characters.
 
@@ -400,22 +401,22 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
 ```bash
 make build     # swift build — Xcode 27 needs the --build-system native pin the Makefile probes for
 make test      # unit tests: no VM, no entitlement. Never --parallel. (web-assets-check first)
-make web-assets        # 590: regenerate Sources/SnoozeWeb/Resources/Web after editing WebSource/ (commit it)
+make web-assets        # 590: regenerate Sources/DozerWeb/Resources/Web after editing WebSource/ (commit it)
 make audit     # Scripts/audit.sh
 make test-vm   # the VM integration suite — see below
-make cli       # 585: build + sign .build/debug/snooze
-make test-cli  # 585: the signed snooze from separate processes, scratch store $TMPDIR/snooze-clitest-store
-make test-vm-claude  # 588: Claude credentials through the proxy with a FAKE key (SNOOZE_TEST_CLAUDE_LOGIN=1 adds this Mac's login, read-only)
-make test-vm-upgrade # 591: the previous release sleeps sandboxes, this build wakes them; the in-place overwrite incident (scratch store $TMPDIR/snooze-upgrade-store)
+make cli       # 585: build + sign .build/debug/doz
+make test-cli  # 585: the signed doz from separate processes, scratch store $TMPDIR/doz-clitest-store
+make test-vm-claude  # 588: Claude credentials through the proxy with a FAKE key (DOZ_TEST_CLAUDE_LOGIN=1 adds this Mac's login, read-only)
+make test-vm-upgrade # 591: the previous release sleeps sandboxes, this build wakes them; the in-place overwrite incident (scratch store $TMPDIR/doz-upgrade-store)
 ```
 
 ### The VM integration tests need an ENTITLED host — how
 
 `swift test` runs an XCTest bundle inside `xctest`, which does not (and cannot be made to) carry
 `com.apple.security.virtualization`, so no VM can start there. The integration suite is therefore
-an executable target, `snooze-vmtest`, that `make test-vm`:
+an executable target, `doz-vmtest`, that `make test-vm`:
 
-1. builds (`swift build --product snooze-vmtest`),
+1. builds (`swift build --product doz-vmtest`),
 2. ad-hoc signs with `Scripts/vmtest.entitlements` (`codesign --force --sign - --entitlements …`),
 3. runs under a watchdog (`perl -e 'alarm 420; exec @ARGV' …`) so a VM op that never completes
    fails the run instead of wedging it; stdout is line-buffered so a hang shows where it stopped.
@@ -423,18 +424,17 @@ an executable target, `snooze-vmtest`, that `make test-vm`:
 It prints one `PASS`/`FAIL` line per check and `vmtest: ALL PASS` last. Modes: `all` (default),
 `network` (580, `make test-vm-network`: the claude-code image proxied; live-prompt check SKIPs
 without `ANTHROPIC_API_KEY`), `lineage [part]` (587, `make test-vm-lineage`: bake, discard, sync,
-journal, nojournal, accounting, reclaim, rederive, children; then `compat-wake` / `compat-discard`
-after the v0.4.0 host's `crash-save` — the Makefile builds that host once from the tag into
-`V040_DIR`), `netdebug --script '…'`, `lifecycle`, `crash` (spawns itself as `crash-save` — start, session, sleep to disk, exit without
+journal, nojournal, accounting, reclaim, rederive, children; 587's v0.4.0 compatibility item was
+retired by 592), `netdebug --script '…'`, `lifecycle`, `crash` (spawns itself as `crash-save` — start, session, sleep to disk, exit without
 stopping — then restores in the parent), `crash-restore`.
 
-- **Store:** `VMTEST_STORE` (default `$TMPDIR/snooze-vmtest-store`) — a SCRATCH store, never an app's
+- **Store:** `VMTEST_STORE` (default `$TMPDIR/doz-vmtest-store`) — a SCRATCH store, never an app's
   storage root. The first run in a new store pulls images and bakes `bash ncurses` (~40 s, network).
 - **Coexistence:** sandboxes are named `vmtest` / `vmtest-crash`; the suite touches nothing outside
   its store and never kills a process it did not start, so SandboxLab or a probe can run beside it.
 - **Kernel:** the library's pinned kernel via `KernelProvider`, cached in `KERNEL_CACHE` (exported
-  as `$SNOOZE_KERNEL_CACHE`; default: under the store). `make kernel` fetches it alone.
-  `SNOOZE_KERNEL=<path>` boots an explicit kernel instead.
+  as `$DOZ_KERNEL_CACHE`; default: under the store). `make kernel` fetches it alone.
+  `DOZ_KERNEL=<path>` boots an explicit kernel instead.
 - A VM test is green when it is green **twice in a row**.
 
 ## Contributing

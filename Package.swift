@@ -1,8 +1,8 @@
 // swift-tools-version: 6.2
-// SnoozeContainerKit — a pausable Linux sandbox for macOS: one container in its own VM through
-// Apple's Containerization package, with pause/resume in ~1 ms, sleep to disk that frees the RAM,
-// wake in ~0.35 s, restore after a host crash, and terminal sessions (the `deckhold` guest PTY
-// holder) that survive every one of those.
+// DozerKit — the library behind Dozer Sandbox ("Fast, suspendable micro-VMs for your Mac"): one
+// container in its own VM, built on Apple's Containerization framework, with pause/resume in ~1 ms,
+// sleep to disk that frees the RAM, wake in ~0.35 s, restore after a host crash, and terminal
+// sessions (the `deckhold` guest PTY holder) that survive every one of those.
 //
 // Stand-alone: no knowledge of any host app. macOS 26+ only — Virtualization.framework and vmnet
 // have no Linux equivalent, so there is no Linux build of this package at all.
@@ -16,13 +16,13 @@
 import PackageDescription
 
 let package = Package(
-    name: "SnoozeContainerKit",
+    name: "DozerKit",
     platforms: [.macOS("26.0")],
     products: [
-        .library(name: "SnoozeContainerKit", targets: ["SnoozeContainerKit"]),
-        // 585: the `snooze` command-line tool. `make cli` builds it and signs it with the
+        .library(name: "DozerKit", targets: ["DozerKit"]),
+        // 585: the `doz` command-line tool. `make cli` builds it and signs it with the
         // virtualization entitlement (an unsigned build can do everything but boot a VM).
-        .executable(name: "snooze", targets: ["snooze"]),
+        .executable(name: "doz", targets: ["doz"]),
     ],
     dependencies: [
         .package(url: "https://github.com/apple/containerization.git", exact: "0.47.0"),
@@ -35,14 +35,14 @@ let package = Package(
         .package(url: "https://github.com/apple/swift-nio-ssl.git", from: "2.37.5"),
         .package(url: "https://github.com/apple/swift-certificates.git", from: "1.21.0"),
         .package(url: "https://github.com/apple/swift-asn1.git", from: "1.7.3"),
-        // 585 — the `snooze` CLI's argument parsing (subcommands, aliases, --help). Another apple/*
+        // 585 — the `doz` CLI's argument parsing (subcommands, aliases, --help). Another apple/*
         // package containerization 0.47.0 already resolves (Package.resolved is unchanged by
         // declaring it); only the CLI target imports it, never the library. README "Dependencies".
         .package(url: "https://github.com/apple/swift-argument-parser.git", from: "1.5.0"),
     ],
     targets: [
         .target(
-            name: "SnoozeContainerKit",
+            name: "DozerKit",
             dependencies: [
                 .product(name: "Containerization", package: "containerization"),
                 .product(name: "ContainerizationArchive", package: "containerization"),
@@ -58,14 +58,14 @@ let package = Package(
                 .product(name: "X509", package: "swift-certificates"),
                 .product(name: "SwiftASN1", package: "swift-asn1"),
             ],
-            path: "Sources/SnoozeContainerKit",
+            path: "Sources/DozerKit",
             resources: [
                 // The guest PTY holder: a static aarch64-linux-musl ELF, committed as the pin
                 // (Resources/PROVENANCE.md records sha256, toolchain and command; the C source
                 // and build script live in Guest/deckhold/). Copied, never processed.
                 .copy("Resources/deckhold"),
-                // 580: the guest half of a proxied sandbox's network (Guest/snoozenet/).
-                .copy("Resources/snoozenet"),
+                // 580: the guest half of a proxied sandbox's network (Guest/doznet/).
+                .copy("Resources/doznet"),
             ]
         ),
         // The ENTITLED test host. `swift test` binaries cannot carry
@@ -73,70 +73,70 @@ let package = Package(
         // executable, which `make test-vm` builds, ad-hoc signs with
         // `Scripts/vmtest.entitlements`, and runs under a watchdog. See CLAUDE.md.
         .executableTarget(
-            name: "snooze-vmtest",
-            // SnoozeHost (585): the `cli` mode decodes the real binary's --json output with its types.
-            dependencies: ["SnoozeContainerKit", "SnoozeHost", .product(name: "Containerization", package: "containerization")],
-            path: "Sources/snooze-vmtest"
+            name: "doz-vmtest",
+            // DozerHost (585): the `cli` mode decodes the real binary's --json output with its types.
+            dependencies: ["DozerKit", "DozerHost", .product(name: "Containerization", package: "containerization")],
+            path: "Sources/doz-vmtest"
         ),
-        // 585 — the per-user host behind the `snooze` CLI: it owns every running VM, the egress
+        // 585 — the per-user host behind the `doz` CLI: it owns every running VM, the egress
         // proxies, the metrics writer and the shared event-loop group, and serves `<store>/host.sock`
         // (JSON lines + a raw attach relay). Also the client side of that socket. Not a product.
         .target(
-            name: "SnoozeHost",
-            dependencies: ["SnoozeContainerKit"],
-            path: "Sources/SnoozeHost"
+            name: "DozerHost",
+            dependencies: ["DozerKit"],
+            path: "Sources/DozerHost"
         ),
-        // 590 — `snooze ui`: the local web UI. A CLIENT of the host (host.sock), served by swift-nio's
+        // 590 — `doz ui`: the local web UI. A CLIENT of the host (host.sock), served by swift-nio's
         // own HTTP/1.1 codec (NIOHTTP1 — part of swift-nio, already resolved; no new package) on
         // 127.0.0.1 only. The page is vanilla HTML/CSS/JS from WebSource/, compiled into the
         // content-hashed, digest-manifested Resources/Web by Scripts/build-web-assets.swift and
         // committed (`make web-assets`; `make web-assets-check` fails on drift). Not a product.
         // 591: + NIOWebSocket (also a module of swift-nio — Package.resolved unchanged) for the
-        // browser terminals' socket; the audit confines it to Sources/SnoozeWeb.
+        // browser terminals' socket; the audit confines it to Sources/DozerWeb.
         .target(
-            name: "SnoozeWeb",
-            dependencies: ["SnoozeHost", "SnoozeContainerKit",
+            name: "DozerWeb",
+            dependencies: ["DozerHost", "DozerKit",
                            .product(name: "NIOCore", package: "swift-nio"),
                            .product(name: "NIOPosix", package: "swift-nio"),
                            .product(name: "NIOHTTP1", package: "swift-nio"),
                            .product(name: "NIOWebSocket", package: "swift-nio")],
-            path: "Sources/SnoozeWeb",
+            path: "Sources/DozerWeb",
             exclude: ["WebSource"],
             resources: [.copy("Resources/Web")]
         ),
         // 585 — the commands (swift-argument-parser), the attach client, the human/JSON output.
         .target(
-            name: "SnoozeCLI",
-            dependencies: ["SnoozeHost", "SnoozeContainerKit", "SnoozeWeb",
+            name: "DozerCLI",
+            dependencies: ["DozerHost", "DozerKit", "DozerWeb",
                            .product(name: "ArgumentParser", package: "swift-argument-parser")],
-            path: "Sources/SnoozeCLI"
+            path: "Sources/DozerCLI"
         ),
         .executableTarget(
-            name: "snooze",
-            dependencies: ["SnoozeCLI", .product(name: "ArgumentParser", package: "swift-argument-parser")],
-            path: "Sources/snooze"
+            name: "doz",
+            dependencies: ["DozerCLI", .product(name: "ArgumentParser", package: "swift-argument-parser")],
+            path: "Sources/doz"
         ),
         .testTarget(
-            name: "SnoozeCLITests",
-            dependencies: ["SnoozeCLI", "SnoozeHost", "SnoozeContainerKit"],
-            path: "Tests/SnoozeCLITests"
+            name: "DozerCLITests",
+            dependencies: ["DozerCLI", "DozerHost", "DozerKit"],
+            path: "Tests/DozerCLITests"
         ),
         // 590 — the web UI's security rules as unit tests, and a real listener driven over HTTP.
         .testTarget(
-            name: "SnoozeWebTests",
-            dependencies: ["SnoozeWeb", "SnoozeHost", "SnoozeContainerKit"],
-            path: "Tests/SnoozeWebTests"
+            name: "DozerWebTests",
+            dependencies: ["DozerWeb", "DozerHost", "DozerKit"],
+            path: "Tests/DozerWebTests"
         ),
         .testTarget(
-            name: "SnoozeContainerKitTests",
-            dependencies: ["SnoozeContainerKit",
+            name: "DozerKitTests",
+            dependencies: ["DozerKit",
                            // 587: real ext4 disks, made on the host, for the EXT4Inspector / accounting tests.
                            .product(name: "ContainerizationEXT4", package: "containerization"),
                            .product(name: "ContainerizationArchive", package: "containerization"),
                            .product(name: "NIOCore", package: "swift-nio"),
                            .product(name: "NIOEmbedded", package: "swift-nio"),
                            .product(name: "NIOSSL", package: "swift-nio-ssl")],
-            path: "Tests/SnoozeContainerKitTests"
+            path: "Tests/DozerKitTests"
         ),
     ]
 )

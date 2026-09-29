@@ -2,7 +2,7 @@
 # Rewrite the (auto) lines of Guest/deckhold/PROVENANCE.md from the committed deckhold binary.
 set -euo pipefail
 PKG="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-BIN="$PKG/Sources/SnoozeContainerKit/Resources/deckhold"
+BIN="$PKG/Sources/DozerKit/Resources/deckhold"
 DOC="$PKG/Guest/deckhold/PROVENANCE.md"
 SHA=$(shasum -a 256 "$BIN" | awk '{print $1}')
 SIZE=$(wc -c < "$BIN" | tr -d ' ')

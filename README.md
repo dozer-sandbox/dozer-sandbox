@@ -1,7 +1,10 @@
-# SnoozeContainerKit
+# DozerKit
 
-SnoozeContainerKit is a pausable Linux sandbox for macOS: one Linux container in its own VM,
-driven through Apple's [Containerization](https://github.com/apple/containerization) package, that
+**Dozer Sandbox — fast, suspendable micro-VMs for your Mac.** DozerKit is its library, and `doz`
+its command-line tool.
+
+DozerKit is a pausable Linux sandbox for macOS: one Linux container in its own VM,
+built on Apple's [Containerization](https://github.com/apple/containerization) framework, that
 pauses in about a millisecond, sleeps to disk to give its RAM back, wakes in about a third of a
 second, and restores into a new process after the host app crashes — with terminal sessions that
 survive every one of those.
@@ -14,8 +17,8 @@ Linux equivalent, so there is no Linux build and no Linux CI job. The VM needs t
 
 | Product | What it is |
 |---|---|
-| `SnoozeContainerKit` | `Sandbox` (the actor that owns one VM and its lifecycle), `SandboxSpec`, `SessionConnection` (one viewer's connection to a guest terminal session), the `deckhold` wire protocol, and the committed `deckhold` guest binary as a resource. |
-| `snooze` (executable, 585) | The command-line tool: create, start, pause, sleep, deep-sleep and wake sandboxes, attach to their sessions, restore points, network policy, metrics — see [The `snooze` CLI](#the-snooze-cli). Built on the library; the library does not depend on it. |
+| `DozerKit` | `Sandbox` (the actor that owns one VM and its lifecycle), `SandboxSpec`, `SessionConnection` (one viewer's connection to a guest terminal session), the `deckhold` wire protocol, and the committed `deckhold` guest binary as a resource. |
+| `doz` (executable, 585) | The command-line tool: create, start, pause, sleep, deep-sleep and wake sandboxes, attach to their sessions, restore points, network policy, metrics — see [The `doz` CLI](#the-doz-cli). Built on the library; the library does not depend on it. |
 
 ## What it does, measured
 
@@ -36,7 +39,7 @@ measured the same design first):
 ## Using it
 
 ```swift
-import SnoozeContainerKit
+import DozerKit
 
 let spec = SandboxSpec(name: "lab", storeRoot: myAppSupport.appendingPathComponent("sandboxes"),
                        bakePackages: ["bash", "ncurses"],
@@ -75,11 +78,11 @@ on a journal-less disk, checked with `e2fsck` first (583; see **Journal** below)
 (no shell unless you pass one), `sessions()` (`deckhold ls`), `screenText(name)` (`deckhold dump`),
 `bootConsole()`.
 
-**Images** (`ImageRecipe`, `ImageBaker`, `AgentRecipes.claudeCode` / `.pi`): no layered images and
+**Images** (`ImageSpec`, `ImageBaker`, `AgentImages.claudeCode` / `.pi`): no layered images and
 no Dockerfile — a digest-pinned OCI base is flattened to one ext4 **base disk** once, every bake
 starts from an APFS clone of it, the install steps run inside a VM booted from that clone, a
 credential-free check verifies the result, `fstrim /` runs last, and the disk is kept read-only in
-the store, keyed by recipe + kernel + deckhold. A sandbox with `spec.recipe` APFS-clones it as its
+the store, keyed by image spec + kernel + deckhold. A sandbox with `spec.imageSpec` APFS-clones it as its
 root and gets a per-sandbox **state disk** for the agent's login/state (it survives Stop, Reset to
 image and re-bakes). Credentials go to `openSession(environment:)` only.
 
@@ -100,7 +103,7 @@ image and re-bakes). Credentials go to `openSession(environment:)` only.
   `base:…`, a prepared-disk key). `CustomImage.baseImage` is such a key.
 - A pre-587 store re-bakes each image once (the key includes the lineage format and the journal).
 
-**Journal (587): on by default, 16 MiB — a toggle.** `ImageRecipe.journalMiB` (the image's root and
+**Journal (587): on by default, 16 MiB — a toggle.** `ImageSpec.journalMiB` (the image's root and
 every sandbox's state disk) and `SandboxSpec.journalMiB` (the lab's prepared disk): default 16, `nil`
 = no journal. 586/587 measured it: after Deep Sleep → discard, a journaled disk cold-boots by
 journal replay in **~380 ms** with no e2fsck (15/15 `e2fsck -fn` clean afterwards); a journal-less
@@ -170,7 +173,7 @@ the PTY, keeps an emulator model of the screen, and on attach sends a rendered S
 the viewer's size, then the program's own bytes. That is why a session survives a sleep to disk
 (which severs every exec's stdio) — the viewer simply reattaches. Programs are started **without**
 `sh -c` and with every signal reset to default (BusyBox `sh` leaks an ignored SIGQUIT, which a
-program cannot trap). The wire protocol and the snapshot recipe are documented in
+program cannot trap). The wire protocol and the snapshot image spec are documented in
 [`Guest/deckhold/deckhold.c`](Guest/deckhold/deckhold.c).
 
 **NAT subnets (583).** A `.nat` sandbox whose spec names no `subnet` gets a free vmnet /24 of its
@@ -180,15 +183,15 @@ which two processes could both take (the NAT then silently drops one). `SandboxS
 override; a restore keeps the subnet its guest was addressed from. Proxied sandboxes have no NIC.
 
 **Network (580): proxied sandboxes.** `SandboxSpec(…, network: .proxied(.agent))` boots a VM with
-**no network interface** — only `lo`. The guest's only way out is `snoozenet` (a small static guest
-binary, `Guest/snoozenet/`) relaying over vsock to `sandbox.egress`, an `EgressProxy` running in
+**no network interface** — only `lo`. The guest's only way out is `doznet` (a small static guest
+binary, `Guest/doznet/`) relaying over vsock to `sandbox.egress`, an `EgressProxy` running in
 the host process, where root in the guest cannot reach:
 
 ```swift
-var spec = SandboxSpec(name: "agent", storeRoot: root, recipe: AgentRecipes.claudeCode,
+var spec = SandboxSpec(name: "agent", storeRoot: root, imageSpec: AgentImages.claudeCode,
                        network: .proxied(.agent))        // .locked · .bake · .agent · .open, or your own
 let sandbox = try Sandbox(spec: spec)
-sandbox.setCredential(.anthropic, secret: key)          // memory only; the guest gets snz_cred_… placeholders
+sandbox.setCredential(.anthropic, secret: key)          // memory only; the guest gets doz_cred_… placeholders
 try await sandbox.start()
 for await r in sandbox.egress!.log.stream() { … }        // ConnectionRecord: host, verdict, rule, bytes, ms
 sandbox.setNetworkPolicy(newPolicy)                      // live; e.g. policy.allow(host: "example.com")
@@ -234,72 +237,72 @@ First fetch ~90 s (a 569 MiB archive); every later start verifies the cached 15 
 A byte-identical copy already on the Mac (the `container` CLI's) seeds the cache with no network;
 `SandboxSpec.kernelPath` boots any kernel you choose instead.
 
-## The `snooze` CLI
+## The `doz` CLI
 
 ```bash
 make install-cli PREFIX=~/.local       # release build, signed with the virtualization entitlement
-snooze doctor                          # macOS, Apple silicon, the entitlement, kernel, store, host
-snooze up myproj --image claude-code --workspace ~/code/myproj   # create → boot → attach to Claude Code
+doz doctor                          # macOS, Apple silicon, the entitlement, kernel, store, host
+doz up myproj --image claude-code --workspace ~/code/myproj   # create → boot → attach to Claude Code
 ```
 
 New to it: the [walkthrough](docs/CLI-WALKTHROUGH.md) (~20 min, first run end to end) and the
 [user guide](docs/CLI-USER-GUIDE.md) (concepts, every command by task, keys, network, troubleshooting).
 
-`make cli` builds and signs `.build/debug/snooze` for development. An unsigned `snooze` runs every
-command but cannot boot a VM (`snooze doctor` says so).
+`make cli` builds and signs `.build/debug/doz` for development. An unsigned `doz` runs every
+command but cannot boot a VM (`doz doctor` says so).
 
 ### Commands (the owner's vocabulary; aliases in brackets)
 
 | | |
 |---|---|
-| `snooze create NAME --image lab\|claude-code\|pi\|<custom> [--cpus N] [--memory 2G] [--workspace DIR] [--network agent\|bake\|locked\|open\|nat\|none] [--subnet CIDR]` | Make a sandbox (off until started). `lab` is Alpine + bash (1 GiB); the agent images get 2 GiB. The workspace is shared at `/workspace`. The network defaults to **proxied** — no network interface, every connection judged by the Mac's policy and logged: `agent` for an agent image, `bake` (package registries only) for the lab. |
-| `snooze up NAME [create options] [--session S] [-d] [-- CMD…]` | Create if missing → start or wake → attach to the image's session (`claude`, `pi`, or a `bash -l` shell), opening it if it is not running (`vagrant up` / `compose up`). |
-| `snooze start NAME` [`cold-boot`] | Boot — or wake it if it is asleep, resume it if paused. |
-| `snooze pause NAME` [`suspend`] · `snooze resume NAME` | Guest CPU to 0 in ~1 ms, RAM kept. |
-| `snooze sleep NAME` | Pause + snapshot to disk: RAM kept, and it survives a host crash. |
-| `snooze deep-sleep NAME` [`hibernate`] · `snooze wake NAME` | Snapshot + VM stopped: RAM returned. Wake ~0.3 s, sessions and pids where they were. A program started less than 3 s ago gets the rest of that time first (583). |
-| `snooze shutdown NAME` · `snooze reset NAME` · `snooze rm NAME` | Cold stop keeping the disk · discard the disk (back to the image) · remove everything. Each asks first on the terminal; `--yes` skips; with no terminal and no `--yes` they refuse (exit 5). |
-| `snooze ls` · `snooze inspect NAME` · `snooze sessions NAME` | Name, image, phase, RAM held (the allocation less what the balloon returned; 0 deep asleep or off), disk, sessions, network · everything as JSON · the guest's terminal sessions. |
-| `snooze attach NAME [SESSION] [--no-wake]` | A raw-tty client of a guest session. **Ctrl-]** detaches (`--detach-key ctrl-x\|none`); the session keeps running. A Deep Sleep disconnects you and the client waits, then reattaches by itself when the sandbox runs again. A paused or sleeping sandbox is woken first unless `--no-wake`. |
-| `snooze run NAME [--session S] [-d] -- CMD…` | A NEW session running CMD (no shell in front — say `bash -lc '…'` for one), attached; exits with the program's exit code. |
-| `snooze exec NAME [--user U] [--workdir D] [-e K=V] [--timeout S] -- CMD…` | One-shot and non-interactive: stdout, stderr and the exit code pass through. Runs like a session (an agent image's user in `/workspace`). |
-| `snooze image ls\|bake NAME\|rm NAME` | The built-in images and custom ones; bake now rather than at the first start. `pull`/`push` answer "not yet" (584.B2). |
-| `snooze point take\|ls\|revert\|fork\|rm\|save-image NAME …` | Restore points (disk-only APFS clones): `take NAME [POINT]`, `revert NAME POINT` (shuts down; a "before revert" point is taken first), `fork NAME POINT NEW`, `save-image NAME [POINT] --as IMAGE`. A point is named by its name or id. |
-| `snooze net policy NAME [--preset P] [--allow HOST…] [--deny HOST…] [--remove HOST…]` · `snooze net log NAME [--denied] [--follow]` | A proxied sandbox's policy, changed live and kept for the next start · its connection log (metadata only). |
-| `snooze key set NAME --anthropic [--keychain SERVICE]` · `key set NAME --claude-login` · `key rm` · `key ls` | The key is read from stdin (or a no-echo prompt, or a keychain generic password) — **never an argument** — and held by the host's proxy in memory; the guest's `ANTHROPIC_API_KEY` is a placeholder. A key from stdin lasts while the host runs; one from the keychain is read again when a new host loads the sandbox. `--claude-login` = `account use NAME mac`. `key ls` shows the account, state, expiry, policy and the fingerprints of credentials the guest brought itself. |
-| `snooze account ls\|add\|verify\|rm\|default\|use\|keepalive` · `create --account NAME` | 588: Anthropic accounts the host holds — `mac` (built in: this Mac's own Claude Code login, read-only, renewed by the Mac's Claude Code), `setup-token` (`claude setup-token`, 1 year, in the keychain as `snooze-claude:NAME`), `api-key`. A proxied sandbox follows the store's default (`mac`) or pins one; the guest sees a placeholder plus the plan (`CLAUDE_CODE_SUBSCRIPTION_TYPE`), so Claude Code shows "Claude Max" and defaults to Opus. No silent fallback. `keepalive on` (off by default) runs the Mac's own `claude -p` near expiry while a sandbox uses the login. |
-| `snooze key policy NAME allow\|strict\|auto` | 588: a credential the guest brings itself (a guest `/login`, a pasted key) — allow and flag it (fingerprint in `net log`, `ls`, `key ls`, events), or refuse it with an explanation and deny the sign-in hosts. `auto`: strict for a non-`mac` account. |
-| `snooze metrics [--csv] [--image X] [--days N] [--no-steps]` | Every action's timing (count, median, p90, min, max, failures) from `<store>/metrics.sqlite` — SandboxLab's schema. |
-| `snooze doctor` · `snooze events [NAME]` | Checks · follow the host's phases, steps and notes. |
-| `snooze console NAME [--follow]` | The boot console (kernel + init), or follow it as the sandbox boots. |
-| `snooze ui [--open\|--print-url]` · `snooze ui link` | 590: a local web UI of the whole store — sandboxes, sessions, restore points, network policy and log, keys and accounts (fingerprints only), images, metrics (filters, CSV), doctor, live activity — and its actions: create and the whole lifecycle, sessions (open, run detached), Open in Terminal (Terminal.app), restore points (take, revert, fork, delete, save as image), policy edits with a preview, key policy, account use/default/verify/remove/keep-alive, image bake/remove. Destructive actions need the name typed; a secret is never entered in the browser. Loopback only, on a port the OS picks; the browser signs in with a one-use, five-minute link (opened for you, or printed on the terminal with `--print-url`); `ui link` mints another for the running UI. A client of the host like every command; one UI per store; Ctrl-C stops it. |
-| `snooze host [--foreground] [--idle-timeout MIN]` · `host stop` · `host status` | The host (normally started for you) · Deep Sleep everything and stop it · is one running (never starts one). |
+| `doz create NAME --image lab\|claude-code\|pi\|<custom> [--cpus N] [--memory 2G] [--workspace DIR] [--network agent\|bake\|locked\|open\|nat\|none] [--subnet CIDR]` | Make a sandbox (off until started). `lab` is Alpine + bash (1 GiB); the agent images get 2 GiB. The workspace is shared at `/workspace`. The network defaults to **proxied** — no network interface, every connection judged by the Mac's policy and logged: `agent` for an agent image, `bake` (package registries only) for the lab. |
+| `doz up NAME [create options] [--session S] [-d] [-- CMD…]` | Create if missing → start or wake → attach to the image's session (`claude`, `pi`, or a `bash -l` shell), opening it if it is not running (`vagrant up` / `compose up`). |
+| `doz start NAME` [`cold-boot`] | Boot — or wake it if it is asleep, resume it if paused. |
+| `doz pause NAME` [`suspend`] · `doz resume NAME` | Guest CPU to 0 in ~1 ms, RAM kept. |
+| `doz sleep NAME` | Pause + snapshot to disk: RAM kept, and it survives a host crash. |
+| `doz deep-sleep NAME` [`hibernate`] · `doz wake NAME` | Snapshot + VM stopped: RAM returned. Wake ~0.3 s, sessions and pids where they were. A program started less than 3 s ago gets the rest of that time first (583). |
+| `doz shutdown NAME` · `doz reset NAME` · `doz rm NAME` | Cold stop keeping the disk · discard the disk (back to the image) · remove everything. Each asks first on the terminal; `--yes` skips; with no terminal and no `--yes` they refuse (exit 5). |
+| `doz ls` · `doz inspect NAME` · `doz sessions NAME` | Name, image, phase, RAM held (the allocation less what the balloon returned; 0 deep asleep or off), disk, sessions, network · everything as JSON · the guest's terminal sessions. |
+| `doz attach NAME [SESSION] [--no-wake]` | A raw-tty client of a guest session. **Ctrl-]** detaches (`--detach-key ctrl-x\|none`); the session keeps running. A Deep Sleep disconnects you and the client waits, then reattaches by itself when the sandbox runs again. A paused or sleeping sandbox is woken first unless `--no-wake`. |
+| `doz run NAME [--session S] [-d] -- CMD…` | A NEW session running CMD (no shell in front — say `bash -lc '…'` for one), attached; exits with the program's exit code. |
+| `doz exec NAME [--user U] [--workdir D] [-e K=V] [--timeout S] -- CMD…` | One-shot and non-interactive: stdout, stderr and the exit code pass through. Runs like a session (an agent image's user in `/workspace`). |
+| `doz image ls\|bake NAME\|rm NAME` | The built-in images and custom ones; bake now rather than at the first start. `pull`/`push` answer "not yet" (584.B2). |
+| `doz point take\|ls\|revert\|fork\|rm\|save-image NAME …` | Restore points (disk-only APFS clones): `take NAME [POINT]`, `revert NAME POINT` (shuts down; a "before revert" point is taken first), `fork NAME POINT NEW`, `save-image NAME [POINT] --as IMAGE`. A point is named by its name or id. |
+| `doz net policy NAME [--preset P] [--allow HOST…] [--deny HOST…] [--remove HOST…]` · `doz net log NAME [--denied] [--follow]` | A proxied sandbox's policy, changed live and kept for the next start · its connection log (metadata only). |
+| `doz key set NAME --anthropic [--keychain SERVICE]` · `key set NAME --claude-login` · `key rm` · `key ls` | The key is read from stdin (or a no-echo prompt, or a keychain generic password) — **never an argument** — and held by the host's proxy in memory; the guest's `ANTHROPIC_API_KEY` is a placeholder. A key from stdin lasts while the host runs; one from the keychain is read again when a new host loads the sandbox. `--claude-login` = `account use NAME mac`. `key ls` shows the account, state, expiry, policy and the fingerprints of credentials the guest brought itself. |
+| `doz account ls\|add\|verify\|rm\|default\|use\|keepalive` · `create --account NAME` | 588: Anthropic accounts the host holds — `mac` (built in: this Mac's own Claude Code login, read-only, renewed by the Mac's Claude Code), `setup-token` (`claude setup-token`, 1 year, in the keychain as `doz-claude:NAME`), `api-key`. A proxied sandbox follows the store's default (`mac`) or pins one; the guest sees a placeholder plus the plan (`CLAUDE_CODE_SUBSCRIPTION_TYPE`), so Claude Code shows "Claude Max" and defaults to Opus. No silent fallback. `keepalive on` (off by default) runs the Mac's own `claude -p` near expiry while a sandbox uses the login. |
+| `doz key policy NAME allow\|strict\|auto` | 588: a credential the guest brings itself (a guest `/login`, a pasted key) — allow and flag it (fingerprint in `net log`, `ls`, `key ls`, events), or refuse it with an explanation and deny the sign-in hosts. `auto`: strict for a non-`mac` account. |
+| `doz metrics [--csv] [--image X] [--days N] [--no-steps]` | Every action's timing (count, median, p90, min, max, failures) from `<store>/metrics.sqlite` — SandboxLab's schema. |
+| `doz doctor` · `doz events [NAME]` | Checks · follow the host's phases, steps and notes. |
+| `doz console NAME [--follow]` | The boot console (kernel + init), or follow it as the sandbox boots. |
+| `doz ui [--open\|--print-url]` · `doz ui link` | 590: a local web UI of the whole store — sandboxes, sessions, restore points, network policy and log, keys and accounts (fingerprints only), images, metrics (filters, CSV), doctor, live activity — and its actions: create and the whole lifecycle, sessions (open, run detached), Open in Terminal (Terminal.app), restore points (take, revert, fork, delete, save as image), policy edits with a preview, key policy, account use/default/verify/remove/keep-alive, image bake/remove. Destructive actions need the name typed; a secret is never entered in the browser. Loopback only, on a port the OS picks; the browser signs in with a one-use, five-minute link (opened for you, or printed on the terminal with `--print-url`); `ui link` mints another for the running UI. A client of the host like every command; one UI per store; Ctrl-C stops it. |
+| `doz host [--foreground] [--idle-timeout MIN]` · `host stop` · `host status` | The host (normally started for you) · Deep Sleep everything and stop it · is one running (never starts one). |
 
 Every command takes `--json` (machine-readable output on stdout; errors as `{"error":{"code","message"}}`),
-`--store DIR` (default `$SNOOZE_STORE`, else the settings' `store.path`, else `~/Library/Application Support/SnoozeContainerKit`),
+`--store DIR` (default `$DOZ_STORE`, else the settings' `store.path`, else `~/Library/Application Support/dozer-sandbox`),
 `-v` (every progress step; by default only an operation slower than a second shows its steps, on
 stderr) and `-q`. JSON documents only ever gain fields. Phases on the wire are `off`, `booting`,
 `running`, `paused`, `asleep`, `deepAsleep`, `failed`.
 
 **Exit codes:** 0 ok · 1 failed · 2 not found · 3 not possible in this phase · 4 already exists ·
 5 not confirmed · 6 host unavailable · 7 not implemented yet · 64 usage. `exec`, `run` and
-`attach` exit with the program's own code, and 125 when snooze itself fails.
+`attach` exit with the program's own code, and 125 when doz itself fails.
 
-**Environment:** `SNOOZE_STORE`; `SNOOZE_HOST_IDLE` (minutes, the host's idle timeout; default 5, 0 =
-never); `SNOOZE_KERNEL_CACHE` / `SNOOZE_KERNEL` (a shared kernel cache / an explicit kernel, as for
-the library's tests); `SNOOZE_SUBNET` (the default subnet of a `--network nat` sandbox). They are
+**Environment:** `DOZ_STORE`; `DOZ_HOST_IDLE` (minutes, the host's idle timeout; default 5, 0 =
+never); `DOZ_KERNEL_CACHE` / `DOZ_KERNEL` (a shared kernel cache / an explicit kernel, as for
+the library's tests); `DOZ_SUBNET` (the default subnet of a `--network nat` sandbox). They are
 read when a sandbox is created (the kernel and subnet are then part of its spec).
 
-**Settings (591):** `${XDG_CONFIG_HOME:-~/.config}/dozer-sandbox/dzr.toml` — every setting listed
-with its default commented out; `snooze config show|get|set|unset|init|path`, and the web UI's
+**Settings (591):** `${XDG_CONFIG_HOME:-~/.config}/dozer-sandbox/doz.toml` — every setting listed
+with its default commented out; `doz config show|get|set|unset|init|path`, and the web UI's
 Settings page. Precedence: a flag, then the environment variable above, then the file, then the
-default (`snooze config show` names each value's source). The docs: `docs/CLI-USER-GUIDE.md`
+default (`doz config show` names each value's source). The docs: `docs/CLI-USER-GUIDE.md`
 "Settings".
 
 ### The host
 
 A running VM lives in the process that started it, so one process per user and store owns them
-all: **`snooze host`** (owner ruling, 585: a lazy per-user host). It owns every running VM, each
+all: **`doz host`** (owner ruling, 585: a lazy per-user host). It owns every running VM, each
 proxied sandbox's egress proxy (its policy, connection log and credential vault), the metrics
 writer, and the shared event-loop group (583), and serves `<store>/host.sock`. Every command is a
 thin client of that socket.
@@ -310,11 +313,11 @@ thin client of that socket.
   `<store>/host.lock` (flock) for its whole life, so there is never a second host for a store, and a
   new one waits for an exiting one to finish before it loads anything.
 - **Idle exit.** It exits once no sandbox has a VM (booting, running, paused or asleep) and no
-  client is connected, for `--idle-timeout` minutes (default 5; `$SNOOZE_HOST_IDLE`). Read-only
+  client is connected, for `--idle-timeout` minutes (default 5; `$DOZ_HOST_IDLE`). Read-only
   commands — `ls`, `inspect`, `point ls`, `image ls`, `net policy` (shown), `key ls` — answer from the
   store in-process when no host runs, so **no daemon runs when no sandbox is running**, and looking
   never starts one.
-- **Quit = Deep Sleep.** `snooze host stop`, SIGTERM and SIGINT deep-sleep every running, paused or
+- **Quit = Deep Sleep.** `doz host stop`, SIGTERM and SIGINT deep-sleep every running, paused or
   sleeping sandbox (the library's `prepareForExit`, with its settle delay) and then exit. The next
   command starts a new host; `wake` (or `attach`, `up`, `exec`) brings each back, sessions and pids
   intact.
@@ -324,12 +327,12 @@ thin client of that socket.
   **running** → reported as died (`ls` shows it; `inspect` has `diedWithHost`), its disk — never
   unmounted, and the ext4 has no journal — marked for e2fsck at the next start. A read-only command
   that finds such a record starts the host so it can recover.
-- **The protocol** (`Sources/SnoozeHost/HostProtocol.swift`) is JSON lines: one request line
+- **The protocol** (`Sources/DozerHost/HostProtocol.swift`) is JSON lines: one request line
   (`{"v":1,"op":"deep-sleep","name":"myproj"}`), then zero or more `{"event":…}` progress lines and one
   final `{"ok":true,"result":…}` / `{"ok":false,"error":{"code","message"}}`. `attach` switches to raw
   after its `ok` line (`{"state":"attached"|"held"}`): VT bytes from the host; keystrokes plus in-band
   `0xFF 'H'|'R' cols rows` frames from the client (SandboxLab's attach wire); the end of a session is
-  a notice carrying `ESC ] 777;snooze;ended;<code> BEL`. `events` and `net-log --follow` stream event
+  a notice carrying `ESC ] 777;doz;ended;<code> BEL`. `events` and `net-log --follow` stream event
   lines. Fields are only ever added; a host answers a newer `v` with `error.code = "version"`.
 
 ## Dependencies
@@ -337,11 +340,11 @@ thin client of that socket.
 | Package | Pin | Why |
 |---|---|---|
 | apple/containerization | **exact** 0.47.0 | the VM runtime; the sleep design leans on its internals' shape |
-| apple/swift-nio (NIOCore, NIOEmbedded, NIOPosix; 590: NIOHTTP1) | from 2.103.0 | 580: drives TLS synchronously on the proxy's connection threads (`EmbeddedChannel`); 583: one shared `MultiThreadedEventLoopGroup` for every VM's vminitd clients; 590: `snooze ui`'s HTTP/1.1 server (`NIOHTTP1` is a module of the same package — no new dependency; imported only by `Sources/SnoozeWeb`, which the audit enforces) |
+| apple/swift-nio (NIOCore, NIOEmbedded, NIOPosix; 590: NIOHTTP1) | from 2.103.0 | 580: drives TLS synchronously on the proxy's connection threads (`EmbeddedChannel`); 583: one shared `MultiThreadedEventLoopGroup` for every VM's vminitd clients; 590: `doz ui`'s HTTP/1.1 server (`NIOHTTP1` is a module of the same package — no new dependency; imported only by `Sources/DozerWeb`, which the audit enforces) |
 | apple/swift-nio-ssl (NIOSSL) | from 2.37.5 | 580: terminates and re-originates TLS for bound hosts with **in-memory** keys — Network.framework and Secure Transport need a `SecIdentity`, i.e. a keychain (prompts for an ad-hoc-signed app, and a leaf key per host on disk) |
 | apple/swift-certificates (X509), apple/swift-asn1 | from 1.21.0 / 1.7.3 | 580: issues the per-sandbox CA and its per-host leaves |
 
-| apple/swift-argument-parser (ArgumentParser) | from 1.5.0 (resolved 1.8.2) | 585: the `snooze` CLI's subcommands, aliases, options and `--help`. Imported ONLY by the CLI's command targets (`Sources/SnoozeCLI`, `Sources/snooze`) — never by the library or the host; the audit enforces it. Hand-rolling a parser for ~40 subcommands with aliases and `--` passthrough would be more code to get wrong than this Apple package. |
+| apple/swift-argument-parser (ArgumentParser) | from 1.5.0 (resolved 1.8.2) | 585: the `doz` CLI's subcommands, aliases, options and `--help`. Imported ONLY by the CLI's command targets (`Sources/DozerCLI`, `Sources/doz`) — never by the library or the host; the audit enforces it. Hand-rolling a parser for ~40 subcommands with aliases and `--` passthrough would be more code to get wrong than this Apple package. |
 
 All five are apple/* packages that containerization 0.47.0 already resolves, so declaring them
 changed nothing in `Package.resolved`. The CLI's host also uses the system `SQLite3` module for its
@@ -353,17 +356,17 @@ the import and dependency allowlists.
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/johnoscott/SnoozeContainerKit.git", from: "0.1.0"),
+    .package(url: "https://github.com/johnoscott/DozerKit.git", from: "0.1.0"),
 ],
 targets: [
     .target(name: "YourTarget", dependencies: [
-        .product(name: "SnoozeContainerKit", package: "SnoozeContainerKit"),
+        .product(name: "DozerKit", package: "DozerKit"),
     ]),
 ]
 ```
 
 The package identity SwiftPM derives is the lowercased last URL component — which must stay
-`SnoozeContainerKit`.
+`DozerKit`.
 
 > **Prelaunch note.** Until this repo is unveiled publicly, the URL above is not yet reachable.
 > Consumers keep the public URL in their manifest and redirect it with a SwiftPM mirror supplied
@@ -372,9 +375,9 @@ The package identity SwiftPM derives is the lowercased last URL component — wh
 > deleted at unveil. It must **not** live at `.swiftpm/configuration/mirrors.json` — a mirror there
 > applies in every mode and rewrites package identity, which breaks path-dependency (local) mode.
 
-**Resources in an app bundle:** copy `SnoozeContainerKit_SnoozeContainerKit.bundle` from the build
+**Resources in an app bundle:** copy `DozerKit_DozerKit.bundle` from the build
 directory into `Contents/Resources`. The library finds `deckhold` there (or beside the executable,
-or at `$SNOOZE_DECKHOLD`) and never uses SwiftPM's trapping `Bundle.module` accessor.
+or at `$DOZ_DECKHOLD`) and never uses SwiftPM's trapping `Bundle.module` accessor.
 
 ## Storage / identity is configured by the host, not by this package
 
@@ -387,7 +390,7 @@ This package owns no brand and no directory name: the host passes `storeRoot`. N
 ```bash
 make build            # swift build (with the build-system pin Xcode 27 needs)
 make test             # unit tests — no VM (runs make web-assets-check first)
-make web-assets       # 590: rebuild snooze ui's content-hashed assets from Sources/SnoozeWeb/WebSource (commit them)
+make web-assets       # 590: rebuild doz ui's content-hashed assets from Sources/DozerWeb/WebSource (commit them)
 make web-assets-check # 590: fail when the committed web assets are not exactly what WebSource/ builds
 make test-vm          # the VM integration suite: lifecycle, crash restore, restore points (entitled test host)
 make test-vm-agents   # the claude-code and pi images: bake/cache, start, sessions, sleep → wake, state disk
@@ -396,14 +399,14 @@ make audit            # import allowlist, one exact dependency, no host brand, d
 make deckhold         # rebuild the guest binary (pinned Zig + ghostty; first run ~3.5 min)
 make deckhold-verify  # rebuild from scratch and check the committed bytes match
 make test-vm-network  # 580: a proxied (no-NIC) sandbox end to end, then a bake under the bake preset
-make test-vm-lineage  # 587: warm-base bakes, journal / discard / sync, accounting, reclaim, rederive, then a
-                      #      sandbox deep-slept by v0.4.0 (its test host built once from the tag) — LINEAGE=part for one
-make snoozenet        # rebuild the snoozenet guest binary (pinned Zig; no ghostty) + refresh PROVENANCE.md
-make snoozenet-verify # rebuild snoozenet and check the committed bytes match
-make cli              # 585: build .build/debug/snooze and sign it with the virtualization entitlement
-make install-cli      # release build, signed, into PREFIX (default ~/.local): bin/snooze → libexec/snooze/
-make test-cli         # 585: the signed snooze driven from separate processes against a scratch store
-make test-vm-claude   # 588: the credential proxy's classifier, strict, a placeholder across a host restart — a fake key (SNOOZE_TEST_CLAUDE_LOGIN=1: + this Mac's login)
+make test-vm-lineage  # 587: warm-base bakes, journal / discard / sync, accounting, reclaim, rederive, children
+                      #      — LINEAGE=part for one
+make doznet        # rebuild the doznet guest binary (pinned Zig; no ghostty) + refresh PROVENANCE.md
+make doznet-verify # rebuild doznet and check the committed bytes match
+make cli              # 585: build .build/debug/doz and sign it with the virtualization entitlement
+make install-cli      # release build, signed, into PREFIX (default ~/.local): bin/doz → libexec/doz/
+make test-cli         # 585: the signed doz driven from separate processes against a scratch store
+make test-vm-claude   # 588: the credential proxy's classifier, strict, a placeholder across a host restart — a fake key (DOZ_TEST_CLAUDE_LOGIN=1: + this Mac's login)
                       #      (up/exec/run/attach, lifecycle, points, two sandboxes, kill -9 the host, idle exit)
 ```
 

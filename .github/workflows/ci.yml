@@ -1,4 +1,4 @@
-# SnoozeContainerKit CI — feature 578. Runs on the SELF-HOSTED Mac runner (label `deck-mac`, as
+# DozerKit CI — feature 578. Runs on the SELF-HOSTED Mac runner (label `deck-mac`, as
 # DeckStack does), never a GitHub-hosted image: macOS minutes bill 10x, the hosted image ships an
 # older Swift, and a VM needs a real Mac with Virtualization.framework.
 #
@@ -7,14 +7,14 @@
 # Jobs:
 #   package  every push/PR: audit, build, unit tests (no VM).
 #   vm       the entitled VM integration suite (`make test-vm`). Runs only when asked for
-#            (workflow_dispatch `vm: true`) or when the repository variable SNOOZE_VM_CI is "1" —
+#            (workflow_dispatch `vm: true`) or when the repository variable DOZ_VM_CI is "1" —
 #            set that once the runner is verified to boot VMs (logged-in user session; network
 #            for the first kernel fetch and image pull — no `container` CLI needed).
 #   deckhold workflow_dispatch `deckhold: true` only: rebuild the guest binary from the pinned
 #            Zig + ghostty and check it matches the committed bytes (~3.5 min cold).
 # No concurrency group: the self-hosted runner runs one job at a time, and every job here is
 # read-only (`permissions: contents: read`).
-name: SnoozeContainerKit
+name: DozerKit
 
 on:
   pull_request:
@@ -66,7 +66,7 @@ jobs:
   vm:
     name: VM integration suite (entitled test host)
     needs: package
-    if: (github.event_name == 'workflow_dispatch' && inputs.vm) || vars.SNOOZE_VM_CI == '1'
+    if: (github.event_name == 'workflow_dispatch' && inputs.vm) || vars.DOZ_VM_CI == '1'
     runs-on: [self-hosted, deck-mac]
     timeout-minutes: 20
     steps:
@@ -77,13 +77,13 @@ jobs:
         # The library owns its kernel (KernelProvider): kata-containers 3.28.0's vmlinux-6.18.15-186,
         # sha256-pinned. The cache lives under the runner user's home so it persists between runs and
         # is shared with SandboxLab's CI on the same host; concurrent fillers are safe (atomic rename).
-        run: make kernel KERNEL_CACHE="$HOME/Library/Caches/SnoozeContainerKit-ci/kernels" VMTEST_STORE="$RUNNER_TEMP/snooze-vmtest-store"
+        run: make kernel KERNEL_CACHE="$HOME/Library/Caches/DozerKit-ci/kernels" VMTEST_STORE="$RUNNER_TEMP/doz-vmtest-store"
       - name: make test-vm (scratch store under the runner's temp dir)
         shell: bash
         run: |
           set -euo pipefail
           LOCK="$HOME/Developer/bin/ci-build-lock"
-          RUN='make test-vm VMTEST_STORE="$RUNNER_TEMP/snooze-vmtest-store" KERNEL_CACHE="$HOME/Library/Caches/SnoozeContainerKit-ci/kernels"'
+          RUN='make test-vm VMTEST_STORE="$RUNNER_TEMP/doz-vmtest-store" KERNEL_CACHE="$HOME/Library/Caches/DozerKit-ci/kernels"'
           if [ -x "$LOCK" ]; then "$LOCK" --name "$GITHUB_REPOSITORY#vm" -- bash -c "$RUN"; else bash -c "$RUN"; fi
 
   deckhold:

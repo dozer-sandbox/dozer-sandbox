@@ -1,0 +1,3 @@
+/* doz ui — the terminal frame (591): the engine alone, filling its sandboxed iframe. */
+html, body { margin: 0; height: 100%; background: #16171c; overflow: hidden; }
+.term-host { position: absolute; inset: 6px 0 0 8px; overflow: hidden; outline: none; }

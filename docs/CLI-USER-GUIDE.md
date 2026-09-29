@@ -1,8 +1,8 @@
-# `snooze` user guide
+# `doz` user guide
 
-`snooze` runs Linux sandboxes on your Mac that pause in a millisecond, deep-sleep to disk and wake
+`doz` runs Linux sandboxes on your Mac that pause in a millisecond, deep-sleep to disk and wake
 in about a third of a second, with the programs inside them still running where they were. It is
-the command-line face of SnoozeContainerKit. New to it? Start with the
+the command-line face of DozerKit. New to it? Start with the
 [walkthrough](CLI-WALKTHROUGH.md).
 
 ## Concepts
@@ -13,20 +13,20 @@ the command-line face of SnoozeContainerKit. New to it? Start with the
 | **Image** | What a sandbox starts from: a baked, read-only disk. Built in: `lab` (Alpine + bash, 1 GiB RAM), `claude-code` and `pi` (Debian `node` + the agent, 2 GiB). Custom images are saved from a sandbox. |
 | **Session** | A terminal program living in the sandbox (a shell, `claude`, `pi`). It survives pause, sleep and deep sleep. You *attach* to it and *detach* from it; it keeps running either way. |
 | **Workspace** | A folder of your Mac shared into the sandbox at `/workspace`. |
-| **Host** | One background `snooze` process per user and store. It owns every running VM, the network proxy and the keys. It starts when needed and exits when idle, so you never manage it. |
-| **Store** | Where everything lives on disk: `~/Library/Application Support/SnoozeContainerKit` unless `--store` or `$SNOOZE_STORE` says otherwise. Each store has its own images, sandboxes and host. |
+| **Host** | One background `doz` process per user and store. It owns every running VM, the network proxy and the keys. It starts when needed and exits when idle, so you never manage it. |
+| **Store** | Where everything lives on disk: `~/Library/Application Support/dozer-sandbox` unless `--store` or `$DOZ_STORE` says otherwise. Each store has its own images, sandboxes and host. |
 
 ## Install
 
 ```bash
-cd repo/lib/SnoozeContainerKit
-make install-cli                  # PREFIX=~/.local by default → ~/.local/bin/snooze
-snooze doctor
+cd repo/lib/DozerKit
+make install-cli                  # PREFIX=~/.local by default → ~/.local/bin/doz
+doz doctor
 ```
 
 A VM can only be booted by a binary signed with Apple's virtualization entitlement, and
 `make install-cli` signs it. An unsigned build runs every command but cannot boot anything, and
-`snooze doctor` says so. `make cli` builds a signed debug binary at `.build/debug/snooze` for
+`doz doctor` says so. `make cli` builds a signed debug binary at `.build/debug/doz` for
 development.
 
 ## The lifecycle
@@ -59,11 +59,11 @@ off mid-startup (Claude Code's first network calls, for example) can otherwise f
 ## Creating and entering sandboxes
 
 ```bash
-snooze create NAME --image lab|claude-code|pi|<custom> \
+doz create NAME --image lab|claude-code|pi|<custom> \
     [--cpus 2] [--memory 2G] [--workspace ~/code/proj] \
     [--network agent|bake|locked|open|nat|none] [--subnet CIDR]
 
-snooze up NAME [same options] [--session S] [-d] [-- CMD …]
+doz up NAME [same options] [--session S] [-d] [-- CMD …]
 ```
 
 - **`up`** is the everyday command, in the manner of `vagrant up` and `docker compose up`: create
@@ -78,11 +78,11 @@ snooze up NAME [same options] [--session S] [-d] [-- CMD …]
 
 | | |
 |---|---|
-| `snooze attach NAME [SESSION]` | Your terminal becomes that session. **Ctrl-]** detaches (`--detach-key ctrl-x` or `none`). A paused or sleeping sandbox is woken first (`--no-wake` waits instead). If the sandbox deep-sleeps while you are attached, the client waits and reattaches by itself when it wakes. |
-| `snooze run NAME [--session S] [-d] -- CMD …` | Open a **new** session running CMD and attach. It exits with CMD's exit code. There is no shell in front, so write `bash -lc '…'` if you want one. |
-| `snooze exec NAME [--user U] [--workdir D] [-e K=V] [--timeout S] -- CMD …` | One-shot, no terminal: stdout, stderr and the exit code pass straight through (default timeout 120 s). On agent images it runs as the agent's user in `/workspace`; `--user root` for root. |
-| `snooze sessions NAME` | The sandbox's sessions. |
-| `snooze ls` · `snooze inspect NAME` | Every sandbox: image, phase, RAM held, disk, sessions, network · everything about one, as JSON. |
+| `doz attach NAME [SESSION]` | Your terminal becomes that session. **Ctrl-]** detaches (`--detach-key ctrl-x` or `none`). A paused or sleeping sandbox is woken first (`--no-wake` waits instead). If the sandbox deep-sleeps while you are attached, the client waits and reattaches by itself when it wakes. |
+| `doz run NAME [--session S] [-d] -- CMD …` | Open a **new** session running CMD and attach. It exits with CMD's exit code. There is no shell in front, so write `bash -lc '…'` if you want one. |
+| `doz exec NAME [--user U] [--workdir D] [-e K=V] [--timeout S] -- CMD …` | One-shot, no terminal: stdout, stderr and the exit code pass straight through (default timeout 120 s). On agent images it runs as the agent's user in `/workspace`; `--user root` for root. |
+| `doz sessions NAME` | The sandbox's sessions. |
+| `doz ls` · `doz inspect NAME` | Every sandbox: image, phase, RAM held, disk, sessions, network · everything about one, as JSON. |
 
 **RAM held** in `ls` is what the VM costs your Mac right now: the allocation, less what the memory
 balloon handed back after a wake. It is shown as `—` when the sandbox is off or deep asleep.
@@ -101,12 +101,12 @@ running the real Claude Code it:
 - passes `--dangerously-skip-permissions`, so there are no approval prompts. The VM, the proxy and
   the key vault are the boundary.
 
-`-e SNOOZE_CLAUDE_PERMISSIONS=ask` (on `run` or `exec`) keeps Claude Code's own prompts, and a
+`-e DOZ_CLAUDE_PERMISSIONS=ask` (on `run` or `exec`) keeps Claude Code's own prompts, and a
 `claude` run as root always keeps them.
 
 Keys never enter the sandbox. The host's proxy holds each credential and puts it into requests to
 Anthropic on their way out. Inside the sandbox, `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` is
-a `snz_cred_…` placeholder. A credential is never a command-line argument, so it never lands in
+a `doz_cred_…` placeholder. A credential is never a command-line argument, so it never lands in
 shell history or `ps`.
 
 ### Claude accounts
@@ -115,20 +115,20 @@ A sandbox on a proxied network uses one **account**:
 
 | kind | what it is | where the secret lives | renewal |
 |---|---|---|---|
-| `mac` (built in) | this Mac's own Claude Code login | Claude Code's own keychain item, read-only for snooze | the Mac's Claude Code renews it |
-| `setup-token` | a `claude setup-token` token (a Claude subscription, valid 1 year) | the login keychain, `snooze-claude:NAME` | none: add a new one before it expires |
-| `api-key` | an Anthropic API key | the login keychain, `snooze-anthropic:NAME` (or an item you name) | none |
+| `mac` (built in) | this Mac's own Claude Code login | Claude Code's own keychain item, read-only for doz | the Mac's Claude Code renews it |
+| `setup-token` | a `claude setup-token` token (a Claude subscription, valid 1 year) | the login keychain, `doz-claude:NAME` | none: add a new one before it expires |
+| `api-key` | an Anthropic API key | the login keychain, `doz-anthropic:NAME` (or an item you name) | none |
 
 ```bash
-snooze account ls                                   # accounts, state, expiry, which sandboxes use them — never a secret
-snooze account add work --setup-token --plan max    # paste the token `claude setup-token` printed (no echo), or pipe it in
-snooze account add ci --api-key                     # an API key (prompt or stdin), or: --keychain SERVICE
-snooze account use NAME work                        # this sandbox uses work; open sessions switch on their next request
-snooze account use NAME default                     # follow the store's default again (none: no credential)
-snooze account default work                         # every sandbox that follows the default moves to work
-snooze account verify work                          # one tiny request to api.anthropic.com
-snooze account rm work [--force]                    # also deletes the keychain item snooze made
-snooze create NAME --image claude-code --account work
+doz account ls                                   # accounts, state, expiry, which sandboxes use them — never a secret
+doz account add work --setup-token --plan max    # paste the token `claude setup-token` printed (no echo), or pipe it in
+doz account add ci --api-key                     # an API key (prompt or stdin), or: --keychain SERVICE
+doz account use NAME work                        # this sandbox uses work; open sessions switch on their next request
+doz account use NAME default                     # follow the store's default again (none: no credential)
+doz account default work                         # every sandbox that follows the default moves to work
+doz account verify work                          # one tiny request to api.anthropic.com
+doz account rm work [--force]                    # also deletes the keychain item doz made
+doz create NAME --image claude-code --account work
 ```
 
 - **A new proxied sandbox follows the store's default account, `mac` out of the box.** Sign in
@@ -141,12 +141,12 @@ snooze create NAME --image claude-code --account work
   expires.
 - **No silent fallback.** A missing, expired or held credential is refused with a message saying
   what to do. The sandbox never switches to another account or to an API key by itself.
-- `snooze key set NAME --claude-login` still works: it is `account use NAME mac`.
+- `doz key set NAME --claude-login` still works: it is `account use NAME mac`.
   `key set NAME --anthropic` gives the sandbox a key of its own and takes it off its account.
 
 ### The Mac's login: how renewal works
 
-Snooze reads only the **access token** of the Mac's Claude Code login, never the refresh token.
+Dozer reads only the **access token** of the Mac's Claude Code login, never the refresh token.
 The Mac's Claude Code is the one program that renews the login, so the two can never fork it. The
 access token lives about 8 hours. Claude Code renews it when a `claude` process runs on the Mac
 within 5 minutes of expiry; `claude auth status` does not renew it.
@@ -157,38 +157,38 @@ within 5 minutes of expiry; `claude auth status` does not renew it.
   once. If the login is still expired, it answers with a message that Claude Code in the sandbox
   shows: "this Mac's Claude login expired at 04:59 — open Claude Code on the Mac (any prompt), then
   retry". The session recovers by itself when the Mac renews.
-- **Keep-alive (off by default):** `snooze account keepalive on`. Within 10 minutes of expiry, if a
+- **Keep-alive (off by default):** `doz account keepalive on`. Within 10 minutes of expiry, if a
   sandbox used the Mac login in the last 15 minutes and no Claude Code runs on the Mac, the host
   runs the Mac's own `claude -p ok --model haiku` once. Claude Code's normal startup renews the login
   under its own lock, at the cost of one tiny turn on your subscription.
 - **The Mac signs out:** the sandboxes' token is cleared at once, and requests get "this Mac's Claude
   Code signed out".
 - **A different account signs in on the Mac:** sandboxes on `mac` are **held** and don't silently
-  switch identity or billing. `snooze account use NAME mac` follows the new account.
-- **A locked keychain** keeps the last token and warns (`snooze events`).
+  switch identity or billing. `doz account use NAME mac` follows the new account.
+- **A locked keychain** keeps the last token and warns (`doz events`).
 - **Several Claude config dirs** (`CLAUDE_CONFIG_DIR`): Claude Code keeps one keychain item per
-  directory. `snooze account add work-mac --claude-login --config-dir ~/.claude-work` adds another
-  one. `snooze doctor` lists every Claude login item in the keychain (attributes only).
+  directory. `doz account add work-mac --claude-login --config-dir ~/.claude-work` adds another
+  one. `doz doctor` lists every Claude login item in the keychain (attributes only).
 
-`snooze doctor` checks that Claude Code is installed, whether it is signed in with a subscription
+`doz doctor` checks that Claude Code is installed, whether it is signed in with a subscription
 (or an API key, or not at all), the plan, who is signed in, and when the access token expires.
 `account use … mac` makes the same checks and changes nothing when they fail.
 
 ### A credential the guest brings itself
 
-The proxy decrypts api.anthropic.com anyway, so it sees every credential. A **credential snooze
+The proxy decrypts api.anthropic.com anyway, so it sees every credential. A **credential doz
 never issued**, such as a guest `/login` or a pasted key, is classified by the **key policy**:
 
 ```bash
-snooze key policy NAME allow    # pass it, and flag it
-snooze key policy NAME strict   # refuse it
-snooze key policy NAME auto     # the default: strict for a setup-token or api-key account, allow for mac
+doz key policy NAME allow    # pass it, and flag it
+doz key policy NAME strict   # refuse it
+doz key policy NAME auto     # the default: strict for a setup-token or api-key account, allow for mac
 ```
 
 - **allow:** the request goes through. The net log says `own credential (oauth sk-ant-oat01…, fp
   ab12cd34ef56)`, `ls` marks the sandbox `own key`, `key ls` lists the fingerprints, and an event is
   recorded once per credential. A fingerprint is the first 12 hex of the credential's sha256,
-  never the value. Snooze's own credential is never added to a request that carries the guest's.
+  never the value. Dozer's own credential is never added to a request that carries the guest's.
 - **strict:** refused with 403 and an explanation that Claude Code shows. The Claude sign-in hosts
   are denied too, so a `/login` in the sandbox can't finish. This pins a sandbox to its account,
   for billing and multi-account setups.
@@ -203,19 +203,19 @@ What Claude Code in a sandbox does:
 ### Keys given directly, and restarts
 
 ```bash
-snooze key set NAME --anthropic                       # prompt (no echo), or: … < keyfile
-snooze key set NAME --anthropic --keychain SERVICE    # read from a keychain generic password
-snooze key ls NAME                                    # keys, account, state, expiry, policy, foreign fingerprints
-snooze key rm NAME --anthropic
+doz key set NAME --anthropic                       # prompt (no echo), or: … < keyfile
+doz key set NAME --anthropic --keychain SERVICE    # read from a keychain generic password
+doz key ls NAME                                    # keys, account, state, expiry, policy, foreign fingerprints
+doz key rm NAME --anthropic
 ```
 
 - **A key from stdin or the prompt lasts while the host runs.** When the host stops (idle exit,
   `host stop`, a reboot), set it again. Accounts and keychain keys are read again whenever a new
   host loads the sandbox.
-- **Sessions survive a host restart with their credentials.** The sandbox's `snooze.json` keeps
+- **Sessions survive a host restart with their credentials.** The sandbox's `doz.json` keeps
   a sha256 of each live placeholder, never the placeholder itself, so a session that deep-slept
   through `host stop` keeps working in the new host. `shutdown`, `reset` and `rm` revoke them.
-- To store a key in the keychain yourself: `security add-generic-password -s snooze-anthropic -a
+- To store a key in the keychain yourself: `security add-generic-password -s doz-anthropic -a
   "$USER" -w` (it prompts for the key).
 
 ## Network
@@ -233,11 +233,11 @@ connection against a policy and logs it.
 | `none` | no network at all | |
 
 ```bash
-snooze net policy NAME                                  # show
-snooze net policy NAME --allow github.com --allow '*.githubusercontent.com'
-snooze net policy NAME --deny example.com --remove github.com
-snooze net policy NAME --preset open
-snooze net log NAME [--denied] [--follow]              # host, verdict, rule, bytes; never contents
+doz net policy NAME                                  # show
+doz net policy NAME --allow github.com --allow '*.githubusercontent.com'
+doz net policy NAME --deny example.com --remove github.com
+doz net policy NAME --preset open
+doz net log NAME [--denied] [--follow]              # host, verdict, rule, bytes; never contents
 ```
 
 Policy changes apply to the next connection and are kept for the next start. A name the policy
@@ -250,19 +250,19 @@ a sandbox yet.
 Restore points are instant, disk-only copies (APFS clones). They cover the disks, not memory.
 
 ```bash
-snooze point take NAME [POINT] [--note …]      # a running sandbox pauses for milliseconds
-snooze point ls NAME
-snooze point revert NAME POINT                 # shuts down; a "before revert" point is taken first
-snooze point fork NAME POINT NEWNAME           # a new sandbox from that point (cold-boots on start)
-snooze point rm NAME POINT
-snooze point save-image NAME [POINT] --as myimage [--note …]    # a custom image
-snooze up other --image myimage
+doz point take NAME [POINT] [--note …]      # a running sandbox pauses for milliseconds
+doz point ls NAME
+doz point revert NAME POINT                 # shuts down; a "before revert" point is taken first
+doz point fork NAME POINT NEWNAME           # a new sandbox from that point (cold-boots on start)
+doz point rm NAME POINT
+doz point save-image NAME [POINT] --as myimage [--note …]    # a custom image
+doz up other --image myimage
 ```
 
 ```bash
-snooze image ls                   # built-in and custom images, and whether each is baked here
-snooze image bake claude-code     # bake now rather than at the first start (minutes, needs network)
-snooze image rm NAME              # sandboxes already made from it keep working
+doz image ls                   # built-in and custom images, and whether each is baked here
+doz image bake claude-code     # bake now rather than at the first start (minutes, needs network)
+doz image rm NAME              # sandboxes already made from it keep working
 ```
 
 `image pull` / `push` are not built yet (exit 7).
@@ -274,20 +274,20 @@ The host is started for you by the first command that needs it. It runs detached
 
 | | |
 |---|---|
-| **Idle exit** | It exits after 5 minutes with no running, paused or sleeping VM and no attached client (`$SNOOZE_HOST_IDLE` minutes, 0 = never). |
+| **Idle exit** | It exits after 5 minutes with no running, paused or sleeping VM and no attached client (`$DOZ_HOST_IDLE` minutes, 0 = never). |
 | **Looking never starts it** | `ls`, `inspect`, `point ls`, `image ls`, `net policy` (shown) and `key ls` read the store directly when no host runs. |
-| `snooze host status` | Is one running, and what does it hold? Never starts one. |
-| `snooze host stop` | Deep-sleeps everything that runs, then exits. The next command starts a new host; `wake`, `attach`, `up` and `exec` bring each sandbox back. |
-| `snooze host [--foreground] [--idle-timeout MIN]` | Run it by hand (in the foreground, it logs to the terminal). |
+| `doz host status` | Is one running, and what does it hold? Never starts one. |
+| `doz host stop` | Deep-sleeps everything that runs, then exits. The next command starts a new host; `wake`, `attach`, `up` and `exec` bring each sandbox back. |
+| `doz host [--foreground] [--idle-timeout MIN]` | Run it by hand (in the foreground, it logs to the terminal). |
 | **If it crashes** | The next command starts a new one. Sleeping sandboxes are restored with their sessions. Deep-sleeping ones are untouched. Ones that were running are reported as died (`ls`; `inspect` shows `diedWithHost`), and their disk is checked with `e2fsck` at the next start. |
-| **If its program changes** | A host knows the file it runs from. If an update wrote into that file while it ran, macOS stops trusting it and refuses its virtual machines: every start or wake then says "this host's program was updated underneath it — `snooze host stop`, then retry", and `host status` and `doctor` say so too. An update that puts a new file in place (as `make install-cli` does) is harmless: the host keeps running its own copy, `host status` notes it, and once nothing runs and nobody is attached it exits by itself so the next command runs the new build. |
+| **If its program changes** | A host knows the file it runs from. If an update wrote into that file while it ran, macOS stops trusting it and refuses its virtual machines: every start or wake then says "this host's program was updated underneath it — `doz host stop`, then retry", and `host status` and `doctor` say so too. An update that puts a new file in place (as `make install-cli` does) is harmless: the host keeps running its own copy, `host status` notes it, and once nothing runs and nobody is attached it exits by itself so the next command runs the new build. |
 
-### Updating snooze
+### Updating doz
 
 ```bash
 make install-cli          # the new build goes in next to the running one — nothing running is touched
-snooze host stop          # sandboxes that run deep-sleep; the host of the old build exits
-snooze wake NAME          # (or attach / up / the web UI) — each wakes on the new build, sessions and all
+doz host stop          # sandboxes that run deep-sleep; the host of the old build exits
+doz wake NAME          # (or attach / up / the web UI) — each wakes on the new build, sessions and all
 ```
 
 A sandbox that was asleep when you updated wakes on the new build with its programs and sessions
@@ -295,33 +295,33 @@ where they were. Each snapshot records the exact virtual machine it was taken in
 disks, network card, devices, the kernel), and a wake rebuilds that machine — with the kernel it
 slept under, even after an update pins a newer one. If a new build can no longer build the same
 machine, the wake refuses instead of risking the snapshot, and says so: keep it asleep and wake it
-with the snooze that slept it, or Shut Down (below).
+with the doz that slept it, or Shut Down (below).
 
 ### If a wake fails
 
-1. `snooze host stop`, then wake again. Nothing is lost by trying: a wake that fails keeps its
+1. `doz host stop`, then wake again. Nothing is lost by trying: a wake that fails keeps its
    snapshot, and so does quitting the host after it.
 2. Read what it says. "Updated underneath it" is the host's own program (step 1 fixes it). "Put to
-   sleep by snooze X in a virtual machine this build cannot rebuild" means waking it needs snooze X.
-3. Last resort: `snooze shutdown NAME`, then `snooze start NAME`. This discards the snapshot, so
+   sleep by doz X in a virtual machine this build cannot rebuild" means waking it needs doz X.
+3. Last resort: `doz shutdown NAME`, then `doz start NAME`. This discards the snapshot, so
    running programs and their sessions end, but the disk is kept — files, installed packages, and an
    agent's own history on the state disk. For Claude Code, `claude --continue` in the new session
    picks the last conversation back up.
 
 ## The web UI
 
-`snooze ui` is a dashboard in your browser for everything in the store, and it can do most of
+`doz ui` is a dashboard in your browser for everything in the store, and it can do most of
 what the CLI does. (The maintenance and disk-accounting views come later.)
 
 ```bash
-snooze ui                 # serve it, and open it in your default browser
-snooze ui --print-url     # the same, but print the link instead of opening a browser
-snooze ui link            # another browser or tab on the UI that is already running
+doz ui                 # serve it, and open it in your default browser
+doz ui --print-url     # the same, but print the link instead of opening a browser
+doz ui link            # another browser or tab on the UI that is already running
 ```
 
 It shows every sandbox (phase, RAM held, disk, sessions, network, account), each sandbox's
 sessions, restore points, network policy and connection log, keys and their state, the images,
-the Claude accounts, the metrics, `snooze doctor`, and the host's activity as it happens.
+the Claude accounts, the metrics, `doz doctor`, and the host's activity as it happens.
 
 What you can do from it:
 
@@ -344,19 +344,19 @@ already under way). The list has no session count, since counting asks every ses
 guest; each sandbox's page lists its sessions.
 
 One thing is CLI-only on purpose: **a secret is never typed into the browser**. Add an account
-(`snooze account add`) or set a key (`snooze key set`) in a terminal; the page shows the command.
+(`doz account add`) or set a key (`doz key set`) in a terminal; the page shows the command.
 
 **Terminals in the browser** (the **Terminals** page). **Open here** on a sandbox's page attaches
 to its own session (starting it if needed); each session row has **Open** and **Watch**; **New
 terminal…** attaches to any session or starts a new one running a command. Terminals are tabs, and
 **Split** shows two side by side (⇄ moves a tab to the other side). Closing a tab only closes the
-view — the session keeps running, as Ctrl-] does in `snooze attach`.
+view — the session keeps running, as Ctrl-] does in `doz attach`.
 
 - **Watch** is read-only: nothing you type reaches the session, and it never resizes it.
 - **Watch it boot.** **Start** (or **Open here** on a shut-down sandbox) opens a terminal that shows
-  the start as it happens — snooze's timed steps (on a first start, the download and the bake) and
+  the start as it happens — doz's timed steps (on a first start, the download and the bake) and
   the kernel's boot console — and then becomes the image's own session in the same pane, with the
-  boot log kept in the scrollback. `snooze console NAME [--follow]` shows the same console in a
+  boot log kept in the scrollback. `doz console NAME [--follow]` shows the same console in a
   terminal. Turn it off with the setting `ui.boot_view_on_start = false`: Start then just starts.
 - **A new terminal is a new shell.** **New terminal…** and **Split** start a new shell session
   (`shell-2`, `shell-3`, …); attaching to or watching a session that already runs is a choice in the
@@ -371,22 +371,22 @@ view — the session keeps running, as Ctrl-] does in `snooze attach`.
 - **Links** in terminal output are not clickable, and a program inside the sandbox can never read
   or set your clipboard. Cmd-C copies a selection (so does selecting with the mouse); Cmd-V pastes.
   Cmd shortcuts belong to the browser (Cmd-W closes the tab — the session runs on).
-- An open terminal keeps the host running, as `snooze attach` does; the dashboard alone does not.
+- An open terminal keeps the host running, as `doz attach` does; the dashboard alone does not.
 - The terminal itself runs in an isolated frame of the page: whatever a sandbox prints can never
   reach your UI session, its cookie or the other terminals.
 
-**Open in Terminal** opens `snooze attach` in your default terminal app instead: whatever opens
+**Open in Terminal** opens `doz attach` in your default terminal app instead: whatever opens
 `.command` files on this Mac (Terminal, or iTerm2 / Ghostty if you've made them the handler). No
 permission prompt.
 
 | | |
 |---|---|
 | **Where** | `http://127.0.0.1:<port>`, a port the system picks. Only this Mac can reach it. |
-| **Signing in** | The link it opens (or prints) works **once**, for **five minutes**. It signs that browser in until you close the UI or sign out. Another browser or tab needs another link: `snooze ui link`, or run `snooze ui` again. Treat a printed link like a password — anyone with it signs in to your UI. |
+| **Signing in** | The link it opens (or prints) works **once**, for **five minutes**. It signs that browser in until you close the UI or sign out. Another browser or tab needs another link: `doz ui link`, or run `doz ui` again. Treat a printed link like a password — anyone with it signs in to your UI. |
 | **Stopping** | Ctrl-C in the terminal that runs it. Signing out and stopping both end every browser's session. |
-| **One per store** | Each store has at most one UI. `--store` (or `$SNOOZE_STORE`) picks the store, as for every command. |
+| **One per store** | Each store has at most one UI. `--store` (or `$DOZ_STORE`) picks the store, as for every command. |
 | **The host** | The UI is a client of the host, like the CLI. Looking never starts a host: with none running, the UI reads the store (nothing is live). It follows the host's events only while a sandbox is live, so an open UI never keeps an idle host from exiting. |
-| **Terminals** | In the page: each terminal is opened with a one-use ticket over a WebSocket on the same loopback address, and only for a signed-in browser. Open in Terminal runs `snooze attach NAME [SESSION] --store …` in a new Terminal tab (waking the sandbox if it sleeps). The page also shows that command to copy. |
+| **Terminals** | In the page: each terminal is opened with a one-use ticket over a WebSocket on the same loopback address, and only for a signed-in browser. Open in Terminal runs `doz attach NAME [SESSION] --store …` in a new Terminal tab (waking the sandbox if it sleeps). The page also shows that command to copy. |
 | **Secrets** | Never shown. Keys and accounts appear as a state, a source name (`keychain:…`, `account:mac`) and a fingerprint. |
 
 `--print-url` prints only to a terminal (not with `--json`, not into a pipe or a file), because the
@@ -394,7 +394,7 @@ link is a key to the UI.
 
 ## Settings
 
-Settings live in one file, `~/.config/dozer-sandbox/dzr.toml` (under `$XDG_CONFIG_HOME` when that
+Settings live in one file, `~/.config/dozer-sandbox/doz.toml` (under `$XDG_CONFIG_HOME` when that
 is set). It lists every setting, grouped in sections, each with a description and its default
 commented out:
 
@@ -407,36 +407,36 @@ commented out:
 # boot_view_on_start = true
 ```
 
-Uncomment a line to set it — or let snooze write it:
+Uncomment a line to set it — or let doz write it:
 
 ```bash
-snooze config                               # every setting: value, source (flag / env / file / default), default
-snooze config set ui.boot_view_on_start false
-snooze config get ui.boot_view_on_start     # false
-snooze config unset ui.boot_view_on_start   # back to the default
-snooze config init                          # write the file with everything commented out
-snooze config path
+doz config                               # every setting: value, source (flag / env / file / default), default
+doz config set ui.boot_view_on_start false
+doz config get ui.boot_view_on_start     # false
+doz config unset ui.boot_view_on_start   # back to the default
+doz config init                          # write the file with everything commented out
+doz config path
 ```
 
 The web UI's **Settings** page shows the same list — each setting's value, default, description
 and where the value came from — and changes a value in place. A `[ui]` setting applies at once;
 the others say when they apply (the next sandbox created, the next session, or after
-`snooze host stop`).
+`doz host stop`).
 
 | Section | Settings |
 |---|---|
 | `[ui]` | `boot_view_on_start` (true), `confirm_shutdown` (true), `split_default` (`shell` · `watch` · `attach` · `dialog`), `terminals` (true), `terminal_font_size` (13), `theme` (`auto` · `light` · `dark`) |
-| `[host]` | `idle_timeout_minutes` (5; `$SNOOZE_HOST_IDLE`), `keepalive` (false — for a store that has not chosen with `snooze account keepalive`) |
-| `[store]` | `path` (`--store`, `$SNOOZE_STORE`) |
-| `[claude]` | `permissions` (`skip` · `ask`) — Claude Code's own prompts in a claude-code sandbox; `-e SNOOZE_CLAUDE_PERMISSIONS=…` on `run`/`exec` still wins |
-| `[defaults]` | `cpus` (2), `nat_subnet` (a free one; `$SNOOZE_SUBNET`) |
+| `[host]` | `idle_timeout_minutes` (5; `$DOZ_HOST_IDLE`), `keepalive` (false — for a store that has not chosen with `doz account keepalive`) |
+| `[store]` | `path` (`--store`, `$DOZ_STORE`) |
+| `[claude]` | `permissions` (`skip` · `ask`) — Claude Code's own prompts in a claude-code sandbox; `-e DOZ_CLAUDE_PERMISSIONS=…` on `run`/`exec` still wins |
+| `[defaults]` | `cpus` (2), `nat_subnet` (a free one; `$DOZ_SUBNET`) |
 | `[images.lab]` · `[images.claude-code]` · `[images.pi]` | `memory_mib` (1024 · 2048 · 2048), `network` (`bake` · `agent` · `agent`) — a custom image follows the image it was saved from |
-| `[kernel]` | `path` (`$SNOOZE_KERNEL`), `cache` (`$SNOOZE_KERNEL_CACHE`) |
+| `[kernel]` | `path` (`$DOZ_KERNEL`), `cache` (`$DOZ_KERNEL_CACHE`) |
 
 - **Precedence:** a command-line flag, then its environment variable, then the file, then the
   default. A value the environment sets is read-only on the Settings page (change it where it is
-  set), and so is a host path (`store.path`, `kernel.*`: `snooze config set`).
-- **The file is snooze's.** `set`, `unset`, `init` and the Settings page rewrite it whole from the
+  set), and so is a host path (`store.path`, `kernel.*`: `doz config set`).
+- **The file is doz's.** `set`, `unset`, `init` and the Settings page rewrite it whole from the
   list of settings (atomically, readable only by you): comments you add are not kept. A key it
   doesn't know is a warning and is kept; a file that doesn't parse is ignored — with the line that
   is wrong — and never overwritten until you fix it.
@@ -450,9 +450,9 @@ the others say when they apply (the next sandbox created, the next session, or a
   only ever added.
 - `-q` prints no progress. `-v` prints every step (by default only operations slower than a second
   show their steps, on stderr).
-- `snooze console NAME [--follow]` prints the sandbox's boot console (the kernel and init); with
+- `doz console NAME [--follow]` prints the sandbox's boot console (the kernel and init); with
   `--follow` it keeps printing as it boots (the web UI's boot view shows the same lines).
-- `snooze events [NAME]` follows phases and timed steps live. `snooze metrics [--csv] [--image X]
+- `doz events [NAME]` follows phases and timed steps live. `doz metrics [--csv] [--image X]
   [--days N]` shows every action's count, median, p90, min, max and failures.
 
 | exit code | meaning |
@@ -466,15 +466,15 @@ the others say when they apply (the next sandbox created, the next session, or a
 | 6 | host unavailable |
 | 7 | not implemented yet |
 | 64 | usage |
-| *program's own* | `exec`, `run`, `attach` (125 = snooze itself failed) |
+| *program's own* | `exec`, `run`, `attach` (125 = doz itself failed) |
 
 | environment | overrides the setting | |
 |---|---|---|
-| `SNOOZE_STORE` | `store.path` | the store directory |
-| `SNOOZE_HOST_IDLE` | `host.idle_timeout_minutes` | host idle timeout, minutes |
-| `SNOOZE_KERNEL_CACHE` / `SNOOZE_KERNEL` | `kernel.cache` / `kernel.path` | a shared kernel cache / an explicit kernel |
-| `SNOOZE_SUBNET` | `defaults.nat_subnet` | default subnet for `--network nat` |
-| `XDG_CONFIG_HOME` | — | where `dozer-sandbox/dzr.toml` is (default `~/.config`) |
+| `DOZ_STORE` | `store.path` | the store directory |
+| `DOZ_HOST_IDLE` | `host.idle_timeout_minutes` | host idle timeout, minutes |
+| `DOZ_KERNEL_CACHE` / `DOZ_KERNEL` | `kernel.cache` / `kernel.path` | a shared kernel cache / an explicit kernel |
+| `DOZ_SUBNET` | `defaults.nat_subnet` | default subnet for `--network nat` |
+| `XDG_CONFIG_HOME` | — | where `dozer-sandbox/doz.toml` is (default `~/.config`) |
 
 The kernel, subnet and `[defaults]` / `[images.*]` settings are read (by the host) when a sandbox
 is created, and become part of it.
@@ -483,17 +483,17 @@ is created, and become part of it.
 
 | symptom | try |
 |---|---|
-| "cannot boot a VM" / entitlement | `snooze doctor`. Reinstall with `make install-cli` (it signs). |
-| First start is slow | It is baking the image, once per store. `snooze image bake …` ahead of time; `-v` shows the steps. |
-| An agent says it has no key / 401 | `snooze key ls NAME`. A stdin key is gone after the host stopped, so set it again or use `--keychain`. |
-| A package install fails | The policy: `snooze net log NAME --denied`, then `snooze net policy NAME --allow HOST`. |
-| A sandbox shows as died | The host crashed while it ran. `snooze start NAME` checks the disk and cold-boots it. |
-| The UI says "sign in with a new link" | Its link was used or expired, or the UI restarted. `snooze ui link`. |
-| A browser terminal says "Disconnected" | The UI stopped, the browser signed out, or the tab was silent for a long time. Reconnect (or a new link: `snooze ui link`). |
+| "cannot boot a VM" / entitlement | `doz doctor`. Reinstall with `make install-cli` (it signs). |
+| First start is slow | It is baking the image, once per store. `doz image bake …` ahead of time; `-v` shows the steps. |
+| An agent says it has no key / 401 | `doz key ls NAME`. A stdin key is gone after the host stopped, so set it again or use `--keychain`. |
+| A package install fails | The policy: `doz net log NAME --denied`, then `doz net policy NAME --allow HOST`. |
+| A sandbox shows as died | The host crashed while it ran. `doz start NAME` checks the disk and cold-boots it. |
+| The UI says "sign in with a new link" | Its link was used or expired, or the UI restarted. `doz ui link`. |
+| A browser terminal says "Disconnected" | The UI stopped, the browser signed out, or the tab was silent for a long time. Reconnect (or a new link: `doz ui link`). |
 | A browser terminal will not type Chinese/Japanese/Korean | Its engine's input-method support is incomplete; use Open in Terminal for now. |
 | Open in Terminal says no app opened it | Make a terminal app the handler for `.command` files (Finder › Get Info on any `.command` file › Open with › Change All…). |
-| `snooze ui` says the resources are missing | `SnoozeContainerKit_SnoozeWeb.bundle` must sit beside the executable. Reinstall with `make install-cli`. |
-| Anything else | `<store>/host.log` and `snooze events`. |
+| `doz ui` says the resources are missing | `DozerKit_DozerWeb.bundle` must sit beside the executable. Reinstall with `make install-cli`. |
+| Anything else | `<store>/host.log` and `doz events`. |
 
 ## Not yet
 

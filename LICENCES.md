@@ -1,9 +1,9 @@
 # Licences
 
-`SnoozeContainerKit` itself is MIT — see [`LICENSE`](LICENSE).
+`DozerKit` itself is MIT — see [`LICENSE`](LICENSE).
 
 Two kinds of third-party material: the Swift packages the host-side library resolves, and what is
-statically linked into the **committed guest binary** `Sources/SnoozeContainerKit/Resources/deckhold`
+statically linked into the **committed guest binary** `Sources/DozerKit/Resources/deckhold`
 (a Linux executable the library copies into each sandbox; its build is recorded in
 [`Guest/deckhold/PROVENANCE.md`](Guest/deckhold/PROVENANCE.md)).
 
@@ -24,14 +24,14 @@ statically linked into the **committed guest binary** `Sources/SnoozeContainerKi
 The direct dependencies are apple/containerization, pinned exactly, and five apple/* packages it
 already resolves (declared so the code that imports them names them: swift-nio, swift-nio-ssl,
 swift-certificates and swift-asn1 for the 580 egress proxy; swift-argument-parser for the 585
-`snooze` CLI only). Declaring them added nothing to `Package.resolved`; everything below is the
-same resolved set. The `snooze` executable additionally links the system `SQLite3` library (macOS,
+`doz` CLI only). Declaring them added nothing to `Package.resolved`; everything below is the
+same resolved set. The `doz` executable additionally links the system `SQLite3` library (macOS,
 public domain).
 
 | Component | Licence | Notes |
 |---|---|---|
 | [apple/containerization](https://github.com/apple/containerization) 0.47.0 | Apache-2.0 | the VM + container runtime; the direct dependency |
-| [apple/swift-argument-parser](https://github.com/apple/swift-argument-parser) 1.8.2 | Apache-2.0 | 585: the `snooze` CLI's command line (direct for the CLI targets only) |
+| [apple/swift-argument-parser](https://github.com/apple/swift-argument-parser) 1.8.2 | Apache-2.0 | 585: the `doz` CLI's command line (direct for the CLI targets only) |
 | grpc-swift-2, grpc-swift-nio-transport, grpc-swift-protobuf | Apache-2.0 | vminitd client transport |
 | swift-nio, swift-nio-extras, swift-nio-http2, swift-nio-ssl, swift-nio-transport-services | Apache-2.0 | |
 | swift-protobuf | Apache-2.0 | |
@@ -46,7 +46,7 @@ public domain).
 
 | Component | Licence | Notes |
 |---|---|---|
-| [ghostty-web](https://github.com/coder/ghostty-web) 0.4.0 (Coder), which embeds Ghostty's VT parser compiled to WebAssembly | MIT (ghostty-web); MIT (Ghostty) | 591: `Sources/SnoozeWeb/WebSource/vendor/ghostty-web/` — `ghostty-web.umd.cjs` and `ghostty-vt.wasm`, byte-identical to the npm registry tarball (`VENDOR.json` pins its integrity and each file's sha256). Served by `snooze ui` to the browser only; the licence text ships in the resource bundle (`Resources/Web/licences/`). |
+| [ghostty-web](https://github.com/coder/ghostty-web) 0.4.0 (Coder), which embeds Ghostty's VT parser compiled to WebAssembly | MIT (ghostty-web); MIT (Ghostty) | 591: `Sources/DozerWeb/WebSource/vendor/ghostty-web/` — `ghostty-web.umd.cjs` and `ghostty-vt.wasm`, byte-identical to the npm registry tarball (`VENDOR.json` pins its integrity and each file's sha256). Served by `doz ui` to the browser only; the licence text ships in the resource bundle (`Resources/Web/licences/`). |
 
 ## The Linux kernel (downloaded at run time, not in this repository)
 

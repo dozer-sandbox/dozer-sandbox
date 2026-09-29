@@ -1,6 +1,6 @@
 # deckhold — provenance of the committed binary
 
-`Sources/SnoozeContainerKit/Resources/deckhold` is a **committed build artefact**: the guest-side
+`Sources/DozerKit/Resources/deckhold` is a **committed build artefact**: the guest-side
 PTY holder every sandbox installs at `/usr/local/bin/deckhold` on start. It is the pin, the way a
 vendored xcframework is — consumers never need Zig or the ghostty source. This file records exactly
 what produced it; `make deckhold` rewrites the two lines marked (auto) after a rebuild, and

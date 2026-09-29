@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# docs-drift-check.sh — cheap check that the CLI reference (589) still names every real `snooze`
+# docs-drift-check.sh — cheap check that the CLI reference (589) still names every real `doz`
 # subcommand, and nothing it no longer has.
 #
 # Cheap on purpose: it diffs COMMAND NAMES only (not flags or help text — that would need a real
 # ArgumentParser --help parser, and the name is the part that actually goes stale: 585 added the
 # whole CLI, 588 added `account` and `key policy`, both exactly new names this check would catch).
 #
-# It builds the UNSIGNED debug `snooze` — `--help` needs no entitlement, only booting a VM does —
+# It builds the UNSIGNED debug `doz` — `--help` needs no entitlement, only booting a VM does —
 # and walks the top level plus every subcommand group's --help, extracting each subcommand's
 # canonical name (aliases ignored) from ArgumentParser's own SUBCOMMANDS listing. That set is
 # diffed against Scripts/docs-known-commands.txt, the list the CLI reference article documents.
@@ -14,7 +14,7 @@ set -euo pipefail
 
 PACKAGE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 KNOWN="$PACKAGE/Scripts/docs-known-commands.txt"
-BIN="$PACKAGE/.build/debug/snooze"
+BIN="$PACKAGE/.build/debug/doz"
 CMD_GROUPS="image point net key account host ui config"   # NOT "GROUPS" — bash reserves that name for the
                                                   # caller's group-membership array; assigning to
                                                   # it silently no-ops and $GROUPS then reads back
@@ -28,7 +28,7 @@ fail() {
 [[ -f "$KNOWN" ]] || fail "missing $KNOWN"
 
 echo "docs-drift-check: building the CLI (unsigned — --help needs no entitlement) …"
-(cd "$PACKAGE" && swift build -j 8 --product snooze) >/dev/null
+(cd "$PACKAGE" && swift build -j 8 --product doz) >/dev/null
 
 [[ -x "$BIN" ]] || fail "missing $BIN after build"
 

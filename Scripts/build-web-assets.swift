@@ -1,13 +1,13 @@
 #!/usr/bin/env swift
-// build-web-assets.swift — `snooze ui`'s front end compiler (590; the technique of DeckStack 503's
+// build-web-assets.swift — `doz ui`'s front end compiler (590; the technique of DeckStack 503's
 // Scripts/build-web-assets.swift). Dependency-free and deterministic: no Node, no package manager,
 // no network.
 //
-//   Sources/SnoozeWeb/WebSource/{index.html, app.css, app.js}   the page's OWN code (what people edit)
-//   Sources/SnoozeWeb/WebSource/vendor/<package>/               591: VENDORED third-party files, each
+//   Sources/DozerWeb/WebSource/{index.html, app.css, app.js}   the page's OWN code (what people edit)
+//   Sources/DozerWeb/WebSource/vendor/<package>/               591: VENDORED third-party files, each
 //                                                               byte-identical to its registry tarball
 //                                                               and pinned in that directory's VENDOR.json
-//   Sources/SnoozeWeb/Resources/Web/                           what ships (COMMITTED, generated):
+//   Sources/DozerWeb/Resources/Web/                           what ships (COMMITTED, generated):
 //       index.html                  referencing the hashed names
 //       assets/app-<sha16>.css      content-hashed
 //       assets/app-<sha16>.js
@@ -91,8 +91,8 @@ func main() throws {
     guard args.isEmpty || args == ["--check"] else { throw Failure.usage }
     let check = args == ["--check"]
     let package = URL(fileURLWithPath: #filePath).standardizedFileURL.deletingLastPathComponent().deletingLastPathComponent()
-    let sources = package.appendingPathComponent("Sources/SnoozeWeb/WebSource")
-    let output = package.appendingPathComponent("Sources/SnoozeWeb/Resources/Web")
+    let sources = package.appendingPathComponent("Sources/DozerWeb/WebSource")
+    let output = package.appendingPathComponent("Sources/DozerWeb/Resources/Web")
     let fm = FileManager.default
 
     // The page's own documents, each with its one stylesheet and one script (591: the terminal
@@ -244,7 +244,7 @@ func main() throws {
         guard existing == expected else {
             let want = Set(expected.keys), have = Set(existing.keys)
             let changed = want.intersection(have).filter { expected[$0] != existing[$0] }.sorted()
-            throw Failure.stale("x web assets are stale (missing \(want.subtracting(have).sorted()), changed \(changed), unexpected \(have.subtracting(want).sorted())) — run make web-assets and commit Sources/SnoozeWeb/Resources/Web")
+            throw Failure.stale("x web assets are stale (missing \(want.subtracting(have).sorted()), changed \(changed), unexpected \(have.subtracting(want).sorted())) — run make web-assets and commit Sources/DozerWeb/Resources/Web")
         }
         print("ok web assets: Resources/Web is exactly what WebSource/ builds (\(expected.count) files, \(packages.count) vendored package(s) at their pins)")
         return

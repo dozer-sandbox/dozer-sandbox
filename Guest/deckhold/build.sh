@@ -3,7 +3,7 @@
 # aarch64-linux-musl binary: Guest/deckhold/out/deckhold. Idempotent: every step is skipped when
 # its output already exists, so a rebuild with nothing changed takes well under a second.
 #
-# The COMMITTED binary is Sources/SnoozeContainerKit/Resources/deckhold (the pin, like a vendored
+# The COMMITTED binary is Sources/DozerKit/Resources/deckhold (the pin, like a vendored
 # xcframework); `make deckhold` runs this and installs the result there + refreshes PROVENANCE.md,
 # `make deckhold-verify` rebuilds from scratch and checks the committed bytes match.
 #
