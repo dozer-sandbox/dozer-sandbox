@@ -6,23 +6,23 @@
       "mimeType" : "text/html; charset=utf-8",
       "publicPath" : "/",
       "resourcePath" : "index.html",
-      "sha256" : "92f9cb542e5b5cb92790a6e473730899343c1dcfb2ef4eda793fdee98f3274c8"
-    },
-    {
-      "cachePolicy" : "public, max-age=31536000, immutable",
-      "class" : "page",
-      "mimeType" : "text/css; charset=utf-8",
-      "publicPath" : "/assets/app-4ebefc4082d09a03.css",
-      "resourcePath" : "assets/app-4ebefc4082d09a03.css",
-      "sha256" : "4ebefc4082d09a030b8849ffe96ba3e339987cfaaebbecbc06d96d3f6caa8717"
+      "sha256" : "cb4d6e1c6901ca075c97b6fc466d76d4b28d00f8ce6272971387588863b619cd"
     },
     {
       "cachePolicy" : "public, max-age=31536000, immutable",
       "class" : "page",
       "mimeType" : "application/javascript; charset=utf-8",
-      "publicPath" : "/assets/app-579135cfc758e0ee.js",
-      "resourcePath" : "assets/app-579135cfc758e0ee.js",
-      "sha256" : "579135cfc758e0eee11cc29e4c1232ad41414472b572ab89270139ce20fb0e24"
+      "publicPath" : "/assets/app-798c5963891ff757.js",
+      "resourcePath" : "assets/app-798c5963891ff757.js",
+      "sha256" : "798c5963891ff75723a85c04c610058007a42f314ea0f86c6bae927250255ec5"
+    },
+    {
+      "cachePolicy" : "public, max-age=31536000, immutable",
+      "class" : "page",
+      "mimeType" : "text/css; charset=utf-8",
+      "publicPath" : "/assets/app-c4ca2daf592efea8.css",
+      "resourcePath" : "assets/app-c4ca2daf592efea8.css",
+      "sha256" : "c4ca2daf592efea8dfdb74afc9ca70f4377cbf6e31d098c38a2f54b98bc40a21"
     },
     {
       "cachePolicy" : "public, max-age=31536000, immutable",
@@ -60,9 +60,9 @@
       "cachePolicy" : "public, max-age=31536000, immutable",
       "class" : "vendor",
       "mimeType" : "image/svg+xml",
-      "publicPath" : "/assets/vendor-lucide-icons-b6eaf34c368e0500.svg",
-      "resourcePath" : "assets/vendor-lucide-icons-b6eaf34c368e0500.svg",
-      "sha256" : "b6eaf34c368e05006557767309b98a8864b60f925d0f74afbce65b86e6634808"
+      "publicPath" : "/assets/vendor-lucide-icons-50b9440c5b7bf99e.svg",
+      "resourcePath" : "assets/vendor-lucide-icons-50b9440c5b7bf99e.svg",
+      "sha256" : "50b9440c5b7bf99e0a90269efc3445cd56167834f4935aa1207c68fbc8a2c4b1"
     },
     {
       "cachePolicy" : "no-store",

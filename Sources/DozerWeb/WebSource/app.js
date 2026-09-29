@@ -60,7 +60,21 @@ const $ = (id) => document.getElementById(id);
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const SPRITE = (() => { const m = document.querySelector('meta[name="doz-icons"]'); return m ? m.getAttribute('content') : ''; })();
 const ICON_FALLBACK = 'circle-dot';
+/// 593 (owner): the two sleeps are told apart by a second glyph — Sleep keeps RAM (a memory stick),
+/// Deep sleep frees it and keeps the state on disk (a hard drive). Used wherever those states show.
+const ICON_SLEEP = 'moon+memory-stick', ICON_DEEP_SLEEP = 'moon+hard-drive';
+/// A phase (or a cover's kind) → its glyph, where it has one.
+const PHASE_GLYPH = { paused: 'pause', asleep: ICON_SLEEP, deepAsleep: ICON_DEEP_SLEEP, off: 'power', shutDown: 'power' };
+/// An operation's action → its glyph (the lifecycle verbs; the rest have none).
+const OP_GLYPH = { start: 'play', pause: 'pause', resume: 'play', sleep: ICON_SLEEP, 'deep-sleep': ICON_DEEP_SLEEP, wake: 'sun',
+                   shutdown: 'power', reset: 'rotate-ccw', rm: 'trash-2', duplicate: 'copy', 'template-create': 'layout-template' };
+/// `name`, or a pair `a+b`: a glyph drawn as two icons side by side (both hidden, one tight group).
 function icon(name) {
+  if (name.includes('+')) {
+    const g = h('span', { class: 'icon-pair', 'aria-hidden': 'true', 'data-icon': name });
+    for (const n of name.split('+')) g.append(icon(n));
+    return g;
+  }
   const svg = document.createElementNS(SVG_NS, 'svg');
   svg.setAttribute('class', 'icon');
   svg.setAttribute('aria-hidden', 'true');
@@ -77,14 +91,14 @@ const ICON_EXACT = {
   'save template': 'layout-template', 'hide details': 'panel-right', 'details': 'panel-right', 'take a restore point…': 'camera', 'take': 'camera',
   'key policy…': 'key-round', 'account…': 'user-round', 'edit policy…': 'shield', 'terminal…': 'terminal', 'new shell': 'plus',
   'new sandbox': 'plus', 'run detached…': 'play', 'default': 'rotate-ccw', 'apply anyway': 'check', 'download csv': 'download',
-  'deep sleep': 'moon-star', 'shut down': 'power', 'sign out': 'log-out', 'unsplit': 'columns-2',
+  'deep sleep': ICON_DEEP_SLEEP, 'deep-sleep': ICON_DEEP_SLEEP, 'shut down': 'power', 'sign out': 'log-out', 'unsplit': 'columns-2',
 };
 const ICON_WORD = {
-  start: 'play', pause: 'pause', resume: 'play', sleep: 'moon', wake: 'sun', reset: 'rotate-ccw', remove: 'trash-2', delete: 'trash-2',
+  start: 'play', pause: 'pause', resume: 'play', sleep: ICON_SLEEP, wake: 'sun', reset: 'rotate-ccw', remove: 'trash-2', delete: 'trash-2',
   open: 'terminal', split: 'columns-2', duplicate: 'copy', revert: 'history', fork: 'git-fork', copy: 'clipboard', copied: 'check',
   select: 'clipboard', refresh: 'refresh-cw', create: 'plus', bake: 'flame', 're-bake': 'flame', verify: 'badge-check', watch: 'eye',
   set: 'check', use: 'check', run: 'play', save: 'layout-template', preview: 'eye', apply: 'check', cancel: 'x', paste: 'clipboard-paste',
-  reconnect: 'refresh-cw', table: 'table', lineage: 'list-tree', shut: 'power', deep: 'moon-star', attach: 'link', close: 'x',
+  reconnect: 'refresh-cw', table: 'table', lineage: 'list-tree', shut: 'power', deep: ICON_DEEP_SLEEP, attach: 'link', close: 'x',
 };
 function iconFor(label) {
   const l = String(label).trim().toLowerCase();
@@ -238,7 +252,7 @@ function renderOperations() {
     const secs = o.state === 'running' ? Math.max(0, Math.round((Date.now() - new Date(o.startedAt).getTime()) / 1000)) + ' s' : (o.milliseconds ? ms(o.milliseconds) : '—');
     return h('tr', { class: 'op-row op-' + o.state, 'data-op': o.id },
       h('td', null, o.state === 'running' ? h('span', { class: 'mini-spin', title: 'running' }) : h('span', { class: 'op-state', title: o.state }, o.state === 'done' ? '✓' : '✕')),
-      h('td', null, o.action), h('td', null, o.sandbox ? h('a', { href: '#/sandbox/' + o.sandbox }, o.sandbox) : '—'),
+      h('td', { class: 'op-action' }, OP_GLYPH[o.action] ? icon(OP_GLYPH[o.action]) : null, o.action), h('td', null, o.sandbox ? h('a', { href: '#/sandbox/' + o.sandbox }, o.sandbox) : '—'),
       h('td', null, clock(o.startedAt)), h('td', { class: 'num' }, secs),
       h('td', { class: 'op-text' }, o.text));
   });
@@ -1560,13 +1574,14 @@ function terminalElements(t) {
   const host = h('div', { class: 'term-frame-host' });
   const note = h('div', { class: 'term-notice', role: 'status', hidden: true });
   const spin = h('div', { class: 'tc-spin', 'aria-hidden': 'true' });
+  const glyph = h('div', { class: 'tc-glyph', hidden: true });
   const head = h('div', { class: 'tc-head' });
   const detail = h('div', { class: 'tc-detail' });
   const action = h('button', { type: 'button', class: 'btn small tc-act' });
   action.addEventListener('click', (ev) => { ev.stopPropagation(); coverAction(t); });
-  const cover = h('div', { class: 'term-cover', role: 'status', 'aria-live': 'polite' }, h('div', { class: 'tc-box' }, spin, head, detail, action));
+  const cover = h('div', { class: 'term-cover', role: 'status', 'aria-live': 'polite' }, h('div', { class: 'tc-box' }, spin, glyph, head, detail, action));
   const wrap = h('div', { class: 'term-wrap', 'data-terminal': String(t.id) }, host, cover, note);
-  return { wrap, host, cover, spin, head, detail, action, note };
+  return { wrap, host, cover, spin, glyph, head, detail, action, note };
 }
 
 // ── paste (Ghostty 1.3.0's `encode`, after xterm): these become a space, in either paste mode —
@@ -1647,6 +1662,10 @@ function paintCover(t) {
   e.detail.textContent = detail;
   e.detail.hidden = !detail;
   e.spin.hidden = !spinner;
+  // 593: the state's own glyph over the cover (the two sleeps told apart: RAM kept / on disk).
+  const g = PHASE_GLYPH[kind] || null;
+  e.glyph.hidden = !g || spinner;
+  if (g && e.glyph.dataset.icon !== g) { e.glyph.dataset.icon = g; e.glyph.replaceChildren(icon(g)); }
   e.action.hidden = !action;
   if (action) setButton(e.action, action); else e.action.replaceChildren();
   e.action.title = action === 'Reconnect' ? 'Open the terminal again' : action ? action + ' — so does any key typed in the terminal' : '';
@@ -2049,6 +2068,7 @@ function paintTile(tile, w) {
     tile.note.hidden = false;
     tile.note.className = 'tile-note static';
     tile.note.replaceChildren(
+      !w.none && PHASE_GLYPH[s.phase] ? h('div', { class: 'tc-glyph' }, icon(PHASE_GLYPH[s.phase])) : null,
       h('div', { class: 'tile-note-head' }, w.none ? 'No sessions running' : s.phaseLabel),
       h('div', null, w.none ? 'Open one from its page.' : known.length ? 'Sessions when it last ran: ' + known.map((x) => x.name).join(', ') : 'Its sessions are listed while it runs.'));
   }

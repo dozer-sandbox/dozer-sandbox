@@ -120,17 +120,21 @@ func iconBody(_ file: String, _ text: String) throws -> String {
         guard allowedTags.contains(name) else { throw Failure.source("\(file): <\(name)> is not an allowed drawing element") }
         let attrs = ns.substring(with: m.range(at: 3)).replacingOccurrences(of: "/", with: " ")
         let an = attrs as NSString
-        var rest = attrs
+        // What the matched attributes do not cover must be blank (by position — `x="2"` is also inside `rx="2"`).
+        var rest = ""
+        var at = 0
         for a in attr.matches(in: attrs, range: NSRange(location: 0, length: an.length)) {
+            rest += an.substring(with: NSRange(location: at, length: a.range.location - at))
+            at = a.range.location + a.range.length
             let key = an.substring(with: a.range(at: 1)), value = an.substring(with: a.range(at: 2))
             // A dot drawn filled (key-round's) takes the icon's colour: currentColor, or none.
-            if key == "fill", value == "currentColor" || value == "none" { rest = rest.replacingOccurrences(of: an.substring(with: a.range), with: ""); continue }
+            if key == "fill", value == "currentColor" || value == "none" { continue }
             guard allowedAttributes.contains(key) else { throw Failure.source("\(file): attribute \(key) is not allowed") }
             guard value.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber || " .,-".contains($0)) }) else {
                 throw Failure.source("\(file): \(key) holds more than geometry")
             }
-            rest = rest.replacingOccurrences(of: an.substring(with: a.range), with: "")
         }
+        rest += an.substring(from: at)
         guard rest.trimmingCharacters(in: .whitespaces).isEmpty else { throw Failure.source("\(file): an attribute that is not name=\"value\"") }
     }
     guard ns.substring(from: covered).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw Failure.source("\(file): text after the drawing") }

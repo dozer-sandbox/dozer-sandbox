@@ -307,6 +307,18 @@
       "serve": "icon"
     },
     {
+      "file": "memory-stick.svg",
+      "fromTarball": "package/icons/memory-stick.svg",
+      "sha256": "77aebe6f4187a0cceceafa70b04b5727c0442940b61e18abb4985316e9c09f77",
+      "serve": "icon"
+    },
+    {
+      "file": "hard-drive.svg",
+      "fromTarball": "package/icons/hard-drive.svg",
+      "sha256": "8598aea148ae983795a783f29c68230633d402c8c06b7a4c747fe2437555dd0c",
+      "serve": "icon"
+    },
+    {
       "file": "LICENSE",
       "fromTarball": "package/LICENSE",
       "sha256": "b495047bd93a9b06913511076f504daba17d5bbeb3e0650f3bb53a4220329c57",

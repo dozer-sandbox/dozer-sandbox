@@ -362,6 +362,12 @@ nav a.active .ph-dot { box-shadow: 0 0 0 1.5px var(--bg); }
 .icon { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .btn, .seg, .link-button { display: inline-flex; align-items: center; gap: 6px; }
 .btn.small .icon, .seg .icon { width: 14px; height: 14px; }
+/* A two-icon glyph (Sleep = moon + memory stick, Deep sleep = moon + hard drive): one tight group. */
+.icon-pair { display: inline-flex; align-items: center; gap: 1px; flex: none; }
+.tc-glyph { display: inline-flex; color: #c5cbff; }
+.tc-glyph[hidden] { display: none; }
+.tc-glyph .icon { width: 22px; height: 22px; }
+td.op-action { display: flex; align-items: center; gap: 6px; }
 .btn.split-caret { padding-left: 6px; padding-right: 6px; }
 nav a { display: flex; align-items: center; gap: 9px; }
 nav a > .icon { width: 17px; height: 17px; opacity: 0.85; }
