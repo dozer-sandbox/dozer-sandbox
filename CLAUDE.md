@@ -193,6 +193,19 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   2.1.227's own screens, so re-check them when the pin moves — and since 594 images install
   `latest` by default, `make test-cli-onboarding` re-checks the launcher (argv, skill, a session with
   a key) on whatever the registry's latest is.
+- **Agent credentials (594, `AgentCredentials.swift`; the table is `AgentImages.credentials`):**
+  Claude Code: `mac`, `setup-token`, `api-key`; pi: `api-key` ONLY (it reads `ANTHROPIC_API_KEY`;
+  never hand it a Claude subscription — `applyAccount` clears both bindings, with a notice, for an
+  account the agent cannot use). `createProblem` runs in `HostCore.create` and `duplicate` (proxied
+  networks only; an explicit `none` is allowed, the default resolving to none is not for pi), in the
+  CLI's `preflightAgentAccount` (create/up/init; on a TTY it offers a fitting account or the hidden
+  paste of a key) and, through `WebAccounts.agents`, in the web forms (`accountChooser`).
+  `useAccount` refuses an incompatible account. `SandboxInfo.credentialProblem` is the page's
+  banner and switches the facts block to "no credential you can use is attached". Room for other
+  providers: `AgentCredentialSupport(provider:accountKinds:)`.
+- **Agent tools:** the dev baseline bakes `fd-find` (+ `/usr/local/bin/fd`) and `ripgrep`, the lab
+  `fd` — agents (pi) download them from GitHub otherwise; `api.github.com` stays out of the agent
+  preset, `pi.dev` is in it.
 - **Agent versions (594, `AgentVersions.swift`):** `images.claude_code_version` / `images.pi_version`
   = `latest` (default) or exact. `latest` is resolved on the MAC at preparation time
   (`NpmRegistry`: `<registry>/<package>/latest` → version + sha512 integrity, both validated —

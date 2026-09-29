@@ -403,6 +403,11 @@ public struct SandboxInfo: Codable, Equatable, Sendable {
     public var foreignCredentials: Int?
     /// 594: the workspace folder was made by this create (it did not exist).
     public var workspaceCreated: Bool?
+    /// 594: the agent the sandbox runs (claude-code, pi — its image spec's name; a template's too), and
+    /// what is wrong with its account for that agent ("pi can't use the account mac — choose an
+    /// API-key account"); nil: it fits.
+    public var agent: String?
+    public var credentialProblem: String?
 
     /// 594: "isolated" — no folder of the Mac is shared (`workspace` is null).
     public var isolated: Bool { workspace == nil }
@@ -410,6 +415,7 @@ public struct SandboxInfo: Codable, Equatable, Sendable {
     enum CodingKeys: String, CodingKey {
         case name, image, phase, busy, cpus, memoryMiB, ramHeldMiB, memoryReturnedMiB, diskBytes, sessions, network, deniedConnections
         case workspace, createdAt, diedWithHost, account, credentialState, credentialPolicy, foreignCredentials, workspaceCreated, isolated
+        case agent, credentialProblem
     }
 
     public init(from decoder: Decoder) throws {
@@ -434,6 +440,8 @@ public struct SandboxInfo: Codable, Equatable, Sendable {
         credentialPolicy = try c.decodeIfPresent(String.self, forKey: .credentialPolicy)
         foreignCredentials = try c.decodeIfPresent(Int.self, forKey: .foreignCredentials)
         workspaceCreated = try c.decodeIfPresent(Bool.self, forKey: .workspaceCreated)
+        agent = try c.decodeIfPresent(String.self, forKey: .agent)
+        credentialProblem = try c.decodeIfPresent(String.self, forKey: .credentialProblem)
     }
 
     /// `workspace` is written even when null (with `isolated: true`), so a reader never has to guess.
@@ -460,6 +468,8 @@ public struct SandboxInfo: Codable, Equatable, Sendable {
         try c.encodeIfPresent(credentialPolicy, forKey: .credentialPolicy)
         try c.encodeIfPresent(foreignCredentials, forKey: .foreignCredentials)
         try c.encodeIfPresent(workspaceCreated, forKey: .workspaceCreated)
+        try c.encodeIfPresent(agent, forKey: .agent)
+        try c.encodeIfPresent(credentialProblem, forKey: .credentialProblem)
     }
 
     public init(name: String, image: String, phase: String, busy: Bool, cpus: Int, memoryMiB: UInt64, ramHeldMiB: UInt64,
@@ -644,6 +654,8 @@ public struct ImageRow: Codable, Equatable, Sendable {
     public var latestCheckedAt: Date?
     public var available: String?
     public var preparing: Bool?
+    /// 594: the agent a sandbox of this image runs (claude-code, pi; a template's: its image's); nil: none.
+    public var agent: String?
 
     /// 594: "claude-code 2.1.227 (2.1.230 available — preparing)", "claude-code 2.1.285 (latest)",
     /// "pi 0.84.1 (pinned: images.pi_version)" — nil for an image with no agent.

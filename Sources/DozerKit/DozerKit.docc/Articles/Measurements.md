@@ -26,7 +26,9 @@ Like for like: the same pinned images, median of 5 runs (feature 580).
 | host memory after a turn (simulated) | — | ~1,050–1,080 MiB | — |
 | restore point | 2–3 ms stopped, ~54 ms running | same | same |
 
-\* pi downloads `fd` and `ripgrep` on its first launch, on every runtime.
+\* pi downloaded `fd` and `ripgrep` on its first launch, on every runtime, when these were measured.
+Since 594 both are in the agent images (`fd-find`, linked as `fd`, and `ripgrep`), so pi finds them
+and downloads nothing.
 
 ### Cold, baked, warm and hot starts (feature 584)
 

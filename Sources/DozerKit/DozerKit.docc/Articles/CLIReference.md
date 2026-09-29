@@ -195,6 +195,15 @@ the sandbox shows the real plan (`CLAUDE_CODE_SUBSCRIPTION_TYPE`); there is **no
 switched to another account or an API key by itself. `doz key set NAME --claude-login` is
 still `account use NAME mac`.
 
+**Each agent says which accounts it can use** (``AgentImages/credentials(_:)``): Claude Code — `mac`,
+`setup-token`, `api-key`; **pi — an `api-key` account only** (it reads `ANTHROPIC_API_KEY`, the
+proxy's placeholder; a Claude subscription is never given to it). A create, `up`, `init` or
+`duplicate` of pi with no such account stops before anything is made, saying what to do (`doz
+account add NAME --api-key`, or `--account NAME`); on a terminal it offers the accounts that fit or a
+hidden paste of a key. `--account none` is an explicit choice. The web forms offer only the accounts
+that fit (the key field in the form when none do); an existing sandbox whose account does not fit
+shows a banner with a picker, and its agent is told that no credential is attached.
+
 ### A credential the guest brings itself
 
 ```bash
@@ -227,7 +236,7 @@ connection against a policy and logs it.
 
 | `--network` | allows | default for |
 |---|---|---|
-| `agent` | Anthropic's API and sign-in hosts; what Claude Code reaches on its own (`downloads.claude.ai` for updates, its two Datadog error-reporting intakes `http-intake.logs.us5.datadoghq.com` and `browser-intake-us5-datadoghq.com`); GitHub over HTTPS for git and Claude Code's plugin marketplace (`github.com`, `raw.githubusercontent.com`, `codeload.github.com`, `objects.githubusercontent.com`); plus package registries | `claude-code`, `pi` |
+| `agent` | Anthropic's API and sign-in hosts; what Claude Code reaches on its own (`downloads.claude.ai` for updates, its two Datadog error-reporting intakes `http-intake.logs.us5.datadoghq.com` and `browser-intake-us5-datadoghq.com`); GitHub over HTTPS for git and Claude Code's plugin marketplace (`github.com`, `raw.githubusercontent.com`, `codeload.github.com`, `objects.githubusercontent.com`); `pi.dev` (pi's updates); plus package registries — never `api.github.com` (`fd` and `rg` are in the image) | `claude-code`, `pi` |
 | `bake` | package registries only (npm, apt, apk, PyPI) | `lab` |
 | `locked` | nothing | |
 | `open` | everything, still proxied and logged | |

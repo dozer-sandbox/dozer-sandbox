@@ -198,11 +198,20 @@ func cliOnboardingSuite(binary: String) async {
     try? FileManager.default.createDirectory(at: cws, withIntermediateDirectories: true)
     let own = c.store.appendingPathComponent("own-prompt.md")
     try? "Project rule: {{sandbox.name}} runs the tests with make test.".write(to: own, atomically: true, encoding: .utf8)
-    r = c.run(["up", "pp", "--image", "pi", "--workspace", cws.path, "--agent-prompt", own.path, "--detach"], timeout: 900)
-    check(r.code == 0, "up pp --image pi --workspace … --agent-prompt FILE (exit \(r.code))")
+    // 594: pi needs an API-key account — the store's default here is none, so a plain up is refused
+    // before anything is made; --account none is the explicit choice (the prompt is all this part checks).
+    r = c.run(["up", "pp", "--image", "pi", "--workspace", cws.path, "--detach"], timeout: 120)
+    check(r.code != 0 && r.err.contains("pi needs an Anthropic API key") && r.err.contains("doz account add NAME --api-key") && c.row("pp") == nil,
+          "up pp --image pi with no API-key account: refused, nothing made, the next step said (\(r.err.split(separator: "\n").last ?? ""))")
+    r = c.run(["up", "pp", "--image", "pi", "--account", "none", "--workspace", cws.path, "--agent-prompt", own.path, "--detach"], timeout: 900)
+    check(r.code == 0, "up pp --image pi --account none --workspace … --agent-prompt FILE (exit \(r.code))")
+    check(c.row("pp")?.credentialProblem == "pi has no credential — pi needs an Anthropic API key; choose an API-key account",
+          "ls: pp says pi has no credential (\(c.row("pp")?.credentialProblem ?? "nil"))")
     let facts = c.run(["exec", "pp", "--", "cat", "/run/dozer/agent-prompt.md"]).out
     check(facts.contains("You are in `pp`, a Dozer Sandbox") && facts.contains("user's Mac folder \(cws.path), shared live"),
           "the facts block is in the guest: the sandbox and its workspace")
+    check(facts.contains("no credential you can use is attached") && !facts.contains("adds the account's credential"),
+          "pi with no account: the facts say no credential is attached — choose one in Dozer, never log in")
     check(facts.hasSuffix("\n\nProject rule: pp runs the tests with make test.\n"), "the sandbox's own prompt is appended")
     check(c.run(["exec", "pp", "--", "cat", "/home/agent/.pi/agent/skills/dozer/SKILL.md"]).out.hasPrefix("---\nname: dozer\n"),
           "the dozer skill: ~/.pi/agent/skills/dozer/SKILL.md")
@@ -288,6 +297,38 @@ func cliOnboardingSuite(binary: String) async {
     print("  the claude session's screen (latest image):\n" + screen.split(separator: "\n").prefix(24).map { "    │ " + $0 }.joined(separator: "\n"))
     check(!screen.isEmpty && !screen.contains("Update Claude Code"), "no \"Update Claude Code\" line on a latest-baked image")
     c.run(["rm", "cn", "--yes"])
+
+    // 594 (the owner's first pi sandbox: "fd not found. Downloading... Failed to download fd: fetch
+    // failed", denied api.github.com and pi.dev): pi's tools are baked and pi's own host is allowed.
+    print("cli: a fresh pi sandbox's first session — fd and rg baked, no denied connections")
+    let piAt = Date()
+    r = c.run(["up", "pn", "--image", "pi", "--account", "fk", "--detach"], timeout: 900)
+    check(r.code == 0, "up pn --image pi --account fk: pi starts in its session (exit \(r.code))")
+    check(c.row("pn")?.credentialProblem == nil, "an API-key account fits pi: no problem said")
+    check(c.run(["exec", "pn", "--", "cat", "/run/dozer/agent-prompt.md"]).out.contains("adds the account's credential (fk)"),
+          "pi's facts: the proxy adds fk's credential")
+    let piEnv = c.run(["exec", "pn", "--", "sh", "-c", "echo ${ANTHROPIC_API_KEY%%_*}/${CLAUDE_CODE_OAUTH_TOKEN:-none}"]).out
+    check(piEnv.hasPrefix("doz/none") || piEnv.hasPrefix("doz_cred/none") || (piEnv.hasPrefix("doz") && piEnv.contains("/none")),
+          "pi reads ANTHROPIC_API_KEY = the proxy's placeholder; no Claude subscription token (\(piEnv.trimmingCharacters(in: .whitespacesAndNewlines)))")
+    let tools = c.run(["exec", "pn", "--", "sh", "-c", "command -v fd; command -v rg; fd --version"]).out
+    check(tools.contains("/usr/local/bin/fd") && tools.contains("/usr/bin/rg") && tools.contains("fd"), "fd and rg are on the PATH: \(tools.replacingOccurrences(of: "\n", with: " "))")
+    r = c.run(["exec", "pn", "--timeout", "60", "--", "sh", "-c", "pi -p 'say ok' </dev/null"], timeout: 90)
+    print("  pi -p: exit \(r.code)")
+    // End to end: pi sent the placeholder, the proxy swapped in fk's (fake) key, Anthropic refused THAT key.
+    check((r.out + r.err).contains("authentication_error") && !(r.out + r.err).contains("No API key found"),
+          "pi -p reaches Anthropic with the account's key (a fake one: 401 authentication_error), not \"No API key found\"")
+    let piWait = 60 - Date().timeIntervalSince(piAt)
+    if piWait > 0 { try? await Task.sleep(for: .seconds(piWait)) }
+    let piSeen = c.json(["net", "log", "pn"], [ConnectionRecord].self) ?? []
+    let piRefused = c.json(["net", "log", "pn", "--denied"], [ConnectionRecord].self)
+    print("  connections: " + Set(piSeen.map { "\($0.target) \($0.verdict.rawValue)" }).sorted().joined(separator: ", "))
+    check(piRefused != nil && piRefused!.isEmpty,
+          "doz net log pn --denied: nothing denied" + ((piRefused ?? []).isEmpty ? "" : " — " + Set(piRefused!.map(\.target)).sorted().joined(separator: ", ")))
+    check(c.run(["pause", "pn"]).code == 0, "pause pn (its screens are saved)")
+    let piScreen = c.run(["sessions", "pn", "--screen", "pi"]).out
+    print("  the pi session's screen:\n" + piScreen.split(separator: "\n").prefix(20).map { "    │ " + $0 }.joined(separator: "\n"))
+    check(!piScreen.isEmpty && !piScreen.contains("fd not found") && !piScreen.contains("Failed to download"), "no \"fd not found\", nothing downloaded")
+    c.run(["rm", "pn", "--yes"])
     c.run(["account", "rm", "fk", "--force"])
 
     print("cli: Ctrl-C detaches onboarding; --cancel cancels (D3)")

@@ -85,7 +85,7 @@ final class NetworkPolicyTests: XCTestCase {
     /// its own — its updates, its two US5 Datadog intakes (exact hosts, never the domain), GitHub.
     func testTheAgentPresetAllowsWhatClaudeCodeItselfReaches() {
         let agent = NetworkPolicy.agent
-        for host in ["downloads.claude.ai", "http-intake.logs.us5.datadoghq.com", "browser-intake-us5-datadoghq.com",
+        for host in ["downloads.claude.ai", "http-intake.logs.us5.datadoghq.com", "browser-intake-us5-datadoghq.com", "pi.dev",
                      "github.com", "raw.githubusercontent.com", "codeload.github.com", "objects.githubusercontent.com"] {
             XCTAssertEqual(agent.evaluateConnection(host: host, port: 443).kind, .allow, host)
             XCTAssertEqual(agent.evaluateConnection(host: host, port: 22).kind, .deny, "\(host): HTTPS only")
@@ -98,7 +98,10 @@ final class NetworkPolicyTests: XCTestCase {
         XCTAssertEqual(agent.rules.filter { $0.host == "github.com" }.map(\.note), ["GitHub (git, Claude Code plugins)"])
         XCTAssertEqual(agent.rules.filter { $0.host.contains("datadoghq") }.map(\.note), ["Claude Code error reporting", "Claude Code error reporting"])
         XCTAssertEqual(agent.rules.first { $0.host == "downloads.claude.ai" }?.note, "Claude Code updates")
-        XCTAssertEqual(agent.rules.count, 5 + 3 + 4 + 7)
+        // 594: pi's own host; never api.github.com (pi's tools are baked: fd, rg).
+        XCTAssertEqual(agent.rules.first { $0.host == "pi.dev" }?.note, "pi updates")
+        XCTAssertEqual(agent.evaluateConnection(host: "api.github.com", port: 443).kind, .deny)
+        XCTAssertEqual(agent.rules.count, 5 + 4 + 4 + 7)
     }
 
     func testAllowThisHost() {

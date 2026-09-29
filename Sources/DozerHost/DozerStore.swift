@@ -153,6 +153,8 @@ public struct SandboxConfig: Codable, Equatable, Sendable {
 /// The images a sandbox can be created from, and the specs they make.
 public enum DozerImages {
     public static let builtIn = ["lab", "claude-code", "pi"]
+    /// The lab's apk packages (Alpine 3.20).
+    public static let labPackages = ["bash", "ncurses", "fd"]
 
     /// Where a workspace is shared in the guest.
     public static let workspaceGuestPath = "/workspace"
@@ -229,7 +231,8 @@ public enum DozerImages {
         var spec = SandboxSpec(name: name, storeRoot: store.root, kernelPath: kernelPath, kernelCacheDirectory: kernelCache,
                                cpus: o.cpus ?? settings.int(SettingKey.cpus),
                                memoryMiB: o.memoryMiB ?? UInt64(settings.int(SettingKey.memory(section))), rootfsMiB: 1024,
-                               bakePackages: imageSpec == nil && customKey == nil ? ["bash", "ncurses"] : [],
+                               // 594: fd, as in the agent images (tools an agent looks for).
+                               bakePackages: imageSpec == nil && customKey == nil ? DozerImages.labPackages : [],
                                shares: shares, subnet: network == .nat ? subnet : nil,
                                imageSpec: imageSpec, customImage: customKey)
         spec.network = network

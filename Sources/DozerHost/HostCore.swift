@@ -307,7 +307,7 @@ public actor HostCore {
             sessionCount = list.filter { !$0.isEnded }.count
         }
         let egress = m.sandbox.egress
-        return SandboxInfo(name: m.name, image: m.config.image, phase: phase.rawValue, busy: status.busy, cpus: m.sandbox.spec.cpus,
+        var i = SandboxInfo(name: m.name, image: m.config.image, phase: phase.rawValue, busy: status.busy, cpus: m.sandbox.spec.cpus,
                            memoryMiB: mem, ramHeldMiB: phase.holdsRAM ? mem - min(mem, returned) : 0,
                            memoryReturnedMiB: phase.holdsRAM ? returned : 0,
                            diskBytes: allocatedBytes(m.sandbox.layout.sandboxDirectory), sessions: sessionCount,
@@ -317,6 +317,9 @@ public actor HostCore {
                            account: accountName(m), credentialState: readOnly ? nil : credentialState(m, binding: nil),
                            credentialPolicy: egress == nil ? nil : effectivePolicy(m, accountStore.load()).rawValue,
                            foreignCredentials: egress.map { $0.vault.foreignSightings.count }.flatMap { $0 == 0 ? nil : $0 })
+        i.agent = m.sandbox.spec.imageSpec?.name
+        i.credentialProblem = credentialProblem(m)
+        return i
     }
 
     // MARK: requests
@@ -554,6 +557,13 @@ public actor HostCore {
         // gets the image already prepared, and a newer one is prepared in the background.
         await freshen(o.image, update: true)
         let (spec, image) = try DozerImages.spec(name: name, options: o, store: store)
+        // 594: the agent's credential prerequisite, before anything is made (pi: an API-key account).
+        if spec.network.policy != nil {
+            let (def, kinds) = accountKinds()
+            if let p = AgentCredentials.createProblem(image: spec.imageSpec?.name, account: o.account, defaultAccount: def, kinds: kinds) {
+                throw HostError(.invalid, p)
+            }
+        }
         var cfg = SandboxConfig(name: name, image: image, spec: spec, workspace: spec.shares.first?.hostPath)
         // 588: a proxied sandbox follows the store's default account unless told otherwise.
         if spec.network.policy != nil {
@@ -1190,6 +1200,11 @@ public actor HostCore {
                 guard accountStore.load().accounts.contains(where: { $0.name == a }) else { throw HostError(.notFound, "no account \(a) (doz account ls)") }
                 cfg.account = a
             }
+            // 594: the agent's credential prerequisite (a duplicate keeps the source's account unless told).
+            let (def, kinds) = accountKinds()
+            if let p = AgentCredentials.createProblem(image: spec.imageSpec?.name, account: o.account ?? cfg.account ?? "none", defaultAccount: def, kinds: kinds) {
+                throw HostError(.invalid, p)
+            }
         } else {
             if let a = o.account, a != "none", a != "default" {
                 throw HostError(.invalid, "--account needs a proxied network (agent, open, …): the credential lives in the host's proxy")
@@ -1240,7 +1255,7 @@ public actor HostCore {
         let labBaked = FileManager.default.fileExists(atPath: golden.path)
         rows.append(ImageRow(name: "lab", kind: "builtin", baked: labBaked, key: labBaked ? StoreLayout.goldenKey(for: lab) : nil,
                              bakedAt: labBaked ? (try? FileManager.default.attributesOfItem(atPath: golden.path)[.modificationDate] as? Date) ?? nil : nil,
-                             allocatedBytes: labBaked ? allocatedBytes(golden) : nil, note: "Alpine 3.20 + bash, ncurses", fromSandbox: nil))
+                             allocatedBytes: labBaked ? allocatedBytes(golden) : nil, note: "Alpine 3.20 + " + DozerImages.labPackages.joined(separator: ", "), fromSandbox: nil))
         let settings = DozerSettings.load()
         let versions = AgentVersions.all(store)
         for name in ["claude-code", "pi"] {
@@ -1264,13 +1279,16 @@ public actor HostCore {
                 row.available = t
             }
             row.preparing = runningPreparation(name) != nil ? true : nil
+            row.agent = name
             rows.append(row)
         }
         // 594: prepared for this build (the key it bakes now, the kernel, the guest init disk).
         for i in rows.indices { rows[i].current = preparedCheck(rows[i].name, store) }
         for c in store.layout("_").customImages() {
-            rows.append(ImageRow(name: c.name, kind: "custom", baked: true, key: c.key, bakedAt: c.createdAt, allocatedBytes: c.allocatedBytes,
-                                 note: c.note.isEmpty ? nil : c.note, fromSandbox: c.fromSandbox))
+            var row = ImageRow(name: c.name, kind: "custom", baked: true, key: c.key, bakedAt: c.createdAt, allocatedBytes: c.allocatedBytes,
+                               note: c.note.isEmpty ? nil : c.note, fromSandbox: c.fromSandbox)
+            row.agent = c.imageSpec?.name
+            rows.append(row)
         }
         return rows
     }

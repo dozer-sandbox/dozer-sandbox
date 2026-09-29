@@ -547,6 +547,100 @@ final class AccountTests: XCTestCase {
                                                                              firstSeen: Date(), lastSeen: Date(), requests: 3)])])
         XCTAssertTrue(text.contains("ab12cd34ef56") && text.contains("sk-ant-oat01…"))
     }
+
+    // MARK: 594 — each agent's credentials (owner: "creating a Pi sandbox should have pre-requisites")
+
+    func testTheCompatibilityTable() {
+        XCTAssertEqual(AgentCredentials.kinds("claude-code"), [.mac, .setupToken, .apiKey])
+        XCTAssertEqual(AgentCredentials.kinds("pi"), [.apiKey], "pi: an Anthropic API key only — never a Claude subscription")
+        XCTAssertNil(AgentCredentials.kinds("lab"))
+        XCTAssertNil(AgentCredentials.kinds(nil))
+        XCTAssertTrue(AgentCredentials.needsAccount("pi"))
+        XCTAssertFalse(AgentCredentials.needsAccount("claude-code"))
+        XCTAssertFalse(AgentCredentials.accepts("pi", .mac))
+        XCTAssertFalse(AgentCredentials.accepts("pi", .setupToken))
+        XCTAssertTrue(AgentCredentials.accepts("pi", .apiKey))
+        XCTAssertTrue(AgentCredentials.accepts("lab", .mac), "no agent: anything goes")
+        XCTAssertEqual(AgentImages.credentials("pi"), [AgentCredentialSupport(provider: "anthropic", accountKinds: ["api-key"])])
+        XCTAssertEqual(AgentCredentials.requirement("pi"), "pi needs an Anthropic API key")
+
+        let kinds: [String: AccountKind] = ["mac": .mac, "sub": .setupToken]
+        // pi: every way of having no usable account is refused, with the next step.
+        var p = AgentCredentials.createProblem(image: "pi", account: nil, defaultAccount: "none", kinds: kinds)
+        XCTAssertTrue(p?.contains("pi needs an Anthropic API key") == true && p?.contains("doz account add NAME --api-key") == true, p ?? "nil")
+        p = AgentCredentials.createProblem(image: "pi", account: nil, defaultAccount: "mac", kinds: kinds)
+        XCTAssertTrue(p?.hasPrefix("pi can't use the account mac (this Mac's Claude login)") == true, p ?? "nil")
+        p = AgentCredentials.createProblem(image: "pi", account: "default", defaultAccount: "sub", kinds: kinds)
+        XCTAssertTrue(p?.contains("can't use the account sub") == true, p ?? "nil")
+        p = AgentCredentials.createProblem(image: "pi", account: "mac", defaultAccount: "none", kinds: kinds)
+        XCTAssertTrue(p?.contains("can't use the account mac") == true, p ?? "nil")
+        // …and names the accounts that fit, when there are some.
+        p = AgentCredentials.createProblem(image: "pi", account: nil, defaultAccount: "mac", kinds: kinds.merging(["work": .apiKey]) { a, _ in a })
+        XCTAssertTrue(p?.contains("--account work") == true, p ?? "nil")
+        // What fits.
+        XCTAssertNil(AgentCredentials.createProblem(image: "pi", account: "work", defaultAccount: "mac", kinds: ["mac": .mac, "work": .apiKey]))
+        XCTAssertNil(AgentCredentials.createProblem(image: "pi", account: nil, defaultAccount: "work", kinds: ["mac": .mac, "work": .apiKey]))
+        XCTAssertNil(AgentCredentials.createProblem(image: "pi", account: "none", defaultAccount: "mac", kinds: kinds), "an explicit none is a choice")
+        XCTAssertNil(AgentCredentials.createProblem(image: "claude-code", account: nil, defaultAccount: "mac", kinds: kinds))
+        XCTAssertNil(AgentCredentials.createProblem(image: "claude-code", account: nil, defaultAccount: "none", kinds: kinds))
+        XCTAssertNil(AgentCredentials.createProblem(image: "lab", account: "mac", defaultAccount: "none", kinds: kinds))
+        // An existing sandbox: the banner.
+        XCTAssertEqual(AgentCredentials.sandboxProblem(image: "pi", account: .mac, missing: nil), "pi can't use the account mac — choose an API-key account")
+        XCTAssertEqual(AgentCredentials.sandboxProblem(image: "pi", account: nil, missing: nil),
+                       "pi has no credential — pi needs an Anthropic API key; choose an API-key account")
+        XCTAssertNil(AgentCredentials.sandboxProblem(image: "claude-code", account: .mac, missing: nil))
+        XCTAssertNil(AgentCredentials.sandboxProblem(image: "claude-code", account: nil, missing: nil))
+    }
+
+    func testPiIsCreatedOnlyWithAnAccountItCanUse() async throws {
+        keychain.put(svc, claudeItem("sk-ant-oat01-MAC", expires: Date().addingTimeInterval(7200)))
+        let c = await core()
+        // The store's default is mac (this Mac's login): pi cannot use it — refused, nothing made.
+        do { try await create(c, "p1", image: "pi"); XCTFail("created") } catch let e as HostError {
+            XCTAssertEqual(e.code, .invalid)
+            XCTAssertTrue(e.message.contains("pi can't use the account mac") && e.message.contains("doz account add NAME --api-key"), e.message)
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: DozerStore(root: root).layout("p1").sandboxDirectory.path))
+        // An explicit none is a choice: made, and it says what is missing.
+        let none = try await create(c, "p2", account: "none", image: "pi")
+        XCTAssertEqual(none.agent, "pi")
+        XCTAssertEqual(none.credentialProblem, "pi has no credential — pi needs an Anthropic API key; choose an API-key account")
+        func prompt(_ n: String) async throws -> AgentPromptReport? {
+            try await c.handle(HostRequest(.agentPrompt, name: n)).result?.decode(AgentPromptReport.self)
+        }
+        let promptP2 = try await prompt("p2")
+        XCTAssertTrue(promptP2?.text?.contains("no credential you can use is attached") == true, promptP2?.text ?? "")
+        XCTAssertFalse(promptP2?.text?.contains("adds the account's credential") == true)
+        // Only an API-key account can be given to it.
+        let refused = await use(c, "p2", "mac")
+        XCTAssertTrue(refused.error?.message.contains("pi can't use the account mac") == true, "\(String(describing: refused.error))")
+        var r = HostRequest(.accountAdd)
+        r.account = "work"
+        r.accountKind = "api-key"
+        r.secret = "sk-ant-api03-PIPIPIPIPIPIPIPIPIPIPI"
+        let added = await c.handle(r)
+        XCTAssertNil(added.error)
+        let used = await use(c, "p2", "work")
+        XCTAssertNil(used.error, "an API key: yes")
+        let v = try await XCTUnwrapAsync(await c.vault(of: "p2"))
+        XCTAssertTrue(v.hasSecret("anthropic"), "pi's ANTHROPIC_API_KEY placeholder is swapped for work's key")
+        let rows = try await c.handle(HostRequest(.ls)).result!.decode([SandboxInfo].self)
+        XCTAssertNil(rows.first { $0.name == "p2" }?.credentialProblem, "the banner goes once it fits")
+        let fits = try await prompt("p2")
+        XCTAssertTrue(fits?.text?.contains("adds the account's credential (work)") == true, fits?.text ?? "")
+        // With --account work: made.
+        let ok = try await create(c, "p3", account: "work", image: "pi")
+        XCTAssertNil(ok.credentialProblem)
+        // Claude Code keeps every account, none included.
+        let cc = try await create(c, "cc")
+        XCTAssertNil(cc.credentialProblem)
+        // A duplicate of p3 onto mac is refused; keeping work is fine.
+        var d = HostRequest(.duplicate, name: "p3")
+        d.newName = "p4"
+        d.duplicate = DuplicateOptions(account: "mac")
+        let dm = await c.handle(d)
+        XCTAssertTrue(dm.error?.message.contains("pi can't use the account mac") == true, "\(String(describing: dm.error))")
+    }
 }
 
 func XCTUnwrapAsync<T>(_ v: T?, file: StaticString = #filePath, line: UInt = #line) async throws -> T {

@@ -400,6 +400,10 @@ struct Init: AsyncParsableCommand {
         }
         p.network = network
         p.account = account
+        // 594: the agent's credential prerequisite — checked (and on a terminal met) now, not at `doz up`.
+        if AgentImages.credentials(img) != nil, network != "nat", network != "none" {
+            p.account = try preflightAgentAccount(image: img, network: network, account: account, g)
+        }
         let text = p.render()
         do { _ = try DozerProject.parse(text) } catch { throw fail(HostError(.invalid, error.localizedDescription), g) }   // our own file must read back
         do { try Data(text.utf8).write(to: file, options: .atomic) } catch {

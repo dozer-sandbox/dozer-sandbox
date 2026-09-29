@@ -103,6 +103,24 @@ extension HostCore {
         return file.accounts.first { $0.name == name }.map(ResolvedAccount.record) ?? .missing(name)
     }
 
+    /// 594: the store's default account and every account's kind (`mac` is always this Mac's login).
+    func accountKinds() -> (String, [String: AccountKind]) {
+        let file = accountStore.load()
+        var k: [String: AccountKind] = ["mac": .mac]
+        for a in file.accounts { k[a.name] = a.kind }
+        return (file.defaultAccount, k)
+    }
+
+    /// 594: an existing sandbox whose account does not fit its agent — what its page says.
+    func credentialProblem(_ m: Managed) -> String? {
+        guard m.sandbox.egress != nil else { return nil }
+        switch resolvedAccount(m, accountStore.load()) {
+        case .none: return AgentCredentials.sandboxProblem(image: m.sandbox.spec.imageSpec?.name, account: nil, missing: nil)
+        case .missing(let n): return AgentCredentials.sandboxProblem(image: m.sandbox.spec.imageSpec?.name, account: nil, missing: n)
+        case .record(let a): return AgentCredentials.sandboxProblem(image: m.sandbox.spec.imageSpec?.name, account: a, missing: nil)
+        }
+    }
+
     /// The account's name as `ls` shows it (`mac`, `work (default)`…); nil: none.
     func accountName(_ m: Managed) -> String? {
         guard m.sandbox.egress != nil, m.config.account != nil else { return nil }
@@ -220,6 +238,11 @@ extension HostCore {
             sb.setCredential(.anthropic, secret: nil, expiresAt: nil, environment: [:], notice: nil)
             sb.setCredential(.claudeOAuth, secret: nil, expiresAt: nil, environment: [:],
                              notice: "the account \(n) this sandbox uses no longer exists — doz account use \(m.name) ACCOUNT")
+        case .record(let a) where !AgentCredentials.accepts(sb.spec.imageSpec?.name, a.kind):
+            // 594: never hand an agent a credential it cannot use (a Claude subscription never reaches pi).
+            let why = AgentCredentials.sandboxProblem(image: sb.spec.imageSpec?.name, account: a, missing: nil)
+            sb.setCredential(.anthropic, secret: nil, expiresAt: nil, environment: [:], notice: why)
+            sb.setCredential(.claudeOAuth, secret: nil, expiresAt: nil, environment: [:], notice: why)
         case .record(let a):
             let other: CredentialBinding = a.kind == .apiKey ? .claudeOAuth : .anthropic
             sb.setCredential(other, secret: nil, expiresAt: nil, environment: [:], notice: nil)
@@ -298,6 +321,11 @@ extension HostCore {
         let target = value == "default" ? file.defaultAccount : value
         if target != "none" {
             guard let a = file.accounts.first(where: { $0.name == target }) else { throw HostError(.notFound, "no account \(target) (doz account ls)") }
+            // 594: only an account the sandbox's agent can use.
+            let image = m.sandbox.spec.imageSpec?.name
+            guard AgentCredentials.accepts(image, a.kind) else {
+                throw HostError(.invalid, "\(AgentImages.agentName(image ?? "") ?? "its agent") can't use the account \(a.name) (\(a.kind.label)) — \(AgentCredentials.requirement(image ?? ""))")
+            }
             switch a.kind {
             case .mac:
                 // E1–E4 before anything changes; then follow whoever is signed in now (D6).

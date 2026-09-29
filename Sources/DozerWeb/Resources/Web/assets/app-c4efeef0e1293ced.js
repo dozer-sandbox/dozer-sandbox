@@ -1040,7 +1040,7 @@ async function viewOverview() {
 async function createDialog() {
   let images = [], accounts = { accounts: [] };
   try { [images, accounts] = await Promise.all([api('images'), api('accounts')]); } catch (_) { /* defaults */ }
-  const slot = h('div');
+  const slot = h('div'), acctSlot = h('div');
   const dlg = dialog('New sandbox','It is created off; Start boots it (the first start of an image not yet prepared prepares it — minutes, needs network).', [
     { name: 'sandbox', label: 'Name', placeholder: 'a-z 0-9 -', required: true },
     { name: 'image', label: 'Image', type: 'select', value: setting('defaults.image', 'lab'),
@@ -1048,8 +1048,11 @@ async function createDialog() {
     { name: 'network', label: 'Network', type: 'select', value: '',
       options: [['', 'default (per image, Settings)'],['agent', 'agent — proxied, Anthropic, Claude Code, GitHub + registries'], ['bake', 'bake — proxied, package registries'],
         ['locked', 'locked — proxied, nothing'], ['open', 'open — proxied, everything (logged)'], ['nat', 'nat — a real interface (vmnet)'], ['none', 'none']] },
-    { name: 'account', label: 'Account', type: 'select', value: '',
-      options: [['', 'the store default'], ['none', 'none'], ...accounts.accounts.map((a) => [a.name, a.name + ' (' + a.kind + ')'])] },
+    // 594: only the accounts the image's agent can use; pi with none: the key right here.
+    { name: 'account', type: 'custom', el: acctSlot, get: () => {
+      if (!acct.ok()) throw new Error((AGENT_NAMES[agentOf()] || 'This agent') + ' needs an Anthropic API key — add one above.');
+      return acct.get();
+    } },
     { name: 'cpus', label: 'CPUs', type: 'number', min: 1, max: 64, placeholder: 'default (' + setting('defaults.cpus', 2) + ', Settings)' },
     { name: 'memoryMiB', label: 'Memory (MiB)', type: 'number', min: 256, placeholder: 'default (per image, Settings)' },
     // 594: Shared folder (the default: <projects_dir>/<name>, made when missing) | Isolated.
@@ -1064,7 +1067,14 @@ async function createDialog() {
   });
   const chooser = workspaceChooser({ nameInput: dlg.inputs.sandbox, image: () => dlg.inputs.image.value });
   slot.replaceWith(chooser.el);
-  dlg.inputs.image.addEventListener('change', () => chooser.imageChanged());
+  const submit = dlg.querySelector('button[type="submit"]');
+  const agentOf = () => { const i = images.find((x) => x.name === dlg.inputs.image.value); return i ? i.agent : (AGENT_NAMES[dlg.inputs.image.value] ? dlg.inputs.image.value : null); };
+  const netProxied = () => !['nat', 'none'].includes(dlg.inputs.network.value);
+  const acct = accountChooser({ accounts, agent: () => (netProxied() ? agentOf() : null), onChange: () => { submit.disabled = !acct.ok(); } });
+  acctSlot.replaceWith(acct.el);
+  submit.disabled = !acct.ok();
+  dlg.inputs.image.addEventListener('change', () => { chooser.imageChanged(); acct.agentChanged(); });
+  dlg.inputs.network.addEventListener('change', () => acct.agentChanged());
 }
 
 // ── a sandbox's page (593): a control bar, the terminal area, a collapsible details panel ──────
@@ -1348,7 +1358,8 @@ function sandboxParts(name, d, net, accounts) {
         $('sbx-body').classList.toggle('details-closed', !open);
         saveSetting('ui.details_open', open).then(() => refreshSandbox()).catch((e) => toast('The setting was not saved: ' + (e.message || e), true));
       }, { small: true, title: 'The sessions, restore points, network and keys panel (remembered: ui.details_open)' })),
-    h('div', { 'data-op-for': name, 'data-banner': '1', role: 'status' }));
+    h('div', { 'data-op-for': name, 'data-banner': '1', role: 'status' }),
+    i.credentialProblem ? credentialBanner(name, i, accounts) : null);
   const details = h('div', { class: 'sbx-details-inner' },
     h('div', { class: 'cards small-cards' },
       card('RAM held', mib(i.ramHeldMiB), 'of ' + mib(i.memoryMiB) + (i.memoryReturnedMiB ? ' · balloon returned ' + mib(i.memoryReturnedMiB) : '')),
@@ -1381,11 +1392,7 @@ function sandboxParts(name, d, net, accounts) {
         [{ name: 'policy', label: 'Policy', type: 'select', options: ['auto', 'allow', 'strict'], value: 'auto' }], 'Set', async (v) => {
           await actOrThrow({ action: 'key-policy', sandbox: name, policy: v.policy });
         }), { small: true }) : null,
-      proxied ? btn('Account…', () => dialog('Account of ' + name, 'Which Anthropic account the proxy uses for it. The guest only ever sees a placeholder.',
-        [{ name: 'account', label: 'Account', type: 'select', value: i.account || 'default',
-           options: [['default', 'the store default'], ['none', 'none'], ...accounts.accounts.map((a) => [a.name, a.name + ' (' + a.kind + ')'])] }], 'Use', async (v) => {
-          await actOrThrow({ action: 'account-use', sandbox: name, account: v.account });
-        }), { small: true }) : null)),
+      proxied ? btn('Account…', () => accountDialog(name, i, accounts), { small: true }) : null)),
     panel(table(['Key', 'Set', 'Source', 'State', 'Policy', ''], creds), 'No keys — the sandbox uses none.'),
     keyEntry(name, proxied),
     foreign.length ? h('h2', null, 'Credentials the guest brought itself (fingerprints only)') : null,
@@ -1441,7 +1448,7 @@ function duplicateDialog(name, d, accounts, pointID) {
   const i = d.info;
   const sources = [['', 'the current disk' + (i.phase === 'off' ? '' : ' (it pauses for the clone: milliseconds)')],
     ...d.restorePoints.map((p) => [p.id, 'restore point ' + p.name])];
-  const slot = h('div');
+  const slot = h('div'), acctSlot = h('div');
   const dlg = dialog('Duplicate ' + name,
     'A new sandbox from ' + name + '’s root disk (an instant APFS clone). It is created off; Start boots it. Keys are not copied.', [
       { name: 'newName', label: 'New sandbox name', placeholder: 'a-z 0-9 -', required: true },
@@ -1452,8 +1459,11 @@ function duplicateDialog(name, d, accounts, pointID) {
       { name: 'memoryMiB', label: 'Memory (MiB)', type: 'number', min: 256, placeholder: String(d.memoryMiB) + ' (the same)' },
       { name: 'network', label: 'Network', type: 'select', value: '',
         options: [['', i.network + ' (the same, its policy included)'], ['agent', 'agent'], ['bake', 'bake'], ['locked', 'locked'], ['open', 'open'], ['nat', 'nat'], ['none', 'none']] },
-      { name: 'account', label: 'Account', type: 'select', value: '',
-        options: [['', 'the same'], ['default', 'the store default'], ['none', 'none'], ...accounts.accounts.map((a) => [a.name, a.name + ' (' + a.kind + ')'])] },
+      // 594: only the accounts the agent can use ("the same" only when that one fits).
+      { name: 'account', type: 'custom', el: acctSlot, get: () => {
+        if (!acct.ok()) throw new Error((AGENT_NAMES[i.agent] || 'This agent') + ' needs an Anthropic API key — add one above.');
+        return acct.get();
+      } },
       { name: 'copyState', label: 'Copy the agent’s state disk too', type: 'checkbox',
         help: 'Off (the default): a fresh state disk. On: its logins and history are copied into the new sandbox.' },
     ], 'Duplicate', async (v) => {
@@ -1468,6 +1478,13 @@ function duplicateDialog(name, d, accounts, pointID) {
     });
   const chooser = workspaceChooser({ nameInput: dlg.inputs.newName, image: () => i.image });
   slot.replaceWith(chooser.el);
+  const submit = dlg.querySelector('button[type="submit"]');
+  const acct = accountChooser({ accounts, agent: () => (['nat', 'none'].includes(dlg.inputs.network.value) ? null : i.agent),
+    same: i.credentialProblem ? null : 'the same' + (i.account ? ' (' + i.account + ')' : ''), defaultValue: 'default',
+    onChange: () => { submit.disabled = !acct.ok(); } });
+  acctSlot.replaceWith(acct.el);
+  submit.disabled = !acct.ok();
+  dlg.inputs.network.addEventListener('change', () => acct.agentChanged());
 }
 
 /// Edit the policy in a dialog; Preview shows exactly what the host will do; Apply sends it.
@@ -1665,6 +1682,97 @@ function accountForm(opts) {
     h('label', { class: 'field' }, secretLabel, secret, hint),
     error,
     h('div', { class: 'wiz-buttons' }, add));
+}
+
+// ── 594: an agent's credential prerequisite in a create form ────────────────
+// Owner (2026-09-30): "creating a Pi sandbox should have pre-requisites for things like API key so that
+// this is not the first experience". The account picker offers only the accounts the chosen image's
+// agent can use (the host's table: WebAccounts.agents — pi: an Anthropic API key); an incompatible
+// store default is not preselected. When the agent needs one and none fits: "pi needs an Anthropic API
+// key", with the masked key field right there (accountForm: the same route and guarantees) — or, with
+// ui.allow_secret_entry off, the commands. `ok()` says whether the form may create.
+const AGENT_NAMES = { 'claude-code': 'Claude Code', pi: 'pi' };
+const KIND_LABELS = { mac: 'this Mac’s login', 'setup-token': 'setup token', 'api-key': 'API key' };
+function accountChooser({ accounts, agent, same = null, defaultValue = '', onChange = () => {} }) {
+  let acc = accounts, current = agent(), chosen = null;
+  const el = h('div', { class: 'field acct-chooser', 'data-acct-chooser': '' });
+  const kindsOf = (a) => (a && acc.agents ? acc.agents[a] : null);
+  const fits = (kinds) => acc.accounts.filter((x) => !kinds || kinds.includes(x.kind));
+  function state() {
+    const kinds = kindsOf(current);
+    const needs = !!kinds && !kinds.includes('mac');
+    const usable = fits(kinds);
+    const def = acc.accounts.find((x) => x.name === acc.defaultAccount);
+    const defFits = acc.defaultAccount !== 'none' ? (!!def && (!kinds || kinds.includes(def.kind))) : !needs;
+    return { kinds, needs, usable, defFits };
+  }
+  function render() {
+    const s = state();
+    const opts = [];
+    if (same) opts.push(['', same]);
+    if (s.defFits) opts.push([defaultValue, 'the store default (' + acc.defaultAccount + ')']);
+    for (const x of s.usable) opts.push([x.name, x.name + ' (' + (KIND_LABELS[x.kind] || x.kind) + ')']);
+    if (!s.needs) opts.push(['none', 'none']);
+    const sel = h('select', { name: 'account', 'aria-label': 'Account' }, opts.map(([v, l]) => h('option', { value: v }, l)));
+    if (chosen !== null && opts.some(([v]) => v === chosen)) sel.value = chosen;
+    chosen = sel.value;
+    sel.addEventListener('change', () => { chosen = sel.value; onChange(); });
+    const name = AGENT_NAMES[current] || current;
+    const missing = s.needs && !s.usable.length;
+    el.dataset.acctOk = String(!missing);
+    const parts = [h('span', null, 'Account')];
+    if (!missing) parts.push(sel);
+    if (s.kinds && current) {
+      parts.push(h('small', { class: 'muted' }, name + ' can use: ' + s.kinds.map((k) => KIND_LABELS[k] || k).join(', ')
+        + (s.needs ? ' — never a Claude subscription' : '')));
+    }
+    if (missing) {
+      parts.push(h('div', { class: 'acct-need', 'data-acct-need': current },
+        h('div', { class: 'acct-need-title' }, icon('key-round'), ' ' + name + ' needs an Anthropic API key'),
+        h('small', null, 'Add one now — it is stored as `doz account add` stores it (the login keychain), and this sandbox uses it.'),
+        secretEntryAllowed()
+          ? accountForm({ kind: 'api-key', name: acc.accounts.some((x) => x.name === 'anthropic') ? 'anthropic-2' : 'anthropic',
+              onAdded: (r, n) => { acc = r; chosen = n; toast('account ' + n + ' added'); render(); onChange(); } })
+          : accountCommandsNode('api-key')));
+    }
+    el.replaceChildren(...parts);
+  }
+  render();
+  return {
+    el,
+    /// The image changed: its agent's accounts.
+    agentChanged() { current = agent(); chosen = null; render(); onChange(); },
+    ok() { return el.dataset.acctOk === 'true'; },
+    /// The account to send (undefined: the store default / the same).
+    get() { return chosen ? chosen : undefined; },
+  };
+}
+
+/// 594: which account a sandbox uses — only the ones its agent can use (and the key right there when
+/// none fits). It applies to the sandbox's next session.
+function accountDialog(name, i, accounts) {
+  const slot = h('div');
+  let acct = null;
+  const dlg = dialog('Account of ' + name, 'Which Anthropic account the proxy uses for it — from its next session. The guest only ever sees a placeholder.',
+    [{ name: 'account', type: 'custom', el: slot, get: () => {
+      if (!acct.ok()) throw new Error((AGENT_NAMES[i.agent] || 'This agent') + ' needs an Anthropic API key — add one above.');
+      return acct.get() || 'default';
+    } }], 'Use', async (v) => {
+      await actOrThrow({ action: 'account-use', sandbox: name, account: v.account });
+    });
+  const submit = dlg.querySelector('button[type="submit"]');
+  acct = accountChooser({ accounts, agent: () => i.agent, defaultValue: 'default', onChange: () => { submit.disabled = !acct.ok(); } });
+  slot.replaceWith(acct.el);
+  submit.disabled = !acct.ok();
+}
+
+/// 594: an existing sandbox whose account does not fit its agent — "pi can't use the account mac —
+/// choose an API-key account" — with the accounts that fit (or the key field) right there.
+function credentialBanner(name, i, accounts) {
+  return h('div', { class: 'cred-banner', role: 'alert', 'data-cred-banner': name },
+    h('div', { class: 'cred-banner-text' }, icon('key-round'), ' ' + i.credentialProblem),
+    h('div', { class: 'actions' },
+      btn('Choose an account…', () => accountDialog(name, i, accounts), { small: true, primary: true, icon: 'key-round' })));
 }
 
 /// 594 (owner ruling: sandbox keys in the browser too): a sandbox's own Anthropic key — what `doz key set
@@ -2079,8 +2187,10 @@ function wizStep5(d, w) {
   // (made when missing) — both follow until typed in; Choose… is the Mac's own folder picker; or Isolated.
   const chooser = workspaceChooser({ nameInput: name, image: () => image.value, initialPath: w.firstWorkspace || '', initialIsolated: !!w.firstIsolated });
   if (w.firstName) name.dispatchEvent(new Event('input'));
-  image.addEventListener('change', () => { w.firstImage = image.value; chooser.imageChanged(); });
   const error = h('div', { class: 'dlg-error', role: 'alert' });
+  // 594: the agent's credential prerequisite — only accounts it can use; pi with none: the key here.
+  if (!w.accounts) api('accounts').then((a) => { w.accounts = a; if (w.step === 5) renderWizard(true); }).catch(() => { w.accounts = { accounts: [] }; });
+  let acct = null;
   const create = btn('Create sandbox', async (ev) => {
     const b = ev.currentTarget;
     error.textContent = '';
@@ -2089,20 +2199,29 @@ function wizStep5(d, w) {
     if (!/^[a-z0-9][a-z0-9-]{0,39}$/.test(n)) { error.textContent = 'The name: 1–40 of a-z 0-9 - (not starting with -).'; return; }
     let ws;
     try { ws = chooser.get(); } catch (e) { error.textContent = e.message; return; }
+    if (acct && !acct.ok()) { error.textContent = (AGENT_NAMES[image.value] || 'This agent') + ' needs an Anthropic API key — add one above.'; return; }
     w.firstWorkspace = ws.workspace || '';
     w.firstIsolated = !!ws.isolated;
     b.disabled = true;
     try {
-      await actOrThrow({ action: 'create', sandbox: n, image: image.value, ...ws });
+      const account = acct ? acct.get() : undefined;
+      await actOrThrow({ action: 'create', sandbox: n, image: image.value, ...ws, ...(account ? { account } : {}) });
       w.created = n;
       wizGo(6);
     } catch (e) { error.textContent = e.message || String(e); b.disabled = false; }
   }, { primary: true });
+  if (w.accounts) {
+    acct = accountChooser({ accounts: w.accounts, agent: () => (AGENT_NAMES[image.value] ? image.value : null),
+      onChange: () => { create.disabled = !acct.ok(); api('accounts').then((a) => { w.accounts = a; }).catch(() => {}); } });
+    create.disabled = !acct.ok();
+  } else create.disabled = true;
+  image.addEventListener('change', () => { w.firstImage = image.value; chooser.imageChanged(); if (acct) acct.agentChanged(); });
   return [
     h('h2', null, 'First sandbox (optional)'),
     h('p', { class: 'sub' }, 'A sandbox for one project. Its workspace is a folder on this Mac, shared live at /workspace — Dozer makes it when it does not exist yet. Or Isolated: nothing is shared. It is created off; Start boots it.'),
     h('label', { class: 'field' }, h('span', null, 'Name'), name),
     h('label', { class: 'field' }, h('span', null, 'Image'), image),
+    acct ? acct.el : null,
     chooser.el,
     error,
     h('p', { class: 'muted' }, 'In a terminal the same is: doz init in the project folder, then doz up.'),

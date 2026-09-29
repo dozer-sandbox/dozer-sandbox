@@ -39,7 +39,8 @@ func templatesSuite() async throws {
     func sh(_ name: String, _ script: String) -> CLIRun { h.run(["exec", name, "--", "sh", "-c", script], timeout: 120) }
 
     check(h.run(["account", "default", "none"]).code == 0, "account default none (a scratch store never reads the Mac's login)")
-    var r = h.run(["create", "tpa", "--image", "pi", "--memory", "1G", "--network", "locked", "--workspace", ws1.path])
+    // (594: pi needs an API-key account; `--account none` is the explicit choice of none — nothing here calls a model.)
+    var r = h.run(["create", "tpa", "--image", "pi", "--memory", "1G", "--network", "locked", "--account", "none", "--workspace", ws1.path])
     check(r.code == 0, "create tpa --image pi --workspace ws-one")
     r = h.run(["start", "tpa"], timeout: 1200)
     check(r.code == 0, "start tpa (a first start in the store bakes pi: minutes)")
@@ -55,7 +56,10 @@ func templatesSuite() async throws {
         check(files == ["image.json", "root.ext4"], "the template holds no state disk (\(files.joined(separator: ", ")))")
         check(tpl.imageSpec?.name == "pi", "it keeps the image spec (user, persist dirs) of pi")
     } else { check(false, "tpl-pi is in the store") }
+    // 594: a template of pi is pi — the same credential prerequisite (refused here, then none on purpose).
     r = h.run(["create", "tpb", "--image", "tpl-pi", "--memory", "1G", "--network", "locked"])
+    check(r.code != 0 && r.err.contains("pi needs an Anthropic API key") && h.row("tpb") == nil, "a pi template with no API-key account: refused, nothing made")
+    r = h.run(["create", "tpb", "--image", "tpl-pi", "--memory", "1G", "--network", "locked", "--account", "none"])
     check(r.code == 0 && h.run(["start", "tpb"], timeout: 600).code == 0, "a sandbox from the template starts")
     check(sh("tpb", "cat /home/agent/rootmark").out == "rootmark\n", "tpb has the root disk's file")
     r = sh("tpb", "cat \(state)/statemark 2>/dev/null || echo none; test -d \(state) && echo dir")

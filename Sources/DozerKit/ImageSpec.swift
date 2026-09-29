@@ -178,6 +178,17 @@ public enum BakeEnvironment {
 
 // MARK: - The two agent imageSpecs
 
+/// 594: one provider's credentials an agent can use: the kinds of account (`mac`, `setup-token`,
+/// `api-key` for Anthropic).
+public struct AgentCredentialSupport: Sendable, Codable, Equatable, Hashable {
+    public var provider: String
+    public var accountKinds: [String]
+    public init(provider: String, accountKinds: [String]) {
+        self.provider = provider
+        self.accountKinds = accountKinds
+    }
+}
+
 /// 594: an agent's npm package at one exact version.
 public struct AgentPackage: Sendable, Codable, Equatable, Hashable {
     public var package: String
@@ -238,6 +249,24 @@ public enum AgentImages {
         integrity: "sha512-D0YP8GFwPaP/9eObEuP5LRO5+9QSD9CLa6K26whNzXxpxz3pFqPS3nn7l1/MLmSWy32wBP2IKQzkRB3mumUKUQ==")
     public static let piPinned = AgentRelease(version: "0.84.1",
         integrity: "sha512-ncAqFrG+iybuPGOhMiZoEHkEzTpJgz3guYD32pD+M7ucc0WeHmauP6wa7qwP8V/KWvsZDVNa5XGsdZ7fkC7w7A==")
+
+    /// 594 (owner: "creating a Pi sandbox should have pre-requisites for things like API key"): the
+    /// credentials each agent can use, per provider — the kinds of Dozer account (`mac` = this Mac's
+    /// Claude login, `setup-token`, `api-key`). Claude Code: any Anthropic account. pi: an Anthropic
+    /// API key only (it reads ANTHROPIC_API_KEY — the proxy's placeholder); a Claude subscription is
+    /// never given to it. Other providers can be added per agent later. nil: no agent (the lab).
+    public static func credentials(_ image: String) -> [AgentCredentialSupport]? {
+        switch image {
+        case "claude-code": [AgentCredentialSupport(provider: "anthropic", accountKinds: ["mac", "setup-token", "api-key"])]
+        case "pi": [AgentCredentialSupport(provider: "anthropic", accountKinds: ["api-key"])]
+        default: nil
+        }
+    }
+
+    /// The agent's name as a person reads it.
+    public static func agentName(_ image: String) -> String? {
+        switch image { case "claude-code": "Claude Code"; case "pi": "pi"; default: nil }
+    }
 
     /// The npm package of an agent image (nil: not an agent image).
     public static func package(_ image: String) -> String? {
@@ -324,8 +353,11 @@ public enum AgentImages {
     /// from Debian's signed archive through the bake proxy. The same list for every agent image:
     /// it is the class baseline until base-layer images (one baked "dev base" that agent images
     /// clone) replace it.
+    /// 594 (owner: pi printed "fd not found. Downloading... Failed to download fd"): `fd-find` too —
+    /// pi (like many agents) wants `fd` and `rg` and downloads them from GitHub when they are missing.
+    /// Debian names it `fdfind`; `/usr/local/bin/fd` is linked to it.
     public static let devBaselinePackages = ["procps", "git", "less", "jq", "unzip", "openssh-client",
-                                             "ca-certificates", "curl", "vim-tiny", "ripgrep", "python3"]
+                                             "ca-certificates", "curl", "vim-tiny", "ripgrep", "fd-find", "python3"]
 
     static let devBaseline = BakeStep.script("install the developer baseline (\(devBaselinePackages.joined(separator: " ")))", """
         export DEBIAN_FRONTEND=noninteractive
@@ -333,12 +365,13 @@ public enum AgentImages {
         # live tail the preparation card and the CLI show while this step runs — not silenced.
         apt-get update
         apt-get install -y --no-install-recommends -o Dpkg::Use-Pty=0 \(devBaselinePackages.joined(separator: " "))
+        ln -sf /usr/bin/fdfind /usr/local/bin/fd
         rm -rf /var/lib/apt/lists/*
         """)
 
     /// What the baseline must provide, checked after every agent bake.
     static let devBaselineVerify: [VerifyCheck] = [
-        VerifyCheck(["sh", "-c", "for t in ps top git less jq unzip ssh curl vi rg python3; do command -v $t >/dev/null || { echo missing $t; exit 1; }; done; echo baseline-ok"],
+        VerifyCheck(["sh", "-c", "for t in ps top git less jq unzip ssh curl vi rg fd python3; do command -v $t >/dev/null || { echo missing $t; exit 1; }; done; echo baseline-ok"],
                     expect: "baseline-ok"),
     ]
 

@@ -10,7 +10,7 @@ the command-line face of DozerKit. New to it? Start with the
 | | |
 |---|---|
 | **Sandbox** | One Linux VM with its own disk, named by you (`a-z 0-9 -`, 1–40 characters). |
-| **Image** | What a sandbox starts from: a baked, read-only disk. Built in: `lab` (Alpine + bash, 1 GiB RAM), `claude-code` and `pi` (Debian `node` + the agent, 2 GiB). Custom images are saved from a sandbox. |
+| **Image** | What a sandbox starts from: a baked, read-only disk. Built in: `lab` (Alpine + bash and `fd`, 1 GiB RAM), `claude-code` and `pi` (Debian `node` + the agent and a developer baseline — git, curl, jq, `rg`, `fd`, python3, … — 2 GiB). Custom images are saved from a sandbox. |
 | **Session** | A terminal program living in the sandbox (a shell, `claude`, `pi`). It survives pause, sleep and hibernate. You *attach* to it and *detach* from it; it keeps running either way. |
 | **Workspace** | A folder of your Mac shared into the sandbox at `/workspace`. |
 | **Host** | One background `doz` process per user and store. It owns every running VM, the network proxy and the keys. It starts when needed and exits when idle, so you never manage it. |
@@ -325,6 +325,22 @@ doz account rm work [--force]                    # also deletes the keychain ite
 doz create NAME --image claude-code --account work
 ```
 
+- **Which accounts an agent can use** (594):
+
+  | agent | accounts it can use |
+  |---|---|
+  | Claude Code (`claude-code`) | `mac`, `setup-token`, `api-key` |
+  | pi (`pi`) | `api-key` only — pi reads `ANTHROPIC_API_KEY`, the proxy's placeholder for the key; a Claude subscription is never given to it |
+
+  This is checked **before a sandbox is made**, in `doz create`/`up`/`init`/`duplicate`, New
+  sandbox, the wizard's First sandbox and Duplicate. With no account pi can use, the CLI stops with
+  the next step (`doz account add NAME --api-key`, or `--account NAME`); on a terminal it offers the
+  accounts that fit, or a hidden paste of a key right there. The web forms offer only the accounts
+  the agent can use, with the masked key field in the form when there are none (or the commands,
+  with `ui.allow_secret_entry` off); Create waits until it is met. `--account none` is an explicit
+  choice. An existing sandbox whose account does not fit (or has none) says so on its page — "pi
+  can't use the account mac — choose an API-key account" — with a picker; the change applies to its
+  next session. Its agent is told plainly that no credential is attached (and never to log in).
 - **A new proxied sandbox follows the store's default account, `mac` out of the box.** Sign in
   on the Mac once (`claude`) and every sandbox can use your subscription, with nothing to paste.
 - **Claude Code in the sandbox shows your plan.** The guest gets `CLAUDE_CODE_SUBSCRIPTION_TYPE`
@@ -419,7 +435,7 @@ connection against a policy and logs it.
 
 | `--network` | allows | default for |
 |---|---|---|
-| `agent` | Anthropic's API and sign-in hosts; what Claude Code reaches on its own (`downloads.claude.ai` for updates, its two Datadog error-reporting intakes `http-intake.logs.us5.datadoghq.com` and `browser-intake-us5-datadoghq.com`); GitHub over HTTPS for git and Claude Code's plugin marketplace (`github.com`, `raw.githubusercontent.com`, `codeload.github.com`, `objects.githubusercontent.com`); plus package registries | `claude-code`, `pi` |
+| `agent` | Anthropic's API and sign-in hosts; what Claude Code reaches on its own (`downloads.claude.ai` for updates, its two Datadog error-reporting intakes `http-intake.logs.us5.datadoghq.com` and `browser-intake-us5-datadoghq.com`); GitHub over HTTPS for git and Claude Code's plugin marketplace (`github.com`, `raw.githubusercontent.com`, `codeload.github.com`, `objects.githubusercontent.com`); `pi.dev` (pi's updates and model catalog); plus package registries — never `api.github.com` (the tools agents fetch from GitHub, `fd` and `rg`, are in the image) | `claude-code`, `pi` |
 | `bake` | package registries only (npm, apt, apk, PyPI) | `lab` |
 | `locked` | nothing | |
 | `open` | everything, still proxied and logged | |

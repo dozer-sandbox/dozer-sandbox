@@ -72,6 +72,13 @@ final class AgentVersionsTests: XCTestCase {
         XCTAssertEqual(AgentVersions.integrity(in: a), newer.integrity)
         XCTAssertNoThrow(try a.validate())
         XCTAssertEqual(AgentImages.pi(AgentRelease(version: "0.99.1", integrity: newer.integrity)).agent?.version, "0.99.1")
+        // pi's (and any agent's) tools are baked, never downloaded: fd (Debian's fdfind, linked) and rg.
+        for img in [a, AgentImages.pi] {
+            let baseline = img.steps.first { $0.name.hasPrefix("install the developer baseline") }!.argv.last!
+            XCTAssertTrue(baseline.contains("fd-find") && baseline.contains("ripgrep") && baseline.contains("ln -sf /usr/bin/fdfind /usr/local/bin/fd"))
+            XCTAssertTrue(img.verify.contains { $0.argv.last!.contains(" rg fd ") })
+        }
+        XCTAssertTrue(DozerImages.labPackages.contains("fd"))
         // Claude Code never updates itself in a sandbox.
         XCTAssertEqual(a.sessionEnvironment["DISABLE_AUTOUPDATER"], "1")
         XCTAssertEqual(a.sessionEnvironment["DISABLE_UPDATES"], "1")

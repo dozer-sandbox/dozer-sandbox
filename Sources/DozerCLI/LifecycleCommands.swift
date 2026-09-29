@@ -102,7 +102,9 @@ struct Create: AsyncParsableCommand {
 
     func run() async throws {
         var r = HostRequest(.create, name: name)
-        r.create = try create.options()
+        var o = try create.options()
+        try preflightAgentAccount(&o, g)          // 594: pi needs an API-key account — before anything is made
+        r.create = o
         let v = try call(r, g)
         let info = try decode(v, SandboxInfo.self, g)
         if g.json { Out.json(info) } else {
@@ -263,9 +265,13 @@ struct Up: AsyncParsableCommand {
                 if let w = create.absoluteWorkspace { o.workspace = w }
                 if create.isolated { o.workspace = nil; o.isolated = true }
                 try create.applyPrompt(to: &o)
+                // 594: doz_project.yaml's image and account are checked like any create.
+                try preflightAgentAccount(&o, g)
                 r.create = o
             } else {
-                r.create = try create.options(defaultImage: DozerSettings.load().string(SettingKey.defaultImage) ?? "lab")
+                var o = try create.options(defaultImage: DozerSettings.load().string(SettingKey.defaultImage) ?? "lab")
+                try preflightAgentAccount(&o, g)
+                r.create = o
             }
             let info = try decode(try call(r, g), SandboxInfo.self, g)
             if !g.json && !g.quiet {

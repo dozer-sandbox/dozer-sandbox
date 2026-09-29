@@ -160,7 +160,7 @@ public enum AgentPrompt {
     /// The values of every variable for a sandbox, from its current record.
     public static func values(name: String, image: String, cpus: Int, memoryMiB: UInt64, workspace: String?,
                               network: NetworkMode, account: String?, version: String,
-                              hostname: String = macHostname()) -> [String: String] {
+                              hostname: String = macHostname(), credentialProblem: String? = nil) -> [String: String] {
         var v: [String: String] = [:]
         v["sandbox.name"] = name
         v["sandbox.image"] = image.hasPrefix("custom:") ? String(image.dropFirst(7)) + " (a template)" : image
@@ -191,7 +191,12 @@ public enum AgentPrompt {
             v["network.description"] = "none — this VM has no network at all."
         }
         v["account.name"] = account ?? "none"
-        if network.policy != nil, let account {
+        if network.policy != nil, let problem = credentialProblem {
+            // 594: only a credential this agent can use is "added for you".
+            v["account.name"] = "none usable (\(account ?? "none"))"
+            v["credentials.description"] = "no credential you can use is attached (\(problem)), so your requests to the model will fail. "
+                + "Do not log in or ask for a key inside the sandbox — tell the user to choose an account in Dozer: `doz account use \(name) ACCOUNT` on the Mac, or the sandbox's page in `doz ui`."
+        } else if network.policy != nil, let account {
             v["credentials.description"] = "the Mac's proxy adds the account's credential (\(account)) to your requests to Anthropic on the way out. The key-like values in your environment are placeholders — that is expected; never log in, and never ask the user for a key."
         } else if network.policy != nil {
             v["credentials.description"] = "no account is attached, so the proxy adds none. Do not log in or ask for a key inside the sandbox — the user attaches one with `doz account use \(name) ACCOUNT` on the Mac."
@@ -261,11 +266,13 @@ public enum AgentPrompt {
 
     /// The prompt and skill a sandbox gets at its next session. nil: its image runs no agent.
     public static func report(config: SandboxConfig, policy: NetworkPolicy?, account: String?, version: String,
-                              settings: DozerSettings = .load(), hostname: String = macHostname()) -> AgentPromptReport? {
+                              settings: DozerSettings = .load(), hostname: String = macHostname(),
+                              credentialProblem: String? = nil) -> AgentPromptReport? {
         guard let agent = agent(of: config.spec), let imageSpec = config.spec.imageSpec else { return nil }
         let network: NetworkMode = policy.map { .proxied($0) } ?? config.spec.network
         let vals = values(name: config.name, image: config.image, cpus: config.spec.cpus, memoryMiB: config.spec.memoryMiB,
-                          workspace: config.workspace, network: network, account: account, version: version, hostname: hostname)
+                          workspace: config.workspace, network: network, account: account, version: version, hostname: hostname,
+                          credentialProblem: credentialProblem)
         var r = AgentPromptReport(enabled: settings.bool(SettingKey.agentPrompt), agent: agent, text: nil, error: nil, layers: [],
                                   skill: nil, promptPath: guestPromptPath,
                                   skillPath: skillDirectory(agent: agent, home: imageSpec.home) + "/SKILL.md")
@@ -328,7 +335,8 @@ extension HostCore {
     /// The prompt a sandbox's next session gets (nil: its image runs no agent).
     func agentPromptReport(_ m: Managed) -> AgentPromptReport? {
         AgentPrompt.report(config: m.config, policy: m.sandbox.egress?.policy,
-                           account: m.sandbox.egress == nil ? nil : accountName(m), version: version)
+                           account: m.sandbox.egress == nil ? nil : accountName(m), version: version,
+                           credentialProblem: credentialProblem(m))
     }
 
     /// Write (or, when off, remove) the facts file and the skill in the guest — a utility exec as

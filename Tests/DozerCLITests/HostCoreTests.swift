@@ -61,7 +61,7 @@ final class HostCoreTests: XCTestCase {
         let (lab, labName) = try DozerImages.spec(name: "box", options: CreateOptions(image: "lab", workspace: root.path), store: store, environment: [:])
         XCTAssertEqual(labName, "lab")
         XCTAssertEqual(lab.network, .proxied(.bake), "the lab defaults to proxied, registries only")
-        XCTAssertEqual(lab.bakePackages, ["bash", "ncurses"])
+        XCTAssertEqual(lab.bakePackages, ["bash", "ncurses", "fd"])
         XCTAssertEqual(lab.memoryMiB, 1024)
         XCTAssertEqual(lab.shares, [Share(hostPath: root.standardizedFileURL.path, guestPath: "/workspace")])
         XCTAssertEqual(lab.storeRoot, store.root)

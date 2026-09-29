@@ -72,6 +72,8 @@ public struct NetworkPolicy: Sendable, Codable, Equatable {
         EgressRule(host: "downloads.claude.ai", ports: [443], note: "Claude Code updates"),
         EgressRule(host: "http-intake.logs.us5.datadoghq.com", ports: [443], note: "Claude Code error reporting"),
         EgressRule(host: "browser-intake-us5-datadoghq.com", ports: [443], note: "Claude Code error reporting"),
+        // 594 (the owner's pi-sandbox net log): pi's own version check, install report and model catalog.
+        EgressRule(host: "pi.dev", ports: [443], note: "pi updates"),
     ]
 
     /// GitHub over HTTPS: git, and Claude Code's official plugin marketplace (fetched at startup).

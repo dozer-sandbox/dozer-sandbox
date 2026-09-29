@@ -50,9 +50,14 @@ public struct WebSandboxRow: Codable, Equatable, Sendable {
     /// API uses one (the data source decides from the sandbox's policy; this default is by preset).
     /// bake/locked/nat/none show "n/a" (590 nit).
     public var accountApplies: Bool
+    /// 594: the agent it runs (claude-code, pi) and what is wrong with its account for it (the page's banner).
+    public var agent: String?
+    public var credentialProblem: String?
 
     public init(_ i: SandboxInfo) {
         accountApplies = ["agent", "open", "custom"].contains(i.network)
+        agent = i.agent
+        credentialProblem = i.credentialProblem
         name = i.name
         image = i.image
         phase = i.phase
@@ -522,8 +527,11 @@ public struct WebImage: Codable, Equatable, Sendable {
     public var available: String?
     public var preparing: Bool?
     public var versionLine: String?
+    /// 594: the agent a sandbox of this image runs (a template's: the image it was saved from).
+    public var agent: String?
 
     public init(_ r: ImageRow) {
+        agent = r.agent
         name = r.name
         kind = r.kind
         baked = r.baked
@@ -616,6 +624,18 @@ public struct WebAccounts: Codable, Equatable, Sendable {
     public var accounts: [WebAccount]
     public var defaultAccount: String
     public var keepalive: Bool
+    /// 594: the kinds of account each agent can use (`AgentImages.credentials`): claude-code → mac,
+    /// setup-token, api-key; pi → api-key. The forms offer only these.
+    public var agents: [String: [String]] = [:]
+
+    public init(accounts: [WebAccount], defaultAccount: String, keepalive: Bool) {
+        self.accounts = accounts
+        self.defaultAccount = defaultAccount
+        self.keepalive = keepalive
+        for image in ["claude-code", "pi"] {
+            if let c = AgentImages.credentials(image) { agents[image] = c.flatMap(\.accountKinds) }
+        }
+    }
 }
 
 public struct WebMetricsRow: Codable, Equatable, Sendable {

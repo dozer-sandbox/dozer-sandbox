@@ -203,8 +203,8 @@ let jsonl = sandbox.egress!.log.exportJSONLines()
   ports, and optional **methods / path prefixes** — enforceable only on requests the proxy reads,
   so a host with such a rule is decrypted. DNS is gated too: a name no rule could allow gets
   NXDOMAIN. Presets: `locked` (nothing), `bake` (npm, apt, apk, PyPI registries), `agent`
-  (Anthropic's API and sign-in hosts, Claude Code's updates and error reporting, GitHub over HTTPS
-  + registries), `open` (everything, still proxied and logged).
+  (Anthropic's API and sign-in hosts, Claude Code's updates and error reporting, pi's updates,
+  GitHub over HTTPS + registries), `open` (everything, still proxied and logged).
 - **What reaches the proxy:** `HTTP(S)_PROXY` (set for every `exec` and session) → CONNECT tunnels
   and plain HTTP; **any other TCP** is redirected in the guest (nat REDIRECT) and judged by the name
   its address was resolved from (a bare IP no DNS answer produced is denied); **DNS** is answered
