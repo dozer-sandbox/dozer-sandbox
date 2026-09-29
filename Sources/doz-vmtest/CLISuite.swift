@@ -59,6 +59,9 @@ final class CLIHarness: @unchecked Sendable {
         var e = ProcessInfo.processInfo.environment
         e["DOZ_STORE"] = store.path
         e["DOZ_HOST_IDLE"] = "30"          // the suite stops the host itself; the idle test sets its own
+        // 593 §9: the periodic screen capture every minute (the shortest) — it runs beside everything
+        // the suite does, and `cliSessionMemoryChecks` waits for one.
+        e["DOZ_SCREEN_CAPTURE"] = "1"
         // 591: the settings file is the suite's own (under the scratch store) — never the owner's ~/.config.
         e["XDG_CONFIG_HOME"] = store.appendingPathComponent("xdg").path
         let vmtestKernels = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("doz-vmtest-store/kernels")
@@ -200,11 +203,12 @@ func cliSuite() async throws {
         for c in clients { c.close() }
         h.run(["rm", "clia", "--yes"])
         h.run(["rm", "clib", "--yes"])
+        h.run(["rm", "clis", "--yes"])
         h.run(["host", "stop"])
     }
     // A previous run that died part-way.
     if h.hostRunning { h.run(["host", "stop"]) }
-    for n in ["clia", "clib", "clic", "clid"] where FileManager.default.fileExists(atPath: DozerStore(root: storeRoot).configFile(n).path) {
+    for n in ["clia", "clib", "clic", "clid", "clis"] where FileManager.default.fileExists(atPath: DozerStore(root: storeRoot).configFile(n).path) {
         h.run(["rm", n, "--yes"])
     }
     h.run(["template", "rm", "clitpl", "--yes"])
@@ -333,6 +337,9 @@ func cliSuite() async throws {
         print("cli: lineage, templates, duplicate (593)")
         cliLineageChecks(h, ws: ws)
 
+        print("cli: saved screens and session memory (593 §9)")
+        cliSessionMemoryChecks(h)
+
         print("cli: key (stdin, a fake key), net policy / log")
         let fake = "sk-ant-FAKE-doz-clitest-0000"
         r = h.run(["key", "set", "clib", "--anthropic"], stdin: Data((fake + "\n").utf8))
@@ -363,6 +370,13 @@ func cliSuite() async throws {
         check(h.hostRunning && h.hostPID() != hostPID, String(format: "the next call (ls) started a new host (pid %@, %.2f s)",
                                                                h.hostPID().map(String.init) ?? "?", Date().timeIntervalSince(t9)))
         check(after.contains { $0.name == "clia" && $0.phase == "hibernated" }, "clia is still hibernated")
+        // 593 §9: clis was RUNNING when the host died — its programs are gone, but its last periodic
+        // screen is kept, marked ended.
+        check(h.waitFor(30) { h.row("clis")?.phase == "off" && h.sessions("clis").first { $0.name == "tick" }.map { $0.saved == true && $0.ended && $0.savedReason == "periodic" } == true },
+              "clis died with the host: its periodic saved screen survives the crash, marked ended")
+        check(h.run(["sessions", "clis", "--screen", "tick"]).out.contains("PERIODIC-"), "…and --screen shows it")
+        check(h.run(["rm", "clis", "--yes"]).code == 0 && !FileManager.default.fileExists(atPath: DozerStore(root: storeRoot).layout("clis").screensDirectory.path),
+              "rm clis: its saved screens go with it (S6)")
         check(h.waitFor(60) { h.row("clib").map { $0.phase == "asleep" && !$0.busy } ?? false },
               "clib, asleep when the host died, was restored and is asleep again")
         r = h.run(["wake", "clia"])
@@ -489,6 +503,91 @@ func cliLineageChecks(_ h: CLIHarness, ws: URL) {
     check(r.code == 2 && r.err.contains("never creates") && h.row("clie") == nil, "a workspace that does not exist is refused (never created)")
     check(h.run(["template", "rm", "clitpl", "--yes"]).code == 0 && h.json(["template", "ls"], [ImageRow].self)?.isEmpty == true, "template rm clitpl")
     check(h.row("clia")?.phase == "running", "clia still runs")
+}
+
+/// 593 §9 (S2, S4, S5, S6): saved screens on `clis` (lab): saved at pause, sleep, hibernate and
+/// shutdown (0600 files in a 0700 directory); `doz sessions` lists them while it does not run and
+/// `--screen` prints one (text; `--vt` the bytes, to a pipe); a new program is always a new session;
+/// Reset deletes them; the periodic capture saves only what changed. Leaves `clis` RUNNING with a
+/// session the periodic capture has saved — the kill -9 section checks that a crash keeps it.
+func cliSessionMemoryChecks(_ h: CLIHarness) {
+    let layout = DozerStore(root: h.store).layout("clis")
+    func rows() -> [SessionRow] { h.sessions("clis") }
+    func mode(_ url: URL) -> mode_t {
+        var st = stat()
+        return stat(url.path, &st) == 0 ? st.st_mode & 0o777 : 0
+    }
+    guard h.run(["create", "clis", "--image", "lab", "--memory", "384M"]).code == 0, h.run(["start", "clis"]).code == 0 else {
+        check(false, "create + start clis"); return
+    }
+    var r = h.run(["run", "clis", "-d", "--session", "memo", "--", "sh", "-c", "printf '\\033[1;31mMEMO-one\\033[0m\\n'; exec sleep 3600"])
+    check(r.code == 0, "run -d --session memo (a coloured line)")
+    usleep(800_000)
+
+    // Pause: saved first, while the guest can answer.
+    r = h.run(["pause", "clis"])
+    var saved = rows()
+    check(r.code == 0 && saved.first { $0.name == "memo" }.map { $0.saved == true && $0.savedReason == "pause" && !$0.ended } == true,
+          "pause: the session's screen is saved (reason pause); sessions lists it without waking (\(saved.map { "\($0.name)/\($0.savedReason ?? "-")" }))")
+    check(mode(layout.screensDirectory) == 0o700 && ["vt", "txt", "json"].allSatisfy { mode(layout.screensDirectory.appendingPathComponent("memo.\($0)")) == 0o600 },
+          "screens/ is 0700, memo.{vt,txt,json} 0600")
+    r = h.run(["sessions", "clis", "--screen", "memo"])
+    check(r.code == 0 && r.out.contains("MEMO-one") && !r.out.contains("\u{1B}") && r.err.contains("pause"),
+          "sessions --screen memo: the saved screen as text, no escape (\(r.out.trimmingCharacters(in: .whitespacesAndNewlines).prefix(40)))")
+    r = h.run(["sessions", "clis", "--screen", "memo", "--vt"])
+    check(r.code == 0 && r.outData.first == 0x1B && String(decoding: r.outData, as: UTF8.self).contains("\u{1B}[1m") && String(decoding: r.outData, as: UTF8.self).contains("MEMO-one"),
+          "--vt writes the VT bytes to a pipe (\(r.outData.count) B, bold/colour kept)")
+    check(h.run(["sessions", "clis", "--screen", "nope"]).code == 2, "--screen of a session with no saved screen: not found (2)")
+    check(h.run(["sessions", "clis", "--vt"]).code == 64, "--vt without --screen: a usage error")
+    h.run(["resume", "clis"])
+    check(rows().allSatisfy { $0.saved != true } && rows().first { $0.name == "memo" }?.savedReason == "pause",
+          "resumed: the guest's sessions again (each says when its screen was last saved)")
+
+    // A new program is always a NEW session, never the running one.
+    let b1 = h.run(["run", "clis", "-d", "--", "sh", "-c", "echo SECOND; exec sleep 3600"]), b2 = h.run(["run", "clis", "-d", "--", "sh", "-c", "echo SECOND; exec sleep 3600"])
+    let names = rows().filter { !$0.ended }.map(\.name)
+    check(b1.code == 0 && b2.code == 0 && names.contains("sh") && names.contains("sh-2") && names.contains("memo"),
+          "two `run -d -- sh …` make two NEW sessions (sh, sh-2) beside memo (\(names.joined(separator: ", ")))")
+
+    // Sleep, then hibernate: saved each time.
+    r = h.run(["sleep", "clis"])
+    saved = rows()
+    check(r.code == 0 && Set(saved.filter { $0.savedReason == "sleep" }.map(\.name)) == ["memo", "sh", "sh-2"], "sleep: every session saved (reason sleep)")
+    h.run(["wake", "clis"])
+    r = h.run(["hibernate", "clis"])
+    saved = rows()
+    check(r.code == 0 && saved.count == 3 && saved.allSatisfy { $0.saved == true && $0.savedReason == "hibernate" && !$0.ended },
+          "hibernate: saved (reason hibernate); `doz sessions` lists them while hibernated, nothing woken")
+    check(h.row("clis")?.phase == "hibernated", "…and it is still hibernated")
+    check(h.run(["sessions", "clis", "--screen", "sh-2"]).out.contains("SECOND"), "--screen sh-2 while hibernated")
+    h.run(["wake", "clis"])
+    check(rows().first { $0.name == "memo" }?.pid != nil && rows().allSatisfy { $0.saved != true }, "wake: the live sessions again")
+
+    // Shutdown: the last screens kept, marked ended.
+    r = h.run(["shutdown", "clis", "--yes"])
+    saved = rows()
+    check(r.code == 0 && saved.count == 3 && saved.allSatisfy { $0.saved == true && $0.ended && $0.savedReason == "shutdown" },
+          "shutdown: saved first, then every screen marked ended (\(saved.map { "\($0.name)/\($0.savedReason ?? "-")/\($0.ended)" }))")
+    check(h.run(["sessions", "clis", "--screen", "memo"]).out.contains("MEMO-one"), "…the last screen stays readable after the shutdown")
+
+    // Start: a new boot's capture drops the previous boot's screens; reset deletes them all.
+    h.run(["start", "clis"])
+    h.run(["run", "clis", "-d", "--session", "fresh", "--", "sh", "-c", "echo FRESH; exec sleep 3600"])
+    h.run(["pause", "clis"])
+    check(rows().map(\.name) == ["fresh"], "after a cold boot the next capture keeps only the sessions that exist (\(rows().map(\.name)))")
+    h.run(["resume", "clis"])
+    r = h.run(["reset", "clis", "--yes"])
+    check(r.code == 0 && rows().isEmpty && !FileManager.default.fileExists(atPath: layout.screensDirectory.path),
+          "reset: the saved screens are deleted with the disk (S6)")
+
+    // The periodic capture (DOZ_SCREEN_CAPTURE=1): only what changed; the kill -9 section checks it survives a crash.
+    h.run(["start", "clis"])
+    h.run(["run", "clis", "-d", "--session", "tick", "--", "sh", "-c", "i=0; while true; do i=$((i+1)); echo PERIODIC-$i; sleep 5; done"])
+    let t0 = Date()
+    let periodic = h.waitFor(150) { h.sessions("clis").first { $0.name == "tick" }?.savedReason == "periodic" }
+    check(periodic, String(format: "a periodic capture saved the running session's screen (%.0f s)", Date().timeIntervalSince(t0)))
+    check(mode(layout.screensDirectory.appendingPathComponent("tick.vt")) == 0o600, "…0600")
+    check(h.row("clis")?.phase == "running", "clis runs on (the kill -9 section checks its saved screen survives the crash)")
 }
 
 /// 591: `doz config` from a separate process, on the harness's scratch XDG_CONFIG_HOME — no VM.
