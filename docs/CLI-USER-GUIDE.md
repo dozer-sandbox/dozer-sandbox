@@ -440,6 +440,11 @@ view — the session keeps running, as Ctrl-] does in `doz attach`.
   the kernel's boot console — and then becomes the image's own session in the same pane, with the
   boot log kept in the scrollback. `doz console NAME [--follow]` shows the same console in a
   terminal. Turn it off with the setting `ui.boot_view_on_start = false`: Start then just starts.
+  While a step runs it shows a spinner and its seconds so far, and becomes "✓ step — 1.2 s" (or
+  "✗ step — why") when it ends; a first start's image pull shows a bar ("pulling node@1a2b3c4d5e6f
+  ██████░░░░ 87 / 142 MB 6.1 MB/s ~9 s (3/5 layers)") and then "pulled … : 142 MB in 23 s"; a bake
+  step's last two output lines show dimmed beneath. Only finished lines stay in the scrollback. The
+  setting `ui.progress = "plain"` shows one line per step instead.
 - **A new terminal is a new shell.** **New shell**, **Terminal…** and **Split** start a new shell session
   (`shell-2`, `shell-3`, …); attaching to or watching a session that already runs is a choice in the
   New terminal dialog. Two tabs on one session are marked "shared with tab N".
@@ -507,7 +512,7 @@ the others say when they apply (the next sandbox created, the next session, or a
 
 | Section | Settings |
 |---|---|
-| `[ui]` | `boot_view_on_start` (true), `confirm_shutdown` (true), `split_default` (`shell` · `watch` · `attach` · `dialog`), `terminals` (true), `terminal_font_size` (13), `theme` (`auto` · `light` · `dark`), `details_open` (true), `grid_live_tiles` (8, 1–12), `grid_tile_size` (`small` · `medium` · `large`) |
+| `[ui]` | `boot_view_on_start` (true), `confirm_shutdown` (true), `split_default` (`shell` · `watch` · `attach` · `dialog`), `terminals` (true), `terminal_font_size` (13), `theme` (`auto` · `light` · `dark`), `details_open` (true), `grid_live_tiles` (8, 1–12), `grid_tile_size` (`small` · `medium` · `large`), `progress` (`animated` · `plain`; `$DOZ_PROGRESS`, `--progress auto\|plain`) |
 | `[host]` | `idle_timeout_minutes` (5; `$DOZ_HOST_IDLE`), `keepalive` (false — for a store that has not chosen with `doz account keepalive`) |
 | `[store]` | `path` (`--store`, `$DOZ_STORE`) |
 | `[claude]` | `permissions` (`skip` · `ask`) — Claude Code's own prompts in a claude-code sandbox; `-e DOZ_CLAUDE_PERMISSIONS=…` on `run`/`exec` still wins |
@@ -532,6 +537,12 @@ the others say when they apply (the next sandbox created, the next session, or a
   only ever added.
 - `-q` prints no progress. `-v` prints every step (by default only operations slower than a second
   show their steps, on stderr).
+- **Progress on a terminal is animated** (`--progress auto`, the default): a spinner on the step
+  under way, redrawn in place, then "✓ step — 1.2 s"; a download as a bar with bytes, speed and time
+  left, then its summary; a bake step's last output lines, dimmed. `--progress plain` (or
+  `DOZ_PROGRESS=plain`, or the setting `ui.progress = "plain"`) prints one line per step and a
+  summary per download. When stderr is not a terminal, with `--json`, or with `NO_COLOR` set, it is
+  always plain — nothing is redrawn and no escape sequence is written.
 - `doz console NAME [--follow]` prints the sandbox's boot console (the kernel and init); with
   `--follow` it keeps printing as it boots (the web UI's boot view shows the same lines).
 - `doz events [NAME]` follows phases and timed steps live. `doz metrics [--csv] [--image X]
@@ -556,6 +567,7 @@ the others say when they apply (the next sandbox created, the next session, or a
 | `DOZ_HOST_IDLE` | `host.idle_timeout_minutes` | host idle timeout, minutes |
 | `DOZ_KERNEL_CACHE` / `DOZ_KERNEL` | `kernel.cache` / `kernel.path` | a shared kernel cache / an explicit kernel |
 | `DOZ_SUBNET` | `defaults.nat_subnet` | default subnet for `--network nat` |
+| `DOZ_PROGRESS` | `ui.progress` | `animated` or `plain` progress (the CLI on a terminal, the web UI's boot view) |
 | `XDG_CONFIG_HOME` | — | where `dozer-sandbox/doz.toml` is (default `~/.config`) |
 
 The kernel, subnet and `[defaults]` / `[images.*]` settings are read (by the host) when a sandbox

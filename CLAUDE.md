@@ -349,6 +349,17 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   operations and shows a dot for a failure that ended after the page was last viewed.
 - **`image-tree` is a read** (answered in-process when no host runs), measured OFF the host actor;
   the page fetches it only when Lineage is shown. `ImageTree.build` is pure (unit-tested).
+- **Progress is ONE view in two terminals** (owner, 593): `ProgressBoard` + `ProgressTerminal`
+  (`Sources/DozerHost/ProgressView.swift`) render the host's events for the web boot view (the
+  bridge, ticking every 120 ms) AND the CLI's stderr (a 100 ms timer while the request blocks).
+  Animated: the step under way (`started` … `step`/`failed`, same label), a transfer's bar, the last 2
+  output lines — a live block ERASED and redrawn under each finished line, so the scrollback holds
+  finished lines only. Plain (`ui.progress`, `$DOZ_PROGRESS`, `--progress plain`; always off a TTY, with
+  --json or NO_COLOR): one line per step + a download summary, no redraw. The library emits
+  `.stepStarted/.stepFailed` from every `timed`, `.transfer` from an OCI pull (`PullMeter`) and `.output`
+  from a bake step (`OutputTail`): both ≤ 4 events/s; guest output is made inert (`InertText`: CSI,
+  OSC/DCS/APC strings and every control character removed) in the library and again in the view.
+  Digests are trimmed to 12 hex for people. Output lines are live-only: not in host.log or Activity.
 - **Every button has an icon** (owner, 593): Lucide (`vendor/lucide-static/`, pinned like ghostty-web;
   `serve: icon`) compiled by `build-web-assets.swift` into ONE sprite of `<symbol>`s — the compiler
   admits an icon file only as geometry (path/circle/ellipse/line/polyline/polygon/rect with geometry
