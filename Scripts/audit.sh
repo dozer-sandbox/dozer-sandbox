@@ -16,6 +16,10 @@
 #   6. The committed doznet binary is the one Guest/doznet/PROVENANCE.md records.
 #   7. (590) The web UI's committed assets are exactly what Sources/DozerWeb/WebSource builds, and
 #      its modules stay where they belong (NIOHTTP1 in DozerWeb; LaunchServices in `doz ui`).
+#   8. (592) The product's OLD name is gone: no file in the repo (sources, tests, scripts, docs, CI)
+#      carries it, in any case, nor its short `snz` prefixes. Nothing is allow-listed — the rename
+#      kept no compatibility (owner ruling) and this repo holds no history file. Only third-party
+#      vendored bytes are skipped (they are pinned by VENDOR.json and never edited).
 # (No Linux seam check: this package is macOS-only by nature — Virtualization.framework + vmnet.)
 set -euo pipefail
 
@@ -127,8 +131,20 @@ grep -qF "| sha256 (auto) | \`$NSHA\` |" "$PACKAGE/Guest/doznet/PROVENANCE.md" \
 # ── 7. (590) The web UI's committed assets match their sources ───────────────
 swift "$PACKAGE/Scripts/build-web-assets.swift" --check >/dev/null || fail "Sources/DozerWeb/Resources/Web is stale — run make web-assets and commit it"
 
+# ── 8. (592) The old product name is gone ─────────────────────────────────────
+# The pattern is assembled, so this script does not match itself.
+OLD_NAME="sn""ooze"
+OLD_SHORT="sn""z(_|1|-)"
+STRAY=$(git -C "$PACKAGE" grep --untracked -nIiE "${OLD_NAME}|${OLD_SHORT}" -- . \
+          ':(exclude)Sources/DozerWeb/WebSource/vendor/**' \
+          ':(exclude)Sources/DozerWeb/Resources/Web/assets/vendor-*' \
+          ':(exclude)Sources/DozerWeb/Resources/Web/licences/**' | head -20 || true)
+[[ -z "$STRAY" ]] || fail "the old product name survives (592 renamed everything to doz / DozerKit / Dozer Sandbox):
+$STRAY"
+
 printf 'ok audit: DozerKit imports only its allowlist (Foundation/Security/Virtualization/Containerization/NIO/X509),\n'
 printf '          depends only on apple/containerization (exact) + the apple/* packages it already resolves\n'
 printf '          (TLS; ArgumentParser for the CLI targets only),\n'
 printf '          carries no host brand, deckhold + doznet match their provenance,\n'
-printf '          and the web UI (NIOHTTP1, confined) ships exactly the assets its sources build\n'
+printf '          the web UI (NIOHTTP1, confined) ships exactly the assets its sources build,\n'
+printf '          and no file carries the pre-592 product name\n'
