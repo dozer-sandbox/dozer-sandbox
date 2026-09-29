@@ -275,7 +275,8 @@ public struct ImageBaker: Sendable {
             if let cachedImage { return cachedImage }
             // 593: the pull's progress (bytes and layers), counted here and reported at most 4 times a second.
             let meter = PullMeter(label: "pulling \(Self.shortReference(imageSpec.base))", events: events)
-            let img = try await store.pull(reference: imageSpec.base, progress: { batch in meter.add(batch) })
+            // linux/arm64 only: a nil platform pulls the layers of EVERY platform the index lists.
+            let img = try await store.pull(reference: imageSpec.base, platform: Platform(arch: "arm64", os: "linux"), progress: { batch in meter.add(batch) })
             meter.finish()
             return img
         }
