@@ -179,14 +179,72 @@ async function act(body) {
     toast(label + ' is already under way', false);
     return null;
   }
+  beginTransition(body.sandbox, body.action);
   try {
     const op = await api('actions', { method: 'POST', json: body });
     trackOp(op);
     return op;
   } catch (e) {
+    endTransition(body.sandbox, body.action);
     toast(e.message || String(e), true);
     return null;
   }
+}
+
+// ── transitions (593 follow-up — owner: "when i clicked on the button to start the sandbox, it briefly
+// flashed a button that it was "Shut Down" before the boot sequence"). The moment a lifecycle action is
+// asked for, its sandbox is IN that transition on this page: the phase pill says so ("Booting…", with a
+// spinner), every lifecycle button stays where it was but disabled — the set shown when it was clicked,
+// never another phase's — and the boot view's cover says it is starting. It ends when the operation
+// ends (or is refused); only then does the control bar show the new phase's buttons.
+const TRANSITION_LABEL = { start: 'Booting…', wake: 'Waking…', resume: 'Resuming…', pause: 'Pausing…', sleep: 'Going to sleep…',
+                           hibernate: 'Hibernating…', shutdown: 'Shutting down…', reset: 'Resetting…', rm: 'Removing…' };
+state.transitions = new Map();
+state.trGen = 0;
+function beginTransition(name, action) {
+  if (!name || !TRANSITION_LABEL[action]) return;
+  const have = state.transitions.get(name);
+  if (have && have.action === action) return;
+  state.trGen++;
+  state.transitions.set(name, { action, verbs: verbsFor(sandboxPhase(name)) });
+  paintTransition(name);
+}
+/// `repaint`: the action failed or was refused — show what is true again at once. After a success the
+/// refresh that follows repaints from the NEW state (repainting now would show the phase it just left).
+function endTransition(name, action, repaint = true) {
+  const t = name && state.transitions.get(name);
+  if (!t || (action && t.action !== action)) return;
+  state.trGen++;
+  state.transitions.delete(name);
+  for (const x of terminals.values()) {
+    if (x.sandbox !== name) continue;
+    if (x.bootIntent) { x.bootIntent = false; if (repaint) paintCover(x); } else if (x.saved && repaint) paintCover(x);
+  }
+}
+/// This page's transition of the sandbox, or — an operation it did not start here (a reload, another
+/// tab's) — the running lifecycle operation it knows of (then the buttons follow the phase).
+function transitionOf(name) {
+  const t = state.transitions.get(name);
+  if (t) return t;
+  const o = [...state.ops.values()].find((x) => x.sandbox === name && x.state === 'running' && TRANSITION_LABEL[x.action]);
+  return o ? { action: o.action, verbs: null } : null;
+}
+function transitionPill(t, name) {
+  return h('span', { class: 'pill ph-busy', 'data-pill-for': name, 'data-transition': t.action },
+    h('span', { class: 'mini-spin', 'aria-hidden': 'true' }), ' ' + TRANSITION_LABEL[t.action]);
+}
+/// Put a sandbox into its transition where it is shown NOW — in place, no re-render: its pills say so
+/// and its lifecycle buttons are disabled (nothing is swapped).
+function paintTransition(name) {
+  const t = state.transitions.get(name);
+  if (!t) return;
+  for (const el of document.querySelectorAll('[data-lifecycle-for]')) {
+    if (el.dataset.lifecycleFor !== name) continue;
+    for (const b of el.querySelectorAll('button')) { b.disabled = true; b.title = TRANSITION_LABEL[t.action]; }
+  }
+  for (const el of document.querySelectorAll('[data-pill-for]')) if (el.dataset.pillFor === name) el.replaceWith(transitionPill(t, name));
+  for (const x of terminals.values()) if (x.sandbox === name && x.saved) paintCover(x);
+  if (state.view === 'sandbox' && state.param === name) paintTermEmpty();
 }
 function trackOp(op) {
   const before = state.ops.get(op.id);
@@ -198,6 +256,7 @@ function trackOp(op) {
   // (Not for a removal: the page it would refetch is about to be gone.)
   if (!before && op.state === 'running' && op.action !== 'rm') refresh(false);
   if (op.state !== 'running' && (!before || before.state === 'running')) {
+    endTransition(op.sandbox, op.action, op.state === 'failed');
     if (op.state === 'failed') toast(op.label + ': ' + op.text, true);
     refreshNav();
     // The sandbox this page shows is gone: back to the list (route() refreshes) instead of a 404.
@@ -357,7 +416,9 @@ function confirmAction(title, text, name, body) {
   }, { danger: true, confirmName: name });
 }
 async function actOrThrow(body) {
-  const op = await api('actions', { method: 'POST', json: body });
+  beginTransition(body.sandbox, body.action);
+  let op;
+  try { op = await api('actions', { method: 'POST', json: body }); } catch (e) { endTransition(body.sandbox, body.action); throw e; }
   trackOp(op);
   return op;
 }
@@ -765,8 +826,11 @@ function bootViewOnStart() { return setting('ui.boot_view_on_start', true) && se
 async function startWithBootView(name) {
   // The terminal first: once the UI process shows it waiting on the shut-down sandbox, it is following
   // the host's events — then the start, so not one step is missed (a warm start takes half a second).
+  // The transition starts at the click (the bar says "Booting…" at once), and the boot view's cover says
+  // it is starting from its first paint — never "Sandbox shut down" while the start is being sent.
+  beginTransition(name, 'start');
   const before = new Set(terminals.keys());
-  openTerminal(name, null, 'interactive');
+  openTerminal(name, null, 'interactive', undefined, { bootIntent: true });
   const t = [...terminals.values()].find((x) => !before.has(x.id));
   const end = Date.now() + 15000;
   while (t && Date.now() < end && !t.closed && !t.errorText && !(t.state && ['shutDown', 'failed', 'boot'].includes(t.state.cover.kind))) {
@@ -775,14 +839,24 @@ async function startWithBootView(name) {
   await act({ action: 'start', sandbox: name });
 }
 function lifecycleButtons(s, all) {
-  const busy = s.busy || s.phase === 'booting' || opRunningFor(s.name);
-  const verbs = verbsFor(s.phase);
+  const tr = transitionOf(s.name);
+  const busy = s.busy || s.phase === 'booting' || opRunningFor(s.name) || !!tr;
+  // In a transition this page started, the buttons it showed when asked — disabled, never swapped.
+  const verbs = tr && tr.verbs ? tr.verbs : verbsFor(s.phase);
   const extra = all ? ['reset', 'rm'] : [];
-  return h('div', { class: 'actions' }, [...verbs, ...extra].map((v) => {
-    const b = btn(VERBS[v][0], () => lifecycle(v, s.name), { small: true, title: VERBS[v][1], danger: !!DESTRUCTIVE[v] });
+  return h('div', { class: 'actions', 'data-lifecycle-for': s.name }, [...verbs, ...extra].map((v) => {
+    const b = btn(VERBS[v][0], () => lifecycle(v, s.name), { small: true, title: tr ? TRANSITION_LABEL[tr.action] : VERBS[v][1], danger: !!DESTRUCTIVE[v] });
     if (busy) b.disabled = true;
     return b;
   }));
+}
+/// The phase pill — or, in a transition, what is under way.
+function sandboxPill(s) {
+  const tr = transitionOf(s.name);
+  if (tr) return transitionPill(tr, s.name);
+  const p = phasePill(s.phase, s.phaseLabel, s.busy);
+  p.dataset.pillFor = s.name;
+  return p;
 }
 
 function hostCard(host) {
@@ -800,7 +874,7 @@ async function viewOverview() {
   renderNavSandboxes();
   const rows = o.sandboxes.map((s) => h('tr', { class: 'click', on: { click: () => { location.hash = '#/sandbox/' + s.name; } } },
     h('td', null, h('a', { href: '#/sandbox/' + s.name }, s.name), h('div', { class: 'muted' }, s.image), h('div', { 'data-op-for': s.name })),
-    h('td', null, phasePill(s.phase, s.phaseLabel, s.busy), s.diedWithHost ? h('div', { class: 'st-warn' }, 'died with its host') : null),
+    h('td', null, sandboxPill(s), s.diedWithHost ? h('div', { class: 'st-warn' }, 'died with its host') : null),
     h('td', { class: 'num' }, h('div', null, s.ramHeldMiB ? mib(s.ramHeldMiB) : '—'), h('div', { class: 'muted' }, 'of ' + mib(s.memoryMiB)), meter(s.ramHeldMiB, s.memoryMiB)),
     h('td', { class: 'num' }, bytes(s.diskBytes)),
     h('td', null, s.network, s.deniedConnections ? h('div', { class: 'st-warn' }, s.deniedConnections + ' denied') : null),
@@ -883,8 +957,11 @@ async function refreshSandbox() {
   sbxRefreshing = true;
   const name = state.param;
   try {
+    const gen = state.trGen;
     const [d, net, accounts] = await Promise.all([api('sandboxes/' + name), api('sandboxes/' + name + '/network'), api('accounts').catch(() => ({ accounts: [] }))]);
     if (state.view !== 'sandbox' || state.param !== name || state.signedOut) return;
+    // A transition began or ended while this was read: what it read may be the phase before — read again.
+    if (gen !== state.trGen) { sbxAgain = true; return; }
     state.sbx = { name, d, net, accounts };
     const parts = sandboxParts(name, d, net, accounts);
     $('sbx-bar').replaceChildren(parts.bar);
@@ -1037,7 +1114,7 @@ function sandboxParts(name, d, net, accounts) {
   const running = i.phase === 'running';
   // Sessions need a VM: running, or one a session request wakes (paused, asleep, hibernated) — never
   // while off, failed, booting, busy or while another operation on it runs (590 bug 2).
-  const sessionsReady = ['running', 'paused', 'asleep', 'hibernated'].includes(i.phase) && !i.busy && !opRunningFor(name);
+  const sessionsReady = ['running', 'paused', 'asleep', 'hibernated'].includes(i.phase) && !i.busy && !opRunningFor(name) && !transitionOf(name);
   const whyNot = sessionsReady ? null : i.phase === 'off' || i.phase === 'failed' ? 'Start it first' : 'Wait until it is running';
   const gated = (b) => { if (!sessionsReady) { b.disabled = true; b.title = whyNot; } return b; };
   const fact = (k, v) => h('div', null, h('div', { class: 'k' }, k), h('div', { class: 'v' }, v));
@@ -1097,12 +1174,12 @@ function sandboxParts(name, d, net, accounts) {
     h('td', { class: 'num' }, String(f.requests)),
     h('td', null, when(f.lastSeen))));
   const proxied = net.proxied;
-  const busy = i.busy || i.phase === 'booting' || opRunningFor(name);
+  const busy = i.busy || i.phase === 'booting' || opRunningFor(name) || !!transitionOf(name);
   const detailsOpen = setting('ui.details_open', true);
   const netText = i.network + (i.deniedConnections ? ' (' + i.deniedConnections + ' denied)' : '');
   const bar = h('div', { class: 'sbx-bar-inner' },
     h('div', { class: 'sbx-title' },
-      h('h1', null, name), phasePill(i.phase, i.phaseLabel, i.busy),
+      h('h1', null, name), sandboxPill(i),
       h('span', { class: 'sbx-meta' },
         h('span', null, i.image),
         h('span', null, (i.ramHeldMiB ? mib(i.ramHeldMiB) : '—') + ' of ' + mib(i.memoryMiB)),
@@ -1587,10 +1664,11 @@ async function bootTerm(t, fontSize) {
   return true;
 }
 /// A terminal on the sandbox's page (593: each sandbox's page has its own tabs and split).
-async function openTerminal(sandbox, session, mode, pane) {
+async function openTerminal(sandbox, session, mode, pane, opts = {}) {
   if (!terminalsAllowed()) return;
   const v = sview(sandbox);
   const t = newTerm(sandbox, session, mode);
+  t.bootIntent = !!opts.bootIntent;
   t.pane = v.split ? (pane ?? v.focusedPane) : 0;
   v.selected[t.pane] = t.id;
   paintCover(t);
@@ -1643,6 +1721,7 @@ function onTerminalMessage(t, ev) {
   try { m = JSON.parse(ev.data); } catch (_) { return; }
   if (m.t === 'state') {
     t.state = m;
+    if (t.bootIntent && m.cover && !['shutDown', 'failed', 'reattaching'].includes(m.cover.kind)) t.bootIntent = false;
     if (m.session) t.session = m.session;
     // "woke in 0.4 s": one line over the screen, for a few seconds.
     if (typeof m.notice === 'string' && m.notice) {
@@ -1779,6 +1858,11 @@ function paintCover(t) {
   let kind = 'none', headline = '', detail = '', action = null, spinner = false, glyphKey = null;
   if (t.errorText) { kind = 'error'; headline = 'This terminal could not open'; detail = t.errorText; }
   else if (t.saved) { ({ headline, detail, action, glyphKey } = savedCover(t)); kind = 'saved'; }
+  // A boot view asked for by Start: "Starting…" from its first paint until the host's steps take over
+  // (never the shut-down cover the sandbox had a moment before the start reached the host).
+  else if (t.bootIntent && !t.ended && (!t.state || ['shutDown', 'failed', 'reattaching'].includes(t.state.cover.kind))) {
+    kind = 'working'; headline = 'Starting the sandbox…'; spinner = true;
+  }
   else if (t.ended) { kind = 'ended'; headline = 'The session ended'; detail = t.endText; }
   else if (t.disconnected) { kind = 'disconnected'; headline = 'Disconnected'; detail = t.disconnected; action = 'Reconnect'; }
   else if (!t.state) { kind = 'reattaching'; headline = 'Attaching…'; spinner = true; }
@@ -1838,6 +1922,7 @@ function sandboxPhase(name) {
   return row ? row.phase : '';
 }
 function sandboxBusy(name) {
+  if (state.transitions.has(name)) return true;
   if (state.sbx && state.sbx.name === name && state.sbx.d) return !!state.sbx.d.info.busy || opRunningFor(name);
   const row = state.overview && state.overview.sandboxes.find((s) => s.name === name);
   return (row && row.busy) || opRunningFor(name);
@@ -1853,6 +1938,14 @@ function savedCover(t) {
 function savedCoverFor(t) {
   const s = t.saved, phase = sandboxPhase(t.sandbox);
   const saved = 'saved ' + when(s.savedAt);
+  // An action under way: say what (never the phase it is leaving).
+  const tr = transitionOf(t.sandbox);
+  if (tr) return { headline: TRANSITION_LABEL[tr.action] + ' — ' + (s.ended ? 'its last screen' : 'its saved screen'), detail: saved, action: null, glyphKey: null };
+  // Shut down: a key does NOT start it (orchestrator ruling — a cold boot makes new sessions); Start is a button.
+  if (phase === 'off' || phase === 'failed') {
+    return { headline: (phase === 'off' ? 'Shut down' : 'Failed') + ' — Start boots it; these sessions ended', detail: 'Its last screen, ' + saved,
+             action: sandboxBusy(t.sandbox) ? null : 'Start', glyphKey: phase === 'off' ? 'off' : null };
+  }
   if (s.ended) {
     return { headline: 'The session ended' + (s.exitCode !== null && s.exitCode !== undefined ? ' (exit ' + s.exitCode + ')' : phase === 'off' ? ' with the shutdown' : ''),
              detail: 'Its last screen, ' + saved, action: phase === 'off' || phase === 'failed' ? 'Start' : null, glyphKey: phase === 'off' ? 'off' : null };
@@ -1989,6 +2082,7 @@ function renderTerminals() {
     const mine = name ? pageTerminals(name).filter((t) => t.pane === i) : [];
     if (!mine.some((t) => t.id === v.selected[i])) v.selected[i] = mine.length ? mine[mine.length - 1].id : null;
     p.strip.replaceChildren(...mine.map((t) => tabElement(t, i)));
+    scrollActiveTab(p.strip);
     p.empty.hidden = mine.length > 0;
     for (const t of mine) {
       if (t.els.wrap.parentNode !== p.body) p.body.append(t.els.wrap);
@@ -2010,6 +2104,16 @@ function renderTerminals() {
     history.replaceState(null, '', location.pathname + '#/sandbox/' + name + '/' + sel.session);
   }
 }
+/// A pane's tab strip scrolls sideways when its tabs overflow; the selected tab is always in view
+/// (orchestrator ruling, 593 follow-up).
+function scrollActiveTab(strip) {
+  const w = strip.querySelector('.tab.active')?.closest('.tab-wrap');
+  if (!w) return;
+  const sr = strip.getBoundingClientRect(), wr = w.getBoundingClientRect();
+  if (!sr.width) return;
+  if (wr.left < sr.left) strip.scrollLeft += wr.left - sr.left;
+  else if (wr.right > sr.right) strip.scrollLeft += wr.right - sr.right;
+}
 /// The terminal area with no terminal: what it can open, from the sandbox's state.
 function paintTermEmpty() {
   if (!termUI.built) return;
@@ -2018,11 +2122,12 @@ function paintTermEmpty() {
   if (p.empty.hidden) return;
   if (!s || !s.d || s.name !== state.param) { p.empty.replaceChildren(h('div', { class: 'term-empty-box' }, 'Loading…')); return; }
   const i = s.d.info;
-  const busy = i.busy || i.phase === 'booting' || opRunningFor(s.name);
+  const tr = transitionOf(s.name);
+  const busy = i.busy || i.phase === 'booting' || opRunningFor(s.name) || !!tr;
   const live = (s.d.sessions || []).filter((x) => !x.ended);
   const box = h('div', { class: 'term-empty-box' });
   if (busy) {
-    box.append(h('div', { class: 'term-empty-head' }, i.phaseLabel + '…'), h('div', null, 'The terminal opens when it can.'));
+    box.append(h('div', { class: 'term-empty-head' }, tr ? TRANSITION_LABEL[tr.action] : i.phaseLabel + '…'), h('div', null, 'The terminal opens when it can.'));
   } else if (i.phase === 'off' || i.phase === 'failed') {
     box.append(h('div', { class: 'term-empty-head' }, s.name + ' is ' + i.phaseLabel.toLowerCase()),
       h('div', { class: 'actions center' },

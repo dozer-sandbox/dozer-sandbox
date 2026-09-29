@@ -111,6 +111,11 @@ tr.click:hover td { background: var(--bg); }
 .pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; border: 1px solid currentColor; white-space: nowrap; }
 .ph-running { color: var(--run); }
 .ph-booting { color: var(--accent); }
+/* 593 follow-up: a lifecycle action under way — the pill says what, with a spinner. */
+.ph-busy { color: var(--accent); display: inline-flex; align-items: center; gap: 5px; }
+.ph-busy .mini-spin { width: 8px; height: 8px; }
+/* The tab strip scrolls sideways; a tab never shrinks (the selected one is scrolled into view). */
+.tab-wrap { flex: none; }
 .ph-paused { color: var(--pause); }
 .ph-asleep { color: var(--sleep); }
 .ph-hibernated { color: var(--hibernated); }
