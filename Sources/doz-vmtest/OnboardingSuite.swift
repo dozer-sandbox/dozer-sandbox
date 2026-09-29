@@ -44,6 +44,11 @@ func onboardingHarness(_ binary: String, _ tag: String, seed items: [String]) ->
     return h
 }
 
+/// 594: the registry's latest version of `package`, asked directly (nil: offline).
+func registryLatest(_ package: String) async -> String? {
+    try? await NpmRegistry.http(NpmRegistry.npmjs).lookup?(package, "latest").version
+}
+
 /// The host's preparations, asked in-process (never starting a host).
 func preparations(_ h: CLIHarness) -> [PreparationInfo] {
     guard let m = try? HostClient.request(HostRequest(.prepareStatus), store: DozerStore(root: h.store), autostart: false),
@@ -234,6 +239,23 @@ func cliOnboardingSuite(binary: String) async {
     check(c.run(["exec", "cc", "--", "cat", "/home/agent/.claude/skills/dozer/SKILL.md"]).out.hasPrefix("---\nname: dozer\n"),
           "the dozer skill: ~/.claude/skills/dozer/SKILL.md")
     check(c.sessions("cc").first { $0.name == "claude" }?.command == "claude", "the session's command stays `claude` (the launcher adds it)")
+
+    // 594 (owner: "Can we install (optionally) latest claude code (default true)?"): images.claude_code_version
+    // is latest by default — the host asked the registry, the bake installed that exact version, and
+    // the image and the store record it.
+    print("cli: latest Claude Code — resolved when the image was prepared, installed at that exact version")
+    let recorded = AgentVersions.all(DozerStore(root: c.store))["claude-code"]?.latest?.version
+    let npmNow = await registryLatest(AgentImages.claudeCodePackage)
+    print("  the host resolved \(recorded ?? "nothing"); the registry says \(npmNow ?? "?") now")
+    check(recorded != nil && (npmNow == nil || recorded == npmNow), "the host asked the registry: latest = \(recorded ?? "—") (<store>/agent-versions.json)")
+    check((r.out + r.err).contains("@anthropic-ai/claude-code@\(recorded ?? "?") (latest, resolved now)"),
+          "the preparation's step says it: npm install @anthropic-ai/claude-code@\(recorded ?? "?") (latest, resolved now)")
+    let ccRow = c.json(["image", "ls"], [ImageRow].self)?.first { $0.name == "claude-code" }
+    check(ccRow?.version == recorded && ccRow?.versionSetting == "latest" && ccRow?.versionLine == "claude-code \(recorded ?? "?") (latest)",
+          "image ls: \(ccRow?.versionLine ?? "no row")")
+    check(c.run(["exec", "cc", "--", "claude", "--version"]).out.contains(recorded ?? "?"), "claude --version in the sandbox: \(recorded ?? "?")")
+    check(c.run(["exec", "cc", "--", "sh", "-c", "echo $DISABLE_AUTOUPDATER$DISABLE_UPDATES"]).out == "11\n",
+          "Claude Code's updater is off in the sandbox (DISABLE_AUTOUPDATER, DISABLE_UPDATES)")
     c.run(["rm", "cc", "--yes"])
 
     // 594 (owner: "there are some legit requests that should be allowed"): the agent preset holds what
@@ -259,6 +281,12 @@ func cliOnboardingSuite(binary: String) async {
     check(refused != nil && refused!.isEmpty,
           "doz net log cn --denied: nothing denied" + ((refused ?? []).isEmpty ? "" : " — " + Set(refused!.map(\.target)).sorted().joined(separator: ", ")))
     check(!c.run(["net", "log", "cn"]).out.contains(fk) && !hostLog(c).contains(fk), "the fake key is in no log")
+    // 594: the "Update Claude Code to try it" line the owner saw on a pinned build — the claude session's
+    // screen on a latest-baked image (saved when it pauses).
+    check(c.run(["pause", "cn"]).code == 0, "pause cn (its screens are saved)")
+    let screen = c.run(["sessions", "cn", "--screen", "claude"]).out
+    print("  the claude session's screen (latest image):\n" + screen.split(separator: "\n").prefix(24).map { "    │ " + $0 }.joined(separator: "\n"))
+    check(!screen.isEmpty && !screen.contains("Update Claude Code"), "no \"Update Claude Code\" line on a latest-baked image")
     c.run(["rm", "cn", "--yes"])
     c.run(["account", "rm", "fk", "--force"])
 

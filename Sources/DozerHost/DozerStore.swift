@@ -194,8 +194,11 @@ public enum DozerImages {
     /// `environment` names the settings file and overrides it — the kernel (`DOZ_KERNEL`,
     /// `DOZ_KERNEL_CACHE`), a default NAT subnet (`DOZ_SUBNET`) — then `doz.toml`
     /// (`defaults.cpus`, `images.<image>.memory_mib` / `.network`, …), then the defaults.
+    /// 594: `purpose` — an agent image's version: a create gets the image already prepared (the newest
+    /// for this build), a preparation the version the settings name (`AgentVersions.spec`).
     public static func spec(name: String, options o: CreateOptions, store: DozerStore,
-                            environment env: [String: String] = ProcessInfo.processInfo.environment) throws -> (SandboxSpec, String) {
+                            environment env: [String: String] = ProcessInfo.processInfo.environment,
+                            purpose: AgentVersions.Purpose = .create) throws -> (SandboxSpec, String) {
         let settings = DozerSettings.load(environment: env)
         let kernelPath = settings.string(SettingKey.kernelPath).map { ($0 as NSString).expandingTildeInPath }
         let kernelCache = settings.string(SettingKey.kernelCache).map { URL(fileURLWithPath: ($0 as NSString).expandingTildeInPath) }
@@ -208,7 +211,7 @@ public enum DozerImages {
             }
             shares.append(Share(hostPath: path, guestPath: workspaceGuestPath))
         }
-        var imageSpec = imageSpec(o.image)
+        var imageSpec = try AgentVersions.spec(o.image, purpose: purpose, store: store, settings: settings) ?? imageSpec(o.image)
         var customKey: String?
         var imageName = o.image
         if imageSpec == nil, o.image != "lab" {

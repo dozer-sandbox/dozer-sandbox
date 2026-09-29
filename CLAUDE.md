@@ -190,7 +190,22 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   --dangerously-skip-permissions`. `DOZ_CLAUDE_PERMISSIONS=ask` and root keep the prompts.
   The script spells the key variable's name apart, because no image spec may name a credential
   (`ImageSpecTests`). These keys were found by diffing the config before and after Claude Code
-  2.1.227's own screens, so re-check them when the pin moves.
+  2.1.227's own screens, so re-check them when the pin moves — and since 594 images install
+  `latest` by default, `make test-cli-onboarding` re-checks the launcher (argv, skill, a session with
+  a key) on whatever the registry's latest is.
+- **Agent versions (594, `AgentVersions.swift`):** `images.claude_code_version` / `images.pi_version`
+  = `latest` (default) or exact. `latest` is resolved on the MAC at preparation time
+  (`NpmRegistry`: `<registry>/<package>/latest` → version + sha512 integrity, both validated —
+  they go into a bake script) and installed at that exact version by `AgentImages.claudeCode(_:)` /
+  `pi(_:)`; `ImageSpec.agent` records it, so it is in the bake key. `AgentVersions.spec(purpose:)`
+  is synchronous and uses only the store: `.create` → the newest image PREPARED for this build (no
+  waiting), `.prepare` → the version the setting names (cached latest, a known exact, else the pin
+  when the registry was never asked, else a clear error). `HostCore.freshen` is the only thing that
+  asks the registry (hourly cache in `<store>/agent-versions.json`, 5-min back-off after a failure)
+  and, when the prepared image is behind, starts a background preparation ("update to X"). Only the
+  real host asks (`HostServer` passes `.fromEnvironment()`; `DOZ_TEST_NPM_REGISTRY=offline|URL` for
+  tests); in-process hosts and unit tests have `.disabled` and resolve to the pin. Claude Code's own
+  updater is off in sessions (`DISABLE_AUTOUPDATER`, `DISABLE_UPDATES` — both honoured by 2.1.227).
 - **The `doz` host (585) is the ONE owner of a store's VMs.** It holds `<store>/host.lock` for its
   whole life and loads nothing before it has it (a new host waits for an exiting one — otherwise it
   would read a record still saying `running` and report a live sandbox as died). The launcher is a

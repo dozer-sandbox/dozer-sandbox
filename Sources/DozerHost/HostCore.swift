@@ -76,6 +76,11 @@ public actor HostCore {
     /// Whether an image is already prepared for this build (tests substitute one).
     var preparedCheck: @Sendable (String, DozerStore) -> Bool = HostCore.isPrepared
 
+    /// 594: where `latest` agent versions are asked — the real host asks the npm registry; an
+    /// in-process host (and a unit test, unless it sets a stub) asks nothing.
+    var agentRegistry: NpmRegistry = .disabled
+    public func setAgentRegistry(_ r: NpmRegistry) { agentRegistry = r }
+
     /// Tests: the preparation work and the "already prepared" check.
     public func setPreparationRunner(_ r: @escaping PreparationRunner, prepared: @escaping @Sendable (String, DozerStore) -> Bool) {
         preparationRunner = r
@@ -83,8 +88,9 @@ public actor HostCore {
     }
 
     public init(store: DozerStore, readOnly: Bool, version: String, services: CredentialServices = .system,
-                newStoreKeepalive: Bool = false, newStoreDefaultAccount: String? = nil) {
+                newStoreKeepalive: Bool = false, newStoreDefaultAccount: String? = nil, agentRegistry: NpmRegistry = .disabled) {
         self.store = store
+        self.agentRegistry = agentRegistry
         self.readOnly = readOnly
         self.version = version
         self.services = services
@@ -544,6 +550,9 @@ public actor HostCore {
         }
         var made = false
         defer { if !made, let p = prepared { Workspace.undo(p) } }
+        // 594: an agent image — latest asked of the registry (hourly, offline-tolerant); this sandbox
+        // gets the image already prepared, and a newer one is prepared in the background.
+        await freshen(o.image, update: true)
         let (spec, image) = try DozerImages.spec(name: name, options: o, store: store)
         var cfg = SandboxConfig(name: name, image: image, spec: spec, workspace: spec.shares.first?.hostPath)
         // 588: a proxied sandbox follows the store's default account unless told otherwise.
@@ -1232,12 +1241,30 @@ public actor HostCore {
         rows.append(ImageRow(name: "lab", kind: "builtin", baked: labBaked, key: labBaked ? StoreLayout.goldenKey(for: lab) : nil,
                              bakedAt: labBaked ? (try? FileManager.default.attributesOfItem(atPath: golden.path)[.modificationDate] as? Date) ?? nil : nil,
                              allocatedBytes: labBaked ? allocatedBytes(golden) : nil, note: "Alpine 3.20 + bash, ncurses", fromSandbox: nil))
+        let settings = DozerSettings.load()
+        let versions = AgentVersions.all(store)
         for name in ["claude-code", "pi"] {
             let imageSpec = DozerImages.imageSpec(name)!
-            let baked = ImageBaker(storeRoot: store.root).all(imageSpec).first
-            rows.append(ImageRow(name: name, kind: "builtin", baked: baked != nil, key: baked.map { String($0.key.prefix(12)) },
-                                 bakedAt: baked?.manifest.bakedAt, allocatedBytes: baked?.manifest.allocatedBytes,
-                                 note: imageSpec.verify.first?.expect.map { "\(name) \($0)" }, fromSandbox: nil))
+            // 594: the one a new sandbox gets — the newest prepared for this build, else the newest bake.
+            let prepared = AgentVersions.prepared(name, store: store, settings: settings).first
+            let all = ImageBaker(storeRoot: store.root).all(imageSpec)
+            let baked = prepared.flatMap { p in all.first { $0.manifest.imageSpec == p } } ?? all.first
+            let version = baked?.manifest.imageSpec.agent?.version
+            var row = ImageRow(name: name, kind: "builtin", baked: baked != nil, key: baked.map { String($0.key.prefix(12)) },
+                               bakedAt: baked?.manifest.bakedAt, allocatedBytes: baked?.manifest.allocatedBytes,
+                               note: version.map { "\(name) \($0)" } ?? imageSpec.verify.first?.expect.map { "\(name) \($0)" }, fromSandbox: nil)
+            row.version = version
+            row.versionSetting = AgentVersions.setting(name, settings)
+            row.latest = versions[name]?.latest?.version
+            row.latestCheckedAt = versions[name]?.checkedAt
+            if let b = AgentVersions.behind(name, store: store, settings: settings) {
+                row.available = b.target
+            } else if prepared == nil, row.versionSetting != "latest" || versions[name]?.latest != nil,
+                      let t = (try? AgentVersions.spec(name, purpose: .prepare, store: store, settings: settings))??.agent?.version, t != version {
+                row.available = t
+            }
+            row.preparing = runningPreparation(name) != nil ? true : nil
+            rows.append(row)
         }
         // 594: prepared for this build (the key it bakes now, the kernel, the guest init disk).
         for i in rows.indices { rows[i].current = preparedCheck(rows[i].name, store) }
@@ -1254,6 +1281,8 @@ public actor HostCore {
         guard DozerImages.builtIn.contains(image) else {
             throw HostError(.invalid, "only the built-in images bake (lab, claude-code, pi); a custom image is saved from a restore point")
         }
+        // 594: latest asked of the registry first — the bake makes the version the settings name.
+        if runningPreparation(image) == nil { await freshen(image, update: false) }
         try await follow(try preparation(for: image, requestedBy: "image bake"), emit: emit)
         guard let row = try images().first(where: { $0.name == image }) else { throw HostError(.failed, "the bake left no image") }
         return row

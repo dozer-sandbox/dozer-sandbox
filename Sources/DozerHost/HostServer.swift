@@ -38,7 +38,9 @@ public final class HostServer: @unchecked Sendable {
         let settings = DozerSettings.load()
         core = HostCore(store: store, readOnly: false, version: version, services: .forHost(),
                         newStoreKeepalive: settings.bool(SettingKey.keepalive),
-                        newStoreDefaultAccount: settings.string(SettingKey.defaultAccount) ?? "mac")
+                        newStoreDefaultAccount: settings.string(SettingKey.defaultAccount) ?? "mac",
+                        // 594: `latest` agent versions are asked of the npm registry (DOZ_TEST_NPM_REGISTRY: a stub).
+                        agentRegistry: .fromEnvironment())
     }
 
     public enum StartError: Error, LocalizedError {

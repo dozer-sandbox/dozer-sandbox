@@ -34,6 +34,9 @@ public struct ImageSpec: Sendable, Codable, Equatable {
     /// as before 587. Part of the base key and the bake key. A record written before 587 has no
     /// value here, and decodes as nil: its disks have no journal.
     public var journalMiB: Int?
+    /// 594: the agent this image installs, at the exact version (the npm package and version; its
+    /// integrity is in the install step). nil for an image with no agent. Part of the bake key.
+    public var agent: AgentPackage?
 
     public init(name: String, base: String, steps: [BakeStep], verify: [VerifyCheck], user: String, home: String,
                 persistDirs: [String], sessionEnvironment: [String: String] = [:], workdir: String = "/workspace",
@@ -70,6 +73,12 @@ public struct ImageSpec: Sendable, Codable, Equatable {
         guard !user.isEmpty, home.hasPrefix("/"), workdir.hasPrefix("/") else { throw SandboxError.invalidSpec("image user/home/workdir") }
         for d in persistDirs where !(d.hasPrefix("/") || d.hasPrefix("~/")) || d.contains("'") {
             throw SandboxError.invalidSpec("persist dir must be absolute or ~/…, quote-free: \(d)")
+        }
+        if let a = agent {
+            guard AgentRelease(version: a.version, integrity: "sha512-A").isWellFormed,
+                  a.package.range(of: #"^(@[a-z0-9-]+/)?[a-z0-9._-]+$"#, options: .regularExpression) != nil else {
+                throw SandboxError.invalidSpec("agent package/version: \(a.package)@\(a.version)")
+            }
         }
         for k in (steps.flatMap { $0.environment.keys }) + Array(sessionEnvironment.keys) where BakeEnvironment.isCredential(k) {
             throw SandboxError.invalidSpec("credential \(k) must never be part of an image spec — pass it to openSession")
@@ -169,9 +178,79 @@ public enum BakeEnvironment {
 
 // MARK: - The two agent imageSpecs
 
+/// 594: an agent's npm package at one exact version.
+public struct AgentPackage: Sendable, Codable, Equatable, Hashable {
+    public var package: String
+    public var version: String
+    public init(package: String, version: String) {
+        self.package = package
+        self.version = version
+    }
+}
+
+/// 594: one published version of an agent: its version and the registry's sha512 integrity for its
+/// tarball (`sha512-…`, as npm's `dist.integrity`).
+public struct AgentRelease: Sendable, Codable, Equatable, Hashable {
+    public var version: String
+    public var integrity: String
+    public init(version: String, integrity: String) {
+        self.version = version
+        self.integrity = integrity
+    }
+
+    /// Safe to put in a bake script: an exact version (`1.2.3`, `-pre`, `+build`) and a sha512 SRI
+    /// integrity — nothing a registry answer could use to break out of the script's quotes.
+    public var isWellFormed: Bool {
+        version.count <= 64 && integrity.count <= 200
+            && version.range(of: #"^\d+\.\d+\.\d+([-+][0-9A-Za-z.-]+)?$"#, options: .regularExpression) != nil
+            && integrity.range(of: #"^sha512-[A-Za-z0-9+/]+={0,2}$"#, options: .regularExpression) != nil
+    }
+
+    /// Numeric `major.minor.patch` order; a pre-release sorts before its release.
+    public static func isNewer(_ a: String, than b: String) -> Bool {
+        func parts(_ v: String) -> ([Int], String?) {
+            let core = v.split(separator: "+").first.map(String.init) ?? v
+            let pre = core.split(separator: "-", maxSplits: 1)
+            let nums = pre[0].split(separator: ".").map { Int($0) ?? 0 }
+            return (nums, pre.count > 1 ? String(pre[1]) : nil)
+        }
+        let (x, xp) = parts(a), (y, yp) = parts(b)
+        for i in 0..<max(x.count, y.count) {
+            let l = i < x.count ? x[i] : 0, r = i < y.count ? y[i] : 0
+            if l != r { return l > r }
+        }
+        switch (xp, yp) {
+        case (nil, .some): return true
+        case (.some(let p), .some(let q)): return p > q
+        default: return false
+        }
+    }
+}
+
 /// Pinned values copied (by hand, values only) from the DeckStack official imageSpecs
 /// `claude-code` 2.1.227 and `pi-coding-agent` 0.84.1 — no code or type is shared with them.
+/// 594: these are the DEFAULT pins; `images.claude_code_version` / `images.pi_version` = latest (the
+/// default setting) prepares the registry's latest instead, at its exact version and integrity.
 public enum AgentImages {
+    public static let claudeCodePackage = "@anthropic-ai/claude-code"
+    public static let piPackage = "@earendil-works/pi-coding-agent"
+    public static let claudeCodePinned = AgentRelease(version: "2.1.227",
+        integrity: "sha512-D0YP8GFwPaP/9eObEuP5LRO5+9QSD9CLa6K26whNzXxpxz3pFqPS3nn7l1/MLmSWy32wBP2IKQzkRB3mumUKUQ==")
+    public static let piPinned = AgentRelease(version: "0.84.1",
+        integrity: "sha512-ncAqFrG+iybuPGOhMiZoEHkEzTpJgz3guYD32pD+M7ucc0WeHmauP6wa7qwP8V/KWvsZDVNa5XGsdZ7fkC7w7A==")
+
+    /// The npm package of an agent image (nil: not an agent image).
+    public static func package(_ image: String) -> String? {
+        switch image { case "claude-code": claudeCodePackage; case "pi": piPackage; default: nil }
+    }
+    public static func pinned(_ image: String) -> AgentRelease? {
+        switch image { case "claude-code": claudeCodePinned; case "pi": piPinned; default: nil }
+    }
+    /// The agent image's spec at `release`.
+    public static func spec(_ image: String, release: AgentRelease) -> ImageSpec? {
+        switch image { case "claude-code": claudeCode(release); case "pi": pi(release); default: nil }
+    }
+
     /// The imageSpecs' digest-pinned Debian `node` base (glibc).
     public static let nodeBase = "docker.io/library/node@sha256:d649c27dae7ba0137b3cef5dd75baa422c08dc3d9e3fc0c23dfb172dc3cc6436"
 
@@ -276,36 +355,51 @@ public enum AgentImages {
             """, environment: ["NPM_CONFIG_UPDATE_NOTIFIER": "false"])
     }
 
-    public static let claudeCode = ImageSpec(
-        name: "claude-code",
-        base: nodeBase,
-        steps: [createAgent, devBaseline,
-                npmInstall("@anthropic-ai/claude-code", version: "2.1.227",
-                           integrity: "sha512-D0YP8GFwPaP/9eObEuP5LRO5+9QSD9CLa6K26whNzXxpxz3pFqPS3nn7l1/MLmSWy32wBP2IKQzkRB3mumUKUQ=="),
-                claudeLauncher],
-        verify: [VerifyCheck(["claude", "--version"], expect: "2.1.227"),
-                 VerifyCheck(["sh", "-c", "test -x /home/agent/.local/bin/claude && echo launcher-ok"], expect: "launcher-ok")]
-            + devBaselineVerify,
-        user: "agent", home: "/home/agent",
-        // CLAUDE_CONFIG_DIR puts .claude.json INSIDE ~/.claude, so one directory holds all state.
-        persistDirs: ["~/.claude"],
-        sessionEnvironment: ["CLAUDE_CONFIG_DIR": "/home/agent/.claude", "DISABLE_AUTOUPDATER": "1",
-                             "PATH": "/home/agent/.local/bin:/usr/local/bin:/usr/bin:/bin"],
-        rootfsMiB: 4096)
+    /// The claude-code image at the pinned version.
+    public static let claudeCode = claudeCode(claudeCodePinned)
 
-    public static let pi = ImageSpec(
-        name: "pi",
-        base: nodeBase,
-        steps: [createAgent, devBaseline,
-                npmInstall("@earendil-works/pi-coding-agent", version: "0.84.1",
-                           integrity: "sha512-ncAqFrG+iybuPGOhMiZoEHkEzTpJgz3guYD32pD+M7ucc0WeHmauP6wa7qwP8V/KWvsZDVNa5XGsdZ7fkC7w7A==",
-                           extraArgs: ["--ignore-scripts"])],
-        verify: [VerifyCheck(["pi", "--version"], expect: "0.84.1")] + devBaselineVerify,
-        user: "agent", home: "/home/agent",
-        persistDirs: ["~/.pi/agent"],
-        sessionEnvironment: ["PI_CODING_AGENT_DIR": "/home/agent/.pi/agent",
-                             "PATH": "/home/agent/.local/bin:/usr/local/bin:/usr/bin:/bin"],
-        rootfsMiB: 4096)
+    public static func claudeCode(_ r: AgentRelease) -> ImageSpec {
+        var s = ImageSpec(
+            name: "claude-code",
+            base: nodeBase,
+            steps: [createAgent, devBaseline,
+                    npmInstall(claudeCodePackage, version: r.version, integrity: r.integrity),
+                    claudeLauncher],
+            verify: [VerifyCheck(["claude", "--version"], expect: r.version),
+                     VerifyCheck(["sh", "-c", "test -x /home/agent/.local/bin/claude && echo launcher-ok"], expect: "launcher-ok")]
+                + devBaselineVerify,
+            user: "agent", home: "/home/agent",
+            // CLAUDE_CONFIG_DIR puts .claude.json INSIDE ~/.claude, so one directory holds all state.
+            persistDirs: ["~/.claude"],
+            // 594: Claude Code never updates itself in a sandbox (it could not write /usr/local, and a
+            // sandbox keeps the version it was made with; a new image brings the new one). Its binary
+            // honours both: DISABLE_AUTOUPDATER (the background updater) and DISABLE_UPDATES (every
+            // update path, `claude update` included).
+            sessionEnvironment: ["CLAUDE_CONFIG_DIR": "/home/agent/.claude", "DISABLE_AUTOUPDATER": "1", "DISABLE_UPDATES": "1",
+                                 "PATH": "/home/agent/.local/bin:/usr/local/bin:/usr/bin:/bin"],
+            rootfsMiB: 4096)
+        s.agent = AgentPackage(package: claudeCodePackage, version: r.version)
+        return s
+    }
+
+    /// The pi image at the pinned version.
+    public static let pi = pi(piPinned)
+
+    public static func pi(_ r: AgentRelease) -> ImageSpec {
+        var s = ImageSpec(
+            name: "pi",
+            base: nodeBase,
+            steps: [createAgent, devBaseline,
+                    npmInstall(piPackage, version: r.version, integrity: r.integrity, extraArgs: ["--ignore-scripts"])],
+            verify: [VerifyCheck(["pi", "--version"], expect: r.version)] + devBaselineVerify,
+            user: "agent", home: "/home/agent",
+            persistDirs: ["~/.pi/agent"],
+            sessionEnvironment: ["PI_CODING_AGENT_DIR": "/home/agent/.pi/agent",
+                                 "PATH": "/home/agent/.local/bin:/usr/local/bin:/usr/bin:/bin"],
+            rootfsMiB: 4096)
+        s.agent = AgentPackage(package: piPackage, version: r.version)
+        return s
+    }
 }
 
 extension BakeStep {

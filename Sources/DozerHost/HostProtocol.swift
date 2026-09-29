@@ -635,6 +635,34 @@ public struct ImageRow: Codable, Equatable, Sendable {
     /// 594: a built-in image is prepared for THIS build (its bake key, the kernel, the guest init
     /// disk) — `baked` also counts an older build's bake. nil for a template.
     public var current: Bool?
+    /// 594 (an agent image): the agent version a new sandbox gets now (the newest prepared for this
+    /// build, else the newest baked); the setting (`latest` or exact); the registry's latest as last
+    /// asked; a newer version the settings want that is not prepared yet, and whether it is being prepared.
+    public var version: String?
+    public var versionSetting: String?
+    public var latest: String?
+    public var latestCheckedAt: Date?
+    public var available: String?
+    public var preparing: Bool?
+
+    /// 594: "claude-code 2.1.227 (2.1.230 available — preparing)", "claude-code 2.1.285 (latest)",
+    /// "pi 0.84.1 (pinned: images.pi_version)" — nil for an image with no agent.
+    public var versionLine: String? {
+        guard versionSetting != nil else { return nil }
+        guard let v = version else {
+            let what = available ?? (versionSetting == "latest" ? "latest" : versionSetting!)
+            return "\(name) \(what) when prepared" + (preparing == true ? " — preparing" : "")
+        }
+        var s = "\(name) \(v)"
+        if let a = available {
+            s += " (\(a) available" + (preparing == true ? " — preparing)" : ")")
+        } else if versionSetting == "latest" {
+            s += v == latest ? " (latest)" : ""
+        } else {
+            s += " (pinned)"
+        }
+        return s
+    }
 }
 
 /// `key ls` (never the secret).

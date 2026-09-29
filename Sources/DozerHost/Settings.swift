@@ -27,6 +27,8 @@ public enum SettingType: Sendable, Equatable {
     case path
     /// An IPv4 CIDR for vmnet (`192.168.64.0/24`); `""` = a free one.
     case subnet
+    /// 594: a package version — `latest` (resolved when an image is prepared) or an exact `1.2.3`.
+    case version
 
     public var name: String {
         switch self {
@@ -35,7 +37,13 @@ public enum SettingType: Sendable, Equatable {
         case .choice(let c): c.joined(separator: " | ")
         case .path: "path (\"\" = automatic)"
         case .subnet: "IPv4 subnet, a.b.c.d/nn (\"\" = a free one)"
+        case .version: "latest, or an exact version like 2.1.227"
         }
+    }
+
+    /// `1.2.3`, optionally `-pre.1` / `+build` — what npm publishes (never a range).
+    public static func isExactVersion(_ s: String) -> Bool {
+        s.count <= 64 && s.range(of: #"^\d+\.\d+\.\d+([-+][0-9A-Za-z.-]+)?$"#, options: .regularExpression) != nil
     }
 }
 
@@ -115,6 +123,9 @@ public struct SettingDefinition: Sendable {
         case (.subnet, .string(let s)):
             guard s.isEmpty || Self.isSubnet(s) else { throw SettingsError("\(key) is an IPv4 subnet like 192.168.64.0/24, or \"\"") }
             return v
+        case (.version, .string(let s)):
+            guard s == "latest" || SettingType.isExactVersion(s) else { throw SettingsError("\(key) is latest, or an exact version like 2.1.227") }
+            return v
         default:
             throw SettingsError("\(key) is a \(type.name), not a \(v.typeName)")
         }
@@ -133,7 +144,7 @@ public struct SettingDefinition: Sendable {
         case .int:
             guard let i = Int(t) else { throw SettingsError("\(key) is a whole number") }
             return try validate(.int(i))
-        case .choice, .path, .subnet:
+        case .choice, .path, .subnet, .version:
             return try validate(.string(t))
         }
     }
@@ -234,6 +245,13 @@ public enum SettingKey {
     /// `images.<lab|claude-code|pi>.memory_mib` / `.network`.
     public static func memory(_ image: String) -> String { "images.\(image).memory_mib" }
     public static func network(_ image: String) -> String { "images.\(image).network" }
+    /// 594 (owner: "install (optionally) latest claude code (default true)"): the agent's version an
+    /// image is prepared with — `latest` (resolved at preparation time) or an exact one.
+    public static let claudeCodeVersion = "images.claude_code_version"
+    public static let piVersion = "images.pi_version"
+    public static func agentVersion(_ image: String) -> String? {
+        switch image { case "claude-code": claudeCodeVersion; case "pi": piVersion; default: nil }
+    }
 }
 
 public struct DozerSettings: Sendable {
@@ -314,6 +332,12 @@ public struct DozerSettings: Sendable {
                   "Tell the agent where it runs: a short facts block appended to its system prompt (the sandbox, its /workspace share, the network, credentials) and the dozer skill, written at every session start. Your own template: agent-prompt.md beside this file.",
                   applies: .nextSession),
         ]
+        s.append(.init("images", "claude_code_version", .version, .string("latest"),
+                       "The Claude Code the claude-code image is prepared with: latest (asked of the npm registry when the image is prepared, then installed at that exact version, integrity-checked; a newer one is prepared in the background, and the next new sandbox gets it) or an exact version like 2.1.227. A sandbox keeps the version it was created with; doz reset NAME moves it to the image's current one.",
+                       applies: .nextCreate))
+        s.append(.init("images", "pi_version", .version, .string("latest"),
+                       "The pi coding agent the pi image is prepared with: latest or an exact version, as images.claude_code_version.",
+                       applies: .nextCreate))
         for (image, memory, network) in [("lab", 1024, "bake"), ("claude-code", 2048, "agent"), ("pi", 2048, "agent")] {
             s.append(.init("images.\(image)", "memory_mib", .int(256...262_144), .int(memory),
                            "Memory (MiB) of a new \(image) sandbox (a custom image follows the image it was saved from).",
@@ -500,6 +524,7 @@ public struct DozerSettings: Sendable {
             case .choice(let c): kind = "choice"; choices = c
             case .path: kind = "path"
             case .subnet: kind = "subnet"
+            case .version: kind = "version"
             }
             var note: String?
             switch r.source {

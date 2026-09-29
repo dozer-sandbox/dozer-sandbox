@@ -816,6 +816,8 @@ function refreshNav() {
   }, 300);
 }
 function renderNavSandboxes() {
+  // 594 (owner: "add a link to Onboarding in the left nav"): a dot until this store is onboarded.
+  if (state.overview) $('onb-dot').hidden = state.overview.onboarded !== false;
   const list = state.overview ? state.overview.sandboxes.slice().sort((a, b) => a.name.localeCompare(b.name)) : [];
   $('nav-sandboxes').replaceChildren(...list.map((s) => h('a', {
     href: '#/sandbox/' + s.name, class: 'nav-child' + (state.view === 'sandbox' && state.param === s.name ? ' active' : ''),
@@ -1542,7 +1544,18 @@ async function viewImages() {
     h('td', null, r.kind === 'custom' ? 'template' : r.kind),
     h('td', null, r.baked ? (r.bakedAt ? full(r.bakedAt) : 'yes') : h('span', { class: 'muted' }, 'no — bakes on first start')),
     h('td', { class: 'num' }, r.allocatedBytes ? bytes(r.allocatedBytes) : '—'),
-    h('td', null, [r.note, r.fromSandbox ? 'from ' + r.fromSandbox : null].filter(Boolean).join(' · ') || '—'),
+    // 594: an agent image's version — the one a new sandbox gets, and a newer one available (and
+    // being prepared in the background: the next new sandbox gets it).
+    h('td', { 'data-version': r.version || '', 'data-available': r.available || '' },
+      r.versionSetting ? [
+        r.version ? h('span', { class: 'mono' }, r.version)
+          : h('span', { class: 'muted' }, (r.available ? r.available + ' ' : '') + 'when prepared' + (r.preparing ? ' — preparing' : '')),
+        r.version && r.available ? h('span', { class: 'tag ver-available', title: 'a new sandbox gets ' + (r.version || 'it') + ' now; the next one gets ' + r.available + ' once it is prepared' },
+          r.available + ' available' + (r.preparing ? ' — preparing' : '')) : null,
+        h('div', { class: 'muted' }, r.versionSetting === 'latest'
+          ? 'latest' + (r.latest ? ' (npm: ' + r.latest + ')' : '') : 'pinned: ' + r.versionSetting),
+      ] : '—'),
+    h('td', null, [r.versionSetting ? null : r.note, r.fromSandbox ? 'from ' + r.fromSandbox : null].filter(Boolean).join(' · ') || '—'),
     h('td', { class: 'mono muted' }, r.key ? r.key.slice(0, 16) : ''),
     h('td', null, h('div', { class: 'actions' },
       r.kind === 'builtin' ? btn(r.baked ? 'Re-bake' : 'Bake', () => act({ action: 'image-bake', image: r.name }), { small: true, title: 'Minutes, needs network' }) : null,
@@ -1551,7 +1564,7 @@ async function viewImages() {
         r.name, { action: 'image-rm', image: r.name }), { small: true, danger: true }) : null))));
   return h('div', null, h('div', { class: 'head' }, h('h1', null, 'Images'), imagesToggle()),
     h('p', { class: 'sub' }, 'Built-in images, and templates saved from sandboxes (a sandbox’s root disk — never its state disk). Progress of a bake shows under Operations.'),
-    panel(table(['Image', 'Kind', 'Baked', 'Size', 'Note', 'Key', ''], rows, [3])));
+    panel(table(['Image', 'Kind', 'Baked', 'Size', 'Version', 'Note', 'Key', ''], rows, [3])));
 }
 async function viewLineage() {
   const t = await api('images/tree');
@@ -1840,6 +1853,7 @@ function wizGo(step) {
   const w = state.wiz;
   w.step = step;
   if (step === 4) { loadPreparations().then(() => renderWizard(true)); wizardPoll(); } else wizardStopPolling();
+  if (step >= 5) refreshNav();          // the nav's Onboarding dot goes once the record is written
   renderWizard(true);
   $('main').scrollTop = 0;
 }
@@ -3096,7 +3110,7 @@ function detachTile(tile) {
 // ── start ───────────────────────────────────────────────────────────────────
 // The static page's own controls get their icons here (index.html holds no SVG).
 const NAV_ICONS = { overview: 'box', sessions: 'layout-grid', images: 'layers', operations: 'list-checks', accounts: 'key-round',
-                    metrics: 'chart-line', activity: 'activity', doctor: 'stethoscope', settings: 'settings' };
+                    metrics: 'chart-line', activity: 'activity', onboarding: 'rocket', doctor: 'stethoscope', settings: 'settings' };
 for (const a of document.querySelectorAll('#nav > a[data-view]')) if (NAV_ICONS[a.dataset.view]) a.prepend(icon(NAV_ICONS[a.dataset.view]));
 setButton($('sign-out'), 'Sign out');
 
@@ -3107,6 +3121,8 @@ setButton($('sign-out'), 'Sign out');
     // 594 (D8): a store never onboarded opens on the setup wizard (once per page load).
     try {
       const o = await api('overview');
+      state.overview = o;
+      renderNavSandboxes();
       if (o.onboarded === false && location.hash === '#/overview') history.replaceState(null, '', location.pathname + '#/onboarding');
     } catch (_) { /* the overview says so itself */ }
     route();

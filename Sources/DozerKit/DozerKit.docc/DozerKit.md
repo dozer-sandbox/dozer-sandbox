@@ -85,6 +85,8 @@ See <doc:Concepts> for the full vocabulary (images, sessions, network, keys and 
 - ``ImageSpec``
 - ``ImageBaker``
 - ``AgentImages``
+- ``AgentRelease``
+- ``AgentPackage``
 - ``StoreLayout``
 - ``RestorePoint``
 - ``CustomImage``

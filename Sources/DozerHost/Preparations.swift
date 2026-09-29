@@ -132,7 +132,12 @@ public struct PreparationRecord: Codable, Equatable, Sendable {
         case let k: if !k.hasPrefix("bake step ") { return k }
         }
         let cut = label.range(of: " (")?.lowerBound ?? label.endIndex
-        return String(label[..<cut])
+        var k = String(label[..<cut])
+        // 594: an agent's install step is the same step whatever version it installs.
+        if let r = k.range(of: #"^step: npm install (@[a-z0-9-]+/)?[a-z0-9._-]+@"#, options: .regularExpression) {
+            k = String(k[r]).dropLast() + "@version"
+        }
+        return k
     }
 
     public func usual(_ label: String) -> Double? {
@@ -463,10 +468,38 @@ extension HostCore {
             image = "lab"
         }
         if runningPreparation(image) != nil { return image }
+        await freshen(image, update: false)
         let s = store
         let check = preparedCheck
         let ready = await Task.detached { check(image, s) }.value
+        // 594: prepared (maybe an older version): this start does not wait; a newer one is prepared
+        // in the background for the next sandbox.
+        if ready { await freshen(image, update: true) }
         return ready ? nil : image
+    }
+
+    /// 594: an agent image's freshness — ask the registry for `latest` (at most hourly, never failing:
+    /// offline means the image already prepared is used, noted in the log) and, when `update` and the
+    /// prepared image is behind, start a background preparation of the new version (single-flight;
+    /// Operations shows it) — the sandbox being made now does not wait for it.
+    @discardableResult
+    func freshen(_ image: String, update: Bool) async -> AgentVersions.Freshness? {
+        guard AgentImages.package(image) != nil else { return nil }
+        let settings = DozerSettings.load()
+        let f = await AgentVersions.refresh(image, store: store, settings: settings, registry: agentRegistry)
+        if let e = f.error, f.looked {
+            HostLog.line("\(image): the npm registry could not be asked (\(e)) — the image already prepared is used")
+        } else if f.looked, let v = f.latest {
+            HostLog.line("\(image): latest is \(v) (npm registry)")
+        }
+        guard update, !readOnly, runningPreparation(image) == nil else { return f }
+        let s = store
+        let behind = await Task.detached { AgentVersions.behind(image, store: s, settings: settings) }.value
+        if let b = behind {
+            note(nil, "\(image) \(b.current) is prepared; \(b.target) is available — preparing it in the background (the next new sandbox gets it)")
+            _ = try? preparation(for: image, requestedBy: "update to \(b.target)")
+        }
+        return f
     }
 
     func runningPreparation(_ image: String) -> Preparation? {
@@ -549,10 +582,13 @@ extension HostCore {
         // A throwaway sandbox a crashed preparation left behind would cold-boot its kept disk
         // instead of baking: it goes first.
         try? FileManager.default.removeItem(at: store.layout(tmpName).sandboxDirectory)
-        let spec = try DozerImages.spec(name: tmpName, options: CreateOptions(image: image), store: store).0
+        // 594: the version the settings name — latest as resolved (the host asked the registry first),
+        // or the exact one.
+        let spec = try DozerImages.spec(name: tmpName, options: CreateOptions(image: image), store: store, purpose: .prepare).0
         let sb = try Sandbox(spec: spec)
         let stream = sb.events()
-        let forward = Task { for await e in stream { if let he = HostEvent(e, sandbox: image) { emit(he) } } }
+        let relabel = installLabel(image, spec: spec)
+        let forward = Task { for await e in stream { if let he = HostEvent(e, sandbox: image) { emit(relabel(he)) } } }
         defer { forward.cancel() }
         do {
             try Task.checkCancellation()
@@ -574,6 +610,20 @@ extension HostCore {
             throw error
         }
         try? FileManager.default.removeItem(at: store.layout(tmpName).sandboxDirectory)
+    }
+
+    /// 594: an agent's install step says which version and why — "npm install @anthropic-ai/claude-code@2.1.285
+    /// (latest, resolved now)" when the setting is latest; the pinned label otherwise.
+    static func installLabel(_ image: String, spec: SandboxSpec) -> @Sendable (HostEvent) -> HostEvent {
+        guard let a = spec.imageSpec?.agent, AgentVersions.setting(image, DozerSettings.load()) == "latest" else { return { $0 } }
+        let from = "npm install \(a.package)@\(a.version) (integrity-pinned)"
+        let to = "npm install \(a.package)@\(a.version) (latest, resolved now)"
+        return { e in
+            guard let t = e.text, t.contains(from) else { return e }
+            var e = e
+            e.text = t.replacingOccurrences(of: from, with: to)
+            return e
+        }
     }
 
     /// Follow `p` until it ends: its events so far and as they come go to `emit`.
@@ -631,10 +681,15 @@ extension HostCore {
             let s = store
             let check = preparedCheck
             for i in images {
+                // 594: latest resolved first (a prepared image that is behind is brought up to date in
+                // the background — onboarding does not wait for it).
+                await freshen(i, update: false)
                 if runningPreparation(i) != nil { todo.append(i); continue }
                 let ready = await Task.detached { check(i, s) }.value
-                if ready { emit(HostEvent(kind: .note, sandbox: i, text: "\(i) is already prepared in this store — nothing to do")) }
-                else { todo.append(i) }
+                if ready {
+                    emit(HostEvent(kind: .note, sandbox: i, text: "\(i) is already prepared in this store — nothing to do"))
+                    await freshen(i, update: true)
+                } else { todo.append(i) }
             }
             preps = try todo.map { try preparation(for: $0, requestedBy: who) }
         }

@@ -81,6 +81,29 @@ store's last successful preparation of the same image (`<store>/preparations.jso
 time): "usually ~37 s" for the step under way and "about 2 min left" overall. The first time there
 is nothing to go on, and it says so: "first time: no estimate yet".
 
+**Agent versions: latest by default.** The claude-code and pi images install their agent at one
+exact version. Which one is the setting `images.claude_code_version` (and `images.pi_version`):
+`latest` — the default — or an exact version such as `2.1.227`.
+
+- **`latest` is resolved when the image is prepared**, never while a sandbox runs: the host asks
+  the npm registry for the package's latest version and its sha512 integrity, and the bake installs
+  THAT version, integrity-checked. The preparation's step says so — `npm install
+  @anthropic-ai/claude-code@2.1.285 (latest, resolved now)` — and the version is part of the image
+  (and of its bake key): an image is always one exact version.
+- **Nobody waits for a newer version.** `doz onboard`, the wizard, `doz image bake`, `doz create`
+  and a first start ask the registry (one small request, remembered for an hour in
+  `<store>/agent-versions.json`). When the prepared image is behind, a **new preparation starts in
+  the background** (Operations shows it); the sandbox being created now uses the image already
+  prepared, and the next one gets the new version. `doz image ls` and the Images page say
+  `claude-code 2.1.227 (2.1.285 available — preparing)`, then `claude-code 2.1.285 (latest)`.
+- **Offline:** the registry not answering is noted in `host.log` and the image already prepared is
+  used. `latest` with no network and **no image yet** fails, saying so — set an exact version
+  (`doz config set images.claude_code_version 2.1.227`). An exact version this store knows (the
+  built-in one, or one it prepared or resolved before) always works without asking.
+- **A sandbox keeps its version.** Its root disk is the image it was created from; `doz reset NAME`
+  gives it the image's current version (and a fresh root disk). Inside a sandbox Claude Code never
+  updates itself (`DISABLE_AUTOUPDATER=1`, `DISABLE_UPDATES=1` in its sessions).
+
 ## Projects: `doz init` and `doz_project.yaml`
 
 ```bash
@@ -555,7 +578,8 @@ when taken — and its workspace: **Shared folder** `~/Developer/dozer-sandbox-p
 default, made when it does not exist, typed, pasted or picked with **Choose…** (the Mac's own folder
 picker) — or **Isolated**) **→ Done**. The settings file
 and your prompt template are written only when missing. The wizard is always reachable again from
-**Doctor › Run onboarding again**, and **Operations** lists the host's image preparations whoever
+**Onboarding** in the navigation (with a dot beside it until the store is onboarded) or **Doctor ›
+Run onboarding again**, and **Operations** lists the host's image preparations whoever
 started them (`doz onboard` in a terminal too); the badge counts them while they run.
 
 **The navigation.** **Sandboxes** opens the table of every sandbox; under it, each sandbox has its
@@ -578,7 +602,8 @@ What you can do from it:
 | **Sandboxes** | New sandbox (image or template, network, account, CPUs, memory, workspace folder). Per sandbox: start, pause, resume, sleep, hibernate, wake, shut down, reset, remove. |
 | **A sandbox** | The lifecycle; browser terminals; Open in Terminal; run a command in a new detached session; take a restore point, and revert, fork, save as a template, duplicate or delete one; **Duplicate…** and **Save as template…** (below); edit the network policy, with a preview of exactly what changes; set the key policy and the account; remove a key. |
 | **All sessions** | A live, read-only view of every session of every running sandbox (below). |
-| **Images** | Bake a built-in image; remove an image or a template. **Lineage** shows the tree. |
+| **Images** | Bake a built-in image; remove an image or a template. **Version** says an agent image's version (and a newer one available, and being prepared). **Lineage** shows the tree. |
+| **Onboarding** | The setup wizard again (a dot beside it until this store is onboarded) — the same as Doctor › Run onboarding again. |
 | **Operations** | Every action this UI started, newest first, with its live progress, how long it took and its result; filter by sandbox. |
 | **Accounts & keys** | Make an account the default; verify one; remove one; keep-alive on or off. |
 | **Metrics** | Filter by image, time and steps; download the rows as CSV. |
@@ -731,6 +756,7 @@ the others say when they apply (the next sandbox created, the next session, or a
 | `[store]` | `path` (`--store`, `$DOZ_STORE`) |
 | `[claude]` | `permissions` (`skip` · `ask`) — Claude Code's own prompts in a claude-code sandbox; `-e DOZ_CLAUDE_PERMISSIONS=…` on `run`/`exec` still wins |
 | `[defaults]` | `cpus` (2), `nat_subnet` (a free one; `$DOZ_SUBNET`) |
+| `[images]` | `claude_code_version`, `pi_version` (`latest`, or an exact version like `2.1.227` — see "Agent versions" below) |
 | `[images.lab]` · `[images.claude-code]` · `[images.pi]` | `memory_mib` (1024 · 2048 · 2048), `network` (`bake` · `agent` · `agent`) — a custom image follows the image it was saved from |
 | `[kernel]` | `path` (`$DOZ_KERNEL`), `cache` (`$DOZ_KERNEL_CACHE`) |
 

@@ -60,7 +60,10 @@ A session survives hibernation because it lives inside the guest (deckhold), not
 
 No Dockerfile: ``ImageSpec`` (base digest + ``BakeStep``s + ``VerifyCheck``) describes a bake,
 ``ImageBaker`` runs it once and caches the result, and ``AgentImages`` has the two built-in agent
-image specs (`claudeCode`, `pi`). ``StoreLayout`` resolves every image key to its disk on disk;
+image specs (`claudeCode`, `pi` — at their built-in pins; `claudeCode(_:)` / `pi(_:)` make one at
+any ``AgentRelease``: an exact version and the registry's sha512 integrity, installed and checked
+in the bake). An agent spec records its ``AgentPackage`` (package and version), so the version is
+part of the bake key: a spec is always one exact version. ``StoreLayout`` resolves every image key to its disk on disk;
 ``RestorePoint`` and ``CustomImage`` are instant APFS-clone snapshots you can revert to, fork from,
 or save as a new image.
 

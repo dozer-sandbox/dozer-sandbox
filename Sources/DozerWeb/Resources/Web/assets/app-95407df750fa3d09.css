@@ -267,6 +267,7 @@ nav a.active .ph-dot { box-shadow: 0 0 0 1.5px var(--bg); }
 .nav-badge { display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; font-variant-numeric: tabular-nums; background: var(--bar); color: var(--ink); border-radius: 999px; padding: 0 7px; }
 .nav-badge[hidden], .nav-alert[hidden] { display: none; }
 .nav-alert { width: 8px; height: 8px; border-radius: 50%; background: var(--fail); margin-left: auto; }
+.nav-alert.nav-todo { background: var(--accent); }
 .mini-spin { width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--accent); border-top-color: transparent; animation: tc-spin 0.9s linear infinite; display: inline-block; }
 .op-row.op-failed .op-text, .op-row.op-failed .op-state { color: var(--fail); }
 .op-row.op-done .op-state { color: var(--run); }
@@ -477,6 +478,7 @@ ul.prep-steps .prep-done-transfer { color: var(--muted); }
 .ops-preps td.op-action { white-space: nowrap; }
 .prompt-panel { padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; font-size: 13px; }
 .no-ws { font-size: 12px; }
+.tag.ver-available { margin-left: 6px; background: color-mix(in srgb, var(--run) 16%, transparent); color: var(--run); }
 /* 594: the workspace chooser — Shared folder | Isolated; the path, Choose…, what the host says. */
 .ws-field .segmented { align-self: flex-start; }
 .ws-shared { display: flex; flex-direction: column; gap: 4px; }

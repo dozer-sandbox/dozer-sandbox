@@ -60,8 +60,14 @@ detaches — it goes on. Try it:
 
 ```bash
 doz onboard --status               # joins it again: the same progress, from where it is
-doz image ls                       # claude-code: ready, once it is done
+doz image ls                       # claude-code 2.1.285 (latest), once it is done
 ```
+
+The Claude Code installed is the **latest** one, asked of the npm registry while the image is
+prepared, then installed at that exact version (integrity-checked). When a newer one comes out, the
+next `doz create` or `doz up` still starts at once on the image you have, and the newer version is
+prepared in the background for the sandbox after it. For a fixed version:
+`doz config set images.claude_code_version 2.1.227`.
 
 (`doz onboard --cancel` would stop it.) A `doz up` of that image meanwhile would *join* the same
 preparation — one download, one bake. Re-running `doz onboard` later is safe: it prepares only what
@@ -261,7 +267,8 @@ shows it) → First sandbox (a name, an image and a workspace folder typed or pa
 pick a local folder for the host) → Done. The account
 step takes an API key or a setup token in a masked field (sent once, stored as `doz account add`
 stores it, and cleared from the page) — or, with `doz config set ui.allow_secret_entry false`, shows
-the CLI command instead. Afterwards the wizard is always under **Doctor › Run onboarding again**.
+the CLI command instead. Afterwards the wizard is always under **Onboarding** in the navigation (a
+dot marks it until setup is done), or **Doctor › Run onboarding again**.
 
 Try **Continue in the background**, then open the new sandbox's page while the image still prepares:
 its Start joins the same preparation. A sandbox's page shows its **Environment prompt** and whether

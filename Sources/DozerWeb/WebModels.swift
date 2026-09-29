@@ -514,6 +514,14 @@ public struct WebImage: Codable, Equatable, Sendable {
     public var fromSandbox: String?
     /// 594: prepared for this build (a built-in image).
     public var current: Bool?
+    /// 594: an agent image's version (the one a new sandbox gets), its setting, the registry's latest,
+    /// a newer version available and whether it is being prepared, and the line saying all that.
+    public var version: String?
+    public var versionSetting: String?
+    public var latest: String?
+    public var available: String?
+    public var preparing: Bool?
+    public var versionLine: String?
 
     public init(_ r: ImageRow) {
         name = r.name
@@ -525,6 +533,12 @@ public struct WebImage: Codable, Equatable, Sendable {
         note = r.note
         fromSandbox = r.fromSandbox
         current = r.current
+        version = r.version
+        versionSetting = r.versionSetting
+        latest = r.latest
+        available = r.available
+        preparing = r.preparing
+        versionLine = r.versionLine
     }
 }
 

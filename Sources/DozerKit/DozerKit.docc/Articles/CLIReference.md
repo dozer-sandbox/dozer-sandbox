@@ -258,7 +258,8 @@ doz point rm NAME POINT
 doz point save-image NAME [POINT] --as myimage [--note …]    # a custom image (a template)
 doz up other --image myimage
 
-doz image ls                   # built-in images and templates, and whether each is baked here (for this build)
+doz image ls                   # built-in images and templates, whether each is baked here (for this build),
+                               # and an agent image's version: claude-code 2.1.227 (2.1.285 available — preparing)
 doz image ls --tree            # the lineage: OCI base → image → template → sandboxes, with sizes
 doz image bake claude-code     # prepare it now (joins a preparation already running; minutes, needs network)
 doz image rm NAME              # sandboxes already made from it keep working
@@ -266,6 +267,16 @@ doz image rm NAME              # sandboxes already made from it keep working
 
 `image pull` / `push` answer "not yet" (exit 7). `image ls --tree` shows each disk's size, the
 bytes it shares with its parent (APFS clones) and its own (what removing it frees).
+
+**Agent versions.** `images.claude_code_version` and `images.pi_version` are `latest` (the default)
+or an exact version. `latest` is resolved when the image is PREPARED — one npm registry lookup
+(remembered for an hour, `<store>/agent-versions.json`) for the version and its sha512 integrity;
+the bake installs that exact version, integrity-checked, and the version is in the image spec and
+its bake key. A create or a first start uses the image already prepared; when the registry has a
+newer one, it is prepared in the background (Operations shows it) for the next sandbox. Offline, the
+prepared image is used; `latest` with no image and no network fails, naming an exact version to set.
+A sandbox keeps its root disk: `doz reset NAME` moves it to the image's current version. Claude Code
+never updates itself inside a sandbox (`DISABLE_AUTOUPDATER`, `DISABLE_UPDATES`).
 
 ### Templates and duplicates
 
@@ -323,7 +334,8 @@ command, so it can't do anything the CLI can't.
 
 A store that was never onboarded opens on the **setup wizard** — Welcome, Checks, Claude account,
 Images, Preparing, First sandbox, Done — the same steps as `doz onboard` (always reachable again from
-**Doctor › Run onboarding again**). Preparing runs in the host: **Continue in the background** leaves
+**Onboarding** in the navigation — marked with a dot until the store is onboarded — or **Doctor ›
+Run onboarding again**). Preparing runs in the host: **Continue in the background** leaves
 it running, and **Operations** lists the host's image preparations whoever started them (the CLI
 too). A sandbox's page shows its environment prompt as the next session gets it, and whether
 `/workspace` is shared (or the **isolated** badge). New sandbox, Duplicate and the wizard's First
