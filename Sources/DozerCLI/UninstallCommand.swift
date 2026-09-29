@@ -36,13 +36,14 @@ struct Uninstall: AsyncParsableCommand {
     /// The installation this executable belongs to, when it is one `make install-cli` made:
     /// `<prefix>/libexec/doz/doz` (and `<prefix>/bin/doz` when it links there).
     static func installation(executable: String = HostLauncher.executablePath) -> (libexec: URL, link: URL?)? {
-        let exe = URL(fileURLWithPath: executable).standardizedFileURL
+        let exe = URL(fileURLWithPath: executable).resolvingSymlinksInPath()
         let libexec = exe.deletingLastPathComponent()
         guard exe.lastPathComponent == "doz", libexec.lastPathComponent == "doz", libexec.deletingLastPathComponent().lastPathComponent == "libexec" else { return nil }
         let prefix = libexec.deletingLastPathComponent().deletingLastPathComponent()
         let link = prefix.appendingPathComponent("bin/doz")
+        // The link counts only when it leads to this very executable (paths compared resolved: /tmp is /private/tmp).
         let target = (try? FileManager.default.destinationOfSymbolicLink(atPath: link.path)).map {
-            URL(fileURLWithPath: $0, relativeTo: link.deletingLastPathComponent()).standardizedFileURL.path
+            URL(fileURLWithPath: $0, relativeTo: link.deletingLastPathComponent()).resolvingSymlinksInPath().path
         }
         return (libexec, target == exe.path ? link : nil)
     }

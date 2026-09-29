@@ -56,8 +56,11 @@ public enum Onboarding {
     ]
 
     /// What every first preparation needs besides the images: the kernel archive (downloaded, then
-    /// only its kernel kept), the guest init disk, and the node base (flattened once, shared).
-    public static let commonBytes: Int64 = 1_200 << 20
+    /// only its kernel kept) and the guest init disk.
+    public static let commonBytes: Int64 = 700 << 20
+    /// The agent images' shared Debian node base (pulled and flattened once, for claude-code and pi).
+    public static let nodeBaseBytes: Int64 = 500 << 20
+    public static let nodeBaseImages: Set<String> = ["claude-code", "pi"]
     /// Room left over after the images, so a first sandbox still fits.
     public static let headroomBytes: Int64 = 2 << 30
 
@@ -72,7 +75,8 @@ public enum Onboarding {
     public static func requiredBytes(_ chosen: [String], prepared: Set<String>) -> Int64 {
         let todo = chosen.filter { !prepared.contains($0) }
         guard !todo.isEmpty else { return 0 }
-        return commonBytes + headroomBytes + todo.reduce(0) { sum, n in sum + (images.first { $0.name == n }?.bytes ?? 0) }
+        let base = todo.contains(where: nodeBaseImages.contains) ? nodeBaseBytes : 0
+        return commonBytes + base + headroomBytes + todo.reduce(0) { sum, n in sum + (images.first { $0.name == n }?.bytes ?? 0) }
     }
 
     /// The volume a store is (or will be) on: its nearest existing directory's format and free space.

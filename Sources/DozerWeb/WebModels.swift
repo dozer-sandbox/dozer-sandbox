@@ -369,6 +369,8 @@ public struct WebOnboarding: Codable, Equatable, Sendable {
     public var blocked: Bool
     public var freeBytes: Int64?
     public var commonBytes: Int64
+    /// The agent images' shared base, counted once when claude-code or pi is chosen.
+    public var nodeBaseBytes: Int64
     public var headroomBytes: Int64
     public var macSignedIn: Bool
     public var accountOptions: [AccountOption]
@@ -391,6 +393,7 @@ public struct WebOnboarding: Codable, Equatable, Sendable {
         blocked = checks.contains { $0.blocks && $0.check != "disk" }
         self.freeBytes = freeBytes
         commonBytes = Onboarding.commonBytes
+        nodeBaseBytes = Onboarding.nodeBaseBytes
         headroomBytes = Onboarding.headroomBytes
         self.macSignedIn = macSignedIn
         let (options, preferred) = Onboarding.accountOptions(macSignedIn: macSignedIn)

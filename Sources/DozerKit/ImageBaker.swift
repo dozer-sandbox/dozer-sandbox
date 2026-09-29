@@ -339,6 +339,8 @@ public struct ImageBaker: Sendable {
             }
             let netEnv = proxy?.guestEnvironment ?? [:]
             for step in imageSpec.steps {
+                // 594: a cancelled preparation stops between steps (the one under way runs to its end).
+                try Task.checkCancellation()
                 // 593: the step's own output, live — a tail of it, as inert text, at most 4 lines a second.
                 let tail = OutputTail { events(.output($0)) }
                 let r = try await timed("step: \(step.name)") {
@@ -376,9 +378,11 @@ public struct ImageBaker: Sendable {
             trimmed = max(0, before - Self.sizes(root).allocated)
             events(.note("fstrim: \((tr.output + tr.errorOutput).trimmingCharacters(in: .whitespacesAndNewlines)) — \(Self.mib(trimmed)) MiB returned to the Mac"))
         } catch {
-            try? await c.stop()
-            try? mgr.delete(id)
-            events(.note("bake of \(imageSpec.name) FAILED: \(error.localizedDescription) — nothing was cached"))
+            // 594: in a task of its own — a CANCELLED bake (its preparation was cancelled) must still
+            // stop its VM cleanly; calls made in the cancelled task could refuse to run.
+            let cm = mgr
+            await Task { var m = cm; try? await c.stop(); try? m.delete(id) }.value
+            events(.note("bake of \(imageSpec.name) \(error is CancellationError ? "cancelled" : "FAILED: \(error.localizedDescription)") — nothing was cached"))
             throw error
         }
 

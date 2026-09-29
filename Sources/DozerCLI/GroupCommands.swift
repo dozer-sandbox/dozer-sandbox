@@ -27,7 +27,10 @@ struct ImageList: AsyncParsableCommand {
         if g.json { Out.json(rows); return }
         var t = [["IMAGE", "KIND", "BAKED", "SIZE", "NOTE"]]
         for r in rows {
-            t.append([r.name, r.kind, r.baked ? (r.bakedAt.map { $0.formatted(date: .abbreviated, time: .shortened) } ?? "yes") : "no (bakes on first start)",
+            // 594: a bake of an older build's key is not this build's image (the next start bakes again).
+            let baked = r.baked && r.current == false ? "an older build's — prepared again when next needed"
+                : r.baked ? (r.bakedAt.map { $0.formatted(date: .abbreviated, time: .shortened) } ?? "yes") : "no (prepared on first start, or doz onboard)"
+            t.append([r.name, r.kind, baked,
                       r.allocatedBytes.map(DozerImages.formatBytes) ?? "—", [r.note, r.fromSandbox.map { "from \($0)" }].compactMap { $0 }.joined(separator: " · ")])
         }
         Out.stdout(Out.table(t))

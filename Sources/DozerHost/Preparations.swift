@@ -371,7 +371,8 @@ extension HostCore {
             }
             for _ in 0..<8 { await Task.yield() }
         } catch {
-            if spec.imageSpec == nil { try? await sb.delete() }
+            // In a task of its own: a cancelled preparation still stops the lab's throwaway VM cleanly.
+            if spec.imageSpec == nil { await Task { try? await sb.delete() }.value }
             try? FileManager.default.removeItem(at: store.layout(tmpName).sandboxDirectory)
             for _ in 0..<8 { await Task.yield() }
             throw error

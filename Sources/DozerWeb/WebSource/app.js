@@ -288,7 +288,7 @@ function preparationsSection() {
     h('td', { class: 'op-text' }, prepProgressText(p)),
     h('td', null, prepRunning(p) && p.state !== 'cancelling'
       ? btn('Cancel preparation', () => act({ action: 'prepare-cancel', images: [p.image] }), { small: true, danger: true }) : null)));
-  return h('div', null, h('h2', null, 'Image preparations (in the host)'),
+  return h('div', { class: 'ops-preps' }, h('h2', null, 'Image preparations (in the host)'),
     h('p', { class: 'sub' }, 'The kernel, the base image and the bake of a built-in image — asked for by doz onboard, the onboarding wizard, doz image bake or a first start. One per image at a time; whoever asks next joins it.'),
     panel(table(['', 'Image', 'Asked by', 'Started', 'Took', 'Progress', ''], rows, [4])));
 }
@@ -1440,7 +1440,8 @@ function wizDiskNeed() {
   const d = state.wiz.data;
   const todo = d.images.filter((i) => state.wiz.images.has(i.name) && !i.prepared);
   if (!todo.length) return 0;
-  return d.commonBytes + d.headroomBytes + todo.reduce((s, i) => s + i.diskBytes, 0);
+  const base = todo.some((i) => i.name === 'claude-code' || i.name === 'pi') ? d.nodeBaseBytes : 0;
+  return d.commonBytes + base + d.headroomBytes + todo.reduce((s, i) => s + i.diskBytes, 0);
 }
 function wizardNode() {
   const w = state.wiz, d = w.data;

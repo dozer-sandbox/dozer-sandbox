@@ -414,7 +414,7 @@ final class OnboardingTests: XCTestCase {
         FileManager.default.createFile(atPath: exe.path, contents: Data("x".utf8))
         try FileManager.default.createSymbolicLink(atPath: prefix.appendingPathComponent("bin/doz").path, withDestinationPath: exe.path)
         let inst = try XCTUnwrap(Uninstall.installation(executable: exe.path))
-        XCTAssertEqual(inst.libexec.path, libexec.standardizedFileURL.path)
+        XCTAssertEqual(inst.libexec.path, libexec.resolvingSymlinksInPath().path)
         XCTAssertEqual(inst.link?.lastPathComponent, "doz")
         XCTAssertNil(Uninstall.installation(executable: "/x/.build/debug/doz"), "a build is not an installation")
         // A store: empty, or with a store's own entries — never an arbitrary folder.

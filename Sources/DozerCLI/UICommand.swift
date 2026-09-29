@@ -74,11 +74,14 @@ struct UIServe: AsyncParsableCommand {
         do { assets = try WebAssets.load() } catch {
             throw fail(HostError(.failed, "the web UI's resources are missing or altered (\(error)) — \(WebAssets.bundleName) must sit beside the doz executable (make install-cli copies it)"), g)
         }
+        // 594: a TEST seam (the headless-browser probes): the UI then never looks at the Mac's Claude
+        // Code login (no keychain read, no `claude --version`) — the wizard shows "not signed in".
+        let probeClaude = ProcessInfo.processInfo.environment["DOZ_TEST_NO_MAC_LOGIN"] != "1"
         let data = HostWebData(store: store, version: DozerCommand.version, macLogin: {
             // 594: the onboarding wizard's account step — is Claude Code signed in on this Mac (read-only).
-            ClaudeLoginStatus.check(configDir: nil, keychain: SystemKeychain(), probeBinary: false).state == .signedIn
+            probeClaude && ClaudeLoginStatus.check(configDir: nil, keychain: SystemKeychain(), probeBinary: false).state == .signedIn
         }) {
-            Doctor.checks(store: store).map { WebDoctorCheck(check: $0.check, status: $0.status.rawValue, detail: $0.detail) }
+            Doctor.checks(store: store, claude: probeClaude).map { WebDoctorCheck(check: $0.check, status: $0.status.rawValue, detail: $0.detail) }
         }
         let server: DozerWebServer
         // 591: the Settings page edits the settings file this process's environment names.

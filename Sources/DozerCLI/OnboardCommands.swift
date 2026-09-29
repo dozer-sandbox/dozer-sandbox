@@ -107,9 +107,12 @@ struct OnboardingFlow {
 
         // 5. The preparation (D3): in the host; Ctrl-C detaches.
         var result: PrepareResult?
-        if chosen.isEmpty {
+        let todo = chosen.filter { !prepared.contains($0) }
+        if chosen.isEmpty || todo.isEmpty {
+            if !chosen.isEmpty { say("\n5. \(chosen.joined(separator: ", ")) already prepared in this store — nothing to do") }
             var r = HostRequest(.onboard)
-            r.images = []
+            r.images = chosen
+            r.requestedBy = "doz onboard"
             result = try decode(try call(r, g), PrepareResult.self, g)
         } else {
             say("\n5. Preparing \(chosen.joined(separator: ", ")) in the host — Ctrl-C detaches (it goes on): doz onboard --status watches it, --cancel stops it")
