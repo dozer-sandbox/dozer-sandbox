@@ -307,15 +307,15 @@
       "serve": "icon"
     },
     {
-      "file": "memory-stick.svg",
-      "fromTarball": "package/icons/memory-stick.svg",
-      "sha256": "77aebe6f4187a0cceceafa70b04b5727c0442940b61e18abb4985316e9c09f77",
+      "file": "cpu.svg",
+      "fromTarball": "package/icons/cpu.svg",
+      "sha256": "87050f03a1bd4a9879c55aa717b58549cb52a9a26b59baca753c5f236d1480ec",
       "serve": "icon"
     },
     {
-      "file": "hard-drive.svg",
-      "fromTarball": "package/icons/hard-drive.svg",
-      "sha256": "8598aea148ae983795a783f29c68230633d402c8c06b7a4c747fe2437555dd0c",
+      "file": "cylinder.svg",
+      "fromTarball": "package/icons/cylinder.svg",
+      "sha256": "f75fb884d773162479e2e4270337e6fd778f85081a2631fdfd701bbbecb93d00",
       "serve": "icon"
     },
     {

@@ -63,7 +63,7 @@ const ICON_FALLBACK = 'circle-dot';
 /// 593 (owner): Sleep and Hibernate are told apart by a second glyph — Sleep keeps the machine in
 /// memory (a CPU), Hibernate frees it and keeps the state on disk (a cylinder — storage). Used
 /// wherever those states show.
-const ICON_SLEEP = 'moon+memory-stick', ICON_HIBERNATE = 'moon+hard-drive';
+const ICON_SLEEP = 'moon+cpu', ICON_HIBERNATE = 'moon+cylinder';
 /// A phase (or a cover's kind) → its glyph, where it has one.
 const PHASE_GLYPH = { paused: 'pause', asleep: ICON_SLEEP, hibernated: ICON_HIBERNATE, off: 'power', shutDown: 'power' };
 /// An operation's action → its glyph (the lifecycle verbs; the rest have none).
