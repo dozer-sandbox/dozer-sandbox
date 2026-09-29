@@ -55,6 +55,8 @@ public actor HostCore {
         /// When a session last started a program (hibernating lets it settle first — 583).
         var lastSessionOpen: ContinuousClock.Instant?
         var sessionRows: [String: Int64] = [:]
+        /// 593: the boot being recorded (a cold boot, a wake, a restore after a crash), if one is.
+        var boot: BootRecorder?
         init(sandbox: Sandbox, config: SandboxConfig) {
             self.sandbox = sandbox
             self.config = config
@@ -176,7 +178,9 @@ public actor HostCore {
                 let row = beginAction(m, "restore after crash", phaseBefore: "asleep")
                 let t0 = ContinuousClock.now
                 do {
-                    try await m.sandbox.wake()
+                    beginBoot(m, kind: "restore after crash")
+                    do { try await m.sandbox.wake() } catch { await endBoot(m, error: error); throw error }
+                    await endBoot(m, error: nil)
                     try await m.sandbox.sleep()
                     finishAction(m, row, t0, ok: true)
                     note(m.name, "restored and asleep again, sessions where they were")
@@ -193,8 +197,10 @@ public actor HostCore {
                 try? p.write(to: layout.persistedState)
                 m.config.diedWithHostAt = Date()
                 try? m.config.write(store.configFile(m.name))
-                // 593 §9: its sessions died too — each saved screen (the last periodic one) is its last.
-                SavedScreens.markEnded(layout)
+                // 593 (owner, 2026-09-30): its sessions died too — a shut-down sandbox shows no session
+                // screens and has no panes: its saved screens and its terminal layout are deleted.
+                SavedScreens.remove(layout)
+                try? TerminalLayout.write(nil, store, m.name)
                 note(m.name, "was running when the previous host died — its programs are gone; the next start checks its disk (e2fsck)")
                 metrics?.record(run: metricsRun, action: "died with host", sandbox: m.name, image: m.config.image,
                                 phaseBefore: "running", phaseAfter: "off", startedAt: Date(), durationMs: nil, ok: false)
@@ -216,6 +222,7 @@ public actor HostCore {
 
     private func handleEvent(_ name: String, _ e: SandboxEvent) {
         if let he = HostEvent(e, sandbox: name) {
+            managed[name]?.boot?.record(he)
             hub.yield(he)
             if he.kind != .progress, he.kind != .output { HostLog.line(he.line) }   // 593: a bake's output is live only
         }
@@ -247,6 +254,55 @@ public actor HostCore {
             metrics.addNetwork(run: metricsRun, sandbox: name, minute: minute, allowed: b.allowed, denied: b.denied,
                                failed: b.failed, bytesUp: b.up, bytesDown: b.down)
         }
+    }
+
+    // MARK: boot logs (593, owner 2026-09-30)
+
+    /// Start recording a boot of `m` (`cold boot`, `wake`, `restore after crash`).
+    func beginBoot(_ m: Managed, kind: String) {
+        guard !readOnly else { return }
+        m.boot = BootRecorder(kind: kind, bootLog: m.sandbox.bootLogURL)
+    }
+
+    /// The boot is over: keep it (its events, its console, how it went), then the newest
+    /// `host.boot_logs_kept`. The sandbox's event stream is drained a little first (its events reach the
+    /// actor asynchronously). Never fails the operation.
+    func endBoot(_ m: Managed, error: Error?) async {
+        guard let rec = m.boot else { return }
+        for _ in 0..<8 { await Task.yield() }
+        try? await Task.sleep(for: .milliseconds(50))
+        m.boot = nil
+        let console = rec.console(m.sandbox.bootLogURL)
+        let info = rec.info(result: error == nil ? "ok" : "failed", error: error.map { explain($0).message }, console: console.count)
+        let keep = DozerSettings.load().int(SettingKey.bootLogsKept)
+        do { try BootLogs.write(m.sandbox.layout, info: info, events: rec.snapshot, console: console, keep: keep) } catch {
+            note(m.name, "could not keep the boot log: \(error.localizedDescription)")
+        }
+    }
+
+    /// `boot-log`: the kept boots (newest first) — with, from the host, the one under way as number 1.
+    func bootLog(_ r: HostRequest) throws -> JSONValue {
+        let m = try get(r.name)
+        let layout = m.sandbox.layout
+        let live = m.boot
+        var boots = BootLogs.list(layout)
+        if let live { boots.insert(live.info(result: "running", error: nil, console: live.console(m.sandbox.bootLogURL).count), at: 0) }
+        for i in boots.indices { boots[i].number = i + 1 }
+        if r.list == true { return try JSONValue(encoding: BootLogList(name: m.name, boots: boots)) }
+        let n = r.boot ?? 1
+        guard n >= 1, n <= boots.count else {
+            throw HostError(.notFound, boots.isEmpty ? "no boot of \(m.name) is kept yet — one is recorded each time it starts or wakes"
+                                                     : "no boot \(n) of \(m.name): \(boots.count) kept (doz console \(m.name) --list)")
+        }
+        if n == 1, let live {
+            let console = BootLogs.consoleLines(live.console(m.sandbox.bootLogURL))
+            return try JSONValue(encoding: BootLogRecord(name: m.name, info: boots[0], events: live.snapshot, console: console))
+        }
+        guard var rec = BootLogs.read(layout, name: m.name, number: live == nil ? n : n - 1) else {
+            throw HostError(.notFound, "boot \(n) of \(m.name) could not be read")
+        }
+        rec.info.number = n
+        return try JSONValue(encoding: rec)
     }
 
     private func beginAction(_ m: Managed, _ action: String, phaseBefore: String) -> Int64? {
@@ -428,10 +484,16 @@ public actor HostCore {
             let m = try get(r.name)
             guard let s = r.session else { throw HostError(.invalid, "which session? (doz sessions \(m.name) --screen SESSION)") }
             try GuestCommand.validateSessionName(s)
+            let phase = await effectivePhase(m)
+            guard phase == .running || Self.wakeable(phase) else {
+                throw HostError(.notFound, "\(m.name) is \(PhaseName.label(phase)) — it has no sessions (Start boots it fresh, with new ones)")
+            }
             guard let saved = SavedScreens.read(m.sandbox.layout, session: s) else {
-                throw HostError(.notFound, "no saved screen of \(s) in \(m.name) — screens are saved when it pauses, sleeps, hibernates or shuts down, and every few minutes while it runs")
+                throw HostError(.notFound, "no saved screen of \(s) in \(m.name) — screens are saved when it pauses, sleeps or hibernates, and every few minutes while it runs")
             }
             return try JSONValue(encoding: SessionScreen(name: m.name, saved))
+        case .bootLog:
+            return try bootLog(r)
         case .terminalLayout:
             let m = try get(r.name)
             guard let l = TerminalLayout.read(store, m.name) else { return .null }
@@ -706,20 +768,25 @@ public actor HostCore {
         let name = m.name
         let forward = Task { for await e in stream { if let he = HostEvent(e, sandbox: name) { emit(he) } } }
         let row = beginAction(m, action.label, phaseBefore: before.rawValue)
+        // 593: a start and a wake are BOOTS — kept (steps, console, result) for the Boot log.
+        let bootKind: String? = action.label == "start" ? "cold boot" : action.label == "wake" ? "wake" : nil
+        if let bootKind { beginBoot(m, kind: bootKind) }
         do {
             try await action.body()
         } catch {
+            if bootKind != nil { await endBoot(m, error: error) }
             for _ in 0..<8 { await Task.yield() }
             forward.cancel()
             finishAction(m, row, t0, ok: false, error: error, phaseAfter: (await effectivePhase(m)).rawValue)
             throw error
         }
+        if bootKind != nil { await endBoot(m, error: nil) }
         for _ in 0..<8 { await Task.yield() }
         forward.cancel()
         finishAction(m, row, t0, ok: true, phaseAfter: (await effectivePhase(m)).rawValue)
-        // 593 §9: a reset's sessions are gone with the disk — so are its panes (its saved screens went
-        // with the library's reset).
-        if op == .reset { try? TerminalLayout.write(nil, store, m.name) }
+        // 593 §9: a reset's or a shutdown's sessions are gone — so are its panes (owner, 2026-09-30; the
+        // saved screens went with the library's step).
+        if op == .reset || op == .shutdown { try? TerminalLayout.write(nil, store, m.name) }
         if [.start, .shutdown, .reset].contains(op), m.config.diedWithHostAt != nil {
             m.config.diedWithHostAt = nil
             try? m.config.write(store.configFile(m.name))
@@ -754,10 +821,13 @@ public actor HostCore {
             case .asleep where wake && !busy, .hibernated where wake && !busy:
                 let row = beginAction(m, "wake", phaseBefore: p.rawValue)
                 let t0 = ContinuousClock.now
+                beginBoot(m, kind: "wake")
                 do { try await m.sandbox.wake() } catch {
+                    await endBoot(m, error: error)
                     finishAction(m, row, t0, ok: false, error: error)
                     throw error
                 }
+                await endBoot(m, error: nil)
                 finishAction(m, row, t0, ok: true, phaseAfter: "running", detail: ["trigger": "use"])
                 return
             case .off, .failed:
@@ -830,7 +900,11 @@ public actor HostCore {
     /// the host: this is answered in-process too).
     func sessionRows(_ m: Managed) async throws -> [SessionRow] {
         let saved = m.sandbox.savedScreens()
-        guard await m.sandbox.phase == .running else { return saved.map(SessionRow.init(saved:)) }
+        guard await m.sandbox.phase == .running else {
+            // Only a sandbox one wakes back into has sessions to show (owner, 2026-09-30): shut down,
+            // failed or booting — none.
+            return Self.wakeable(await effectivePhase(m)) ? saved.map(SessionRow.init(saved:)) : []
+        }
         let byName = Dictionary(saved.map { ($0.session, $0) }, uniquingKeysWith: { a, _ in a })
         return try await m.sandbox.sessions().map { s in
             var row = SessionRow(s)
@@ -841,6 +915,9 @@ public actor HostCore {
             return row
         }
     }
+
+    /// The phases one wakes (or resumes) back into — the only ones with saved screens.
+    static func wakeable(_ p: Phase) -> Bool { p == .paused || p == .asleep || p == .hibernated }
 
     /// 593 §9 (S2): the light periodic capture — every `minutes` (the setting
     /// `host.screen_capture_minutes`; 0 = off), each RUNNING sandbox's sessions that wrote something
@@ -988,8 +1065,11 @@ public actor HostCore {
         let i = await info(m, sessions: false)
         var sessions: [SessionRow]?
         if i.phase == Phase.running.rawValue, !i.busy, let list = try? await m.sandbox.sessions() { sessions = list.map(SessionRow.init) }
-        // 593 §9: not running — the sessions as last saved (`saved: true`), from the sandbox's directory.
-        if i.phase != Phase.running.rawValue, case let saved = m.sandbox.savedScreens(), !saved.isEmpty { sessions = saved.map(SessionRow.init(saved:)) }
+        // 593 §9: paused, asleep or hibernated — the sessions as last saved (`saved: true`), from the
+        // sandbox's directory. Shut down: none (owner, 2026-09-30).
+        if let p = Phase(rawValue: i.phase), Self.wakeable(p), case let saved = m.sandbox.savedScreens(), !saved.isEmpty {
+            sessions = saved.map(SessionRow.init(saved:))
+        }
         let status = await m.sandbox.status
         return SandboxDetail(info: i, spec: m.sandbox.spec, policy: m.sandbox.egress?.policy, sessions: sessions,
                              restorePoints: m.sandbox.restorePoints(), credentials: credentials(m),

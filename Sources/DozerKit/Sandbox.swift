@@ -893,13 +893,12 @@ public actor Sandbox {
             case .paused: "pause"
             case .asleep: "sleep"
             case .hibernated: "hibernate"
-            default: "shutdown"
+            default: "capture"               // (the planner captures before those three only)
             }
             _ = await captureScreensLocked(reason: reason, changedOnly: false)
-        case .markScreensEnded:
-            SavedScreens.markEnded(layout)
         case .removeSavedScreens:
-            if !SavedScreens.remove(layout).isEmpty { note("reset: deleted the sessions' saved screens") }
+            // Shut down, reset, remove: the sessions are gone — so are their screens (owner, 2026-09-30).
+            if !SavedScreens.remove(layout).isEmpty { note("deleted the sessions' saved screens (the sessions are gone)") }
         }
         emitStatus()
     }
@@ -1527,8 +1526,8 @@ public actor Sandbox {
 
     /// List the guest's sessions, then attach to each for a moment: its SNAPSHOT (VT) and DUMP (text).
     /// Bounded per session and in all; a failure is logged and keeps the previous file. A saved screen
-    /// of a session the guest no longer has (a previous boot's) is removed; one whose program exited is
-    /// marked ended (its last screen stays).
+    /// of a session the guest no longer runs — gone, or its program exited — is removed (593, owner
+    /// 2026-09-30: only live sessions have a saved screen).
     func captureScreensLocked(reason: String, changedOnly: Bool) async -> ScreenCaptureReport {
         var report = ScreenCaptureReport()
         let t0 = ContinuousClock.now
@@ -1543,19 +1542,10 @@ public actor Sandbox {
             return report
         }
         let saved = Dictionary(SavedScreens.list(layout).map { ($0.session, $0) }, uniquingKeysWith: { a, _ in a })
-        report.removed = SavedScreens.remove(layout, keeping: Set(list.map(\.name)))
-        for s in list.prefix(SavedScreens.maximumSessions) {
-            if s.isEnded {
-                if var i = saved[s.name], !i.ended {
-                    i.ended = true
-                    i.exitCode = s.exitCode
-                    i.endedAt = Date()
-                    try? SavedScreens.update(layout, info: i)
-                }
-                report.ended.append(s.name)
-                continue
-            }
-            if changedOnly, let i = saved[s.name], !i.ended, i.bytesOut == s.bytesOut {
+        report.removed = SavedScreens.remove(layout, keeping: Set(list.filter { !$0.isEnded }.map(\.name)))
+        report.ended = list.filter(\.isEnded).map(\.name)
+        for s in list.filter({ !$0.isEnded }).prefix(SavedScreens.maximumSessions) {
+            if changedOnly, let i = saved[s.name], i.bytesOut == s.bytesOut {
                 report.unchanged.append(s.name)
                 continue
             }
@@ -1566,9 +1556,9 @@ public actor Sandbox {
                     report.failed.append(s.name)
                     continue
                 }
-                if let code = shot.exitCode {
-                    // It ended between the listing and the attach: its last saved screen (if any) stands.
-                    if var i = saved[s.name] { i.ended = true; i.exitCode = code; i.endedAt = Date(); try? SavedScreens.update(layout, info: i) }
+                if shot.exitCode != nil {
+                    // It ended between the listing and the attach: no live session, no saved screen.
+                    SavedScreens.remove(layout, keeping: Set(SavedScreens.list(layout).map(\.session)).subtracting([s.name]))
                     report.ended.append(s.name)
                     continue
                 }

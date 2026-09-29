@@ -75,6 +75,7 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
 | `Sources/DozerHost/ImageTree.swift`; `Sources/DozerCLI/TemplateCommands.swift`; `Sources/doz-vmtest/TemplatesSuite.swift` | 593: the lineage (`image-tree`, built from `DiskAccounting`; `doz image ls --tree`, Images › Lineage); templates (`template-create`) and `duplicate` (`Sandbox.duplicate`); `make test-vm-templates` |
 | `Sources/DozerHost/Preparations.swift`, `Onboarding.swift`, `AgentPrompt.swift`; `Sources/DozerCLI/OnboardCommands.swift`, `ProjectFile.swift`, `Prompting.swift`, `UninstallCommand.swift`; `Sources/doz-vmtest/OnboardingSuite.swift`, `PullBench.swift` | 594: image preparation in the host (single-flight, joined, cancelled) + `onboarded.json`; onboarding's checks / account step / settings-only-when-missing; the agent's environment prompt + the `dozer` skill; `doz onboard`/`init`/`uninstall`, `doz_project.yaml` (Yams), TTY questions; `make test-cli`'s onboarding part (`make test-cli-onboarding`); `make pullbench` (D12) |
 | `Sources/DozerKit/SavedScreens.swift`; `Sources/DozerHost/TerminalLayout.swift`; `Sources/DozerWeb/WebSessionMemory.swift` | 593 §9: the sessions' saved screens (`<sandbox>/screens/NAME.{vt,txt,json}`; the capture is `Sandbox.captureScreensLocked`, the `.captureScreens` step); the web UI's terminal layout kept by the host (`terminal-layout.json`); their web projections and the layout's strict decoder |
+| `Sources/DozerHost/BootLogs.swift`; `Sources/DozerWeb/WebBootLogs.swift` | 593: each sandbox's kept boots (`<sandbox>/boots/`), the recorder, the one renderer; the web's Boot log projections |
 | `Tests/DozerWebTests/` | 590: the security rules one by one, and a real listener driven with raw HTTP |
 | `Tests/DozerKitTests/` | Unit tests — no VM |
 
@@ -488,13 +489,20 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   socket path under 104 bytes) seeded from the vmtest store, each with its own XDG_CONFIG_HOME; the
   wizard probe (`probes/594-*/run-wizard-probe.sh`) a fresh `/tmp/dzw-*` store.
 
-### Session memory and saved screens (593 §9, owner 2026-09-29 — S1–S6)
+### Session memory and saved screens (593 §9, owner 2026-09-29 — S1–S6; amended 2026-09-30)
 
+- **Saved screens exist ONLY for a sandbox one wakes back into** — paused, asleep, hibernated (owner,
+  2026-09-30: "when i shutdown the new sandbox, i should not still see the claude terminal screen").
+  A SHUT-DOWN sandbox shows no session screens anywhere: shutdown, reset, rm and a host that died with
+  the VM (`recoverAfterStart`) DELETE them (`.removeSavedScreens`; the host also clears the terminal
+  layout on shutdown, reset and death), `sessions`/`session-screen`/`inspect` list nothing for it, and
+  the page shows the plain off state (its panes close, none is persisted, no grid tile). There is no
+  "ended" screen: a session whose program exited has none (the next capture removes it).
 - **Screens are saved while the guest can still answer**: `.captureScreens` is the FIRST step of
-  pause, sleep, hibernate and shutdown from RUNNING (planner data — `LifecycleTests`); never from
-  another phase (the guest cannot answer), never before reset/delete (the screens go). It is best
-  effort and bounded (3 s a session, 8 s in all): a failure keeps the previous file and is a note —
-  it never fails or holds up the lifecycle action. Quit = Hibernate captures too.
+  pause, sleep and hibernate from RUNNING (planner data — `LifecycleTests`); never a shutdown, never
+  from another phase (the guest cannot answer). It is best effort and bounded (3 s a session, 8 s in
+  all): a failure keeps the previous file and is a note — it never fails or holds up the lifecycle
+  action. Quit = Hibernate captures too.
 - **A capture is a momentary attach that disturbs nothing**: `deckhold pipe` as a non-terminal
   exec, written `DeckholdFrame.captureRequest` in one go — HELLO **0×0** (keep the session's size:
   no SIGWINCH, no reflow) then DUMP — read until DUMP's answer (then stdin closes and the pipe exits),
@@ -503,16 +511,14 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
 - **Stored as text, not an image**: `NAME.vt` (the SNAPSHOT: VT that redraws the screen, capped at
   2 MiB keeping the newest lines after a soft reset), `NAME.txt` (DUMP's text, every control
   character removed — what the CLI prints) and `NAME.json` (`SavedScreenInfo`). 0600 files in a 0700
-  `screens/`, written atomically, and never into a sandbox directory that is gone. A shutdown marks
-  them ended (`.markScreensEnded`), a host that died with the VM too (`recoverAfterStart`); a later
-  capture drops the screens of sessions the guest no longer has (a previous boot's); reset deletes
-  them (`.removeSavedScreens`), rm with the directory. Duplicate, fork, restore points and templates
-  copy disks BY NAME — never the screens (`SavedScreensTests`).
+  `screens/`, written atomically, and never into a sandbox directory that is gone. A capture drops the
+  screens of sessions the guest no longer runs. Duplicate, fork, restore points and templates copy
+  disks BY NAME — never the screens (`SavedScreensTests`).
 - **The periodic capture** (`host.screen_capture_minutes`, 5; 0 = off; read at host start): each
   running, not-busy sandbox — ONE `deckhold ls`, then an attach only for sessions whose `bytes=`
   moved since their saved screen. It is serialised with the lifecycle (the sandbox's gate).
 - **Looking never wakes**: `sessions` answers from the saved screens (`saved: true`, `savedAt`,
-  `savedReason`) whenever the sandbox is not running — in-process too; `session-screen` (read-only)
+  `savedReason`) while the sandbox is paused, asleep or hibernated — in-process too; `session-screen` (read-only)
   gives one back. The CLI prints the TEXT; `--vt` writes the guest's bytes only when stdout is not a
   terminal.
 - **The layout is the host's** (`terminal-layout.json` beside `doz.json`, `TerminalLayout`: one or
@@ -534,6 +540,24 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   Terminal… dialog (a new shell, or a new session running a command) never attach to a running
   session; a running one is reached through its pane, the empty area's "Open NAME" or Details ›
   Sessions. Split's watch/attach kinds stay: they name the left pane's session explicitly.
+
+### Boot logs (593, owner 2026-09-30 — "where is the bootup terminal output stored…")
+
+- **Every boot is kept** — each Start (`cold boot`), wake (`wake`, also a wake on use) and restore after
+  a crash — by the HOST (`BootRecorder` from `beginBoot` to `endBoot` around the library call in
+  `HostCore`): the sandbox's own host events of that boot (exactly what the boot view draws; never a
+  connection record or a console line), that boot's part of `bootlog.log` (from its size at the start
+  of a wake; all of it for a cold boot, which starts the file afresh), and `BootLogInfo` (started, kind,
+  duration, result, failure). `<sandbox>/boots/b-<epoch ms>/{boot.json,events.jsonl,console.log}`,
+  0700/0600, written atomically (a temporary directory renamed), never into a removed sandbox; the
+  newest `host.boot_logs_kept` (5) are kept. Kept across reset, gone with `rm`, never copied by
+  duplicate/fork/templates. Recording never fails a boot.
+- **One renderer**: `BootLogs.render` replays the events through `ProgressBoard` +
+  `ProgressTerminal.format` — the boot view's finished lines (✓/✗ with times) — then the console made
+  inert (every control character removed). The CLI (`doz console --steps`, plain off a terminal) and
+  the web's Boot log (`GET …/boots`, `GET …/boots/N`, rendered on the server, drawn in the frame's saved
+  mode — read-only, no socket, any phase) use it. `boot-log` is a read-only host op (in-process when no
+  host runs; the host adds the boot under way as number 1).
 
 ### Browser terminals (591, on by default — owner ruling) — design: workspace `changes/591-*/591.01-DESIGN.md`
 
@@ -581,7 +605,8 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
 - **The frame protocol is closed and checked on both sides** (frame.js `valid`, app.js
   `validFrameMessage`): source window, opaque origin, known type, exact fields, typed and capped;
   anything else is dropped and counted. Page → frame: init (mode interactive | watch | saved) / write /
-  paste / focus / keep-scrollback / live (593: saved → interactive | watch only).
+  paste / focus / keep-scrollback / live (593: saved → interactive | watch only) / top (593: a Boot log
+  opens at its first line).
   Frame → page: ready / opened / data / resize / title / paste / paste-too-big / failed / key (593: a
   key on a saved screen, no content).
 - **The frame wraps the engine** (ghostty-web 0.4.0 fails the bar alone): Cmd/Ctrl-clicks dropped and

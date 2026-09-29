@@ -224,20 +224,22 @@ doz up NAME [same options] [--session S] [-d] [-- CMD …]
 | `doz attach NAME [SESSION]` | Your terminal becomes that session. **Ctrl-]** detaches (`--detach-key ctrl-x` or `none`). A paused or sleeping sandbox is woken first (`--no-wake` waits instead). If the sandbox hibernates while you are attached, the client waits and reattaches by itself when it wakes. |
 | `doz run NAME [--session S] [-d] -- CMD …` | Open a **new** session running CMD and attach. It exits with CMD's exit code. There is no shell in front, so write `bash -lc '…'` if you want one. |
 | `doz exec NAME [--user U] [--workdir D] [-e K=V] [--timeout S] -- CMD …` | One-shot, no terminal: stdout, stderr and the exit code pass straight through (default timeout 120 s). On agent images it runs as the agent's user in `/workspace`; `--user root` for root. |
-| `doz sessions NAME [--screen SESSION [--vt]]` | The sandbox's sessions. While it is not running (paused, asleep, hibernated, shut down) they are listed from their **saved screens**, and nothing is woken. `--screen SESSION` prints that session's last saved screen as text; `--vt` writes its terminal bytes instead — to a file or a pipe (`> s.vt`, then `cat s.vt` in a terminal redraws it), never straight to a terminal. |
+| `doz sessions NAME [--screen SESSION [--vt]]` | The sandbox's sessions. While it is paused, asleep or hibernated they are listed from their **saved screens**, and nothing is woken. A shut-down sandbox has none ("no sessions — NAME is shut down"): Start boots it fresh, with new sessions. `--screen SESSION` prints that session's last saved screen as text; `--vt` writes its terminal bytes instead — to a file or a pipe (`> s.vt`, then `cat s.vt` in a terminal redraws it), never straight to a terminal. |
 | `doz ls` · `doz inspect NAME` | Every sandbox: image, phase, RAM held, disk, sessions, network · everything about one, as JSON. |
 
 **RAM held** in `ls` is what the VM costs your Mac right now: the allocation, less what the memory
 balloon handed back after a wake. It is shown as `—` when the sandbox is off or hibernated.
 
-**Saved screens.** Before a sandbox pauses, sleeps, hibernates or shuts down, doz saves the screen of
-each of its sessions — and every `host.screen_capture_minutes` (5) while it runs, for the sessions
-that printed something since, so a crash still leaves a recent copy. Saving is a moment's look at
-the session (it is not resized, nothing is typed), limited to a few seconds, and a screen that
-cannot be saved keeps the previous one — it never holds up the sleep. Each screen is kept as text
-(the terminal's own bytes, and plain text) in the sandbox's directory (`screens/`, readable only by
-you). After a shutdown the last screens stay, marked ended. Reset and remove delete them; duplicate,
-fork and templates never copy them.
+**Saved screens.** Before a sandbox pauses, sleeps or hibernates, doz saves the screen of each of its
+sessions — and every `host.screen_capture_minutes` (5) while it runs, for the sessions that printed
+something since, which is what a sleep or hibernation falls back on. Saving is a moment's look at the
+session (it is not resized, nothing is typed), limited to a few seconds, and a screen that cannot be
+saved keeps the previous one — it never holds up the sleep. Each screen is kept as text (the
+terminal's own bytes, and plain text) in the sandbox's directory (`screens/`, readable only by you).
+Saved screens exist only while you can wake the sandbox back: **shut down, reset, remove — or a host
+that died with the VM — delete them**, and a shut-down sandbox shows no session screens anywhere (its
+sessions ended with the VM; Start boots it fresh). A session whose program exited has none either.
+Duplicate, fork and templates never copy them.
 
 ## Agents and keys
 
@@ -635,17 +637,19 @@ also shows a message).
 
 **A sandbox's panes are remembered** — which terminals it shows, split or not, which session each
 tab shows — by the host, beside the sandbox (not in the browser): after `doz ui` restarts, after a
-reload or in another browser the page shows the same panes, attached. While a sandbox is not running
-its page shows every session as a pane with its **saved screen** (read-only; you can select and copy
+reload or in another browser the page shows the same panes, attached. While a sandbox is paused,
+asleep or hibernated its page shows every session as a pane with its **saved screen** (read-only; you can select and copy
 from it) under "Hibernated 2 h ago — its saved screen · press any key to wake": a key (or Wake)
-wakes it, and each pane becomes the live session in place. It holds no connection until then.
+wakes it, and each pane becomes the live session in place. It holds no connection until then. A
+shut-down sandbox shows none: its page is "Shut down — Starting boots it fresh — new sessions" with
+Start, its Sessions list is empty, and its panes are forgotten.
 **New shell** and **Terminal…** always start a **new** session; a session that already runs is
 opened from its pane, the empty area's "Open NAME", or Details › Sessions.
 
 **All sessions** is a grid: a tile per session of every running sandbox, each a live, read-only
 view (a watch — nothing reaches the session, and it never resizes it), named sandbox · session. A
-sandbox that is not running shows a tile per session with its saved screen (or, with none, one tile
-with its state) and a button (Wake, Resume or Start); it holds no connection, so the grid never
+sandbox that is paused, asleep or hibernated shows a tile per session with its saved screen (a
+shut-down one, or one with none, is one tile with its state) and a button (Wake, Resume or Start); it holds no connection, so the grid never
 keeps the host running for it — woken, its tiles go live in place. Click a tile to open that
 session on its sandbox's page. Filter by sandbox and phase; pick a tile size (`ui.grid_tile_size`).
 Each live tile is a terminal engine and a connection, so only the tiles **on screen** are live, and
@@ -694,7 +698,8 @@ view — the session keeps running, as Ctrl-] does in `doz attach`.
   the start as it happens — doz's timed steps (on a first start, the download and the bake) and
   the kernel's boot console — and then becomes the image's own session in the same pane, with the
   boot log kept in the scrollback. `doz console NAME [--follow]` shows the same console in a
-  terminal. Turn it off with the setting `ui.boot_view_on_start = false`: Start then just starts.
+  terminal; the whole boot is kept afterwards (**Boot log** on the control bar, `doz console NAME
+  --steps` — below). Turn it off with the setting `ui.boot_view_on_start = false`: Start then just starts.
   While a step runs it shows a spinner and its seconds so far, and becomes "✓ step — 1.2 s" (or
   "✗ step — why") when it ends; a first start's image pull shows a bar ("pulling node@1a2b3c4d5e6f
   ██████░░░░ 87 / 142 MB 6.1 MB/s ~9 s (3/5 layers)") and then "pulled … : 142 MB in 23 s"; a bake
@@ -768,7 +773,7 @@ the others say when they apply (the next sandbox created, the next session, or a
 | Section | Settings |
 |---|---|
 | `[ui]` | `boot_view_on_start` (true), `confirm_shutdown` (true), `split_default` (`shell` · `watch` · `attach` · `dialog`), `terminals` (true), `terminal_font_size` (13), `theme` (`auto` · `light` · `dark`), `details_open` (true), `grid_live_tiles` (8, 1–12), `grid_tile_size` (`small` · `medium` · `large`), `progress` (`animated` · `plain`; `$DOZ_PROGRESS`, `--progress auto\|plain`) |
-| `[host]` | `idle_timeout_minutes` (5; `$DOZ_HOST_IDLE`), `screen_capture_minutes` (5, 0–1440; `$DOZ_SCREEN_CAPTURE` — how often a running sandbox's changed session screens are saved; 0 = only at pause, sleep, hibernate and shutdown), `keepalive` (false — for a store that has not chosen with `doz account keepalive`) |
+| `[host]` | `idle_timeout_minutes` (5; `$DOZ_HOST_IDLE`), `boot_logs_kept` (5, 1–50; `$DOZ_BOOT_LOGS` — boots kept per sandbox for `doz console --boot N` and the Boot log), `screen_capture_minutes` (5, 0–1440; `$DOZ_SCREEN_CAPTURE` — how often a running sandbox's changed session screens are saved; 0 = only at pause, sleep and hibernate), `keepalive` (false — for a store that has not chosen with `doz account keepalive`) |
 | `[store]` | `path` (`--store`, `$DOZ_STORE`) |
 | `[claude]` | `permissions` (`skip` · `ask`) — Claude Code's own prompts in a claude-code sandbox; `-e DOZ_CLAUDE_PERMISSIONS=…` on `run`/`exec` still wins |
 | `[defaults]` | `cpus` (2), `nat_subnet` (a free one; `$DOZ_SUBNET`) |
@@ -801,6 +806,17 @@ the others say when they apply (the next sandbox created, the next session, or a
   always plain — nothing is redrawn and no escape sequence is written.
 - `doz console NAME [--follow]` prints the sandbox's boot console (the kernel and init); with
   `--follow` it keeps printing as it boots (the web UI's boot view shows the same lines).
+- **Boot logs.** Every boot of a sandbox — each Start (a cold boot), each wake, a restore after a
+  crash — is kept: doz's timed steps exactly as the boot view showed them, that boot's kernel
+  console, when it started, how long it took and whether it failed (and why). The last
+  `host.boot_logs_kept` (5) are kept per sandbox, in its directory (readable only by you); they stay
+  across a reset and go with `doz rm`.
+  - `doz console NAME --list` — the kept boots: when, what, how long, ✓ or ✗.
+  - `doz console NAME --steps` — the latest boot's steps, then its console; `--boot N` picks an older
+    one (1 = the latest, 2 = the one before …). `--json` gives the record (its events and console).
+  - In the web UI, **Boot log** on a sandbox's control bar shows the same thing, drawn as the boot
+    view drew it — read-only, selectable — with a picker for the kept boots (the latest opens; a
+    failed one says ✕). It works in any phase: nothing is woken.
 - `doz events [NAME]` follows phases and timed steps live. `doz metrics [--csv] [--image X]
   [--days N]` shows every action's count, median, p90, min, max and failures.
 
@@ -835,6 +851,7 @@ is created, and become part of it.
 |---|---|
 | "cannot boot a VM" / entitlement | `doz doctor`. Reinstall with `make install-cli` (it signs). |
 | First start is slow | It is preparing the image, once per store. `doz onboard` (or `doz image bake …`) does it ahead of time; `-v` shows the steps. |
+| A start or wake failed, or the boot scrolled past too fast | `doz console NAME --list`, then `doz console NAME --steps [--boot N]` (or **Boot log** in the web UI): each kept boot's steps (the failing one marked ✗, with why) and its kernel console. |
 | An agent's sessions do not start: "the agent prompt does not render" | A `{{variable}}` not on the list, in `agent-prompt.md` or the sandbox's own prompt. `doz inspect NAME --prompt` names it; or `doz config set agent.prompt false`. |
 | The agent does not know where it runs | `doz inspect NAME --prompt`. A claude-code sandbox from an image baked before 594 lacks the launcher part: `doz reset NAME`. |
 | Start over from nothing | `doz uninstall` (it lists what goes), `make install-cli`, `doz onboard`. |

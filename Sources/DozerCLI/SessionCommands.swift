@@ -66,10 +66,11 @@ struct Sessions: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         abstract: "The sandbox's terminal sessions (they survive pause, sleep and hibernate).",
         discussion: """
-            While the sandbox is not running, its sessions are listed from their saved screens (saved when it \
-            pauses, sleeps, hibernates or shuts down, and every host.screen_capture_minutes while it runs) — \
-            nothing is woken. --screen SESSION prints that session's last saved screen as text; add --vt to \
-            write the terminal bytes instead (to a file or a pipe — never to a terminal).
+            While the sandbox is paused, asleep or hibernated, its sessions are listed from their saved screens \
+            (saved when it pauses, sleeps or hibernates, and every host.screen_capture_minutes while it runs) — \
+            nothing is woken. A shut-down sandbox has no sessions (Start boots it fresh). --screen SESSION \
+            prints that session's last saved screen as text; add --vt to write the terminal bytes instead (to \
+            a file or a pipe — never to a terminal).
             """)
     @OptionGroup var g: GlobalOptions
     @Argument var name: String
@@ -81,13 +82,22 @@ struct Sessions: AsyncParsableCommand {
         if vt { throw fail(HostError(.invalid, "--vt goes with --screen SESSION"), g, code: DozerExit.usage) }
         let rows = try decode(try await query(HostRequest(.sessions, name: name), g), [SessionRow].self, g)
         if g.json { Out.json(rows); return }
-        if rows.isEmpty { Out.stdout("no sessions — doz run \(name) -- CMD, or doz up \(name)\n"); return }
+        if rows.isEmpty {
+            var ls = HostRequest(.ls)
+            ls.withSessions = false
+            let phase = (try? decode(try await query(ls, g), [SandboxInfo].self, g))?.first { $0.name == name }?.phase
+            if phase == Phase.off.rawValue || phase == Phase.failed.rawValue {
+                Out.stdout("no sessions — \(name) is \(phase == Phase.off.rawValue ? "shut down" : "failed") (doz start \(name) boots it fresh, with new sessions)\n")
+            } else {
+                Out.stdout("no sessions — doz run \(name) -- CMD, or doz up \(name)\n")
+            }
+            return
+        }
         var t = [["SESSION", "PID", "SIZE", "CLIENTS", "STATE", "COMMAND"]]
         for s in rows {
             let state: String
             if s.saved == true {
-                let when = s.savedAt.map { " " + Out.ago($0) } ?? ""
-                state = s.ended ? "ended" + (s.exitCode.map { " (exit \($0))" } ?? "") + " · screen saved\(when)" : "screen saved\(when)"
+                state = "screen saved" + (s.savedAt.map { " " + Out.ago($0) } ?? "")
             } else {
                 state = s.ended ? "ended (exit \(s.exitCode.map(String.init) ?? "?"))" : "running"
             }
@@ -113,8 +123,7 @@ struct Sessions: AsyncParsableCommand {
         }
         if g.json { Out.json(s); return }
         let size = s.cols.map { " · \($0)×\(s.rows ?? 0)" } ?? ""
-        let state = s.ended ? " · ended" + (s.exitCode.map { " (exit \($0))" } ?? "") : ""
-        Out.stderr("\(name) · \(s.session) — saved \(Out.ago(s.savedAt)) (\(s.reason))\(size)\(state)\(s.truncated ? " · oldest scrollback dropped" : "")\n")
+        Out.stderr("\(name) · \(s.session) — saved \(Out.ago(s.savedAt)) (\(s.reason))\(size)\(s.truncated ? " · oldest scrollback dropped" : "")\n")
         Out.stdout(s.text.isEmpty ? "" : s.text + "\n")
     }
 }

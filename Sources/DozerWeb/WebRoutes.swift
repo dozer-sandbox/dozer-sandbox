@@ -53,6 +53,9 @@ public enum WebRoute: Equatable, Sendable {
     case sessionScreen(String, String)  // GET  /api/v1/sandboxes/{name}/sessions/{session}/screen
     case terminalLayout(String)         // GET  /api/v1/sandboxes/{name}/layout
     case terminalLayoutSet(String)      // POST /api/v1/sandboxes/{name}/layout  ({split, focusedPane, panes})
+    // 593 — the Boot log (WebBootLogs.swift): the kept boots, and one of them rendered (read-only).
+    case bootLogs(String)               // GET  /api/v1/sandboxes/{name}/boots
+    case bootLog(String, Int)           // GET  /api/v1/sandboxes/{name}/boots/{n}   (1 = the latest; 1–99)
     // 594 — onboarding: the wizard's facts; the settings file + prompt template written only when
     // missing (CSRF, strict {defaultImage, account}); the host's image preparations.
     case onboarding                // GET  /api/v1/onboarding
@@ -144,8 +147,14 @@ public enum WebRoute: Equatable, Sendable {
             case "network": return .sandboxNetwork(rest[1])
             case "terminal-socket": return .terminalSocket(rest[1])
             case "layout": return .terminalLayout(rest[1])
+            case "boots": return .bootLogs(rest[1])
             default: return nil
             }
+        case 4 where rest[0] == "sandboxes" && isSandboxName(rest[1]) && rest[2] == "boots":
+            // 1–99, digits only (no sign, no leading zero).
+            guard (1...2).contains(rest[3].count), rest[3].first != "0", rest[3].allSatisfy({ $0.isASCII && $0.isNumber }),
+                  let n = Int(rest[3]) else { return nil }
+            return .bootLog(rest[1], n)
         case 5 where rest[0] == "sandboxes" && isSandboxName(rest[1]) && rest[2] == "sessions" && isSessionName(rest[3]) && rest[4] == "screen":
             return .sessionScreen(rest[1], rest[3])
         default:

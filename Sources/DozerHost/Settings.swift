@@ -61,6 +61,7 @@ public enum SettingApplies: String, Codable, Sendable, CaseIterable {
     case nextSession = "next-session"
     case hostRestart = "host-restart"
     case newStore = "new-store"
+    case nextBoot = "next-boot"
 
     public var note: String {
         switch self {
@@ -70,6 +71,7 @@ public enum SettingApplies: String, Codable, Sendable, CaseIterable {
         case .nextSession: "applies to sessions opened from now on"
         case .hostRestart: "applies after doz host stop (the next host reads it)"
         case .newStore: "the choice for a store that has not made one (doz account keepalive wins)"
+        case .nextBoot: "applies when the next boot of a sandbox is kept"
         }
     }
 }
@@ -225,6 +227,7 @@ public enum SettingKey {
     public static let progress = "ui.progress"
     public static let idleTimeout = "host.idle_timeout_minutes"
     public static let screenCapture = "host.screen_capture_minutes"
+    public static let bootLogsKept = "host.boot_logs_kept"
     public static let keepalive = "host.keepalive"
     public static let storePath = "store.path"
     public static let claudePermissions = "claude.permissions"
@@ -302,8 +305,11 @@ public struct DozerSettings: Sendable {
                   "Minutes with nothing running before the host exits; 0 = never.",
                   env: "DOZ_HOST_IDLE", flag: "doz host start --idle-timeout", applies: .hostRestart),
             .init("host", "screen_capture_minutes", .int(0...1440), .int(5),
-                  "Every this many minutes, save the screen of each running sandbox's sessions that printed something since (a crash still leaves a recent copy); 0 = only when it pauses, sleeps, hibernates or shuts down.",
+                  "Every this many minutes, save the screen of each running sandbox's sessions that printed something since (what a sleep or hibernation falls back on); 0 = only when it pauses, sleeps or hibernates.",
                   env: "DOZ_SCREEN_CAPTURE", applies: .hostRestart),
+            .init("host", "boot_logs_kept", .int(1...50), .int(BootLogs.defaultKept),
+                  "How many boots of each sandbox to keep (its steps and kernel console — the web UI's Boot log, doz console --boot N); the oldest goes.",
+                  env: "DOZ_BOOT_LOGS", applies: .nextBoot),
             .init("host", "keepalive", .bool, .bool(false),
                   "Near a Mac login's expiry, while a sandbox uses it and no Claude Code runs, the host runs the Mac's claude once to renew it.",
                   applies: .newStore),

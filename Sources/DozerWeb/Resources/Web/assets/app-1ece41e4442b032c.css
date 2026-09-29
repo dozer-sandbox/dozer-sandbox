@@ -249,6 +249,16 @@ main.main-terms { padding: 14px 20px 14px; display: flex; flex-direction: column
 .term-empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
 .term-empty-box { display: flex; flex-direction: column; align-items: center; gap: 10px; color: #c5cbff; text-align: center; padding: 20px; }
 .term-empty-head { font-weight: 600; font-size: 15px; }
+.term-empty-note { color: #9aa0ab; font-size: 13px; }
+/* 593: the Boot log — a dialog with a boot picker and a read-only terminal. */
+dialog.dlg.bootlog-dialog { width: min(1100px, calc(100vw - 32px)); max-width: none; padding: 16px 20px 20px; }
+.bootlog-head { display: flex; align-items: center; gap: 12px; }
+.bootlog-head h2 { margin: 0; margin-right: auto; }
+.bootlog-picker { max-width: 60%; }
+.bootlog-area { position: relative; height: 68vh; margin-top: 10px; background: #16171c; border-radius: var(--radius); overflow: hidden; }
+.bootlog-area .empty { color: #9aa0ab; padding: 20px; }
+.bootlog-error { color: var(--fail); margin: 6px 0 0; }
+.bootlog-error[hidden] { display: none; }
 .actions.center { justify-content: center; }
 @media (max-width: 1100px) {
   main.main-terms { height: auto; min-height: 100vh; }

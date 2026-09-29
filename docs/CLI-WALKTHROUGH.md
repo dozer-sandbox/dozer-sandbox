@@ -119,6 +119,13 @@ doz sessions lab1                  # shell  (the top you left running)
 The first command also started the **host**: one background process per user that owns the
 running VMs. It started itself and will exit by itself.
 
+The boot flew past? It is kept:
+
+```bash
+doz console lab1 --list            # 1  …  cold boot  0.5 s  ✓   (each start and wake is kept — the last 5)
+doz console lab1 --steps           # doz's steps as they happened, then the kernel's console
+```
+
 ## 3. The lifecycle (3 min)
 
 Try each step and watch `doz ls` between them:

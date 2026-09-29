@@ -14,6 +14,7 @@
 //                  {t:'focus'} · {t:'keep-scrollback'} (after a boot view, before the session's screen)
 //                  {t:'live', mode}                       593: a SAVED screen becomes the live session
 //                                                          (interactive | watch) — only from saved
+//                  {t:'top'}                              593: scroll to the first line (a Boot log)
 //   frame → page   {t:'ready'} · {t:'opened', cols, rows} · {t:'data', s} (keys, reports)
 //                  {t:'resize', cols, rows} · {t:'title', s} · {t:'paste', text, bracketed}
 //                  {t:'paste-too-big', bytes} · {t:'failed'} (the engine did not load)
@@ -136,7 +137,7 @@ function valid(m) {
     case 'live': return !!term && mode === 'saved' && (m.mode === 'interactive' || m.mode === 'watch') && Object.keys(m).length === 2;
     case 'write': return !!term && m.data instanceof ArrayBuffer && m.data.byteLength <= MAX_WRITE && Object.keys(m).length === 2;
     case 'paste': return !!term && typeof m.text === 'string' && m.text.length <= MAX_PASTE && Object.keys(m).length === 2;
-    case 'focus': case 'keep-scrollback': return !!term && Object.keys(m).length === 1;
+    case 'focus': case 'keep-scrollback': case 'top': return !!term && Object.keys(m).length === 1;
     default: return false;
   }
 }
@@ -150,6 +151,8 @@ window.addEventListener('message', (ev) => {
     case 'focus': term.focus(); break;
     // 593: the saved screen becomes the live session (the page then attaches; its SNAPSHOT redraws).
     case 'live': mode = m.mode; break;
+    // 593: a Boot log opens at its first line (the steps), not at the console's end.
+    case 'top': quietly(() => term.scrollToTop()); break;
     // After the boot view: the screen (the boot log's end) scrolls into the scrollback before the
     // session's first screen replaces it — the terminal alone knows how tall it is.
     case 'keep-scrollback': term.write('\x1b[999;1H' + '\r\n'.repeat(term.rows)); break;

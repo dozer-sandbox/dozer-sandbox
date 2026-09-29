@@ -1,8 +1,8 @@
 import Darwin
 import Foundation
 
-// 593 §9 (owner, 2026-09-29 — S2, S5, S6): a sandbox's SAVED SCREENS. Before a sandbox pauses,
-// sleeps, hibernates or shuts down — and every few minutes while it runs — each of its sessions'
+// 593 §9 (owner, 2026-09-29 — S2, S5, S6; amended 2026-09-30): a sandbox's SAVED SCREENS. Before a
+// sandbox pauses, sleeps or hibernates — and every few minutes while it runs — each of its sessions'
 // screens is captured: a momentary attach to deckhold, which answers every HELLO with a SNAPSHOT (VT
 // bytes that redraw the screen on a blank terminal) and a DUMP with the screen as plain text. One
 // file set per session, in the sandbox's own directory:
@@ -10,19 +10,23 @@ import Foundation
 //     <sandbox>/screens/            0700
 //         NAME.vt                   0600  the SNAPSHOT as the guest sent it (VT; ≤ `maximumVTBytes`)
 //         NAME.txt                  0600  the active screen as plain text, control characters removed
-//         NAME.json                 0600  `SavedScreenInfo`: when, why, size, command, ended
+//         NAME.json                 0600  `SavedScreenInfo`: when, why, size, command
+//
+// Saved screens exist ONLY for sessions that are still alive in a sandbox you can wake back into
+// (paused, asleep, hibernated). The owner's amendment (2026-09-30): "when i shutdown the new sandbox,
+// i should not still see the claude terminal screen" — a shutdown (and a reset, a remove, a host that
+// died with the VM) DELETES them; a session whose program exited has none. There is no "ended" screen.
 //
 // Text, not an image: identical to the live terminal, sharp at any size, kilobytes, selectable.
 // The bytes came from inside the sandbox, which is untrusted: a reader renders the VT only in a
 // terminal engine (the web UI's sandboxed frame), and prints the TEXT (`doz sessions --screen`).
-// Deleted with the sandbox (its directory) and on reset (`LifecycleStep.removeSavedScreens`); never
-// copied by duplicate, fork or a template (they copy disks by name).
+// Never copied by duplicate, fork or a template (they copy disks by name).
 
 /// What is known about one saved screen (`NAME.json`).
 public struct SavedScreenInfo: Codable, Sendable, Equatable {
     public var session: String
     public var savedAt: Date
-    /// Why it was taken: `pause`, `sleep`, `hibernate`, `shutdown` or `periodic`.
+    /// Why it was taken: `pause`, `sleep`, `hibernate` or `periodic`.
     public var reason: String
     /// The sandbox's phase when it was taken (always `running`: only a running guest can answer).
     public var phase: String
@@ -35,19 +39,12 @@ public struct SavedScreenInfo: Codable, Sendable, Equatable {
     /// The session's output counter at the capture (`deckhold ls` bytes=): a periodic capture skips a
     /// session whose counter has not moved.
     public var bytesOut: UInt64
-    /// The session is over: its program exited (`exitCode`), or the sandbox shut down (`exitCode` nil)
-    /// — the screen is its LAST one.
-    public var ended: Bool
-    public var exitCode: Int32?
-    /// When it was marked ended (a shutdown, a host that died, the program's exit).
-    public var endedAt: Date?
     public var vtBytes: Int
     /// The snapshot was longer than `SavedScreens.maximumVTBytes`: its oldest scrollback was dropped.
     public var truncated: Bool
 
     public init(session: String, savedAt: Date, reason: String, phase: String = "running", cols: UInt16? = nil, rows: UInt16? = nil,
-                screen: String? = nil, command: String = "", pid: Int? = nil, bytesOut: UInt64 = 0, ended: Bool = false,
-                exitCode: Int32? = nil, endedAt: Date? = nil, vtBytes: Int = 0, truncated: Bool = false) {
+                screen: String? = nil, command: String = "", pid: Int? = nil, bytesOut: UInt64 = 0, vtBytes: Int = 0, truncated: Bool = false) {
         self.session = session
         self.savedAt = savedAt
         self.reason = reason
@@ -58,9 +55,6 @@ public struct SavedScreenInfo: Codable, Sendable, Equatable {
         self.command = command
         self.pid = pid
         self.bytesOut = bytesOut
-        self.ended = ended
-        self.exitCode = exitCode
-        self.endedAt = endedAt
         self.vtBytes = vtBytes
         self.truncated = truncated
     }
@@ -84,7 +78,7 @@ public struct ScreenCaptureReport: Sendable, Equatable {
     public var captured: [String] = []
     /// Unchanged since the last capture (a periodic capture only).
     public var unchanged: [String] = []
-    /// Their program had exited: the saved screen (if any) is marked ended.
+    /// Their program had exited: the saved screen (if any) is deleted.
     public var ended: [String] = []
     /// Could not be captured (timeout, transport): the previous file is kept.
     public var failed: [String] = []
@@ -178,23 +172,6 @@ public enum SavedScreens {
         try writePrivate(capped, to: f.vt)
         try writePrivate(Data(inertScreenText(text).utf8), to: f.text)
         try writePrivate(try encoder.encode(i), to: f.info)
-    }
-
-    /// Update only what is known (`NAME.json`) — the VT and text stay as they were.
-    public static func update(_ layout: StoreLayout, info: SavedScreenInfo) throws {
-        try GuestCommand.validateSessionName(info.session)
-        try ensureDirectory(layout)
-        try writePrivate(try encoder.encode(info), to: files(layout, info.session).info)
-    }
-
-    /// The sessions died with the VM (a shutdown, a host that died with it): every saved screen is
-    /// its session's LAST one. Idempotent: one already ended keeps its exit code and time.
-    public static func markEnded(_ layout: StoreLayout, at date: Date = Date()) {
-        for var i in list(layout) where !i.ended {
-            i.ended = true
-            i.endedAt = date
-            try? update(layout, info: i)
-        }
     }
 
     /// Remove saved screens: those NOT in `keeping` (sessions the guest no longer has), or every one.
@@ -299,8 +276,9 @@ public enum SavedScreens {
         chmod(d.path, 0o700)
     }
 
-    /// Atomically, 0600 from the first byte (the temporary file is created 0600, then renamed).
-    static func writePrivate(_ data: Data, to url: URL) throws {
+    /// Atomically, 0600 from the first byte (the temporary file is created 0600, then renamed). (Also
+    /// the host's boot logs.)
+    public static func writePrivate(_ data: Data, to url: URL) throws {
         let tmp = url.deletingLastPathComponent().appendingPathComponent(".\(url.lastPathComponent).\(getpid()).\(UInt32.random(in: 0...UInt32.max)).tmp")
         let fd = open(tmp.path, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0o600)
         guard fd >= 0 else { throw CocoaError(.fileWriteUnknown, userInfo: [NSFilePathErrorKey: tmp.path]) }

@@ -1171,7 +1171,7 @@ async function sandboxArrived(name, want) {
 // stored one, so arriving never overwrites it with an empty page.
 function layoutOf(name) {
   const v = sview(name);
-  const kept = pageTerminals(name).filter((t) => t.session && !t.ended && !t.errorText && !(t.saved && t.saved.ended));
+  const kept = pageTerminals(name).filter((t) => t.session && !t.ended && !t.errorText);
   const panes = (v.split ? [0, 1] : [0]).map((pi) => {
     const inPane = kept.filter((t) => (v.split ? t.pane : 0) === pi).slice(0, 16);
     const idx = inPane.findIndex((t) => t.id === v.selected[pi]);
@@ -1182,6 +1182,8 @@ function layoutOf(name) {
 function persistLayout(name) {
   const v = sview(name);
   if (!v.restored || v.restoring || !setting('ui.terminals', true)) return;
+  // Shut down: no sessions, no panes to remember (the host cleared the layout with the shutdown).
+  if (sandboxPhase(name) === 'off') return;
   const body = JSON.stringify(layoutOf(name));
   if (body === v.savedLayout) return;
   v.savedLayout = body;
@@ -1199,7 +1201,7 @@ async function savedRows(name) {
 function addTab(name, session, mode, pane, saved) {
   const t = newTerm(name, session, mode);
   t.pane = pane;
-  t.saved = saved ? { savedAt: saved.savedAt, reason: saved.savedReason, ended: saved.ended, exitCode: saved.exitCode } : null;
+  t.saved = saved ? { savedAt: saved.savedAt, reason: saved.savedReason } : null;
   t.lazy = true;
   paintCover(t);
   return t;
@@ -1213,8 +1215,11 @@ function openSavedTerminal(name, row, pane) {
   v.selected[t.pane] = t.id;
   renderTerminals();
 }
-/// Restore the stored layout: a RUNNING sandbox's tabs whose sessions run attach; a sandbox that is not
-/// running shows every session it has a saved screen of (S3) — the layout's first, in their panes.
+/// The phases one wakes (or resumes) back into — the only ones with saved screens (owner, 2026-09-30:
+/// a shut-down sandbox shows no session screens anywhere).
+const SAVED_PHASES = ['paused', 'asleep', 'hibernated'];
+/// Restore the stored layout: a RUNNING sandbox's tabs whose sessions run attach; a paused, asleep or
+/// hibernated one shows every session it has a saved screen of (S3) — the layout's first, in their panes.
 async function restorePanes(name) {
   const v = sview(name);
   if (v.restored || v.restoring) return;
@@ -1233,7 +1238,7 @@ async function restorePanes(name) {
     if (i.phase === 'running' && !i.busy) {
       const live = new Set((s.d.sessions || []).filter((x) => !x.ended).map((x) => x.name));
       if (layout) layout.panes.forEach((p, pi) => p.tabs.forEach((tb) => { if (live.has(tb.session)) plan.push({ pane: pi, session: tb.session, mode: tb.mode }); }));
-    } else if (['paused', 'asleep', 'hibernated', 'off', 'failed'].includes(i.phase)) {
+    } else if (SAVED_PHASES.includes(i.phase)) {        // shut down or failed: no sessions, no screens
       const rows = new Map((await savedRows(name)).map((r) => [r.name, r]));
       if (layout) {
         layout.panes.forEach((p, pi) => p.tabs.forEach((tb) => {
@@ -1283,9 +1288,9 @@ function sandboxParts(name, d, net, accounts) {
       toast(r.message);
     } catch (e) { toast(e.message, true); }
   };
-  // 593 §9: while it does not run, the sessions as last saved — each can be shown (its saved screen).
-  const savedState = (s) => (s.ended ? 'ended' + (s.exitCode !== null && s.exitCode !== undefined ? ' (exit ' + s.exitCode + ')' : '') + ' · ' : '')
-    + 'screen saved ' + when(s.savedAt) + (s.savedReason ? ' (' + s.savedReason + ')' : '');
+  // 593 §9: paused, asleep or hibernated — the sessions as last saved, each can be shown (its saved
+  // screen). A shut-down sandbox has none (owner, 2026-09-30).
+  const savedState = (s) => 'screen saved ' + when(s.savedAt) + (s.savedReason ? ' (' + s.savedReason + ')' : '');
   const sessions = (d.sessions || []).map((s) => h('tr', { 'data-session': s.name },
     h('td', null, s.name, s.name === d.defaultSession ? h('span', { class: 'tag' }, 'default') : null),
     h('td', null, s.saved ? h('span', { class: 'muted' }, savedState(s)) : s.ended ? h('span', { class: 'muted' }, 'ended (exit ' + s.exitCode + ')') : 'running'),
@@ -1353,6 +1358,7 @@ function sandboxParts(name, d, net, accounts) {
         btn('Duplicate…', () => duplicateDialog(name, d, accounts, null), { small: true, title: 'A new sandbox from this one’s disk: a new workspace, CPUs, memory, network, account' })),
       ((b) => { if (busy || !d.hasRootDisk) { b.disabled = true; b.title = d.hasRootDisk ? 'Wait until it settles' : 'It has no disk yet — start it once'; } return b; })(
         btn('Save as template…', () => templateDialog(name, d, null), { small: true, title: 'Its root disk becomes an image other sandboxes are created from (never its state disk)' })),
+      btn('Boot log', () => bootLogDialog(name), { small: true, icon: 'history', title: 'Its last boots — the steps and the kernel console, as the boot view showed them (any phase)' }),
       btn(detailsOpen ? 'Hide details' : 'Details', () => {
         const open = !setting('ui.details_open', true);
         $('sbx-body').classList.toggle('details-closed', !open);
@@ -1375,7 +1381,8 @@ function sandboxParts(name, d, net, accounts) {
           await actOrThrow({ action: 'open-session', sandbox: name, session: v.session, argv });
         }), { small: true })))),
     panel(table(['Session', 'State', 'Command', 'Size', 'Viewers', ''], sessions, [3, 4]),
-      running ? 'No sessions.' : 'No saved screens — sessions are listed while it runs, and saved when it pauses, sleeps, hibernates or shuts down.'),
+      running ? 'No sessions.' : i.phase === 'off' || i.phase === 'failed' ? 'No sessions — ' + (i.phase === 'off' ? 'shut down' : 'failed') + '. Start boots it fresh, with new sessions.'
+        : 'No saved screens — sessions are listed while it runs, and saved when it pauses, sleeps or hibernates.'),
     h('div', { class: 'head' }, h('h2', null, 'Restore points'), h('div', { class: 'actions' },
       btn('Take a restore point…', () => dialog('Take a restore point of ' + name, running ? 'A running sandbox pauses for the clone (milliseconds); its copy gets e2fsck on the first boot from it.' : 'An instant APFS clone of the disks.',
         [{ name: 'point', label: 'Name', placeholder: 'default point-N' }, { name: 'note', label: 'Note' }], 'Take', async (v) => {
@@ -2587,6 +2594,7 @@ function paintCover(t) {
   const e = t.els;
   let kind = 'none', headline = '', detail = '', action = null, spinner = false, glyphKey = null;
   if (t.errorText) { kind = 'error'; headline = 'This terminal could not open'; detail = t.errorText; }
+  else if (t.bootlog) { kind = t.savedShown ? 'none' : 'reattaching'; headline = 'Loading…'; spinner = !t.savedShown; }
   else if (t.saved) { ({ headline, detail, action, glyphKey } = savedCover(t)); kind = 'saved'; }
   // A boot view asked for by Start: "Starting…" from its first paint until the host's steps take over
   // (never the shut-down cover the sandbox had a moment before the start reached the host).
@@ -2670,26 +2678,16 @@ function savedCoverFor(t) {
   const saved = 'saved ' + when(s.savedAt);
   // An action under way: say what (never the phase it is leaving).
   const tr = transitionOf(t.sandbox);
-  if (tr) return { headline: TRANSITION_LABEL[tr.action] + ' — ' + (s.ended ? 'its last screen' : 'its saved screen'), detail: saved, action: null, glyphKey: null };
-  // Shut down: a key does NOT start it (orchestrator ruling — a cold boot makes new sessions); Start is a button.
-  if (phase === 'off' || phase === 'failed') {
-    return { headline: (phase === 'off' ? 'Shut down' : 'Failed') + ' — Start boots it; these sessions ended', detail: 'Its last screen, ' + saved,
-             action: sandboxBusy(t.sandbox) ? null : 'Start', glyphKey: phase === 'off' ? 'off' : null };
-  }
-  if (s.ended) {
-    return { headline: 'The session ended' + (s.exitCode !== null && s.exitCode !== undefined ? ' (exit ' + s.exitCode + ')' : phase === 'off' ? ' with the shutdown' : ''),
-             detail: 'Its last screen, ' + saved, action: phase === 'off' || phase === 'failed' ? 'Start' : null, glyphKey: phase === 'off' ? 'off' : null };
-  }
+  if (tr) return { headline: TRANSITION_LABEL[tr.action] + ' — its saved screen', detail: saved, action: null, glyphKey: null };
   const w = SAVED_WAKE[phase];
   if (phase === 'running') return { headline: 'Attaching…', detail: saved, action: null, glyphKey: null };
   return { headline: (PHASE_WORD[phase] || phase || 'not running').replace(/^./, (c) => c.toUpperCase()) + ' ' + when(s.savedAt) + ' — its saved screen',
            detail: w && !sandboxBusy(t.sandbox) ? 'press any key to ' + w[1] : sandboxBusy(t.sandbox) ? 'under way…' : '',
            action: w && !sandboxBusy(t.sandbox) ? w[0] : null, glyphKey: phase };
 }
-/// A key on a saved screen: the ordinary wake / resume action (the page's own; never for a session
-/// that ended, never a cold boot).
+/// A key on a saved screen: the ordinary wake / resume action (the page's own; never a cold boot).
 function savedKey(t) {
-  if (!t.saved || t.saved.ended || t.grid) return;
+  if (!t.saved || t.grid) return;
   const w = SAVED_WAKE[sandboxPhase(t.sandbox)];
   if (!w || sandboxBusy(t.sandbox)) return;
   act({ action: w[1], sandbox: t.sandbox });
@@ -2698,14 +2696,15 @@ function savedKey(t) {
 async function loadSavedScreen(t) {
   let s;
   try {
-    s = await api('sandboxes/' + t.sandbox + '/sessions/' + t.session + '/screen');
+    // 593: a Boot log terminal draws a kept boot (rendered by the host's boot-view renderer) the same way.
+    s = await api(t.bootlog ? 'sandboxes/' + t.sandbox + '/boots/' + t.bootlog : 'sandboxes/' + t.sandbox + '/sessions/' + t.session + '/screen');
   } catch (e) {
-    t.errorText = e.status === 404 ? 'no saved screen of ' + t.session : e.message || String(e);
+    t.errorText = e.status === 404 ? (t.bootlog ? 'that boot is no longer kept' : 'no saved screen of ' + t.session) : e.message || String(e);
     paintCover(t);
     return;
   }
   if (t.closed || !t.saved) return;
-  t.saved = { ...t.saved, savedAt: s.savedAt, reason: s.reason, ended: s.ended, exitCode: s.exitCode };
+  if (!t.bootlog) t.saved = { ...t.saved, savedAt: s.savedAt, reason: s.reason };
   const bin = atob(s.vt);
   const bytes = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
@@ -2713,11 +2712,60 @@ async function loadSavedScreen(t) {
     const chunk = bytes.slice(i, i + (1 << 20)).buffer;
     toFrame(t, { t: 'write', data: chunk }, [chunk]);
   }
+  if (t.bootlog) toFrame(t, { t: 'top' });            // a Boot log opens at its steps
   t.savedShown = true;
-  if (t.els.wrap) t.els.wrap.dataset.saved = s.reason;
+  if (t.els.wrap) t.els.wrap.dataset.saved = t.bootlog ? 'boot' : s.reason;
   paintCover(t);
   paintTabs();
 }
+// ── the Boot log (593 — owner: "where is the bootup terminal output stored so i can look at it after the
+// machine has booted"): the host keeps the last host.boot_logs_kept boots of each sandbox; this draws one
+// EXACTLY as the boot view did (the host renders it with the boot view's own renderer), read-only and
+// selectable in the terminal frame's saved mode. A picker switches boots; the latest opens first (a
+// failed one is marked ✕). Any phase — it reads files; nothing is woken.
+function bootLabel(b) {
+  const took = b.milliseconds ? ms(b.milliseconds) : '…';
+  const res = b.result === 'failed' ? '✕ failed' : b.result === 'ok' ? '✓' : 'booting…';
+  return '#' + b.number + ' · ' + new Date(b.startedAt).toLocaleString() + ' · ' + b.kind + ' · ' + took + ' · ' + res;
+}
+async function bootLogDialog(name) {
+  let boots;
+  try { boots = (await api('sandboxes/' + name + '/boots')).boots; } catch (e) { toast(e.message || String(e), true); return; }
+  const d = h('dialog', { class: 'dlg bootlog-dialog', 'data-sandbox': name });
+  const picker = h('select', { 'aria-label': 'Which boot', class: 'bootlog-picker' },
+    boots.map((b) => h('option', { value: String(b.number), 'data-result': b.result }, bootLabel(b))));
+  const area = h('div', { class: 'bootlog-area' });
+  const why = h('div', { class: 'bootlog-error', role: 'status' });
+  const close = h('button', { type: 'button', class: 'btn' }, withIcon('x', 'Close'));
+  d.append(h('div', { class: 'bootlog-head' }, h('h2', null, 'Boot log — ' + name), picker, close),
+    h('p', { class: 'sub' }, 'Each start and wake of ' + name + ': Dozer’s steps as the boot view showed them, then the kernel console. The last '
+      + setting('host.boot_logs_kept', 5) + ' are kept (Settings › host.boot_logs_kept); doz console ' + name + ' --list shows them too.'),
+    why, area);
+  let term = null;
+  const show = (n) => {
+    if (term) closeTerminal(term.id);
+    const b = boots.find((x) => x.number === n);
+    why.textContent = b && b.result === 'failed' ? '✕ This boot failed' + (b.error ? ': ' + b.error : '') : '';
+    why.hidden = !why.textContent;
+    const t = newTerm(name, null, 'watch');
+    t.grid = true;                                      // not a tab of the page
+    t.bootlog = n;
+    t.saved = { reason: 'boot' };
+    paintCover(t);
+    area.replaceChildren(t.els.wrap);
+    bootTerm(t, setting('ui.terminal_font_size', 13));
+    term = t;
+    d.dataset.boot = String(n);
+  };
+  picker.addEventListener('change', () => show(Number(picker.value)));
+  close.addEventListener('click', () => d.close());
+  d.addEventListener('close', () => { if (term) closeTerminal(term.id); d.remove(); });
+  document.body.append(d);
+  d.showModal();
+  if (boots.length) show(1);
+  else area.replaceChildren(h('div', { class: 'empty' }, 'No boot of ' + name + ' is kept yet — one is recorded each time it starts or wakes.'));
+}
+
 /// The sandbox runs again: this saved pane becomes its session's live terminal, in place — the saved
 /// screen is cleared and the attach's SNAPSHOT draws the live one.
 function goLive(t) {
@@ -2734,15 +2782,24 @@ function goLive(t) {
   t.initMode = t.mode;
   connectTerminal(t);
 }
-/// After the sandbox's state changed: saved panes of a sandbox that runs go live (their session runs),
-/// or say their session is gone; the others repaint their cover (the phase, the wake hint).
+/// After the sandbox's state changed: saved panes of a sandbox that runs go live (their session runs)
+/// or close (it is gone); the others repaint their cover (the phase, the wake hint). A sandbox that is
+/// SHUT DOWN shows no session screens anywhere (owner, 2026-09-30): every pane of it — saved, or a live
+/// one whose session died with the VM — closes, and the area shows the off state. (A FAILED start keeps
+/// its boot view: that is where the failure is.)
 function promoteSaved(name, live) {
-  const running = sandboxPhase(name) === 'running' && !sandboxBusy(name);
+  const phase = sandboxPhase(name);
+  const running = phase === 'running' && !sandboxBusy(name);
+  const gone = phase === 'off' && !sandboxBusy(name);
+  // The plain off state is one area, not an empty split.
+  if (gone && !pageTerminals(name).some((t) => t.bootIntent)) { const v = sview(name); v.split = false; v.focusedPane = 0; }
   for (const t of [...terminals.values()]) {
-    if (t.sandbox !== name || !t.saved) continue;
-    if (running && live && !t.saved.ended) {
+    if (t.sandbox !== name || t.bootlog) continue;       // a Boot log terminal is never a session's
+    if (gone && !t.bootIntent) { if (t.grid) continue; closeTerminal(t.id); continue; }
+    if (!t.saved) continue;
+    if (running && live) {
       if (live.includes(t.session)) goLive(t);
-      else { t.saved = { ...t.saved, ended: true }; paintCover(t); }
+      else if (!t.grid) closeTerminal(t.id);
     } else {
       paintCover(t);
     }
@@ -2859,7 +2916,10 @@ function paintTermEmpty() {
   if (busy) {
     box.append(h('div', { class: 'term-empty-head' }, tr ? TRANSITION_LABEL[tr.action] : i.phaseLabel + '…'), h('div', null, 'The terminal opens when it can.'));
   } else if (i.phase === 'off' || i.phase === 'failed') {
-    box.append(h('div', { class: 'term-empty-head' }, s.name + ' is ' + i.phaseLabel.toLowerCase()),
+    // The plain off state (owner, 2026-09-30): no session screens — its sessions ended with the VM.
+    box.dataset.off = i.phase;
+    box.append(h('div', { class: 'term-empty-head' }, i.phase === 'off' ? 'Shut down' : s.name + ' failed to start'),
+      h('div', { class: 'term-empty-note' }, 'Starting boots it fresh — new sessions.'),
       h('div', { class: 'actions center' },
         btn('Start', () => lifecycle('start', s.name), { primary: true, title: bootViewOnStart() ? 'Boot it, and watch it boot here' : 'Boot it' })));
   } else {
@@ -2867,7 +2927,7 @@ function paintTermEmpty() {
     // (the sessions list). The image's own session is offered by name: opened when it runs, started when not.
     const saved = (s.d.sessions || []).filter((x) => x.saved);
     const defaultRuns = live.some((x) => x.name === s.d.defaultSession && !x.saved);
-    const defaultSaved = saved.some((x) => x.name === s.d.defaultSession && !x.ended);
+    const defaultSaved = saved.some((x) => x.name === s.d.defaultSession);
     box.append(h('div', { class: 'term-empty-head' }, 'No terminal open'),
       h('div', { class: 'actions center' },
         defaultSaved ? null : defaultRuns
@@ -2882,7 +2942,7 @@ function paintTermEmpty() {
   p.empty.replaceChildren(box);
 }
 function tabElement(t, pane) {
-  const phase = t.ended || t.errorText || t.disconnected || (t.saved && t.saved.ended) ? 'ended'
+  const phase = t.ended || t.errorText || t.disconnected ? 'ended'
     : t.saved ? sandboxPhase(t.sandbox) || 'unknown' : (t.state && t.state.phase) || 'unknown';
   const v = sview(t.sandbox);
   // Tabs are numbered (1, 2, …) per sandbox, so a shared session can say which tab it is shared with.
@@ -3109,7 +3169,8 @@ function gridRender() {
       if (!live.length) want.push({ key: s.name + '/', sandbox: s.name, session: null, s, none: true });
     } else {
       // 593 §9 (S3): its saved screens, a tile each (same key as the live tile: waking swaps it in place).
-      const saved = s.phase === 'booting' ? [] : (grid.sessions[s.name] || []).filter((x) => x.saved);
+      // Shut down or failed: no tiles of sessions (owner, 2026-09-30) — one static tile with Start.
+      const saved = !SAVED_PHASES.includes(s.phase) ? [] : (grid.sessions[s.name] || []).filter((x) => x.saved);
       for (const x of saved) want.push({ key: s.name + '/' + x.name, sandbox: s.name, session: x.name, command: x.command, s, saved: x.saved });
       if (!saved.length) want.push({ key: s.name + '/', sandbox: s.name, session: null, s });
     }
@@ -3159,7 +3220,7 @@ function paintTile(tile, w) {
   }
   tile.kind = kind;
   tile.saved = w.saved || null;
-  if (tile.term && tile.term.saved && w.saved) { tile.term.saved = { ...tile.term.saved, ended: w.saved.ended }; paintCover(tile.term); }
+  if (tile.term && tile.term.saved && w.saved) paintCover(tile.term);
   tile.el.dataset.kind = kind;
   tile.el.dataset.phase = s.phase;
   tile.dot.className = 'ph-dot ph-' + s.phase;
@@ -3175,7 +3236,8 @@ function paintTile(tile, w) {
     tile.note.replaceChildren(
       !w.none && PHASE_GLYPH[s.phase] ? h('div', { class: 'tc-glyph' }, icon(PHASE_GLYPH[s.phase])) : null,
       h('div', { class: 'tile-note-head' }, w.none ? 'No sessions running' : s.phaseLabel),
-      h('div', null, w.none ? 'Open one from its page.' : known.length ? 'Sessions when it last ran: ' + known.map((x) => x.name).join(', ') : 'Its sessions are listed while it runs.'));
+      h('div', null, w.none ? 'Open one from its page.' : s.phase === 'off' ? 'Starting boots it fresh — new sessions.'
+        : known.length ? 'Sessions when it last ran: ' + known.map((x) => x.name).join(', ') : 'Its sessions are listed while it runs.'));
   }
 }
 function gridSchedule() {
@@ -3213,7 +3275,7 @@ function attachTile(tile) {
   if (!setting('ui.terminals', true)) return;
   const t = newTerm(tile.sandbox, tile.session, 'watch');
   t.grid = true;
-  if (tile.saved) t.saved = { savedAt: tile.saved.savedAt, reason: tile.saved.savedReason, ended: tile.saved.ended, exitCode: tile.saved.exitCode };
+  if (tile.saved) t.saved = { savedAt: tile.saved.savedAt, reason: tile.saved.savedReason };
   tile.term = t;
   paintCover(t);
   tile.screen.append(t.els.wrap);
