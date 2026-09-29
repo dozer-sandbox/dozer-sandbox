@@ -1357,8 +1357,9 @@ public actor Sandbox {
     }
 
     static func exec(on container: LinuxContainer, _ argv: [String], environment: [String: String],
-                     workingDirectory: String, privileged: Bool, timeout: Int64, user: String? = nil) async throws -> ExecResult {
-        let out = OutputCollector(), err = OutputCollector()
+                     workingDirectory: String, privileged: Bool, timeout: Int64, user: String? = nil,
+                     onOutput: (@Sendable (Data) -> Void)? = nil) async throws -> ExecResult {
+        let out = OutputCollector(onData: onOutput), err = OutputCollector(onData: onOutput)
         let p = try await container.exec("x-\(UUID().uuidString.prefix(12).lowercased())") { cfg in
             cfg.arguments = argv
             cfg.environmentVariables = GuestCommand.environment(environment)
@@ -1501,11 +1502,18 @@ public actor Sandbox {
 
     func note(_ s: String) { broadcaster.yield(.note(s)) }
 
+    /// A timed step: `.stepStarted` now, then `.step` (or `.stepFailed`) with the same label.
     func timed<T>(_ label: String, _ body: () async throws -> T) async throws -> T {
         let t0 = ContinuousClock.now
-        let v = try await body()
-        broadcaster.yield(.step(label, milliseconds: milliseconds(since: t0)))
-        return v
+        broadcaster.yield(.stepStarted(label))
+        do {
+            let v = try await body()
+            broadcaster.yield(.step(label, milliseconds: milliseconds(since: t0)))
+            return v
+        } catch {
+            broadcaster.yield(.stepFailed(label, milliseconds: milliseconds(since: t0), error: error.localizedDescription))
+            throw error
+        }
     }
 
     private func fileSize(_ url: URL) -> Int {

@@ -150,7 +150,13 @@ struct ConnectionReader: ReaderStream {
 final class OutputCollector: Writer, @unchecked Sendable {
     private let lock = NSLock()
     private var buffer = Data()
-    func write(_ data: Data) throws { lock.lock(); buffer.append(data); lock.unlock() }
+    /// 593: each chunk as it arrives, too (a bake step's live output).
+    private let onData: (@Sendable (Data) -> Void)?
+    init(onData: (@Sendable (Data) -> Void)? = nil) { self.onData = onData }
+    func write(_ data: Data) throws {
+        lock.lock(); buffer.append(data); lock.unlock()
+        onData?(data)
+    }
     func close() throws {}
     var data: Data { lock.lock(); defer { lock.unlock() }; return buffer }
 }

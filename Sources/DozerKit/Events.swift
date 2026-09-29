@@ -51,6 +51,15 @@ public enum SandboxEvent: Sendable, Equatable {
     case note(String)
     /// A long transfer's progress (the one-time kernel download).
     case progress(String, completedBytes: Int64, totalBytes: Int64?)
+    /// 593: a timed step began (its `.step` — or `.stepFailed` — ends it, with the same label).
+    case stepStarted(String)
+    /// 593: a timed step failed after `milliseconds`.
+    case stepFailed(String, milliseconds: Double, error: String)
+    /// 593: a transfer counted in bytes AND items (an OCI pull: layers).
+    case transfer(String, completedBytes: Int64, totalBytes: Int64?, completedItems: Int, totalItems: Int?)
+    /// 593: a line a bake step printed (guest text: control characters removed, capped; at most
+    /// four a second — `OutputTail`).
+    case output(String)
     /// The readouts changed (RAM held, snapshot size, busy).
     case status(SandboxStatus)
 }

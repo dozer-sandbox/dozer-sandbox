@@ -264,8 +264,9 @@ doz console NAME [--follow]                                 # the boot console (
 
 Every command takes `--json` (machine-readable output; errors as
 `{"error":{"code","message"}}`), `--store DIR` (default `$DOZ_STORE`, else the settings'
-`store.path`, else `~/Library/Application Support/dozer-sandbox`), `-v` (every progress step)
-and `-q` (none).
+`store.path`, else `~/Library/Application Support/dozer-sandbox`), `-v` (every progress step),
+`-q` (none) and `--progress auto|plain` (on a terminal: a spinner and download bars, or one line
+per step; not a terminal, `--json` or `NO_COLOR`: always plain).
 JSON documents only ever gain fields.
 
 | exit code | meaning |
@@ -287,6 +288,7 @@ JSON documents only ever gain fields.
 | `DOZ_HOST_IDLE` | `host.idle_timeout_minutes` | host idle timeout, minutes |
 | `DOZ_KERNEL_CACHE` / `DOZ_KERNEL` | `kernel.cache` / `kernel.path` | a shared kernel cache / an explicit kernel |
 | `DOZ_SUBNET` | `defaults.nat_subnet` | default subnet for `--network nat` |
+| `DOZ_PROGRESS` | `ui.progress` | `animated` or `plain` progress |
 | `XDG_CONFIG_HOME` | — | where `dozer-sandbox/doz.toml` is (default `~/.config`) |
 
 ### Troubleshooting

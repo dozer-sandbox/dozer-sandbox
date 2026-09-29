@@ -250,11 +250,17 @@ public struct ImageBaker: Sendable {
         var timings: [ImageManifest.TimedStep] = []
         func timed<T>(_ label: String, _ body: () async throws -> T) async throws -> T {
             let t0 = ContinuousClock.now
-            let v = try await body()
-            let ms = milliseconds(since: t0)
-            timings.append(.init(step: label, milliseconds: ms))
-            events(.step(label, milliseconds: ms))
-            return v
+            events(.stepStarted(label))
+            do {
+                let v = try await body()
+                let ms = milliseconds(since: t0)
+                timings.append(.init(step: label, milliseconds: ms))
+                events(.step(label, milliseconds: ms))
+                return v
+            } catch {
+                events(.stepFailed(label, milliseconds: milliseconds(since: t0), error: error.localizedDescription))
+                throw error
+            }
         }
         events(.note("baking image \(imageSpec.name) \(key.prefix(12)) from \(imageSpec.base) (one-time per image spec, needs network)…"))
         let store = try ImageStore(path: storeRoot)
@@ -263,9 +269,15 @@ public struct ImageBaker: Sendable {
         defer { if let bakeNet { SubnetPool.release(bakeNet.subnet.description) } }
         var mgr = try await ContainerManager(kernel: inputs.kernel, initfsReference: inputs.initfsReference,
                                              imageStore: store, network: bakeNet)
-        let hadBase = (try? await store.get(reference: imageSpec.base, pull: false)) != nil
-        let image = try await timed("base \(hadBase ? "ready (cached)" : "pulled") — \(imageSpec.base.split(separator: "@").first ?? "")") {
-            try await store.get(reference: imageSpec.base, pull: true)
+        let cachedImage = try? await store.get(reference: imageSpec.base, pull: false)
+        let baseName = imageSpec.base.split(separator: "@").first.map(String.init) ?? imageSpec.base
+        let image = try await timed(cachedImage != nil ? "base image \(baseName) (cached)" : "pulled the base image \(baseName)") {
+            if let cachedImage { return cachedImage }
+            // 593: the pull's progress (bytes and layers), counted here and reported at most 4 times a second.
+            let meter = PullMeter(label: "pulling \(Self.shortReference(imageSpec.base))", events: events)
+            let img = try await store.pull(reference: imageSpec.base, progress: { batch in meter.add(batch) })
+            meter.finish()
+            return img
         }
         let id = "bake-\(imageSpec.name)"
         try? mgr.delete(id)
@@ -321,11 +333,15 @@ public struct ImageBaker: Sendable {
             }
             let netEnv = proxy?.guestEnvironment ?? [:]
             for step in imageSpec.steps {
+                // 593: the step's own output, live — a tail of it, as inert text, at most 4 lines a second.
+                let tail = OutputTail { events(.output($0)) }
                 let r = try await timed("step: \(step.name)") {
                     try await Sandbox.exec(on: c, step.argv,
                                            environment: BakeEnvironment.scrubbed(step.environment.merging(Self.userEnv(step.user, imageSpec)) { a, _ in a }.merging(netEnv) { a, _ in a }),
-                                           workingDirectory: "/", privileged: false, timeout: step.timeoutSeconds, user: step.user)
+                                           workingDirectory: "/", privileged: false, timeout: step.timeoutSeconds, user: step.user,
+                                           onOutput: { tail.add($0) })
                 }
+                tail.flush()
                 guard r.exitCode == 0 else {
                     throw SandboxError.commandFailed(command: "bake step \(step.name)", exitCode: r.exitCode, output: r.output + r.errorOutput)
                 }
