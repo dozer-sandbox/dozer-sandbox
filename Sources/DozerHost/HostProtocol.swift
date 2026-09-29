@@ -46,11 +46,20 @@ public enum HostOp: String, Codable, Sendable, CaseIterable {
     /// its lines so far as the result, or, with `follow`, `console` event lines as they are
     /// written, until the client hangs up (a stream, like `events`).
     case console
+    /// 593: the image lineage — OCI base → baked image → template (custom image) → sandboxes, with
+    /// 587's `DiskAccounting` sizes (`ImageTree`).
+    case imageTree = "image-tree"
+    /// 593: a template (a custom image, never the state disk) from a sandbox's current disk — any
+    /// phase: a live one goes through a temporary restore point — or from one of its restore points.
+    case templateCreate = "template-create"
+    /// 593: a new sandbox from an existing one's disk (or a restore point), with overrides
+    /// (`DuplicateOptions`); the state disk starts fresh unless `copyState`.
+    case duplicate
 
     /// Operations that only read — answered from the store in-process when no host is running.
     public var isReadOnly: Bool {
         switch self {
-        case .ping, .ls, .inspect, .pointList, .imageList, .keyList, .accountList: true
+        case .ping, .ls, .inspect, .pointList, .imageList, .keyList, .accountList, .imageTree: true
         case .netPolicy: false        // decided per request (a change needs the host)
         default: false
         }
@@ -86,6 +95,30 @@ public struct CreateOptions: Codable, Equatable, Sendable {
 
 /// A flat bag of the arguments an operation may take; each op reads the fields it needs. Flat on
 /// purpose: a later version adds fields, never nests or renames.
+/// 593 `duplicate`: what the new sandbox changes from its source. Everything nil keeps the source's.
+public struct DuplicateOptions: Codable, Equatable, Sendable {
+    /// A host directory shared at /workspace (it must exist and be readable; never created).
+    public var workspace: String?
+    public var cpus: Int?
+    public var memoryMiB: UInt64?
+    /// `agent`, `bake`, `locked`, `open`, `nat` or `none` (nil: the source's, a custom policy included).
+    public var network: String?
+    /// An account name, `none` or `default` (nil: the source's).
+    public var account: String?
+    /// Clone the source's state disk (the agent's logins and history) too. Default: a fresh one.
+    public var copyState: Bool?
+
+    public init(workspace: String? = nil, cpus: Int? = nil, memoryMiB: UInt64? = nil, network: String? = nil,
+                account: String? = nil, copyState: Bool? = nil) {
+        self.workspace = workspace
+        self.cpus = cpus
+        self.memoryMiB = memoryMiB
+        self.network = network
+        self.account = account
+        self.copyState = copyState
+    }
+}
+
 public struct HostRequest: Codable, Equatable, Sendable {
     public var v: Int
     public var op: HostOp
@@ -136,6 +169,8 @@ public struct HostRequest: Codable, Equatable, Sendable {
     /// — `doz ui`'s, every 3 s — must not pay it (it grew a guest log by 600 KB in 9 hours).
     /// nil or true: counted, as before.
     public var withSessions: Bool?
+    /// 593 `duplicate`: the overrides (the new name is `newName`, a restore point `point`).
+    public var duplicate: DuplicateOptions?
 
     public init(_ op: HostOp, name: String? = nil) {
         v = HostProtocol.version

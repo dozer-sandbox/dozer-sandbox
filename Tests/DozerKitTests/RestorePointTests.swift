@@ -118,6 +118,56 @@ final class RestorePointTests: XCTestCase {
         XCTAssertEqual(layout.customImages().map(\.key), [disk.key])
     }
 
+    /// 593: a template is the ROOT disk only — never the state disk (the agent's logins and history).
+    func test_aTemplateNeverHoldsTheStateDisk() async throws {
+        let sb = try Sandbox(spec: spec)
+        try Data("logins".utf8).write(to: layout.stateDisk)
+        let rp = try await sb.takeRestorePoint(name: "with-state")
+        XCTAssertTrue(rp.hasStateDisk)
+        for img in [try sb.saveAsImage(rp.id, name: "tpl-point"), try sb.saveAsImage(nil, name: "tpl-disk")] {
+            let files = try FileManager.default.contentsOfDirectory(atPath: layout.customImageDirectory(img.key).path).sorted()
+            XCTAssertEqual(files, ["image.json", "root.ext4"], "\(img.key): no state disk in a template")
+        }
+    }
+
+    /// 593: duplicate — the root cloned, the spec the caller's, the state disk fresh unless copied.
+    func test_duplicateClonesTheRootAndStartsTheStateFresh() async throws {
+        let sb = try Sandbox(spec: spec)
+        try Data("logins".utf8).write(to: layout.stateDisk)
+        var s = spec!
+        s.name = "lab-dup"
+        s.cpus = 4
+        s.memoryMiB = 3072
+        s.shares = [Share(hostPath: dir.path, guestPath: "/workspace")]
+        try sb.duplicate(from: nil, as: s, copyState: false)
+        let nl = StoreLayout(spec: s)
+        XCTAssertEqual(String(decoding: try Data(contentsOf: nl.rootfs), as: UTF8.self), "v1")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: nl.stateDisk.path), "a fresh state disk: made empty on the first boot")
+        let p = try XCTUnwrap(PersistedSandbox.read(from: nl.persistedState))
+        XCTAssertEqual(p.phase, .off)
+        XCTAssertEqual(p.rootImage, "alpine-3.20-abc", "the lineage follows the source's image")
+        XCTAssertNotNil(Sandbox.keptRootDisk(nl))
+        XCTAssertThrowsError(try sb.duplicate(from: nil, as: s, copyState: false), "a name in use is refused")
+
+        // With the state copied, from a restore point.
+        let rp = try await sb.takeRestorePoint(name: "p")
+        s.name = "lab-dup2"
+        try sb.duplicate(from: rp.id, as: s, copyState: true)
+        let nl2 = StoreLayout(spec: s)
+        XCTAssertEqual(String(decoding: try Data(contentsOf: nl2.stateDisk), as: UTF8.self), "logins")
+        XCTAssertEqual(PersistedSandbox.read(from: nl2.persistedState)?.restorePoint, rp.id)
+
+        // The current disk of a sandbox that is not stopped on disk is refused (the host goes through a point).
+        var live = try XCTUnwrap(PersistedSandbox.read(from: layout.persistedState))
+        live.phase = .running
+        try live.write(to: layout.persistedState)
+        s.name = "lab-dup3"
+        XCTAssertThrowsError(try sb.duplicate(from: nil, as: s, copyState: false))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: StoreLayout(spec: s).sandboxDirectory.path), "nothing left behind")
+        s.name = "lab"
+        XCTAssertThrowsError(try sb.duplicate(from: rp.id, as: s, copyState: false), "not onto itself")
+    }
+
     func test_restorePointIDsSortByTime() {
         let a = RestorePoint.newID(at: Date(timeIntervalSince1970: 1_000_000))
         let b = RestorePoint.newID(at: Date(timeIntervalSince1970: 2_000_000))

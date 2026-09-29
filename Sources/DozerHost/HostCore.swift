@@ -362,6 +362,14 @@ public actor HostCore {
             return try await point(r, emit: emit)
         case .imageList:
             return try JSONValue(encoding: images())
+        case .imageTree:
+            // Every disk's extent map is read: off the actor, so nothing else waits on it.
+            let s = store
+            return try JSONValue(encoding: try await Task.detached { try ImageTree.measure(store: s) }.value)
+        case .templateCreate:
+            return try JSONValue(encoding: try await templateCreate(r))
+        case .duplicate:
+            return try JSONValue(encoding: try await duplicate(r))
         case .imageBake:
             return try JSONValue(encoding: try await bake(r.image, emit: emit))
         case .imageRm:
@@ -885,6 +893,148 @@ public actor HostCore {
         default:
             throw HostError(.invalid, "not a restore point operation")
         }
+    }
+
+    // MARK: templates and duplicates (593)
+
+    /// The sandbox is stopped AND its record says so (a deep sleep of an earlier host is `off` in
+    /// memory but holds a snapshot: its disk is not a clean stop).
+    private func stoppedOnDisk(_ m: Managed) async -> Bool {
+        guard await m.sandbox.phase == .off else { return false }
+        return PersistedSandbox.read(from: m.sandbox.layout.persistedState).map { $0.phase == .off } ?? false
+    }
+
+    /// A template — a custom image: the ROOT disk only, never the state disk (the agent's logins and
+    /// history never go into a disk meant to be shared). From a restore point; from the current disk
+    /// of a stopped sandbox; or, from a live one, through a temporary restore point (sync, pause, APFS
+    /// clone, resume — crash-consistent, like any point taken while running), deleted afterwards.
+    private func templateCreate(_ r: HostRequest) async throws -> CustomImage {
+        let m = try get(r.name)
+        let sb = m.sandbox
+        guard let name = r.image else { throw HostError(.invalid, "a template needs a name (--as TEMPLATE)") }
+        guard (1...40).contains(name.count), name.allSatisfy({ ("a"..."z").contains($0) || ("0"..."9").contains($0) || $0 == "-" }), name.first != "-" else {
+            throw HostError(.invalid, "a template's name is 1–40 characters of [a-z0-9-]")
+        }
+        guard !DozerImages.builtIn.contains(name) else { throw HostError(.invalid, "\(name) is a built-in image's name") }
+        guard !store.layout("_").customImages().contains(where: { $0.name == name }) else {
+            throw HostError(.exists, "a template named \(name) already exists (doz template ls)")
+        }
+        let t0 = ContinuousClock.now
+        let row = beginAction(m, "save as template", phaseBefore: (await effectivePhase(m)).rawValue)
+        do {
+            let img: CustomImage
+            if r.point != nil {
+                img = try sb.saveAsImage(try resolvePoint(m, r.point).id, name: name, note: r.note ?? "")
+            } else if await stoppedOnDisk(m) {
+                img = try sb.saveAsImage(nil, name: name, note: r.note ?? "")
+            } else {
+                let tmp = try await sb.takeRestorePoint(name: "for template \(name)", note: "temporary — removed once the template is saved")
+                defer { try? sb.deleteRestorePoint(tmp.id) }
+                img = try sb.saveAsImage(tmp.id, name: name, note: r.note ?? "")
+            }
+            finishAction(m, row, t0, ok: true)
+            metrics?.record(run: metricsRun, action: "save as template", sandbox: m.name, image: m.config.image, startedAt: Date(),
+                            durationMs: ms(since: t0), bytes: img.allocatedBytes)
+            note(m.name, "saved as template \(name) (root disk only — never the state disk)")
+            return img
+        } catch { finishAction(m, row, t0, ok: false, error: error); throw error }
+    }
+
+    /// A new sandbox from an existing one's disk — its current disk (a live one goes through a
+    /// temporary restore point) or one of its restore points — with overrides. The root disk is an
+    /// APFS clone; the state disk starts fresh unless `copyState`. Keys are not copied (as for fork).
+    private func duplicate(_ r: HostRequest) async throws -> SandboxInfo {
+        let m = try get(r.name)
+        let sb = m.sandbox
+        guard let newName = r.newName else { throw HostError(.invalid, "duplicate needs a name for the new sandbox") }
+        guard managed[newName] == nil, !creating.contains(newName) else { throw HostError(.exists, "sandbox \(newName) already exists") }
+        guard !FileManager.default.fileExists(atPath: store.layout(newName).sandboxDirectory.path) else {
+            throw HostError(.exists, "\(store.layout(newName).sandboxDirectory.path) already exists (not made by doz — remove it or pick another name)")
+        }
+        let o = r.duplicate ?? DuplicateOptions()
+        var spec = m.config.spec
+        spec.name = newName
+        if let c = o.cpus {
+            guard (1...64).contains(c) else { throw HostError(.invalid, "--cpus is 1–64") }
+            spec.cpus = c
+        }
+        if let mem = o.memoryMiB {
+            guard (256...262_144).contains(mem) else { throw HostError(.invalid, "--memory is 256 MiB – 256 GiB") }
+            spec.memoryMiB = mem
+        }
+        if let ws = o.workspace {
+            let path = try Self.validatedWorkspace(ws)
+            spec.shares = spec.shares.filter { $0.guestPath != DozerImages.workspaceGuestPath } + [Share(hostPath: path, guestPath: DozerImages.workspaceGuestPath)]
+        }
+        if let net = o.network {
+            let mode = try DozerImages.networkMode(net)
+            let wasNAT = spec.network == .nat
+            spec.network = mode
+            if mode != .nat || !wasNAT { spec.subnet = nil }
+        }
+        try spec.validate()
+        var cfg = m.config
+        cfg.name = newName
+        cfg.spec = spec
+        cfg.workspace = spec.shares.first { $0.guestPath == DozerImages.workspaceGuestPath }?.hostPath
+        cfg.createdAt = Date()
+        cfg.credentialSources = [:]
+        cfg.diedWithHostAt = nil
+        cfg.placeholderHashes = nil
+        if spec.network.policy != nil {
+            switch o.account {
+            case nil: if cfg.account == nil, m.config.spec.network.policy == nil { cfg.account = "default" }
+            case "default": cfg.account = "default"
+            case "none": cfg.account = nil
+            case let a?:
+                guard accountStore.load().accounts.contains(where: { $0.name == a }) else { throw HostError(.notFound, "no account \(a) (doz account ls)") }
+                cfg.account = a
+            }
+        } else {
+            if let a = o.account, a != "none", a != "default" {
+                throw HostError(.invalid, "--account needs a proxied network (agent, open, …): the credential lives in the host's proxy")
+            }
+            cfg.account = nil
+            cfg.credentialPolicy = nil
+        }
+        creating.insert(newName)
+        defer { creating.remove(newName) }
+        let t0 = ContinuousClock.now
+        var from = try r.point.map { try resolvePoint(m, $0).id }
+        var temporary: String?
+        if from == nil, !(await stoppedOnDisk(m)) {
+            let tmp = try await sb.takeRestorePoint(name: "for duplicate \(newName)", note: "temporary — removed once the duplicate is made")
+            temporary = tmp.id
+            from = tmp.id
+        }
+        defer { if let t = temporary { try? sb.deleteRestorePoint(t) } }
+        try sb.duplicate(from: from, as: spec, copyState: o.copyState == true)
+        do {
+            try cfg.write(store.configFile(newName))
+        } catch {
+            try? FileManager.default.removeItem(at: store.layout(newName).sandboxDirectory)
+            throw error
+        }
+        let nm = try adopt(cfg)
+        metrics?.record(run: metricsRun, action: "duplicate", sandbox: newName, image: cfg.image, phaseAfter: "off", startedAt: Date(),
+                        durationMs: ms(since: t0), detail: ["from": m.name, "point": r.point ?? "current disk", "state": o.copyState == true ? "copied" : "fresh"])
+        note(newName, "duplicated from \(m.name)\(r.point.map { " (restore point \($0))" } ?? "") — \(spec.cpus) CPUs, \(spec.memoryMiB) MiB, network \(cfg.networkName), state disk \(o.copyState == true ? "copied" : "fresh")")
+        return await info(nm, sessions: false)
+    }
+
+    /// A workspace the host will share: absolute (or ~), an existing directory this user can read
+    /// and enter. Never created.
+    static func validatedWorkspace(_ raw: String) throws -> String {
+        let expanded = (raw as NSString).expandingTildeInPath
+        guard expanded.hasPrefix("/") else { throw HostError(.invalid, "the workspace is an absolute path (or ~/…)") }
+        let path = URL(fileURLWithPath: expanded).standardizedFileURL.path
+        var isDir: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: path, isDirectory: &isDir) else {
+            throw HostError(.notFound, "the workspace \(path) does not exist — doz never creates one; make it first")
+        }
+        guard isDir.boolValue else { throw HostError(.invalid, "the workspace \(path) is not a directory") }
+        guard access(path, R_OK | X_OK) == 0 else { throw HostError(.invalid, "the workspace \(path) is not readable by you") }
+        return path
     }
 
     // MARK: images

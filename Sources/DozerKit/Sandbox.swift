@@ -407,6 +407,53 @@ public actor Sandbox {
         return s
     }
 
+    /// 593: a new sandbox from this one's disk — restore point `restorePoint`, or (nil) the current
+    /// root disk of this STOPPED sandbox — with its own spec `newSpec` (the caller changes the name,
+    /// shares, CPUs, memory, network; everything else is this one's). The root disk is an APFS clone;
+    /// the state disk (the agent's logins and history) starts FRESH — the image spec's empty one is
+    /// made on its first boot — unless `copyState`. Cold-booted on its first Start (after e2fsck when
+    /// the source was taken while running). `fork` is this with the same spec and the state copied.
+    public nonisolated func duplicate(from restorePoint: String?, as newSpec: SandboxSpec, copyState: Bool) throws {
+        try newSpec.validate()
+        let nl = StoreLayout(spec: newSpec)
+        let fm = FileManager.default
+        guard newSpec.name != spec.name else { throw SandboxError.alreadyExists("sandbox \(newSpec.name)") }
+        let root: URL, state: URL?, sourceImage: String?, pointID: String?, fsck: Bool
+        if let restorePoint {
+            guard let rp = layout.restorePoints().first(where: { $0.id == restorePoint }) else { throw SandboxError.restorePointNotFound(restorePoint) }
+            let dir = layout.restorePointDirectory(rp.id)
+            root = dir.appendingPathComponent("root.ext4")
+            state = rp.hasStateDisk ? dir.appendingPathComponent("state.ext4") : nil
+            sourceImage = rp.sourceImage
+            pointID = rp.id
+            fsck = rp.needsFsck
+        } else {
+            guard let p = PersistedSandbox.read(from: layout.persistedState), p.phase == .off, fm.fileExists(atPath: layout.rootfs.path) else {
+                throw SandboxError.invalidSpec("duplicate the current disk only while the sandbox is stopped (or from a restore point)")
+            }
+            root = layout.rootfs
+            state = fm.fileExists(atPath: layout.stateDisk.path) ? layout.stateDisk : nil
+            sourceImage = p.rootImage
+            pointID = p.restorePoint
+            fsck = p.fsckOnNextBoot == true
+        }
+        guard !fm.fileExists(atPath: nl.sandboxDirectory.path) else { throw SandboxError.alreadyExists("sandbox \(newSpec.name)") }
+        try fm.createDirectory(at: nl.sandboxDirectory, withIntermediateDirectories: true)
+        do {
+            try cloneFile(root, to: nl.rootfs)
+            if copyState, let state { try cloneFile(state, to: nl.stateDisk) }
+            var p = PersistedSandbox(spec: newSpec, phase: .off, machineIdentifier: VZGenericMachineIdentifier().dataRepresentation,
+                                     macAddress: newSpec.networking ? PersistedSandbox.randomMAC() : nil, subnet: nil, shareTags: [:])
+            p.rootImage = sourceImage
+            p.restorePoint = pointID
+            p.fsckOnNextBoot = fsck ? true : nil
+            try p.write(to: nl.persistedState)
+        } catch {
+            try? fm.removeItem(at: nl.sandboxDirectory)
+            throw error
+        }
+    }
+
     /// Delete a restore point. Any one, in any order: each is a set of independent APFS clones —
     /// there is no chain of deltas to merge.
     public nonisolated func deleteRestorePoint(_ id: String) throws {
