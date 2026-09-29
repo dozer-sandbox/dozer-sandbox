@@ -52,8 +52,13 @@ public final class HostServer: @unchecked Sendable {
         }
     }
 
-    /// Run the host in this process until it exits (never returns).
-    public static func run(store: DozerStore, idleTimeoutMinutes: Double, version: String) async throws -> Never {
+    /// 593: this host was started by `HostLauncher` (fully detached), not by a person's `--foreground`.
+    nonisolated(unsafe) public static var launchedDetached: Bool = false
+
+    /// Run the host in this process until it exits (never returns). `launched`: started by
+    /// `HostLauncher` (its parent is launchd); false: a person ran `doz host start --foreground`.
+    public static func run(store: DozerStore, idleTimeoutMinutes: Double, version: String, launched: Bool = false) async throws -> Never {
+        launchedDetached = launched
         setvbuf(stdout, nil, _IOLBF, 0)
         signal(SIGPIPE, SIG_IGN)
         signal(SIGHUP, SIG_IGN)
@@ -63,6 +68,8 @@ public final class HostServer: @unchecked Sendable {
         try server.takeLock(waitSeconds: 60)
         HostLog.enabled = true
         HostLog.line("doz host \(version) (pid \(getpid())) — store \(store.root.path), idle timeout \(idleTimeoutMinutes) min")
+        HostLog.line(launched ? "detached: parent \(getppid())\(getppid() == 1 ? " (launchd)" : " — NOT launchd"), session \(getsid(0))"
+                              : "in the foreground (parent \(getppid())): it lives in that terminal's process tree")
         if ProcessInfo.processInfo.environment["DOZ_TEST_CREDENTIALS"] == "memory" {
             HostLog.line("TEST: DOZ_TEST_CREDENTIALS=memory — accounts' secrets live in this host's memory, never the keychain; nothing is verified")
         }
@@ -83,6 +90,18 @@ public final class HostServer: @unchecked Sendable {
         server.installSignalHandlers()
         Task.detached { await server.core.recoverAfterStart() }
         Task.detached { await server.idleLoop() }
+        // 593 §9 (S2): the periodic screen capture (read once, at start — like the idle timeout).
+        let captureMinutes = DozerSettings.load().int(SettingKey.screenCapture)
+        HostLog.line(captureMinutes > 0 ? "saving session screens every \(captureMinutes) min while a sandbox runs (host.screen_capture_minutes)"
+                                        : "periodic screen capture off (host.screen_capture_minutes = 0)")
+        if captureMinutes > 0 {
+            Task.detached {
+                while true {
+                    try? await Task.sleep(for: .seconds(Double(captureMinutes) * 60))
+                    await server.core.captureScreensPeriodically()
+                }
+            }
+        }
         HostLog.line("listening on \(store.socket.path)")
         while true { try? await Task.sleep(for: .seconds(3600)) }
     }

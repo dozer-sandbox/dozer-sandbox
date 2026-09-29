@@ -7,13 +7,22 @@
 // page owns the WebSocket; this frame only draws and reports keys, over a narrow message protocol:
 //
 //   page → frame   {t:'init', wasm: ArrayBuffer, mode, fontSize}   once: compile the engine (one WASM
-//                                                          instance); fontSize 9–32 (ui.terminal_font_size)
+//                                                          instance); fontSize 9–32 (ui.terminal_font_size);
+//                                                          mode interactive | watch | saved (593)
 //                  {t:'write', data: ArrayBuffer}         terminal bytes to draw
 //                  {t:'paste', text}                      a paste the PAGE made safe (and confirmed)
 //                  {t:'focus'} · {t:'keep-scrollback'} (after a boot view, before the session's screen)
+//                  {t:'live', mode}                       593: a SAVED screen becomes the live session
+//                                                          (interactive | watch) — only from saved
 //   frame → page   {t:'ready'} · {t:'opened', cols, rows} · {t:'data', s} (keys, reports)
 //                  {t:'resize', cols, rows} · {t:'title', s} · {t:'paste', text, bracketed}
 //                  {t:'paste-too-big', bytes} · {t:'failed'} (the engine did not load)
+//                  {t:'key'}                              593: a key was pressed on a SAVED screen —
+//                                                          no content; the page decides (wake/resume)
+//
+// 593 §9 — `saved` mode: a session's last saved screen (VT the host captured) drawn read-only and
+// selectable while its sandbox does not run. Nothing is ever sent from it — no keys, no reports, no
+// focus reports, no paste; a key press is only announced ('key'), so the page can wake the sandbox.
 //
 // Every message is checked here (source = the parent, known type, typed fields, capped sizes); anything
 // else is dropped and counted. The hardening that was the page's is kept, inside the frame:
@@ -59,7 +68,21 @@ async function init(wasm, m, fontSize) {
   term.onTitleChange((s) => toPage({ t: 'title', s: String(s).slice(0, 120) }));
   guard(document.documentElement);
   toPage({ t: 'opened', cols: term.cols, rows: term.rows });
-  term.focus();
+  if (mode !== 'saved') term.focus();
+}
+
+/// 593: a key on a saved screen — announced (at most every 2 s), never typed: modifiers alone and the
+/// browser's Cmd-chords do not count.
+const MODIFIER_KEYS = new Set(['Shift', 'Control', 'Alt', 'Meta', 'CapsLock', 'Fn', 'OS']);
+let lastKeyNotice = 0;
+function savedKey(ev) {
+  if (mode !== 'saved' || ev.metaKey || MODIFIER_KEYS.has(ev.key)) return;
+  ev.preventDefault();
+  ev.stopPropagation();
+  const now = Date.now();
+  if (now - lastKeyNotice < 2000) return;
+  lastKeyNotice = now;
+  toPage({ t: 'key' });
 }
 
 function guard(root) {
@@ -81,6 +104,7 @@ function guard(root) {
   // Keys: Cmd-C copies a selection; Cmd-V pastes (the paste event above); every other Cmd-chord is
   // the browser's and never reaches the guest.
   root.addEventListener('keydown', (ev) => {
+    if (mode === 'saved') { savedKey(ev); if (!ev.metaKey) return; }
     if (!ev.metaKey) return;
     if (ev.code === 'KeyV') return;
     if (ev.code === 'KeyC' && term && quietly(() => term.hasSelection(), false)) {
@@ -94,12 +118,12 @@ function guard(root) {
   window.addEventListener('focus', () => {
     if (focused) return;
     focused = true;
-    if (term && quietly(() => term.hasFocusEvents(), false)) toPage({ t: 'data', s: '\x1b[I' });
+    if (mode !== 'saved' && term && quietly(() => term.hasFocusEvents(), false)) toPage({ t: 'data', s: '\x1b[I' });
   });
   window.addEventListener('blur', () => {
     if (!focused) return;
     focused = false;
-    if (term && quietly(() => term.hasFocusEvents(), false)) toPage({ t: 'data', s: '\x1b[O' });
+    if (mode !== 'saved' && term && quietly(() => term.hasFocusEvents(), false)) toPage({ t: 'data', s: '\x1b[O' });
   });
 }
 
@@ -107,8 +131,9 @@ function guard(root) {
 function valid(m) {
   if (!m || typeof m !== 'object' || typeof m.t !== 'string') return false;
   switch (m.t) {
-    case 'init': return !term && m.wasm instanceof ArrayBuffer && (m.mode === 'interactive' || m.mode === 'watch')
+    case 'init': return !term && m.wasm instanceof ArrayBuffer && (m.mode === 'interactive' || m.mode === 'watch' || m.mode === 'saved')
                         && Number.isInteger(m.fontSize) && m.fontSize >= 9 && m.fontSize <= 32 && Object.keys(m).length === 4;
+    case 'live': return !!term && mode === 'saved' && (m.mode === 'interactive' || m.mode === 'watch') && Object.keys(m).length === 2;
     case 'write': return !!term && m.data instanceof ArrayBuffer && m.data.byteLength <= MAX_WRITE && Object.keys(m).length === 2;
     case 'paste': return !!term && typeof m.text === 'string' && m.text.length <= MAX_PASTE && Object.keys(m).length === 2;
     case 'focus': case 'keep-scrollback': return !!term && Object.keys(m).length === 1;
@@ -123,6 +148,8 @@ window.addEventListener('message', (ev) => {
     case 'write': term.write(new Uint8Array(m.data)); break;
     case 'paste': if (mode === 'interactive') term.paste(m.text); break;
     case 'focus': term.focus(); break;
+    // 593: the saved screen becomes the live session (the page then attaches; its SNAPSHOT redraws).
+    case 'live': mode = m.mode; break;
     // After the boot view: the screen (the boot log's end) scrolls into the scrollback before the
     // session's first screen replaces it — the terminal alone knows how tall it is.
     case 'keep-scrollback': term.write('\x1b[999;1H' + '\r\n'.repeat(term.rows)); break;

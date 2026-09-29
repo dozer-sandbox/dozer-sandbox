@@ -269,7 +269,7 @@ command but cannot boot a VM (`doz doctor` says so).
 | `doz sleep NAME` | Pause + snapshot to disk: RAM kept, and it survives a host crash. |
 | `doz hibernate NAME` · `doz wake NAME` | Snapshot + VM stopped: RAM returned. Wake ~0.3 s, sessions and pids where they were. A program started less than 3 s ago gets the rest of that time first (583). |
 | `doz shutdown NAME` · `doz reset NAME` · `doz rm NAME` | Cold stop keeping the disk · discard the disk (back to the image) · remove everything. Each asks first on the terminal; `--yes` skips; with no terminal and no `--yes` they refuse (exit 5). |
-| `doz ls` · `doz inspect NAME` · `doz sessions NAME` | Name, image, phase, RAM held (the allocation less what the balloon returned; 0 hibernated or off), disk, sessions, network · everything as JSON · the guest's terminal sessions. |
+| `doz ls` · `doz inspect NAME` · `doz sessions NAME [--screen S [--vt]]` | Name, image, phase, RAM held (the allocation less what the balloon returned; 0 hibernated or off), disk, sessions, network · everything as JSON · the guest's terminal sessions — while it does not run, from their saved screens (593: saved at pause, sleep, hibernate, shutdown and every `host.screen_capture_minutes`); `--screen` prints one (text; `--vt` the bytes, to a file or pipe). |
 | `doz attach NAME [SESSION] [--no-wake]` | A raw-tty client of a guest session. **Ctrl-]** detaches (`--detach-key ctrl-x\|none`); the session keeps running. Hibernating disconnects you and the client waits, then reattaches by itself when the sandbox runs again. A paused or sleeping sandbox is woken first unless `--no-wake`. |
 | `doz run NAME [--session S] [-d] -- CMD…` | A NEW session running CMD (no shell in front — say `bash -lc '…'` for one), attached; exits with the program's exit code. |
 | `doz exec NAME [--user U] [--workdir D] [-e K=V] [--timeout S] -- CMD…` | One-shot and non-interactive: stdout, stderr and the exit code pass through. Runs like a session (an agent image's user in `/workspace`). |
@@ -316,9 +316,11 @@ proxied sandbox's egress proxy (its policy, connection log and credential vault)
 writer, and the shared event-loop group (583), and serves `<store>/host.sock`. Every command is a
 thin client of that socket.
 
-- **Lazy.** The first command that needs it starts it as a **detached child** — its own session
-  (`setsid`), stdin `/dev/null`, output appended to `<store>/host.log`, none of the caller's other
-  file descriptors. No launchd agent: nothing is installed in `~/Library/LaunchAgents`. It holds
+- **Lazy.** The first command that needs it starts it **fully detached** — through an intermediate
+  that exits, so its parent is launchd and it is in no caller's process tree (stopping a client, its
+  group or its tree never stops the host — 593), its own session (`setsid`), stdin `/dev/null`,
+  output appended to `<store>/host.log`, none of the caller's other file descriptors. `doz doctor`
+  shows its parent. No launchd agent: nothing is installed in `~/Library/LaunchAgents`. It holds
   `<store>/host.lock` (flock) for its whole life, so there is never a second host for a store, and a
   new one waits for an exiting one to finish before it loads anything.
 - **Idle exit.** It exits once no sandbox has a VM (booting, running, paused or asleep) and no

@@ -63,20 +63,59 @@ struct Inspect: AsyncParsableCommand {
 }
 
 struct Sessions: AsyncParsableCommand {
-    static let configuration = CommandConfiguration(abstract: "The sandbox's terminal sessions (they survive pause, sleep and hibernate).")
+    static let configuration = CommandConfiguration(
+        abstract: "The sandbox's terminal sessions (they survive pause, sleep and hibernate).",
+        discussion: """
+            While the sandbox is not running, its sessions are listed from their saved screens (saved when it \
+            pauses, sleeps, hibernates or shuts down, and every host.screen_capture_minutes while it runs) — \
+            nothing is woken. --screen SESSION prints that session's last saved screen as text; add --vt to \
+            write the terminal bytes instead (to a file or a pipe — never to a terminal).
+            """)
     @OptionGroup var g: GlobalOptions
     @Argument var name: String
+    @Option(name: .long, help: "Print this session's last saved screen (text).") var screen: String?
+    @Flag(name: .long, help: "With --screen: write the saved VT bytes (redraw with `cat` in a terminal) — only to a file or a pipe.") var vt = false
 
     func run() async throws {
+        if let screen { try await printScreen(screen); return }
+        if vt { throw fail(HostError(.invalid, "--vt goes with --screen SESSION"), g, code: DozerExit.usage) }
         let rows = try decode(try await query(HostRequest(.sessions, name: name), g), [SessionRow].self, g)
         if g.json { Out.json(rows); return }
         if rows.isEmpty { Out.stdout("no sessions — doz run \(name) -- CMD, or doz up \(name)\n"); return }
         var t = [["SESSION", "PID", "SIZE", "CLIENTS", "STATE", "COMMAND"]]
         for s in rows {
-            t.append([s.name, s.pid.map(String.init) ?? "—", s.cols.map { "\($0)×\(s.rows ?? 0)" } ?? "—", "\(s.clients)",
-                      s.ended ? "ended (exit \(s.exitCode.map(String.init) ?? "?"))" : "running", s.command])
+            let state: String
+            if s.saved == true {
+                let when = s.savedAt.map { " " + Out.ago($0) } ?? ""
+                state = s.ended ? "ended" + (s.exitCode.map { " (exit \($0))" } ?? "") + " · screen saved\(when)" : "screen saved\(when)"
+            } else {
+                state = s.ended ? "ended (exit \(s.exitCode.map(String.init) ?? "?"))" : "running"
+            }
+            t.append([s.name, s.pid.map(String.init) ?? "—", s.cols.map { "\($0)×\(s.rows ?? 0)" } ?? "—", "\(s.clients)", state, s.command])
+        }
+        if rows.contains(where: { $0.saved == true }) {
+            Out.stderr("\(name) is not running: its sessions as last saved (doz sessions \(name) --screen SESSION shows one)\n")
         }
         Out.stdout(Out.table(t))
+    }
+
+    /// S5: the last saved screen — text (inert) by default; the VT bytes only off a terminal.
+    private func printScreen(_ session: String) async throws {
+        var r = HostRequest(.sessionScreen, name: name)
+        r.session = session
+        let s = try decode(try await query(r, g), SessionScreen.self, g)
+        if vt {
+            guard isatty(STDOUT_FILENO) == 0 else {
+                throw fail(HostError(.invalid, "--vt writes the guest's terminal bytes: send them to a file or a pipe, not a terminal"), g, code: DozerExit.usage)
+            }
+            FileHandle.standardOutput.write(s.vt)
+            return
+        }
+        if g.json { Out.json(s); return }
+        let size = s.cols.map { " · \($0)×\(s.rows ?? 0)" } ?? ""
+        let state = s.ended ? " · ended" + (s.exitCode.map { " (exit \($0))" } ?? "") : ""
+        Out.stderr("\(name) · \(s.session) — saved \(Out.ago(s.savedAt)) (\(s.reason))\(size)\(state)\(s.truncated ? " · oldest scrollback dropped" : "")\n")
+        Out.stdout(s.text.isEmpty ? "" : s.text + "\n")
     }
 }
 

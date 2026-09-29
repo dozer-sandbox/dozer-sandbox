@@ -460,12 +460,22 @@ struct HostRun: AsyncParsableCommand {
     @OptionGroup var g: GlobalOptions
     @Flag(name: .long, help: "Run in this process (logs on stdout) instead of detached.") var foreground = false
     @Option(name: .long, help: "Minutes with nothing running before the host exits; 0 = never (default $DOZ_HOST_IDLE, else the settings' host.idle_timeout_minutes, else 5).") var idleTimeout: Double?
+    /// 593: the launcher's intermediate — spawn the host in its own session, print its pid, exit (so the
+    /// host's parent is launchd, never a client). Not for people.
+    @Flag(name: .long, help: .hidden) var launchDetached = false
+    /// 593: this host was started by the launcher (its status says so; `doctor` expects parent launchd).
+    @Flag(name: .long, help: .hidden) var launched = false
 
     func run() async throws {
         let store = g.dozerStore
         let timeout = DozerCLI.idleTimeout(idleTimeout)
+        if launchDetached {
+            let pid = try HostLauncher.spawnHostProcess(store: store, extra: idleTimeout.map { ["--idle-timeout", String($0)] } ?? [])
+            Out.stdout("\(pid)\n")
+            return
+        }
         if foreground {
-            do { try await HostServer.run(store: store, idleTimeoutMinutes: timeout, version: DozerCommand.version) } catch {
+            do { try await HostServer.run(store: store, idleTimeoutMinutes: timeout, version: DozerCommand.version, launched: launched) } catch {
                 throw fail(HostError(.unavailable, error.localizedDescription), g)
             }
         }

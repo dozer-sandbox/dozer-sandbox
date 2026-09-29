@@ -147,6 +147,14 @@ public enum LifecycleStep: Equatable, Sendable {
     case removeSandboxFiles
     /// Write the persisted state (phase + identity), so a new process can restore.
     case persistState
+    /// 593: best effort, never fails the operation, bounded (`SavedScreens.totalBudgetSeconds`) — save
+    /// every session's screen while the guest can still answer: the FIRST step of pausing, sleeping,
+    /// hibernating or shutting down a RUNNING sandbox. A failed capture keeps the previous file.
+    case captureScreens
+    /// 593: the sessions died with the VM — every saved screen is its session's last (a shutdown).
+    case markScreensEnded
+    /// 593: delete the saved screens (Reset: the sessions they showed are gone with the disk).
+    case removeSavedScreens
 }
 
 /// Turns a `LifecycleOperation` into the ordered `LifecycleStep`s it takes, and the `Phase` it
@@ -169,20 +177,20 @@ public enum LifecyclePlanner {
     public static func plan(_ op: LifecycleOperation, from phase: Phase) -> [LifecycleStep]? {
         switch (op, phase) {
         case (.pause, .running):
-            return [.pauseVM]
+            return [.captureScreens, .pauseVM]
         case (.resume, .paused), (.resume, .asleep), (.wake, .asleep):
             // Resume from Pause; Wake from Sleep (resume in place). `resume` from Sleep is the
             // pre-rename spelling and still works. The snapshot is valid only while paused:
             // running again invalidates it.
             return [.resumeVM, .deleteSnapshot, .persistState]
         case (.sleep, .running):
-            return [.restoreGuestMemory, .pauseVM, .saveSnapshot, .persistState]
+            return [.captureScreens, .restoreGuestMemory, .pauseVM, .saveSnapshot, .persistState]
         case (.sleep, .paused):
             return [.saveSnapshot, .persistState]
         case (.hibernate, .running):
             // 587: the guest syncs first — a hibernation may be discarded, and what the guest had not
             // written back would be lost with it (586: the last ~5 s, journal or not).
-            return [.restoreGuestMemory, .syncGuest, .pauseVM, .saveSnapshot, .detachSessions(.sandboxSleeping), .stopVMDirect, .persistState]
+            return [.captureScreens, .restoreGuestMemory, .syncGuest, .pauseVM, .saveSnapshot, .detachSessions(.sandboxSleeping), .stopVMDirect, .persistState]
         case (.hibernate, .paused):
             return [.saveSnapshot, .detachSessions(.sandboxSleeping), .stopVMDirect, .persistState]
         case (.hibernate, .asleep):
@@ -190,9 +198,13 @@ public enum LifecyclePlanner {
         case (.wake, .hibernated):
             return [.restoreSnapshot, .resyncClock, .remountShares, .deleteSnapshot, .returnFreeMemory, .persistState]
         case (.shutDown, _):
-            return stopSteps(from: phase)
+            // 593: a running guest's screens are saved first; after the stop every saved screen is its
+            // session's last (marked ended). From off there is nothing to stop and nothing changes.
+            guard let steps = stopSteps(from: phase) else { return nil }
+            return (phase == .running ? [.captureScreens] : []) + steps + [.markScreensEnded]
         case (.resetToImage, _):
-            return (stopSteps(from: phase) ?? [.deleteSnapshot]) + [.removeRootDisk]
+            // No capture: the saved screens are deleted with the disk (S6).
+            return (stopSteps(from: phase) ?? [.deleteSnapshot]) + [.removeRootDisk, .removeSavedScreens]
         case (.delete, _):
             return (stopSteps(from: phase) ?? []) + [.removeSandboxFiles]
         default:

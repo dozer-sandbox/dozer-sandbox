@@ -133,6 +133,15 @@ enum Out {
 
     static func phaseLabel(_ raw: String) -> String { Phase(rawValue: raw).map(PhaseName.label) ?? raw }
 
+    /// "just now", "7 min ago", "2 h ago", "3 d ago".
+    static func ago(_ d: Date, now: Date = Date()) -> String {
+        let s = max(0, now.timeIntervalSince(d))
+        if s < 45 { return "just now" }
+        if s < 3600 { return "\(Int((s / 60).rounded())) min ago" }
+        if s < 86_400 { return "\(Int((s / 3600).rounded())) h ago" }
+        return "\(Int((s / 86_400).rounded())) d ago"
+    }
+
     static func mib(_ m: UInt64) -> String { m == 0 ? "—" : m >= 1024 && m % 1024 == 0 ? "\(m / 1024) GiB" : "\(m) MiB" }
 }
 

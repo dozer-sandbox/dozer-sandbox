@@ -167,6 +167,17 @@ final class WebSecurityTests: XCTestCase {
         XCTAssertEqual(WebRoute.parse(method: .get, target: "/api/v1/sandboxes/demo-1"), .sandbox("demo-1"))
         XCTAssertEqual(WebRoute.parse(method: .get, target: "/api/v1/sandboxes/demo/network"), .sandboxNetwork("demo"))
         XCTAssertEqual(WebRoute.parse(method: .get, target: "/api/v1/stream"), .stream)
+        // 593 §9: a saved screen (a session name by the host's rule), the layout (read; POST changes it).
+        XCTAssertEqual(WebRoute.parse(method: .get, target: "/api/v1/sandboxes/demo/sessions/shell-2.x_y/screen"), .sessionScreen("demo", "shell-2.x_y"))
+        XCTAssertEqual(WebRoute.parse(method: .get, target: "/api/v1/sandboxes/demo/layout"), .terminalLayout("demo"))
+        XCTAssertEqual(WebRoute.parse(method: .post, target: "/api/v1/sandboxes/demo/layout"), .terminalLayoutSet("demo"))
+        for t in ["/api/v1/sandboxes/demo/sessions/.hidden/screen", "/api/v1/sandboxes/demo/sessions/a%2fb/screen",
+                  "/api/v1/sandboxes/demo/sessions/" + String(repeating: "s", count: 65) + "/screen", "/api/v1/sandboxes/demo/sessions/shell/text",
+                  "/api/v1/sandboxes/demo/sessions/sh ell/screen", "/api/v1/sandboxes/Demo/layout", "/api/v1/sandboxes/demo/layout/x"] {
+            XCTAssertNil(WebRoute.parse(method: .get, target: t), t)
+        }
+        XCTAssertNil(WebRoute.parse(method: .post, target: "/api/v1/sandboxes/demo/sessions/shell/screen"), "a screen is only read")
+        XCTAssertNil(WebRoute.parse(method: .delete, target: "/api/v1/sandboxes/demo/layout"))
         let refused = [
             "/api/v1/sandboxes/../images", "/api/v1/sandboxes/%2e%2e", "/api/v1/sandboxes/Demo", "/api/v1/sandboxes/-x",
             "/api/v1/sandboxes/" + String(repeating: "a", count: 41), "/api/v1/overview/", "//api/v1/overview", "/api/v2/overview",
@@ -349,6 +360,9 @@ final class WebSecurityTests: XCTestCase {
             WebAccounts(accounts: [], defaultAccount: "mac", keepalive: false),
             WebMetrics(available: false, runs: 0, rows: 0, sessions: 0, networkMinutes: 0, summary: []),
             WebActivity(seq: 1, kind: "host", text: "x"),
+            // 593 §9
+            WebSavedScreen(SessionScreen(name: "a", SavedScreen(info: SavedScreenInfo(session: "s", savedAt: now, reason: "sleep"), vt: Data(), text: ""))),
+            WebTerminalLayout(TerminalLayout(panes: [.init(tabs: [.init(session: "s")], selected: 0)])),
             // 594
             WebOnboarding(status: PrepareStatus(preparations: [], onboarded: nil, images: [], hostRunning: true),
                           checks: [OnboardingCheck(check: "claude login", status: "ok", detail: "signed in", hard: false)],

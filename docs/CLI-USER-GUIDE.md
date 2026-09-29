@@ -189,11 +189,20 @@ doz up NAME [same options] [--session S] [-d] [-- CMD …]
 | `doz attach NAME [SESSION]` | Your terminal becomes that session. **Ctrl-]** detaches (`--detach-key ctrl-x` or `none`). A paused or sleeping sandbox is woken first (`--no-wake` waits instead). If the sandbox hibernates while you are attached, the client waits and reattaches by itself when it wakes. |
 | `doz run NAME [--session S] [-d] -- CMD …` | Open a **new** session running CMD and attach. It exits with CMD's exit code. There is no shell in front, so write `bash -lc '…'` if you want one. |
 | `doz exec NAME [--user U] [--workdir D] [-e K=V] [--timeout S] -- CMD …` | One-shot, no terminal: stdout, stderr and the exit code pass straight through (default timeout 120 s). On agent images it runs as the agent's user in `/workspace`; `--user root` for root. |
-| `doz sessions NAME` | The sandbox's sessions. |
+| `doz sessions NAME [--screen SESSION [--vt]]` | The sandbox's sessions. While it is not running (paused, asleep, hibernated, shut down) they are listed from their **saved screens**, and nothing is woken. `--screen SESSION` prints that session's last saved screen as text; `--vt` writes its terminal bytes instead — to a file or a pipe (`> s.vt`, then `cat s.vt` in a terminal redraws it), never straight to a terminal. |
 | `doz ls` · `doz inspect NAME` | Every sandbox: image, phase, RAM held, disk, sessions, network · everything about one, as JSON. |
 
 **RAM held** in `ls` is what the VM costs your Mac right now: the allocation, less what the memory
 balloon handed back after a wake. It is shown as `—` when the sandbox is off or hibernated.
+
+**Saved screens.** Before a sandbox pauses, sleeps, hibernates or shuts down, doz saves the screen of
+each of its sessions — and every `host.screen_capture_minutes` (5) while it runs, for the sessions
+that printed something since, so a crash still leaves a recent copy. Saving is a moment's look at
+the session (it is not resized, nothing is typed), limited to a few seconds, and a screen that
+cannot be saved keeps the previous one — it never holds up the sleep. Each screen is kept as text
+(the terminal's own bytes, and plain text) in the sandbox's directory (`screens/`, readable only by
+you). After a shutdown the last screens stay, marked ended. Reset and remove delete them; duplicate,
+fork and templates never copy them.
 
 ## Agents and keys
 
@@ -569,10 +578,20 @@ and can take two minutes), and the page updates when it ends. **Operations** in 
 shows how many run (with a spinner) and a red dot when one failed since you last looked (a failure
 also shows a message).
 
+**A sandbox's panes are remembered** — which terminals it shows, split or not, which session each
+tab shows — by the host, beside the sandbox (not in the browser): after `doz ui` restarts, after a
+reload or in another browser the page shows the same panes, attached. While a sandbox is not running
+its page shows every session as a pane with its **saved screen** (read-only; you can select and copy
+from it) under "Hibernated 2 h ago — its saved screen · press any key to wake": a key (or Wake)
+wakes it, and each pane becomes the live session in place. It holds no connection until then.
+**New shell** and **Terminal…** always start a **new** session; a session that already runs is
+opened from its pane, the empty area's "Open NAME", or Details › Sessions.
+
 **All sessions** is a grid: a tile per session of every running sandbox, each a live, read-only
 view (a watch — nothing reaches the session, and it never resizes it), named sandbox · session. A
-sandbox that is not running is one tile with its state and one button (Wake, Resume or Start); it
-holds no connection, so the grid never keeps the host running for it. Click a tile to open that
+sandbox that is not running shows a tile per session with its saved screen (or, with none, one tile
+with its state) and a button (Wake, Resume or Start); it holds no connection, so the grid never
+keeps the host running for it — woken, its tiles go live in place. Click a tile to open that
 session on its sandbox's page. Filter by sandbox and phase; pick a tile size (`ui.grid_tile_size`).
 Each live tile is a terminal engine and a connection, so only the tiles **on screen** are live, and
 at most `ui.grid_live_tiles` (8) at once — the others say "Not live" and how many are. The list of
@@ -694,7 +713,7 @@ the others say when they apply (the next sandbox created, the next session, or a
 | Section | Settings |
 |---|---|
 | `[ui]` | `boot_view_on_start` (true), `confirm_shutdown` (true), `split_default` (`shell` · `watch` · `attach` · `dialog`), `terminals` (true), `terminal_font_size` (13), `theme` (`auto` · `light` · `dark`), `details_open` (true), `grid_live_tiles` (8, 1–12), `grid_tile_size` (`small` · `medium` · `large`), `progress` (`animated` · `plain`; `$DOZ_PROGRESS`, `--progress auto\|plain`) |
-| `[host]` | `idle_timeout_minutes` (5; `$DOZ_HOST_IDLE`), `keepalive` (false — for a store that has not chosen with `doz account keepalive`) |
+| `[host]` | `idle_timeout_minutes` (5; `$DOZ_HOST_IDLE`), `screen_capture_minutes` (5, 0–1440; `$DOZ_SCREEN_CAPTURE` — how often a running sandbox's changed session screens are saved; 0 = only at pause, sleep, hibernate and shutdown), `keepalive` (false — for a store that has not chosen with `doz account keepalive`) |
 | `[store]` | `path` (`--store`, `$DOZ_STORE`) |
 | `[claude]` | `permissions` (`skip` · `ask`) — Claude Code's own prompts in a claude-code sandbox; `-e DOZ_CLAUDE_PERMISSIONS=…` on `run`/`exec` still wins |
 | `[defaults]` | `cpus` (2), `nat_subnet` (a free one; `$DOZ_SUBNET`) |

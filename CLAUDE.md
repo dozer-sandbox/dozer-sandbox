@@ -74,6 +74,7 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
 | `Sources/DozerHost/Settings.swift`, `TOML.swift`; `Sources/DozerCLI/ConfigCommands.swift`; `Sources/DozerWeb/WebSettings.swift` | 591 settings: the CLOSED schema (`DozerSettings.schema`), `${XDG_CONFIG_HOME:-~/.config}/dozer-sandbox/doz.toml` generated from it, our own strict TOML subset (no dependency), precedence flag > env > file > default with a source per value; `doz config`; the UI's Settings page route (`GET`/`POST /api/v1/settings`) |
 | `Sources/DozerHost/ImageTree.swift`; `Sources/DozerCLI/TemplateCommands.swift`; `Sources/doz-vmtest/TemplatesSuite.swift` | 593: the lineage (`image-tree`, built from `DiskAccounting`; `doz image ls --tree`, Images › Lineage); templates (`template-create`) and `duplicate` (`Sandbox.duplicate`); `make test-vm-templates` |
 | `Sources/DozerHost/Preparations.swift`, `Onboarding.swift`, `AgentPrompt.swift`; `Sources/DozerCLI/OnboardCommands.swift`, `ProjectFile.swift`, `Prompting.swift`, `UninstallCommand.swift`; `Sources/doz-vmtest/OnboardingSuite.swift`, `PullBench.swift` | 594: image preparation in the host (single-flight, joined, cancelled) + `onboarded.json`; onboarding's checks / account step / settings-only-when-missing; the agent's environment prompt + the `dozer` skill; `doz onboard`/`init`/`uninstall`, `doz_project.yaml` (Yams), TTY questions; `make test-cli`'s onboarding part (`make test-cli-onboarding`); `make pullbench` (D12) |
+| `Sources/DozerKit/SavedScreens.swift`; `Sources/DozerHost/TerminalLayout.swift`; `Sources/DozerWeb/WebSessionMemory.swift` | 593 §9: the sessions' saved screens (`<sandbox>/screens/NAME.{vt,txt,json}`; the capture is `Sandbox.captureScreensLocked`, the `.captureScreens` step); the web UI's terminal layout kept by the host (`terminal-layout.json`); their web projections and the layout's strict decoder |
 | `Tests/DozerWebTests/` | 590: the security rules one by one, and a real listener driven with raw HTTP |
 | `Tests/DozerKitTests/` | Unit tests — no VM |
 
@@ -240,6 +241,17 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   overrides, credentials; `ui.terminals` can only take away. Tests use a scratch XDG_CONFIG_HOME
   (the Makefile's test targets export one; the CLI harness sets its own under its store); the web
   server's default `WebSettingsStore(environment: [:])` reads no file.
+- **A host never lives in a client's process tree** (593 incident, 2026-09-29: a host auto-started by
+  `doz ui` was the UI's CHILD — own session, but its descendant; a tool that stopped the UI's tree
+  SIGTERMed the host mid-hibernate and a sandbox lost its programs). `HostLauncher.spawn` is the ONE
+  way a host is started for a client (`HostClient.connect(autostart:)`, `doz host start`): a double
+  spawn — an intermediate `doz host start --launch-detached` (own session) spawns the host
+  (`--foreground --launched`, own session and group, stdin /dev/null, stdout+stderr the log, no other
+  descriptor), prints its pid and exits, so the host's parent is launchd (1). The client still waits
+  for its socket. Only a person's `doz host start --foreground` runs in a caller's tree. `host status`
+  carries `parentPid`, `sessionID`, `launchedDetached`; `doctor` warns when a launched host's parent
+  isn't 1. `make test-cli` (`cliHostDetachChecks`) kills a client's group and every descendant (TERM,
+  then KILL) and checks the host, a running sandbox and its session survive.
 - **Looking never starts the host.** Read-only commands answer from the store in-process
   (`HostCore(readOnly: true)`) unless a host runs — or a record says a VM was live when its host went
   away, which only a host can recover. A short request does not reset the idle clock; an open
@@ -437,6 +449,53 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   socket path under 104 bytes) seeded from the vmtest store, each with its own XDG_CONFIG_HOME; the
   wizard probe (`probes/594-*/run-wizard-probe.sh`) a fresh `/tmp/dzw-*` store.
 
+### Session memory and saved screens (593 §9, owner 2026-09-29 — S1–S6)
+
+- **Screens are saved while the guest can still answer**: `.captureScreens` is the FIRST step of
+  pause, sleep, hibernate and shutdown from RUNNING (planner data — `LifecycleTests`); never from
+  another phase (the guest cannot answer), never before reset/delete (the screens go). It is best
+  effort and bounded (3 s a session, 8 s in all): a failure keeps the previous file and is a note —
+  it never fails or holds up the lifecycle action. Quit = Hibernate captures too.
+- **A capture is a momentary attach that disturbs nothing**: `deckhold pipe` as a non-terminal
+  exec, written `DeckholdFrame.captureRequest` in one go — HELLO **0×0** (keep the session's size:
+  no SIGWINCH, no reflow) then DUMP — read until DUMP's answer (then stdin closes and the pipe exits),
+  and always `delete()`d. Nothing is typed; no focus report is sent. While attached (milliseconds)
+  deckhold counts it as a viewer, so it does not answer a program's terminal query itself — accepted.
+- **Stored as text, not an image**: `NAME.vt` (the SNAPSHOT: VT that redraws the screen, capped at
+  2 MiB keeping the newest lines after a soft reset), `NAME.txt` (DUMP's text, every control
+  character removed — what the CLI prints) and `NAME.json` (`SavedScreenInfo`). 0600 files in a 0700
+  `screens/`, written atomically, and never into a sandbox directory that is gone. A shutdown marks
+  them ended (`.markScreensEnded`), a host that died with the VM too (`recoverAfterStart`); a later
+  capture drops the screens of sessions the guest no longer has (a previous boot's); reset deletes
+  them (`.removeSavedScreens`), rm with the directory. Duplicate, fork, restore points and templates
+  copy disks BY NAME — never the screens (`SavedScreensTests`).
+- **The periodic capture** (`host.screen_capture_minutes`, 5; 0 = off; read at host start): each
+  running, not-busy sandbox — ONE `deckhold ls`, then an attach only for sessions whose `bytes=`
+  moved since their saved screen. It is serialised with the lifecycle (the sandbox's gate).
+- **Looking never wakes**: `sessions` answers from the saved screens (`saved: true`, `savedAt`,
+  `savedReason`) whenever the sandbox is not running — in-process too; `session-screen` (read-only)
+  gives one back. The CLI prints the TEXT; `--vt` writes the guest's bytes only when stdout is not a
+  terminal.
+- **The layout is the host's** (`terminal-layout.json` beside `doz.json`, `TerminalLayout`: one or
+  two panes, ≤ 16 tabs, session names by the host's rule, mode interactive|watch). `terminal-layout`
+  is a read; `terminal-layout-set` goes through the host when one runs (serialised with `rm`) and is
+  otherwise answered IN-PROCESS (it is UI state, like doz.toml — writing it never starts a host); it
+  refuses to create a directory. Reset clears it. The web route decodes the body STRICTLY
+  (`WebTerminalLayout.decode`) and the host validates again.
+- **The page** restores the stored layout once per page load (`restorePanes`) — not while the sandbox
+  is under way (it waits for the next settled refresh) — and writes its panes back (debounced) only
+  after that, so arriving never overwrites the stored layout with an empty page. Restored tabs load
+  their engine the first time they are SHOWN (a hidden frame has no size, and an interactive attach at
+  no size would resize the session). A sandbox that does not run shows its saved screens in the
+  frame's `saved` mode: read-only and selectable, sending NOTHING (no keys, reports, focus reports or
+  paste); a key is only announced (`{t:'key'}`) and the page starts the ordinary wake/resume action.
+  Once it runs, each saved pane (and grid tile) goes live IN PLACE (`{t:'live', mode}`, then the
+  attach's SNAPSHOT). A saved pane holds no socket, so it keeps no host alive (T3).
+- **New is new (S4)**: New shell (shell-N, the next free name — saved names count as taken) and the
+  Terminal… dialog (a new shell, or a new session running a command) never attach to a running
+  session; a running one is reached through its pane, the empty area's "Open NAME" or Details ›
+  Sessions. Split's watch/attach kinds stay: they name the left pane's session explicitly.
+
 ### Browser terminals (591, on by default — owner ruling) — design: workspace `changes/591-*/591.01-DESIGN.md`
 
 - **A terminal is two steps.** `POST …/terminal-ticket` (CSRF, strict body) mints a 256-bit ticket that
@@ -482,8 +541,10 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   REPLACES a default of that name (the frame's CSP/XFO) — never a second copy.
 - **The frame protocol is closed and checked on both sides** (frame.js `valid`, app.js
   `validFrameMessage`): source window, opaque origin, known type, exact fields, typed and capped;
-  anything else is dropped and counted. Page → frame: init / write / paste / focus / keep-scrollback.
-  Frame → page: ready / opened / data / resize / title / paste / paste-too-big / failed.
+  anything else is dropped and counted. Page → frame: init (mode interactive | watch | saved) / write /
+  paste / focus / keep-scrollback / live (593: saved → interactive | watch only).
+  Frame → page: ready / opened / data / resize / title / paste / paste-too-big / failed / key (593: a
+  key on a saved screen, no content).
 - **The frame wraps the engine** (ghostty-web 0.4.0 fails the bar alone): Cmd/Ctrl-clicks dropped and
   `window.open` refused (no link opens; the sandbox has no popups either), the engine's paste handler
   never runs (the frame sends the text to the page, which applies our port of Ghostty 1.3.0's paste

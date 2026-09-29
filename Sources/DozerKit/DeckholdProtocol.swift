@@ -17,6 +17,11 @@ public enum DeckholdFrame: Equatable, Sendable {
     /// Frames larger than this are a protocol error (deckhold drops such a client too).
     public static let maxPayload = 1 << 24
 
+    /// 593: a screen capture's whole request, one write: HELLO 0×0 (keep the session's size — the
+    /// program is not resized, nothing is typed) — answered with a SNAPSHOT — then DUMP, answered with
+    /// the screen as plain text, after which deckhold closes this client.
+    public static let captureRequest: Data = hello(TermSize(cols: 0, rows: 0)).encoded + Data([UInt8(ascii: "P"), 0, 0, 0, 0])
+
     public var typeByte: UInt8 {
         switch self {
         case .hello: UInt8(ascii: "H")

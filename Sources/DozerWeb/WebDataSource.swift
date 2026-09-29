@@ -34,6 +34,12 @@ public protocol DozerWebData: Sendable {
     func attachTerminal(_ name: String, session: String?, size: TermSize) async throws -> any WebTerminalAttachment
     /// 591: the boot console as it is written (the host's `console --follow`); nil when no host runs.
     func bootConsole(_ name: String) -> AsyncStream<String>?
+    /// 593 §9: a session's last saved screen (`session-screen`; in-process when no host runs).
+    func sessionScreen(_ name: String, session: String) async throws -> WebSavedScreen
+    /// 593 §9: the sandbox's terminal layout (nil: none yet), and its change (`terminal-layout-set` —
+    /// through the host when one runs, else in-process: it never starts one).
+    func terminalLayout(_ name: String) async throws -> WebTerminalLayout?
+    func setTerminalLayout(_ name: String, _ layout: TerminalLayout) async throws -> WebTerminalLayout?
     /// 594: the onboarding wizard's facts — the checks, the account step, the images, the preparations,
     /// the store's onboarding record (the settings file's part is the server's).
     func onboarding() async throws -> WebOnboarding
@@ -381,6 +387,24 @@ public final class HostWebData: DozerWebData, @unchecked Sendable {
             _ = client
         }
         return stream
+    }
+
+    // MARK: 593 §9 — session memory
+
+    public func sessionScreen(_ name: String, session: String) async throws -> WebSavedScreen {
+        var r = HostRequest(.sessionScreen, name: name)
+        r.session = session
+        return WebSavedScreen(try await query(r).0.decode(SessionScreen.self))
+    }
+
+    public func terminalLayout(_ name: String) async throws -> WebTerminalLayout? {
+        try await query(HostRequest(.terminalLayout, name: name)).0.decode(TerminalLayout?.self).map(WebTerminalLayout.init)
+    }
+
+    public func setTerminalLayout(_ name: String, _ layout: TerminalLayout) async throws -> WebTerminalLayout? {
+        var r = HostRequest(.terminalLayoutSet, name: name)
+        r.layout = layout
+        return try await query(r).0.decode(TerminalLayout?.self).map(WebTerminalLayout.init)
     }
 
     /// `doz attach NAME`, with `--store` when this is not the default store (shell-quoted). The UI

@@ -187,14 +187,72 @@ async function act(body) {
     toast(label + ' is already under way', false);
     return null;
   }
+  beginTransition(body.sandbox, body.action);
   try {
     const op = await api('actions', { method: 'POST', json: body });
     trackOp(op);
     return op;
   } catch (e) {
+    endTransition(body.sandbox, body.action);
     toast(e.message || String(e), true);
     return null;
   }
+}
+
+// ── transitions (593 follow-up — owner: "when i clicked on the button to start the sandbox, it briefly
+// flashed a button that it was "Shut Down" before the boot sequence"). The moment a lifecycle action is
+// asked for, its sandbox is IN that transition on this page: the phase pill says so ("Booting…", with a
+// spinner), every lifecycle button stays where it was but disabled — the set shown when it was clicked,
+// never another phase's — and the boot view's cover says it is starting. It ends when the operation
+// ends (or is refused); only then does the control bar show the new phase's buttons.
+const TRANSITION_LABEL = { start: 'Booting…', wake: 'Waking…', resume: 'Resuming…', pause: 'Pausing…', sleep: 'Going to sleep…',
+                           hibernate: 'Hibernating…', shutdown: 'Shutting down…', reset: 'Resetting…', rm: 'Removing…' };
+state.transitions = new Map();
+state.trGen = 0;
+function beginTransition(name, action) {
+  if (!name || !TRANSITION_LABEL[action]) return;
+  const have = state.transitions.get(name);
+  if (have && have.action === action) return;
+  state.trGen++;
+  state.transitions.set(name, { action, verbs: verbsFor(sandboxPhase(name)) });
+  paintTransition(name);
+}
+/// `repaint`: the action failed or was refused — show what is true again at once. After a success the
+/// refresh that follows repaints from the NEW state (repainting now would show the phase it just left).
+function endTransition(name, action, repaint = true) {
+  const t = name && state.transitions.get(name);
+  if (!t || (action && t.action !== action)) return;
+  state.trGen++;
+  state.transitions.delete(name);
+  for (const x of terminals.values()) {
+    if (x.sandbox !== name) continue;
+    if (x.bootIntent) { x.bootIntent = false; if (repaint) paintCover(x); } else if (x.saved && repaint) paintCover(x);
+  }
+}
+/// This page's transition of the sandbox, or — an operation it did not start here (a reload, another
+/// tab's) — the running lifecycle operation it knows of (then the buttons follow the phase).
+function transitionOf(name) {
+  const t = state.transitions.get(name);
+  if (t) return t;
+  const o = [...state.ops.values()].find((x) => x.sandbox === name && x.state === 'running' && TRANSITION_LABEL[x.action]);
+  return o ? { action: o.action, verbs: null } : null;
+}
+function transitionPill(t, name) {
+  return h('span', { class: 'pill ph-busy', 'data-pill-for': name, 'data-transition': t.action },
+    h('span', { class: 'mini-spin', 'aria-hidden': 'true' }), ' ' + TRANSITION_LABEL[t.action]);
+}
+/// Put a sandbox into its transition where it is shown NOW — in place, no re-render: its pills say so
+/// and its lifecycle buttons are disabled (nothing is swapped).
+function paintTransition(name) {
+  const t = state.transitions.get(name);
+  if (!t) return;
+  for (const el of document.querySelectorAll('[data-lifecycle-for]')) {
+    if (el.dataset.lifecycleFor !== name) continue;
+    for (const b of el.querySelectorAll('button')) { b.disabled = true; b.title = TRANSITION_LABEL[t.action]; }
+  }
+  for (const el of document.querySelectorAll('[data-pill-for]')) if (el.dataset.pillFor === name) el.replaceWith(transitionPill(t, name));
+  for (const x of terminals.values()) if (x.sandbox === name && x.saved) paintCover(x);
+  if (state.view === 'sandbox' && state.param === name) paintTermEmpty();
 }
 function trackOp(op) {
   const before = state.ops.get(op.id);
@@ -206,6 +264,7 @@ function trackOp(op) {
   // (Not for a removal: the page it would refetch is about to be gone.)
   if (!before && op.state === 'running' && op.action !== 'rm') refresh(false);
   if (op.state !== 'running' && (!before || before.state === 'running')) {
+    endTransition(op.sandbox, op.action, op.state === 'failed');
     if (op.state === 'failed') toast(op.label + ': ' + op.text, true);
     refreshNav();
     // The sandbox this page shows is gone: back to the list (route() refreshes) instead of a 404.
@@ -395,7 +454,9 @@ function confirmAction(title, text, name, body) {
   }, { danger: true, confirmName: name });
 }
 async function actOrThrow(body) {
-  const op = await api('actions', { method: 'POST', json: body });
+  beginTransition(body.sandbox, body.action);
+  let op;
+  try { op = await api('actions', { method: 'POST', json: body }); } catch (e) { endTransition(body.sandbox, body.action); throw e; }
   trackOp(op);
   return op;
 }
@@ -813,8 +874,11 @@ function bootViewOnStart() { return setting('ui.boot_view_on_start', true) && se
 async function startWithBootView(name) {
   // The terminal first: once the UI process shows it waiting on the shut-down sandbox, it is following
   // the host's events — then the start, so not one step is missed (a warm start takes half a second).
+  // The transition starts at the click (the bar says "Booting…" at once), and the boot view's cover says
+  // it is starting from its first paint — never "Sandbox shut down" while the start is being sent.
+  beginTransition(name, 'start');
   const before = new Set(terminals.keys());
-  openTerminal(name, null, 'interactive');
+  openTerminal(name, null, 'interactive', undefined, { bootIntent: true });
   const t = [...terminals.values()].find((x) => !before.has(x.id));
   const end = Date.now() + 15000;
   while (t && Date.now() < end && !t.closed && !t.errorText && !(t.state && ['shutDown', 'failed', 'boot'].includes(t.state.cover.kind))) {
@@ -823,14 +887,24 @@ async function startWithBootView(name) {
   await act({ action: 'start', sandbox: name });
 }
 function lifecycleButtons(s, all) {
-  const busy = s.busy || s.phase === 'booting' || opRunningFor(s.name);
-  const verbs = verbsFor(s.phase);
+  const tr = transitionOf(s.name);
+  const busy = s.busy || s.phase === 'booting' || opRunningFor(s.name) || !!tr;
+  // In a transition this page started, the buttons it showed when asked — disabled, never swapped.
+  const verbs = tr && tr.verbs ? tr.verbs : verbsFor(s.phase);
   const extra = all ? ['reset', 'rm'] : [];
-  return h('div', { class: 'actions' }, [...verbs, ...extra].map((v) => {
-    const b = btn(VERBS[v][0], () => lifecycle(v, s.name), { small: true, title: VERBS[v][1], danger: !!DESTRUCTIVE[v] });
+  return h('div', { class: 'actions', 'data-lifecycle-for': s.name }, [...verbs, ...extra].map((v) => {
+    const b = btn(VERBS[v][0], () => lifecycle(v, s.name), { small: true, title: tr ? TRANSITION_LABEL[tr.action] : VERBS[v][1], danger: !!DESTRUCTIVE[v] });
     if (busy) b.disabled = true;
     return b;
   }));
+}
+/// The phase pill — or, in a transition, what is under way.
+function sandboxPill(s) {
+  const tr = transitionOf(s.name);
+  if (tr) return transitionPill(tr, s.name);
+  const p = phasePill(s.phase, s.phaseLabel, s.busy);
+  p.dataset.pillFor = s.name;
+  return p;
 }
 
 function hostCard(host) {
@@ -850,7 +924,7 @@ async function viewOverview() {
     h('td', null, h('a', { href: '#/sandbox/' + s.name }, s.name), h('div', { class: 'muted' }, s.image),
       s.workspace ? null : h('div', { class: 'muted no-ws', title: '/workspace is private to the VM: nothing is shared with the Mac' }, 'no workspace'),
       h('div', { 'data-op-for': s.name })),
-    h('td', null, phasePill(s.phase, s.phaseLabel, s.busy), s.diedWithHost ? h('div', { class: 'st-warn' }, 'died with its host') : null),
+    h('td', null, sandboxPill(s), s.diedWithHost ? h('div', { class: 'st-warn' }, 'died with its host') : null),
     h('td', { class: 'num' }, h('div', null, s.ramHeldMiB ? mib(s.ramHeldMiB) : '—'), h('div', { class: 'muted' }, 'of ' + mib(s.memoryMiB)), meter(s.ramHeldMiB, s.memoryMiB)),
     h('td', { class: 'num' }, bytes(s.diskBytes)),
     h('td', null, s.network, s.deniedConnections ? h('div', { class: 'st-warn' }, s.deniedConnections + ' denied') : null),
@@ -919,16 +993,31 @@ async function showSandbox() {
     $('main').scrollTop = 0;
   }
   renderTerminals();
+  // What arriving does needs the sandbox's detail: it runs once, after whichever refresh loads it first
+  // (a refresh already in flight — the stream's hello — may be the one; this one then returns early).
+  state.arrival = { name, want };
   await refreshSandbox();
-  sandboxArrived(name, want);
+  takeArrival(name);
+}
+function takeArrival(name) {
+  const a = state.arrival;
+  if (!a || a.name !== name || !state.sbx || state.sbx.name !== name || !state.sbx.d) return;
+  state.arrival = null;
+  sandboxArrived(a.name, a.want);
 }
 async function refreshSandbox() {
+  // A re-run queued while the page was a sandbox's may come after it left for another page (593 §9:
+  // it asked for sandboxes/null, got a 404 and sent the grid to the overview).
+  if (state.view !== 'sandbox' || !state.param) return;
   if (sbxRefreshing) { sbxAgain = true; return; }
   sbxRefreshing = true;
   const name = state.param;
   try {
+    const gen = state.trGen;
     const [d, net, accounts] = await Promise.all([api('sandboxes/' + name), api('sandboxes/' + name + '/network'), api('accounts').catch(() => ({ accounts: [] }))]);
     if (state.view !== 'sandbox' || state.param !== name || state.signedOut) return;
+    // A transition began or ended while this was read: what it read may be the phase before — read again.
+    if (gen !== state.trGen) { sbxAgain = true; return; }
     state.sbx = { name, d, net, accounts };
     const parts = sandboxParts(name, d, net, accounts);
     $('sbx-bar').replaceChildren(parts.bar);
@@ -936,8 +1025,17 @@ async function refreshSandbox() {
     $('sbx-body').classList.toggle('details-closed', !setting('ui.details_open', true));
     paintRowOps();
     paintTermEmpty();
+    // 593 §9: saved panes go live once it runs (their sessions listed by the detail), or repaint.
+    promoteSaved(name, d.info.phase === 'running' && !d.info.busy && d.sessions ? d.sessions.filter((x) => !x.ended).map((x) => x.name) : null);
+    paintTabs();
+    takeArrival(name);
+    // An arrival that found it under way restores once it has settled (never over a tab opened since).
+    const sv = sview(name);
+    if (sv.deferred && !sv.restoring && !d.info.busy && d.info.phase !== 'booting' && !opRunningFor(name)) {
+      if (pageTerminals(name).length) { sv.deferred = false; sv.restored = true; } else restorePanes(name);
+    }
   } catch (e) {
-    if (e.status === 404) { location.hash = '#/overview'; return; }
+    if (e.status === 404) { if (state.view === 'sandbox' && state.param === name) location.hash = '#/overview'; return; }
     if (!state.signedOut) toast(e.message || String(e), true);
   } finally {
     sbxRefreshing = false;
@@ -948,21 +1046,123 @@ async function refreshSandbox() {
 /// gets its tab — opened, or selected; otherwise, when the sandbox runs and its own session runs,
 /// the page attaches to it (explicit viewing of a live VM, which keeps nothing alive the VM does
 /// not). A sandbox that is not running shows the empty area's actions instead.
-function sandboxArrived(name, want) {
+async function sandboxArrived(name, want) {
   const s = state.sbx;
   if (!s || s.name !== name || !s.d) return;
   const mine = [...terminals.values()].filter((t) => !t.grid && t.sandbox === name);
   const running = s.d.info.phase === 'running';
   const live = (s.d.sessions || []).filter((x) => !x.ended).map((x) => x.name);
+  // 593 §9 (S1): the panes the host kept for this sandbox, the first time this page shows it.
+  if (!mine.length) await restorePanes(name);
   if (want) {
-    const have = mine.find((t) => t.session === want && t.mode === 'interactive' && !t.ended);
-    if (have) { const v = sview(name); v.selected[have.pane] = have.id; renderTerminals(); focusTerm(have); }
+    const have = pageTerminals(name).find((t) => t.session === want && t.mode === 'interactive' && !t.ended);
+    if (have) { const v = sview(name); v.selected[have.pane] = have.id; v.focusedPane = have.pane; renderTerminals(); if (!have.saved) focusTerm(have); }
     else if (running && live.includes(want)) openTerminal(name, want, 'interactive');
+    else if (!running && (await savedRows(name)).some((r) => r.name === want)) openSavedTerminal(name, (await savedRows(name)).find((r) => r.name === want));
     else toast('Session ' + want + ' is not running in ' + name, true);
     return;
   }
-  if (!mine.length && running && live.includes(s.d.defaultSession) && setting('ui.terminals', true)) {
+  if (!pageTerminals(name).length && running && live.includes(s.d.defaultSession) && setting('ui.terminals', true) && !sview(name).restoredAny) {
     openTerminal(name, s.d.defaultSession, 'interactive');
+  }
+}
+
+// ── the terminal layout (593 §9 — S1): the HOST keeps each sandbox's panes (`terminal-layout`, beside
+// its doz.json), so a UI restart, a reload or another browser shows the same ones. The page writes it
+// (one typed, CSRF-checked POST, debounced) whenever its panes change — only once it has restored the
+// stored one, so arriving never overwrites it with an empty page.
+function layoutOf(name) {
+  const v = sview(name);
+  const kept = pageTerminals(name).filter((t) => t.session && !t.ended && !t.errorText && !(t.saved && t.saved.ended));
+  const panes = (v.split ? [0, 1] : [0]).map((pi) => {
+    const inPane = kept.filter((t) => (v.split ? t.pane : 0) === pi).slice(0, 16);
+    const idx = inPane.findIndex((t) => t.id === v.selected[pi]);
+    return { tabs: inPane.map((t) => ({ session: t.session, mode: t.mode === 'watch' ? 'watch' : 'interactive' })), selected: idx >= 0 ? idx : null };
+  });
+  return { split: !!v.split, focusedPane: v.split && v.focusedPane === 1 ? 1 : 0, panes };
+}
+function persistLayout(name) {
+  const v = sview(name);
+  if (!v.restored || v.restoring || !setting('ui.terminals', true)) return;
+  const body = JSON.stringify(layoutOf(name));
+  if (body === v.savedLayout) return;
+  v.savedLayout = body;
+  clearTimeout(v.layoutTimer);
+  v.layoutTimer = setTimeout(() => {
+    api('sandboxes/' + name + '/layout', { method: 'POST', json: JSON.parse(body) })
+      .catch(() => { if (v.savedLayout === body) v.savedLayout = null; });
+  }, 400);
+}
+/// Saved sessions of a sandbox that is not running (`sessions` answers from its saved screens).
+async function savedRows(name) {
+  try { return (await api('sandboxes/' + name + '/sessions')).filter((r) => r.saved); } catch (_) { return []; }
+}
+/// A tab (not yet loaded: `lazy` — its engine starts the first time it is shown).
+function addTab(name, session, mode, pane, saved) {
+  const t = newTerm(name, session, mode);
+  t.pane = pane;
+  t.saved = saved ? { savedAt: saved.savedAt, reason: saved.savedReason, ended: saved.ended, exitCode: saved.exitCode } : null;
+  t.lazy = true;
+  paintCover(t);
+  return t;
+}
+/// A saved screen as a tab of the sandbox's page (the details' Show, a grid tile's click).
+function openSavedTerminal(name, row, pane) {
+  if (!terminalsAllowed() || !row) return;
+  const v = sview(name);
+  const have = pageTerminals(name).find((t) => t.session === row.name && t.saved);
+  const t = have || addTab(name, row.name, 'interactive', v.split ? (pane ?? v.focusedPane) : 0, row);
+  v.selected[t.pane] = t.id;
+  renderTerminals();
+}
+/// Restore the stored layout: a RUNNING sandbox's tabs whose sessions run attach; a sandbox that is not
+/// running shows every session it has a saved screen of (S3) — the layout's first, in their panes.
+async function restorePanes(name) {
+  const v = sview(name);
+  if (v.restored || v.restoring) return;
+  v.restoring = true;
+  try {
+    const s = state.sbx;
+    if (!s || !s.d || !setting('ui.terminals', true)) return;
+    const i = s.d.info;
+    // Under way (booting, pausing, hibernating, waking…): what to show is not known yet — the next
+    // refresh that finds it settled restores (refreshSandbox), and nothing is written meanwhile.
+    if (i.busy || i.phase === 'booting' || opRunningFor(name)) { v.deferred = true; return; }
+    v.deferred = false;
+    let layout = null;
+    try { layout = await api('sandboxes/' + name + '/layout'); } catch (_) { /* none */ }
+    const plan = [];
+    if (i.phase === 'running' && !i.busy) {
+      const live = new Set((s.d.sessions || []).filter((x) => !x.ended).map((x) => x.name));
+      if (layout) layout.panes.forEach((p, pi) => p.tabs.forEach((tb) => { if (live.has(tb.session)) plan.push({ pane: pi, session: tb.session, mode: tb.mode }); }));
+    } else if (['paused', 'asleep', 'hibernated', 'off', 'failed'].includes(i.phase)) {
+      const rows = new Map((await savedRows(name)).map((r) => [r.name, r]));
+      if (layout) {
+        layout.panes.forEach((p, pi) => p.tabs.forEach((tb) => {
+          const r = rows.get(tb.session);
+          if (r) { plan.push({ pane: pi, session: tb.session, mode: tb.mode, saved: r }); rows.delete(tb.session); }
+        }));
+      }
+      for (const r of rows.values()) plan.push({ pane: 0, session: r.name, mode: 'interactive', saved: r });
+    }
+    // Something was opened meanwhile (a click, the grid), or the page moved on: leave it be.
+    if (!plan.length || pageTerminals(name).length || state.view !== 'sandbox' || state.param !== name) return;
+    const split = !!(layout && layout.split && plan.some((p) => p.pane === 1) && plan.some((p) => p.pane === 0));
+    const made = plan.map((p) => addTab(name, p.session, p.mode, split ? p.pane : 0, p.saved));
+    v.split = split;
+    for (const pi of [0, 1]) {
+      const inPane = made.filter((t) => t.pane === pi);
+      if (!inPane.length) { v.selected[pi] = null; continue; }
+      const lp = layout && layout.panes[pi];
+      const want = lp && lp.selected !== null && lp.selected !== undefined ? lp.tabs[lp.selected] : null;
+      v.selected[pi] = (want && inPane.find((t) => t.session === want.session && t.mode === want.mode) || inPane[0]).id;
+    }
+    v.focusedPane = split && layout.focusedPane === 1 ? 1 : 0;
+    v.restoredAny = true;
+  } finally {
+    v.restoring = false;
+    if (!v.deferred) v.restored = true;
+    if (state.view === 'sandbox' && state.param === name) renderTerminals();
   }
 }
 function sandboxParts(name, d, net, accounts) {
@@ -970,7 +1170,7 @@ function sandboxParts(name, d, net, accounts) {
   const running = i.phase === 'running';
   // Sessions need a VM: running, or one a session request wakes (paused, asleep, hibernated) — never
   // while off, failed, booting, busy or while another operation on it runs (590 bug 2).
-  const sessionsReady = ['running', 'paused', 'asleep', 'hibernated'].includes(i.phase) && !i.busy && !opRunningFor(name);
+  const sessionsReady = ['running', 'paused', 'asleep', 'hibernated'].includes(i.phase) && !i.busy && !opRunningFor(name) && !transitionOf(name);
   const whyNot = sessionsReady ? null : i.phase === 'off' || i.phase === 'failed' ? 'Start it first' : 'Wait until it is running';
   const gated = (b) => { if (!sessionsReady) { b.disabled = true; b.title = whyNot; } return b; };
   const fact = (k, v) => h('div', null, h('div', { class: 'k' }, k), h('div', { class: 'v' }, v));
@@ -985,13 +1185,18 @@ function sandboxParts(name, d, net, accounts) {
       toast(r.message);
     } catch (e) { toast(e.message, true); }
   };
-  const sessions = (d.sessions || []).map((s) => h('tr', null,
+  // 593 §9: while it does not run, the sessions as last saved — each can be shown (its saved screen).
+  const savedState = (s) => (s.ended ? 'ended' + (s.exitCode !== null && s.exitCode !== undefined ? ' (exit ' + s.exitCode + ')' : '') + ' · ' : '')
+    + 'screen saved ' + when(s.savedAt) + (s.savedReason ? ' (' + s.savedReason + ')' : '');
+  const sessions = (d.sessions || []).map((s) => h('tr', { 'data-session': s.name },
     h('td', null, s.name, s.name === d.defaultSession ? h('span', { class: 'tag' }, 'default') : null),
-    h('td', null, s.ended ? h('span', { class: 'muted' }, 'ended (exit ' + s.exitCode + ')') : 'running'),
+    h('td', null, s.saved ? h('span', { class: 'muted' }, savedState(s)) : s.ended ? h('span', { class: 'muted' }, 'ended (exit ' + s.exitCode + ')') : 'running'),
     h('td', { class: 'mono' }, s.command),
     h('td', { class: 'num' }, s.cols ? s.cols + '×' + s.rows : '—'),
-    h('td', { class: 'num' }, String(s.clients)),
-    h('td', null, s.ended ? null : h('div', { class: 'actions' },
+    h('td', { class: 'num' }, s.saved ? '—' : String(s.clients)),
+    h('td', null, s.saved ? h('div', { class: 'actions' },
+      btn('Show', () => openSavedTerminal(name, s), { small: true, icon: 'eye', title: 'Its last saved screen in a tab (read-only; it goes live when the sandbox runs)' }))
+    : s.ended ? null : h('div', { class: 'actions' },
       btn('Open', () => openTerminal(name, s.name, 'interactive'), { small: true, title: 'A terminal on this session, here in the browser' }),
       btn('Watch', () => openTerminal(name, s.name, 'watch'), { small: true, title: 'Watch only: nothing you type reaches the session, and it never resizes it' }),
       gated(btn('Open in Terminal', terminal(s.name), { small: true }))))));
@@ -1025,12 +1230,12 @@ function sandboxParts(name, d, net, accounts) {
     h('td', { class: 'num' }, String(f.requests)),
     h('td', null, when(f.lastSeen))));
   const proxied = net.proxied;
-  const busy = i.busy || i.phase === 'booting' || opRunningFor(name);
+  const busy = i.busy || i.phase === 'booting' || opRunningFor(name) || !!transitionOf(name);
   const detailsOpen = setting('ui.details_open', true);
   const netText = i.network + (i.deniedConnections ? ' (' + i.deniedConnections + ' denied)' : '');
   const bar = h('div', { class: 'sbx-bar-inner' },
     h('div', { class: 'sbx-title' },
-      h('h1', null, name), phasePill(i.phase, i.phaseLabel, i.busy),
+      h('h1', null, name), sandboxPill(i),
       h('span', { class: 'sbx-meta' },
         h('span', null, i.image),
         h('span', null, (i.ramHeldMiB ? mib(i.ramHeldMiB) : '—') + ' of ' + mib(i.memoryMiB)),
@@ -1043,7 +1248,7 @@ function sandboxParts(name, d, net, accounts) {
       gated(btn('Open in Terminal', terminal(null), { small: true, title: 'Your terminal app attaches to the ' + d.defaultSession + ' session (waking the sandbox if it sleeps)' })),
       gated(btn('New shell', () => newShellTerminal(name).catch((e) => toast(e.message || String(e), true)),
         { small: true, title: 'A new shell session (shell-2, shell-3, …) in a browser terminal' })),
-      ((b) => { if (busy) b.disabled = true; return b; })(btn('Terminal…', () => newTerminalDialog(name), { small: true, title: 'Attach to or watch a session, or start one running a command' })),
+      ((b) => { if (busy) b.disabled = true; return b; })(btn('Terminal…', () => newTerminalDialog(name), { small: true, title: 'A NEW session: a shell, or one running a command (a running session opens from Details › Sessions)' })),
       termUI.splitBtn || null,
       h('span', { class: 'sbx-sep', 'aria-hidden': 'true' }),
       ((b) => { if (busy || !d.hasRootDisk) { b.disabled = true; b.title = d.hasRootDisk ? 'Wait until it settles' : 'It has no disk yet — start it once'; } return b; })(
@@ -1071,7 +1276,7 @@ function sandboxParts(name, d, net, accounts) {
           await actOrThrow({ action: 'open-session', sandbox: name, session: v.session, argv });
         }), { small: true })))),
     panel(table(['Session', 'State', 'Command', 'Size', 'Viewers', ''], sessions, [3, 4]),
-      running ? 'No sessions.' : 'Sessions are listed while the sandbox runs.'),
+      running ? 'No sessions.' : 'No saved screens — sessions are listed while it runs, and saved when it pauses, sleeps, hibernates or shuts down.'),
     h('div', { class: 'head' }, h('h2', null, 'Restore points'), h('div', { class: 'actions' },
       btn('Take a restore point…', () => dialog('Take a restore point of ' + name, running ? 'A running sandbox pauses for the clone (milliseconds); its copy gets e2fsck on the first boot from it.' : 'An instant APFS clone of the disks.',
         [{ name: 'point', label: 'Name', placeholder: 'default point-N' }, { name: 'note', label: 'Note' }], 'Take', async (v) => {
@@ -1881,6 +2086,7 @@ function validFrameMessage(m) {
     case 'title': return n === 2 && typeof m.s === 'string' && m.s.length <= 200;
     case 'paste': return n === 3 && typeof m.text === 'string' && m.text.length <= PASTE_MAX_BYTES && typeof m.bracketed === 'boolean';
     case 'paste-too-big': return n === 2 && isInt(m.bytes, 0, Number.MAX_SAFE_INTEGER);
+    case 'key': return n === 1;
     default: return false;
   }
 }
@@ -1900,6 +2106,7 @@ window.addEventListener('message', (ev) => {
     case 'title': t.title = m.s.slice(0, 120); paintTabs(); break;
     case 'paste': safePaste(t, m.text, m.bracketed); break;
     case 'paste-too-big': toast('That paste is too big — a terminal takes at most 1 MiB at once', true); break;
+    case 'key': savedKey(t); break;
   }
 });
 
@@ -1930,7 +2137,7 @@ function terminalsAllowed() {
 
 /// 593: a terminal record (a page terminal, or a grid tile's when `grid`).
 function newTerm(sandbox, session, mode) {
-  const t = { id: termUI.nextId++, sandbox, session, mode, pane: 0, grid: false,
+  const t = { id: termUI.nextId++, sandbox, session, mode, pane: 0, grid: false, saved: null, lazy: false,
               ws: null, frame: null, cols: 80, rows: 24, state: null, ended: false, endText: '', errorText: '', disconnected: '',
               closed: false, title: '', pinger: null, coverAction: null, onReady: null, onOpened: null, onFailed: null };
   t.els = terminalElements(t);
@@ -1943,7 +2150,10 @@ async function bootTerm(t, fontSize) {
     const wasm = await engineBytes();
     if (t.closed) return false;
     const opened = new Promise((resolve, reject) => { t.onOpened = resolve; t.onFailed = reject; });
-    t.onReady = () => toFrame(t, { t: 'init', wasm: wasm.slice(0), mode: t.mode, fontSize: isInt(fontSize, 9, 32) ? fontSize : 13 });
+    t.onReady = () => {
+      t.initMode = t.saved ? 'saved' : t.mode;
+      toFrame(t, { t: 'init', wasm: wasm.slice(0), mode: t.initMode, fontSize: isInt(fontSize, 9, 32) ? fontSize : 13 });
+    };
     // The engine's frame: an opaque origin (allow-scripts only — no same-origin, no popups, no forms).
     t.frame = h('iframe', { class: 'term-frame', src: '/terminal-frame', sandbox: 'allow-scripts', allow: 'clipboard-write',
                             referrerpolicy: 'no-referrer', name: 'term-' + t.id, title: 'Terminal: ' + t.sandbox + ' · ' + (t.session || 'default') });
@@ -1955,14 +2165,19 @@ async function bootTerm(t, fontSize) {
     return false;
   }
   if (t.closed) return false;
+  t.booted = true;
+  if (t.saved) { loadSavedScreen(t); return true; }       // 593 §9: no socket — the saved screen
+  // A saved pane whose sandbox ran again while its engine loaded: the frame leaves saved mode first.
+  if (t.initMode === 'saved') toFrame(t, { t: 'live', mode: t.mode });
   connectTerminal(t);
   return true;
 }
 /// A terminal on the sandbox's page (593: each sandbox's page has its own tabs and split).
-async function openTerminal(sandbox, session, mode, pane) {
+async function openTerminal(sandbox, session, mode, pane, opts = {}) {
   if (!terminalsAllowed()) return;
   const v = sview(sandbox);
   const t = newTerm(sandbox, session, mode);
+  t.bootIntent = !!opts.bootIntent;
   t.pane = v.split ? (pane ?? v.focusedPane) : 0;
   v.selected[t.pane] = t.id;
   paintCover(t);
@@ -2015,6 +2230,7 @@ function onTerminalMessage(t, ev) {
   try { m = JSON.parse(ev.data); } catch (_) { return; }
   if (m.t === 'state') {
     t.state = m;
+    if (t.bootIntent && m.cover && !['shutDown', 'failed', 'reattaching'].includes(m.cover.kind)) t.bootIntent = false;
     if (m.session) t.session = m.session;
     // "woke in 0.4 s": one line over the screen, for a few seconds.
     if (typeof m.notice === 'string' && m.notice) {
@@ -2148,8 +2364,14 @@ function elapsedText(verb, since) {
 }
 function paintCover(t) {
   const e = t.els;
-  let kind = 'none', headline = '', detail = '', action = null, spinner = false;
+  let kind = 'none', headline = '', detail = '', action = null, spinner = false, glyphKey = null;
   if (t.errorText) { kind = 'error'; headline = 'This terminal could not open'; detail = t.errorText; }
+  else if (t.saved) { ({ headline, detail, action, glyphKey } = savedCover(t)); kind = 'saved'; }
+  // A boot view asked for by Start: "Starting…" from its first paint until the host's steps take over
+  // (never the shut-down cover the sandbox had a moment before the start reached the host).
+  else if (t.bootIntent && !t.ended && (!t.state || ['shutDown', 'failed', 'reattaching'].includes(t.state.cover.kind))) {
+    kind = 'working'; headline = 'Starting the sandbox…'; spinner = true;
+  }
   else if (t.ended) { kind = 'ended'; headline = 'The session ended'; detail = t.endText; }
   else if (t.disconnected) { kind = 'disconnected'; headline = 'Disconnected'; detail = t.disconnected; action = 'Reconnect'; }
   else if (!t.state) { kind = 'reattaching'; headline = 'Attaching…'; spinner = true; }
@@ -2163,7 +2385,7 @@ function paintCover(t) {
     spinner = !!c.spinner;
   }
   e.wrap.dataset.cover = kind;
-  e.wrap.dataset.phase = (t.state && t.state.phase) || '';
+  e.wrap.dataset.phase = (t.saved ? sandboxPhase(t.sandbox) : t.state && t.state.phase) || '';
   e.wrap.dataset.reports = String((t.state && t.state.reportsIgnored) || 0);
   e.wrap.dataset.wakes = String((t.state && t.state.keystrokeWakes) || 0);
   // The boot view draws the boot in the terminal itself: no cover.
@@ -2173,12 +2395,13 @@ function paintCover(t) {
   e.detail.hidden = !detail;
   e.spin.hidden = !spinner;
   // 593: the state's own glyph over the cover (the two sleeps told apart: RAM kept / on disk).
-  const g = PHASE_GLYPH[kind] || null;
+  const g = PHASE_GLYPH[glyphKey || kind] || null;
   e.glyph.hidden = !g || spinner;
   if (g && e.glyph.dataset.icon !== g) { e.glyph.dataset.icon = g; e.glyph.replaceChildren(icon(g)); }
   e.action.hidden = !action;
   if (action) setButton(e.action, action); else e.action.replaceChildren();
-  e.action.title = action === 'Reconnect' ? 'Open the terminal again' : action ? action + ' — so does any key typed in the terminal' : '';
+  e.action.title = action === 'Reconnect' ? 'Open the terminal again' : action === 'Start' ? 'Start it (a cold boot: new sessions)'
+    : action ? action + ' — so does any key typed in the terminal' : '';
   t.coverAction = action;
 }
 function coverAction(t) {
@@ -2188,10 +2411,121 @@ function coverAction(t) {
     t.state = null;
     paintCover(t);
     connectTerminal(t);
+  } else if (a === 'Start' && t.saved) {
+    lifecycle('start', t.sandbox);                        // 593: a saved screen's Start is the page's Start
+    return;
   } else if (a) {
     act({ action: { Resume: 'resume', Wake: 'wake', Start: 'start' }[a], sandbox: t.sandbox });
   }
   focusTerm(t);
+}
+
+// ── saved screens (593 §9 — S3): a session's last saved screen, drawn read-only (and selectable) by the
+// engine in its sandboxed frame while the sandbox does not run; no socket, so it keeps no host alive.
+// A key pressed on it wakes (or resumes) the sandbox — the frame only says that a key was pressed —
+// and once the sandbox runs, each pane becomes its live session IN PLACE (`goLive`).
+/// The sandbox's phase as this page last read it (its own page's detail, else the overview).
+function sandboxPhase(name) {
+  if (state.sbx && state.sbx.name === name && state.sbx.d) return state.sbx.d.info.phase;
+  const row = state.overview && state.overview.sandboxes.find((s) => s.name === name);
+  return row ? row.phase : '';
+}
+function sandboxBusy(name) {
+  if (state.transitions.has(name)) return true;
+  if (state.sbx && state.sbx.name === name && state.sbx.d) return !!state.sbx.d.info.busy || opRunningFor(name);
+  const row = state.overview && state.overview.sandboxes.find((s) => s.name === name);
+  return (row && row.busy) || opRunningFor(name);
+}
+const SAVED_WAKE = { paused: ['Resume', 'resume'], asleep: ['Wake', 'wake'], hibernated: ['Wake', 'wake'] };
+const PHASE_WORD = { paused: 'paused', asleep: 'asleep', hibernated: 'hibernated', off: 'shut down', failed: 'failed', booting: 'starting', running: 'running' };
+function savedCover(t) {
+  const c = savedCoverFor(t);
+  // A grid tile takes no keys (its overlay opens the page): the tile's head has the Wake button.
+  if (t.grid) { c.detail = ''; c.action = null; }
+  return c;
+}
+function savedCoverFor(t) {
+  const s = t.saved, phase = sandboxPhase(t.sandbox);
+  const saved = 'saved ' + when(s.savedAt);
+  // An action under way: say what (never the phase it is leaving).
+  const tr = transitionOf(t.sandbox);
+  if (tr) return { headline: TRANSITION_LABEL[tr.action] + ' — ' + (s.ended ? 'its last screen' : 'its saved screen'), detail: saved, action: null, glyphKey: null };
+  // Shut down: a key does NOT start it (orchestrator ruling — a cold boot makes new sessions); Start is a button.
+  if (phase === 'off' || phase === 'failed') {
+    return { headline: (phase === 'off' ? 'Shut down' : 'Failed') + ' — Start boots it; these sessions ended', detail: 'Its last screen, ' + saved,
+             action: sandboxBusy(t.sandbox) ? null : 'Start', glyphKey: phase === 'off' ? 'off' : null };
+  }
+  if (s.ended) {
+    return { headline: 'The session ended' + (s.exitCode !== null && s.exitCode !== undefined ? ' (exit ' + s.exitCode + ')' : phase === 'off' ? ' with the shutdown' : ''),
+             detail: 'Its last screen, ' + saved, action: phase === 'off' || phase === 'failed' ? 'Start' : null, glyphKey: phase === 'off' ? 'off' : null };
+  }
+  const w = SAVED_WAKE[phase];
+  if (phase === 'running') return { headline: 'Attaching…', detail: saved, action: null, glyphKey: null };
+  return { headline: (PHASE_WORD[phase] || phase || 'not running').replace(/^./, (c) => c.toUpperCase()) + ' ' + when(s.savedAt) + ' — its saved screen',
+           detail: w && !sandboxBusy(t.sandbox) ? 'press any key to ' + w[1] : sandboxBusy(t.sandbox) ? 'under way…' : '',
+           action: w && !sandboxBusy(t.sandbox) ? w[0] : null, glyphKey: phase };
+}
+/// A key on a saved screen: the ordinary wake / resume action (the page's own; never for a session
+/// that ended, never a cold boot).
+function savedKey(t) {
+  if (!t.saved || t.saved.ended || t.grid) return;
+  const w = SAVED_WAKE[sandboxPhase(t.sandbox)];
+  if (!w || sandboxBusy(t.sandbox)) return;
+  act({ action: w[1], sandbox: t.sandbox });
+}
+/// The saved screen's VT (base64 from the API) into the frame, in writes the frame accepts (≤ 1 MiB).
+async function loadSavedScreen(t) {
+  let s;
+  try {
+    s = await api('sandboxes/' + t.sandbox + '/sessions/' + t.session + '/screen');
+  } catch (e) {
+    t.errorText = e.status === 404 ? 'no saved screen of ' + t.session : e.message || String(e);
+    paintCover(t);
+    return;
+  }
+  if (t.closed || !t.saved) return;
+  t.saved = { ...t.saved, savedAt: s.savedAt, reason: s.reason, ended: s.ended, exitCode: s.exitCode };
+  const bin = atob(s.vt);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  for (let i = 0; i < bytes.length; i += 1 << 20) {
+    const chunk = bytes.slice(i, i + (1 << 20)).buffer;
+    toFrame(t, { t: 'write', data: chunk }, [chunk]);
+  }
+  t.savedShown = true;
+  if (t.els.wrap) t.els.wrap.dataset.saved = s.reason;
+  paintCover(t);
+  paintTabs();
+}
+/// The sandbox runs again: this saved pane becomes its session's live terminal, in place — the saved
+/// screen is cleared and the attach's SNAPSHOT draws the live one.
+function goLive(t) {
+  if (!t.saved) return;
+  t.saved = null;
+  t.state = null;
+  if (t.els.wrap) delete t.els.wrap.dataset.saved;
+  paintCover(t);
+  // Not booted yet (a hidden tab, or its engine still loading): it attaches once it is (bootTerm).
+  if (!t.booted) return;
+  const clear = utf8.encode('\x1bc\x1b[3J\x1b[H\x1b[2J').buffer;
+  toFrame(t, { t: 'write', data: clear }, [clear]);
+  toFrame(t, { t: 'live', mode: t.mode });
+  t.initMode = t.mode;
+  connectTerminal(t);
+}
+/// After the sandbox's state changed: saved panes of a sandbox that runs go live (their session runs),
+/// or say their session is gone; the others repaint their cover (the phase, the wake hint).
+function promoteSaved(name, live) {
+  const running = sandboxPhase(name) === 'running' && !sandboxBusy(name);
+  for (const t of [...terminals.values()]) {
+    if (t.sandbox !== name || !t.saved) continue;
+    if (running && live && !t.saved.ended) {
+      if (live.includes(t.session)) goLive(t);
+      else { t.saved = { ...t.saved, ended: true }; paintCover(t); }
+    } else {
+      paintCover(t);
+    }
+  }
 }
 
 // ── a sandbox's terminal area: tabs, and a split (593: per sandbox; the grid's tiles are apart)
@@ -2257,19 +2591,37 @@ function renderTerminals() {
     const mine = name ? pageTerminals(name).filter((t) => t.pane === i) : [];
     if (!mine.some((t) => t.id === v.selected[i])) v.selected[i] = mine.length ? mine[mine.length - 1].id : null;
     p.strip.replaceChildren(...mine.map((t) => tabElement(t, i)));
+    scrollActiveTab(p.strip);
     p.empty.hidden = mine.length > 0;
     for (const t of mine) {
       if (t.els.wrap.parentNode !== p.body) p.body.append(t.els.wrap);
       t.els.wrap.hidden = t.id !== v.selected[i];
+      // 593 §9: a restored tab loads its engine the first time it is shown — a hidden frame has no size,
+      // and an interactive attach at no size would resize its session.
+      if (t.lazy && !t.els.wrap.hidden) {
+        t.lazy = false;
+        setTimeout(() => bootTerm(t, setting('ui.terminal_font_size', 13)), 0);
+      }
     }
   });
   paintTermEmpty();
+  if (name) persistLayout(name);
   // The URL names the session shown (replaceState: no route).
   const sel = name && terminals.get(v.selected[v.focusedPane] ?? v.selected[0]);
   if (sel && sel.session && state.session !== sel.session) {
     state.session = sel.session;
     history.replaceState(null, '', location.pathname + '#/sandbox/' + name + '/' + sel.session);
   }
+}
+/// A pane's tab strip scrolls sideways when its tabs overflow; the selected tab is always in view
+/// (orchestrator ruling, 593 follow-up).
+function scrollActiveTab(strip) {
+  const w = strip.querySelector('.tab.active')?.closest('.tab-wrap');
+  if (!w) return;
+  const sr = strip.getBoundingClientRect(), wr = w.getBoundingClientRect();
+  if (!sr.width) return;
+  if (wr.left < sr.left) strip.scrollLeft += wr.left - sr.left;
+  else if (wr.right > sr.right) strip.scrollLeft += wr.right - sr.right;
 }
 /// The terminal area with no terminal: what it can open, from the sandbox's state.
 function paintTermEmpty() {
@@ -2279,27 +2631,38 @@ function paintTermEmpty() {
   if (p.empty.hidden) return;
   if (!s || !s.d || s.name !== state.param) { p.empty.replaceChildren(h('div', { class: 'term-empty-box' }, 'Loading…')); return; }
   const i = s.d.info;
-  const busy = i.busy || i.phase === 'booting' || opRunningFor(s.name);
+  const tr = transitionOf(s.name);
+  const busy = i.busy || i.phase === 'booting' || opRunningFor(s.name) || !!tr;
   const live = (s.d.sessions || []).filter((x) => !x.ended);
   const box = h('div', { class: 'term-empty-box' });
   if (busy) {
-    box.append(h('div', { class: 'term-empty-head' }, i.phaseLabel + '…'), h('div', null, 'The terminal opens when it can.'));
+    box.append(h('div', { class: 'term-empty-head' }, tr ? TRANSITION_LABEL[tr.action] : i.phaseLabel + '…'), h('div', null, 'The terminal opens when it can.'));
   } else if (i.phase === 'off' || i.phase === 'failed') {
     box.append(h('div', { class: 'term-empty-head' }, s.name + ' is ' + i.phaseLabel.toLowerCase()),
       h('div', { class: 'actions center' },
         btn('Start', () => lifecycle('start', s.name), { primary: true, title: bootViewOnStart() ? 'Boot it, and watch it boot here' : 'Boot it' })));
   } else {
+    // 593 §9 (S4): "New shell" always makes a NEW session; a running session is opened by its own name
+    // (the sessions list). The image's own session is offered by name: opened when it runs, started when not.
+    const saved = (s.d.sessions || []).filter((x) => x.saved);
+    const defaultRuns = live.some((x) => x.name === s.d.defaultSession && !x.saved);
+    const defaultSaved = saved.some((x) => x.name === s.d.defaultSession && !x.ended);
     box.append(h('div', { class: 'term-empty-head' }, 'No terminal open'),
       h('div', { class: 'actions center' },
-        btn('Open ' + s.d.defaultSession, () => openDefaultTerminal(s.name), { primary: true,
-          title: 'A terminal on the ' + s.d.defaultSession + ' session (started when it is not running' + (i.phase === 'running' ? '' : '; it wakes the sandbox') + ')' }),
-        ...live.filter((x) => x.name !== s.d.defaultSession).slice(0, 8).map((x) => btn('Open ' + x.name, () => openTerminal(s.name, x.name, 'interactive'))),
-        btn('New shell', () => newShellTerminal(s.name).catch((e) => toast(e.message || String(e), true)))));
+        defaultSaved ? null : defaultRuns
+          ? btn('Open ' + s.d.defaultSession, () => openTerminal(s.name, s.d.defaultSession, 'interactive'), { primary: true, icon: 'terminal',
+            title: 'A terminal on the running ' + s.d.defaultSession + ' session' })
+          : btn('Start ' + s.d.defaultSession, () => openDefaultTerminal(s.name), { primary: true, icon: 'play',
+            title: 'Start the image’s own session (' + s.d.defaultSession + ')' + (i.phase === 'running' ? '' : ' — it wakes the sandbox') }),
+        ...live.filter((x) => x.name !== s.d.defaultSession && !x.saved).slice(0, 8).map((x) => btn('Open ' + x.name, () => openTerminal(s.name, x.name, 'interactive'), { icon: 'terminal' })),
+        ...saved.slice(0, 8).map((x) => btn('Show ' + x.name, () => openSavedTerminal(s.name, x), { icon: 'eye', title: 'Its last saved screen (read-only)' })),
+        btn('New shell', () => newShellTerminal(s.name).catch((e) => toast(e.message || String(e), true)), { title: 'A NEW shell session (shell-2, shell-3, …)' })));
   }
   p.empty.replaceChildren(box);
 }
 function tabElement(t, pane) {
-  const phase = t.ended || t.errorText || t.disconnected ? 'ended' : (t.state && t.state.phase) || 'unknown';
+  const phase = t.ended || t.errorText || t.disconnected || (t.saved && t.saved.ended) ? 'ended'
+    : t.saved ? sandboxPhase(t.sandbox) || 'unknown' : (t.state && t.state.phase) || 'unknown';
   const v = sview(t.sandbox);
   // Tabs are numbered (1, 2, …) per sandbox, so a shared session can say which tab it is shared with.
   const order = pageTerminals(t.sandbox).map((x) => x.id);
@@ -2312,7 +2675,9 @@ function tabElement(t, pane) {
                                title: t.title ? t.title + ' — ' + label : label, 'data-term': String(t.id),
                                on: { click: () => { v.selected[pane] = t.id; v.focusedPane = pane; renderTerminals(); focusTerm(t); } } },
     h('span', { class: 'tab-dot ph-' + phase, 'aria-hidden': 'true' }), icon(t.mode === 'watch' ? 'eye' : 'terminal'), label,
-    t.mode === 'watch' ? h('span', { class: 'tag' }, 'watch') : null, shared);
+    t.mode === 'watch' ? h('span', { class: 'tag' }, 'watch') : null,
+    t.saved ? h('span', { class: 'tag saved', title: 'Its last saved screen (' + (t.saved.reason || 'saved') + ', ' + when(t.saved.savedAt) + ') — it goes live when the sandbox runs' }, 'saved') : null,
+    shared);
   const move = v.split ? h('button', { type: 'button', class: 'tab-x', title: 'Move to the other pane', 'aria-label': 'Move ' + label + ' to the other pane',
     on: { click: () => { t.pane = 1 - t.pane; v.selected[t.pane] = t.id; renderTerminals(); focusTerm(t); } } }, icon('arrow-left-right')) : null;
   const close = h('button', { type: 'button', class: 'tab-x', title: 'Close this terminal (the session keeps running)', 'aria-label': 'Close ' + label,
@@ -2364,9 +2729,10 @@ async function newTerminalDialog(sandbox) {
   const names = [sandbox || state.param].filter(Boolean);
   if (!names.length) { toast('Open a sandbox first', true); return; }
   const first = names[0];
-  // What to open: a NEW shell by default (591 owner feedback: an empty form must never mirror an
-  // existing session); attaching to or watching a running session is an explicit choice.
-  const d = dialog('New terminal in ' + first, 'A new shell session by default. To see a session that already runs, pick Attach or Watch.', [
+  // What to open: ALWAYS a new session (593 §9 S4, owner — after "New terminal" attached to a session that
+  // already ran): a new shell, or a new session running a command. A running session is reached through
+  // its pane or the sessions list (Details › Sessions: Open / Watch), never from here.
+  const d = dialog('New terminal in ' + first, 'A new session: a shell, or a command. A session that already runs is opened from the Sessions list.', [
     { name: 'sandbox', label: 'Sandbox', type: 'select', options: names, value: first },
     { name: 'what', label: 'Open', type: 'select', options: [['new', 'New shell'], ['command', 'New session running a command…']] },
     { name: 'session', label: 'Session name (new session only)', placeholder: 'e.g. worker' },
@@ -2381,32 +2747,18 @@ async function newTerminalDialog(sandbox) {
       if (!v.session) throw new Error('a new session needs a name');
       const done = await waitForOp(await actOrThrow({ action: 'open-session', sandbox: v.sandbox, session: v.session, argv }));
       if (!done || done.state !== 'done') throw new Error(done ? done.text : 'the session did not start in time');
-      if (!done.text.startsWith('started')) throw new Error('a session named ' + v.session + ' already runs — pick another name, or Attach to it');
+      if (!done.text.startsWith('started')) throw new Error('a session named ' + v.session + ' already runs — pick another name (open it from the Sessions list)');
       openTerminal(v.sandbox, v.session, 'interactive', pane);
       return;
     }
-    const m = /^(attach|watch):(.+)$/.exec(v.what);
-    if (!m) throw new Error('pick what to open');
-    openTerminal(v.sandbox, m[2], m[1] === 'watch' ? 'watch' : 'interactive', pane);
+    throw new Error('pick what to open');
   });
   const sandboxSel = d.querySelector('[name="sandbox"]'), whatSel = d.querySelector('[name="what"]');
   sandboxSel.closest('label').hidden = true;             // 593: the page's sandbox
   const nameField = d.querySelector('[name="session"]').closest('label'), cmdField = d.querySelector('[name="command"]').closest('label');
   const showFields = () => { const c = whatSel.value === 'command'; nameField.hidden = !c; cmdField.hidden = !c; };
-  // The running sessions of the chosen sandbox, as explicit Attach / Watch choices.
-  const loadSessions = async () => {
-    for (const o of [...whatSel.options]) if (o.value.includes(':')) o.remove();
-    let rows = [];
-    try { rows = await api('sandboxes/' + sandboxSel.value + '/sessions'); } catch (_) { /* not running: none to attach to */ }
-    for (const s of rows.filter((r) => !r.ended)) {
-      whatSel.append(h('option', { value: 'attach:' + s.name }, 'Attach to ' + s.name + ' (' + s.command + ')'));
-      whatSel.append(h('option', { value: 'watch:' + s.name }, 'Watch ' + s.name + ' (read-only)'));
-    }
-    showFields();
-  };
-  sandboxSel.addEventListener('change', loadSessions);
   whatSel.addEventListener('change', showFields);
-  loadSessions();
+  showFields();
 }
 
 /// A NEW shell session in `sandbox` — `shell-2`, `shell-3`, … (the next name not taken), running a
@@ -2506,9 +2858,15 @@ async function gridRefresh(force) {
   try { o = await api('overview'); } catch (e) { toast(e.message || String(e), true); return; }
   state.overview = o;
   renderNavSandboxes();
-  await Promise.all(o.sandboxes.filter((s) => s.phase === 'running').map(async (s) => {
-    try { grid.sessions[s.name] = (await api('sandboxes/' + s.name + '/sessions')).filter((r) => !r.ended).map((r) => ({ name: r.name, command: r.command })); }
-    catch (_) { /* it stopped meanwhile: its last list stays */ }
+  // A running sandbox's sessions come from its guest; any other's from its saved screens (593 §9 — S3:
+  // read from the sandbox's directory, nothing woken).
+  await Promise.all(o.sandboxes.filter((s) => s.phase !== 'booting').map(async (s) => {
+    try {
+      const rows = await api('sandboxes/' + s.name + '/sessions');
+      grid.sessions[s.name] = s.phase === 'running'
+        ? rows.filter((r) => !r.ended && !r.saved).map((r) => ({ name: r.name, command: r.command }))
+        : rows.filter((r) => r.saved).map((r) => ({ name: r.name, command: r.command, saved: r }));
+    } catch (_) { /* it changed meanwhile: its last list stays */ }
   }));
   if (!grid.active) return;
   gridRender();
@@ -2525,10 +2883,14 @@ function gridRender() {
     if (grid.sandbox && s.name !== grid.sandbox) continue;
     if (grid.phase && s.phase !== grid.phase) continue;
     if (s.phase === 'running') {
-      for (const x of grid.sessions[s.name] || []) want.push({ key: s.name + '/' + x.name, sandbox: s.name, session: x.name, command: x.command, s });
-      if (!(grid.sessions[s.name] || []).length) want.push({ key: s.name + '/', sandbox: s.name, session: null, s, none: true });
+      const live = (grid.sessions[s.name] || []).filter((x) => !x.saved);
+      for (const x of live) want.push({ key: s.name + '/' + x.name, sandbox: s.name, session: x.name, command: x.command, s });
+      if (!live.length) want.push({ key: s.name + '/', sandbox: s.name, session: null, s, none: true });
     } else {
-      want.push({ key: s.name + '/', sandbox: s.name, session: null, s });
+      // 593 §9 (S3): its saved screens, a tile each (same key as the live tile: waking swaps it in place).
+      const saved = s.phase === 'booting' ? [] : (grid.sessions[s.name] || []).filter((x) => x.saved);
+      for (const x of saved) want.push({ key: s.name + '/' + x.name, sandbox: s.name, session: x.name, command: x.command, s, saved: x.saved });
+      if (!saved.length) want.push({ key: s.name + '/', sandbox: s.name, session: null, s });
     }
   }
   const keep = new Set(want.map((w) => w.key));
@@ -2566,13 +2928,25 @@ function makeTile(w) {
 function paintTile(tile, w) {
   const s = w.s;
   tile.liveable = !!w.session;
+  // 593 §9: a tile is live (a watch terminal), saved (the session's saved screen — an engine, no
+  // socket) or static. Saved → live swaps in place; live → saved lets go of the socket first (an
+  // open grid never keeps a host alive for a sandbox that does not run).
+  const kind = !w.session ? 'static' : w.saved ? 'saved' : 'live';
+  if (tile.term && tile.kind && tile.kind !== kind) {
+    if (tile.kind === 'saved' && kind === 'live' && tile.term.saved) goLive(tile.term);
+    else detachTile(tile);
+  }
+  tile.kind = kind;
+  tile.saved = w.saved || null;
+  if (tile.term && tile.term.saved && w.saved) { tile.term.saved = { ...tile.term.saved, ended: w.saved.ended }; paintCover(tile.term); }
+  tile.el.dataset.kind = kind;
   tile.el.dataset.phase = s.phase;
   tile.dot.className = 'ph-dot ph-' + s.phase;
   tile.title.textContent = w.session ? w.sandbox + ' · ' + w.session : w.sandbox;
   tile.title.title = w.command ? w.command : '';
-  tile.phase.textContent = s.phaseLabel;
+  tile.phase.textContent = w.saved ? s.phaseLabel + ' · saved ' + when(w.saved.savedAt) : s.phaseLabel;
   const verb = { paused: 'resume', asleep: 'wake', hibernated: 'wake', off: 'start', failed: 'start' }[s.phase];
-  tile.act.replaceChildren(verb && !w.session && !s.busy ? btn(VERBS[verb][0], () => lifecycle(verb, w.sandbox), { small: true }) : '');
+  tile.act.replaceChildren(verb && (!w.session || w.saved) && !s.busy ? btn(VERBS[verb][0], () => lifecycle(verb, w.sandbox), { small: true }) : '');
   if (!w.session) {
     const known = grid.sessions[w.sandbox] || [];
     tile.note.hidden = false;
@@ -2618,6 +2992,7 @@ function attachTile(tile) {
   if (!setting('ui.terminals', true)) return;
   const t = newTerm(tile.sandbox, tile.session, 'watch');
   t.grid = true;
+  if (tile.saved) t.saved = { savedAt: tile.saved.savedAt, reason: tile.saved.savedReason, ended: tile.saved.ended, exitCode: tile.saved.exitCode };
   tile.term = t;
   paintCover(t);
   tile.screen.append(t.els.wrap);

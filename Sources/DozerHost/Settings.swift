@@ -213,6 +213,7 @@ public enum SettingKey {
     public static let gridTileSize = "ui.grid_tile_size"
     public static let progress = "ui.progress"
     public static let idleTimeout = "host.idle_timeout_minutes"
+    public static let screenCapture = "host.screen_capture_minutes"
     public static let keepalive = "host.keepalive"
     public static let storePath = "store.path"
     public static let claudePermissions = "claude.permissions"
@@ -280,6 +281,9 @@ public struct DozerSettings: Sendable {
             .init("host", "idle_timeout_minutes", .int(0...10_080), .int(5),
                   "Minutes with nothing running before the host exits; 0 = never.",
                   env: "DOZ_HOST_IDLE", flag: "doz host start --idle-timeout", applies: .hostRestart),
+            .init("host", "screen_capture_minutes", .int(0...1440), .int(5),
+                  "Every this many minutes, save the screen of each running sandbox's sessions that printed something since (a crash still leaves a recent copy); 0 = only when it pauses, sleeps, hibernates or shuts down.",
+                  env: "DOZ_SCREEN_CAPTURE", applies: .hostRestart),
             .init("host", "keepalive", .bool, .bool(false),
                   "Near a Mac login's expiry, while a sandbox uses it and no Claude Code runs, the host runs the Mac's claude once to renew it.",
                   applies: .newStore),

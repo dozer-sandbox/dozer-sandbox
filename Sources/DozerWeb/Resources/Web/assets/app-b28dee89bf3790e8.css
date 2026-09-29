@@ -111,6 +111,11 @@ tr.click:hover td { background: var(--bg); }
 .pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; border: 1px solid currentColor; white-space: nowrap; }
 .ph-running { color: var(--run); }
 .ph-booting { color: var(--accent); }
+/* 593 follow-up: a lifecycle action under way — the pill says what, with a spinner. */
+.ph-busy { color: var(--accent); display: inline-flex; align-items: center; gap: 5px; }
+.ph-busy .mini-spin { width: 8px; height: 8px; }
+/* The tab strip scrolls sideways; a tab never shrinks (the selected one is scrolled into view). */
+.tab-wrap { flex: none; }
 .ph-paused { color: var(--pause); }
 .ph-asleep { color: var(--sleep); }
 .ph-hibernated { color: var(--hibernated); }
@@ -357,6 +362,14 @@ nav a.active .ph-dot { box-shadow: 0 0 0 1.5px var(--bg); }
 @keyframes tc-spin { to { transform: rotate(360deg); } }
 .term-wrap[data-cover="ended"] .term-cover, .term-wrap[data-cover="error"] .term-cover { align-items: flex-end; background: none; backdrop-filter: none; }
 .term-wrap[data-cover="ended"] .tc-box, .term-wrap[data-cover="error"] .tc-box { margin-bottom: 14px; }
+/* 593 §9: a saved screen stays readable (and selectable — the cover takes no pointer): the cover is a
+   note at the bottom, not a veil. */
+.term-wrap[data-cover="saved"] .term-cover { align-items: flex-end; background: none; backdrop-filter: none; }
+.term-wrap[data-cover="saved"] .tc-box { margin-bottom: 14px; flex-direction: row; flex-wrap: wrap; justify-content: center; gap: 4px 10px;
+  border: 1px solid color-mix(in srgb, #c5cbff 22%, transparent); }
+.term-wrap[data-cover="saved"] .tc-glyph .icon { width: 16px; height: 16px; }
+.term-wrap[data-cover="saved"] .tc-act { margin-top: 0; }
+.tag.saved { background: color-mix(in srgb, var(--hibernated) 18%, transparent); color: var(--hibernated); }
 /* 593: icons (Lucide, one sprite). They take the control's colour — the theme's ink, a danger red,
    a primary button's inverse — and sit before the label at one size and gap. */
 .icon { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }

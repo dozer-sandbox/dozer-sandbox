@@ -152,6 +152,94 @@ final class HostCoreTests: XCTestCase {
         XCTAssertEqual(again.first?.phase, "hibernated")
     }
 
+    /// 593 §9 (S5): a sandbox that is not running lists its sessions from their SAVED screens, and
+    /// `session-screen` gives one back — in-process, with no host and nothing in a guest asked.
+    func testSessionsOfASandboxThatIsNotRunningComeFromItsSavedScreens() async throws {
+        let store = DozerStore(root: root)
+        let (s, n) = try DozerImages.spec(name: "x", options: CreateOptions(image: "lab"), store: store, environment: [:])
+        try SandboxConfig(name: "x", image: n, spec: s, workspace: nil).write(store.configFile("x"))
+        let core = HostCore(store: store, readOnly: true, version: "test")
+        await core.load()
+        let first = await core.handle(HostRequest(.sessions, name: "x"))
+        let none = try XCTUnwrap(first.result).decode([SessionRow].self)
+        XCTAssertEqual(none, [], "no saved screens: no sessions (no longer an error)")
+        let at = Date(timeIntervalSince1970: 1_800_000_000)
+        try SavedScreens.write(store.layout("x"), info: SavedScreenInfo(session: "shell", savedAt: at, reason: "hibernate", cols: 100, rows: 30,
+                                                                        command: "bash -l", pid: 9, bytesOut: 5),
+                               vt: Data("\u{1B}cVT".utf8), text: "$ echo hi\nhi")
+        let listed = await core.handle(HostRequest(.sessions, name: "x"))
+        let rows = try XCTUnwrap(listed.result).decode([SessionRow].self)
+        XCTAssertEqual(rows.map(\.name), ["shell"])
+        XCTAssertEqual(rows.first?.saved, true)
+        XCTAssertEqual(rows.first?.savedReason, "hibernate")
+        XCTAssertEqual(rows.first?.savedAt, at)
+        XCTAssertEqual(rows.first?.cols, 100)
+        XCTAssertEqual(rows.first?.ended, false)
+        var r = HostRequest(.sessionScreen, name: "x")
+        r.session = "shell"
+        let got = await core.handle(r)
+        let screen = try XCTUnwrap(got.result).decode(SessionScreen.self)
+        XCTAssertEqual(screen.text, "$ echo hi\nhi")
+        XCTAssertEqual(screen.vt, Data("\u{1B}cVT".utf8))
+        XCTAssertEqual(screen.reason, "hibernate")
+        r.session = "nope"
+        let missing = await core.handle(r)
+        XCTAssertEqual(missing.error?.code, .notFound)
+        r.session = "../x"
+        let bad = await core.handle(r)
+        XCTAssertEqual(bad.error?.code, .invalid)
+        XCTAssertTrue(HostOp.sessionScreen.isReadOnly, "looking never starts a host")
+        XCTAssertTrue(HostOp.terminalLayout.isReadOnly)
+        XCTAssertFalse(HostOp.terminalLayoutSet.isReadOnly)
+    }
+
+    /// 593 §9 (S1): the terminal layout is the host's (beside doz.json, 0600), validated, and written
+    /// in-process when no host runs — never into a sandbox that does not exist.
+    func testTheTerminalLayoutIsKeptBesideTheSandbox() async throws {
+        let store = DozerStore(root: root)
+        let (s, n) = try DozerImages.spec(name: "x", options: CreateOptions(image: "lab"), store: store, environment: [:])
+        try SandboxConfig(name: "x", image: n, spec: s, workspace: nil).write(store.configFile("x"))
+        let core = HostCore(store: store, readOnly: true, version: "test")
+        await core.load()
+        let empty = await core.handle(HostRequest(.terminalLayout, name: "x"))
+        XCTAssertEqual(empty.result, .null, "none yet")
+        let layout = TerminalLayout(split: true, focusedPane: 1, panes: [
+            .init(tabs: [.init(session: "shell"), .init(session: "shell-2")], selected: 1),
+            .init(tabs: [.init(session: "shell", mode: "watch")], selected: 0)])
+        var set = HostRequest(.terminalLayoutSet, name: "x")
+        set.layout = layout
+        let written = await core.handle(set)
+        let back = try XCTUnwrap(written.result).decode(TerminalLayout.self)
+        XCTAssertEqual(back.panes, layout.panes)
+        XCTAssertNotNil(back.updatedAt)
+        let again = await core.handle(HostRequest(.terminalLayout, name: "x"))
+        let read = try XCTUnwrap(again.result).decode(TerminalLayout.self)
+        XCTAssertEqual(read.panes, layout.panes)
+        XCTAssertTrue(read.split)
+        XCTAssertEqual(read.focusedPane, 1)
+        var st = stat()
+        XCTAssertEqual(stat(store.terminalLayoutFile("x").path, &st), 0)
+        XCTAssertEqual(st.st_mode & 0o777, 0o600)
+        for bad in [TerminalLayout(split: false, panes: []),
+                    TerminalLayout(split: true, panes: [.init(tabs: [])]),
+                    TerminalLayout(split: false, focusedPane: 1, panes: [.init(tabs: [])]),
+                    TerminalLayout(split: false, panes: [.init(tabs: [.init(session: "../etc")])]),
+                    TerminalLayout(split: false, panes: [.init(tabs: [.init(session: "a", mode: "type")])]),
+                    TerminalLayout(split: false, panes: [.init(tabs: [.init(session: "a")], selected: 3)]),
+                    TerminalLayout(split: false, panes: [.init(tabs: Array(repeating: .init(session: "a"), count: 17))])] {
+            set.layout = bad
+            let refused = await core.handle(set)
+            XCTAssertEqual(refused.error?.code, .invalid, "\(bad)")
+        }
+        XCTAssertEqual(TerminalLayout.read(store, "x")?.panes, layout.panes, "a refused change leaves the layout as it was")
+        set.layout = nil
+        let cleared = await core.handle(set)
+        XCTAssertEqual(cleared.result, .null)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: store.terminalLayoutFile("x").path), "nil clears it")
+        XCTAssertThrowsError(try TerminalLayout.write(layout, store, "gone"))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: store.layout("gone").sandboxDirectory.path), "never re-creates a sandbox's directory")
+    }
+
     func testAllocatedBytesOfAFileAndADirectory() throws {
         let f = root.appendingPathComponent("d/f")
         try FileManager.default.createDirectory(at: f.deletingLastPathComponent(), withIntermediateDirectories: true)
