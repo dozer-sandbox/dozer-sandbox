@@ -22,8 +22,10 @@
       </div>
       <nav id="nav">
         <a href="#/overview" data-view="overview">Sandboxes</a>
-        <a href="#/terminals" data-view="terminals">Terminals</a>
+        <div class="nav-children" id="nav-sandboxes" role="list" aria-label="Sandboxes"></div>
+        <a href="#/sessions" data-view="sessions">All sessions</a>
         <a href="#/images" data-view="images">Images</a>
+        <a href="#/operations" data-view="operations" id="nav-operations">Operations <span class="nav-badge" id="ops-badge" hidden></span><span class="nav-alert" id="ops-alert" hidden title="An operation failed"></span></a>
         <a href="#/accounts" data-view="accounts">Accounts &amp; keys</a>
         <a href="#/metrics" data-view="metrics">Metrics</a>
         <a href="#/activity" data-view="activity">Activity</a>
@@ -38,9 +40,15 @@
     </aside>
     <main id="main" tabindex="-1">
       <div class="notice" id="notice" hidden></div>
-      <div class="ops" id="ops" hidden aria-live="polite"></div>
       <section id="view"></section>
-      <section id="terminals" class="terms" hidden></section>
+      <section id="sbx" class="sbx" hidden>
+        <div id="sbx-bar" class="sbx-bar"></div>
+        <div class="sbx-body" id="sbx-body">
+          <section id="terminals" class="terms"></section>
+          <aside id="sbx-details" class="sbx-details" aria-label="Details"></aside>
+        </div>
+      </section>
+      <section id="grid" class="grid-view" hidden></section>
     </main>
   </div>
   <div class="toasts" id="toasts" aria-live="assertive"></div>

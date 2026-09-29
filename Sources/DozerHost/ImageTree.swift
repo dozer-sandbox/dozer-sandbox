@@ -69,8 +69,9 @@ public struct ImageTree: Codable, Equatable, Sendable {
         }
     }
 
-    /// `customNames`: a template's key (`<name>/<id>`) → its name.
-    public init(disks: [Disk], customNames: [String: String] = [:], unionBytes: Int64 = 0, milliseconds: Double = 0) {
+    /// `customNames`: a template's key (`<name>/<id>`) → its name; `customFrom`: → the sandbox it was saved from.
+    public init(disks: [Disk], customNames: [String: String] = [:], customFrom: [String: String] = [:], unionBytes: Int64 = 0,
+                milliseconds: Double = 0) {
         struct Draft {
             var disk: Disk
             var kind: String
@@ -101,7 +102,7 @@ public struct ImageTree: Codable, Equatable, Sendable {
                 draft.kind = "template"
                 let key = d.name.hasPrefix("custom:") ? String(d.name.dropFirst(7)) : d.name
                 draft.name = customNames[key] ?? String(key.split(separator: "/").first ?? Substring(key))
-                draft.detail = key
+                draft.detail = customFrom[key].map { "from \($0)" } ?? key
             case .preparedDisk:
                 draft.kind = "prepared"
                 let file = d.name.hasPrefix("prepared ") ? String(d.name.dropFirst(9)) : d.name
@@ -172,8 +173,10 @@ public struct ImageTree: Codable, Equatable, Sendable {
     public static func measure(store: DozerStore) throws -> ImageTree {
         guard FileManager.default.fileExists(atPath: store.root.path) else { return ImageTree(disks: []) }
         let report = try DiskAccounting.measure(store: store.root)
-        let names = Dictionary(store.layout("_").customImages().map { ($0.key, $0.name) }, uniquingKeysWith: { a, _ in a })
-        return ImageTree(disks: report.disks.map(Disk.init), customNames: names, unionBytes: report.unionBytes,
+        let customs = store.layout("_").customImages()
+        let names = Dictionary(customs.map { ($0.key, $0.name) }, uniquingKeysWith: { a, _ in a })
+        let from = Dictionary(customs.map { ($0.key, $0.fromSandbox) }, uniquingKeysWith: { a, _ in a })
+        return ImageTree(disks: report.disks.map(Disk.init), customNames: names, customFrom: from, unionBytes: report.unionBytes,
                          milliseconds: report.milliseconds)
     }
 }

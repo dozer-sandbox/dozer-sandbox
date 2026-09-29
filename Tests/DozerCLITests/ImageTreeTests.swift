@@ -63,6 +63,8 @@ final class ImageTreeTests: XCTestCase {
         XCTAssertEqual(t.nodes.map(\.id), Array(0..<t.nodes.count), "ids are depth-first order")
         for n in t.nodes { if let p = n.parent { XCTAssertLessThan(p, n.id); XCTAssertEqual(t.nodes[p].depth + 1, n.depth) } }
         XCTAssertEqual(t.unionBytes, mib(1500))
+        let named = ImageTree(disks: disks, customNames: ["tpl/disk-1": "tpl"], customFrom: ["tpl/disk-1": "a"])
+        XCTAssertEqual(named.nodes.first { $0.kind == "template" }?.detail, "from a", "a template says where it came from")
     }
 
     func testAnEmptyStoreIsAnEmptyTree() throws {

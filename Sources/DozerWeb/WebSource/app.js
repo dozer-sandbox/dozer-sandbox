@@ -18,6 +18,11 @@ const state = {
   expiresAt: null,
   view: 'overview',
   param: null,
+  session: null,           // 593: #/sandbox/NAME/SESSION
+  sbx: null,               // 593: the shown sandbox's {name, d, net, accounts}
+  opsSeenAt: Date.now(),   // 593: a failure that ended after this is unacknowledged (the Operations badge)
+  opsFilter: '',
+  imagesMode: 'table',     // 593: Images › Table | Lineage
   overview: null,
   activity: [],
   ops: new Map(),
@@ -137,6 +142,7 @@ function trackOp(op) {
   if (!before && op.state === 'running' && op.action !== 'rm') refresh(false);
   if (op.state !== 'running' && (!before || before.state === 'running')) {
     if (op.state === 'failed') toast(op.label + ': ' + op.text, true);
+    refreshNav();
     // The sandbox this page shows is gone: back to the list (route() refreshes) instead of a 404.
     if (op.state === 'done' && op.action === 'rm' && state.view === 'sandbox' && state.param === op.sandbox) { location.hash = '#/overview'; return; }
     refresh(false);
@@ -147,17 +153,57 @@ function toast(text, bad) {
   $('toasts').append(t);
   setTimeout(() => t.remove(), bad ? 9000 : 4000);
 }
+// 593 (owner): Operations is its own page, not a block on top of every page. What the nav shows: the
+// running count (with a spinner) and a red dot while a failure is unacknowledged — one that ended
+// after the Operations page was last shown (or this page loaded). In-context progress stays: the
+// overview row and the sandbox's control bar (`data-op-for`).
+function opEnded(o) { return new Date(o.startedAt).getTime() + (o.milliseconds || 0); }
 function renderOps() {
-  // Running ones, and what finished in the last 10 minutes (the newest six).
-  const list = [...state.ops.values()].filter((o) => o.state === 'running' || Date.now() - new Date(o.startedAt).getTime() < 600000).slice(-6).reverse();
-  const box = $('ops');
-  if (!list.length) { box.hidden = true; return; }
-  box.hidden = false;
-  box.replaceChildren(h('div', { class: 'ops-title' }, 'Operations'),
-    ...list.map((o) => h('div', { class: 'op op-' + o.state },
-      h('span', { class: 'op-state' }, o.state === 'running' ? '…' : o.state === 'done' ? '✓' : '✕'),
-      h('span', { class: 'op-label' }, o.label),
-      h('span', { class: 'op-text' }, o.text + (o.milliseconds ? ' · ' + ms(o.milliseconds) : '')))));
+  const running = [...state.ops.values()].filter((o) => o.state === 'running').length;
+  const badge = $('ops-badge');
+  badge.hidden = running === 0;
+  badge.replaceChildren(h('span', { class: 'mini-spin', 'aria-hidden': 'true' }), String(running));
+  badge.title = running + ' running';
+  if (state.view === 'operations') state.opsSeenAt = Date.now();
+  const unseen = [...state.ops.values()].some((o) => o.state === 'failed' && opEnded(o) > state.opsSeenAt);
+  $('ops-alert').hidden = !unseen;
+  if (state.view === 'operations') renderOperations();
+}
+function acknowledgeOps() {
+  state.opsSeenAt = Date.now();
+  $('ops-alert').hidden = true;
+}
+function viewOperations() {
+  acknowledgeOps();
+  const box = h('div');
+  state.opsBox = box;
+  renderOperations();
+  return box;
+}
+function renderOperations() {
+  const box = state.opsBox;
+  if (!box) return;
+  const all = [...state.ops.values()].reverse();
+  const names = [...new Set(all.map((o) => o.sandbox).filter(Boolean))].sort();
+  const filter = h('select', { 'aria-label': 'Filter by sandbox' }, h('option', { value: '' }, 'every sandbox'), names.map((n) => {
+    const o = h('option', { value: n }, n);
+    if (n === state.opsFilter) o.selected = true;
+    return o;
+  }));
+  filter.addEventListener('change', () => { state.opsFilter = filter.value; renderOperations(); });
+  const list = all.filter((o) => !state.opsFilter || o.sandbox === state.opsFilter);
+  const rows = list.map((o) => {
+    const secs = o.state === 'running' ? Math.max(0, Math.round((Date.now() - new Date(o.startedAt).getTime()) / 1000)) + ' s' : (o.milliseconds ? ms(o.milliseconds) : '—');
+    return h('tr', { class: 'op-row op-' + o.state, 'data-op': o.id },
+      h('td', null, o.state === 'running' ? h('span', { class: 'mini-spin', title: 'running' }) : h('span', { class: 'op-state', title: o.state }, o.state === 'done' ? '✓' : '✕')),
+      h('td', null, o.action), h('td', null, o.sandbox ? h('a', { href: '#/sandbox/' + o.sandbox }, o.sandbox) : '—'),
+      h('td', null, clock(o.startedAt)), h('td', { class: 'num' }, secs),
+      h('td', { class: 'op-text' }, o.text));
+  });
+  box.replaceChildren(h('h1', null, 'Operations'),
+    h('p', { class: 'sub' }, 'What this UI asked the host to do, newest first: live progress while it runs, then its result. A failure also raises a message.'),
+    h('div', { class: 'toolbar' }, filter, list.length + ' of ' + all.length),
+    panel(table(['', 'Action', 'Sandbox', 'Started', 'Took', 'Progress / result'], rows, [4]), 'Nothing yet — actions you take show here.'));
 }
 /// The newest operation of each sandbox, shown under its name in the list (live, without a refetch).
 /// A running operation counts its seconds, so a two-minute first start (pull, flatten, bake) is
@@ -432,10 +478,11 @@ function signedOut(message) {
   for (const d of document.querySelectorAll('dialog')) d.close();
   setLive('bad', 'signed out');
   $('sign-out').hidden = true;
-  $('ops').hidden = true;
   // 591: the server closes this session's terminals; the page forgets them.
+  gridLeave();
   for (const t of [...terminals.values()]) closeTerminal(t.id);
-  $('terminals').hidden = true;
+  $('sbx').hidden = true;
+  $('grid').hidden = true;
   $('view').hidden = false;
   const view = $('view');
   view.replaceChildren(h('div', { class: 'signed-out' },
@@ -463,10 +510,15 @@ function connect() {
   es.addEventListener('hello', async () => {
     setLive('on', 'live');
     try { for (const o of await api('operations')) state.ops.set(o.id, o); renderOps(); } catch (_) { /* */ }
+    refreshNav();
     refresh(true);
   });
-  // The Settings page is not about the store's live state: re-rendering it would drop a half-typed value.
-  es.addEventListener('changed', () => { if (state.view !== 'settings') refresh(false); });
+  // The Settings page is not about the store's live state: re-rendering it would drop a half-typed
+  // value; nor is Operations (its own events keep it current).
+  es.addEventListener('changed', () => {
+    refreshNav();
+    if (state.view !== 'settings' && state.view !== 'operations') refresh(false);
+  });
   es.addEventListener('op', (ev) => { try { trackOp(JSON.parse(ev.data)); } catch (_) { /* */ } });
   es.addEventListener('activity', (ev) => {
     try {
@@ -501,22 +553,53 @@ function notice(text, bad) {
   n.textContent = text;
 }
 
-// ── routing ─────────────────────────────────────────────────────────────────
-function route() {
-  const m = /^#\/([a-z]+)(?:\/([a-z0-9-]{1,40}))?$/.exec(location.hash);
-  state.view = m ? m[1] : 'overview';
-  state.param = m && m[2] ? m[2] : null;
-  if (state.view === 'sandbox' && !state.param) state.view = 'overview';
-  for (const a of document.querySelectorAll('#nav a')) {
+// ── the nav: a child per sandbox (593) ──────────────────────────────────────
+// From the overview (`ls` without session counts — never the guest's session holders), re-read on
+// the stream's hello, on `changed`, and when an operation ends. Text only.
+let navTimer = null;
+function refreshNav() {
+  clearTimeout(navTimer);
+  navTimer = setTimeout(async () => {
+    try { state.overview = await api('overview'); renderNavSandboxes(); } catch (_) { /* the last list */ }
+  }, 300);
+}
+function renderNavSandboxes() {
+  const list = state.overview ? state.overview.sandboxes.slice().sort((a, b) => a.name.localeCompare(b.name)) : [];
+  $('nav-sandboxes').replaceChildren(...list.map((s) => h('a', {
+    href: '#/sandbox/' + s.name, class: 'nav-child' + (state.view === 'sandbox' && state.param === s.name ? ' active' : ''),
+    role: 'listitem', 'data-sandbox': s.name, title: s.name + ' — ' + s.phaseLabel },
+    h('span', { class: 'ph-dot ph-' + s.phase, 'aria-hidden': 'true' }), h('span', { class: 'nav-name' }, s.name))));
+}
+function paintNav() {
+  for (const a of document.querySelectorAll('#nav > a')) {
     a.classList.toggle('active', a.dataset.view === state.view || (state.view === 'sandbox' && a.dataset.view === 'overview'));
   }
+  renderNavSandboxes();
+}
+
+// ── routing ─────────────────────────────────────────────────────────────────
+// #/VIEW, #/sandbox/NAME and #/sandbox/NAME/SESSION (a session addressed: its tab opened or selected).
+function route() {
+  const m = /^#\/([a-z]+)(?:\/([a-z0-9-]{1,40})(?:\/([A-Za-z0-9_-][A-Za-z0-9._-]{0,63}))?)?$/.exec(location.hash);
+  if (m && m[1] === 'terminals') { location.replace('#/sessions'); return; }      // 591's name for the grid's place
+  state.view = m ? m[1] : 'overview';
+  state.param = m && m[2] ? m[2] : null;
+  state.session = m && m[3] ? m[3] : null;
+  if (state.view === 'sandbox' && !state.param) state.view = 'overview';
+  paintNav();
   // 591: the terminals live in their own section, never re-rendered by refresh() (a live update
-  // must not steal a terminal's focus or reparent its canvas).
-  const onTerminals = state.view === 'terminals';
-  $('terminals').hidden = !onTerminals;
-  $('view').hidden = onTerminals;
-  $('main').classList.toggle('main-terms', onTerminals);
-  if (onTerminals) { renderTerminals(); return; }
+  // must not steal a terminal's focus or reparent its canvas). 593: that section is the sandbox
+  // page's terminal area; the grid is a section of its own too.
+  const onSbx = state.view === 'sandbox', onGrid = state.view === 'sessions';
+  $('sbx').hidden = !onSbx;
+  $('grid').hidden = !onGrid;
+  $('view').hidden = onSbx || onGrid;
+  $('main').classList.toggle('main-terms', onSbx);
+  if (!onGrid) gridLeave();
+  if (state.view !== 'operations') state.opsBox = null;
+  if (state.view === 'operations') acknowledgeOps();
+  if (onSbx) { showSandbox(); return; }
+  if (onGrid) { gridEnter(); return; }
   refresh(true);
 }
 window.addEventListener('hashchange', () => { if (!state.signedOut) route(); });
@@ -524,11 +607,12 @@ window.addEventListener('hashchange', () => { if (!state.signedOut) route(); });
 let refreshing = false, again = false;
 async function refresh(scrollTop) {
   if (state.signedOut) return;
-  if (state.view === 'terminals') { renderTerminals(); return; }
+  if (state.view === 'sandbox') { refreshSandbox(); return; }
+  if (state.view === 'sessions') { gridRefresh(false); return; }
   if (refreshing) { again = true; return; }
   refreshing = true;
   try {
-    const views = { overview: viewOverview, sandbox: viewSandbox, images: viewImages, accounts: viewAccounts,
+    const views = { overview: viewOverview, images: viewImages, operations: viewOperations, accounts: viewAccounts,
                     metrics: viewMetrics, activity: viewActivity, doctor: viewDoctor, settings: viewSettings };
     const fn = views[state.view] || viewOverview;
     const node = await fn();
@@ -654,6 +738,7 @@ function hostCard(host) {
 async function viewOverview() {
   const o = await api('overview');
   state.overview = o;
+  renderNavSandboxes();
   const rows = o.sandboxes.map((s) => h('tr', { class: 'click', on: { click: () => { location.hash = '#/sandbox/' + s.name; } } },
     h('td', null, h('a', { href: '#/sandbox/' + s.name }, s.name), h('div', { class: 'muted' }, s.image), h('div', { 'data-op-for': s.name })),
     h('td', null, phasePill(s.phase, s.phaseLabel, s.busy), s.diedWithHost ? h('div', { class: 'st-warn' }, 'died with its host') : null),
@@ -685,7 +770,7 @@ async function createDialog() {
   try { [images, accounts] = await Promise.all([api('images'), api('accounts')]); } catch (_) { /* defaults */ }
   dialog('New sandbox', 'It is created off; Start boots it (the first start of an image bakes it — minutes, needs network).', [
     { name: 'sandbox', label: 'Name', placeholder: 'a-z 0-9 -', required: true },
-    { name: 'image', label: 'Image', type: 'select', options: images.length ? images.map((i) => [i.name, i.name + (i.kind === 'custom' ? ' (custom)' : '')]) : ['lab', 'claude-code', 'pi'] },
+    { name: 'image', label: 'Image', type: 'select', options: images.length ? images.map((i) => [i.name, i.name + (i.kind === 'custom' ? ' (template)' : '')]) : ['lab', 'claude-code', 'pi'] },
     { name: 'network', label: 'Network', type: 'select', value: '',
       options: [['', 'default (per image, Settings)'],['agent', 'agent — proxied, Anthropic + registries'], ['bake', 'bake — proxied, package registries'],
         ['locked', 'locked — proxied, nothing'], ['open', 'open — proxied, everything (logged)'], ['nat', 'nat — a real interface (vmnet)'], ['none', 'none']] },
@@ -705,9 +790,67 @@ async function createDialog() {
   });
 }
 
-async function viewSandbox() {
+// ── a sandbox's page (593): a control bar, the terminal area, a collapsible details panel ──────
+// #sbx is persistent: refreshSandbox() re-renders the bar and the details, never #terminals.
+let sbxRefreshing = false, sbxAgain = false;
+async function showSandbox() {
   const name = state.param;
-  const [d, net, accounts] = await Promise.all([api('sandboxes/' + name), api('sandboxes/' + name + '/network'), api('accounts').catch(() => ({ accounts: [] }))]);
+  const want = state.session;                  // the addressed session (renderTerminals re-points the URL)
+  const first = !state.sbx || state.sbx.name !== name;
+  if (first) {
+    state.sbx = { name, d: null };
+    $('sbx-bar').replaceChildren(h('div', { class: 'sbx-title' }, h('h1', null, name)));
+    $('sbx-details').replaceChildren();
+    $('main').scrollTop = 0;
+  }
+  renderTerminals();
+  await refreshSandbox();
+  sandboxArrived(name, want);
+}
+async function refreshSandbox() {
+  if (sbxRefreshing) { sbxAgain = true; return; }
+  sbxRefreshing = true;
+  const name = state.param;
+  try {
+    const [d, net, accounts] = await Promise.all([api('sandboxes/' + name), api('sandboxes/' + name + '/network'), api('accounts').catch(() => ({ accounts: [] }))]);
+    if (state.view !== 'sandbox' || state.param !== name || state.signedOut) return;
+    state.sbx = { name, d, net, accounts };
+    const parts = sandboxParts(name, d, net, accounts);
+    $('sbx-bar').replaceChildren(parts.bar);
+    $('sbx-details').replaceChildren(parts.details);
+    $('sbx-body').classList.toggle('details-closed', !setting('ui.details_open', true));
+    paintRowOps();
+    paintTermEmpty();
+  } catch (e) {
+    if (e.status === 404) { location.hash = '#/overview'; return; }
+    if (!state.signedOut) toast(e.message || String(e), true);
+  } finally {
+    sbxRefreshing = false;
+    if (sbxAgain) { sbxAgain = false; refreshSandbox(); }
+  }
+}
+/// On arriving at a sandbox's page: an addressed session (#/sandbox/NAME/SESSION, from the grid)
+/// gets its tab — opened, or selected; otherwise, when the sandbox runs and its own session runs,
+/// the page attaches to it (explicit viewing of a live VM, which keeps nothing alive the VM does
+/// not). A sandbox that is not running shows the empty area's actions instead.
+function sandboxArrived(name, want) {
+  const s = state.sbx;
+  if (!s || s.name !== name || !s.d) return;
+  const mine = [...terminals.values()].filter((t) => !t.grid && t.sandbox === name);
+  const running = s.d.info.phase === 'running';
+  const live = (s.d.sessions || []).filter((x) => !x.ended).map((x) => x.name);
+  if (want) {
+    const have = mine.find((t) => t.session === want && t.mode === 'interactive' && !t.ended);
+    if (have) { const v = sview(name); v.selected[have.pane] = have.id; renderTerminals(); focusTerm(have); }
+    else if (running && live.includes(want)) openTerminal(name, want, 'interactive');
+    else toast('Session ' + want + ' is not running in ' + name, true);
+    return;
+  }
+  if (!mine.length && running && live.includes(s.d.defaultSession) && setting('ui.terminals', true)) {
+    openTerminal(name, s.d.defaultSession, 'interactive');
+  }
+}
+function sandboxParts(name, d, net, accounts) {
   const i = d.info;
   const running = i.phase === 'running';
   // Sessions need a VM: running, or one a session request wakes (paused, asleep, deep asleep) — never
@@ -747,12 +890,8 @@ async function viewSandbox() {
         { action: 'point-revert', sandbox: name, point: p.id }), { small: true, danger: true }),
       btn('Fork', () => dialog('Fork ' + p.name, 'A new sandbox whose disks are this point’s (it cold-boots on start).',
         [{ name: 'newName', label: 'New sandbox name', required: true }], 'Fork', async (v) => { await actOrThrow({ action: 'point-fork', sandbox: name, point: p.id, newName: v.newName }); }), { small: true }),
-      btn('Save as image', () => dialog('Save ' + p.name + ' as an image', 'Other sandboxes can then be created from it.',
-        [{ name: 'image', label: 'Image name', required: true }, { name: 'note', label: 'Note' }], 'Save', async (v) => {
-          const b = { action: 'point-save-image', sandbox: name, point: p.id, image: v.image };
-          if (v.note) b.note = v.note;
-          await actOrThrow(b);
-        }), { small: true }),
+      btn('Save as template…', () => templateDialog(name, d, p.id), { small: true, title: 'Its root disk becomes a template (never its state disk)' }),
+      btn('Duplicate…', () => duplicateDialog(name, d, accounts, p.id), { small: true, title: 'A new sandbox from this point, with a new workspace, CPUs, memory, network' }),
       btn('Delete', () => confirmAction('Delete ' + p.name, 'Delete the restore point “' + p.name + '” of ' + name + '.', name,
         { action: 'point-rm', sandbox: name, point: p.id }), { small: true, danger: true })))));
   const creds = d.credentials.map((c) => h('tr', null,
@@ -771,27 +910,43 @@ async function viewSandbox() {
     h('td', { class: 'num' }, String(f.requests)),
     h('td', null, when(f.lastSeen))));
   const proxied = net.proxied;
-  return h('div', null,
-    h('p', { class: 'sub' }, h('a', { href: '#/overview' }, '← Sandboxes')),
-    h('div', { class: 'head' }, h('h1', null, name, ' ', phasePill(i.phase, i.phaseLabel, i.busy)), lifecycleButtons(i, true)),
-    h('p', { class: 'sub' }, i.image + ' · created ' + when(i.createdAt)),
-    h('div', { 'data-op-for': name, 'data-banner': '1', role: 'status' }),
-    h('div', { class: 'cards' },
-      card('RAM held', mib(i.ramHeldMiB), 'of ' + mib(i.memoryMiB) + (i.memoryReturnedMiB ? ' · balloon returned ' + mib(i.memoryReturnedMiB) : '')),
-      card('Disk', bytes(i.diskBytes), d.snapshotBytes ? 'snapshot ' + bytes(d.snapshotBytes) : (d.hasRootDisk ? 'root disk kept' : 'no root disk yet')),
-      card('CPUs', String(d.cpus)),
-      card('Sessions', d.sessions ? String(d.sessions.filter((s) => !s.ended).length) : '—', running ? '' : 'listed while it runs')),
-    h('h2', null, 'Terminal'),
-    h('div', { class: 'panel' }, h('div', { class: 'cmd' }, h('code', null, d.attachCommand), copy,
-      ((b) => { if (i.busy || i.phase === 'booting' || opRunningFor(name)) { b.disabled = true; b.title = 'Wait until it is running'; } return b; })(
-        btn('Open here', () => ((i.phase === 'off' || i.phase === 'failed') && bootViewOnStart() ? startWithBootView(name) : openDefaultTerminal(name)),
-          { primary: true, title: 'A terminal in this browser on the ' + d.defaultSession + ' session (a shut-down sandbox starts, and you watch it boot)' })),
-      gated(btn('Open in Terminal', terminal(null), { title: 'Terminal.app attaches to the ' + d.defaultSession + ' session (waking the sandbox if it sleeps)' }))),
-      h('div', { class: 'empty' }, 'Attaches to the ' + d.defaultSession + ' session; Ctrl-] detaches, the session keeps running. Open here keeps it in the Terminals view; Open in Terminal uses your default terminal app.')),
-    h('div', { class: 'head' }, h('h2', null, 'Sessions'), h('div', { class: 'actions' },
+  const busy = i.busy || i.phase === 'booting' || opRunningFor(name);
+  const detailsOpen = setting('ui.details_open', true);
+  const netText = i.network + (i.deniedConnections ? ' (' + i.deniedConnections + ' denied)' : '');
+  const bar = h('div', { class: 'sbx-bar-inner' },
+    h('div', { class: 'sbx-title' },
+      h('h1', null, name), phasePill(i.phase, i.phaseLabel, i.busy),
+      h('span', { class: 'sbx-meta' },
+        h('span', null, i.image),
+        h('span', null, (i.ramHeldMiB ? mib(i.ramHeldMiB) : '—') + ' of ' + mib(i.memoryMiB)),
+        h('span', { class: i.deniedConnections ? 'st-warn' : null }, netText),
+        i.accountApplies ? h('span', null, 'account ' + (i.account || '—')) : null)),
+    h('div', { class: 'sbx-actions' },
+      lifecycleButtons(i, true),
+      h('span', { class: 'sbx-sep', 'aria-hidden': 'true' }),
+      gated(btn('Open in Terminal', terminal(null), { small: true, title: 'Your terminal app attaches to the ' + d.defaultSession + ' session (waking the sandbox if it sleeps)' })),
       gated(btn('New shell', () => newShellTerminal(name).catch((e) => toast(e.message || String(e), true)),
         { small: true, title: 'A new shell session (shell-2, shell-3, …) in a browser terminal' })),
-      gated(btn('Open the ' + d.defaultSession + ' session', () => act({ action: 'open-session', sandbox: name }), { small: true, title: 'Start the image’s own session if it is not running (wakes a sleeping sandbox)' })),
+      ((b) => { if (busy) b.disabled = true; return b; })(btn('Terminal…', () => newTerminalDialog(name), { small: true, title: 'Attach to or watch a session, or start one running a command' })),
+      termUI.splitBtn || null,
+      h('span', { class: 'sbx-sep', 'aria-hidden': 'true' }),
+      ((b) => { if (busy || !d.hasRootDisk) { b.disabled = true; b.title = d.hasRootDisk ? 'Wait until it settles' : 'It has no disk yet — start it once'; } return b; })(
+        btn('Duplicate…', () => duplicateDialog(name, d, accounts, null), { small: true, title: 'A new sandbox from this one’s disk: a new workspace, CPUs, memory, network, account' })),
+      ((b) => { if (busy || !d.hasRootDisk) { b.disabled = true; b.title = d.hasRootDisk ? 'Wait until it settles' : 'It has no disk yet — start it once'; } return b; })(
+        btn('Save as template…', () => templateDialog(name, d, null), { small: true, title: 'Its root disk becomes an image other sandboxes are created from (never its state disk)' })),
+      btn(detailsOpen ? 'Hide details' : 'Details', () => {
+        const open = !setting('ui.details_open', true);
+        $('sbx-body').classList.toggle('details-closed', !open);
+        saveSetting('ui.details_open', open).then(() => refreshSandbox()).catch((e) => toast('The setting was not saved: ' + (e.message || e), true));
+      }, { small: true, title: 'The sessions, restore points, network and keys panel (remembered: ui.details_open)' })),
+    h('div', { 'data-op-for': name, 'data-banner': '1', role: 'status' }));
+  const details = h('div', { class: 'sbx-details-inner' },
+    h('div', { class: 'cards small-cards' },
+      card('RAM held', mib(i.ramHeldMiB), 'of ' + mib(i.memoryMiB) + (i.memoryReturnedMiB ? ' · balloon returned ' + mib(i.memoryReturnedMiB) : '')),
+      card('Disk', bytes(i.diskBytes), d.snapshotBytes ? 'snapshot ' + bytes(d.snapshotBytes) : (d.hasRootDisk ? 'root disk kept' : 'no root disk yet')),
+      card('CPUs', String(d.cpus))),
+    h('div', { class: 'panel' }, h('div', { class: 'cmd' }, h('code', null, d.attachCommand), copy)),
+    h('div', { class: 'head' }, h('h2', null, 'Sessions'), h('div', { class: 'actions' },
       gated(btn('Run detached…', () => dialog('Run a command in ' + name, 'A new session running the command — no shell in front (say bash -lc \'…\' for one). It runs inside the sandbox; attach to see it.',
         [{ name: 'session', label: 'Session name', placeholder: 'e.g. worker', required: true },
          { name: 'command', label: 'Command', placeholder: 'sleep 600', required: true }], 'Run', async (v) => {
@@ -808,13 +963,7 @@ async function viewSandbox() {
           if (v.point) b.point = v.point;
           if (v.note) b.note = v.note;
           await actOrThrow(b);
-        }), { small: true }),
-      i.phase === 'off' ? btn('Save disk as image…', () => dialog('Save ' + name + '’s disk as an image', 'The stopped sandbox’s current disk becomes a custom image.',
-        [{ name: 'image', label: 'Image name', required: true }, { name: 'note', label: 'Note' }], 'Save', async (v) => {
-          const b = { action: 'point-save-image', sandbox: name, image: v.image };
-          if (v.note) b.note = v.note;
-          await actOrThrow(b);
-        }), { small: true }) : null)),
+        }), { small: true }))),
     panel(table(['Point', 'Taken', 'While', 'Note', ''], points), 'No restore points.'),
     h('div', { class: 'head' }, h('h2', null, 'Network'), proxied ? btn('Edit policy…', () => policyDialog(name, net.policy), { small: true }) : null),
     networkPanel(net),
@@ -838,6 +987,59 @@ async function viewSandbox() {
       fact('Journal', d.journalMiB ? mib(d.journalMiB) : 'none'), fact('Network', d.networkMode + (d.subnet ? ' · ' + d.subnet : '')),
       fact('Account', i.accountApplies ? (i.account || '—') : 'n/a'), fact('Shares', d.shares.length ? d.shares.map((s) => s.hostPath + ' → ' + s.guestPath).join(', ') : 'none'),
       fact('Directory', d.directory))));
+  return { bar, details };
+}
+
+/// 593: Save as template — the ROOT disk only (never the state disk: logins and history stay out of a
+/// disk meant to be shared). From the current disk (a live sandbox pauses for the clone) or a point.
+function templateDialog(name, d, pointID) {
+  const sources = [['', 'the current disk' + (d.info.phase === 'off' ? '' : ' (it pauses for the clone: milliseconds)')],
+    ...d.restorePoints.map((p) => [p.id, 'restore point ' + p.name])];
+  dialog('Save ' + name + ' as a template',
+    'A template is an image other sandboxes are created from. Everything installed or written on the ROOT disk is in it: files in /root, /etc, /usr, /opt, caches — so do not save a secret you put there. The agent’s state disk (its logins, history) is never included.', [
+      { name: 'image', label: 'Template name', placeholder: 'a-z 0-9 -', required: true },
+      { name: 'source', label: 'From', type: 'select', options: sources, value: pointID || '' },
+      { name: 'note', label: 'Note', placeholder: 'what is in it' },
+    ], 'Save template', async (v) => {
+      const b = { action: 'template-create', sandbox: name, image: v.image };
+      if (v.source) b.point = v.source;
+      if (v.note) b.note = v.note;
+      await actOrThrow(b);
+    });
+}
+
+/// 593: Duplicate — a new sandbox from this one's disk (or a point) with overrides. The root disk is
+/// an APFS clone; the state disk starts fresh unless the person opts in.
+function duplicateDialog(name, d, accounts, pointID) {
+  const i = d.info;
+  const sources = [['', 'the current disk' + (i.phase === 'off' ? '' : ' (it pauses for the clone: milliseconds)')],
+    ...d.restorePoints.map((p) => [p.id, 'restore point ' + p.name])];
+  const ws = d.shares.find((s) => s.guestPath === '/workspace');
+  dialog('Duplicate ' + name,
+    'A new sandbox from ' + name + '’s root disk (an instant APFS clone). It is created off; Start boots it. Keys are not copied.', [
+      { name: 'newName', label: 'New sandbox name', placeholder: 'a-z 0-9 -', required: true },
+      { name: 'source', label: 'From', type: 'select', options: sources, value: pointID || '' },
+      { name: 'workspace', label: 'Workspace (a folder on this Mac, shared at /workspace)', placeholder: ws ? ws.hostPath + ' (the same)' : 'none (the same)',
+        help: 'It must exist — Dozer never creates it.' },
+      { name: 'cpus', label: 'CPUs', type: 'number', min: 1, max: 64, placeholder: String(d.cpus) + ' (the same)' },
+      { name: 'memoryMiB', label: 'Memory (MiB)', type: 'number', min: 256, placeholder: String(d.memoryMiB) + ' (the same)' },
+      { name: 'network', label: 'Network', type: 'select', value: '',
+        options: [['', i.network + ' (the same, its policy included)'], ['agent', 'agent'], ['bake', 'bake'], ['locked', 'locked'], ['open', 'open'], ['nat', 'nat'], ['none', 'none']] },
+      { name: 'account', label: 'Account', type: 'select', value: '',
+        options: [['', 'the same'], ['default', 'the store default'], ['none', 'none'], ...accounts.accounts.map((a) => [a.name, a.name + ' (' + a.kind + ')'])] },
+      { name: 'copyState', label: 'Copy the agent’s state disk too', type: 'checkbox',
+        help: 'Off (the default): a fresh state disk. On: its logins and history are copied into the new sandbox.' },
+    ], 'Duplicate', async (v) => {
+      const b = { action: 'duplicate', sandbox: name, newName: v.newName };
+      if (v.source) b.point = v.source;
+      if (v.workspace) b.workspace = v.workspace;
+      if (v.cpus) b.cpus = Number(v.cpus);
+      if (v.memoryMiB) b.memoryMiB = Number(v.memoryMiB);
+      if (v.network) b.network = v.network;
+      if (v.account) b.account = v.account;
+      if (v.copyState) b.copyState = true;
+      await actOrThrow(b);
+    });
 }
 
 /// Edit the policy in a dialog; Preview shows exactly what the host will do; Apply sends it.
@@ -896,21 +1098,65 @@ function networkPanel(net) {
     panel(table(['Time', 'Verdict', 'Kind', 'Target', 'Rule', 'Bytes', 'Credential'], log, [5]), net.logAvailable ? 'No connections.' : net.note));
 }
 
+/// 593: Images › Table | Lineage. The lineage is measured by the host (every disk's extent map), so
+/// it is fetched only when shown, or on Refresh — never on a live update.
+function imagesToggle() {
+  const mk = (mode, label) => {
+    const b = h('button', { type: 'button', class: 'seg' + (state.imagesMode === mode ? ' active' : ''), 'aria-pressed': state.imagesMode === mode ? 'true' : 'false', 'data-mode': mode },
+      label);
+    b.addEventListener('click', () => { if (state.imagesMode !== mode) { state.imagesMode = mode; refresh(false); } });
+    return b;
+  };
+  return h('div', { class: 'segmented', role: 'group', 'aria-label': 'View' }, mk('table', 'Table'), mk('lineage', 'Lineage'));
+}
 async function viewImages() {
+  if (state.imagesMode === 'lineage') return viewLineage();
   const rows = (await api('images')).map((r) => h('tr', null,
-    h('td', null, r.name), h('td', null, r.kind),
+    h('td', null, r.name, r.kind === 'custom' ? h('span', { class: 'tag tpl' }, 'template') : null),
+    h('td', null, r.kind === 'custom' ? 'template' : r.kind),
     h('td', null, r.baked ? (r.bakedAt ? full(r.bakedAt) : 'yes') : h('span', { class: 'muted' }, 'no — bakes on first start')),
     h('td', { class: 'num' }, r.allocatedBytes ? bytes(r.allocatedBytes) : '—'),
     h('td', null, [r.note, r.fromSandbox ? 'from ' + r.fromSandbox : null].filter(Boolean).join(' · ') || '—'),
     h('td', { class: 'mono muted' }, r.key ? r.key.slice(0, 16) : ''),
     h('td', null, h('div', { class: 'actions' },
       r.kind === 'builtin' ? btn(r.baked ? 'Re-bake' : 'Bake', () => act({ action: 'image-bake', image: r.name }), { small: true, title: 'Minutes, needs network' }) : null,
-      r.baked || r.kind === 'custom' ? btn('Remove', () => confirmAction('Remove image ' + r.name,
-        r.kind === 'custom' ? 'The custom image is deleted; sandboxes made from it keep working.' : 'Its baked disk is deleted (it is baked again when next needed); sandboxes cloned from it keep working.',
+      r.baked || r.kind === 'custom' ? btn('Remove', () => confirmAction('Remove ' + (r.kind === 'custom' ? 'template ' : 'image ') + r.name,
+        r.kind === 'custom' ? 'The template is deleted; sandboxes created from it keep working.' : 'Its baked disk is deleted (it is baked again when next needed); sandboxes cloned from it keep working.',
         r.name, { action: 'image-rm', image: r.name }), { small: true, danger: true }) : null))));
-  return h('div', null, h('h1', null, 'Images'),
-    h('p', { class: 'sub' }, 'Built-in images and custom images saved from restore points. Progress of a bake shows under Operations.'),
+  return h('div', null, h('div', { class: 'head' }, h('h1', null, 'Images'), imagesToggle()),
+    h('p', { class: 'sub' }, 'Built-in images, and templates saved from sandboxes (a sandbox’s root disk — never its state disk). Progress of a bake shows under Operations.'),
     panel(table(['Image', 'Kind', 'Baked', 'Size', 'Note', 'Key', ''], rows, [3])));
+}
+async function viewLineage() {
+  const t = await api('images/tree');
+  const labels = { base: 'OCI base', image: 'image', template: 'template', prepared: 'prepared disk', sandbox: 'sandbox', restorePoint: 'restore point' };
+  const rows = t.nodes.map((n) => {
+    const shared = n.sharedWithParentBytes || 0;
+    const own = n.uniqueBytes || 0;
+    const whole = Math.max(1, n.allocatedBytes);
+    const bar = h('div', { class: 'lin-bar', title: 'shared with its parent ' + bytes(shared) + ' · its own ' + bytes(own) });
+    const a = h('span', { class: 'lin-shared' }), b = h('span', { class: 'lin-own' });
+    a.style.width = Math.min(100, (shared / whole) * 100).toFixed(1) + '%';
+    b.style.width = Math.min(100, (own / whole) * 100).toFixed(1) + '%';
+    bar.append(a, b);
+    const name = n.kind === 'sandbox' ? h('a', { href: '#/sandbox/' + n.sandbox }, n.name) : h('span', null, n.name);
+    return h('div', { class: 'lin-row depth-' + Math.min(n.depth, 8) + ' lin-' + n.kind, 'data-kind': n.kind, 'data-name': n.name, 'data-depth': String(n.depth) },
+      h('div', { class: 'lin-name' }, h('span', { class: 'lin-branch', 'aria-hidden': 'true' }, n.depth ? '└ ' : ''), name,
+        h('span', { class: 'tag lin-kind' }, labels[n.kind] || n.kind), n.detail ? h('span', { class: 'muted mono lin-detail' }, n.detail) : null),
+      h('div', { class: 'num lin-size' }, bytes(n.allocatedBytes), n.stateAllocatedBytes ? h('div', { class: 'muted' }, '+ state ' + bytes(n.stateAllocatedBytes)) : null),
+      h('div', { class: 'num lin-shared-n' }, n.sharedWithParentBytes != null ? bytes(n.sharedWithParentBytes) : '—'),
+      h('div', { class: 'num lin-own-n' }, bytes(own)),
+      bar);
+  });
+  return h('div', null, h('div', { class: 'head' }, h('h1', null, 'Images'),
+      h('div', { class: 'actions' }, btn('Refresh', () => refresh(false), { small: true, title: 'Measure again' }), imagesToggle())),
+    h('p', { class: 'sub' }, 'The lineage: OCI base → image → template → the sandboxes on each. Size is what the disk holds; shared is what it shares with its parent (APFS clones); own is what removing it frees. All disks together: ' +
+      bytes(t.unionBytes) + ' (measured in ' + Math.round(t.milliseconds) + ' ms).'),
+    t.nodes.length
+      ? h('div', { class: 'panel lineage' },
+          h('div', { class: 'lin-row lin-headrow' }, h('div', null, 'Image / sandbox'), h('div', { class: 'num' }, 'Size'), h('div', { class: 'num' }, 'Shared'), h('div', { class: 'num' }, 'Own'), h('div', null, '')),
+          rows)
+      : panel(null, 'No disks yet — bake an image or start a sandbox.'));
 }
 
 async function viewAccounts() {
@@ -1025,7 +1271,12 @@ async function viewDoctor() {
 //   · what wakes a sandbox is decided by the UI process (the 541 rule), never here: every key and
 //     every report is sent, and the server says what it did.
 const terminals = new Map();
-const termUI = { built: false, split: false, selected: [null, null], focusedPane: 0, nextId: 1, lastSandbox: null, dropped: 0 };
+const termUI = { built: false, by: {}, nextId: 1, dropped: 0 };
+/// 593: each sandbox's page keeps its own split, selected tab per pane and focused pane.
+function sview(name) {
+  if (!termUI.by[name]) termUI.by[name] = { split: false, selected: [null, null], focusedPane: 0 };
+  return termUI.by[name];
+}
 const PASTE_CONFIRM_BYTES = 64 * 1024;
 const PASTE_MAX_BYTES = 1024 * 1024;
 const INPUT_CHUNK = 16 * 1024;
@@ -1109,39 +1360,50 @@ function terminalsAllowed() {
   return false;
 }
 
-async function openTerminal(sandbox, session, mode, pane) {
-  if (!terminalsAllowed()) return;
-  const t = { id: termUI.nextId++, sandbox, session, mode, pane: termUI.split ? (pane ?? termUI.focusedPane) : 0,
+/// 593: a terminal record (a page terminal, or a grid tile's when `grid`).
+function newTerm(sandbox, session, mode) {
+  const t = { id: termUI.nextId++, sandbox, session, mode, pane: 0, grid: false,
               ws: null, frame: null, cols: 80, rows: 24, state: null, ended: false, endText: '', errorText: '', disconnected: '',
               closed: false, title: '', pinger: null, coverAction: null, onReady: null, onOpened: null, onFailed: null };
   t.els = terminalElements(t);
   terminals.set(t.id, t);
-  termUI.selected[t.pane] = t.id;
-  paintCover(t);
-  if (location.hash !== '#/terminals') location.hash = '#/terminals';
-  else renderTerminals();
-  // The body must be laid out before the engine measures it.
-  await new Promise((r) => setTimeout(r, 0));
-  renderTerminals();
+  return t;
+}
+/// Load the engine into the terminal's frame, then connect. False when it could not.
+async function bootTerm(t, fontSize) {
   try {
     const wasm = await engineBytes();
-    if (t.closed) return;
+    if (t.closed) return false;
     const opened = new Promise((resolve, reject) => { t.onOpened = resolve; t.onFailed = reject; });
-    const fontSize = setting('ui.terminal_font_size', 13);
-    t.onReady = () => toFrame(t, { t: 'init', wasm: wasm.slice(0), mode, fontSize: isInt(fontSize, 9, 32) ? fontSize : 13 });
+    t.onReady = () => toFrame(t, { t: 'init', wasm: wasm.slice(0), mode: t.mode, fontSize: isInt(fontSize, 9, 32) ? fontSize : 13 });
     // The engine's frame: an opaque origin (allow-scripts only — no same-origin, no popups, no forms).
     t.frame = h('iframe', { class: 'term-frame', src: '/terminal-frame', sandbox: 'allow-scripts', allow: 'clipboard-write',
-                            referrerpolicy: 'no-referrer', name: 'term-' + t.id, title: 'Terminal: ' + sandbox + ' · ' + (session || 'default') });
+                            referrerpolicy: 'no-referrer', name: 'term-' + t.id, title: 'Terminal: ' + t.sandbox + ' · ' + (t.session || 'default') });
     t.els.host.append(t.frame);
     await opened;
   } catch (e) {
     t.errorText = 'the terminal engine did not load (' + (e.message || e) + ')';
     paintCover(t);
-    return;
+    return false;
   }
-  if (t.closed) return;
+  if (t.closed) return false;
   connectTerminal(t);
-  focusTerm(t);
+  return true;
+}
+/// A terminal on the sandbox's page (593: each sandbox's page has its own tabs and split).
+async function openTerminal(sandbox, session, mode, pane) {
+  if (!terminalsAllowed()) return;
+  const v = sview(sandbox);
+  const t = newTerm(sandbox, session, mode);
+  t.pane = v.split ? (pane ?? v.focusedPane) : 0;
+  v.selected[t.pane] = t.id;
+  paintCover(t);
+  if (state.view !== 'sandbox' || state.param !== sandbox) location.hash = '#/sandbox/' + sandbox;
+  else renderTerminals();
+  // The body must be laid out before the engine measures it.
+  await new Promise((r) => setTimeout(r, 0));
+  renderTerminals();
+  if (await bootTerm(t, setting('ui.terminal_font_size', 13))) focusTerm(t);
 }
 
 async function connectTerminal(t) {
@@ -1238,7 +1500,9 @@ function closeTerminal(id) {
   if (t.ws) { try { t.ws.close(1000, 'closed'); } catch (_) { /* */ } }
   t.els.wrap.remove();                                 // its frame — and its engine instance — go with it
   terminals.delete(id);
-  for (const p of [0, 1]) if (termUI.selected[p] === id) termUI.selected[p] = null;
+  if (t.grid) return;
+  const v = sview(t.sandbox);
+  for (const p of [0, 1]) if (v.selected[p] === id) v.selected[p] = null;
   renderTerminals();
 }
 function focusTerm(t) {
@@ -1357,8 +1621,9 @@ function coverAction(t) {
   focusTerm(t);
 }
 
-// ── the Terminals view: tabs, and a split
-function paintTabs() { if (state.view === 'terminals') renderTerminals(); }
+// ── a sandbox's terminal area: tabs, and a split (593: per sandbox; the grid's tiles are apart)
+function paintTabs() { if (state.view === 'sandbox') renderTerminals(); }
+function pageTerminals(name) { return [...terminals.values()].filter((t) => !t.grid && t.sandbox === name); }
 function renderTerminals() {
   const root = $('terminals');
   if (!termUI.built) {
@@ -1366,17 +1631,18 @@ function renderTerminals() {
     // with the chosen kind (or, when split, unsplits); the ▾ menu picks the kind — and when already
     // split, adds that kind to the right pane at once.
     const unsplit = () => {
-      termUI.split = false;
-      for (const t of terminals.values()) t.pane = 0;
-      termUI.selected[0] = termUI.selected[0] ?? termUI.selected[1];
-      termUI.selected[1] = null;
-      termUI.focusedPane = 0;
+      const v = sview(state.param);
+      v.split = false;
+      for (const t of pageTerminals(state.param)) t.pane = 0;
+      v.selected[0] = v.selected[0] ?? v.selected[1];
+      v.selected[1] = null;
+      v.focusedPane = 0;
       renderTerminals();
     };
     termUI.splitMain = btn('Split', () => {
-      if (termUI.split) unsplit();
+      if (sview(state.param).split) unsplit();
       else splitWith(termUI.splitKind).catch((e) => toast(e.message || String(e), true));
-    }, { title: 'Two terminals side by side — the right one is a ' + SPLIT_KINDS[termUI.splitKind] });
+    }, { small: true, title: 'Two terminals side by side — the right one is a ' + SPLIT_KINDS[termUI.splitKind] });
     termUI.splitMenu = h('div', { class: 'menu', role: 'menu', hidden: true },
       Object.entries(SPLIT_KINDS).map(([kind, label]) => h('button', { type: 'button', role: 'menuitem', class: 'menu-item', 'data-kind': kind,
         on: { click: (ev) => {
@@ -1388,56 +1654,92 @@ function renderTerminals() {
           paintSplitButton();
           splitWith(kind).catch((e) => toast(e.message || String(e), true));
         } } }, label)));
-    const caret = h('button', { type: 'button', class: 'btn split-caret', title: 'What the split adds', 'aria-haspopup': 'menu',
+    const caret = h('button', { type: 'button', class: 'btn small split-caret', title: 'What the split adds', 'aria-haspopup': 'menu',
       on: { click: (ev) => { ev.stopPropagation(); termUI.splitMenu.hidden = !termUI.splitMenu.hidden; } } }, '▾');
     document.addEventListener('click', () => { termUI.splitMenu.hidden = true; });
     termUI.splitBtn = h('div', { class: 'split-button' }, termUI.splitMain, caret, termUI.splitMenu);
     termUI.panes = [0, 1].map((i) => {
       const strip = h('div', { class: 'tabs', role: 'tablist' });
       const body = h('div', { class: 'term-body' });
-      const empty = h('div', { class: 'empty term-empty' }, 'No terminal here. Open one from a sandbox’s page (Open here, or a session’s Open / Watch), or New terminal….');
+      const empty = h('div', { class: 'term-empty' });
       const pane = h('div', { class: 'term-pane', 'data-pane': String(i) }, strip, body);
       body.append(empty);
-      pane.addEventListener('focusin', () => { termUI.focusedPane = i; });
-      pane.addEventListener('mousedown', () => { termUI.focusedPane = i; });
+      pane.addEventListener('focusin', () => { if (state.param) sview(state.param).focusedPane = i; });
+      pane.addEventListener('mousedown', () => { if (state.param) sview(state.param).focusedPane = i; });
       return { root: pane, strip, body, empty };
     });
     termUI.grid = h('div', { class: 'term-grid' }, termUI.panes[0].root, termUI.panes[1].root);
-    root.replaceChildren(
-      h('div', { class: 'head' }, h('h1', null, 'Terminals'),
-        h('div', { class: 'actions' }, btn('New terminal…', () => newTerminalDialog(), { primary: true }), termUI.splitBtn)),
-      termUI.grid);
+    root.replaceChildren(termUI.grid);
     termUI.built = true;
   }
-  termUI.grid.classList.toggle('split', termUI.split);
+  const name = state.view === 'sandbox' ? state.param : null;
+  const v = name ? sview(name) : { split: false, selected: [null, null] };
+  termUI.grid.classList.toggle('split', v.split);
   paintSplitButton();
-  termUI.panes[1].root.hidden = !termUI.split;
+  termUI.panes[1].root.hidden = !v.split;
+  // Another sandbox's terminals stay open (hidden) — going back to it is instant.
+  for (const t of terminals.values()) if (!t.grid && t.sandbox !== name) t.els.wrap.hidden = true;
   termUI.panes.forEach((p, i) => {
-    const mine = [...terminals.values()].filter((t) => t.pane === i);
-    if (!mine.some((t) => t.id === termUI.selected[i])) termUI.selected[i] = mine.length ? mine[mine.length - 1].id : null;
+    const mine = name ? pageTerminals(name).filter((t) => t.pane === i) : [];
+    if (!mine.some((t) => t.id === v.selected[i])) v.selected[i] = mine.length ? mine[mine.length - 1].id : null;
     p.strip.replaceChildren(...mine.map((t) => tabElement(t, i)));
     p.empty.hidden = mine.length > 0;
     for (const t of mine) {
       if (t.els.wrap.parentNode !== p.body) p.body.append(t.els.wrap);
-      t.els.wrap.hidden = t.id !== termUI.selected[i];
+      t.els.wrap.hidden = t.id !== v.selected[i];
     }
   });
+  paintTermEmpty();
+  // The URL names the session shown (replaceState: no route).
+  const sel = name && terminals.get(v.selected[v.focusedPane] ?? v.selected[0]);
+  if (sel && sel.session && state.session !== sel.session) {
+    state.session = sel.session;
+    history.replaceState(null, '', location.pathname + '#/sandbox/' + name + '/' + sel.session);
+  }
+}
+/// The terminal area with no terminal: what it can open, from the sandbox's state.
+function paintTermEmpty() {
+  if (!termUI.built) return;
+  const s = state.sbx;
+  const p = termUI.panes[0];
+  if (p.empty.hidden) return;
+  if (!s || !s.d || s.name !== state.param) { p.empty.replaceChildren(h('div', { class: 'term-empty-box' }, 'Loading…')); return; }
+  const i = s.d.info;
+  const busy = i.busy || i.phase === 'booting' || opRunningFor(s.name);
+  const live = (s.d.sessions || []).filter((x) => !x.ended);
+  const box = h('div', { class: 'term-empty-box' });
+  if (busy) {
+    box.append(h('div', { class: 'term-empty-head' }, i.phaseLabel + '…'), h('div', null, 'The terminal opens when it can.'));
+  } else if (i.phase === 'off' || i.phase === 'failed') {
+    box.append(h('div', { class: 'term-empty-head' }, s.name + ' is ' + i.phaseLabel.toLowerCase()),
+      h('div', { class: 'actions center' },
+        btn('Start', () => lifecycle('start', s.name), { primary: true, title: bootViewOnStart() ? 'Boot it, and watch it boot here' : 'Boot it' })));
+  } else {
+    box.append(h('div', { class: 'term-empty-head' }, 'No terminal open'),
+      h('div', { class: 'actions center' },
+        btn('Open ' + s.d.defaultSession, () => openDefaultTerminal(s.name), { primary: true,
+          title: 'A terminal on the ' + s.d.defaultSession + ' session (started when it is not running' + (i.phase === 'running' ? '' : '; it wakes the sandbox') + ')' }),
+        ...live.filter((x) => x.name !== s.d.defaultSession).slice(0, 8).map((x) => btn('Open ' + x.name, () => openTerminal(s.name, x.name, 'interactive'))),
+        btn('New shell', () => newShellTerminal(s.name).catch((e) => toast(e.message || String(e), true)))));
+  }
+  p.empty.replaceChildren(box);
 }
 function tabElement(t, pane) {
   const phase = t.ended || t.errorText || t.disconnected ? 'ended' : (t.state && t.state.phase) || 'unknown';
-  // Tabs are numbered (1, 2, …) so a shared session can say which tab it is shared with.
-  const order = [...terminals.keys()];
+  const v = sview(t.sandbox);
+  // Tabs are numbered (1, 2, …) per sandbox, so a shared session can say which tab it is shared with.
+  const order = pageTerminals(t.sandbox).map((x) => x.id);
   const num = order.indexOf(t.id) + 1;
-  const label = num + ' · ' + t.sandbox + ' · ' + (t.session || '…');
-  const twins = t.session && !t.ended ? [...terminals.values()].filter((o) => o.id !== t.id && !o.ended && o.sandbox === t.sandbox && o.session === t.session) : [];
+  const label = num + ' · ' + (t.session || '…');
+  const twins = t.session && !t.ended ? pageTerminals(t.sandbox).filter((o) => o.id !== t.id && !o.ended && o.session === t.session) : [];
   const shared = twins.length ? h('span', { class: 'tag shared', title: 'Two views of ONE session: what is typed in either shows in both' },
     'shared with tab ' + twins.map((o) => order.indexOf(o.id) + 1).join(', ')) : null;
-  const select = h('button', { type: 'button', role: 'tab', class: 'tab' + (t.id === termUI.selected[pane] ? ' active' : ''),
+  const select = h('button', { type: 'button', role: 'tab', class: 'tab' + (t.id === v.selected[pane] ? ' active' : ''),
                                title: t.title ? t.title + ' — ' + label : label, 'data-term': String(t.id),
-                               on: { click: () => { termUI.selected[pane] = t.id; renderTerminals(); focusTerm(t); } } },
+                               on: { click: () => { v.selected[pane] = t.id; v.focusedPane = pane; renderTerminals(); focusTerm(t); } } },
     h('span', { class: 'tab-dot ph-' + phase, 'aria-hidden': 'true' }), label, t.mode === 'watch' ? h('span', { class: 'tag' }, 'watch') : null, shared);
-  const move = termUI.split ? h('button', { type: 'button', class: 'tab-x', title: 'Move to the other pane',
-    on: { click: () => { t.pane = 1 - t.pane; termUI.selected[t.pane] = t.id; renderTerminals(); focusTerm(t); } } }, '⇄') : null;
+  const move = v.split ? h('button', { type: 'button', class: 'tab-x', title: 'Move to the other pane',
+    on: { click: () => { t.pane = 1 - t.pane; v.selected[t.pane] = t.id; renderTerminals(); focusTerm(t); } } }, '⇄') : null;
   const close = h('button', { type: 'button', class: 'tab-x', title: 'Close this terminal (the session keeps running)', 'aria-label': 'Close ' + label,
     on: { click: () => closeTerminal(t.id) } }, '×');
   return h('div', { class: 'tab-wrap' }, select, move, close);
@@ -1453,45 +1755,47 @@ const SPLIT_KINDS = {
 termUI.splitKind = 'shell';   // until the settings load (ui.split_default)
 function paintSplitButton() {
   if (!termUI.splitMain) return;
-  termUI.splitMain.textContent = termUI.split ? 'Unsplit' : 'Split';
-  termUI.splitMain.title = termUI.split ? 'Back to one pane (the right pane’s terminals move left)'
-                                        : 'Two terminals side by side — the right one is a ' + SPLIT_KINDS[termUI.splitKind];
+  const split = state.param ? sview(state.param).split : false;
+  termUI.splitMain.textContent = split ? 'Unsplit' : 'Split';
+  termUI.splitMain.title = split ? 'Back to one pane (the right pane’s terminals move left)'
+                                 : 'Two terminals side by side — the right one is a ' + SPLIT_KINDS[termUI.splitKind];
   for (const item of termUI.splitMenu.children) {
-    item.textContent = (item.dataset.kind === termUI.splitKind ? '✓ ' : '   ') + (termUI.split ? 'Add a ' : 'Split with a ') + SPLIT_KINDS[item.dataset.kind];
+    item.textContent = (item.dataset.kind === termUI.splitKind ? '✓ ' : '   ') + (split ? 'Add a ' : 'Split with a ') + SPLIT_KINDS[item.dataset.kind];
   }
 }
 /// Split (if needed) and fill the right pane with `kind` — so a split always creates something.
 /// With no terminal on the left there is nothing to watch, attach to or put a shell beside: the
 /// New terminal dialog opens instead (for the right pane).
 async function splitWith(kind) {
-  const left = terminals.get(termUI.selected[0]) || [...terminals.values()].find((t) => t.pane === 0);
-  if (!termUI.split) { termUI.split = true; renderTerminals(); }
-  termUI.focusedPane = 1;
-  if (kind === 'dialog' || !left) { await newTerminalDialog(); return; }
+  const name = state.param;
+  if (state.view !== 'sandbox' || !name) return;
+  const v = sview(name);
+  const left = terminals.get(v.selected[0]) || pageTerminals(name).find((t) => t.pane === 0);
+  if (!v.split) { v.split = true; renderTerminals(); }
+  v.focusedPane = 1;
+  if (kind === 'dialog' || !left) { await newTerminalDialog(name); return; }
   if (kind === 'watch' || kind === 'attach') {
     if (!left.session) throw new Error('the left terminal has no session yet — wait for it to start');
-    openTerminal(left.sandbox, left.session, kind === 'watch' ? 'watch' : 'interactive', 1);
+    openTerminal(name, left.session, kind === 'watch' ? 'watch' : 'interactive', 1);
     return;
   }
-  await newShellTerminal(left.sandbox, 1);
+  await newShellTerminal(name, 1);
 }
 
-async function newTerminalDialog() {
-  let o = state.overview;
-  try { o = await api('overview'); state.overview = o; } catch (_) { /* the last one */ }
-  const names = o ? o.sandboxes.map((s) => s.name) : [];
-  if (!names.length) { toast('No sandboxes yet — create one first', true); return; }
-  const first = termUI.lastSandbox && names.includes(termUI.lastSandbox) ? termUI.lastSandbox : names[0];
+async function newTerminalDialog(sandbox) {
+  const names = [sandbox || state.param].filter(Boolean);
+  if (!names.length) { toast('Open a sandbox first', true); return; }
+  const first = names[0];
   // What to open: a NEW shell by default (591 owner feedback: an empty form must never mirror an
   // existing session); attaching to or watching a running session is an explicit choice.
-  const d = dialog('New terminal', 'A new shell session by default. To see a session that already runs, pick Attach or Watch.', [
+  const d = dialog('New terminal in ' + first, 'A new shell session by default. To see a session that already runs, pick Attach or Watch.', [
     { name: 'sandbox', label: 'Sandbox', type: 'select', options: names, value: first },
     { name: 'what', label: 'Open', type: 'select', options: [['new', 'New shell'], ['command', 'New session running a command…']] },
     { name: 'session', label: 'Session name (new session only)', placeholder: 'e.g. worker' },
     { name: 'command', label: 'Command (new session only)', placeholder: 'e.g. htop — no shell in front (say bash -lc \'…\' for one)' },
   ], 'Open', async (v) => {
-    termUI.lastSandbox = v.sandbox;
-    const pane = termUI.split ? termUI.focusedPane : 0;
+    const sv = sview(v.sandbox);
+    const pane = sv.split ? sv.focusedPane : 0;
     if (v.what === 'new') { await newShellTerminal(v.sandbox, pane); return; }
     if (v.what === 'command') {
       const argv = splitArgs(v.command);
@@ -1508,6 +1812,7 @@ async function newTerminalDialog() {
     openTerminal(v.sandbox, m[2], m[1] === 'watch' ? 'watch' : 'interactive', pane);
   });
   const sandboxSel = d.querySelector('[name="sandbox"]'), whatSel = d.querySelector('[name="what"]');
+  sandboxSel.closest('label').hidden = true;             // 593: the page's sandbox
   const nameField = d.querySelector('[name="session"]').closest('label'), cmdField = d.querySelector('[name="command"]').closest('label');
   const showFields = () => { const c = whatSel.value === 'command'; nameField.hidden = !c; cmdField.hidden = !c; };
   // The running sessions of the chosen sandbox, as explicit Attach / Watch choices.
@@ -1555,6 +1860,193 @@ function loginShell(detail, rows) {
   return hasBash ? ['bash', '-l'] : ['sh', '-l'];
 }
 
+// ── All sessions: the grid (593) ────────────────────────────────────────────
+// A tile per session of every RUNNING sandbox — a live, read-only (watch) view: the same ticket,
+// socket and frame as any terminal, laid out at a fixed virtual size (960 × 560) and scaled, so it
+// is a thumbnail of the session at its own geometry. A sandbox that is not running is one static
+// tile (no engine, no socket: an open grid never keeps a host alive for it). Engines exist only
+// for tiles on screen (IntersectionObserver), and at most ui.grid_live_tiles at once. Sessions are
+// listed on entry, on Refresh, and on a live change at most every 10 s (listing asks the guest).
+const grid = { built: false, active: false, tiles: new Map(), io: null, sandbox: '', phase: '', lastList: 0, listTimer: null,
+               sessions: {}, scheduled: false, status: null, body: null };
+const TILE_SCALE = { small: 0.3, medium: 0.42, large: 0.62 };
+
+function gridBuild() {
+  const root = $('grid');
+  const sandboxSel = h('select', { 'aria-label': 'Sandbox' });
+  const phaseSel = h('select', { 'aria-label': 'Phase' }, [['', 'every phase'], ['running', 'running'], ['paused', 'paused'], ['asleep', 'asleep'],
+    ['deepAsleep', 'deep asleep'], ['off', 'shut down'], ['failed', 'failed']].map(([v, l]) => h('option', { value: v }, l)));
+  const sizeSel = h('select', { 'aria-label': 'Tile size' }, ['small', 'medium', 'large'].map((s) => h('option', { value: s }, s + ' tiles')));
+  sandboxSel.addEventListener('change', () => { grid.sandbox = sandboxSel.value; gridRender(); });
+  phaseSel.addEventListener('change', () => { grid.phase = phaseSel.value; gridRender(); });
+  sizeSel.addEventListener('change', () => {
+    gridApplySize(sizeSel.value);
+    saveSetting('ui.grid_tile_size', sizeSel.value).catch((e) => toast('The setting was not saved: ' + (e.message || e), true));
+  });
+  grid.status = h('span', { class: 'grid-status', role: 'status' });
+  grid.body = h('div', { class: 'tiles' });
+  grid.sandboxSel = sandboxSel;
+  grid.sizeSel = sizeSel;
+  root.replaceChildren(
+    h('div', { class: 'head' }, h('h1', null, 'All sessions'), h('div', { class: 'actions' }, btn('Refresh', () => gridRefresh(true), { small: true }))),
+    h('p', { class: 'sub' }, 'Every session of every running sandbox, live and read-only. Click one to open it on its sandbox’s page.'),
+    h('div', { class: 'toolbar' }, sandboxSel, phaseSel, sizeSel, grid.status),
+    grid.body);
+  grid.io = new IntersectionObserver((entries) => {
+    for (const e of entries) { const tile = grid.tiles.get(e.target.dataset.key); if (tile) tile.visible = e.isIntersecting; }
+    gridSchedule();
+  }, { root: null, rootMargin: '100px' });
+  grid.built = true;
+}
+function gridApplySize(size) {
+  const s = TILE_SCALE[size] ? size : 'medium';
+  for (const k of Object.keys(TILE_SCALE)) $('grid').classList.toggle('tiles-' + k, k === s);
+  if (grid.sizeSel) grid.sizeSel.value = s;
+}
+async function gridEnter() {
+  if (!grid.built) gridBuild();
+  grid.active = true;
+  gridApplySize(setting('ui.grid_tile_size', 'medium'));
+  await gridRefresh(true);
+}
+function gridLeave() {
+  if (!grid.active) return;
+  grid.active = false;
+  clearTimeout(grid.listTimer);
+  for (const tile of grid.tiles.values()) detachTile(tile);
+}
+async function gridRefresh(force) {
+  if (!grid.active) return;
+  const wait = 10000 - (Date.now() - grid.lastList);
+  if (!force && wait > 0) {
+    clearTimeout(grid.listTimer);
+    grid.listTimer = setTimeout(() => gridRefresh(true), wait);
+    return;
+  }
+  grid.lastList = Date.now();
+  let o;
+  try { o = await api('overview'); } catch (e) { toast(e.message || String(e), true); return; }
+  state.overview = o;
+  renderNavSandboxes();
+  await Promise.all(o.sandboxes.filter((s) => s.phase === 'running').map(async (s) => {
+    try { grid.sessions[s.name] = (await api('sandboxes/' + s.name + '/sessions')).filter((r) => !r.ended).map((r) => ({ name: r.name, command: r.command })); }
+    catch (_) { /* it stopped meanwhile: its last list stays */ }
+  }));
+  if (!grid.active) return;
+  gridRender();
+}
+/// The tiles the filters ask for, made to match the DOM (a kept tile keeps its live terminal).
+function gridRender() {
+  const o = state.overview;
+  if (!o) return;
+  const names = o.sandboxes.map((s) => s.name).sort();
+  grid.sandboxSel.replaceChildren(h('option', { value: '' }, 'every sandbox'), ...names.map((n) => h('option', { value: n }, n)));
+  grid.sandboxSel.value = names.includes(grid.sandbox) ? grid.sandbox : '';
+  const want = [];
+  for (const s of o.sandboxes.slice().sort((a, b) => a.name.localeCompare(b.name))) {
+    if (grid.sandbox && s.name !== grid.sandbox) continue;
+    if (grid.phase && s.phase !== grid.phase) continue;
+    if (s.phase === 'running') {
+      for (const x of grid.sessions[s.name] || []) want.push({ key: s.name + '/' + x.name, sandbox: s.name, session: x.name, command: x.command, s });
+      if (!(grid.sessions[s.name] || []).length) want.push({ key: s.name + '/', sandbox: s.name, session: null, s, none: true });
+    } else {
+      want.push({ key: s.name + '/', sandbox: s.name, session: null, s });
+    }
+  }
+  const keep = new Set(want.map((w) => w.key));
+  for (const [k, tile] of grid.tiles) if (!keep.has(k)) { detachTile(tile); grid.io.unobserve(tile.el); tile.el.remove(); grid.tiles.delete(k); }
+  let prev = null;
+  for (const w of want) {
+    let tile = grid.tiles.get(w.key);
+    if (!tile) { tile = makeTile(w); grid.tiles.set(w.key, tile); grid.io.observe(tile.el); }
+    paintTile(tile, w);
+    const next = prev ? prev.nextSibling : grid.body.firstChild;
+    if (next !== tile.el) grid.body.insertBefore(tile.el, next);
+    prev = tile.el;
+  }
+  if (!want.length) grid.body.replaceChildren(h('div', { class: 'empty' }, o.sandboxes.length ? 'Nothing matches the filters.' : 'No sandboxes yet.'));
+  else for (const n of [...grid.body.children]) if (!n.dataset.key) n.remove();
+  gridSchedule();
+}
+function makeTile(w) {
+  const dot = h('span', { class: 'ph-dot', 'aria-hidden': 'true' });
+  const title = h('span', { class: 'tile-title' });
+  const phase = h('span', { class: 'tile-phase' });
+  const act = h('span', { class: 'tile-act' });
+  const screen = h('div', { class: 'tile-screen' });
+  const note = h('div', { class: 'tile-note', hidden: true });
+  const hit = h('button', { type: 'button', class: 'tile-hit', title: 'Open on its sandbox’s page' });
+  const el = h('div', { class: 'tile', 'data-key': w.key, 'data-sandbox': w.sandbox, 'data-session': w.session || '' },
+    h('div', { class: 'tile-head' }, dot, title, phase, act),
+    h('div', { class: 'tile-body' }, screen, note, hit));
+  const tile = { key: w.key, sandbox: w.sandbox, session: w.session, el, dot, title, phase, act, screen, note, hit, term: null, visible: false, liveable: !!w.session };
+  hit.addEventListener('click', () => { location.hash = '#/sandbox/' + w.sandbox + (tile.session ? '/' + tile.session : ''); });
+  return tile;
+}
+function paintTile(tile, w) {
+  const s = w.s;
+  tile.liveable = !!w.session;
+  tile.el.dataset.phase = s.phase;
+  tile.dot.className = 'ph-dot ph-' + s.phase;
+  tile.title.textContent = w.session ? w.sandbox + ' · ' + w.session : w.sandbox;
+  tile.title.title = w.command ? w.command : '';
+  tile.phase.textContent = s.phaseLabel;
+  const verb = { paused: 'resume', asleep: 'wake', deepAsleep: 'wake', off: 'start', failed: 'start' }[s.phase];
+  tile.act.replaceChildren(verb && !w.session && !s.busy ? btn(VERBS[verb][0], () => lifecycle(verb, w.sandbox), { small: true }) : '');
+  if (!w.session) {
+    const known = grid.sessions[w.sandbox] || [];
+    tile.note.hidden = false;
+    tile.note.className = 'tile-note static';
+    tile.note.replaceChildren(
+      h('div', { class: 'tile-note-head' }, w.none ? 'No sessions running' : s.phaseLabel),
+      h('div', null, w.none ? 'Open one from its page.' : known.length ? 'Sessions when it last ran: ' + known.map((x) => x.name).join(', ') : 'Its sessions are listed while it runs.'));
+  }
+}
+function gridSchedule() {
+  if (grid.scheduled) return;
+  grid.scheduled = true;
+  setTimeout(() => {
+    grid.scheduled = false;
+    if (!grid.active) return;
+    const cap = setting('ui.grid_live_tiles', 8);
+    const tiles = [...grid.body.children].map((el) => grid.tiles.get(el.dataset.key)).filter(Boolean);
+    for (const t of tiles) if (t.term && (!t.visible || !t.liveable)) detachTile(t);
+    let live = tiles.filter((t) => t.term).length;
+    let capped = 0;
+    for (const t of tiles) {
+      if (!t.liveable) continue;
+      if (t.term) { t.note.hidden = true; continue; }
+      if (!t.visible) { t.note.hidden = false; t.note.className = 'tile-note'; t.note.textContent = 'Off screen — not live'; continue; }
+      if (live < cap) { attachTile(t); live++; t.note.hidden = true; continue; }
+      capped++;
+      t.note.hidden = false;
+      t.note.className = 'tile-note capped';
+      t.note.replaceChildren(h('div', { class: 'tile-note-head' }, 'Not live'),
+        h('div', null, live + ' tiles are live (the cap: Settings › ui.grid_live_tiles). Scroll, filter, or click to open.'));
+    }
+    const total = tiles.filter((t) => t.liveable).length;
+    grid.status.textContent = total + ' session' + (total === 1 ? '' : 's') + ' · ' + live + ' live' + (capped ? ' · ' + capped + ' more on screen not live (cap ' + cap + ')' : '');
+    grid.el = grid.body;
+    $('grid').dataset.live = String(live);
+    $('grid').dataset.capped = String(capped);
+  }, 50);
+}
+function attachTile(tile) {
+  if (!setting('ui.terminals', true)) return;
+  const t = newTerm(tile.sandbox, tile.session, 'watch');
+  t.grid = true;
+  tile.term = t;
+  paintCover(t);
+  tile.screen.append(t.els.wrap);
+  bootTerm(t, 13);
+}
+function detachTile(tile) {
+  if (!tile.term) return;
+  const t = tile.term;
+  tile.term = null;
+  closeTerminal(t.id);                                   // the socket closes; the frame and its engine go
+}
+
 // ── start ───────────────────────────────────────────────────────────────────
 (async () => {
   if (await bootstrap()) {
@@ -1562,7 +2054,11 @@ function loginShell(detail, rows) {
     await loadSettings();
     route();
     connect();
-    setInterval(() => { if ([...state.ops.values()].some((o) => o.state === 'running')) paintRowOps(); }, 1000);
+    setInterval(() => {
+      if (![...state.ops.values()].some((o) => o.state === 'running')) return;
+      paintRowOps();
+      if (state.view === 'operations') renderOperations();     // the running ones count their seconds
+    }, 1000);
     setInterval(paintRowOps, 15000);
     setInterval(() => { for (const t of terminals.values()) paintCover(t); }, 30000);   // "asleep 7 min"
   }

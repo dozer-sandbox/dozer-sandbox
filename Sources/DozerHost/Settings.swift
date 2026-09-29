@@ -208,6 +208,9 @@ public enum SettingKey {
     public static let terminals = "ui.terminals"
     public static let terminalFontSize = "ui.terminal_font_size"
     public static let theme = "ui.theme"
+    public static let detailsOpen = "ui.details_open"
+    public static let gridLiveTiles = "ui.grid_live_tiles"
+    public static let gridTileSize = "ui.grid_tile_size"
     public static let idleTimeout = "host.idle_timeout_minutes"
     public static let keepalive = "host.keepalive"
     public static let storePath = "store.path"
@@ -249,6 +252,15 @@ public struct DozerSettings: Sendable {
                   applies: .now),
             .init("ui", "theme", .choice(["auto", "light", "dark"]), .string("auto"),
                   "The UI's colours: auto follows macOS.",
+                  applies: .now),
+            .init("ui", "details_open", .bool, .bool(true),
+                  "A sandbox's page shows its details panel (sessions, restore points, network, keys) beside the terminals; false: collapsed.",
+                  applies: .now),
+            .init("ui", "grid_live_tiles", .int(1...12), .int(8),
+                  "All sessions: at most this many tiles show their session live at once (each is a terminal engine and a socket); the rest say so.",
+                  applies: .now),
+            .init("ui", "grid_tile_size", .choice(["small", "medium", "large"]), .string("medium"),
+                  "All sessions: the size of a tile.",
                   applies: .now),
             .init("host", "idle_timeout_minutes", .int(0...10_080), .int(5),
                   "Minutes with nothing running before the host exits; 0 = never.",

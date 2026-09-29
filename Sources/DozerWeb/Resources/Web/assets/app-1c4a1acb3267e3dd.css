@@ -217,8 +217,102 @@ dialog.dlg h2 { margin: 0; }
    canvas inside .term-host (its colours are the terminal theme, dark in both modes). The cover sits
    over it, translucent, and TAKES NO CLICKS except its one button: a click focuses the terminal and
    the next key wakes the sandbox (SandboxLab's PaneCover). */
-main.main-terms { padding-bottom: 16px; display: flex; flex-direction: column; height: 100vh; }
-.terms:not([hidden]) { display: flex; flex-direction: column; gap: 12px; flex: 1; min-height: 0; }
+main.main-terms { padding: 14px 20px 14px; display: flex; flex-direction: column; height: 100vh; }
+.terms:not([hidden]) { display: flex; flex-direction: column; gap: 12px; flex: 1; min-height: 0; min-width: 0; }
+
+/* ── 593: a sandbox's page — a control bar, the terminal area, a collapsible details panel ── */
+.sbx:not([hidden]) { display: flex; flex-direction: column; gap: 10px; flex: 1; min-height: 0; }
+.sbx-bar-inner { display: flex; flex-direction: column; gap: 8px; }
+.sbx-title { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.sbx-title h1 { margin: 0; }
+.sbx-meta { display: flex; gap: 14px; flex-wrap: wrap; color: var(--muted); font-size: 12.5px; }
+.sbx-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.sbx-actions .actions { justify-content: flex-start; }
+.sbx-sep { width: 1px; height: 18px; background: var(--line); margin: 0 4px; }
+.sbx-bar .op-banner { margin: 0; padding: 6px 12px; }
+.sbx-body { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 440px; gap: 12px; }
+.sbx-body.details-closed { grid-template-columns: minmax(0, 1fr); }
+.sbx-body.details-closed .sbx-details { display: none; }
+.sbx-details { min-height: 0; overflow-y: auto; border: 1px solid var(--line); border-radius: var(--radius); padding: 10px 12px; background: var(--bg); }
+.sbx-details h2 { font-size: 13.5px; }
+.sbx-details .head:has(h2) { margin: 18px 0 8px; }
+.sbx-details .cmd code { flex-basis: 100%; }
+.sbx-details td.mono { max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sbx-details th, .sbx-details td { padding: 6px 8px; }
+.small-cards { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.small-cards .card .v { font-size: 16px; }
+.term-empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
+.term-empty-box { display: flex; flex-direction: column; align-items: center; gap: 10px; color: #c5cbff; text-align: center; padding: 20px; }
+.term-empty-head { font-weight: 600; font-size: 15px; }
+.actions.center { justify-content: center; }
+@media (max-width: 1100px) {
+  main.main-terms { height: auto; min-height: 100vh; }
+  .sbx-body { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(420px, 70vh) auto; }
+  .sbx-details { overflow: visible; }
+}
+
+/* ── 593: the nav — a child per sandbox; the Operations badge ── */
+.nav-children { display: flex; flex-direction: column; gap: 1px; margin: 0 0 4px 10px; padding-left: 8px; border-left: 1px solid var(--line); }
+.nav-children:empty { display: none; }
+a.nav-child { display: flex; align-items: center; gap: 7px; padding: 4px 8px; font-size: 13px; }
+.nav-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ph-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: currentColor; display: inline-block; }
+nav a.active .ph-dot { box-shadow: 0 0 0 1.5px var(--bg); }
+#nav-operations { display: flex; align-items: center; gap: 6px; }
+.nav-badge { display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; font-variant-numeric: tabular-nums; background: var(--bar); color: var(--ink); border-radius: 999px; padding: 0 7px; }
+.nav-badge[hidden], .nav-alert[hidden] { display: none; }
+.nav-alert { width: 8px; height: 8px; border-radius: 50%; background: var(--fail); margin-left: auto; }
+.mini-spin { width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--accent); border-top-color: transparent; animation: tc-spin 0.9s linear infinite; display: inline-block; }
+.op-row.op-failed .op-text, .op-row.op-failed .op-state { color: var(--fail); }
+.op-row.op-done .op-state { color: var(--run); }
+
+/* ── 593: All sessions — tiles. A tile's screen is laid out at 960 × 560 and scaled (--s). ── */
+.grid-view { --s: 0.42; }
+.grid-view.tiles-small { --s: 0.3; }
+.grid-view.tiles-medium { --s: 0.42; }
+.grid-view.tiles-large { --s: 0.62; }
+.grid-status { margin-left: auto; font-variant-numeric: tabular-nums; }
+.tiles { display: flex; flex-wrap: wrap; gap: 14px; }
+.tile { border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); overflow: hidden; }
+.tile-head { display: flex; align-items: center; gap: 8px; padding: 6px 10px; font-size: 12.5px; max-width: calc(960px * var(--s)); }
+.tile-title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tile-phase { color: var(--muted); white-space: nowrap; }
+.tile-act { margin-left: auto; }
+.tile-body { position: relative; width: calc(960px * var(--s)); height: calc(560px * var(--s)); background: #16171c; overflow: hidden; }
+.tile-screen { position: absolute; left: 0; top: 0; width: 960px; height: 560px; transform: scale(var(--s)); transform-origin: 0 0; }
+.tile-note { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; padding: 10px;
+  text-align: center; color: #a3a8b8; font-size: 12px; }
+.tile-note[hidden] { display: none; }
+.tile-note-head { color: #c5cbff; font-weight: 600; font-size: 13px; }
+.tile-hit { position: absolute; inset: 0; background: transparent; border: 0; cursor: pointer; padding: 0; }
+.tile-hit:hover, .tile-hit:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+/* ── 593: Images › Lineage ── */
+.segmented { display: inline-flex; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; }
+.seg { font: inherit; font-size: 12.5px; border: 0; background: var(--panel); color: var(--ink); padding: 3px 12px; cursor: pointer; }
+.seg + .seg { border-left: 1px solid var(--line); }
+.seg.active { background: var(--ink); color: var(--bg); }
+.tag.tpl { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); margin-left: 6px; }
+.lineage { padding: 4px 0; }
+.lin-row { display: grid; grid-template-columns: minmax(0, 1fr) 90px 90px 90px 120px; gap: 10px; align-items: center; padding: 6px 12px; border-bottom: 1px solid var(--line); }
+.lin-row:last-child { border-bottom: 0; }
+.lin-headrow { font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); font-weight: 600; }
+.lin-name { display: flex; align-items: baseline; gap: 6px; min-width: 0; flex-wrap: wrap; }
+.lin-branch { color: var(--muted); font-family: var(--mono); }
+.lin-detail { font-size: 11.5px; }
+.lin-row.depth-1 .lin-name { padding-left: 18px; }
+.lin-row.depth-2 .lin-name { padding-left: 36px; }
+.lin-row.depth-3 .lin-name { padding-left: 54px; }
+.lin-row.depth-4 .lin-name { padding-left: 72px; }
+.lin-row.depth-5 .lin-name { padding-left: 90px; }
+.lin-row.depth-6 .lin-name { padding-left: 108px; }
+.lin-row.depth-7 .lin-name { padding-left: 126px; }
+.lin-row.depth-8 .lin-name { padding-left: 144px; }
+.lin-base .lin-name, .lin-image .lin-name, .lin-prepared .lin-name { font-weight: 600; }
+.lin-bar { display: flex; height: 8px; background: var(--bar); border-radius: 4px; overflow: hidden; }
+.lin-shared { background: color-mix(in srgb, var(--bar-strong) 45%, transparent); }
+.lin-own { background: var(--bar-strong); }
+@media (max-width: 760px) { .lin-row { grid-template-columns: minmax(0, 1fr) 80px 80px; } .lin-shared-n, .lin-bar { display: none; } }
 .term-grid { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
 .term-grid.split { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
 .term-pane { display: flex; flex-direction: column; min-height: 0; min-width: 0; border: 1px solid var(--line); border-radius: var(--radius); background: #16171c; overflow: hidden; }
