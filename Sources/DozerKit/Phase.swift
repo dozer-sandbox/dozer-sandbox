@@ -148,12 +148,12 @@ public enum LifecycleStep: Equatable, Sendable {
     /// Write the persisted state (phase + identity), so a new process can restore.
     case persistState
     /// 593: best effort, never fails the operation, bounded (`SavedScreens.totalBudgetSeconds`) — save
-    /// every session's screen while the guest can still answer: the FIRST step of pausing, sleeping,
-    /// hibernating or shutting down a RUNNING sandbox. A failed capture keeps the previous file.
+    /// every session's screen while the guest can still answer: the FIRST step of pausing, sleeping or
+    /// hibernating a RUNNING sandbox (the phases one wakes back into). A failed capture keeps the
+    /// previous file.
     case captureScreens
-    /// 593: the sessions died with the VM — every saved screen is its session's last (a shutdown).
-    case markScreensEnded
-    /// 593: delete the saved screens (Reset: the sessions they showed are gone with the disk).
+    /// 593: delete the saved screens — shut down, reset: the sessions they showed are gone (owner,
+    /// 2026-09-30: a shut-down sandbox shows no session screens).
     case removeSavedScreens
 }
 
@@ -198,10 +198,10 @@ public enum LifecyclePlanner {
         case (.wake, .hibernated):
             return [.restoreSnapshot, .resyncClock, .remountShares, .deleteSnapshot, .returnFreeMemory, .persistState]
         case (.shutDown, _):
-            // 593: a running guest's screens are saved first; after the stop every saved screen is its
-            // session's last (marked ended). From off there is nothing to stop and nothing changes.
+            // 593 (owner, 2026-09-30): no capture — the sessions end with the VM, and every saved screen
+            // goes with them. From off there is nothing to stop and nothing changes.
             guard let steps = stopSteps(from: phase) else { return nil }
-            return (phase == .running ? [.captureScreens] : []) + steps + [.markScreensEnded]
+            return steps + [.removeSavedScreens]
         case (.resetToImage, _):
             // No capture: the saved screens are deleted with the disk (S6).
             return (stopSteps(from: phase) ?? [.deleteSnapshot]) + [.removeRootDisk, .removeSavedScreens]

@@ -423,10 +423,11 @@ public struct SessionRow: Codable, Equatable, Sendable {
     public var command: String
     public var exitCode: Int32?
     public var ended: Bool
-    /// 593 §9: this row comes from the SAVED screen (the sandbox is not running — S5), not the guest.
+    /// 593 §9: this row comes from the SAVED screen (the sandbox is paused, asleep or hibernated — S5),
+    /// not the guest. A shut-down sandbox has no sessions (owner, 2026-09-30).
     public var saved: Bool?
     /// 593 §9: when the session's screen was last saved, and why (`pause`, `sleep`, `hibernate`,
-    /// `shutdown`, `periodic`) — nil when it has none.
+    /// `periodic`) — nil when it has none.
     public var savedAt: Date?
     public var savedReason: String?
 
@@ -451,8 +452,8 @@ public struct SessionRow: Codable, Equatable, Sendable {
         clients = 0
         screen = i.screen
         command = i.command
-        exitCode = i.exitCode
-        ended = i.ended
+        exitCode = nil
+        ended = false                  // only live sessions have a saved screen (owner, 2026-09-30)
         saved = true
         savedAt = i.savedAt
         savedReason = i.reason
@@ -469,9 +470,6 @@ public struct SessionScreen: Codable, Equatable, Sendable {
     public var rows: UInt16?
     public var screen: String?
     public var command: String
-    public var ended: Bool
-    public var exitCode: Int32?
-    public var endedAt: Date?
     public var truncated: Bool
     /// The screen as plain text (control characters removed): safe to print.
     public var text: String
@@ -488,9 +486,6 @@ public struct SessionScreen: Codable, Equatable, Sendable {
         rows = s.info.rows
         screen = s.info.screen
         command = s.info.command
-        ended = s.info.ended
-        exitCode = s.info.exitCode
-        endedAt = s.info.endedAt
         truncated = s.info.truncated
         text = s.text
         vt = s.vt

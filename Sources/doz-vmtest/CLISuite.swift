@@ -373,13 +373,14 @@ func cliSuite() async throws {
         check(h.hostRunning && h.hostPID() != hostPID, String(format: "the next call (ls) started a new host (pid %@, %.2f s)",
                                                                h.hostPID().map(String.init) ?? "?", Date().timeIntervalSince(t9)))
         check(after.contains { $0.name == "clia" && $0.phase == "hibernated" }, "clia is still hibernated")
-        // 593 §9: clis was RUNNING when the host died — its programs are gone, but its last periodic
-        // screen is kept, marked ended.
-        check(h.waitFor(30) { h.row("clis")?.phase == "off" && h.sessions("clis").first { $0.name == "tick" }.map { $0.saved == true && $0.ended && $0.savedReason == "periodic" } == true },
-              "clis died with the host: its periodic saved screen survives the crash, marked ended")
-        check(h.run(["sessions", "clis", "--screen", "tick"]).out.contains("PERIODIC-"), "…and --screen shows it")
-        check(h.run(["rm", "clis", "--yes"]).code == 0 && !FileManager.default.fileExists(atPath: DozerStore(root: storeRoot).layout("clis").screensDirectory.path),
-              "rm clis: its saved screens go with it (S6)")
+        // 593 (owner, 2026-09-30): clis was RUNNING when the host died — it is off: its programs are gone,
+        // and so are its saved screens (the periodic one included) and its panes.
+        let clisLayout = DozerStore(root: storeRoot).layout("clis")
+        check(h.waitFor(30) { h.row("clis")?.phase == "off" && !FileManager.default.fileExists(atPath: clisLayout.screensDirectory.path) },
+              "clis died with the host: its saved screens are deleted")
+        check(h.sessions("clis").isEmpty && !FileManager.default.fileExists(atPath: DozerStore(root: storeRoot).terminalLayoutFile("clis").path),
+              "…no sessions listed, no terminal layout")
+        check(h.run(["rm", "clis", "--yes"]).code == 0 && !FileManager.default.fileExists(atPath: clisLayout.sandboxDirectory.path), "rm clis")
         check(h.waitFor(60) { h.row("clib").map { $0.phase == "asleep" && !$0.busy } ?? false },
               "clib, asleep when the host died, was restored and is asleep again")
         r = h.run(["wake", "clia"])
@@ -589,11 +590,12 @@ func cliHostDetachChecks(_ h: CLIHarness) {
     check(h.run(["wake", "clib"]).code == 0, "wake clib (for what follows)")
 }
 
-/// 593 §9 (S2, S4, S5, S6): saved screens on `clis` (lab): saved at pause, sleep, hibernate and
-/// shutdown (0600 files in a 0700 directory); `doz sessions` lists them while it does not run and
-/// `--screen` prints one (text; `--vt` the bytes, to a pipe); a new program is always a new session;
-/// Reset deletes them; the periodic capture saves only what changed. Leaves `clis` RUNNING with a
-/// session the periodic capture has saved — the kill -9 section checks that a crash keeps it.
+/// 593 §9 (S2, S4, S5, S6 — amended by the owner 2026-09-30): saved screens on `clis` (lab): saved at
+/// pause, sleep and hibernate (0600 files in a 0700 directory); `doz sessions` lists them while it is
+/// paused/asleep/hibernated and `--screen` prints one (text; `--vt` the bytes, to a pipe); a new program
+/// is always a new session; shutdown and reset DELETE them (a shut-down sandbox has no sessions); an
+/// exited program's screen is removed; the periodic capture saves only what changed. Leaves `clis`
+/// RUNNING with a periodic screen — the kill -9 section checks that the crash deletes it.
 func cliSessionMemoryChecks(_ h: CLIHarness) {
     let layout = DozerStore(root: h.store).layout("clis")
     func rows() -> [SessionRow] { h.sessions("clis") }
@@ -647,18 +649,26 @@ func cliSessionMemoryChecks(_ h: CLIHarness) {
     h.run(["wake", "clis"])
     check(rows().first { $0.name == "memo" }?.pid != nil && rows().allSatisfy { $0.saved != true }, "wake: the live sessions again")
 
-    // Shutdown: the last screens kept, marked ended.
+    // Shutdown (owner, 2026-09-30): no capture, and every saved screen is deleted — a shut-down sandbox
+    // shows no session screens.
     r = h.run(["shutdown", "clis", "--yes"])
-    saved = rows()
-    check(r.code == 0 && saved.count == 3 && saved.allSatisfy { $0.saved == true && $0.ended && $0.savedReason == "shutdown" },
-          "shutdown: saved first, then every screen marked ended (\(saved.map { "\($0.name)/\($0.savedReason ?? "-")/\($0.ended)" }))")
-    check(h.run(["sessions", "clis", "--screen", "memo"]).out.contains("MEMO-one"), "…the last screen stays readable after the shutdown")
+    check(r.code == 0 && rows().isEmpty && !FileManager.default.fileExists(atPath: layout.screensDirectory.path),
+          "shutdown: no saved screens left (no screens/ directory); sessions --json is empty")
+    r = h.run(["sessions", "clis"])
+    check(r.code == 0 && r.out.contains("no sessions — clis is shut down"), "doz sessions says it is shut down (\(r.out.trimmingCharacters(in: .newlines)))")
+    check(h.run(["sessions", "clis", "--screen", "memo"]).code == 2, "--screen of a shut-down sandbox: not found (2)")
 
-    // Start: a new boot's capture drops the previous boot's screens; reset deletes them all.
+    // A session whose program exits has no saved screen: the next capture removes it.
     h.run(["start", "clis"])
     h.run(["run", "clis", "-d", "--session", "fresh", "--", "sh", "-c", "echo FRESH; exec sleep 3600"])
+    h.run(["run", "clis", "-d", "--session", "brief", "--", "sh", "-c", "echo BRIEF; sleep 3"])
     h.run(["pause", "clis"])
-    check(rows().map(\.name) == ["fresh"], "after a cold boot the next capture keeps only the sessions that exist (\(rows().map(\.name)))")
+    check(Set(rows().map(\.name)) == ["fresh", "brief"], "pause: both saved (\(rows().map(\.name)))")
+    h.run(["resume", "clis"])
+    usleep(4_000_000)
+    h.run(["pause", "clis"])
+    check(rows().map(\.name) == ["fresh"], "brief exited: the next capture removed its screen (\(rows().map(\.name)))")
+    check(!FileManager.default.fileExists(atPath: layout.screensDirectory.appendingPathComponent("brief.vt").path), "…its files are gone")
     h.run(["resume", "clis"])
     r = h.run(["reset", "clis", "--yes"])
     check(r.code == 0 && rows().isEmpty && !FileManager.default.fileExists(atPath: layout.screensDirectory.path),
@@ -671,7 +681,7 @@ func cliSessionMemoryChecks(_ h: CLIHarness) {
     let periodic = h.waitFor(150) { h.sessions("clis").first { $0.name == "tick" }?.savedReason == "periodic" }
     check(periodic, String(format: "a periodic capture saved the running session's screen (%.0f s)", Date().timeIntervalSince(t0)))
     check(mode(layout.screensDirectory.appendingPathComponent("tick.vt")) == 0o600, "…0600")
-    check(h.row("clis")?.phase == "running", "clis runs on (the kill -9 section checks its saved screen survives the crash)")
+    check(h.row("clis")?.phase == "running", "clis runs on (the kill -9 section checks the crash deletes its saved screens)")
 }
 
 /// 591: `doz config` from a separate process, on the harness's scratch XDG_CONFIG_HOME — no VM.

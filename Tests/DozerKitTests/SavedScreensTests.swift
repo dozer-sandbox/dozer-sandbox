@@ -45,7 +45,6 @@ final class SavedScreensTests: XCTestCase {
         XCTAssertEqual(s.info.reason, "sleep")
         XCTAssertEqual(s.info.cols, 80)
         XCTAssertEqual(s.info.vtBytes, s.vt.count)
-        XCTAssertFalse(s.info.ended)
         XCTAssertEqual(mode(layout.screensDirectory), 0o700, "the directory is the user's own")
         for ext in ["vt", "txt", "json"] {
             XCTAssertEqual(mode(layout.screensDirectory.appendingPathComponent("worker.\(ext)")), 0o600, ext)
@@ -64,22 +63,15 @@ final class SavedScreensTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: layout.sandboxDirectory.path), "the sandbox's directory is not re-created")
     }
 
-    func test_markEndedKeepsTheLastScreen() throws {
+    /// Owner, 2026-09-30: there is no "ended" screen — a saved screen is a LIVE session's. A record an
+    /// earlier 593 build wrote (with `ended`/`exitCode`) still reads; what is written has no such field.
+    func test_noEndedScreens() throws {
         try save("shell")
-        var i = try XCTUnwrap(SavedScreens.list(layout).first)
-        i.ended = true
-        i.exitCode = 3
-        let exited = Date(timeIntervalSince1970: 1_000)
-        i.endedAt = exited
-        try save("other")
-        try SavedScreens.update(layout, info: i)
-        SavedScreens.markEnded(layout)
-        let all = SavedScreens.list(layout)
-        XCTAssertTrue(all.allSatisfy(\.ended))
-        XCTAssertEqual(all.first { $0.session == "shell" }?.exitCode, 3, "an exit already recorded is kept")
-        XCTAssertEqual(all.first { $0.session == "shell" }?.endedAt, exited)
-        XCTAssertNil(all.first { $0.session == "other" }?.exitCode, "died with the VM: no exit code")
-        XCTAssertEqual(SavedScreens.read(layout, session: "other")?.text, "hi", "the screen itself stays")
+        let json = try String(contentsOf: layout.screensDirectory.appendingPathComponent("shell.json"), encoding: .utf8)
+        XCTAssertFalse(json.contains("ended") || json.contains("exitCode"), json)
+        let old = #"{"session":"old","savedAt":"2026-09-29T10:00:00.000Z","reason":"shutdown","phase":"running","command":"sh","bytesOut":1,"ended":true,"exitCode":3,"vtBytes":0,"truncated":false}"#
+        try Data(old.utf8).write(to: layout.screensDirectory.appendingPathComponent("old.json"))
+        XCTAssertEqual(SavedScreens.list(layout).map(\.session), ["old", "shell"], "an older record reads")
     }
 
     func test_pruneKeepsTheGuestsSessionsAndRemoveAllDeletesTheDirectory() throws {

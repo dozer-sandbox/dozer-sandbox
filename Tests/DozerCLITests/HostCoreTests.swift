@@ -164,9 +164,24 @@ final class HostCoreTests: XCTestCase {
         let none = try XCTUnwrap(first.result).decode([SessionRow].self)
         XCTAssertEqual(none, [], "no saved screens: no sessions (no longer an error)")
         let at = Date(timeIntervalSince1970: 1_800_000_000)
-        try SavedScreens.write(store.layout("x"), info: SavedScreenInfo(session: "shell", savedAt: at, reason: "hibernate", cols: 100, rows: 30,
-                                                                        command: "bash -l", pid: 9, bytesOut: 5),
+        let layout = store.layout("x")
+        try SavedScreens.write(layout, info: SavedScreenInfo(session: "shell", savedAt: at, reason: "hibernate", cols: 100, rows: 30,
+                                                             command: "bash -l", pid: 9, bytesOut: 5),
                                vt: Data("\u{1B}cVT".utf8), text: "$ echo hi\nhi")
+        // Shut down (owner, 2026-09-30): no sessions, no screen — whatever is on disk.
+        let offList = await core.handle(HostRequest(.sessions, name: "x"))
+        let offRows = try XCTUnwrap(offList.result).decode([SessionRow].self)
+        XCTAssertEqual(offRows, [], "a shut-down sandbox has no sessions")
+        var offScreen = HostRequest(.sessionScreen, name: "x")
+        offScreen.session = "shell"
+        let offGot = await core.handle(offScreen)
+        XCTAssertEqual(offGot.error?.code, .notFound, "…and no screen")
+        XCTAssertTrue(offGot.error?.message.contains("no sessions") == true)
+        // Hibernated (a record another process left): its sessions from their saved screens.
+        try Data("disk".utf8).write(to: layout.rootfs)
+        try Data("snap".utf8).write(to: layout.snapshot)
+        try PersistedSandbox(spec: s, phase: .hibernated, machineIdentifier: Data([1]), macAddress: nil, subnet: nil, shareTags: [:])
+            .write(to: layout.persistedState)
         let listed = await core.handle(HostRequest(.sessions, name: "x"))
         let rows = try XCTUnwrap(listed.result).decode([SessionRow].self)
         XCTAssertEqual(rows.map(\.name), ["shell"])

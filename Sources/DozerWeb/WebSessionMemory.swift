@@ -17,15 +17,12 @@ import DozerHost
 public struct WebSavedScreen: Codable, Equatable, Sendable {
     public var session: String
     public var savedAt: Date
-    /// `pause`, `sleep`, `hibernate`, `shutdown` or `periodic`.
+    /// `pause`, `sleep`, `hibernate` or `periodic`.
     public var reason: String
     public var cols: UInt16?
     public var rows: UInt16?
     public var screen: String?
     public var command: String
-    public var ended: Bool
-    public var exitCode: Int32?
-    public var endedAt: Date?
     public var truncated: Bool
     /// The SNAPSHOT (VT bytes), base64 — at most `SavedScreens.maximumVTBytes` before encoding.
     public var vt: String
@@ -38,9 +35,6 @@ public struct WebSavedScreen: Codable, Equatable, Sendable {
         rows = s.rows
         screen = s.screen
         command = s.command
-        ended = s.ended
-        exitCode = s.exitCode
-        endedAt = s.endedAt
         truncated = s.truncated
         vt = s.vt.prefix(SavedScreens.maximumVTBytes).base64EncodedString()
     }

@@ -271,7 +271,7 @@ public struct DozerSettings: Sendable {
                   "Minutes with nothing running before the host exits; 0 = never.",
                   env: "DOZ_HOST_IDLE", flag: "doz host start --idle-timeout", applies: .hostRestart),
             .init("host", "screen_capture_minutes", .int(0...1440), .int(5),
-                  "Every this many minutes, save the screen of each running sandbox's sessions that printed something since (a crash still leaves a recent copy); 0 = only when it pauses, sleeps, hibernates or shuts down.",
+                  "Every this many minutes, save the screen of each running sandbox's sessions that printed something since (what a sleep or hibernation falls back on); 0 = only when it pauses, sleeps or hibernates.",
                   env: "DOZ_SCREEN_CAPTURE", applies: .hostRestart),
             .init("host", "keepalive", .bool, .bool(false),
                   "Near a Mac login's expiry, while a sandbox uses it and no Claude Code runs, the host runs the Mac's claude once to renew it.",

@@ -171,8 +171,10 @@ public actor HostCore {
                 try? p.write(to: layout.persistedState)
                 m.config.diedWithHostAt = Date()
                 try? m.config.write(store.configFile(m.name))
-                // 593 §9: its sessions died too — each saved screen (the last periodic one) is its last.
-                SavedScreens.markEnded(layout)
+                // 593 (owner, 2026-09-30): its sessions died too — a shut-down sandbox shows no session
+                // screens and has no panes: its saved screens and its terminal layout are deleted.
+                SavedScreens.remove(layout)
+                try? TerminalLayout.write(nil, store, m.name)
                 note(m.name, "was running when the previous host died — its programs are gone; the next start checks its disk (e2fsck)")
                 metrics?.record(run: metricsRun, action: "died with host", sandbox: m.name, image: m.config.image,
                                 phaseBefore: "running", phaseAfter: "off", startedAt: Date(), durationMs: nil, ok: false)
@@ -396,8 +398,12 @@ public actor HostCore {
             let m = try get(r.name)
             guard let s = r.session else { throw HostError(.invalid, "which session? (doz sessions \(m.name) --screen SESSION)") }
             try GuestCommand.validateSessionName(s)
+            let phase = await effectivePhase(m)
+            guard phase == .running || Self.wakeable(phase) else {
+                throw HostError(.notFound, "\(m.name) is \(PhaseName.label(phase)) — it has no sessions (Start boots it fresh, with new ones)")
+            }
             guard let saved = SavedScreens.read(m.sandbox.layout, session: s) else {
-                throw HostError(.notFound, "no saved screen of \(s) in \(m.name) — screens are saved when it pauses, sleeps, hibernates or shuts down, and every few minutes while it runs")
+                throw HostError(.notFound, "no saved screen of \(s) in \(m.name) — screens are saved when it pauses, sleeps or hibernates, and every few minutes while it runs")
             }
             return try JSONValue(encoding: SessionScreen(name: m.name, saved))
         case .terminalLayout:
@@ -630,9 +636,9 @@ public actor HostCore {
         for _ in 0..<8 { await Task.yield() }
         forward.cancel()
         finishAction(m, row, t0, ok: true, phaseAfter: (await effectivePhase(m)).rawValue)
-        // 593 §9: a reset's sessions are gone with the disk — so are its panes (its saved screens went
-        // with the library's reset).
-        if op == .reset { try? TerminalLayout.write(nil, store, m.name) }
+        // 593 §9: a reset's or a shutdown's sessions are gone — so are its panes (owner, 2026-09-30; the
+        // saved screens went with the library's step).
+        if op == .reset || op == .shutdown { try? TerminalLayout.write(nil, store, m.name) }
         if [.start, .shutdown, .reset].contains(op), m.config.diedWithHostAt != nil {
             m.config.diedWithHostAt = nil
             try? m.config.write(store.configFile(m.name))
@@ -741,7 +747,11 @@ public actor HostCore {
     /// the host: this is answered in-process too).
     func sessionRows(_ m: Managed) async throws -> [SessionRow] {
         let saved = m.sandbox.savedScreens()
-        guard await m.sandbox.phase == .running else { return saved.map(SessionRow.init(saved:)) }
+        guard await m.sandbox.phase == .running else {
+            // Only a sandbox one wakes back into has sessions to show (owner, 2026-09-30): shut down,
+            // failed or booting — none.
+            return Self.wakeable(await effectivePhase(m)) ? saved.map(SessionRow.init(saved:)) : []
+        }
         let byName = Dictionary(saved.map { ($0.session, $0) }, uniquingKeysWith: { a, _ in a })
         return try await m.sandbox.sessions().map { s in
             var row = SessionRow(s)
@@ -752,6 +762,9 @@ public actor HostCore {
             return row
         }
     }
+
+    /// The phases one wakes (or resumes) back into — the only ones with saved screens.
+    static func wakeable(_ p: Phase) -> Bool { p == .paused || p == .asleep || p == .hibernated }
 
     /// 593 §9 (S2): the light periodic capture — every `minutes` (the setting
     /// `host.screen_capture_minutes`; 0 = off), each RUNNING sandbox's sessions that wrote something
@@ -887,8 +900,11 @@ public actor HostCore {
         let i = await info(m, sessions: false)
         var sessions: [SessionRow]?
         if i.phase == Phase.running.rawValue, !i.busy, let list = try? await m.sandbox.sessions() { sessions = list.map(SessionRow.init) }
-        // 593 §9: not running — the sessions as last saved (`saved: true`), from the sandbox's directory.
-        if i.phase != Phase.running.rawValue, case let saved = m.sandbox.savedScreens(), !saved.isEmpty { sessions = saved.map(SessionRow.init(saved:)) }
+        // 593 §9: paused, asleep or hibernated — the sessions as last saved (`saved: true`), from the
+        // sandbox's directory. Shut down: none (owner, 2026-09-30).
+        if let p = Phase(rawValue: i.phase), Self.wakeable(p), case let saved = m.sandbox.savedScreens(), !saved.isEmpty {
+            sessions = saved.map(SessionRow.init(saved:))
+        }
         let status = await m.sandbox.status
         return SandboxDetail(info: i, spec: m.sandbox.spec, policy: m.sandbox.egress?.policy, sessions: sessions,
                              restorePoints: m.sandbox.restorePoints(), credentials: credentials(m),

@@ -387,13 +387,20 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   (sync, pause, clone, resume), deleted afterwards. `duplicate`'s state disk starts fresh unless
   `copyState`; its workspace must exist and be readable (`HostCore.validatedWorkspace`) — never created.
 
-### Session memory and saved screens (593 §9, owner 2026-09-29 — S1–S6)
+### Session memory and saved screens (593 §9, owner 2026-09-29 — S1–S6; amended 2026-09-30)
 
+- **Saved screens exist ONLY for a sandbox one wakes back into** — paused, asleep, hibernated (owner,
+  2026-09-30: "when i shutdown the new sandbox, i should not still see the claude terminal screen").
+  A SHUT-DOWN sandbox shows no session screens anywhere: shutdown, reset, rm and a host that died with
+  the VM (`recoverAfterStart`) DELETE them (`.removeSavedScreens`; the host also clears the terminal
+  layout on shutdown, reset and death), `sessions`/`session-screen`/`inspect` list nothing for it, and
+  the page shows the plain off state (its panes close, none is persisted, no grid tile). There is no
+  "ended" screen: a session whose program exited has none (the next capture removes it).
 - **Screens are saved while the guest can still answer**: `.captureScreens` is the FIRST step of
-  pause, sleep, hibernate and shutdown from RUNNING (planner data — `LifecycleTests`); never from
-  another phase (the guest cannot answer), never before reset/delete (the screens go). It is best
-  effort and bounded (3 s a session, 8 s in all): a failure keeps the previous file and is a note —
-  it never fails or holds up the lifecycle action. Quit = Hibernate captures too.
+  pause, sleep and hibernate from RUNNING (planner data — `LifecycleTests`); never a shutdown, never
+  from another phase (the guest cannot answer). It is best effort and bounded (3 s a session, 8 s in
+  all): a failure keeps the previous file and is a note — it never fails or holds up the lifecycle
+  action. Quit = Hibernate captures too.
 - **A capture is a momentary attach that disturbs nothing**: `deckhold pipe` as a non-terminal
   exec, written `DeckholdFrame.captureRequest` in one go — HELLO **0×0** (keep the session's size:
   no SIGWINCH, no reflow) then DUMP — read until DUMP's answer (then stdin closes and the pipe exits),
@@ -402,16 +409,14 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
 - **Stored as text, not an image**: `NAME.vt` (the SNAPSHOT: VT that redraws the screen, capped at
   2 MiB keeping the newest lines after a soft reset), `NAME.txt` (DUMP's text, every control
   character removed — what the CLI prints) and `NAME.json` (`SavedScreenInfo`). 0600 files in a 0700
-  `screens/`, written atomically, and never into a sandbox directory that is gone. A shutdown marks
-  them ended (`.markScreensEnded`), a host that died with the VM too (`recoverAfterStart`); a later
-  capture drops the screens of sessions the guest no longer has (a previous boot's); reset deletes
-  them (`.removeSavedScreens`), rm with the directory. Duplicate, fork, restore points and templates
-  copy disks BY NAME — never the screens (`SavedScreensTests`).
+  `screens/`, written atomically, and never into a sandbox directory that is gone. A capture drops the
+  screens of sessions the guest no longer runs. Duplicate, fork, restore points and templates copy
+  disks BY NAME — never the screens (`SavedScreensTests`).
 - **The periodic capture** (`host.screen_capture_minutes`, 5; 0 = off; read at host start): each
   running, not-busy sandbox — ONE `deckhold ls`, then an attach only for sessions whose `bytes=`
   moved since their saved screen. It is serialised with the lifecycle (the sandbox's gate).
 - **Looking never wakes**: `sessions` answers from the saved screens (`saved: true`, `savedAt`,
-  `savedReason`) whenever the sandbox is not running — in-process too; `session-screen` (read-only)
+  `savedReason`) while the sandbox is paused, asleep or hibernated — in-process too; `session-screen` (read-only)
   gives one back. The CLI prints the TEXT; `--vt` writes the guest's bytes only when stdout is not a
   terminal.
 - **The layout is the host's** (`terminal-layout.json` beside `doz.json`, `TerminalLayout`: one or

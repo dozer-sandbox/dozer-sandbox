@@ -11,14 +11,14 @@ final class LifecycleTests: XCTestCase {
     /// never left stopped at the VZ level with the package's vminitd clients unclosed.
     func test_stopPlanDependsOnThePhaseItWasCalledIn() {
         // 587: a running (or paused, once resumed) guest syncs and reports its disk usage first.
-        // 593 §9: a running guest's screens are saved first; afterwards every saved screen is marked ended.
-        XCTAssertEqual(plan(.shutDown, .running), [.captureScreens, .detachSessions(.sandboxStopped), .syncGuest, .stopContainer, .deleteSnapshot, .releaseRuntime, .markScreensEnded])
-        XCTAssertEqual(plan(.shutDown, .paused), [.detachSessions(.sandboxStopped), .reviveForStop, .syncGuest, .stopContainer, .deleteSnapshot, .releaseRuntime, .markScreensEnded])
+        // 593 (owner, 2026-09-30): no capture at shutdown — after the stop the saved screens are deleted.
+        XCTAssertEqual(plan(.shutDown, .running), [.detachSessions(.sandboxStopped), .syncGuest, .stopContainer, .deleteSnapshot, .releaseRuntime, .removeSavedScreens])
+        XCTAssertEqual(plan(.shutDown, .paused), [.detachSessions(.sandboxStopped), .reviveForStop, .syncGuest, .stopContainer, .deleteSnapshot, .releaseRuntime, .removeSavedScreens])
         for p in [Phase.asleep, .hibernated] {
-            XCTAssertEqual(plan(.shutDown, p), [.detachSessions(.sandboxStopped), .reviveForStop, .stopContainer, .deleteSnapshot, .releaseRuntime, .markScreensEnded], "\(p)")
+            XCTAssertEqual(plan(.shutDown, p), [.detachSessions(.sandboxStopped), .reviveForStop, .stopContainer, .deleteSnapshot, .releaseRuntime, .removeSavedScreens], "\(p)")
         }
         for p in [Phase.failed, .booting] {
-            XCTAssertEqual(plan(.shutDown, p), [.detachSessions(.sandboxStopped), .stopContainer, .deleteSnapshot, .releaseRuntime, .markScreensEnded], "\(p)")
+            XCTAssertEqual(plan(.shutDown, p), [.detachSessions(.sandboxStopped), .stopContainer, .deleteSnapshot, .releaseRuntime, .removeSavedScreens], "\(p)")
         }
         XCTAssertNil(plan(.shutDown, .off))
         for p in Phase.allCases {
@@ -36,8 +36,8 @@ final class LifecycleTests: XCTestCase {
             XCTAssertEqual(Array(reset.suffix(2)), [.removeRootDisk, .removeSavedScreens], "reset from \(p): the disk, then its saved screens (S6)")
             XCTAssertTrue(reset.contains(.deleteSnapshot), "reset never leaves a snapshot for a disk that is gone (\(p))")
             XCTAssertEqual(plan(.delete, p)!.last, .removeSandboxFiles, "delete from \(p)")
-            // Reset and delete stop the VM the same way, but never save screens that are about to go.
-            let stopOnly = stop.filter { $0 != .captureScreens && $0 != .markScreensEnded }
+            // Reset and delete stop the VM the same way (the screens go with them too).
+            let stopOnly = stop.filter { $0 != .removeSavedScreens }
             XCTAssertFalse(reset.contains(.captureScreens) || plan(.delete, p)!.contains(.captureScreens), "no capture before a reset/delete (\(p))")
             if p != .off {
                 XCTAssertEqual(Array(reset.dropLast(2)), stopOnly, "reset stops first (\(p))")
@@ -59,29 +59,28 @@ final class LifecycleTests: XCTestCase {
     func test_everyStopDetachesSessionsFirst() {
         for p in Phase.allCases {
             guard let steps = plan(.shutDown, p) else { continue }
-            // 593 §9: only the screen capture comes before it (a momentary attach of its own).
-            XCTAssertEqual(steps.first { $0 != .captureScreens }, .detachSessions(.sandboxStopped), "stop from \(p)")
+            XCTAssertEqual(steps.first, .detachSessions(.sandboxStopped), "stop from \(p)")
         }
     }
 
-    /// 593 §9 (S2): every operation that takes a RUNNING guest away (pause, sleep, hibernate, shut down)
-    /// saves the sessions' screens FIRST, while the guest can still answer; nothing else captures, and
-    /// only a shutdown marks the saved screens ended (the sessions died with the VM).
-    func test_screensAreSavedFirstWheneverARunningGuestGoesAway() {
-        for op in [LifecycleOperation.pause, .sleep, .hibernate, .shutDown] {
+    /// 593 §9 (S2, amended by the owner 2026-09-30): the operations that take a RUNNING guest to a phase
+    /// one wakes back into (pause, sleep, hibernate) save the sessions' screens FIRST, while the guest can
+    /// still answer. Nothing else captures — never a shutdown — and a shutdown or a reset DELETES the saved
+    /// screens (a shut-down sandbox shows no session screens).
+    func test_screensAreSavedOnlyForTheWakeablePhasesAndDeletedByAStop() {
+        for op in [LifecycleOperation.pause, .sleep, .hibernate] {
             XCTAssertEqual(plan(op, .running)?.first, .captureScreens, "\(op) from running")
         }
         for op in LifecycleOperation.allCases {
-            for p in Phase.allCases where p != .running {
-                XCTAssertFalse(plan(op, p)?.contains(.captureScreens) ?? false, "\(op) from \(p): the guest cannot answer — no capture")
+            for p in Phase.allCases where p != .running || ![.pause, .sleep, .hibernate].contains(op) {
+                XCTAssertFalse(plan(op, p)?.contains(.captureScreens) ?? false, "\(op) from \(p): no capture")
             }
             for p in Phase.allCases {
                 guard let steps = plan(op, p) else { continue }
-                XCTAssertEqual(steps.contains(.markScreensEnded), op == .shutDown, "\(op) from \(p)")
-                XCTAssertEqual(steps.contains(.removeSavedScreens), op == .resetToImage, "\(op) from \(p)")
+                XCTAssertEqual(steps.contains(.removeSavedScreens), op == .shutDown || op == .resetToImage, "\(op) from \(p)")
             }
         }
-        XCTAssertEqual(plan(.shutDown, .running)?.last, .markScreensEnded, "marked ended once the VM is down")
+        XCTAssertEqual(plan(.shutDown, .running)?.last, .removeSavedScreens, "deleted once the VM is down")
     }
 
     /// The snapshot is valid only while paused: every operation that ends RUNNING deletes it.
