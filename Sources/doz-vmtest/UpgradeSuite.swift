@@ -128,7 +128,14 @@ func upgradeSuite() async throws {
     let held = try AttachedClient(under, ["attach", "upa", "keep", "--no-wake"])
     _ = held.wait(3) { _ in false }
     // The incident: write the previous release INTO the running host's file, then re-sign it.
-    check(sh(["/bin/cp", oldBin, t]) == 0 && sh(["/usr/bin/codesign", "--force", "--sign", "-", "--entitlements", entitlements, t]) == 0,
+    // 592: the incident needs DIFFERENT code written into the running host's file. When --old is a copy
+    // of this build (no DozerKit release to build yet), its bytes are identical — the running code then
+    // stays valid, and codesign's rewrite reads as a mere "replaced" — so another program of this
+    // build is written in instead: this test host's own executable.
+    let sameBytes = FileManager.default.contentsEqual(atPath: oldBin, andPath: newBin)
+    let intruder = sameBytes ? (Bundle.main.executableURL?.resolvingSymlinksInPath().path ?? oldBin) : oldBin
+    info("the program written into the running host's file: \(sameBytes ? "this test host (--old has this build's bytes)" : "the previous release (--old)")")
+    check(sh(["/bin/cp", intruder, t]) == 0 && sh(["/usr/bin/codesign", "--force", "--sign", "-", "--entitlements", entitlements, t]) == 0,
           "the running host's program overwritten in place (cp + codesign, as the old install did)")
     // This build's CLI asks the running host (the file it started from is what changed).
     let st = new.json(["host", "status"], HostStatus.self)
