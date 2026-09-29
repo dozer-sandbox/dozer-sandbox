@@ -386,7 +386,10 @@ function dialog(title, intro, fields, submitLabel, onSubmit, opts = {}) {
   const d = h('dialog', { class: 'dlg' });
   const form = h('form', { method: 'dialog' });
   const inputs = {};
+  const customs = {};
   const rows = fields.map((f) => {
+    // 594: a composite field (the workspace chooser) brings its own element and its value.
+    if (f.type === 'custom') { customs[f.name] = f.get; return f.el; }
     let input;
     if (f.type === 'select') {
       input = h('select', { name: f.name }, f.options.map((o) => {
@@ -430,6 +433,7 @@ function dialog(title, intro, fields, submitLabel, onSubmit, opts = {}) {
     for (const [k, input] of Object.entries(inputs)) values[k] = input.type === 'checkbox' ? input.checked : input.value.trim();
     submit.disabled = true;
     try {
+      for (const [k, get] of Object.entries(customs)) values[k] = get();
       const keep = await onSubmit(values, { extra, error, submit });
       if (keep !== 'keep-open') d.close();
     } catch (e) {
@@ -444,7 +448,90 @@ function dialog(title, intro, fields, submitLabel, onSubmit, opts = {}) {
   d.showModal();
   const first = form.querySelector('input,select,textarea');
   if (first) first.focus();
-  return d;
+  return Object.assign(d, { inputs });
+}
+
+// ── 594: the workspace of a new sandbox ─────────────────────────────────────
+// Owner (2026-09-29): "an easier way to pick a workspace folder … a default location
+// ~/Developer/dozer-sandbox-projects/[SANDBOX-NAME] and … a better default name like claude-sandbox";
+// "present the no workspace toggle better … call it Isolated"; "i dont want the user to have to create
+// the path first". Shared folder (default) | Isolated. The name follows the image until it is typed
+// in; the folder follows the name until it is typed in (or chosen). The host says what a path would
+// do (POST workspace/check — it makes nothing): "will be created", "exists", or why not. Choose…
+// opens the MAC's folder picker (POST workspace/choose — one at a time; the answer is a path).
+const ISOLATED_NOTE = 'Nothing on your Mac is shared. /workspace exists only inside the sandbox.';
+function workspaceChooser({ nameInput = null, image = () => null, name = null, initialPath = '', initialIsolated = false }) {
+  let mode = initialIsolated ? 'isolated' : 'shared', nameEdited = false, pathEdited = !!initialPath, seq = 0, lastError = null, timer = null;
+  const path = h('input', { type: 'text', name: 'workspace', 'data-ws-path': '', placeholder: '~/Developer/dozer-sandbox-projects/NAME',
+                            autocomplete: 'off', spellcheck: 'false', 'aria-label': 'Workspace folder' });
+  path.value = initialPath;
+  const note = h('small', { class: 'ws-note', 'data-ws-note': '', 'aria-live': 'polite' });
+  const choose = h('button', { type: 'button', class: 'btn small', 'data-ws-choose': '', title: 'Opens the Mac’s folder picker (New Folder allowed)' },
+    withIcon('folder', 'Choose…'));
+  const segs = {};
+  const seg = (m, label, icon) => (segs[m] = h('button', { type: 'button', class: 'seg', 'data-ws-seg': m, on: { click: () => setMode(m) } }, withIcon(icon, label)));
+  const control = h('div', { class: 'segmented', role: 'group', 'aria-label': 'Workspace' }, seg('shared', 'Shared folder', 'folder'), seg('isolated', 'Isolated', 'shield'));
+  const shared = h('div', { class: 'ws-shared' }, h('div', { class: 'ws-row' }, path, choose), note);
+  const isolatedNote = h('small', { class: 'ws-isolated-note', 'data-ws-isolated': '' }, ISOLATED_NOTE);
+  const el = h('div', { class: 'field ws-field', 'data-ws-mode': mode },
+    h('span', null, 'Workspace'), control, shared, isolatedNote);
+  function setMode(m) {
+    mode = m;
+    el.dataset.wsMode = m;
+    for (const [k, b] of Object.entries(segs)) { b.classList.toggle('active', k === m); b.setAttribute('aria-pressed', k === m ? 'true' : 'false'); }
+    shared.hidden = m !== 'shared';
+    isolatedNote.hidden = m !== 'isolated';
+  }
+  function say(r) {
+    lastError = r.error || null;
+    note.classList.toggle('error', !!r.error);
+    note.dataset.wsState = r.error ? 'error' : r.willCreate ? 'create' : r.exists ? 'exists' : '';
+    note.textContent = r.error ? r.error : r.willCreate ? 'Will be created (with any missing folders above it) when the sandbox is.'
+      : r.exists ? 'Exists — shared live at /workspace.' : '';
+  }
+  async function check(what = {}) {
+    const my = ++seq;
+    const body = {};
+    const img = image();
+    if (img) body.image = img;
+    const n = name ? name() : nameInput ? nameInput.value.trim() : '';
+    if (nameEdited && n) body.name = n;
+    if (what.path !== undefined) body.path = what.path;
+    let r;
+    try { r = await api('workspace/check', { method: 'POST', json: body }); } catch (e) { if (my === seq) say({ error: e.message || String(e) }); return; }
+    if (my !== seq) return;
+    if (nameInput && !nameEdited) nameInput.value = r.suggestedName;
+    if (!pathEdited) {
+      path.value = r.defaultPath;
+      if (what.path === undefined) return check({ path: path.value });
+    }
+    if (what.path !== undefined) say(r);
+  }
+  const later = (f) => { clearTimeout(timer); timer = setTimeout(f, 250); };
+  if (nameInput) nameInput.addEventListener('input', () => { nameEdited = true; if (!pathEdited) later(() => check()); });
+  path.addEventListener('input', () => { pathEdited = true; later(() => check({ path: path.value.trim() })); });
+  choose.addEventListener('click', async () => {
+    choose.disabled = true;
+    try {
+      const r = await api('workspace/choose', { method: 'POST', json: path.value.trim() ? { start: path.value.trim() } : {} });
+      if (r && r.path) { path.value = r.path; pathEdited = true; await check({ path: r.path }); }
+    } catch (e) { toast(e.message || String(e), true); } finally { choose.disabled = false; }
+  });
+  setMode(mode);
+  if (pathEdited) check({ path: path.value.trim() }); else check();
+  return {
+    el,
+    /// The image changed: a name not typed in follows it (and the folder, the name).
+    imageChanged() { if (!nameEdited || !pathEdited) check(); },
+    /// {isolated: true} or {workspace} — or an Error with why not.
+    get() {
+      if (mode === 'isolated') return { isolated: true };
+      const p = path.value.trim();
+      if (!p) throw new Error('Give the folder to share at /workspace (Choose…), or pick Isolated.');
+      if (lastError) throw new Error('Workspace: ' + lastError);
+      return { workspace: p };
+    },
+  };
 }
 /// A destructive action: the person types the name; the request carries it as `confirm`.
 function confirmAction(title, text, name, body) {
@@ -922,7 +1009,7 @@ async function viewOverview() {
   renderNavSandboxes();
   const rows = o.sandboxes.map((s) => h('tr', { class: 'click', on: { click: () => { location.hash = '#/sandbox/' + s.name; } } },
     h('td', null, h('a', { href: '#/sandbox/' + s.name }, s.name), h('div', { class: 'muted' }, s.image),
-      s.workspace ? null : h('div', { class: 'muted no-ws', title: '/workspace is private to the VM: nothing is shared with the Mac' }, 'no workspace'),
+      s.workspace ? null : h('div', { class: 'muted no-ws', 'data-isolated': '', title: ISOLATED_NOTE }, 'isolated'),
       h('div', { 'data-op-for': s.name })),
     h('td', null, sandboxPill(s), s.diedWithHost ? h('div', { class: 'st-warn' }, 'died with its host') : null),
     h('td', { class: 'num' }, h('div', null, s.ramHeldMiB ? mib(s.ramHeldMiB) : '—'), h('div', { class: 'muted' }, 'of ' + mib(s.memoryMiB)), meter(s.ramHeldMiB, s.memoryMiB)),
@@ -951,7 +1038,8 @@ async function viewOverview() {
 async function createDialog() {
   let images = [], accounts = { accounts: [] };
   try { [images, accounts] = await Promise.all([api('images'), api('accounts')]); } catch (_) { /* defaults */ }
-  dialog('New sandbox', 'It is created off; Start boots it (the first start of an image not yet prepared prepares it — minutes, needs network).', [
+  const slot = h('div');
+  const dlg = dialog('New sandbox','It is created off; Start boots it (the first start of an image not yet prepared prepares it — minutes, needs network).', [
     { name: 'sandbox', label: 'Name', placeholder: 'a-z 0-9 -', required: true },
     { name: 'image', label: 'Image', type: 'select', value: setting('defaults.image', 'lab'),
       options: images.length ? images.map((i) => [i.name, i.name + (i.kind === 'custom' ? ' (template)' : '')]) : ['lab', 'claude-code', 'pi'] },
@@ -962,21 +1050,19 @@ async function createDialog() {
       options: [['', 'the store default'], ['none', 'none'], ...accounts.accounts.map((a) => [a.name, a.name + ' (' + a.kind + ')'])] },
     { name: 'cpus', label: 'CPUs', type: 'number', min: 1, max: 64, placeholder: 'default (' + setting('defaults.cpus', 2) + ', Settings)' },
     { name: 'memoryMiB', label: 'Memory (MiB)', type: 'number', min: 256, placeholder: 'default (per image, Settings)' },
-    { name: 'workspace', label: 'Workspace (a folder on this Mac, shared at /workspace)', placeholder: '/Users/you/code/project',
-      help: 'Type or paste its path (a browser cannot pick a local folder for the host).' },
-    { name: 'noWorkspace', label: 'No workspace — /workspace is private to the VM (nothing is shared with the Mac)', type: 'checkbox' },
+    // 594: Shared folder (the default: <projects_dir>/<name>, made when missing) | Isolated.
+    { name: 'ws', type: 'custom', el: slot, get: () => chooser.get() },
   ], 'Create', async (v) => {
-    // 594 (D17): creating without a workspace is allowed, but chosen — never by leaving a field empty.
-    if (!v.workspace && !v.noWorkspace) throw new Error('Give a workspace folder, or tick “No workspace”.');
-    if (v.workspace && v.noWorkspace) throw new Error('Either a workspace folder or “No workspace”, not both.');
-    const body = { action: 'create', sandbox: v.sandbox, image: v.image };
+    const body = { action: 'create', sandbox: v.sandbox, image: v.image, ...v.ws };
     if (v.network) body.network = v.network;
     if (v.account) body.account = v.account;
     if (v.cpus) body.cpus = Number(v.cpus);
     if (v.memoryMiB) body.memoryMiB = Number(v.memoryMiB);
-    if (v.workspace) body.workspace = v.workspace;
     await actOrThrow(body);
   });
+  const chooser = workspaceChooser({ nameInput: dlg.inputs.sandbox, image: () => dlg.inputs.image.value });
+  slot.replaceWith(chooser.el);
+  dlg.inputs.image.addEventListener('change', () => chooser.imageChanged());
 }
 
 // ── a sandbox's page (593): a control bar, the terminal area, a collapsible details panel ──────
@@ -1241,7 +1327,7 @@ function sandboxParts(name, d, net, accounts) {
         h('span', null, (i.ramHeldMiB ? mib(i.ramHeldMiB) : '—') + ' of ' + mib(i.memoryMiB)),
         h('span', { class: i.deniedConnections ? 'st-warn' : null }, netText),
         i.accountApplies ? h('span', null, 'account ' + (i.account || '—')) : null,
-        i.workspace ? null : h('span', { class: 'st-warn', title: '/workspace is private to the VM: nothing is shared with the Mac' }, 'no workspace'))),
+        i.workspace ? null : h('span', { class: 'badge-isolated', 'data-isolated': '', title: ISOLATED_NOTE }, withIcon('shield', 'isolated')))),
     h('div', { class: 'sbx-actions' },
       lifecycleButtons(i, true),
       h('span', { class: 'sbx-sep', 'aria-hidden': 'true' }),
@@ -1307,7 +1393,7 @@ function sandboxParts(name, d, net, accounts) {
       fact('Memory', mib(d.memoryMiB)), fact('Root disk', mib(d.rootfsMiB)), fact('State disk', mib(d.stateDiskMiB)),
       fact('Journal', d.journalMiB ? mib(d.journalMiB) : 'none'), fact('Network', d.networkMode + (d.subnet ? ' · ' + d.subnet : '')),
       fact('Account', i.accountApplies ? (i.account || '—') : 'n/a'),
-      fact('Workspace', i.workspace ? i.workspace + ' → /workspace (live)' : 'not shared — /workspace is private to the VM'),
+      fact('Workspace', i.workspace ? i.workspace + ' → /workspace (live)' : 'isolated — ' + ISOLATED_NOTE),
       fact('Shares', d.shares.length ? d.shares.map((s) => s.hostPath + ' → ' + s.guestPath).join(', ') : 'none'),
       d.project ? fact('Project', d.project) : null,
       fact('Directory', d.directory))),
@@ -1353,13 +1439,13 @@ function duplicateDialog(name, d, accounts, pointID) {
   const i = d.info;
   const sources = [['', 'the current disk' + (i.phase === 'off' ? '' : ' (it pauses for the clone: milliseconds)')],
     ...d.restorePoints.map((p) => [p.id, 'restore point ' + p.name])];
-  const ws = d.shares.find((s) => s.guestPath === '/workspace');
-  dialog('Duplicate ' + name,
+  const slot = h('div');
+  const dlg = dialog('Duplicate ' + name,
     'A new sandbox from ' + name + '’s root disk (an instant APFS clone). It is created off; Start boots it. Keys are not copied.', [
       { name: 'newName', label: 'New sandbox name', placeholder: 'a-z 0-9 -', required: true },
       { name: 'source', label: 'From', type: 'select', options: sources, value: pointID || '' },
-      { name: 'workspace', label: 'Workspace (a folder on this Mac, shared at /workspace)', placeholder: ws ? ws.hostPath + ' (the same)' : 'none (the same)',
-        help: 'It must exist — Dozer never creates it.' },
+      // 594: Shared folder (<projects_dir>/<new name> by default, made when missing) | Isolated.
+      { name: 'ws', type: 'custom', el: slot, get: () => chooser.get() },
       { name: 'cpus', label: 'CPUs', type: 'number', min: 1, max: 64, placeholder: String(d.cpus) + ' (the same)' },
       { name: 'memoryMiB', label: 'Memory (MiB)', type: 'number', min: 256, placeholder: String(d.memoryMiB) + ' (the same)' },
       { name: 'network', label: 'Network', type: 'select', value: '',
@@ -1369,9 +1455,8 @@ function duplicateDialog(name, d, accounts, pointID) {
       { name: 'copyState', label: 'Copy the agent’s state disk too', type: 'checkbox',
         help: 'Off (the default): a fresh state disk. On: its logins and history are copied into the new sandbox.' },
     ], 'Duplicate', async (v) => {
-      const b = { action: 'duplicate', sandbox: name, newName: v.newName };
+      const b = { action: 'duplicate', sandbox: name, newName: v.newName, ...v.ws };
       if (v.source) b.point = v.source;
-      if (v.workspace) b.workspace = v.workspace;
       if (v.cpus) b.cpus = Number(v.cpus);
       if (v.memoryMiB) b.memoryMiB = Number(v.memoryMiB);
       if (v.network) b.network = v.network;
@@ -1379,6 +1464,8 @@ function duplicateDialog(name, d, accounts, pointID) {
       if (v.copyState) b.copyState = true;
       await actOrThrow(b);
     });
+  const chooser = workspaceChooser({ nameInput: dlg.inputs.newName, image: () => i.image });
+  slot.replaceWith(chooser.el);
 }
 
 /// Edit the policy in a dialog; Preview shows exactly what the host will do; Apply sends it.
@@ -1971,37 +2058,38 @@ function wizStep5(d, w) {
   const chosen = wizChosenImages();
   const imgs = [...new Set([...chosen, ...d.images.filter((i) => i.prepared).map((i) => i.name)])];
   const name = h('input', { type: 'text', name: 'wiz-name', placeholder: 'a-z 0-9 -', autocomplete: 'off', spellcheck: 'false' });
-  name.value = w.firstName || 'first';
+  name.value = w.firstName || '';
   const image = h('select', { name: 'wiz-image' }, (imgs.length ? imgs : ['claude-code', 'pi', 'lab']).map((n) => h('option', { value: n }, n)));
-  const ws = h('input', { type: 'text', name: 'wiz-workspace', placeholder: '/Users/you/code/project', autocomplete: 'off', spellcheck: 'false' });
-  ws.value = w.firstWorkspace || '';
-  const none = h('input', { type: 'checkbox', name: 'wiz-no-workspace' });
+  if (w.firstImage) image.value = w.firstImage;
+  // 594: the name from the image (claude-sandbox, -2 when taken), its folder under the projects folder
+  // (made when missing) — both follow until typed in; Choose… is the Mac's own folder picker; or Isolated.
+  const chooser = workspaceChooser({ nameInput: name, image: () => image.value, initialPath: w.firstWorkspace || '', initialIsolated: !!w.firstIsolated });
+  if (w.firstName) name.dispatchEvent(new Event('input'));
+  image.addEventListener('change', () => { w.firstImage = image.value; chooser.imageChanged(); });
   const error = h('div', { class: 'dlg-error', role: 'alert' });
   const create = btn('Create sandbox', async (ev) => {
     const b = ev.currentTarget;
     error.textContent = '';
-    const n = name.value.trim(), path = ws.value.trim();
+    const n = name.value.trim();
     w.firstName = n;
-    w.firstWorkspace = path;
     if (!/^[a-z0-9][a-z0-9-]{0,39}$/.test(n)) { error.textContent = 'The name: 1–40 of a-z 0-9 - (not starting with -).'; return; }
-    if (!path && !none.checked) { error.textContent = 'Give a workspace folder, or tick “No workspace”.'; return; }
-    if (path && none.checked) { error.textContent = 'Either a workspace folder or “No workspace”, not both.'; return; }
+    let ws;
+    try { ws = chooser.get(); } catch (e) { error.textContent = e.message; return; }
+    w.firstWorkspace = ws.workspace || '';
+    w.firstIsolated = !!ws.isolated;
     b.disabled = true;
     try {
-      const body = { action: 'create', sandbox: n, image: image.value };
-      if (path) body.workspace = path;
-      await actOrThrow(body);
+      await actOrThrow({ action: 'create', sandbox: n, image: image.value, ...ws });
       w.created = n;
       wizGo(6);
     } catch (e) { error.textContent = e.message || String(e); b.disabled = false; }
   }, { primary: true });
   return [
     h('h2', null, 'First sandbox (optional)'),
-    h('p', { class: 'sub' }, 'A sandbox for one project. Its workspace is a folder on this Mac, shared live at /workspace — type or paste its path (a browser cannot open a folder picker for the host). It is created off; Start boots it.'),
+    h('p', { class: 'sub' }, 'A sandbox for one project. Its workspace is a folder on this Mac, shared live at /workspace — Dozer makes it when it does not exist yet. Or Isolated: nothing is shared. It is created off; Start boots it.'),
     h('label', { class: 'field' }, h('span', null, 'Name'), name),
     h('label', { class: 'field' }, h('span', null, 'Image'), image),
-    h('label', { class: 'field' }, h('span', null, 'Workspace (a folder on this Mac)'), ws),
-    h('label', { class: 'field check' }, h('span', null, 'No workspace — /workspace is private to the VM (nothing is shared with the Mac)'), none),
+    chooser.el,
     error,
     h('p', { class: 'muted' }, 'In a terminal the same is: doz init in the project folder, then doz up.'),
     wizButtons(btn('Skip', () => wizGo(6)), create),

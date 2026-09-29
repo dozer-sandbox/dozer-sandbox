@@ -245,6 +245,35 @@ func cliSuite() async throws {
         let e2 = h.run(["exec", "clia", "--", "sh", "-c", "test -f /workspace/tick.sh && pwd && hostname"])
         check(e2.code == 0 && e2.out == "/workspace\nclia\n", "exec: runs in /workspace, the shared folder is there (\(e2.out.debugDescription))")
 
+        // 594 (owner: "i dont want the user to have to create the path first"; "call it Isolated").
+        print("cli: a missing --workspace is made; isolated is said")
+        let made = URL(fileURLWithPath: "/private/tmp/dzcli-\(getpid())")
+        defer { try? FileManager.default.removeItem(at: made) }
+        let deep = made.appendingPathComponent("new/deep")
+        var w = h.run(["create", "clin", "--image", "lab", "--memory", "512M", "--workspace", deep.path])
+        check(w.code == 0 && w.err.contains("[doz] created ") && w.err.contains("tmp/dzcli-\(getpid())/new/deep") && FileManager.default.fileExists(atPath: deep.path),
+              "create --workspace …/new/deep: the folder is made and said (\(w.err.prefix(120)))")
+        try? "seen\n".write(to: deep.appendingPathComponent("mark"), atomically: true, encoding: .utf8)
+        check(h.run(["start", "clin"], timeout: 300).code == 0 && h.run(["exec", "clin", "--", "cat", "/workspace/mark"]).out == "seen\n",
+              "the sandbox sees it at /workspace")
+        h.run(["rm", "clin", "--yes"])
+        w = h.run(["create", "clii", "--image", "lab", "--memory", "512M"])
+        check(w.code == 0 && w.out.contains(", isolated") && w.err.contains("isolated: nothing on this Mac is shared; /workspace is private to the sandbox"),
+              "create without --workspace: isolated, and said")
+        check(h.run(["ls"]).out.contains("isolated"), "ls: WORKSPACE says isolated")
+        let iso = h.json(["ls"], [SandboxInfo].self)?.first { $0.name == "clii" }
+        check(iso != nil && iso!.workspace == nil && iso!.isolated, "ls --json: workspace null, isolated true")
+        h.run(["rm", "clii", "--yes"])
+        w = h.run(["create", "clij", "--image", "lab", "--memory", "512M", "--isolated"])
+        check(w.code == 0 && !w.err.contains("isolated:"), "create --isolated: asked for, so no note")
+        h.run(["rm", "clij", "--yes"])
+        w = h.run(["create", "clik", "--image", "lab", "--isolated", "--workspace", made.path])
+        check(w.code != 0 && h.row("clik") == nil, "--isolated and --workspace together are refused")
+        w = h.run(["create", "clik", "--image", "lab", "--workspace", h.store.appendingPathComponent("ws-in-store").path])
+        check(w.code != 0 && w.err.contains("inside the store") && h.row("clik") == nil
+              && !FileManager.default.fileExists(atPath: h.store.appendingPathComponent("ws-in-store").path),
+              "a workspace inside the store is refused and not made")
+
         print("cli: run + attach from a second process, reattach")
         let a = try AttachedClient(h, ["run", "clia", "--session", "tick", "--", "bash", "/workspace/tick.sh"])
         clients.append(a)
@@ -504,8 +533,11 @@ func cliLineageChecks(_ h: CLIHarness, ws: URL) {
           "clid: the new workspace at /workspace, clia's root disk")
     check(h.run(["exec", "clid", "--", "nproc"]).out == "1\n", "clid: 1 CPU")
     check(h.run(["rm", "clid", "--yes"]).code == 0, "rm clid")
+    // 594: a missing workspace is made — but never inside the store (this one is).
     r = h.run(["duplicate", "clia", "clie", "--workspace", ws.deletingLastPathComponent().appendingPathComponent("no-such-dir").path])
-    check(r.code == 2 && r.err.contains("never creates") && h.row("clie") == nil, "a workspace that does not exist is refused (never created)")
+    check(r.code == 64 && r.err.contains("inside the store") && h.row("clie") == nil
+          && !FileManager.default.fileExists(atPath: ws.deletingLastPathComponent().appendingPathComponent("no-such-dir").path),
+          "a missing workspace inside the store is refused (and not made)")
     check(h.run(["template", "rm", "clitpl", "--yes"]).code == 0 && h.json(["template", "ls"], [ImageRow].self)?.isEmpty == true, "template rm clitpl")
     check(h.row("clia")?.phase == "running", "clia still runs")
 }

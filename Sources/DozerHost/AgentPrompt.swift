@@ -171,7 +171,7 @@ public enum AgentPrompt {
         v["workspace.host_path"] = workspace ?? "(none)"
         v["workspace.description"] = workspace.map {
             "/workspace is the user's Mac folder \($0), shared live: what you write there is on the Mac at once, and the other way round."
-        } ?? "/workspace is NOT shared with the Mac — this sandbox was created without a workspace, so /workspace is a directory on this VM's own disk and files there exist only inside this VM."
+        } ?? "This sandbox is isolated (no folder is shared with the Mac): /workspace is a directory on this VM's own disk, and files there exist only inside this VM."
         v["network.mode"] = DozerImages.networkName(network)
         switch network {
         case .proxied(let p):

@@ -9,7 +9,7 @@ import DozerHost
 //   · a sandbox created from a template has the root disk's files and a fresh state disk;
 //   · duplicate: the new workspace at /workspace, the root disk's files, a FRESH state disk — or,
 //     with --copy-state, the source's;
-//   · a workspace that does not exist is refused, never created.
+//   · 594: a workspace that does not exist is made (never inside the store); --isolated shares none.
 // Store: --store (default $TMPDIR/doz-templates-store), a scratch store; images are seeded from
 // $DOZ_SEED_STORE or the vmtest store when they are there (APFS clones), else pi bakes (network).
 // Sandboxes tpa / tpb / tpc / tpd; the template tpl-pi. The scratch store follows no account.
@@ -23,7 +23,7 @@ func templatesSuite() async throws {
     try FileManager.default.createDirectory(at: storeRoot, withIntermediateDirectories: true)
     seedImages(into: storeRoot)
     info("doz \(h.binary) · store \(storeRoot.path)")
-    let names = ["tpa", "tpb", "tpc", "tpd", "tpe"]
+    let names = ["tpa", "tpb", "tpc", "tpd", "tpe", "tpf"]
     func cleanUp() {
         for n in names { h.run(["rm", n, "--yes"]) }
         h.run(["template", "rm", "tpl-pi", "--yes"])
@@ -73,10 +73,25 @@ func templatesSuite() async throws {
     check(r.code == 0 && h.run(["start", "tpd"], timeout: 600).code == 0, "duplicate tpa tpd --copy-state; start tpd")
     r = sh("tpd", "cat /workspace/which \(state)/statemark")
     check(r.out == "one\nstatemark\n", "tpd: ws-one kept, the state disk copied (\(r.out.replacingOccurrences(of: "\n", with: " ")))")
-    // A workspace that does not exist.
-    let missing = storeRoot.appendingPathComponent("ws-missing")
-    r = h.run(["duplicate", "tpa", "tpe", "--workspace", missing.path])
-    check(r.code == 2 && !FileManager.default.fileExists(atPath: missing.path) && h.row("tpe") == nil, "a missing workspace is refused, and not created")
+    // 594 (owner: "i dont want the user to have to create the path first"): a workspace that does not
+    // exist is made — outside the store; inside it, it is refused and nothing is made.
+    let inside = storeRoot.appendingPathComponent("ws-missing")
+    r = h.run(["duplicate", "tpa", "tpe", "--workspace", inside.path])
+    check(r.code == 64 && r.err.contains("inside the store") && !FileManager.default.fileExists(atPath: inside.path) && h.row("tpe") == nil,
+          "a missing workspace inside the store is refused, and not made")
+    let scratch = URL(fileURLWithPath: "/private/tmp/dztp-\(getpid())")
+    defer { try? FileManager.default.removeItem(at: scratch) }
+    let deep = scratch.appendingPathComponent("new/deep")
+    r = h.run(["duplicate", "tpa", "tpe", "--workspace", deep.path])
+    check(r.code == 0 && r.err.contains("[doz] created ") && r.err.contains("tmp/dztp-") && FileManager.default.fileExists(atPath: deep.path),
+          "duplicate --workspace …/new/deep: made (\(r.err.prefix(160)))")
+    try? "made\n".write(to: deep.appendingPathComponent("which"), atomically: true, encoding: .utf8)
+    check(h.run(["start", "tpe"], timeout: 600).code == 0 && sh("tpe", "cat /workspace/which").out == "made\n", "tpe sees it at /workspace")
+    r = h.run(["duplicate", "tpa", "tpf", "--isolated"])
+    check(r.code == 0 && r.out.contains("isolated") && h.run(["start", "tpf"], timeout: 600).code == 0
+          && sh("tpf", "cat /workspace/which 2>/dev/null || echo private").out == "private\n",
+          "duplicate --isolated: tpa's workspace is not shared with tpf")
+    check(h.json(["ls"], [SandboxInfo].self)?.first { $0.name == "tpf" }?.workspace == nil, "ls --json: tpf's workspace is null")
 
     cleanUp()
     check(!h.hostRunning, "cleanup: no host left running")

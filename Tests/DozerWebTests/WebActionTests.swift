@@ -78,7 +78,7 @@ final class WebActionTests: XCTestCase {
         XCTAssertNil(t.confirmationTarget)
         let d = try decode(Self.samples["duplicate"]!)
         XCTAssertEqual(d.hostRequest.newName, "a2")
-        let tmp = URL(fileURLWithPath: "/tmp").resolvingSymlinksInPath().path
+        let tmp = "/private/tmp"                                        // 594: realpath (the link /tmp resolved)
         XCTAssertEqual(d.hostRequest.duplicate, DuplicateOptions(workspace: tmp, cpus: 4, memoryMiB: 2048, network: "locked", account: "none", copyState: true))
         XCTAssertEqual(try decode(#"{"action":"duplicate","sandbox":"a","newName":"b"}"#).hostRequest.duplicate, DuplicateOptions(),
                        "nothing given: the source's everything, a fresh state disk")
@@ -93,7 +93,7 @@ final class WebActionTests: XCTestCase {
         invalid(#"{"action":"duplicate","sandbox":"a","newName":"a"}"#)                          // onto itself
         invalid(#"{"action":"duplicate","sandbox":"a","newName":"B"}"#)
         invalid(#"{"action":"duplicate","sandbox":"a","newName":"b","workspace":"relative"}"#)
-        invalid(#"{"action":"duplicate","sandbox":"a","newName":"b","workspace":"/definitely/not/here/593"}"#)
+        invalid(#"{"action":"duplicate","sandbox":"a","newName":"b","workspace":"/w","isolated":true}"#)
         invalid(#"{"action":"duplicate","sandbox":"a","newName":"b","copyState":"yes"}"#)
         invalid(#"{"action":"duplicate","sandbox":"a","newName":"b","copyState":1}"#)
         invalid(#"{"action":"duplicate","sandbox":"a","newName":"b","cpus":0}"#)
@@ -156,7 +156,9 @@ final class WebActionTests: XCTestCase {
         invalid(#"{"action":"create","sandbox":"a","image":"lab","network":"host"}"#)
         invalid(#"{"action":"create","sandbox":"a","image":"lab","subnet":"10.0.0.0"}"#)
         invalid(#"{"action":"create","sandbox":"a","image":"lab","workspace":"relative/path"}"#)
-        invalid(#"{"action":"create","sandbox":"a","image":"lab","workspace":"/definitely/not/here/590"}"#)
+        invalid(#"{"action":"create","sandbox":"a","image":"lab","workspace":"/w\nx"}"#)                // one line
+        invalid(#"{"action":"create","sandbox":"a","image":"lab","workspace":"/w","isolated":true}"#)   // not both
+        invalid(#"{"action":"create","sandbox":"a","image":"lab","isolated":"yes"}"#)
         invalid(#"{"action":"open-session","sandbox":"a","session":".hidden"}"#)
         invalid(#"{"action":"open-session","sandbox":"a","argv":[]}"#)
         invalid(#"{"action":"open-session","sandbox":"a","argv":["a\u0000b"]}"#)
@@ -205,15 +207,22 @@ final class WebActionTests: XCTestCase {
         XCTAssertNil(try decode(Self.samples["hibernate"]!).confirmationTarget)
     }
 
-    func testAWorkspaceIsResolvedToAnExistingDirectory() throws {
-        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("ws-590-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: dir) }
-        let a = try decode(#"{"action":"create","sandbox":"a","image":"lab","workspace":"\#(dir.path)"}"#)
-        XCTAssertEqual(a.hostRequest.create?.workspace, dir.resolvingSymlinksInPath().path)
-        let file = dir.appendingPathComponent("f")
-        try Data().write(to: file)
-        invalid(#"{"action":"create","sandbox":"a","image":"lab","workspace":"\#(file.path)"}"#)
+    /// 594: a workspace is an absolute path (or ~/…), resolved; it need not exist — the HOST makes it
+    /// (and refuses a file, the store, a system location). Isolated is its own field.
+    func testAWorkspaceIsResolvedAndNeedNotExist() throws {
+        let dir = "/private/tmp/ws-590-\(UUID().uuidString.prefix(8))"
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        let a = try decode(#"{"action":"create","sandbox":"a","image":"lab","workspace":"\#(dir.replacingOccurrences(of: "/private/tmp", with: "/tmp"))"}"#)
+        XCTAssertEqual(a.hostRequest.create?.workspace, dir, "links resolved")
+        let missing = try decode(#"{"action":"create","sandbox":"a","image":"lab","workspace":"\#(dir)/new/deep"}"#)
+        XCTAssertEqual(missing.hostRequest.create?.workspace, dir + "/new/deep")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: dir + "/new"), "decoding makes nothing")
+        let home = try decode(#"{"action":"create","sandbox":"a","image":"lab","workspace":"~/proj-x"}"#)
+        XCTAssertEqual(home.hostRequest.create?.workspace, Workspace.home() + "/proj-x")
+        let iso = try decode(#"{"action":"duplicate","sandbox":"a","newName":"b","isolated":true}"#)
+        XCTAssertEqual(iso.hostRequest.duplicate?.isolated, true)
+        XCTAssertNil(iso.hostRequest.duplicate?.workspace)
     }
 
     // MARK: policy preview

@@ -106,6 +106,8 @@ public struct CreateOptions: Codable, Equatable, Sendable {
     public var agentPromptMode: String?
     /// 594 (D9): the project file this sandbox was made from (`doz up` in a folder with `doz_project.yaml`).
     public var project: String?
+    /// 594: asked for explicitly — no workspace ("isolated"); an error together with `workspace`.
+    public var isolated: Bool?
 
     public init(image: String, cpus: Int? = nil, memoryMiB: UInt64? = nil, workspace: String? = nil,
                 network: String? = nil, subnet: String? = nil, account: String? = nil) {
@@ -123,8 +125,10 @@ public struct CreateOptions: Codable, Equatable, Sendable {
 /// purpose: a later version adds fields, never nests or renames.
 /// 593 `duplicate`: what the new sandbox changes from its source. Everything nil keeps the source's.
 public struct DuplicateOptions: Codable, Equatable, Sendable {
-    /// A host directory shared at /workspace (it must exist and be readable; never created).
+    /// A host directory shared at /workspace (594: made when it does not exist).
     public var workspace: String?
+    /// 594: drop the source's workspace — the duplicate is isolated.
+    public var isolated: Bool?
     public var cpus: Int?
     public var memoryMiB: UInt64?
     /// `agent`, `bake`, `locked`, `open`, `nat` or `none` (nil: the source's, a custom policy included).
@@ -397,6 +401,66 @@ public struct SandboxInfo: Codable, Equatable, Sendable {
     public var credentialState: String?
     public var credentialPolicy: String?
     public var foreignCredentials: Int?
+    /// 594: the workspace folder was made by this create (it did not exist).
+    public var workspaceCreated: Bool?
+
+    /// 594: "isolated" — no folder of the Mac is shared (`workspace` is null).
+    public var isolated: Bool { workspace == nil }
+
+    enum CodingKeys: String, CodingKey {
+        case name, image, phase, busy, cpus, memoryMiB, ramHeldMiB, memoryReturnedMiB, diskBytes, sessions, network, deniedConnections
+        case workspace, createdAt, diedWithHost, account, credentialState, credentialPolicy, foreignCredentials, workspaceCreated, isolated
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        name = try c.decode(String.self, forKey: .name)
+        image = try c.decode(String.self, forKey: .image)
+        phase = try c.decode(String.self, forKey: .phase)
+        busy = try c.decode(Bool.self, forKey: .busy)
+        cpus = try c.decode(Int.self, forKey: .cpus)
+        memoryMiB = try c.decode(UInt64.self, forKey: .memoryMiB)
+        ramHeldMiB = try c.decode(UInt64.self, forKey: .ramHeldMiB)
+        memoryReturnedMiB = try c.decode(UInt64.self, forKey: .memoryReturnedMiB)
+        diskBytes = try c.decode(Int64.self, forKey: .diskBytes)
+        sessions = try c.decodeIfPresent(Int.self, forKey: .sessions)
+        network = try c.decode(String.self, forKey: .network)
+        deniedConnections = try c.decodeIfPresent(Int.self, forKey: .deniedConnections)
+        workspace = try c.decodeIfPresent(String.self, forKey: .workspace)
+        createdAt = try c.decodeIfPresent(Date.self, forKey: .createdAt)
+        diedWithHost = try c.decodeIfPresent(Bool.self, forKey: .diedWithHost)
+        account = try c.decodeIfPresent(String.self, forKey: .account)
+        credentialState = try c.decodeIfPresent(String.self, forKey: .credentialState)
+        credentialPolicy = try c.decodeIfPresent(String.self, forKey: .credentialPolicy)
+        foreignCredentials = try c.decodeIfPresent(Int.self, forKey: .foreignCredentials)
+        workspaceCreated = try c.decodeIfPresent(Bool.self, forKey: .workspaceCreated)
+    }
+
+    /// `workspace` is written even when null (with `isolated: true`), so a reader never has to guess.
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(name, forKey: .name)
+        try c.encode(image, forKey: .image)
+        try c.encode(phase, forKey: .phase)
+        try c.encode(busy, forKey: .busy)
+        try c.encode(cpus, forKey: .cpus)
+        try c.encode(memoryMiB, forKey: .memoryMiB)
+        try c.encode(ramHeldMiB, forKey: .ramHeldMiB)
+        try c.encode(memoryReturnedMiB, forKey: .memoryReturnedMiB)
+        try c.encode(diskBytes, forKey: .diskBytes)
+        try c.encodeIfPresent(sessions, forKey: .sessions)
+        try c.encode(network, forKey: .network)
+        try c.encodeIfPresent(deniedConnections, forKey: .deniedConnections)
+        try c.encode(workspace, forKey: .workspace)
+        try c.encode(isolated, forKey: .isolated)
+        try c.encodeIfPresent(createdAt, forKey: .createdAt)
+        try c.encodeIfPresent(diedWithHost, forKey: .diedWithHost)
+        try c.encodeIfPresent(account, forKey: .account)
+        try c.encodeIfPresent(credentialState, forKey: .credentialState)
+        try c.encodeIfPresent(credentialPolicy, forKey: .credentialPolicy)
+        try c.encodeIfPresent(foreignCredentials, forKey: .foreignCredentials)
+        try c.encodeIfPresent(workspaceCreated, forKey: .workspaceCreated)
+    }
 
     public init(name: String, image: String, phase: String, busy: Bool, cpus: Int, memoryMiB: UInt64, ramHeldMiB: UInt64,
                 memoryReturnedMiB: UInt64, diskBytes: Int64, sessions: Int?, network: String, deniedConnections: Int?,

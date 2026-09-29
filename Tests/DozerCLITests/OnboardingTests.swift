@@ -133,7 +133,7 @@ final class OnboardingTests: XCTestCase {
 
         let private_ = try XCTUnwrap(AgentPrompt.report(config: try config(workspace: nil), policy: .agent, account: nil, version: "9.9",
                                                         settings: DozerSettings.load(environment: env()), hostname: "Mac-1"))
-        XCTAssertTrue(private_.text!.contains("/workspace is NOT shared with the Mac"), private_.text!)
+        XCTAssertTrue(private_.text!.contains("This sandbox is isolated (no folder is shared with the Mac)"), private_.text!)
         XCTAssertTrue(private_.text!.contains("no account is attached"))
 
         let pi = try XCTUnwrap(AgentPrompt.report(config: try config(workspace: nil, image: "pi"), policy: .agent, account: nil, version: "9.9",

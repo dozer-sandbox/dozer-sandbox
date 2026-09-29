@@ -389,7 +389,18 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   the root only; `RestorePointTests.test_aTemplateNeverHoldsTheStateDisk` and `make test-vm-templates`
   keep it. From a live sandbox, `template-create` and `duplicate` go through a TEMPORARY restore point
   (sync, pause, clone, resume), deleted afterwards. `duplicate`'s state disk starts fresh unless
-  `copyState`; its workspace must exist and be readable (`HostCore.validatedWorkspace`) — never created.
+  `copyState`; `isolated` drops the source's workspace.
+- **A workspace that does not exist is MADE** (594, `Workspace.swift`): `Workspace.prepare` (normalize —
+  absolute or `~/`, links in the existing part resolved — then `refusal`, then `mkdir -p`) runs in
+  `create` and `duplicate` BEFORE the VM is configured; `Workspace.undo` removes, innermost first, only
+  folders it made and only while empty, when the create fails. Refused, never made: an existing file, a
+  missing folder in the store or under a system location (`Workspace.systemPrefixes`), `/`, home.
+  No workspace = **isolated** (the one word: `ls`, `--json` `"isolated": true` with `"workspace": null`,
+  the UI badge, the agent's facts). The UI's defaults (`Workspace.suggestedName`/`defaultPath`,
+  `defaults.projects_dir` — a path, so `doz config set` only) and the Mac's folder picker are
+  `WebWorkspace.swift`: `POST /api/v1/workspace/check` (makes nothing) and `/choose` (a FIXED
+  AppleScript run by `/usr/bin/osascript`, the start folder its argv; one at a time → 409; tests use
+  `DOZ_TEST_FOLDER_PICKER=/path|cancel` or `setRunner` — never a real dialog).
 
 ### Onboarding, projects, the agent's environment prompt (594) — design: workspace `changes/594-*/594.01-DESIGN.md`
 

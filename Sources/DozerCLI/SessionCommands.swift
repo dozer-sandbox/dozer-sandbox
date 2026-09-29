@@ -23,7 +23,7 @@ struct List: AsyncParsableCommand {
             if let s = r.credentialState, s != "ok" { account += " (\(s))" }
             if r.credentialPolicy == "strict" { account += " · strict" }
             // 594 (D17): no workspace is said, not left blank.
-            let ws = r.workspace.map { $0.hasPrefix(home + "/") ? "~" + $0.dropFirst(home.count) : $0 } ?? "none (private to the VM)"
+            let ws = r.workspace.map { $0.hasPrefix(home + "/") ? "~" + $0.dropFirst(home.count) : $0 } ?? "isolated"
             t.append([r.name, r.image, phase, Out.mib(r.ramHeldMiB), DozerImages.formatBytes(r.diskBytes),
                       r.sessions.map(String.init) ?? "—", net, account, ws])
         }

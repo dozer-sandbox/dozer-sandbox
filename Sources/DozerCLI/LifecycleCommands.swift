@@ -14,8 +14,11 @@ struct CreateArguments: ParsableArguments {
     @Option(name: .long, help: "Guest RAM: 2G, 512M, 2048 (MiB). Default 1G for lab, 2G for an agent image.")
     var memory: String?
 
-    @Option(name: .long, help: "A folder of this Mac shared at /workspace.")
+    @Option(name: .long, help: "A folder of this Mac shared at /workspace (made when it does not exist).")
     var workspace: String?
+
+    @Flag(name: .long, help: "Share no folder: /workspace is private to the sandbox (the default without --workspace, said by a note; this says it on purpose).")
+    var isolated = false
 
     @Option(name: .long, help: "agent, bake, locked, open (proxied: no network interface, every connection through the Mac's policy and log), nat or none. Default: agent for an agent image, bake for lab.")
     var network: String?
@@ -40,9 +43,19 @@ struct CreateArguments: ParsableArguments {
             mem = v
         }
         if let c = cpus, c < 1 { throw ValidationError("--cpus must be at least 1") }
-        var o = CreateOptions(image: img, cpus: cpus, memoryMiB: mem, workspace: workspace, network: network, subnet: subnet, account: account)
+        if isolated && workspace != nil { throw ValidationError("--isolated or --workspace, not both") }
+        var o = CreateOptions(image: img, cpus: cpus, memoryMiB: mem, workspace: absoluteWorkspace, network: network, subnet: subnet, account: account)
+        o.isolated = isolated ? true : nil
         try applyPrompt(to: &o)
         return o
+    }
+
+    /// 594: a relative --workspace is this command's working folder's (the host takes absolute paths only).
+    var absoluteWorkspace: String? {
+        guard let w = workspace else { return nil }
+        let expanded = (w as NSString).expandingTildeInPath
+        if expanded.hasPrefix("/") { return expanded }
+        return URL(fileURLWithPath: expanded, relativeTo: URL(fileURLWithPath: FileManager.default.currentDirectoryPath)).standardizedFileURL.path
     }
 
     /// 594: `--agent-prompt FILE` (≤ 16 KiB of UTF-8) and its mode.
@@ -63,14 +76,21 @@ struct CreateArguments: ParsableArguments {
     }
 
     var givenAny: Bool {
-        image != nil || cpus != nil || memory != nil || workspace != nil || network != nil || subnet != nil || account != nil || agentPrompt != nil
+        image != nil || cpus != nil || memory != nil || workspace != nil || network != nil || subnet != nil || account != nil || agentPrompt != nil || isolated
     }
 }
 
-/// 594 (D17): creating without a workspace is allowed, and said.
-func noteNoWorkspace(_ info: SandboxInfo, _ g: GlobalOptions) {
-    guard info.workspace == nil, !g.json, !g.quiet else { return }
-    Out.stderr("[doz] no workspace: /workspace in \(info.name) is private to the VM (nothing is shared with the Mac) — --workspace DIR shares a folder\n")
+/// 594: a workspace made by this create is said; an isolated sandbox is said — unless asked for with
+/// --isolated (D17; owner: one word, "isolated").
+func noteWorkspace(_ info: SandboxInfo, isolatedAsked: Bool, _ g: GlobalOptions) {
+    guard !g.json, !g.quiet else { return }
+    if info.workspaceCreated == true, let w = info.workspace {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        Out.stderr("[doz] created \(w.hasPrefix(home + "/") ? "~" + w.dropFirst(home.count) : Substring(w))\n")
+    }
+    if info.workspace == nil, !isolatedAsked {
+        Out.stderr("[doz] \(Workspace.isolatedNote) — --workspace DIR shares a folder (--isolated says it on purpose)\n")
+    }
 }
 
 struct Create: AsyncParsableCommand {
@@ -87,9 +107,9 @@ struct Create: AsyncParsableCommand {
         let info = try decode(v, SandboxInfo.self, g)
         if g.json { Out.json(info) } else {
             Out.stdout("created \(info.name): \(info.image), \(info.cpus) CPUs, \(Out.mib(info.memoryMiB)), network \(info.network)"
-                       + (info.workspace.map { ", /workspace = \($0)" } ?? "") + "\n")
+                       + (info.workspace.map { ", /workspace = \($0)" } ?? ", isolated") + "\n")
         }
-        noteNoWorkspace(info, g)
+        noteWorkspace(info, isolatedAsked: create.isolated, g)
     }
 }
 
@@ -239,6 +259,9 @@ struct Up: AsyncParsableCommand {
                 if let n = create.network { o.network = n }
                 if let a = create.account { o.account = a }
                 if let s = create.subnet { o.subnet = s }
+                if create.isolated && create.workspace != nil { throw ValidationError("--isolated or --workspace, not both") }
+                if let w = create.absoluteWorkspace { o.workspace = w }
+                if create.isolated { o.workspace = nil; o.isolated = true }
                 try create.applyPrompt(to: &o)
                 r.create = o
             } else {
@@ -248,7 +271,7 @@ struct Up: AsyncParsableCommand {
             if !g.json && !g.quiet {
                 Out.stderr("[doz] created \(name)" + (projectFile.map { " from \($0.path)" } ?? "") + (info.workspace.map { " — /workspace = \($0)" } ?? "") + "\n")
             }
-            noteNoWorkspace(info, g)
+            noteWorkspace(info, isolatedAsked: create.isolated, g)
         } else {
             if create.givenAny && !g.quiet {
                 Out.stderr("[doz] \(name) exists — its image and settings are kept (the options apply only to a new sandbox)\n")

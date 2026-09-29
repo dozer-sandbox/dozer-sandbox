@@ -201,7 +201,7 @@ public enum WebAction: Equatable, Sendable {
     /// Fields each action may carry (besides `action`).
     static let fields: [String: Set<String>] = {
         var f: [String: Set<String>] = [
-            "create": ["sandbox", "image", "cpus", "memoryMiB", "workspace", "network", "subnet", "account"],
+            "create": ["sandbox", "image", "cpus", "memoryMiB", "workspace", "isolated", "network", "subnet", "account"],
             "open-session": ["sandbox", "session", "argv"],
             "point-take": ["sandbox", "point", "note"],
             "point-revert": ["sandbox", "point", "confirm"],
@@ -209,7 +209,7 @@ public enum WebAction: Equatable, Sendable {
             "point-rm": ["sandbox", "point", "confirm"],
             "point-save-image": ["sandbox", "point", "image", "note"],
             "template-create": ["sandbox", "point", "image", "note"],
-            "duplicate": ["sandbox", "newName", "point", "workspace", "cpus", "memoryMiB", "network", "account", "copyState"],
+            "duplicate": ["sandbox", "newName", "point", "workspace", "isolated", "cpus", "memoryMiB", "network", "account", "copyState"],
             "image-bake": ["image"],
             "image-rm": ["image", "confirm"],
             "net-policy": ["sandbox", "preset", "allow", "deny", "remove"],
@@ -241,9 +241,11 @@ public enum WebAction: Equatable, Sendable {
         let a: WebAction
         switch verb {
         case "create":
-            let o = CreateOptions(image: try f.image("image"), cpus: try f.int("cpus", 1...64), memoryMiB: try f.int("memoryMiB", 256...262_144).map(UInt64.init),
+            var o = CreateOptions(image: try f.image("image"), cpus: try f.int("cpus", 1...64), memoryMiB: try f.int("memoryMiB", 256...262_144).map(UInt64.init),
                                   workspace: try f.workspace("workspace"), network: try f.oneOf("network", ["agent", "bake", "locked", "open", "nat", "none"]),
                                   subnet: try f.subnet("subnet"), account: try f.accountRef("account", allowDefault: true))
+            o.isolated = try f.flag("isolated")
+            guard !(o.isolated == true && o.workspace != nil) else { throw Invalid("isolated: or a workspace, not both") }
             a = .create(name: try f.sandbox("sandbox"), options: o)
         case "open-session":
             a = .openSession(name: try f.sandbox("sandbox"), session: try f.session("session"), argv: try f.argv("argv"))
@@ -267,10 +269,12 @@ public enum WebAction: Equatable, Sendable {
                 guard let b = v as? Bool, CFGetTypeID(v as CFTypeRef) == CFBooleanGetTypeID() else { throw Invalid("copyState: true or false") }
                 copy = b ? true : nil
             }
-            let o = DuplicateOptions(workspace: try f.workspace("workspace"), cpus: try f.int("cpus", 1...64),
+            var o = DuplicateOptions(workspace: try f.workspace("workspace"), cpus: try f.int("cpus", 1...64),
                                      memoryMiB: try f.int("memoryMiB", 256...262_144).map(UInt64.init),
                                      network: try f.oneOf("network", ["agent", "bake", "locked", "open", "nat", "none"]),
                                      account: try f.accountRef("account", allowDefault: true), copyState: copy)
+            o.isolated = try f.flag("isolated")
+            guard !(o.isolated == true && o.workspace != nil) else { throw Invalid("isolated: or a workspace, not both") }
             let name = try f.sandbox("sandbox"), new = try f.sandbox("newName")
             guard name != new else { throw Invalid("newName: a different name") }
             a = .duplicate(name: name, newName: new, point: try f.pointRef("point"), options: o)
@@ -409,16 +413,21 @@ public enum WebAction: Equatable, Sendable {
             try matching(key, #"^(\d{1,3}\.){3}\d{1,3}/\d{1,2}$"#, "an IPv4 CIDR, like 192.168.120.0/24")
         }
 
-        /// A host directory shared at /workspace: absolute, an existing directory (symlinks resolved).
+        /// A host folder shared at /workspace: an absolute path (or ~/…), one line. 594: it need not
+        /// exist — the host makes it (`Workspace.prepare`), and refuses a file, the store, a system
+        /// location, / and the home folder itself.
         func workspace(_ key: String) throws -> String? {
             guard let s = try string(key, max: 1024) else { return nil }
-            guard s.hasPrefix("/") else { throw Invalid("\(key): an absolute path") }
-            let resolved = URL(fileURLWithPath: s).resolvingSymlinksInPath().path
-            var isDir: ObjCBool = false
-            guard FileManager.default.fileExists(atPath: resolved, isDirectory: &isDir), isDir.boolValue else {
-                throw Invalid("\(key): not an existing directory")
-            }
-            return resolved
+            guard !s.unicodeScalars.contains(where: { $0.value < 0x20 || $0.value == 0x7f }) else { throw Invalid("\(key): one line, no control characters") }
+            guard s.hasPrefix("/") || s.hasPrefix("~/") else { throw Invalid("\(key): an absolute path (or ~/…)") }
+            do { return try Workspace.normalize(s) } catch { throw Invalid("\(key): an absolute path (or ~/…)") }
+        }
+
+        /// 594: true, or absent.
+        func flag(_ key: String) throws -> Bool? {
+            guard let v = d[key], !(v is NSNull) else { return nil }
+            guard let b = v as? Bool, CFGetTypeID(v as CFTypeRef) == CFBooleanGetTypeID() else { throw Invalid("\(key): true or false") }
+            return b ? true : nil
         }
 
         /// Hosts for the policy: exact, `*.domain`, `host:port`, or an IPv4 CIDR; ≤ 32.

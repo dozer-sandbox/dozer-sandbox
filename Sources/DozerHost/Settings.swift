@@ -227,6 +227,8 @@ public enum SettingKey {
     public static let agentPrompt = "agent.prompt"
     /// 594 (owner ruling): the web UI may take an API key or a setup token (a masked field).
     public static let allowSecretEntry = "ui.allow_secret_entry"
+    /// 594: where the UI's new sandboxes get their workspace by default (`<projects_dir>/<name>`).
+    public static let projectsDir = "defaults.projects_dir"
     public static let kernelPath = "kernel.path"
     public static let kernelCache = "kernel.cache"
     /// `images.<lab|claude-code|pi>.memory_mib` / `.network`.
@@ -302,6 +304,9 @@ public struct DozerSettings: Sendable {
             .init("defaults", "image", .choice(["lab", "claude-code", "pi"]), .string("lab"),
                   "The image of a new sandbox when none is named (doz up NAME, doz init, the UI's New sandbox). doz onboard writes the one you chose.",
                   flag: "doz create --image", applies: .nextCreate),
+            .init("defaults", "projects_dir", .path, .string("~/Developer/dozer-sandbox-projects"),
+                  "Where the web UI puts a new sandbox's workspace by default: <projects_dir>/<sandbox name> (created when missing, like any workspace). The CLI's doz create has no default workspace (it is isolated unless --workspace); doz init uses the folder it runs in.",
+                  applies: .nextCreate, ui: false),
             .init("defaults", "account", .choice(["mac", "none"]), .string("mac"),
                   "The Anthropic account of a store that has not chosen one: mac (this Mac's Claude Code login) or none. doz account default decides for a store once it has.",
                   applies: .newStore),

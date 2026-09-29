@@ -187,7 +187,8 @@ doz inspect doz-try --prompt
 Ask Claude: *"What is the host path of /workspace?"* — it answers `~/doz-try` (the full path) from
 the facts block, without looking around. Ask *"Where are you running — what is this machine?"* — a
 Dozer Sandbox VM on your Mac, how its disks persist, that the network goes through your Mac's proxy.
-(A sandbox made without a workspace is told `/workspace` is NOT shared; `doz ls` says so too.)
+(A sandbox made without a workspace is **isolated**: its agent is told no folder is shared with the
+Mac, and `doz ls` says `isolated`. A `--workspace` folder that does not exist yet is made for you.)
 
 Claude Code opens straight at its prompt in `/workspace`, with no first-run setup screens: the
 image's launcher marks onboarding done, approves this session's key placeholder and trusts the

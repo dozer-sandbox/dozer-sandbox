@@ -29,6 +29,8 @@ public final class DozerWebServer: @unchecked Sendable {
     let terminals: WebTerminalHub
     /// 591: doz.toml as this process sees it.
     public let settings: WebSettingsStore
+    /// 594: the Mac's folder picker (one at a time; DOZ_TEST_FOLDER_PICKER in tests).
+    public let folderPicker: WebFolderPicker
     private let gate: UpgradeGate
     private let capability: WebBootstrapCapability
     private let listener: NIOAsyncChannel<Accepted, Never>
@@ -88,6 +90,7 @@ public final class DozerWebServer: @unchecked Sendable {
                  listener: NIOAsyncChannel<Accepted, Never>, settings: WebSettingsStore) {
         self.origin = origin
         self.settings = settings
+        folderPicker = WebFolderPicker(environment: settings.environment)
         self.version = version
         self.limits = limits
         self.assets = assets
@@ -555,6 +558,17 @@ public final class DozerWebServer: @unchecked Sendable {
             } catch {
                 throw HostError(.failed, k.scrub(error.localizedDescription))
             }
+        case .workspaceCheck:
+            // Changes nothing; POST (CSRF, above) because it carries a typed path.
+            try Self.requireJSONBody(md)
+            let q = try WebWorkspaceQuery.decode(body)
+            let taken = Set(((try? await data.overview())?.sandboxes ?? []).map(\.name))
+            return json(WebWorkspaceCheck.check(q, taken: taken, settings: settings.current, store: data.storePath))
+        case .workspaceChoose:
+            try Self.requireJSONBody(md)
+            let start = try WebFolderPicker.decodeStart(body)
+            let projects = (Workspace.defaultPath(name: "x", settings: settings.current) as NSString).deletingLastPathComponent
+            return json(try await folderPicker.choose(start: WebFolderPicker.startFolder(start, projectsDir: projects)))
         case .events:
             return json(await monitor.recent)
         case .doctor:

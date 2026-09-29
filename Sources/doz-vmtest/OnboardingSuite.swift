@@ -148,9 +148,9 @@ func cliOnboardingSuite(binary: String) async {
 
     print("cli: no workspace is said (D17)")
     r = a.run(["create", "nows", "--image", "lab", "--memory", "384M"])
-    check(r.code == 0 && r.err.contains("no workspace: /workspace in nows is private to the VM"), "create without --workspace says so")
+    check(r.code == 0 && r.err.contains("isolated: nothing on this Mac is shared; /workspace is private to the sandbox"), "create without --workspace says so (isolated)")
     r = a.run(["ls"])
-    check(r.out.split(separator: "\n").contains { $0.hasPrefix("nows") && $0.contains("none (private to the VM)") }, "ls shows it")
+    check(r.out.split(separator: "\n").contains { $0.hasPrefix("nows") && $0.hasSuffix("isolated") }, "ls shows it: isolated")
     a.run(["rm", "nows", "--yes"])
 
     print("cli: init + up in a project folder (D9)")

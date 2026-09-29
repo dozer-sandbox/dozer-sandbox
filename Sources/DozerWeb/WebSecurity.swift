@@ -70,12 +70,14 @@ public enum WebRejection: String, Error, Equatable, Sendable {
     case terminalsOff = "terminals-off"
     /// 594: `ui.allow_secret_entry = false` — no key or token is taken in the browser.
     case secretEntryOff = "secret-entry-off"
+    /// 594: the Mac's folder picker is already open (one at a time).
+    case pickerOpen = "picker-open"
 
     public var status: Int {
         switch self {
         case .hostRejected, .originRejected, .crossSite, .csrfRejected, .terminalsOff, .secretEntryOff: 403
         case .methodNotAllowed: 405
-        case .alreadyRunning: 409
+        case .alreadyRunning, .pickerOpen: 409
         case .bodyTooLarge: 413
         case .unsupportedMediaType: 415
         case .malformedAuthorization, .bootstrapRejected, .bootstrapUsed, .unauthenticated, .sessionExpired: 401
@@ -115,6 +117,7 @@ public enum WebRejection: String, Error, Equatable, Sendable {
         case .upgradeRequired: "the terminal socket is a WebSocket, opened as the first request of a connection"
         case .terminalsOff: "browser terminals are off (Settings: ui.terminals) — Open in Terminal still works"
         case .secretEntryOff: "keys and tokens are not taken in the browser (ui.allow_secret_entry = false) — in a terminal: doz account add NAME --api-key|--setup-token, or doz key set SANDBOX --anthropic"
+        case .pickerOpen: "the folder picker is already open on this Mac — choose there, or cancel it"
         }
     }
 }

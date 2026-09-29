@@ -328,6 +328,126 @@ final class WebSettingsHTTPTests: XCTestCase {
         XCTAssertEqual(fake.keysSet.count, 1)
     }
 
+    /// 594 (owner: "an easier way to pick a workspace folder", "a better default name", "i dont want the
+    /// user to have to create the path first"): the check (defaults, "will be created", refusals — it
+    /// makes nothing) and the Mac's picker (CSRF, exact Origin, strict body, one at a time; the test seam
+    /// stands in for the dialog — no dialog is ever shown here).
+    func testTheWorkspaceCheckAndTheFolderPicker() throws {
+        let (cookie, csrf) = try signIn()
+        func post(_ path: String, _ body: String, csrf c: String? = nil, origin o: String? = nil) throws -> RawResponse {
+            var h = ["Cookie": cookie, "Origin": o ?? origin, "Content-Type": "application/json"]
+            if let c { h["X-Doz-CSRF"] = c }
+            return try request(path, h, method: "POST", body: body)
+        }
+        func object(_ r: RawResponse) -> [String: Any] { (try? JSONSerialization.jsonObject(with: r.body) as? [String: Any]) ?? [:] }
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        let scratch = "/private/tmp/dzwc-\(UUID().uuidString.prefix(8))"
+        defer { try? FileManager.default.removeItem(atPath: scratch) }
+
+        // Both need CSRF and the exact Origin.
+        for path in ["/api/v1/workspace/check", "/api/v1/workspace/choose"] {
+            XCTAssertEqual(try post(path, "{}").status, 403, "\(path): no CSRF")
+            XCTAssertEqual(try post(path, "{}", csrf: csrf, origin: "http://evil.example").status, 403, "\(path): a foreign Origin")
+            XCTAssertEqual(try post(path, #"{"nope":1}"#, csrf: csrf).status, 400, "\(path): an unknown field")
+            XCTAssertEqual(try request(path, ["Cookie": cookie]).status, 404, "\(path): GET is not a route")
+        }
+        XCTAssertFalse(server.folderPicker.isOpen)
+
+        // Unset, the projects folder is ~/Developer/dozer-sandbox-projects (whatever this Mac has in it).
+        var r = try post("/api/v1/workspace/check", #"{"image":"claude-code","name":"my-box"}"#, csrf: csrf)
+        XCTAssertEqual(r.status, 200, r.text)
+        var o = object(r)
+        XCTAssertEqual(o["defaultPath"] as? String, home + "/Developer/dozer-sandbox-projects/my-box", "the path follows the name")
+        XCTAssertEqual(o["projectsDir"] as? String, home + "/Developer/dozer-sandbox-projects")
+        // defaults.projects_dir moves it (a path: doz config set, not the browser — like kernel.path).
+        XCTAssertEqual(try change(#"{"key":"defaults.projects_dir","value":"\#(scratch)/projects"}"#, cookie, csrf).status, 400)
+        try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try "[defaults]\nprojects_dir = \"\(scratch)/projects\"\n".write(to: file, atomically: true, encoding: .utf8)
+        // Defaults: the name from the image (demo is taken, not these), the folder under projects_dir.
+        o = object(try post("/api/v1/workspace/check", #"{"image":"claude-code"}"#, csrf: csrf))
+        XCTAssertEqual(o["suggestedName"] as? String, "claude-sandbox")
+        XCTAssertEqual(o["defaultPath"] as? String, scratch + "/projects/claude-sandbox")
+        XCTAssertNil(o["error"], "no red error on first view")
+        o = object(try post("/api/v1/workspace/check", #"{"image":"lab"}"#, csrf: csrf))
+        XCTAssertEqual(o["defaultPath"] as? String, scratch + "/projects/lab-sandbox")
+        // A folder there with something in it is taken: the name moves on to -2.
+        try FileManager.default.createDirectory(atPath: scratch + "/projects/pi-sandbox", withIntermediateDirectories: true)
+        try Data("x".utf8).write(to: URL(fileURLWithPath: scratch + "/projects/pi-sandbox/README"))
+        o = object(try post("/api/v1/workspace/check", #"{"image":"pi"}"#, csrf: csrf))
+        XCTAssertEqual(o["suggestedName"] as? String, "pi-sandbox-2")
+        XCTAssertEqual(o["defaultPath"] as? String, scratch + "/projects/pi-sandbox-2")
+
+        // A typed path: will be created / exists / refused — and nothing is made.
+        o = object(try post("/api/v1/workspace/check", #"{"path":"\#(scratch)/new/deep"}"#, csrf: csrf))
+        XCTAssertEqual(o["willCreate"] as? Bool, true)
+        XCTAssertEqual(o["exists"] as? Bool, false)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: scratch + "/new"), "a check makes nothing")
+        try FileManager.default.createDirectory(atPath: scratch + "/have", withIntermediateDirectories: true)
+        o = object(try post("/api/v1/workspace/check", #"{"path":"\#(scratch)/have"}"#, csrf: csrf))
+        XCTAssertEqual(o["exists"] as? Bool, true)
+        XCTAssertNil(o["willCreate"])
+        for (bad, says) in [("relative/dir", "absolute"), ("/", "whole Mac"), ("~", "home folder"), ("/usr/local/dozwc", "system location"),
+                            ("/tmp/fake-store/ws", "inside the store")] {
+            o = object(try post("/api/v1/workspace/check", #"{"path":"\#(bad)"}"#, csrf: csrf))
+            XCTAssertTrue((o["error"] as? String)?.contains(says) == true, "\(bad): \(o)")
+            XCTAssertNil(o["willCreate"], bad)
+        }
+        XCTAssertEqual(try post("/api/v1/workspace/check", #"{"path":"a\nb"}"#, csrf: csrf).status, 400, "one line")
+
+        // The picker, through the seam: a folder, then cancelled.
+        server.folderPicker.setRunner { _ in scratch + "/have/" }
+        r = try post("/api/v1/workspace/choose", #"{"start":"\#(scratch)/new/deep"}"#, csrf: csrf)
+        XCTAssertEqual(r.status, 200, r.text)
+        XCTAssertEqual(object(r)["path"] as? String, scratch + "/have")
+        XCTAssertEqual(object(r)["cancelled"] as? Bool, false)
+        server.folderPicker.setRunner { _ in nil }
+        o = object(try post("/api/v1/workspace/choose", "{}", csrf: csrf))
+        XCTAssertEqual(o["cancelled"] as? Bool, true)
+        XCTAssertNil(o["path"])
+        XCTAssertEqual(try post("/api/v1/workspace/choose", #"{"start":"relative"}"#, csrf: csrf).status, 400)
+        // It opens at the nearest existing folder of the field (never a path that does not exist).
+        XCTAssertEqual(WebFolderPicker.startFolder(scratch + "/new/deep", projectsDir: "/nowhere"), scratch)
+        XCTAssertEqual(WebFolderPicker.startFolder(nil, projectsDir: scratch + "/have/x"), scratch + "/have")
+
+        // One at a time: while one is open, a second is refused (409) — and the first still answers.
+        let gate = DispatchSemaphore(value: 0)
+        let entered = DispatchSemaphore(value: 0)
+        server.folderPicker.setRunner { _ in
+            entered.signal()
+            await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in DispatchQueue.global().async { gate.wait(); c.resume() } }
+            return scratch + "/have"
+        }
+        let first = Box<RawResponse>()
+        let done = DispatchSemaphore(value: 0)
+        let (port, hostHeader, originValue) = (server.origin.port, host, origin)
+        DispatchQueue.global().async {
+            first.value = try? RawHTTP.request(port: port, method: "POST", path: "/api/v1/workspace/choose",
+                                               headers: ["Host": hostHeader, "Cookie": cookie, "Origin": originValue, "Content-Type": "application/json",
+                                                         "X-Doz-CSRF": csrf], body: "{}")
+            done.signal()
+        }
+        XCTAssertEqual(entered.wait(timeout: .now() + 5), .success)
+        XCTAssertTrue(server.folderPicker.isOpen)
+        r = try post("/api/v1/workspace/choose", "{}", csrf: csrf)
+        XCTAssertEqual(r.status, 409, r.text)
+        XCTAssertTrue(r.text.contains("picker-open"), r.text)
+        gate.signal()
+        XCTAssertEqual(done.wait(timeout: .now() + 5), .success)
+        XCTAssertEqual(first.value?.status, 200)
+        XCTAssertFalse(server.folderPicker.isOpen)
+    }
+
+    /// The seam: DOZ_TEST_FOLDER_PICKER=/path answers that path, =cancel cancels (no dialog).
+    func testTheFolderPickerSeam() async throws {
+        let p = WebFolderPicker(environment: ["DOZ_TEST_FOLDER_PICKER": "/private/tmp/x"])
+        let a = try await p.choose(start: "/private/tmp")
+        XCTAssertEqual(a, WebFolderChoice(path: "/private/tmp/x", cancelled: false))
+        let c = try await WebFolderPicker(environment: ["DOZ_TEST_FOLDER_PICKER": "cancel"]).choose(start: "/")
+        XCTAssertEqual(c, WebFolderChoice(path: nil, cancelled: true))
+        XCTAssertTrue(WebFolderPicker.script.contains("on run argv") && WebFolderPicker.script.contains("item 1 of argv"),
+                      "the start folder is an argument of the fixed script, never its text")
+    }
+
     /// 594 (owner ruling): a key or a token typed in the browser — ONE CSRF-checked POST, a strict body,
     /// allowed only while ui.allow_secret_entry; no response (success, refusal or failure) carries it.
     func testAnAccountFromAMaskedFieldNeverComesBack() throws {

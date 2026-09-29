@@ -161,7 +161,7 @@ off mid-startup (Claude Code's first network calls, for example) can otherwise f
 
 ```bash
 doz create NAME --image lab|claude-code|pi|<custom> \
-    [--cpus 2] [--memory 2G] [--workspace ~/code/proj] \
+    [--cpus 2] [--memory 2G] [--workspace ~/code/proj | --isolated] \
     [--network agent|bake|locked|open|nat|none] [--subnet CIDR]
 
 doz up NAME [same options] [--session S] [-d] [-- CMD …]
@@ -176,9 +176,21 @@ doz up NAME [same options] [--session S] [-d] [-- CMD …]
 - `up` defaults to the settings' `defaults.image` when it creates a sandbox (`doz onboard` sets it;
   `lab` otherwise). `create` requires `--image`. With no NAME, in a project folder, `up` uses
   `doz_project.yaml`.
-- **Without `--workspace`**, `/workspace` is a directory on the VM's own disk: nothing is shared
-  with the Mac. That is allowed and said — `create` notes it, `ls` shows `none (private to the VM)`,
-  and the agent is told.
+- **`--workspace DIR`** shares a folder of this Mac at `/workspace`. When it does not exist, doz
+  **makes it** (`mkdir -p`, your permissions) before the VM is configured and says
+  `[doz] created ~/…` (`"workspaceCreated": true` in `--json`); if the create then fails, a folder
+  doz made is removed again while it is still empty. A relative path is this folder's. Refused, and
+  never made: an existing file, a folder inside the store, a system location (`/System`, `/usr`,
+  `/bin`, `/sbin`, `/private/var`, `/Library`, …), `/` and your home folder itself.
+- **Without `--workspace` the sandbox is isolated**: `/workspace` is a directory on the VM's own
+  disk and nothing on this Mac is shared. That is allowed and said — `create` notes
+  `isolated: nothing on this Mac is shared; /workspace is private to the sandbox`, `ls` shows
+  `isolated` (`--json`: `"workspace": null, "isolated": true`), and the agent is told.
+  `--isolated` asks for it on purpose (no note; not together with `--workspace`). The web UI's New
+  sandbox, Duplicate and the wizard default to a **Shared folder** instead —
+  `<defaults.projects_dir>/<name>`, `~/Developer/dozer-sandbox-projects/<name>` unless you set
+  `defaults.projects_dir` (`doz config set defaults.projects_dir PATH`) — with **Isolated** one
+  click away; `doz create` has no default folder, and `doz init` uses the folder it runs in.
 - `--agent-prompt FILE [--agent-prompt-mode append|replace]` gives the sandbox its own part of the
   agent's environment prompt (below).
 
@@ -235,7 +247,7 @@ new workspace) and writes into the guest:
 
 - a short **facts block**, appended to the agent's system prompt: that it is in a Dozer Sandbox (a
   Linux VM on the user's Mac, not a container) — name, image, CPUs, memory; `/workspace` shared from
-  the Mac folder *X* (live) or **not shared**; the network (no interface; deny by default through
+  the Mac folder *X* (live) or **isolated** (no folder is shared with the Mac); the network (no interface; deny by default through
   the Mac's proxy; a refused host needs the user's rule — do not retry around it); credentials
   (injected by the proxy; the placeholders are expected; never log in or ask for keys); sleep and
   hibernation between turns. Claude Code gets it through its launcher (`/run/dozer/agent-prompt.md`
@@ -470,8 +482,8 @@ doz duplicate agent agent-2 --copy-state      # its logins and history too
 ```
 
 A new sandbox from an existing one's disk (an instant APFS clone), off until you start it. Anything
-not given is the source's (its network policy included). The workspace must exist — doz never
-creates one. The state disk starts **fresh** unless `--copy-state`. Keys (`doz key set`) are not
+not given is the source's (its network policy included). A `--workspace` that does not exist is
+made (like `create`'s); `--isolated` shares none. The state disk starts **fresh** unless `--copy-state`. Keys (`doz key set`) are not
 copied; the account follows `--account`, or the source's.
 
 ## The host
@@ -538,8 +550,10 @@ claude-code ticked, each with its download, an estimate and the disk it needs) *
 host's progress, a card per image: Step N of M, the step under way, a download bar, the last lines of
 output, estimates from this store's last run, the finished steps with their times;
 **Continue in the background** leaves it running, **Cancel preparation** stops it) **→ First
-sandbox** (optional: a name, an image and a workspace folder typed or pasted — a browser cannot
-open a folder picker for the host — or an explicit "No workspace") **→ Done**. The settings file
+sandbox** (optional: a name from the image — `claude-sandbox`, `pi-sandbox`, `lab-sandbox`, `-2`
+when taken — and its workspace: **Shared folder** `~/Developer/dozer-sandbox-projects/<name>` by
+default, made when it does not exist, typed, pasted or picked with **Choose…** (the Mac's own folder
+picker) — or **Isolated**) **→ Done**. The settings file
 and your prompt template are written only when missing. The wizard is always reachable again from
 **Doctor › Run onboarding again**, and **Operations** lists the host's image preparations whoever
 started them (`doz onboard` in a terminal too); the badge counts them while they run.

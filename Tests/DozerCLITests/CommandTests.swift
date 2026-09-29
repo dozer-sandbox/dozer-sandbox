@@ -118,7 +118,14 @@ final class CommandTests: XCTestCase {
                             memoryReturnedMiB: 324, diskBytes: 1, sessions: 2, network: "bake", deniedConnections: 0,
                             workspace: "/w", createdAt: Date(), diedWithHost: true)
         XCTAssertEqual(try keys(i), ["name", "image", "phase", "busy", "cpus", "memoryMiB", "ramHeldMiB", "memoryReturnedMiB", "diskBytes",
-                                     "sessions", "network", "deniedConnections", "workspace", "createdAt", "diedWithHost"])
+                                     "sessions", "network", "deniedConnections", "workspace", "isolated", "createdAt", "diedWithHost"])
+        // 594: an isolated sandbox says so — `workspace` null (never left out), `isolated` true.
+        var iso = i
+        iso.workspace = nil
+        let o = try XCTUnwrap(try JSONSerialization.jsonObject(with: HostWire.encoder.encode(iso)) as? [String: Any])
+        XCTAssertTrue(o["workspace"] is NSNull)
+        XCTAssertEqual(o["isolated"] as? Bool, true)
+        XCTAssertTrue(try HostWire.decoder.decode(SandboxInfo.self, from: HostWire.encoder.encode(iso)).isolated)
     }
 
     func testLifecycleAndSessionShapes() throws {

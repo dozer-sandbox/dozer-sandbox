@@ -65,6 +65,11 @@ public enum WebRoute: Equatable, Sendable {
     // 594 (owner ruling: "allow sandbox keys in the browser also") — a sandbox's own Anthropic key,
     // what `doz key set NAME --anthropic` does; same setting, same guarantees as accountAdd.
     case sandboxKey(String)        // POST /api/v1/sandboxes/{name}/key  ({secret})
+    // 594 (owner: "an easier way to pick a workspace folder"): a new sandbox's defaults and what a
+    // typed folder would do (changes nothing); and the MAC's own folder picker (one at a time; the
+    // answer is a path string, nothing else).
+    case workspaceCheck            // POST /api/v1/workspace/check   ({image?, name?, path?})
+    case workspaceChoose           // POST /api/v1/workspace/choose  ({start?})
 
     public var isStatic: Bool {
         switch self { case .index, .asset, .terminalFrame: true; default: false }
@@ -97,6 +102,8 @@ public enum WebRoute: Equatable, Sendable {
         case (.post, 1) where rest[0] == "settings": return .settingsChange
         case (.post, 2) where rest == ["onboarding", "config"]: return .onboardingConfig
         case (.post, 1) where rest[0] == "accounts": return .accountAdd
+        case (.post, 2) where rest == ["workspace", "check"]: return .workspaceCheck
+        case (.post, 2) where rest == ["workspace", "choose"]: return .workspaceChoose
         case (.post, 4) where rest[0] == "sandboxes" && isSandboxName(rest[1]) && rest[2] == "network" && rest[3] == "preview":
             return .policyPreview(rest[1])
         case (.post, 3) where rest[0] == "sandboxes" && isSandboxName(rest[1]) && rest[2] == "terminal":

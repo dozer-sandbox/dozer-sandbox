@@ -94,7 +94,7 @@ those 3 s first (Claude Code's first network calls, for example, can otherwise f
 
 ```bash
 doz create NAME --image lab|claude-code|pi|<custom> \
-    [--cpus 2] [--memory 2G] [--workspace ~/code/proj] \
+    [--cpus 2] [--memory 2G] [--workspace ~/code/proj | --isolated] \
     [--network agent|bake|locked|open|nat|none] [--subnet CIDR]
 
 doz up NAME [same options] [--session S] [-d] [-- CMD …]
@@ -108,8 +108,12 @@ doz up NAME [same options] [--session S] [-d] [-- CMD …]
   image and settings it was created with. `up` defaults to the settings' `defaults.image`
   (`doz onboard` sets it; `lab` otherwise); `create` requires `--image`. With no NAME, in a
   project folder, `up` uses `doz_project.yaml`.
-- **Without `--workspace`**, `/workspace` is private to the VM — nothing is shared with the Mac.
-  That is allowed, and said: `create` notes it, and `ls` shows `none (private to the VM)`.
+- **`--workspace DIR`** is made when it does not exist (`mkdir -p`; `[doz] created ~/…`) — never an
+  existing file, a folder in the store, a system location, `/` or the home folder itself; a folder
+  doz made is removed again, while empty, if the create fails.
+- **Without `--workspace`** the sandbox is **isolated**: `/workspace` is private to the VM — nothing
+  on this Mac is shared. That is allowed, and said: `create` notes it, `ls` shows `isolated`
+  (`--json`: `"workspace": null, "isolated": true`); `--isolated` asks for it on purpose.
 
 ### Working inside
 
@@ -140,7 +144,7 @@ run as root always keeps them.
 
 At every session start the host tells the agent where it runs, from the sandbox's **current**
 facts: a short **facts block** — a Dozer Sandbox VM (not a container) on the user's Mac, its name
-and size, `/workspace` shared from the Mac folder *X* or **not shared**, the network (deny by
+and size, `/workspace` shared from the Mac folder *X* or **isolated** (no folder is shared with the Mac), the network (deny by
 default through the Mac's proxy; a refused host needs the user's rule), credentials (injected; never
 log in) — appended to the agent's system prompt (Claude Code's launcher passes
 `/run/dozer/agent-prompt.md` with `--append-system-prompt`; pi's session gets
@@ -271,14 +275,14 @@ doz template ls
 doz template rm TEMPLATE [--yes]
 doz create other --image TEMPLATE
 
-doz duplicate NAME NEW [--from-point P] [--workspace DIR] [--cpus N] [--memory M]
+doz duplicate NAME NEW [--from-point P] [--workspace DIR | --isolated] [--cpus N] [--memory M]
                        [--network agent|bake|locked|open|nat|none] [--account A] [--copy-state]
 ```
 
 A **template** is a sandbox's ROOT disk saved as an image: everything installed or written there
 (`/root`, `/etc`, `/usr`, `/opt`, caches) — **never its state disk** (the agent's logins and
 history). **Duplicate** makes a new sandbox from an existing one's disk (an APFS clone) with a new
-name and any of a new workspace (it must exist; doz never creates it), CPUs, memory, network or
+name and any of a new workspace (made when it does not exist) or `--isolated`, CPUs, memory, network or
 account; its state disk starts fresh unless `--copy-state`. Keys are not copied.
 
 ### The host
@@ -322,7 +326,10 @@ Images, Preparing, First sandbox, Done — the same steps as `doz onboard` (alwa
 **Doctor › Run onboarding again**). Preparing runs in the host: **Continue in the background** leaves
 it running, and **Operations** lists the host's image preparations whoever started them (the CLI
 too). A sandbox's page shows its environment prompt as the next session gets it, and whether
-`/workspace` is shared; New sandbox asks for a workspace folder or an explicit "No workspace".
+`/workspace` is shared (or the **isolated** badge). New sandbox, Duplicate and the wizard's First
+sandbox name the sandbox from its image (`claude-sandbox`, `-2` when taken) and offer **Shared
+folder** — `<defaults.projects_dir>/<name>` by default, made when missing, with **Choose…** opening
+the Mac's own folder picker — or **Isolated** (nothing on the Mac is shared).
 
 ### Settings
 

@@ -527,13 +527,23 @@ public actor HostCore {
 
     private func create(_ r: HostRequest) async throws -> SandboxInfo {
         guard let name = r.name else { throw HostError(.invalid, "which sandbox? (a name is required)") }
-        guard let o = r.create else { throw HostError(.invalid, "create needs --image") }
+        guard var o = r.create else { throw HostError(.invalid, "create needs --image") }
         guard managed[name] == nil, !creating.contains(name) else { throw HostError(.exists, "sandbox \(name) already exists") }
         guard !FileManager.default.fileExists(atPath: store.layout(name).sandboxDirectory.path) else {
             throw HostError(.exists, "\(store.layout(name).sandboxDirectory.path) already exists (not made by doz — remove it or pick another name)")
         }
+        if o.isolated == true, o.workspace != nil { throw HostError(.invalid, "isolated or a workspace — not both") }
         creating.insert(name)
         defer { creating.remove(name) }
+        // 594: a workspace that does not exist is made now (mkdir -p), before the VM is configured —
+        // and unmade (only what Dozer made, only while empty) if the create fails.
+        var prepared: Workspace.Prepared?
+        if let ws = o.workspace {
+            prepared = try Workspace.prepare(ws, store: store)
+            o.workspace = prepared?.path
+        }
+        var made = false
+        defer { if !made, let p = prepared { Workspace.undo(p) } }
         let (spec, image) = try DozerImages.spec(name: name, options: o, store: store)
         var cfg = SandboxConfig(name: name, image: image, spec: spec, workspace: spec.shares.first?.hostPath)
         // 588: a proxied sandbox follows the store's default account unless told otherwise.
@@ -564,8 +574,12 @@ public actor HostCore {
         let m = try adopt(cfg)
         metrics?.record(run: metricsRun, action: "create", sandbox: name, image: image, phaseAfter: "off", startedAt: Date(), durationMs: 0,
                         detail: ["network": cfg.networkName])
-        note(name, "created (\(image), \(spec.cpus) CPUs, \(spec.memoryMiB) MiB, network \(cfg.networkName))")
-        return await info(m, sessions: false)
+        made = true
+        note(name, "created (\(image), \(spec.cpus) CPUs, \(spec.memoryMiB) MiB, network \(cfg.networkName)"
+             + (prepared?.created == true ? ", workspace \(cfg.workspace ?? "") created" : cfg.workspace == nil ? ", isolated" : "") + ")")
+        var i = await info(m, sessions: false)
+        i.workspaceCreated = prepared?.created == true ? true : nil
+        return i
     }
 
     // MARK: lifecycle
@@ -1131,9 +1145,17 @@ public actor HostCore {
             guard (256...262_144).contains(mem) else { throw HostError(.invalid, "--memory is 256 MiB – 256 GiB") }
             spec.memoryMiB = mem
         }
+        if o.isolated == true, o.workspace != nil { throw HostError(.invalid, "isolated or a new workspace — not both") }
+        // 594: a new workspace that does not exist is made (and unmade if the duplicate fails).
+        var prepared: Workspace.Prepared?
+        var made = false
+        defer { if !made, let p = prepared { Workspace.undo(p) } }
         if let ws = o.workspace {
-            let path = try Self.validatedWorkspace(ws)
+            prepared = try Workspace.prepare(ws, store: store)
+            let path = prepared!.path
             spec.shares = spec.shares.filter { $0.guestPath != DozerImages.workspaceGuestPath } + [Share(hostPath: path, guestPath: DozerImages.workspaceGuestPath)]
+        } else if o.isolated == true {
+            spec.shares = spec.shares.filter { $0.guestPath != DozerImages.workspaceGuestPath }
         }
         if let net = o.network {
             let mode = try DozerImages.networkMode(net)
@@ -1187,23 +1209,12 @@ public actor HostCore {
         let nm = try adopt(cfg)
         metrics?.record(run: metricsRun, action: "duplicate", sandbox: newName, image: cfg.image, phaseAfter: "off", startedAt: Date(),
                         durationMs: ms(since: t0), detail: ["from": m.name, "point": r.point ?? "current disk", "state": o.copyState == true ? "copied" : "fresh"])
-        note(newName, "duplicated from \(m.name)\(r.point.map { " (restore point \($0))" } ?? "") — \(spec.cpus) CPUs, \(spec.memoryMiB) MiB, network \(cfg.networkName), state disk \(o.copyState == true ? "copied" : "fresh")")
-        return await info(nm, sessions: false)
-    }
-
-    /// A workspace the host will share: absolute (or ~), an existing directory this user can read
-    /// and enter. Never created.
-    static func validatedWorkspace(_ raw: String) throws -> String {
-        let expanded = (raw as NSString).expandingTildeInPath
-        guard expanded.hasPrefix("/") else { throw HostError(.invalid, "the workspace is an absolute path (or ~/…)") }
-        let path = URL(fileURLWithPath: expanded).standardizedFileURL.path
-        var isDir: ObjCBool = false
-        guard FileManager.default.fileExists(atPath: path, isDirectory: &isDir) else {
-            throw HostError(.notFound, "the workspace \(path) does not exist — doz never creates one; make it first")
-        }
-        guard isDir.boolValue else { throw HostError(.invalid, "the workspace \(path) is not a directory") }
-        guard access(path, R_OK | X_OK) == 0 else { throw HostError(.invalid, "the workspace \(path) is not readable by you") }
-        return path
+        made = true
+        note(newName, "duplicated from \(m.name)\(r.point.map { " (restore point \($0))" } ?? "") — \(spec.cpus) CPUs, \(spec.memoryMiB) MiB, network \(cfg.networkName), state disk \(o.copyState == true ? "copied" : "fresh")"
+             + (prepared?.created == true ? ", workspace \(prepared!.path) created" : cfg.workspace == nil ? ", isolated" : ""))
+        var i = await info(nm, sessions: false)
+        i.workspaceCreated = prepared?.created == true ? true : nil
+        return i
     }
 
     // MARK: images
