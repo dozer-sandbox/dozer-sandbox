@@ -901,6 +901,12 @@ Task {
             try await claudeSuite()
         case "templates":
             try await templatesSuite()
+        case "pullbench":
+            try await pullBench()
+        case "cli-onboarding":
+            // 594: only the onboarding part of `cli` (its stores are its own).
+            let binary = args.firstIndex(of: "--doz").flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil } ?? ".build/debug/doz"
+            await cliOnboardingSuite(binary: URL(fileURLWithPath: binary).standardizedFileURL.path)
         case "lifecycle":
             try await lifecycleSuite()
         case "crash":
