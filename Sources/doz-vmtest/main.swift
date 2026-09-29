@@ -713,7 +713,15 @@ func restorePointSuite() async throws {
     try await sb.start()
     let fl = await fsckLog.value
     let a2 = try await has("A"), b2 = try await has("B"), c2 = try await has("C")
-    check(fl.contains { $0.hasPrefix("e2fsck rootfs.ext4") }, "the first boot from the running-taken point ran e2fsck (\(fl.first { $0.hasPrefix("fsck rootfs") } ?? "no report"))")
+    // 587 (ca4b86a): a restore point of a JOURNALED disk needs no e2fsck — the kernel replays the
+    // journal on mount; only a journal-less one (`journalMiB: nil`) is checked first. This check
+    // still expected e2fsck for every running-taken point, and failed since 587; 592 aligns it.
+    if rp2.journaled == true {
+        check(!rp2.needsFsck && !fl.contains { $0.hasPrefix("e2fsck rootfs.ext4") } && bootLogExt4Errors(sb).isEmpty,
+              "the first boot from the running-taken point of a journaled disk needed no e2fsck, and the kernel reported no ext4 errors")
+    } else {
+        check(fl.contains { $0.hasPrefix("e2fsck rootfs.ext4") }, "the first boot from the running-taken point ran e2fsck (\(fl.first { $0.hasPrefix("fsck rootfs") } ?? "no report"))")
+    }
     check(a2 && b2 && !c2, "after revert to has-A-B: A and B are there, C is not")
     try await sb.shutDown()
 
