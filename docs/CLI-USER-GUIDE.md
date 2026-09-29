@@ -245,7 +245,7 @@ cannot allow doesn't even resolve. Current limits: IPv4 only, HTTP/1.1 on the ho
 the proxy decrypts, UDP refused (clients fall back to TCP), and no port forwards from the Mac into
 a sandbox yet.
 
-## Restore points and custom images
+## Restore points, templates and duplicates
 
 Restore points are instant, disk-only copies (APFS clones). They cover the disks, not memory.
 
@@ -255,17 +255,61 @@ doz point ls NAME
 doz point revert NAME POINT                 # shuts down; a "before revert" point is taken first
 doz point fork NAME POINT NEWNAME           # a new sandbox from that point (cold-boots on start)
 doz point rm NAME POINT
-doz point save-image NAME [POINT] --as myimage [--note …]    # a custom image
+doz point save-image NAME [POINT] --as myimage [--note …]    # a custom image (a template)
 doz up other --image myimage
 ```
 
 ```bash
-doz image ls                   # built-in and custom images, and whether each is baked here
+doz image ls                   # built-in images and templates, and whether each is baked here
+doz image ls --tree            # the lineage, with each disk's size, shared bytes and own bytes
 doz image bake claude-code     # bake now rather than at the first start (minutes, needs network)
 doz image rm NAME              # sandboxes already made from it keep working
 ```
 
 `image pull` / `push` are not built yet (exit 7).
+
+`doz image ls --tree` draws the lineage — OCI base → baked image → template → the sandboxes on
+each — with each disk's size, the bytes it shares with its parent (APFS clones: counted once on
+disk) and its own bytes (what removing it frees):
+
+```
+IMAGE / SANDBOX   KIND      SIZE    SHARED  OWN
+alpine-3.20       prepared  34 MiB  —       116 KiB  prepared disk e998d5b4deb3
+├─ tpl-a          template  36 MiB  33 MiB  160 KiB  from alpha
+├─ alpha          sandbox   36 MiB  33 MiB  0 B
+└─ beta           sandbox   34 MiB  34 MiB  224 KiB
+```
+
+### Templates
+
+A **template** is a sandbox's root disk saved as an image other sandboxes are created from:
+
+```bash
+doz template create alpha --as node-tools --note "node 22 + pnpm"   # now (a live sandbox pauses for ms)
+doz template create alpha --from-point before-upgrade --as base-2   # or from a restore point
+doz template ls
+doz create beta --image node-tools
+doz template rm node-tools
+```
+
+- **Everything on the ROOT disk is in it**: what you installed or wrote in `/root`, `/etc`, `/usr`,
+  `/opt`, caches. Don't save a secret you put there.
+- **The state disk is never in it.** An agent image keeps the agent's state (`~/.claude`,
+  `~/.pi/agent`: logins, history, tokens) on a separate state disk; a template never includes it, so a
+  template can be shared. A sandbox created from a template starts with a fresh state disk.
+
+### Duplicating a sandbox
+
+```bash
+doz duplicate alpha alpha-2 --workspace ~/code/other-project --cpus 4 --memory 4G
+doz duplicate alpha alpha-3 --from-point before-upgrade --network locked
+doz duplicate agent agent-2 --copy-state      # its logins and history too
+```
+
+A new sandbox from an existing one's disk (an instant APFS clone), off until you start it. Anything
+not given is the source's (its network policy included). The workspace must exist — doz never
+creates one. The state disk starts **fresh** unless `--copy-state`. Keys (`doz key set`) are not
+copied; the account follows `--account`, or the source's.
 
 ## The host
 
@@ -323,22 +367,60 @@ It shows every sandbox (phase, RAM held, disk, sessions, network, account), each
 sessions, restore points, network policy and connection log, keys and their state, the images,
 the Claude accounts, the metrics, `doz doctor`, and the host's activity as it happens.
 
+**The navigation.** **Sandboxes** opens the table of every sandbox; under it, each sandbox has its
+own entry (its name and a dot in its phase's colour) that opens **its page**:
+
+- a **control bar** across the top — its name, phase, image, RAM held, network (and denied
+  connections), account; the lifecycle buttons; Open in Terminal, New shell, Terminal… (attach,
+  watch, or a command), Split; Duplicate…, Save as template…; and Details;
+- its **terminals**, filling the page — tabs, the split, the boot view, the covers. Arriving at a
+  running sandbox whose own session runs attaches to it; otherwise the area offers Start, Open, and
+  the running sessions. The address names the session shown (`#/sandbox/NAME/SESSION`);
+- a **details** panel beside them (below, in a narrow window): sessions, restore points, the
+  network policy and connection log, keys and account, configuration. **Details** hides it; the
+  choice is the setting `ui.details_open`.
+
 What you can do from it:
 
 | Page | Actions |
 |---|---|
-| **Sandboxes** | New sandbox (image, network, account, CPUs, memory, workspace folder). Per sandbox: start, pause, resume, sleep, deep sleep, wake, shut down, reset, remove. |
-| **A sandbox** | Open in Terminal (Terminal.app attaches to a session); open the image's session, or run a command in a new detached session; take a restore point, and revert, fork, save as an image or delete one; edit the network policy, with a preview of exactly what changes; set the key policy and the account; remove a key. |
-| **Images** | Bake a built-in image; remove one. |
+| **Sandboxes** | New sandbox (image or template, network, account, CPUs, memory, workspace folder). Per sandbox: start, pause, resume, sleep, deep sleep, wake, shut down, reset, remove. |
+| **A sandbox** | The lifecycle; browser terminals; Open in Terminal; run a command in a new detached session; take a restore point, and revert, fork, save as a template, duplicate or delete one; **Duplicate…** and **Save as template…** (below); edit the network policy, with a preview of exactly what changes; set the key policy and the account; remove a key. |
+| **All sessions** | A live, read-only view of every session of every running sandbox (below). |
+| **Images** | Bake a built-in image; remove an image or a template. **Lineage** shows the tree. |
+| **Operations** | Every action this UI started, newest first, with its live progress, how long it took and its result; filter by sandbox. |
 | **Accounts & keys** | Make an account the default; verify one; remove one; keep-alive on or off. |
 | **Metrics** | Filter by image, time and steps; download the rows as CSV. |
 
 Reset, remove, revert and every delete ask you to **type the name** first. Shut down keeps the
 disk, so it asks with a plain confirmation; "don't ask again" sets the setting
 `ui.confirm_shutdown = false` (the **Settings** page turns it back on). An
-operation's progress shows in the sandbox's row and in the Operations list while it runs (the
+operation's progress shows in the sandbox's row and in its control bar while it runs (the
 host's latest step and the seconds so far — a first start in a store downloads and bakes its image
-and can take two minutes), and the page updates when it ends. The session buttons wait until the
+and can take two minutes), and the page updates when it ends. **Operations** in the navigation
+shows how many run (with a spinner) and a red dot when one failed since you last looked (a failure
+also shows a message).
+
+**All sessions** is a grid: a tile per session of every running sandbox, each a live, read-only
+view (a watch — nothing reaches the session, and it never resizes it), named sandbox · session. A
+sandbox that is not running is one tile with its state and one button (Wake, Resume or Start); it
+holds no connection, so the grid never keeps the host running for it. Click a tile to open that
+session on its sandbox's page. Filter by sandbox and phase; pick a tile size (`ui.grid_tile_size`).
+Each live tile is a terminal engine and a connection, so only the tiles **on screen** are live, and
+at most `ui.grid_live_tiles` (8) at once — the others say "Not live" and how many are. The list of
+sessions is read when you open the page, on Refresh, and at most every 10 seconds as sandboxes
+change.
+
+**Images › Lineage** draws the tree — OCI base → image → template → the sandboxes on each — with
+each disk's size, what it shares with its parent and its own bytes, the same as `doz image ls
+--tree`. It is measured when you open it (Refresh measures again).
+
+**Save as template…** saves the sandbox's root disk (now — a running sandbox pauses for
+milliseconds — or a restore point's) as a template: everything installed or written on the root
+disk, **never the state disk** (the agent's logins and history). **Duplicate…** makes a new
+sandbox from its disk with a new name, workspace, CPUs, memory, network or account; the state disk
+starts fresh unless you tick "Copy the agent's state disk too". Both are `doz template create` and
+`doz duplicate`. The session buttons wait until the
 sandbox can take a session, and clicking an action again while it runs does nothing more (it is
 already under way). The list has no session count, since counting asks every session inside the
 guest; each sandbox's page lists its sessions.
@@ -346,19 +428,19 @@ guest; each sandbox's page lists its sessions.
 One thing is CLI-only on purpose: **a secret is never typed into the browser**. Add an account
 (`doz account add`) or set a key (`doz key set`) in a terminal; the page shows the command.
 
-**Terminals in the browser** (the **Terminals** page). **Open here** on a sandbox's page attaches
-to its own session (starting it if needed); each session row has **Open** and **Watch**; **New
-terminal…** attaches to any session or starts a new one running a command. Terminals are tabs, and
+**Terminals in the browser** (on each sandbox's page). **Open** in the empty terminal area attaches
+to its own session (starting it if needed); each session row has **Open** and **Watch**;
+**Terminal…** attaches to any session or starts a new one running a command. Terminals are tabs, and
 **Split** shows two side by side (⇄ moves a tab to the other side). Closing a tab only closes the
 view — the session keeps running, as Ctrl-] does in `doz attach`.
 
 - **Watch** is read-only: nothing you type reaches the session, and it never resizes it.
-- **Watch it boot.** **Start** (or **Open here** on a shut-down sandbox) opens a terminal that shows
+- **Watch it boot.** **Start** opens a terminal on the sandbox's page that shows
   the start as it happens — doz's timed steps (on a first start, the download and the bake) and
   the kernel's boot console — and then becomes the image's own session in the same pane, with the
   boot log kept in the scrollback. `doz console NAME [--follow]` shows the same console in a
   terminal. Turn it off with the setting `ui.boot_view_on_start = false`: Start then just starts.
-- **A new terminal is a new shell.** **New terminal…** and **Split** start a new shell session
+- **A new terminal is a new shell.** **New shell**, **Terminal…** and **Split** start a new shell session
   (`shell-2`, `shell-3`, …); attaching to or watching a session that already runs is a choice in the
   New terminal dialog. Two tabs on one session are marked "shared with tab N".
 - **A sleeping sandbox.** When the sandbox is paused, asleep, in deep sleep or shut down, the
@@ -425,7 +507,7 @@ the others say when they apply (the next sandbox created, the next session, or a
 
 | Section | Settings |
 |---|---|
-| `[ui]` | `boot_view_on_start` (true), `confirm_shutdown` (true), `split_default` (`shell` · `watch` · `attach` · `dialog`), `terminals` (true), `terminal_font_size` (13), `theme` (`auto` · `light` · `dark`) |
+| `[ui]` | `boot_view_on_start` (true), `confirm_shutdown` (true), `split_default` (`shell` · `watch` · `attach` · `dialog`), `terminals` (true), `terminal_font_size` (13), `theme` (`auto` · `light` · `dark`), `details_open` (true), `grid_live_tiles` (8, 1–12), `grid_tile_size` (`small` · `medium` · `large`) |
 | `[host]` | `idle_timeout_minutes` (5; `$DOZ_HOST_IDLE`), `keepalive` (false — for a store that has not chosen with `doz account keepalive`) |
 | `[store]` | `path` (`--store`, `$DOZ_STORE`) |
 | `[claude]` | `permissions` (`skip` · `ask`) — Claude Code's own prompts in a claude-code sandbox; `-e DOZ_CLAUDE_PERMISSIONS=…` on `run`/`exec` still wins |

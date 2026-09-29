@@ -167,15 +167,35 @@ doz point ls NAME
 doz point revert NAME POINT                 # shuts down; a "before revert" point is taken first
 doz point fork NAME POINT NEWNAME           # a new sandbox from that point (cold-boots on start)
 doz point rm NAME POINT
-doz point save-image NAME [POINT] --as myimage [--note …]    # a custom image
+doz point save-image NAME [POINT] --as myimage [--note …]    # a custom image (a template)
 doz up other --image myimage
 
-doz image ls                   # built-in and custom images, and whether each is baked here
+doz image ls                   # built-in images and templates, and whether each is baked here
+doz image ls --tree            # the lineage: OCI base → image → template → sandboxes, with sizes
 doz image bake claude-code     # bake now rather than at the first start (minutes, needs network)
 doz image rm NAME              # sandboxes already made from it keep working
 ```
 
-`image pull` / `push` answer "not yet" (exit 7).
+`image pull` / `push` answer "not yet" (exit 7). `image ls --tree` shows each disk's size, the
+bytes it shares with its parent (APFS clones) and its own (what removing it frees).
+
+### Templates and duplicates
+
+```bash
+doz template create NAME [--from-point P] --as TEMPLATE [--note …]   # the root disk, now (a live sandbox pauses for ms) or a point's
+doz template ls
+doz template rm TEMPLATE [--yes]
+doz create other --image TEMPLATE
+
+doz duplicate NAME NEW [--from-point P] [--workspace DIR] [--cpus N] [--memory M]
+                       [--network agent|bake|locked|open|nat|none] [--account A] [--copy-state]
+```
+
+A **template** is a sandbox's ROOT disk saved as an image: everything installed or written there
+(`/root`, `/etc`, `/usr`, `/opt`, caches) — **never its state disk** (the agent's logins and
+history). **Duplicate** makes a new sandbox from an existing one's disk (an APFS clone) with a new
+name and any of a new workspace (it must exist; doz never creates it), CPUs, memory, network or
+account; its state disk starts fresh unless `--copy-state`. Keys are not copied.
 
 ### The host
 
@@ -200,7 +220,10 @@ doz ui link [--store DIR]                             # a fresh one-use sign-in 
 ```
 
 A browser dashboard for sandboxes, images, accounts, metrics, activity and doctor, with the
-lifecycle and every other action. It listens on `127.0.0.1` only. Each link works once and is
+lifecycle and every other action. Each sandbox has its own page (a child of Sandboxes in the
+navigation): a control bar, its terminals filling the page, and a details panel. **All sessions**
+is a grid of live, read-only views of every session; **Images** has a Lineage view; **Operations**
+lists what the UI asked the host to do. It listens on `127.0.0.1` only. Each link works once and is
 exchanged for a strict session cookie; `Host` and `Origin` are checked exactly. Secrets are never
 entered in the browser: add keys and accounts with the CLI. **Open in Terminal** runs
 `doz attach` in your default terminal app. The UI is a client of the host, like any other
