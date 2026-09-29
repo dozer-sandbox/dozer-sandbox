@@ -288,6 +288,31 @@ final class WebHTTPIntegrationTests: XCTestCase {
         XCTAssertEqual(form.status, 415)
     }
 
+    /// 593: the Boot log — session-only GETs; one boot rendered as inert terminal text (no guest escape).
+    func testTheBootLogIsASessionOnlyRenderedRead() async throws {
+        try await start()
+        XCTAssertEqual(try get("/api/v1/sandboxes/demo/boots").status, 401)
+        let (cookie, csrf) = try signIn()
+        let l = try get("/api/v1/sandboxes/demo/boots", ["Cookie": cookie])
+        XCTAssertEqual(l.status, 200, l.text)
+        let list = try WebJSON.decoder.decode(WebBootList.self, from: l.body)
+        XCTAssertEqual(list.boots.map(\.number), [1, 2])
+        XCTAssertEqual(list.boots.first?.result, "failed")
+        XCTAssertFalse(l.text.contains("b-1800"), "no internal id")
+        let one = try WebJSON.decoder.decode(WebBootLog.self, from: try get("/api/v1/sandboxes/demo/boots/2", ["Cookie": cookie]).body)
+        let text = String(decoding: Data(base64Encoded: one.vt) ?? Data(), as: UTF8.self)
+        XCTAssertTrue(text.contains("cold boot of demo") && text.contains("VM created and booted") && text.contains("random: crng init done"), text)
+        XCTAssertTrue(text.contains("evil ]52;c;eA==line"), "the console's escape is made inert: \(text.debugDescription)")
+        XCTAssertFalse(text.contains("\u{1B}]52"), "no OSC reaches the terminal")
+        XCTAssertEqual(try get("/api/v1/sandboxes/demo/boots/3", ["Cookie": cookie]).status, 404)
+        for p in ["/api/v1/sandboxes/demo/boots/0", "/api/v1/sandboxes/demo/boots/01", "/api/v1/sandboxes/demo/boots/100",
+                  "/api/v1/sandboxes/demo/boots/-1", "/api/v1/sandboxes/demo/boots/x", "/api/v1/sandboxes/demo/boots/1/raw"] {
+            XCTAssertEqual(try get(p, ["Cookie": cookie]).status, 404, p)
+        }
+        XCTAssertEqual(try get("/api/v1/sandboxes/demo/boots", ["Cookie": cookie, "Origin": origin, "X-Doz-CSRF": csrf,
+                                                                 "Content-Type": "application/json"], method: "POST", body: "{}").status, 404, "reading only")
+    }
+
     // MARK: server-sent events
 
     func testTheStreamSaysHelloThenChangedAndActivity() async throws {
@@ -520,6 +545,22 @@ final class FakeData: DozerWebData, @unchecked Sendable {
         l.updatedAt = Date()
         lock.withLock { _layout = l; layoutWrites += 1 }
         return WebTerminalLayout(l)
+    }
+
+    // 593 — boot logs: two boots of demo (the latest failed).
+    static let boots = [BootLogInfo(id: "b-1800000000500", number: 1, kind: "wake", startedAt: Date(timeIntervalSince1970: 1_800_000_000.5),
+                                    milliseconds: 310, result: "failed", error: "the snapshot is gone"),
+                        BootLogInfo(id: "b-1800000000000", number: 2, kind: "cold boot", startedAt: Date(timeIntervalSince1970: 1_800_000_000),
+                                    milliseconds: 460, result: "ok")]
+    func bootLogs(_ name: String) async throws -> WebBootList {
+        guard name == "demo" else { throw HostError(.notFound, "no sandbox \(name)") }
+        return WebBootList(BootLogList(name: name, boots: Self.boots))
+    }
+    func bootLog(_ name: String, number: Int) async throws -> WebBootLog {
+        guard name == "demo", (1...2).contains(number) else { throw HostError(.notFound, "no boot \(number) of \(name)") }
+        let step = HostEvent(kind: .step, sandbox: "demo", text: "VM created and booted", milliseconds: 246)
+        return WebBootLog(BootLogRecord(name: name, info: Self.boots[number - 1], events: [step],
+                                        console: ["[    0.07] random: crng init done", "evil \u{1B}]52;c;eA==\u{07}line"]))
     }
 
     func policyPreview(_ name: String, _ edit: WebPolicyEdit) async throws -> WebPolicyPreview {

@@ -1203,6 +1203,7 @@ function sandboxParts(name, d, net, accounts) {
         btn('Duplicate…', () => duplicateDialog(name, d, accounts, null), { small: true, title: 'A new sandbox from this one’s disk: a new workspace, CPUs, memory, network, account' })),
       ((b) => { if (busy || !d.hasRootDisk) { b.disabled = true; b.title = d.hasRootDisk ? 'Wait until it settles' : 'It has no disk yet — start it once'; } return b; })(
         btn('Save as template…', () => templateDialog(name, d, null), { small: true, title: 'Its root disk becomes an image other sandboxes are created from (never its state disk)' })),
+      btn('Boot log', () => bootLogDialog(name), { small: true, icon: 'history', title: 'Its last boots — the steps and the kernel console, as the boot view showed them (any phase)' }),
       btn(detailsOpen ? 'Hide details' : 'Details', () => {
         const open = !setting('ui.details_open', true);
         $('sbx-body').classList.toggle('details-closed', !open);
@@ -1863,6 +1864,7 @@ function paintCover(t) {
   const e = t.els;
   let kind = 'none', headline = '', detail = '', action = null, spinner = false, glyphKey = null;
   if (t.errorText) { kind = 'error'; headline = 'This terminal could not open'; detail = t.errorText; }
+  else if (t.bootlog) { kind = t.savedShown ? 'none' : 'reattaching'; headline = 'Loading…'; spinner = !t.savedShown; }
   else if (t.saved) { ({ headline, detail, action, glyphKey } = savedCover(t)); kind = 'saved'; }
   // A boot view asked for by Start: "Starting…" from its first paint until the host's steps take over
   // (never the shut-down cover the sandbox had a moment before the start reached the host).
@@ -1964,14 +1966,15 @@ function savedKey(t) {
 async function loadSavedScreen(t) {
   let s;
   try {
-    s = await api('sandboxes/' + t.sandbox + '/sessions/' + t.session + '/screen');
+    // 593: a Boot log terminal draws a kept boot (rendered by the host's boot-view renderer) the same way.
+    s = await api(t.bootlog ? 'sandboxes/' + t.sandbox + '/boots/' + t.bootlog : 'sandboxes/' + t.sandbox + '/sessions/' + t.session + '/screen');
   } catch (e) {
-    t.errorText = e.status === 404 ? 'no saved screen of ' + t.session : e.message || String(e);
+    t.errorText = e.status === 404 ? (t.bootlog ? 'that boot is no longer kept' : 'no saved screen of ' + t.session) : e.message || String(e);
     paintCover(t);
     return;
   }
   if (t.closed || !t.saved) return;
-  t.saved = { ...t.saved, savedAt: s.savedAt, reason: s.reason };
+  if (!t.bootlog) t.saved = { ...t.saved, savedAt: s.savedAt, reason: s.reason };
   const bin = atob(s.vt);
   const bytes = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
@@ -1979,11 +1982,60 @@ async function loadSavedScreen(t) {
     const chunk = bytes.slice(i, i + (1 << 20)).buffer;
     toFrame(t, { t: 'write', data: chunk }, [chunk]);
   }
+  if (t.bootlog) toFrame(t, { t: 'top' });            // a Boot log opens at its steps
   t.savedShown = true;
-  if (t.els.wrap) t.els.wrap.dataset.saved = s.reason;
+  if (t.els.wrap) t.els.wrap.dataset.saved = t.bootlog ? 'boot' : s.reason;
   paintCover(t);
   paintTabs();
 }
+// ── the Boot log (593 — owner: "where is the bootup terminal output stored so i can look at it after the
+// machine has booted"): the host keeps the last host.boot_logs_kept boots of each sandbox; this draws one
+// EXACTLY as the boot view did (the host renders it with the boot view's own renderer), read-only and
+// selectable in the terminal frame's saved mode. A picker switches boots; the latest opens first (a
+// failed one is marked ✕). Any phase — it reads files; nothing is woken.
+function bootLabel(b) {
+  const took = b.milliseconds ? ms(b.milliseconds) : '…';
+  const res = b.result === 'failed' ? '✕ failed' : b.result === 'ok' ? '✓' : 'booting…';
+  return '#' + b.number + ' · ' + new Date(b.startedAt).toLocaleString() + ' · ' + b.kind + ' · ' + took + ' · ' + res;
+}
+async function bootLogDialog(name) {
+  let boots;
+  try { boots = (await api('sandboxes/' + name + '/boots')).boots; } catch (e) { toast(e.message || String(e), true); return; }
+  const d = h('dialog', { class: 'dlg bootlog-dialog', 'data-sandbox': name });
+  const picker = h('select', { 'aria-label': 'Which boot', class: 'bootlog-picker' },
+    boots.map((b) => h('option', { value: String(b.number), 'data-result': b.result }, bootLabel(b))));
+  const area = h('div', { class: 'bootlog-area' });
+  const why = h('div', { class: 'bootlog-error', role: 'status' });
+  const close = h('button', { type: 'button', class: 'btn' }, withIcon('x', 'Close'));
+  d.append(h('div', { class: 'bootlog-head' }, h('h2', null, 'Boot log — ' + name), picker, close),
+    h('p', { class: 'sub' }, 'Each start and wake of ' + name + ': Dozer’s steps as the boot view showed them, then the kernel console. The last '
+      + setting('host.boot_logs_kept', 5) + ' are kept (Settings › host.boot_logs_kept); doz console ' + name + ' --list shows them too.'),
+    why, area);
+  let term = null;
+  const show = (n) => {
+    if (term) closeTerminal(term.id);
+    const b = boots.find((x) => x.number === n);
+    why.textContent = b && b.result === 'failed' ? '✕ This boot failed' + (b.error ? ': ' + b.error : '') : '';
+    why.hidden = !why.textContent;
+    const t = newTerm(name, null, 'watch');
+    t.grid = true;                                      // not a tab of the page
+    t.bootlog = n;
+    t.saved = { reason: 'boot' };
+    paintCover(t);
+    area.replaceChildren(t.els.wrap);
+    bootTerm(t, setting('ui.terminal_font_size', 13));
+    term = t;
+    d.dataset.boot = String(n);
+  };
+  picker.addEventListener('change', () => show(Number(picker.value)));
+  close.addEventListener('click', () => d.close());
+  d.addEventListener('close', () => { if (term) closeTerminal(term.id); d.remove(); });
+  document.body.append(d);
+  d.showModal();
+  if (boots.length) show(1);
+  else area.replaceChildren(h('div', { class: 'empty' }, 'No boot of ' + name + ' is kept yet — one is recorded each time it starts or wakes.'));
+}
+
 /// The sandbox runs again: this saved pane becomes its session's live terminal, in place — the saved
 /// screen is cleared and the attach's SNAPSHOT draws the live one.
 function goLive(t) {
@@ -2012,7 +2064,7 @@ function promoteSaved(name, live) {
   // The plain off state is one area, not an empty split.
   if (gone && !pageTerminals(name).some((t) => t.bootIntent)) { const v = sview(name); v.split = false; v.focusedPane = 0; }
   for (const t of [...terminals.values()]) {
-    if (t.sandbox !== name) continue;
+    if (t.sandbox !== name || t.bootlog) continue;       // a Boot log terminal is never a session's
     if (gone && !t.bootIntent) { if (t.grid) continue; closeTerminal(t.id); continue; }
     if (!t.saved) continue;
     if (running && live) {

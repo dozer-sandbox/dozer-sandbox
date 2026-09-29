@@ -276,8 +276,9 @@ public enum SavedScreens {
         chmod(d.path, 0o700)
     }
 
-    /// Atomically, 0600 from the first byte (the temporary file is created 0600, then renamed).
-    static func writePrivate(_ data: Data, to url: URL) throws {
+    /// Atomically, 0600 from the first byte (the temporary file is created 0600, then renamed). (Also
+    /// the host's boot logs.)
+    public static func writePrivate(_ data: Data, to url: URL) throws {
         let tmp = url.deletingLastPathComponent().appendingPathComponent(".\(url.lastPathComponent).\(getpid()).\(UInt32.random(in: 0...UInt32.max)).tmp")
         let fd = open(tmp.path, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0o600)
         guard fd >= 0 else { throw CocoaError(.fileWriteUnknown, userInfo: [NSFilePathErrorKey: tmp.path]) }

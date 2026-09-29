@@ -539,10 +539,18 @@ struct HostStatusCommand: AsyncParsableCommand {
 /// UI's boot view reads the same stream (the UI never gets an operation the CLI lacks).
 struct Console: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
-        abstract: "Show a sandbox's boot console (the kernel and init); --follow keeps printing it as it boots (Ctrl-C stops).")
+        abstract: "Show a sandbox's boot console (the kernel and init); --follow keeps printing it as it boots (Ctrl-C stops).",
+        discussion: """
+            The last host.boot_logs_kept (5) boots of each sandbox are kept — each cold boot, wake and restore \
+            after a crash: its steps (as the boot view showed them) and its kernel console. --list shows them; \
+            --boot N picks one (1 = the latest); --steps puts its steps before its console.
+            """)
     @OptionGroup var g: GlobalOptions
     @Argument(help: "The sandbox.") var name: String
     @Flag(name: [.short, .long], help: "Keep printing new lines (across a restart) until Ctrl-C.") var follow = false
+    @Flag(name: .long, help: "Show the boot's steps (Dozer's, as the boot view drew them) before its console.") var steps = false
+    @Option(name: .long, help: "Which kept boot: 1 = the latest (default), 2 = the one before, …") var boot: Int?
+    @Flag(name: .long, help: "List the kept boots: when, what (cold boot, wake, restore after crash), how long, how it went.") var list = false
 
     /// The console is written by the guest: its control characters never reach this terminal.
     static func printable(_ s: String) -> String {
@@ -552,6 +560,11 @@ struct Console: AsyncParsableCommand {
     }
 
     func run() async throws {
+        if list || steps || boot != nil {
+            guard !follow else { throw fail(HostError(.invalid, "--follow shows the console as it is written: not with --list, --steps or --boot"), g, code: DozerExit.usage) }
+            try await showBoots()
+            return
+        }
         guard follow else {
             var r = HostRequest(.console, name: name)
             r.follow = false
@@ -569,6 +582,32 @@ struct Console: AsyncParsableCommand {
             guard let e = m.event, e.kind == .console else { continue }
             if g.json { Out.jsonLine(e) } else { Out.stdout(Self.printable(e.text ?? "") + "\n") }
         }
+    }
+
+    /// 593: the kept boots — `--list`, or one boot (`--boot N`, 1 = the latest) with `--steps`.
+    private func showBoots() async throws {
+        var r = HostRequest(.bootLog, name: name)
+        if list {
+            r.list = true
+            let l = try decode(try await query(r, g), BootLogList.self, g)
+            if g.json { Out.json(l); return }
+            if l.boots.isEmpty { Out.stdout("no boot of \(name) is kept yet — one is recorded each time it starts or wakes\n"); return }
+            var t = [["#", "STARTED", "KIND", "TOOK", "RESULT"]]
+            for b in l.boots {
+                let result = b.result == "failed" ? "✗ failed" + (b.error.map { " — " + String($0.prefix(80)) } ?? "") : b.result == "ok" ? "✓" : "… booting"
+                t.append([String(b.number ?? 0), b.startedAt.formatted(date: .abbreviated, time: .standard), b.kind,
+                          b.milliseconds.map { ProgressFormat.duration($0 / 1000) } ?? "—", result])
+            }
+            Out.stdout(Out.table(t))
+            return
+        }
+        r.boot = boot ?? 1
+        let rec = try decode(try await query(r, g), BootLogRecord.self, g)
+        if g.json { Out.json(rec); return }
+        let tty = isatty(STDOUT_FILENO) != 0
+        let color = tty && ProcessInfo.processInfo.environment["NO_COLOR"] == nil
+        let text = BootLogs.render(rec, mode: tty ? .animated : .plain, color: color, steps: steps, console: true)
+        Out.stdout(text.replacingOccurrences(of: "\r\n", with: "\n"))
     }
 }
 

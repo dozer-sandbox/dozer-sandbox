@@ -74,6 +74,7 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
 | `Sources/DozerHost/Settings.swift`, `TOML.swift`; `Sources/DozerCLI/ConfigCommands.swift`; `Sources/DozerWeb/WebSettings.swift` | 591 settings: the CLOSED schema (`DozerSettings.schema`), `${XDG_CONFIG_HOME:-~/.config}/dozer-sandbox/doz.toml` generated from it, our own strict TOML subset (no dependency), precedence flag > env > file > default with a source per value; `doz config`; the UI's Settings page route (`GET`/`POST /api/v1/settings`) |
 | `Sources/DozerHost/ImageTree.swift`; `Sources/DozerCLI/TemplateCommands.swift`; `Sources/doz-vmtest/TemplatesSuite.swift` | 593: the lineage (`image-tree`, built from `DiskAccounting`; `doz image ls --tree`, Images › Lineage); templates (`template-create`) and `duplicate` (`Sandbox.duplicate`); `make test-vm-templates` |
 | `Sources/DozerKit/SavedScreens.swift`; `Sources/DozerHost/TerminalLayout.swift`; `Sources/DozerWeb/WebSessionMemory.swift` | 593 §9: the sessions' saved screens (`<sandbox>/screens/NAME.{vt,txt,json}`; the capture is `Sandbox.captureScreensLocked`, the `.captureScreens` step); the web UI's terminal layout kept by the host (`terminal-layout.json`); their web projections and the layout's strict decoder |
+| `Sources/DozerHost/BootLogs.swift`; `Sources/DozerWeb/WebBootLogs.swift` | 593: each sandbox's kept boots (`<sandbox>/boots/`), the recorder, the one renderer; the web's Boot log projections |
 | `Tests/DozerWebTests/` | 590: the security rules one by one, and a real listener driven with raw HTTP |
 | `Tests/DozerKitTests/` | Unit tests — no VM |
 
@@ -439,6 +440,24 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   session; a running one is reached through its pane, the empty area's "Open NAME" or Details ›
   Sessions. Split's watch/attach kinds stay: they name the left pane's session explicitly.
 
+### Boot logs (593, owner 2026-09-30 — "where is the bootup terminal output stored…")
+
+- **Every boot is kept** — each Start (`cold boot`), wake (`wake`, also a wake on use) and restore after
+  a crash — by the HOST (`BootRecorder` from `beginBoot` to `endBoot` around the library call in
+  `HostCore`): the sandbox's own host events of that boot (exactly what the boot view draws; never a
+  connection record or a console line), that boot's part of `bootlog.log` (from its size at the start
+  of a wake; all of it for a cold boot, which starts the file afresh), and `BootLogInfo` (started, kind,
+  duration, result, failure). `<sandbox>/boots/b-<epoch ms>/{boot.json,events.jsonl,console.log}`,
+  0700/0600, written atomically (a temporary directory renamed), never into a removed sandbox; the
+  newest `host.boot_logs_kept` (5) are kept. Kept across reset, gone with `rm`, never copied by
+  duplicate/fork/templates. Recording never fails a boot.
+- **One renderer**: `BootLogs.render` replays the events through `ProgressBoard` +
+  `ProgressTerminal.format` — the boot view's finished lines (✓/✗ with times) — then the console made
+  inert (every control character removed). The CLI (`doz console --steps`, plain off a terminal) and
+  the web's Boot log (`GET …/boots`, `GET …/boots/N`, rendered on the server, drawn in the frame's saved
+  mode — read-only, no socket, any phase) use it. `boot-log` is a read-only host op (in-process when no
+  host runs; the host adds the boot under way as number 1).
+
 ### Browser terminals (591, on by default — owner ruling) — design: workspace `changes/591-*/591.01-DESIGN.md`
 
 - **A terminal is two steps.** `POST …/terminal-ticket` (CSRF, strict body) mints a 256-bit ticket that
@@ -485,7 +504,8 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
 - **The frame protocol is closed and checked on both sides** (frame.js `valid`, app.js
   `validFrameMessage`): source window, opaque origin, known type, exact fields, typed and capped;
   anything else is dropped and counted. Page → frame: init (mode interactive | watch | saved) / write /
-  paste / focus / keep-scrollback / live (593: saved → interactive | watch only).
+  paste / focus / keep-scrollback / live (593: saved → interactive | watch only) / top (593: a Boot log
+  opens at its first line).
   Frame → page: ready / opened / data / resize / title / paste / paste-too-big / failed / key (593: a
   key on a saved screen, no content).
 - **The frame wraps the engine** (ghostty-web 0.4.0 fails the bar alone): Cmd/Ctrl-clicks dropped and

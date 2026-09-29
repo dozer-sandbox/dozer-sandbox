@@ -40,6 +40,9 @@ public protocol DozerWebData: Sendable {
     /// through the host when one runs, else in-process: it never starts one).
     func terminalLayout(_ name: String) async throws -> WebTerminalLayout?
     func setTerminalLayout(_ name: String, _ layout: TerminalLayout) async throws -> WebTerminalLayout?
+    /// 593: the kept boots (the host's `boot-log`; in-process when no host runs), and one rendered.
+    func bootLogs(_ name: String) async throws -> WebBootList
+    func bootLog(_ name: String, number: Int) async throws -> WebBootLog
 }
 
 /// `GET /api/v1/metrics[.csv]?image=…&days=…&steps=0|1`.
@@ -335,6 +338,18 @@ public final class HostWebData: DozerWebData, @unchecked Sendable {
         var r = HostRequest(.terminalLayoutSet, name: name)
         r.layout = layout
         return try await query(r).0.decode(TerminalLayout?.self).map(WebTerminalLayout.init)
+    }
+
+    public func bootLogs(_ name: String) async throws -> WebBootList {
+        var r = HostRequest(.bootLog, name: name)
+        r.list = true
+        return WebBootList(try await query(r).0.decode(BootLogList.self))
+    }
+
+    public func bootLog(_ name: String, number: Int) async throws -> WebBootLog {
+        var r = HostRequest(.bootLog, name: name)
+        r.boot = number
+        return WebBootLog(try await query(r).0.decode(BootLogRecord.self))
     }
 
     /// `doz attach NAME`, with `--store` when this is not the default store (shell-quoted). The UI

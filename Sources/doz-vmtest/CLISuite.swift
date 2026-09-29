@@ -208,7 +208,7 @@ func cliSuite() async throws {
     }
     // A previous run that died part-way.
     if h.hostRunning { h.run(["host", "stop"]) }
-    for n in ["clia", "clib", "clic", "clid", "clis"] where FileManager.default.fileExists(atPath: DozerStore(root: storeRoot).configFile(n).path) {
+    for n in ["clia", "clib", "clic", "clid", "clis", "clibt"] where FileManager.default.fileExists(atPath: DozerStore(root: storeRoot).configFile(n).path) {
         h.run(["rm", n, "--yes"])
     }
     h.run(["template", "rm", "clitpl", "--yes"])
@@ -342,6 +342,9 @@ func cliSuite() async throws {
 
         print("cli: saved screens and session memory (593 §9)")
         cliSessionMemoryChecks(h)
+
+        print("cli: boot logs (593)")
+        cliBootLogChecks(h)
 
         print("cli: key (stdin, a fake key), net policy / log")
         let fake = "sk-ant-FAKE-doz-clitest-0000"
@@ -507,6 +510,43 @@ func cliLineageChecks(_ h: CLIHarness, ws: URL) {
     check(r.code == 2 && r.err.contains("never creates") && h.row("clie") == nil, "a workspace that does not exist is refused (never created)")
     check(h.run(["template", "rm", "clitpl", "--yes"]).code == 0 && h.json(["template", "ls"], [ImageRow].self)?.isEmpty == true, "template rm clitpl")
     check(h.row("clia")?.phase == "running", "clia still runs")
+}
+
+/// 593 (owner, 2026-09-30): boot logs on `clibt` (lab) — six boots, cold boots and wakes mixed; the last
+/// five kept; `doz console --list / --boot N --steps / --json`; removed with the sandbox.
+func cliBootLogChecks(_ h: CLIHarness) {
+    let layout = DozerStore(root: h.store).layout("clibt")
+    guard h.run(["create", "clibt", "--image", "lab", "--memory", "384M"]).code == 0 else { check(false, "create clibt"); return }
+    // 1 cold · 2 wake (hibernated) · 3 cold · 4 wake (asleep) · 5 wake (hibernated) · 6 cold
+    let plan: [[String]] = [["start"], ["hibernate"], ["wake"], ["shutdown", "--yes"], ["start"], ["sleep"], ["wake"],
+                            ["hibernate"], ["wake"], ["shutdown", "--yes"], ["start"]]
+    for step in plan { check(h.run([step[0], "clibt"] + step.dropFirst()).code == 0, "clibt: \(step[0])") }
+    let list = h.json(["console", "clibt", "--list"], BootLogList.self)
+    check(list?.boots.count == 5, "six boots: the last five kept (\(list?.boots.count ?? -1))")
+    check(list?.boots.map(\.kind) == ["cold boot", "wake", "wake", "cold boot", "wake"],
+          "newest first: cold boot, wake, wake, cold boot, wake (\(list?.boots.map(\.kind) ?? []))")
+    check(list?.boots.allSatisfy { $0.result == "ok" && ($0.milliseconds ?? 0) > 0 } == true, "each ok, with its duration")
+    check(((try? FileManager.default.contentsOfDirectory(atPath: BootLogs.directory(layout).path))?.filter { $0.hasPrefix("b-") }.count) == 5,
+          "five boot directories on disk")
+    let table = h.run(["console", "clibt", "--list"])
+    check(table.code == 0 && table.out.contains("KIND") && table.out.contains("cold boot") && table.out.contains("✓"), "console --list prints a table")
+    var r = h.run(["console", "clibt", "--boot", "2", "--steps"])
+    check(r.code == 0 && r.out.contains("── wake of clibt") && r.out.contains("restored VM state from disk") && r.out.contains("── kernel console"),
+          "--boot 2 --steps: the previous boot (a wake from hibernation): its steps, then its console")
+    r = h.run(["console", "clibt", "--boot", "4", "--steps"])
+    check(r.code == 0 && r.out.contains("── cold boot of clibt") && r.out.contains("VM created and booted") && r.out.range(of: #"\[ *\d+\.\d+\]"#, options: .regularExpression) != nil,
+          "--boot 4 --steps: an older cold boot's steps and its kernel console")
+    check(!r.out.contains("\u{1B}"), "…as plain text off a terminal (no escape)")
+    let rec = h.json(["console", "clibt", "--boot", "1"], BootLogRecord.self)
+    check(rec?.info.number == 1 && rec?.info.kind == "cold boot" && (rec?.console.count ?? 0) > 10 && !(rec?.events.isEmpty ?? true),
+          "--boot 1 --json: the latest boot's events and console (\(rec?.console.count ?? 0) lines)")
+    check(h.run(["console", "clibt", "--boot", "6"]).code == 2, "--boot 6: only five are kept (not found)")
+    check(h.run(["console", "clibt", "--boot", "1", "--follow"]).code == 64, "--follow with --boot: a usage error")
+    check(h.run(["console", "clibt"]).out.contains("["), "doz console clibt still shows the latest console")
+    check(h.run(["reset", "clibt", "--yes"]).code == 0 && h.json(["console", "clibt", "--list"], BootLogList.self)?.boots.count == 5,
+          "reset keeps the boot logs (its next boot is still a boot of clibt)")
+    check(h.run(["rm", "clibt", "--yes"]).code == 0 && !FileManager.default.fileExists(atPath: layout.sandboxDirectory.path),
+          "rm clibt: its boot logs go with it")
 }
 
 /// A process's parent (sysctl; nil when it is gone).

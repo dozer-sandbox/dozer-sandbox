@@ -61,11 +61,15 @@ public enum HostOp: String, Codable, Sendable, CaseIterable {
     /// change. UI state kept beside `doz.json`; never a VM, never a secret.
     case terminalLayout = "terminal-layout"
     case terminalLayoutSet = "terminal-layout-set"
+    /// 593 (owner, 2026-09-30): a sandbox's kept BOOTS (`BootLogs`) — `list`, or boot `boot` (1 = the
+    /// latest): its events and kernel console. Read-only; from the sandbox's directory (plus, from the
+    /// host, a boot under way).
+    case bootLog = "boot-log"
 
     /// Operations that only read — answered from the store in-process when no host is running.
     public var isReadOnly: Bool {
         switch self {
-        case .ping, .ls, .inspect, .pointList, .imageList, .keyList, .accountList, .imageTree, .sessionScreen, .terminalLayout: true
+        case .ping, .ls, .inspect, .pointList, .imageList, .keyList, .accountList, .imageTree, .sessionScreen, .terminalLayout, .bootLog: true
         case .netPolicy: false        // decided per request (a change needs the host)
         default: false
         }
@@ -179,6 +183,9 @@ public struct HostRequest: Codable, Equatable, Sendable {
     public var duplicate: DuplicateOptions?
     /// 593 `terminal-layout-set`: the layout (nil clears it).
     public var layout: TerminalLayout?
+    /// 593 `boot-log`: which kept boot (1 = the latest), or the list of them.
+    public var boot: Int?
+    public var list: Bool?
 
     public init(_ op: HostOp, name: String? = nil) {
         v = HostProtocol.version

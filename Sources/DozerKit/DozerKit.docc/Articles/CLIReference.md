@@ -258,6 +258,7 @@ doz metrics [--csv] [--image X] [--days N] [--no-steps]   # count, median, p90, 
 doz doctor                                                  # macOS, Apple silicon, entitlement, kernel, store, host, Claude login
 doz events [NAME]                                           # follow phases and timed steps live
 doz console NAME [--follow]                                 # the boot console (kernel + init); --follow keeps printing it
+doz console NAME --list | --steps [--boot N] [--json]       # the kept boots (host.boot_logs_kept, 5): steps + console of boot N (1 = latest)
 ```
 
 ### Scripting
@@ -297,6 +298,7 @@ JSON documents only ever gain fields.
 |---|---|
 | "cannot boot a VM" / entitlement | `doz doctor`; reinstall with `make install-cli` (it signs). |
 | First start is slow | It is baking the image, once per store — `doz image bake …` ahead of time; `-v` shows the steps. |
+| A start or wake failed, or its boot flew past | `doz console NAME --list`, then `doz console NAME --steps [--boot N]` — each kept boot's steps (✗ with why) and its kernel console; **Boot log** in the web UI. |
 | An agent says it has no key / 401 | `doz key ls NAME` — a stdin key is gone after the host stopped; set it again or use `--keychain`. |
 | A package install fails | Check the policy: `doz net log NAME --denied`, then `doz net policy NAME --allow HOST`. |
 | A sandbox shows as died | The host crashed while it ran — `doz start NAME` checks the disk and cold-boots it. |

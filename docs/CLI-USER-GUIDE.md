@@ -462,7 +462,8 @@ view — the session keeps running, as Ctrl-] does in `doz attach`.
   the start as it happens — doz's timed steps (on a first start, the download and the bake) and
   the kernel's boot console — and then becomes the image's own session in the same pane, with the
   boot log kept in the scrollback. `doz console NAME [--follow]` shows the same console in a
-  terminal. Turn it off with the setting `ui.boot_view_on_start = false`: Start then just starts.
+  terminal; the whole boot is kept afterwards (**Boot log** on the control bar, `doz console NAME
+  --steps` — below). Turn it off with the setting `ui.boot_view_on_start = false`: Start then just starts.
   While a step runs it shows a spinner and its seconds so far, and becomes "✓ step — 1.2 s" (or
   "✗ step — why") when it ends; a first start's image pull shows a bar ("pulling node@1a2b3c4d5e6f
   ██████░░░░ 87 / 142 MB 6.1 MB/s ~9 s (3/5 layers)") and then "pulled … : 142 MB in 23 s"; a bake
@@ -536,7 +537,7 @@ the others say when they apply (the next sandbox created, the next session, or a
 | Section | Settings |
 |---|---|
 | `[ui]` | `boot_view_on_start` (true), `confirm_shutdown` (true), `split_default` (`shell` · `watch` · `attach` · `dialog`), `terminals` (true), `terminal_font_size` (13), `theme` (`auto` · `light` · `dark`), `details_open` (true), `grid_live_tiles` (8, 1–12), `grid_tile_size` (`small` · `medium` · `large`), `progress` (`animated` · `plain`; `$DOZ_PROGRESS`, `--progress auto\|plain`) |
-| `[host]` | `idle_timeout_minutes` (5; `$DOZ_HOST_IDLE`), `screen_capture_minutes` (5, 0–1440; `$DOZ_SCREEN_CAPTURE` — how often a running sandbox's changed session screens are saved; 0 = only at pause, sleep and hibernate), `keepalive` (false — for a store that has not chosen with `doz account keepalive`) |
+| `[host]` | `idle_timeout_minutes` (5; `$DOZ_HOST_IDLE`), `boot_logs_kept` (5, 1–50; `$DOZ_BOOT_LOGS` — boots kept per sandbox for `doz console --boot N` and the Boot log), `screen_capture_minutes` (5, 0–1440; `$DOZ_SCREEN_CAPTURE` — how often a running sandbox's changed session screens are saved; 0 = only at pause, sleep and hibernate), `keepalive` (false — for a store that has not chosen with `doz account keepalive`) |
 | `[store]` | `path` (`--store`, `$DOZ_STORE`) |
 | `[claude]` | `permissions` (`skip` · `ask`) — Claude Code's own prompts in a claude-code sandbox; `-e DOZ_CLAUDE_PERMISSIONS=…` on `run`/`exec` still wins |
 | `[defaults]` | `cpus` (2), `nat_subnet` (a free one; `$DOZ_SUBNET`) |
@@ -568,6 +569,17 @@ the others say when they apply (the next sandbox created, the next session, or a
   always plain — nothing is redrawn and no escape sequence is written.
 - `doz console NAME [--follow]` prints the sandbox's boot console (the kernel and init); with
   `--follow` it keeps printing as it boots (the web UI's boot view shows the same lines).
+- **Boot logs.** Every boot of a sandbox — each Start (a cold boot), each wake, a restore after a
+  crash — is kept: doz's timed steps exactly as the boot view showed them, that boot's kernel
+  console, when it started, how long it took and whether it failed (and why). The last
+  `host.boot_logs_kept` (5) are kept per sandbox, in its directory (readable only by you); they stay
+  across a reset and go with `doz rm`.
+  - `doz console NAME --list` — the kept boots: when, what, how long, ✓ or ✗.
+  - `doz console NAME --steps` — the latest boot's steps, then its console; `--boot N` picks an older
+    one (1 = the latest, 2 = the one before …). `--json` gives the record (its events and console).
+  - In the web UI, **Boot log** on a sandbox's control bar shows the same thing, drawn as the boot
+    view drew it — read-only, selectable — with a picker for the kept boots (the latest opens; a
+    failed one says ✕). It works in any phase: nothing is woken.
 - `doz events [NAME]` follows phases and timed steps live. `doz metrics [--csv] [--image X]
   [--days N]` shows every action's count, median, p90, min, max and failures.
 
@@ -602,6 +614,7 @@ is created, and become part of it.
 |---|---|
 | "cannot boot a VM" / entitlement | `doz doctor`. Reinstall with `make install-cli` (it signs). |
 | First start is slow | It is baking the image, once per store. `doz image bake …` ahead of time; `-v` shows the steps. |
+| A start or wake failed, or the boot scrolled past too fast | `doz console NAME --list`, then `doz console NAME --steps [--boot N]` (or **Boot log** in the web UI): each kept boot's steps (the failing one marked ✗, with why) and its kernel console. |
 | An agent says it has no key / 401 | `doz key ls NAME`. A stdin key is gone after the host stopped, so set it again or use `--keychain`. |
 | A package install fails | The policy: `doz net log NAME --denied`, then `doz net policy NAME --allow HOST`. |
 | A sandbox shows as died | The host crashed while it ran. `doz start NAME` checks the disk and cold-boots it. |

@@ -513,6 +513,10 @@ public final class DozerWebServer: @unchecked Sendable {
             return json(try await data.sessionScreen(name, session: session))
         case .terminalLayout(let name):
             return json(try await data.terminalLayout(name))
+        case .bootLogs(let name):
+            return json(try await data.bootLogs(name))
+        case .bootLog(let name, let n):
+            return json(try await data.bootLog(name, number: n))
         case .terminalLayoutSet(let name):
             try Self.requireJSONBody(md)
             return json(try await data.setTerminalLayout(name, try WebTerminalLayout.decode(body)))
