@@ -48,6 +48,8 @@ PREFIX        ?= $(HOME)/.local
 CLITEST_STORE ?= $(or $(TMPDIR),/tmp/)doz-clitest-store
 # 588: the Claude-credentials suite's scratch store (the claude-code image is cloned from the vmtest store).
 CLAUDETEST_STORE ?= $(or $(TMPDIR),/tmp/)doz-claudetest-store
+# 593: templates and duplicates on pi (images seeded from the vmtest store when there).
+TEMPLATES_STORE ?= $(or $(TMPDIR),/tmp/)doz-templates-store
 
 # ── Documentation site (589) ──────────────────────────────────────────────────
 # Built directly with `xcrun docc` — no swift-docc-plugin dependency: Scripts/audit.sh's dependency
@@ -62,7 +64,7 @@ DOCC_OUT         ?= .docc-build
 DOCC_BASE_PATH   ?= /DozerKit/
 DOCC_PREVIEW_PORT ?= 8000
 
-.PHONY: help build test audit web-assets web-assets-check test-vm test-vm-agents test-vm-network test-vm-hardening test-vm-lineage prev-cli test-vm-upgrade vmtest-host kernel deckhold deckhold-verify doznet doznet-verify cli install-cli test-cli test-vm-claude docs docs-preview docs-drift-check
+.PHONY: help build test audit web-assets web-assets-check test-vm test-vm-agents test-vm-network test-vm-hardening test-vm-lineage prev-cli test-vm-upgrade vmtest-host kernel deckhold deckhold-verify doznet doznet-verify cli install-cli test-cli test-vm-claude test-vm-templates docs docs-preview docs-drift-check
 
 help: ## Show this help
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) | sed 's/:.*## /\t/' | expand -t 22
@@ -73,7 +75,7 @@ build: ## Build every product (and the VM test host)
 # 591: the settings file (doz.toml under XDG_CONFIG_HOME) of every test run is a scratch one — the
 # owner's own ~/.config never shapes a test (the CLI suites set their own, under their scratch store).
 TEST_XDG ?= $(or $(TMPDIR),/tmp/)doz-unit-xdg
-test test-vm test-vm-agents test-vm-network test-vm-hardening test-vm-lineage test-vm-upgrade test-cli test-vm-claude kernel: export XDG_CONFIG_HOME := $(TEST_XDG)
+test test-vm test-vm-agents test-vm-network test-vm-hardening test-vm-lineage test-vm-upgrade test-cli test-vm-claude test-vm-templates kernel: export XDG_CONFIG_HOME := $(TEST_XDG)
 
 test: web-assets-check ## Unit tests — no VM, no entitlement (never --parallel); first, the web assets' drift check
 	swift test $(SWIFT_BUILD_SYSTEM) -j $(JOBS)
@@ -176,6 +178,9 @@ test-cli: cli vmtest-host ## 585 CLI suite: the signed doz from separate process
 
 test-vm-claude: cli vmtest-host ## 588 Claude credentials: the proxy's classifier (allow/strict), a placeholder across a host restart, revoke on shutdown, no token on disk — a FAKE key, nobody's login (DOZ_TEST_CLAUDE_LOGIN=1 adds this Mac's login, read-only)
 	perl -e 'alarm shift; exec @ARGV' 1500 $(VMTEST_BIN) claude --doz $(CLI_BIN) --store "$(CLAUDETEST_STORE)"
+
+test-vm-templates: cli vmtest-host ## 593 templates and duplicates on pi: a template holds the root disk only (never the state disk); duplicate's new workspace and fresh (or --copy-state) state disk
+	perl -e 'alarm shift; exec @ARGV' 2400 $(VMTEST_BIN) templates --doz $(CLI_BIN) --store "$(TEMPLATES_STORE)"
 
 deckhold: ## Rebuild the deckhold guest binary, install it as the committed resource, refresh PROVENANCE.md
 	Guest/deckhold/build.sh

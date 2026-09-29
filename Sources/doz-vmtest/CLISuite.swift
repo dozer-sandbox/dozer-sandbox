@@ -204,9 +204,10 @@ func cliSuite() async throws {
     }
     // A previous run that died part-way.
     if h.hostRunning { h.run(["host", "stop"]) }
-    for n in ["clia", "clib"] where FileManager.default.fileExists(atPath: DozerStore(root: storeRoot).configFile(n).path) {
+    for n in ["clia", "clib", "clic", "clid"] where FileManager.default.fileExists(atPath: DozerStore(root: storeRoot).configFile(n).path) {
         h.run(["rm", n, "--yes"])
     }
+    h.run(["template", "rm", "clitpl", "--yes"])
     if h.hostRunning { h.run(["host", "stop"]) }
 
     do {
@@ -326,6 +327,9 @@ func cliSuite() async throws {
         let ha = h.run(["exec", "clia", "--", "hostname"]).out, hb = h.run(["exec", "clib", "--", "hostname"]).out
         check(ha == "clia\n" && hb == "clib\n", "exec reaches each: \(ha.trimmingCharacters(in: .whitespacesAndNewlines)) / \(hb.trimmingCharacters(in: .whitespacesAndNewlines))")
 
+        print("cli: lineage, templates, duplicate (593)")
+        cliLineageChecks(h, ws: ws)
+
         print("cli: key (stdin, a fake key), net policy / log")
         let fake = "sk-ant-FAKE-doz-clitest-0000"
         r = h.run(["key", "set", "clib", "--anthropic"], stdin: Data((fake + "\n").utf8))
@@ -394,6 +398,56 @@ func cliSuite() async throws {
     }
     cleanUp()
     check(!h.hostRunning, "cleanup: no host left running")
+}
+
+/// 593: `doz image ls --tree`, `doz template`, `doz duplicate` — on clia (running, lab, a workspace)
+/// and clib. Leaves clia and clib as they were; clic, clid and the template are removed.
+func cliLineageChecks(_ h: CLIHarness, ws: URL) {
+    let store = DozerStore(root: h.store)
+    if let tree = h.json(["image", "ls", "--tree"], ImageTree.self) {
+        let root = tree.nodes.first { $0.parent == nil && $0.kind == "prepared" }
+        let kids = tree.nodes.filter { $0.parent == root?.id && $0.kind == "sandbox" }.map(\.name)
+        check(root != nil && kids.contains("clia") && kids.contains("clib"), "image ls --tree: the lab's prepared disk → clia, clib (\(kids.joined(separator: ", ")))")
+        check(tree.nodes.filter { $0.kind == "sandbox" }.allSatisfy { $0.allocatedBytes > 0 && ($0.sharedWithParentBytes ?? 0) > 0 },
+              "each sandbox shares bytes with its parent (APFS clones)")
+    } else { check(false, "image ls --tree --json") }
+    check(h.run(["image", "ls", "--tree"]).out.contains("└─ "), "image ls --tree draws the branches")
+
+    // A template from the RUNNING clia: its root disk (with a marker), never its state disk.
+    _ = h.run(["exec", "clia", "--", "sh", "-c", "echo tmark > /root/tmark && sync"])
+    let pointsBefore = h.json(["point", "ls", "clia"], [RestorePoint].self)?.count
+    var r = h.run(["template", "create", "clia", "--as", "clitpl", "--note", "cli suite"])
+    let img = h.json(["template", "ls"], [ImageRow].self)?.first { $0.name == "clitpl" }
+    check(r.code == 0 && img != nil, "template create clia --as clitpl (while it runs) → template ls lists it")
+    check(h.json(["point", "ls", "clia"], [RestorePoint].self)?.count == pointsBefore, "its temporary restore point is gone")
+    if let key = img?.key {
+        let files = (try? FileManager.default.contentsOfDirectory(atPath: store.layout("_").customImageDirectory(key).path).sorted()) ?? []
+        check(files == ["image.json", "root.ext4"], "the template is the root disk only — no state disk (\(files.joined(separator: ", ")))")
+    }
+    if let tree = h.json(["image", "ls", "--tree"], ImageTree.self) {
+        check(tree.nodes.contains { $0.kind == "template" && $0.name == "clitpl" && $0.parent != nil && $0.detail == "from clia" },
+              "the lineage shows clitpl under its source image, from clia")
+    }
+    r = h.run(["create", "clic", "--image", "clitpl", "--memory", "384M"])
+    check(r.code == 0 && h.run(["start", "clic"]).code == 0, "a sandbox from the template starts")
+    check(h.run(["exec", "clic", "--", "cat", "/root/tmark"]).out == "tmark\n", "it has what was on clia's root disk")
+    check(h.run(["rm", "clic", "--yes"]).code == 0, "rm clic")
+
+    // Duplicate the running clia with a NEW workspace.
+    let ws2 = ws.deletingLastPathComponent().appendingPathComponent("workspace-dup")
+    try? FileManager.default.createDirectory(at: ws2, withIntermediateDirectories: true)
+    try? "w2\n".write(to: ws2.appendingPathComponent("w2marker"), atomically: true, encoding: .utf8)
+    r = h.run(["duplicate", "clia", "clid", "--workspace", ws2.path, "--memory", "384M", "--cpus", "1"])
+    check(r.code == 0 && h.row("clid")?.phase == "off", "duplicate clia clid --workspace … (clia running): clid is off")
+    check(h.run(["start", "clid"]).code == 0, "start clid")
+    check(h.run(["exec", "clid", "--", "cat", "/workspace/w2marker", "/root/tmark"]).out == "w2\ntmark\n",
+          "clid: the new workspace at /workspace, clia's root disk")
+    check(h.run(["exec", "clid", "--", "nproc"]).out == "1\n", "clid: 1 CPU")
+    check(h.run(["rm", "clid", "--yes"]).code == 0, "rm clid")
+    r = h.run(["duplicate", "clia", "clie", "--workspace", ws.deletingLastPathComponent().appendingPathComponent("no-such-dir").path])
+    check(r.code == 2 && r.err.contains("never creates") && h.row("clie") == nil, "a workspace that does not exist is refused (never created)")
+    check(h.run(["template", "rm", "clitpl", "--yes"]).code == 0 && h.json(["template", "ls"], [ImageRow].self)?.isEmpty == true, "template rm clitpl")
+    check(h.row("clia")?.phase == "running", "clia still runs")
 }
 
 /// 591: `doz config` from a separate process, on the harness's scratch XDG_CONFIG_HOME — no VM.
