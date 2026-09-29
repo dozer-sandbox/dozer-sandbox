@@ -155,6 +155,14 @@ final class WebOperations: @unchecked Sendable {
             return (try? v.decode([AccountRow].self))?.first { $0.name == acc }.map { "\(acc): \($0.verification ?? $0.state)" } ?? "\(acc) checked"
         case .accountRemove(let acc):
             return "removed account \(acc)"
+        case .onboard(let images):
+            let r = try? v.decode(PrepareResult.self)
+            let preparing = r?.preparations.filter(\.running).map(\.image) ?? []
+            if !preparing.isEmpty { return "preparing \(preparing.joined(separator: ", ")) in the host — it goes on in the background; the onboarding is recorded when it is done" }
+            return images.isEmpty ? "onboarded (no image prepared now)" : "onboarded — \(images.joined(separator: ", ")) ready"
+        case .prepareCancel:
+            let ps = (try? v.decode([PreparationInfo].self)) ?? []
+            return ps.isEmpty ? "nothing was being prepared" : "cancelling the preparation of \(ps.map(\.image).joined(separator: ", "))"
         }
     }
 

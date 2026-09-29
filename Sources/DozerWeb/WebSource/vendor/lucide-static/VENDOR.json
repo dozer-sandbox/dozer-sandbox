@@ -319,6 +319,36 @@
       "serve": "icon"
     },
     {
+      "file": "arrow-right.svg",
+      "fromTarball": "package/icons/arrow-right.svg",
+      "sha256": "0a3d3733645e158219bf0d3478895a53d70ab2572075bb4cb54d5f229cba5210",
+      "serve": "icon"
+    },
+    {
+      "file": "arrow-left.svg",
+      "fromTarball": "package/icons/arrow-left.svg",
+      "sha256": "db02bc350fd7d18cf5bd92441e10d9159e16518a05f27c921f0f4ae634c35db9",
+      "serve": "icon"
+    },
+    {
+      "file": "rocket.svg",
+      "fromTarball": "package/icons/rocket.svg",
+      "sha256": "402ae322c6647d11f72fe1ef5184a088a22a96e4eb3b6a6c81a30b8c0adaa7e8",
+      "serve": "icon"
+    },
+    {
+      "file": "folder.svg",
+      "fromTarball": "package/icons/folder.svg",
+      "sha256": "f205d7d6bf3ae16724ff3668347c65a318b11442a314d989a873abf173a6d8f6",
+      "serve": "icon"
+    },
+    {
+      "file": "skip-forward.svg",
+      "fromTarball": "package/icons/skip-forward.svg",
+      "sha256": "83af2d93c05050dd6aec3ef741471add639b1cbe8fae37d7441958fd3669dc26",
+      "serve": "icon"
+    },
+    {
       "file": "LICENSE",
       "fromTarball": "package/LICENSE",
       "sha256": "b495047bd93a9b06913511076f504daba17d5bbeb3e0650f3bb53a4220329c57",

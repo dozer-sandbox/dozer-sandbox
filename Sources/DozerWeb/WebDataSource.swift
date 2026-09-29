@@ -34,6 +34,16 @@ public protocol DozerWebData: Sendable {
     func attachTerminal(_ name: String, session: String?, size: TermSize) async throws -> any WebTerminalAttachment
     /// 591: the boot console as it is written (the host's `console --follow`); nil when no host runs.
     func bootConsole(_ name: String) -> AsyncStream<String>?
+    /// 594: the onboarding wizard's facts — the checks, the account step, the images, the preparations,
+    /// the store's onboarding record (the settings file's part is the server's).
+    func onboarding() async throws -> WebOnboarding
+    /// 594: the image preparations in the host (running, then recent); empty with no host.
+    func preparations() async throws -> [WebPreparation]
+}
+
+extension DozerWebData {
+    public func onboarding() async throws -> WebOnboarding { throw HostError(.notImplemented, "onboarding") }
+    public func preparations() async throws -> [WebPreparation] { [] }
 }
 
 /// `GET /api/v1/metrics[.csv]?image=…&days=…&steps=0|1`.
@@ -99,14 +109,46 @@ public final class HostWebData: DozerWebData, @unchecked Sendable {
     let executable: String
     let terminalLauncher: @Sendable (String) throws -> Void
 
+    /// 594: whether Claude Code is signed in on this Mac (the onboarding's account step) — read-only.
+    let macLogin: @Sendable () -> Bool
+    private var macLoginCache: (Date, Bool)?
+
     public init(store: DozerStore, version: String, executable: String = HostLauncher.executablePath,
                 terminal: @escaping @Sendable (String) throws -> Void = TerminalHandoff.openInTerminalApp,
+                macLogin: @escaping @Sendable () -> Bool = { false },
                 doctor: @escaping @Sendable () -> [WebDoctorCheck]) {
         self.store = store
         self.version = version
         self.executable = executable
         terminalLauncher = terminal
+        self.macLogin = macLogin
         doctorChecks = doctor
+    }
+
+    // MARK: 594 — onboarding
+
+    public func onboarding() async throws -> WebOnboarding {
+        let status = try await query(HostRequest(.prepareStatus)).0.decode(PrepareStatus.self)
+        let doctor = try await self.doctor()
+        let prepared = Set(status.images.filter { $0.current ?? false }.map(\.name))
+        let checks = Onboarding.checks(doctor: doctor.map { (check: $0.check, status: $0.status, detail: $0.detail) }, store: store,
+                                       chosen: ["claude-code"], prepared: prepared)
+        let signedIn: Bool
+        if let (t, v) = lock.withLock({ macLoginCache }), Date().timeIntervalSince(t) < 30 {
+            signedIn = v
+        } else {
+            let probe = macLogin
+            signedIn = (try? await blocking { probe() }) ?? false
+            lock.withLock { macLoginCache = (Date(), signedIn) }
+        }
+        let file = AccountStore(store: store, settings: .load()).load()
+        return WebOnboarding(status: status, checks: checks, freeBytes: Onboarding.volume(of: store)?.free, macSignedIn: signedIn,
+                             defaultAccount: file.defaultAccount)
+    }
+
+    public func preparations() async throws -> [WebPreparation] {
+        guard store.hostIsRunning() else { return [] }
+        return try await query(HostRequest(.prepareStatus)).0.decode(PrepareStatus.self).preparations.map(WebPreparation.init)
     }
 
     public var storePath: String { store.root.path }
@@ -161,7 +203,9 @@ public final class HostWebData: DozerWebData, @unchecked Sendable {
                            liveSandboxes: st?.liveSandboxes ?? [], connections: st?.connections,
                            // A live record is only "pending recovery" when no host holds it.
                            recoveryPending: fromHost ? [] : store.needsRecovery(), store: store.root.path, uiVersion: version)
-        return WebOverview(host: host, sandboxes: rows, source: fromHost ? "host" : "store")
+        var o = WebOverview(host: host, sandboxes: rows, source: fromHost ? "host" : "store")
+        o.onboarded = OnboardingRecord.read(store) != nil
+        return o
     }
 
     public func sandbox(_ name: String) async throws -> WebSandboxDetail {

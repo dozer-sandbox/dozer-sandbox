@@ -90,6 +90,8 @@ public struct WebOverview: Codable, Equatable, Sendable {
     public var totals: WebTotals
     /// `host` (asked the running host) or `store` (read in this process; nothing is running).
     public var source: String
+    /// 594 (D8): the store has an onboarding record (the page opens on the wizard until it has).
+    public var onboarded: Bool?
 
     public init(host: WebHost, sandboxes: [WebSandboxRow], source: String) {
         self.host = host
@@ -241,6 +243,11 @@ public struct WebSandboxDetail: Codable, Equatable, Sendable {
     public var defaultSession: String
     /// What to type in a terminal to attach (phase 1's terminal hand-off: copy it).
     public var attachCommand: String
+    /// 594 (D15/D16): the environment prompt the agent gets at its next session — on/off, the
+    /// rendered facts block, why it does not render, its layers, and where the skill goes.
+    public var agentPrompt: WebAgentPrompt?
+    /// 594: the doz_project.yaml it was made from.
+    public var project: String?
 
     public init(_ d: SandboxDetail, attachCommand: String) {
         info = WebSandboxRow(d.info)
@@ -261,7 +268,156 @@ public struct WebSandboxDetail: Codable, Equatable, Sendable {
         hasRootDisk = d.hasRootDisk
         defaultSession = d.defaultSession
         self.attachCommand = attachCommand
+        agentPrompt = d.agentPrompt.map(WebAgentPrompt.init)
+        project = d.project
     }
+}
+
+/// 594: a sandbox's environment prompt, field by field.
+public struct WebAgentPrompt: Codable, Equatable, Sendable {
+    public var enabled: Bool
+    public var agent: String
+    public var text: String?
+    public var error: String?
+    public var layers: [String]
+    public var promptPath: String
+    public var skillPath: String
+    public var skillLines: Int
+
+    public init(_ r: AgentPromptReport) {
+        enabled = r.enabled
+        agent = r.agent
+        text = r.text
+        error = r.error
+        layers = r.layers
+        promptPath = r.promptPath
+        skillPath = r.skillPath
+        skillLines = (r.skill ?? "").split(separator: "\n", omittingEmptySubsequences: false).count
+    }
+}
+
+/// 594: an image preparation in the host (the wizard's Preparing step, the Operations page).
+public struct WebPreparation: Codable, Equatable, Sendable {
+    public var id: String
+    public var image: String
+    public var state: String
+    public var requestedBy: [String]
+    public var startedAt: Date
+    public var finishedAt: Date?
+    public var seconds: Double
+    public var error: String?
+    public var step: String?
+    public var stepSeconds: Double?
+    public var transferLabel: String?
+    public var transferLine: String?
+    public var transferFraction: Double?
+    public var output: [String]
+    public var lines: [String]
+
+    public init(_ p: PreparationInfo) {
+        id = p.id
+        image = p.image
+        state = p.state
+        requestedBy = p.requestedBy
+        startedAt = p.startedAt
+        finishedAt = p.finishedAt
+        seconds = p.seconds
+        error = p.error
+        step = p.step
+        stepSeconds = p.stepSeconds
+        transferLabel = p.transfer?.label
+        transferLine = p.transfer?.line
+        if let t = p.transfer, let total = t.totalBytes, total > 0 { transferFraction = min(1, Double(t.completedBytes) / Double(total)) }
+        output = p.output
+        lines = p.lines
+    }
+}
+
+/// 594: the onboarding wizard's facts (D11).
+public struct WebOnboarding: Codable, Equatable, Sendable {
+    public struct Check: Codable, Equatable, Sendable {
+        public var check: String
+        public var status: String
+        public var detail: String
+        public var hard: Bool
+    }
+    public struct Image: Codable, Equatable, Sendable {
+        public var name: String
+        public var summary: String
+        public var download: String
+        public var estimate: String
+        public var diskBytes: Int64
+        public var prepared: Bool
+        public var recommended: Bool
+    }
+    public struct AccountOption: Codable, Equatable, Sendable {
+        public var value: String
+        public var label: String
+        /// What to run in a terminal (a key or a token is never typed in a browser).
+        public var commands: [String]
+    }
+    public struct Record: Codable, Equatable, Sendable {
+        public var dozVersion: String
+        public var date: Date
+        public var images: [String]
+    }
+
+    public var onboarded: Record?
+    public var hostRunning: Bool
+    public var checks: [Check]
+    /// A hard check other than the disk failed: onboarding cannot go on.
+    public var blocked: Bool
+    public var freeBytes: Int64?
+    public var commonBytes: Int64
+    public var headroomBytes: Int64
+    public var macSignedIn: Bool
+    public var accountOptions: [AccountOption]
+    public var preferredAccount: String
+    /// The store's default account now.
+    public var defaultAccount: String
+    public var images: [Image]
+    public var preparations: [WebPreparation]
+    public var settingsPath: String?
+    public var settingsExists: Bool
+    public var promptTemplatePath: String?
+    public var promptTemplateExists: Bool
+    /// The settings' defaults.image.
+    public var defaultImage: String
+
+    public init(status: PrepareStatus, checks: [OnboardingCheck], freeBytes: Int64?, macSignedIn: Bool, defaultAccount: String) {
+        onboarded = status.onboarded.map { Record(dozVersion: $0.dozVersion, date: $0.date, images: $0.images) }
+        hostRunning = status.hostRunning
+        self.checks = checks.map { Check(check: $0.check, status: $0.status, detail: $0.detail, hard: $0.hard) }
+        blocked = checks.contains { $0.blocks && $0.check != "disk" }
+        self.freeBytes = freeBytes
+        commonBytes = Onboarding.commonBytes
+        headroomBytes = Onboarding.headroomBytes
+        self.macSignedIn = macSignedIn
+        let (options, preferred) = Onboarding.accountOptions(macSignedIn: macSignedIn)
+        accountOptions = options.map { AccountOption(value: $0.rawValue, label: $0.label, commands: Onboarding.accountCommands($0)) }
+        preferredAccount = preferred.rawValue
+        self.defaultAccount = defaultAccount
+        images = Onboarding.imageOptions(status.images).map {
+            Image(name: $0.name, summary: $0.summary, download: $0.download, estimate: $0.estimate, diskBytes: $0.diskBytes,
+                  prepared: $0.prepared, recommended: $0.recommended)
+        }
+        preparations = status.preparations.map(WebPreparation.init)
+        settingsPath = nil
+        settingsExists = false
+        promptTemplatePath = nil
+        promptTemplateExists = false
+        defaultImage = "lab"
+    }
+}
+
+/// 594: `POST /api/v1/onboarding/config` — the settings file and the prompt template, each written
+/// only when missing (D7).
+public struct WebOnboardingConfigResult: Codable, Equatable, Sendable {
+    /// written · kept · unavailable
+    public var settings: String
+    public var settingsPath: String?
+    public var promptTemplate: String
+    public var promptTemplatePath: String?
 }
 
 public struct WebConnection: Codable, Equatable, Sendable {
@@ -323,6 +479,8 @@ public struct WebImage: Codable, Equatable, Sendable {
     public var allocatedBytes: Int64?
     public var note: String?
     public var fromSandbox: String?
+    /// 594: prepared for this build (a built-in image).
+    public var current: Bool?
 
     public init(_ r: ImageRow) {
         name = r.name
@@ -333,6 +491,7 @@ public struct WebImage: Codable, Equatable, Sendable {
         allocatedBytes = r.allocatedBytes
         note = r.note
         fromSandbox = r.fromSandbox
+        current = r.current
     }
 }
 

@@ -48,6 +48,11 @@ public enum WebRoute: Equatable, Sendable {
     // 591 settings — doz.toml: the report, and ONE typed change (closed schema, CSRF).
     case settings                  // GET  /api/v1/settings
     case settingsChange            // POST /api/v1/settings  ({key, value} | {key, reset: true})
+    // 594 — onboarding: the wizard's facts; the settings file + prompt template written only when
+    // missing (CSRF, strict {defaultImage, account}); the host's image preparations.
+    case onboarding                // GET  /api/v1/onboarding
+    case onboardingConfig          // POST /api/v1/onboarding/config
+    case preparations              // GET  /api/v1/preparations
 
     public var isStatic: Bool {
         switch self { case .index, .asset, .terminalFrame: true; default: false }
@@ -78,6 +83,7 @@ public enum WebRoute: Equatable, Sendable {
         case (.post, 2) where rest == ["session", "renew"]: return .sessionRenew
         case (.post, 1) where rest[0] == "actions": return .actions
         case (.post, 1) where rest[0] == "settings": return .settingsChange
+        case (.post, 2) where rest == ["onboarding", "config"]: return .onboardingConfig
         case (.post, 4) where rest[0] == "sandboxes" && isSandboxName(rest[1]) && rest[2] == "network" && rest[3] == "preview":
             return .policyPreview(rest[1])
         case (.post, 3) where rest[0] == "sandboxes" && isSandboxName(rest[1]) && rest[2] == "terminal":
@@ -100,6 +106,8 @@ public enum WebRoute: Equatable, Sendable {
             case "doctor": return .doctor
             case "stream": return .stream
             case "settings": return .settings
+            case "onboarding": return .onboarding
+            case "preparations": return .preparations
             default: return nil
             }
         case 2 where rest == ["images", "tree"]:

@@ -6,23 +6,23 @@
       "mimeType" : "text/html; charset=utf-8",
       "publicPath" : "/",
       "resourcePath" : "index.html",
-      "sha256" : "8b22c5bdd42dd13f8e43d6d8eddb405a9aa32c308d806187ea337850f3517214"
+      "sha256" : "6ac354390c99a44a5dc7b62ba9e19b011833c3ab051773868cbc2c3988a37a19"
     },
     {
       "cachePolicy" : "public, max-age=31536000, immutable",
       "class" : "page",
       "mimeType" : "application/javascript; charset=utf-8",
-      "publicPath" : "/assets/app-48881677beaa00dd.js",
-      "resourcePath" : "assets/app-48881677beaa00dd.js",
-      "sha256" : "48881677beaa00dd3c4a7ccd739809d5803ba3e0d47a8b93cc6d71dfb785db74"
+      "publicPath" : "/assets/app-3928f143ad3e1b9d.js",
+      "resourcePath" : "assets/app-3928f143ad3e1b9d.js",
+      "sha256" : "3928f143ad3e1b9d1ac242c7209b8613ee29d1bb5b2bc01e05bb05db862e58f5"
     },
     {
       "cachePolicy" : "public, max-age=31536000, immutable",
       "class" : "page",
       "mimeType" : "text/css; charset=utf-8",
-      "publicPath" : "/assets/app-86ace4af7b18f782.css",
-      "resourcePath" : "assets/app-86ace4af7b18f782.css",
-      "sha256" : "86ace4af7b18f7829b6f68c9632d9b2f50072f620a59bb2644f7119edd44df25"
+      "publicPath" : "/assets/app-b74f233fb8192f81.css",
+      "resourcePath" : "assets/app-b74f233fb8192f81.css",
+      "sha256" : "b74f233fb8192f81a6ec5157d55cbcb9271fa502278595f22bfbb1278f335874"
     },
     {
       "cachePolicy" : "public, max-age=31536000, immutable",
@@ -60,9 +60,9 @@
       "cachePolicy" : "public, max-age=31536000, immutable",
       "class" : "vendor",
       "mimeType" : "image/svg+xml",
-      "publicPath" : "/assets/vendor-lucide-icons-6dcc617b2f1103d0.svg",
-      "resourcePath" : "assets/vendor-lucide-icons-6dcc617b2f1103d0.svg",
-      "sha256" : "6dcc617b2f1103d04abfd0df5a8104b93aa2d9dbd71436698a721203c03c361d"
+      "publicPath" : "/assets/vendor-lucide-icons-f7d1e347338d8b22.svg",
+      "resourcePath" : "assets/vendor-lucide-icons-f7d1e347338d8b22.svg",
+      "sha256" : "f7d1e347338d8b22e3180ec48209b060aae71e1729dae0c5423555f19d119374"
     },
     {
       "cachePolicy" : "no-store",

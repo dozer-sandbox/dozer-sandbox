@@ -349,6 +349,15 @@ final class WebSecurityTests: XCTestCase {
             WebAccounts(accounts: [], defaultAccount: "mac", keepalive: false),
             WebMetrics(available: false, runs: 0, rows: 0, sessions: 0, networkMinutes: 0, summary: []),
             WebActivity(seq: 1, kind: "host", text: "x"),
+            // 594
+            WebOnboarding(status: PrepareStatus(preparations: [], onboarded: nil, images: [], hostRunning: true),
+                          checks: [OnboardingCheck(check: "claude login", status: "ok", detail: "signed in", hard: false)],
+                          freeBytes: 1, macSignedIn: true, defaultAccount: "mac"),
+            WebPreparation(PreparationInfo(id: "a", image: "pi", state: "running", requestedBy: ["doz onboard"], startedAt: now, finishedAt: nil,
+                                           seconds: 1, error: nil, step: "s", stepSeconds: 1,
+                                           transfer: PreparationTransfer(label: "pulling", completedBytes: 1, totalBytes: 2, completedItems: 1,
+                                                                         totalItems: 2, line: "l"), output: ["o"], lines: ["l"])),
+            WebOnboardingConfigResult(settings: "written", settingsPath: "/x", promptTemplate: "kept", promptTemplatePath: "/y"),
         ]
         let forbidden = ["secret", "token", "password", "apikey", "api_key", "bearer", "authorization", "cookie", "csrf", "credentialvalue"]
         for v in values {

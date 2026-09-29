@@ -39,6 +39,8 @@ final class WebActionTests: XCTestCase {
         "account-keepalive": #"{"action":"account-keepalive","enabled":true}"#,
         "account-verify": #"{"action":"account-verify","account":"work"}"#,
         "account-rm": #"{"action":"account-rm","account":"work","confirm":"work"}"#,
+        "onboard": #"{"action":"onboard","images":["claude-code","lab"]}"#,
+        "prepare-cancel": #"{"action":"prepare-cancel","images":["pi"]}"#,
     ]
 
     /// Everything the web layer may send to the host — and, as important, what it may never.
@@ -46,8 +48,26 @@ final class WebActionTests: XCTestCase {
         .create, .start, .wake, .pause, .resume, .sleep, .hibernate, .shutdown, .reset, .rm, .openSession,
         .pointTake, .pointRevert, .pointFork, .pointRm, .pointSaveImage, .imageBake, .imageRm, .netPolicy,
         .keyPolicy, .keyRm, .accountUse, .accountDefault, .accountKeepalive, .accountVerify, .accountRemove,
-        .templateCreate, .duplicate,
+        .templateCreate, .duplicate, .onboard, .prepareCancel,
     ]
+
+    /// 594: onboard and prepare-cancel — built-in images only, each once; onboard never waits.
+    func testOnboardingActionsDecodeStrictly() throws {
+        let o = try decode(Self.samples["onboard"]!)
+        XCTAssertEqual(o.hostRequest.op, .onboard)
+        XCTAssertEqual(o.hostRequest.images, ["claude-code", "lab"])
+        XCTAssertEqual(o.hostRequest.follow, false, "the preparation runs in the host; the action ends at once")
+        XCTAssertEqual(o.hostRequest.requestedBy, "doz ui")
+        XCTAssertEqual(try decode(#"{"action":"onboard"}"#).hostRequest.images, [], "no images: onboarding is recorded at once")
+        XCTAssertNil(try decode(#"{"action":"prepare-cancel"}"#).hostRequest.images, "none named: every running one")
+        XCTAssertEqual(try decode(Self.samples["prepare-cancel"]!).hostRequest.images, ["pi"])
+        invalid(#"{"action":"onboard","images":["ubuntu"]}"#)
+        invalid(#"{"action":"onboard","images":["pi","pi"]}"#)
+        invalid(#"{"action":"onboard","images":"pi"}"#)
+        invalid(#"{"action":"onboard","images":["pi"],"follow":true}"#)
+        invalid(#"{"action":"onboard","images":["lab","pi","claude-code","lab"]}"#)
+        invalid(#"{"action":"prepare-cancel","images":[1]}"#)
+    }
 
     /// 593: templates and duplicates — strict, and each field mapped to the host's request.
     func testTemplatesAndDuplicatesDecodeStrictly() throws {

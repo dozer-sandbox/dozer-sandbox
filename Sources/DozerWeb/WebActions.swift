@@ -36,6 +36,11 @@ public enum WebAction: Equatable, Sendable {
     case accountKeepalive(Bool)
     case accountVerify(String)
     case accountRemove(String)
+    /// 594: onboard — prepare these built-in images in the host (in the background: the action ends
+    /// at once; the preparation shows in the wizard and in Operations) and record the onboarding.
+    case onboard([String])
+    /// 594: cancel the preparation of these images (all running ones when empty).
+    case prepareCancel([String])
 
     public static let lifecycleOps: [String: HostOp] = [
         "start": .start, "wake": .wake, "pause": .pause, "resume": .resume, "sleep": .sleep, "hibernate": .hibernate,
@@ -52,7 +57,7 @@ public enum WebAction: Equatable, Sendable {
              .pointFork(let n, _, _), .pointRemove(let n, _), .pointSaveImage(let n, _, _, _), .netPolicy(let n, _), .keyPolicy(let n, _),
              .keyRemove(let n, _), .accountUse(let n, _), .templateCreate(let n, _, _, _), .duplicate(let n, _, _, _):
             return n
-        case .imageBake, .imageRemove, .accountDefault, .accountKeepalive, .accountVerify, .accountRemove:
+        case .imageBake, .imageRemove, .accountDefault, .accountKeepalive, .accountVerify, .accountRemove, .onboard, .prepareCancel:
             return nil
         }
     }
@@ -172,6 +177,16 @@ public enum WebAction: Equatable, Sendable {
             var r = HostRequest(.accountRemove)
             r.account = a
             return r
+        case .onboard(let images):
+            var r = HostRequest(.onboard)
+            r.images = images
+            r.follow = false
+            r.requestedBy = "doz ui"
+            return r
+        case .prepareCancel(let images):
+            var r = HostRequest(.prepareCancel)
+            r.images = images.isEmpty ? nil : images
+            return r
         }
     }
 
@@ -204,6 +219,8 @@ public enum WebAction: Equatable, Sendable {
             "account-keepalive": ["enabled"],
             "account-verify": ["account"],
             "account-rm": ["account", "confirm"],
+            "onboard": ["images"],
+            "prepare-cancel": ["images"],
         ]
         for (verb, op) in lifecycleOps { f[verb] = [.reset, .rm].contains(op) ? ["sandbox", "confirm"] : ["sandbox"] }
         return f
@@ -281,6 +298,10 @@ public enum WebAction: Equatable, Sendable {
             a = .accountVerify(try f.account("account"))
         case "account-rm":
             a = .accountRemove(try f.account("account"))
+        case "onboard":
+            a = .onboard(try f.builtInImages("images"))
+        case "prepare-cancel":
+            a = .prepareCancel(try f.builtInImages("images"))
         default:
             guard let op = lifecycleOps[verb] else { throw Invalid("unknown action") }
             a = .lifecycle(op, name: try f.sandbox("sandbox"))
@@ -369,6 +390,18 @@ public enum WebAction: Equatable, Sendable {
                 throw Invalid("\(key): an account name\(allowDefault ? ", default" : "") or none")
             }
             return s
+        }
+
+        /// 594: a list of built-in images (lab, claude-code, pi), each at most once; absent = empty.
+        func builtInImages(_ key: String) throws -> [String] {
+            guard let v = d[key], !(v is NSNull) else { return [] }
+            guard let a = v as? [Any], a.count <= 3 else { throw Invalid("\(key): a list of lab, claude-code, pi") }
+            var out: [String] = []
+            for x in a {
+                guard let s = x as? String, DozerImages.builtIn.contains(s), !out.contains(s) else { throw Invalid("\(key): lab, claude-code, pi — each once") }
+                out.append(s)
+            }
+            return out
         }
 
         func subnet(_ key: String) throws -> String? {

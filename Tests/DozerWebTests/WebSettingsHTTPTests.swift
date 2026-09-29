@@ -217,5 +217,57 @@ final class WebSettingsHTTPTests: XCTestCase {
         XCTAssertEqual(WebRoute.parse(method: .post, target: "/api/v1/settings"), .settingsChange)
         XCTAssertNil(WebRoute.parse(method: .delete, target: "/api/v1/settings"))
         XCTAssertNil(WebRoute.parse(method: .get, target: "/api/v1/settings/ui.theme"))
+        // 594
+        XCTAssertEqual(WebRoute.parse(method: .get, target: "/api/v1/onboarding"), .onboarding)
+        XCTAssertEqual(WebRoute.parse(method: .post, target: "/api/v1/onboarding/config"), .onboardingConfig)
+        XCTAssertEqual(WebRoute.parse(method: .get, target: "/api/v1/preparations"), .preparations)
+        XCTAssertNil(WebRoute.parse(method: .post, target: "/api/v1/onboarding"))
+        XCTAssertNil(WebRoute.parse(method: .get, target: "/api/v1/onboarding/config"))
+        XCTAssertNil(WebRoute.parse(method: .post, target: "/api/v1/preparations"))
+        XCTAssertNil(WebRoute.parse(method: .delete, target: "/api/v1/onboarding"))
+    }
+
+    /// 594 (D7): the wizard's settings — doz.toml and the prompt template, each written only when
+    /// missing; CSRF, exact Origin and a strict body, as every change.
+    func testTheOnboardingConfigIsWrittenOnlyWhenMissing() throws {
+        let (cookie, csrf) = try signIn()
+        func post(_ body: String, csrf c: String?) throws -> RawResponse {
+            var h = ["Cookie": cookie, "Origin": origin, "Content-Type": "application/json"]
+            if let c { h["X-Doz-CSRF"] = c }
+            return try request("/api/v1/onboarding/config", h, method: "POST", body: body)
+        }
+        let body = #"{"defaultImage":"claude-code","account":"mac"}"#
+        XCTAssertEqual(try post(body, csrf: nil).status, 403, "no CSRF token")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: file.path))
+        for bad in [#"{"defaultImage":"claude-code"}"#, #"{"defaultImage":"ubuntu","account":"mac"}"#,
+                    #"{"defaultImage":"pi","account":"sk-ant-api03-x"}"#, #"{"defaultImage":"pi","account":"mac","path":"/etc"}"#] {
+            let r = try post(bad, csrf: csrf)
+            XCTAssertEqual(r.status, 400, bad)
+            XCTAssertFalse(r.text.contains("sk-ant"), "a refusal never echoes the value")
+        }
+        let first = try post(body, csrf: csrf)
+        XCTAssertEqual(first.status, 200, first.text)
+        let res = try JSONDecoder().decode(WebOnboardingConfigResult.self, from: first.body)
+        XCTAssertEqual(res.settings, "written")
+        XCTAssertEqual(res.promptTemplate, "written")
+        let text = try String(contentsOf: file, encoding: .utf8)
+        XCTAssertTrue(text.contains("\nimage = \"claude-code\"\n"))
+        XCTAssertTrue(text.contains("\naccount = \"mac\"\n"))
+        let again = try JSONDecoder().decode(WebOnboardingConfigResult.self, from: try post(#"{"defaultImage":"lab","account":"none"}"#, csrf: csrf).body)
+        XCTAssertEqual(again.settings, "kept")
+        XCTAssertEqual(try String(contentsOf: file, encoding: .utf8), text, "never overwritten")
+        // The wizard's facts and the host's preparations: read with the session.
+        XCTAssertEqual(try request("/api/v1/onboarding").status, 401)
+        let o = try request("/api/v1/onboarding", ["Cookie": cookie])
+        XCTAssertEqual(o.status, 200, o.text)
+        let dec = JSONDecoder()
+        dec.dateDecodingStrategy = .iso8601
+        let ob = try dec.decode(WebOnboarding.self, from: o.body)
+        XCTAssertEqual(ob.settingsPath, file.path)
+        XCTAssertTrue(ob.settingsExists)
+        XCTAssertEqual(ob.defaultImage, "claude-code")
+        XCTAssertFalse(ob.blocked)
+        XCTAssertEqual(ob.preferredAccount, "skip", "no Mac login: skip is the default")
+        XCTAssertEqual(try request("/api/v1/preparations", ["Cookie": cookie]).text, "[]")
     }
 }

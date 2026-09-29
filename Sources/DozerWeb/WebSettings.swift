@@ -93,4 +93,47 @@ public final class WebSettingsStore: @unchecked Sendable {
 
     /// `ui.terminals` — off, no ticket is minted.
     public var terminalsEnabled: Bool { current.bool(SettingKey.terminals) }
+
+    /// 594 (D7): the onboarding's settings — doz.toml and the prompt template, each written only when
+    /// missing (an existing file is never touched), with `defaults.image` and the account's default.
+    public func writeOnboardingConfig(_ c: WebOnboardingConfig) throws -> WebOnboardingConfigResult {
+        lock.lock()
+        defer { lock.unlock() }
+        do {
+            let account = Onboarding.Account(rawValue: c.account).flatMap(Onboarding.defaultAccount(for:))
+            let (s, sp) = try Onboarding.writeSettingsIfMissing(defaultImage: c.defaultImage, account: account, environment: environment)
+            let (t, tp) = try Onboarding.writePromptTemplateIfMissing(environment: environment)
+            return WebOnboardingConfigResult(settings: s.rawValue, settingsPath: sp, promptTemplate: t.rawValue, promptTemplatePath: tp)
+        } catch let e as SettingsError {
+            throw HostError(.failed, e.message)
+        }
+    }
+
+    /// Where the settings file and the prompt template are, and whether they exist (the wizard says).
+    public func onboardingFiles() -> (settings: String?, settingsExists: Bool, template: String?, templateExists: Bool) {
+        let fm = FileManager.default
+        let s = DozerSettings.fileURL(environment: environment)
+        let t = AgentPrompt.userTemplateURL(environment: environment)
+        return (s?.path, s.map { fm.fileExists(atPath: $0.path) } ?? false, t?.path, t.map { fm.fileExists(atPath: $0.path) } ?? false)
+    }
+}
+
+/// 594: `POST /api/v1/onboarding/config`, decoded strictly: exactly {defaultImage, account}.
+public struct WebOnboardingConfig: Equatable, Sendable {
+    public let defaultImage: String
+    public let account: String
+
+    public static func decode(_ body: Data) throws -> WebOnboardingConfig {
+        guard let obj = try? JSONSerialization.jsonObject(with: body), let d = obj as? [String: Any] else {
+            throw WebAction.Invalid("the body must be a JSON object")
+        }
+        guard Set(d.keys) == ["defaultImage", "account"] else { throw WebAction.Invalid("exactly defaultImage and account") }
+        guard let i = d["defaultImage"] as? String, ["lab", "claude-code", "pi"].contains(i) else {
+            throw WebAction.Invalid("defaultImage: lab, claude-code or pi")
+        }
+        guard let a = d["account"] as? String, Onboarding.Account(rawValue: a) != nil else {
+            throw WebAction.Invalid("account: \(Onboarding.Account.allCases.map(\.rawValue).joined(separator: ", "))")
+        }
+        return WebOnboardingConfig(defaultImage: i, account: a)
+    }
 }

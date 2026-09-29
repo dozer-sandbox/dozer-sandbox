@@ -509,6 +509,20 @@ public final class DozerWebServer: @unchecked Sendable {
         case .settingsChange:
             try Self.requireJSONBody(md)
             return json(try settings.apply(try WebSettingChange.decode(body)))
+        case .onboarding:
+            var o = try await data.onboarding()
+            let f = settings.onboardingFiles()
+            o.settingsPath = f.settings
+            o.settingsExists = f.settingsExists
+            o.promptTemplatePath = f.template
+            o.promptTemplateExists = f.templateExists
+            o.defaultImage = settings.current.string(SettingKey.defaultImage) ?? "lab"
+            return json(o)
+        case .onboardingConfig:
+            try Self.requireJSONBody(md)
+            return json(try settings.writeOnboardingConfig(try WebOnboardingConfig.decode(body)))
+        case .preparations:
+            return json(try await data.preparations())
         case .events:
             return json(await monitor.recent)
         case .doctor:

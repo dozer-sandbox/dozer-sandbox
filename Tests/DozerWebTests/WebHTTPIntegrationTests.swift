@@ -386,6 +386,14 @@ final class FakeData: DozerWebData, @unchecked Sendable {
     }
     func metricsCSV(_ q: WebMetricsQuery) async throws -> Data { Data("id,action\n1,'=cmd\n".utf8) }
     func doctor() async throws -> [WebDoctorCheck] { [WebDoctorCheck(check: "macOS", status: "ok", detail: "fake")] }
+    // 594: the onboarding's facts, as a store that was never onboarded shows them.
+    func onboarding() async throws -> WebOnboarding {
+        WebOnboarding(status: PrepareStatus(preparations: [], onboarded: nil, images: [], hostRunning: false),
+                      checks: [OnboardingCheck(check: "macOS", status: "ok", detail: "fake", hard: true),
+                               OnboardingCheck(check: "claude", status: "warn", detail: "not installed", hard: false)],
+                      freeBytes: 100 << 30, macSignedIn: false, defaultAccount: "mac")
+    }
+    func preparations() async throws -> [WebPreparation] { [] }
     // 591: scripted host events and boot console (only after `hostUp`: nil before, as with no host).
     var hostUp: Bool {
         get { lock.withLock { _hostUp } }

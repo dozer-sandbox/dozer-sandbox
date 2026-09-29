@@ -32,6 +32,8 @@ const state = {
   signedOut: false,
   metricsFilter: { image: '', days: '', steps: false },
   settings: null,          // 591: {report, byKey} from GET /api/v1/settings
+  preps: [],               // 594: the host's image preparations (SSE `preparations`, GET /api/v1/preparations)
+  wiz: null,               // 594: the onboarding wizard's state (#/onboarding)
 };
 
 // ── tiny DOM helpers (text only) ────────────────────────────────────────────
@@ -93,6 +95,10 @@ const ICON_EXACT = {
   'key policy…': 'key-round', 'account…': 'user-round', 'edit policy…': 'shield', 'terminal…': 'terminal', 'new shell': 'plus',
   'new sandbox': 'plus', 'run detached…': 'play', 'default': 'rotate-ccw', 'apply anyway': 'check', 'download csv': 'download',
   'shut down': 'power', 'sign out': 'log-out', 'unsplit': 'columns-2',
+  // 594: the onboarding wizard.
+  'get started': 'rocket', 'run onboarding again': 'rocket', 'check again': 'refresh-cw', 'next': 'arrow-right', 'back': 'arrow-left',
+  'continue in the background': 'layers', 'skip': 'skip-forward', 'open sandboxes': 'box', 'prepare and continue': 'flame',
+  'cancel preparation': 'x', 'create sandbox': 'plus', 'try again': 'refresh-cw', 'continue': 'arrow-right',
 };
 const ICON_WORD = {
   start: 'play', pause: 'pause', resume: 'play', sleep: ICON_SLEEP, hibernate: ICON_HIBERNATE, wake: 'sun', reset: 'rotate-ccw', remove: 'trash-2', delete: 'trash-2',
@@ -215,8 +221,9 @@ function toast(text, bad) {
 // after the Operations page was last shown (or this page loaded). In-context progress stays: the
 // overview row and the sandbox's control bar (`data-op-for`).
 function opEnded(o) { return new Date(o.startedAt).getTime() + (o.milliseconds || 0); }
+function prepRunning(p) { return p.state === 'running' || p.state === 'cancelling'; }
 function renderOps() {
-  const running = [...state.ops.values()].filter((o) => o.state === 'running').length;
+  const running = [...state.ops.values()].filter((o) => o.state === 'running').length + state.preps.filter(prepRunning).length;
   const badge = $('ops-badge');
   badge.hidden = running === 0;
   badge.replaceChildren(h('span', { class: 'mini-spin', 'aria-hidden': 'true' }), String(running));
@@ -258,9 +265,36 @@ function renderOperations() {
       h('td', { class: 'op-text' }, o.text));
   });
   box.replaceChildren(h('h1', null, 'Operations'),
+    state.preps.length ? preparationsSection() : null,
     h('p', { class: 'sub' }, 'What this UI asked the host to do, newest first: live progress while it runs, then its result. A failure also raises a message.'),
     h('div', { class: 'toolbar' }, filter, list.length + ' of ' + all.length),
     panel(table(['', 'Action', 'Sandbox', 'Started', 'Took', 'Progress / result'], rows, [4]), 'Nothing yet — actions you take show here.'));
+}
+/// 594: the host's image preparations — whoever asked (doz onboard, the wizard, a start): they run in
+/// the host, not in this page, so they show here even when started from a terminal.
+function prepProgressText(p) {
+  if (p.error) return p.error;
+  if (!prepRunning(p)) return p.state === 'done' ? 'ready' : p.state;
+  if (p.transferLine) return p.transferLine;
+  if (p.step) return p.step + ' · ' + Math.round(p.stepSeconds || 0) + ' s';
+  return p.lines.length ? p.lines[p.lines.length - 1] : 'starting…';
+}
+function preparationsSection() {
+  const rows = state.preps.map((p) => h('tr', { class: 'op-row op-' + (prepRunning(p) ? 'running' : p.state === 'done' ? 'done' : 'failed'), 'data-prep': p.image },
+    h('td', null, prepRunning(p) ? h('span', { class: 'mini-spin', title: p.state }) : h('span', { class: 'op-state', title: p.state }, p.state === 'done' ? '✓' : '✕')),
+    h('td', { class: 'op-action' }, icon('flame'), 'prepare ' + p.image),
+    h('td', null, p.requestedBy.join(', ')),
+    h('td', null, clock(p.startedAt)), h('td', { class: 'num' }, Math.round(p.seconds) + ' s'),
+    h('td', { class: 'op-text' }, prepProgressText(p)),
+    h('td', null, prepRunning(p) && p.state !== 'cancelling'
+      ? btn('Cancel preparation', () => act({ action: 'prepare-cancel', images: [p.image] }), { small: true, danger: true }) : null)));
+  return h('div', null, h('h2', null, 'Image preparations (in the host)'),
+    h('p', { class: 'sub' }, 'The kernel, the base image and the bake of a built-in image — asked for by doz onboard, the onboarding wizard, doz image bake or a first start. One per image at a time; whoever asks next joins it.'),
+    panel(table(['', 'Image', 'Asked by', 'Started', 'Took', 'Progress', ''], rows, [4])));
+}
+async function loadPreparations() {
+  try { state.preps = await api('preparations'); } catch (_) { /* the last list */ }
+  renderOps();
 }
 /// The newest operation of each sandbox, shown under its name in the list (live, without a refetch).
 /// A running operation counts its seconds, so a two-minute first start (pull, flatten, bake) is
@@ -567,14 +601,21 @@ function connect() {
   es.addEventListener('hello', async () => {
     setLive('on', 'live');
     try { for (const o of await api('operations')) state.ops.set(o.id, o); renderOps(); } catch (_) { /* */ }
+    loadPreparations();
     refreshNav();
     refresh(true);
   });
   // The Settings page is not about the store's live state: re-rendering it would drop a half-typed
-  // value; nor is Operations (its own events keep it current).
+  // value; nor is Operations (its own events keep it current), nor the onboarding wizard (its own).
   es.addEventListener('changed', () => {
     refreshNav();
-    if (state.view !== 'settings' && state.view !== 'operations') refresh(false);
+    if (state.view !== 'settings' && state.view !== 'operations' && state.view !== 'onboarding') refresh(false);
+  });
+  // 594: the host's image preparations, while any runs (and once when the last ends).
+  es.addEventListener('preparations', (ev) => {
+    try { state.preps = JSON.parse(ev.data); } catch (_) { return; }
+    renderOps();
+    if (state.view === 'onboarding') renderWizard();
   });
   es.addEventListener('op', (ev) => { try { trackOp(JSON.parse(ev.data)); } catch (_) { /* */ } });
   es.addEventListener('activity', (ev) => {
@@ -654,7 +695,8 @@ function route() {
   $('main').classList.toggle('main-terms', onSbx);
   if (!onGrid) gridLeave();
   if (state.view !== 'operations') state.opsBox = null;
-  if (state.view === 'operations') acknowledgeOps();
+  if (state.view === 'operations') { acknowledgeOps(); loadPreparations(); }
+  if (state.view !== 'onboarding') wizardStopPolling();
   if (onSbx) { showSandbox(); return; }
   if (onGrid) { gridEnter(); return; }
   refresh(true);
@@ -670,7 +712,7 @@ async function refresh(scrollTop) {
   refreshing = true;
   try {
     const views = { overview: viewOverview, images: viewImages, operations: viewOperations, accounts: viewAccounts,
-                    metrics: viewMetrics, activity: viewActivity, doctor: viewDoctor, settings: viewSettings };
+                    metrics: viewMetrics, activity: viewActivity, doctor: viewDoctor, settings: viewSettings, onboarding: viewOnboarding };
     const fn = views[state.view] || viewOverview;
     const node = await fn();
     if (node && !state.signedOut) {
@@ -799,7 +841,9 @@ async function viewOverview() {
   state.overview = o;
   renderNavSandboxes();
   const rows = o.sandboxes.map((s) => h('tr', { class: 'click', on: { click: () => { location.hash = '#/sandbox/' + s.name; } } },
-    h('td', null, h('a', { href: '#/sandbox/' + s.name }, s.name), h('div', { class: 'muted' }, s.image), h('div', { 'data-op-for': s.name })),
+    h('td', null, h('a', { href: '#/sandbox/' + s.name }, s.name), h('div', { class: 'muted' }, s.image),
+      s.workspace ? null : h('div', { class: 'muted no-ws', title: '/workspace is private to the VM: nothing is shared with the Mac' }, 'no workspace'),
+      h('div', { 'data-op-for': s.name })),
     h('td', null, phasePill(s.phase, s.phaseLabel, s.busy), s.diedWithHost ? h('div', { class: 'st-warn' }, 'died with its host') : null),
     h('td', { class: 'num' }, h('div', null, s.ramHeldMiB ? mib(s.ramHeldMiB) : '—'), h('div', { class: 'muted' }, 'of ' + mib(s.memoryMiB)), meter(s.ramHeldMiB, s.memoryMiB)),
     h('td', { class: 'num' }, bytes(s.diskBytes)),
@@ -827,9 +871,10 @@ async function viewOverview() {
 async function createDialog() {
   let images = [], accounts = { accounts: [] };
   try { [images, accounts] = await Promise.all([api('images'), api('accounts')]); } catch (_) { /* defaults */ }
-  dialog('New sandbox', 'It is created off; Start boots it (the first start of an image bakes it — minutes, needs network).', [
+  dialog('New sandbox', 'It is created off; Start boots it (the first start of an image not yet prepared prepares it — minutes, needs network).', [
     { name: 'sandbox', label: 'Name', placeholder: 'a-z 0-9 -', required: true },
-    { name: 'image', label: 'Image', type: 'select', options: images.length ? images.map((i) => [i.name, i.name + (i.kind === 'custom' ? ' (template)' : '')]) : ['lab', 'claude-code', 'pi'] },
+    { name: 'image', label: 'Image', type: 'select', value: setting('defaults.image', 'lab'),
+      options: images.length ? images.map((i) => [i.name, i.name + (i.kind === 'custom' ? ' (template)' : '')]) : ['lab', 'claude-code', 'pi'] },
     { name: 'network', label: 'Network', type: 'select', value: '',
       options: [['', 'default (per image, Settings)'],['agent', 'agent — proxied, Anthropic + registries'], ['bake', 'bake — proxied, package registries'],
         ['locked', 'locked — proxied, nothing'], ['open', 'open — proxied, everything (logged)'], ['nat', 'nat — a real interface (vmnet)'], ['none', 'none']] },
@@ -837,8 +882,13 @@ async function createDialog() {
       options: [['', 'the store default'], ['none', 'none'], ...accounts.accounts.map((a) => [a.name, a.name + ' (' + a.kind + ')'])] },
     { name: 'cpus', label: 'CPUs', type: 'number', min: 1, max: 64, placeholder: 'default (' + setting('defaults.cpus', 2) + ', Settings)' },
     { name: 'memoryMiB', label: 'Memory (MiB)', type: 'number', min: 256, placeholder: 'default (per image, Settings)' },
-    { name: 'workspace', label: 'Workspace (a folder on this Mac, shared at /workspace)', placeholder: '/Users/you/code/project' },
+    { name: 'workspace', label: 'Workspace (a folder on this Mac, shared at /workspace)', placeholder: '/Users/you/code/project',
+      help: 'Type or paste its path (a browser cannot pick a local folder for the host).' },
+    { name: 'noWorkspace', label: 'No workspace — /workspace is private to the VM (nothing is shared with the Mac)', type: 'checkbox' },
   ], 'Create', async (v) => {
+    // 594 (D17): creating without a workspace is allowed, but chosen — never by leaving a field empty.
+    if (!v.workspace && !v.noWorkspace) throw new Error('Give a workspace folder, or tick “No workspace”.');
+    if (v.workspace && v.noWorkspace) throw new Error('Either a workspace folder or “No workspace”, not both.');
     const body = { action: 'create', sandbox: v.sandbox, image: v.image };
     if (v.network) body.network = v.network;
     if (v.account) body.account = v.account;
@@ -979,7 +1029,8 @@ function sandboxParts(name, d, net, accounts) {
         h('span', null, i.image),
         h('span', null, (i.ramHeldMiB ? mib(i.ramHeldMiB) : '—') + ' of ' + mib(i.memoryMiB)),
         h('span', { class: i.deniedConnections ? 'st-warn' : null }, netText),
-        i.accountApplies ? h('span', null, 'account ' + (i.account || '—')) : null)),
+        i.accountApplies ? h('span', null, 'account ' + (i.account || '—')) : null,
+        i.workspace ? null : h('span', { class: 'st-warn', title: '/workspace is private to the VM: nothing is shared with the Mac' }, 'no workspace'))),
     h('div', { class: 'sbx-actions' },
       lifecycleButtons(i, true),
       h('span', { class: 'sbx-sep', 'aria-hidden': 'true' }),
@@ -1044,9 +1095,27 @@ function sandboxParts(name, d, net, accounts) {
     h('div', { class: 'panel' }, h('div', { class: 'facts' },
       fact('Memory', mib(d.memoryMiB)), fact('Root disk', mib(d.rootfsMiB)), fact('State disk', mib(d.stateDiskMiB)),
       fact('Journal', d.journalMiB ? mib(d.journalMiB) : 'none'), fact('Network', d.networkMode + (d.subnet ? ' · ' + d.subnet : '')),
-      fact('Account', i.accountApplies ? (i.account || '—') : 'n/a'), fact('Shares', d.shares.length ? d.shares.map((s) => s.hostPath + ' → ' + s.guestPath).join(', ') : 'none'),
-      fact('Directory', d.directory))));
+      fact('Account', i.accountApplies ? (i.account || '—') : 'n/a'),
+      fact('Workspace', i.workspace ? i.workspace + ' → /workspace (live)' : 'not shared — /workspace is private to the VM'),
+      fact('Shares', d.shares.length ? d.shares.map((s) => s.hostPath + ' → ' + s.guestPath).join(', ') : 'none'),
+      d.project ? fact('Project', d.project) : null,
+      fact('Directory', d.directory))),
+    h('h2', null, 'Environment prompt'),
+    promptPanel(d));
   return { bar, details };
+}
+/// 594 (D15/D16): what the agent is told about where it runs, as its NEXT session gets it.
+function promptPanel(d) {
+  const p = d.agentPrompt;
+  if (!p) return panel(null, 'This image runs no agent — there is no environment prompt.');
+  if (!p.enabled) return panel(null, 'Off — agent.prompt is false (Settings): the agent gets no facts block and no dozer skill.');
+  const how = p.agent === 'pi' ? 'pi’s --append-system-prompt ' + p.promptPath : 'Claude Code’s --append-system-prompt (its launcher reads ' + p.promptPath + ')';
+  return h('div', { class: 'panel prompt-panel' },
+    h('div', { class: 'muted' }, 'Written at every session start, from this sandbox’s current facts — ', how, '. Layers: ', p.layers.join(' + '),
+      '. The dozer skill: ', h('code', null, p.skillPath), ' (' + p.skillLines + ' lines).'),
+    p.error ? h('div', { class: 'notice bad' }, 'It does not render, so sessions do not start: ' + p.error)
+            : h('pre', { class: 'prompt-text' }, p.text || ''),
+    h('div', { class: 'muted' }, 'Your own template: agent-prompt.md beside doz.toml · this sandbox’s own lines: agent_prompt in doz_project.yaml, or doz create --agent-prompt FILE.'));
 }
 
 /// 593: Save as template — the ROOT disk only (never the state disk: logins and history stay out of a
@@ -1311,9 +1380,268 @@ function renderActivity() { $('view').replaceChildren(activityNode()); }
 async function viewDoctor() {
   const checks = await api('doctor');
   const rows = checks.map((c) => h('tr', null, h('td', null, statusPill(c.status)), h('td', null, c.check), h('td', null, c.detail)));
-  return h('div', null, h('h1', null, 'Doctor'),
+  return h('div', null,
+    h('div', { class: 'head' }, h('h1', null, 'Doctor'),
+      btn('Run onboarding again', () => { state.wiz = null; location.hash = '#/onboarding'; },
+        { title: 'The setup wizard: checks, the Claude account, settings, images — it prepares only what is missing' })),
     h('p', { class: 'sub' }, 'doz doctor: this Mac, the store, the host and the Claude login (re-checked at most every 30 s).'),
     panel(table(['', 'Check', 'Detail'], rows)));
+}
+
+// ── onboarding (594) ────────────────────────────────────────────────────────
+// The wizard (D11): Welcome → Checks → Claude account → Images → Preparing → First sandbox → Done.
+// The same model as every page: facts from GET /api/v1/onboarding; changes through the typed actions
+// (account-default, onboard, prepare-cancel, create) and ONE typed route for the settings file and
+// the prompt template (POST /api/v1/onboarding/config — each written only when missing, never
+// overwritten). No secret is typed here: a key or a setup token is added with the CLI command the
+// account step shows. The preparation runs in the HOST: "Continue in the background" leaves it
+// running (Operations shows it), and closing this tab changes nothing.
+const WIZ_STEPS = ['Welcome', 'Checks', 'Claude account', 'Images', 'Preparing', 'First sandbox', 'Done'];
+const WIZ_ORDER = ['claude-code', 'pi', 'lab'];
+let wizTimer = null;
+function wizardStopPolling() { clearInterval(wizTimer); wizTimer = null; }
+function wizardPoll() {
+  if (wizTimer) return;
+  wizTimer = setInterval(async () => {
+    if (state.view !== 'onboarding' || !state.wiz || state.wiz.step !== 4) { wizardStopPolling(); return; }
+    try { state.preps = await api('preparations'); } catch (_) { return; }
+    renderOps();
+    renderWizard();
+  }, 1000);
+}
+async function viewOnboarding() {
+  if (!state.wiz) state.wiz = { step: 0, data: null, account: null, images: null, config: null, created: null, busy: false };
+  const w = state.wiz;
+  if (!w.data || w.step <= 1) w.data = await api('onboarding');
+  if (w.step === 4) { await loadPreparations(); wizardPoll(); }
+  return wizardNode();
+}
+/// Re-render in place (a preparation's progress; a step change). The first-sandbox form is never
+/// re-rendered under the person typing in it.
+function renderWizard(force) {
+  if (state.view !== 'onboarding' || !state.wiz) return;
+  if (!force && state.wiz.step !== 4) return;
+  $('view').replaceChildren(wizardNode());
+}
+function wizGo(step) {
+  const w = state.wiz;
+  w.step = step;
+  if (step === 4) { loadPreparations().then(() => renderWizard(true)); wizardPoll(); } else wizardStopPolling();
+  renderWizard(true);
+  $('main').scrollTop = 0;
+}
+function wizButtons(...buttons) { return h('div', { class: 'wiz-buttons' }, buttons); }
+function wizChosenImages() {
+  const w = state.wiz, d = w.data;
+  if (!w.images) w.images = new Set(d.images.filter((i) => i.recommended || i.prepared).map((i) => i.name));
+  return WIZ_ORDER.filter((n) => w.images.has(n));
+}
+function wizDiskNeed() {
+  const d = state.wiz.data;
+  const todo = d.images.filter((i) => state.wiz.images.has(i.name) && !i.prepared);
+  if (!todo.length) return 0;
+  return d.commonBytes + d.headroomBytes + todo.reduce((s, i) => s + i.diskBytes, 0);
+}
+function wizardNode() {
+  const w = state.wiz, d = w.data;
+  const stepper = h('ol', { class: 'wiz-steps', 'aria-label': 'Steps' }, WIZ_STEPS.map((s, i) =>
+    h('li', { class: i === w.step ? 'current' : i < w.step ? 'done' : null, 'aria-current': i === w.step ? 'step' : null }, h('span', { class: 'wiz-n' }, String(i + 1)), s)));
+  const body = [wizStep0, wizStep1, wizStep2, wizStep3, wizStep4, wizStep5, wizStep6][w.step](d, w);
+  return h('div', { class: 'wizard', 'data-step': String(w.step) },
+    h('h1', null, 'Set up Dozer Sandbox'),
+    h('p', { class: 'sub' }, 'Once for this Mac (store ', h('code', null, $('store-path').textContent), '). The same as ', h('code', null, 'doz onboard'), ' in a terminal.'),
+    stepper, h('section', { class: 'wiz-body panel' }, body));
+}
+function wizStep0(d) {
+  return [
+    h('h2', null, 'Welcome'),
+    h('p', null, 'Dozer Sandbox runs each project in its own small Linux virtual machine on this Mac — an agent like Claude Code works there, not on your Mac. A sandbox pauses in a millisecond, hibernates to disk and wakes in a third of a second.'),
+    h('p', null, 'Setting up takes a few minutes, once: this Mac is checked, you choose how sandboxes reach Claude, the settings file is written, and the images you pick are downloaded and prepared — in the background, so the first sandbox starts in seconds instead of minutes.'),
+    d.onboarded ? h('div', { class: 'notice' }, 'This store was set up on ' + full(d.onboarded.date) + ' (doz ' + d.onboarded.dozVersion + ')' +
+      (d.onboarded.images.length ? ', with ' + d.onboarded.images.join(', ') : '') + '. Running it again checks again and prepares only what is missing.') : null,
+    wizButtons(btn('Get started', () => wizGo(1), { primary: true })),
+  ];
+}
+function wizStep1(d, w) {
+  const rows = d.checks.map((c) => h('tr', { 'data-check': c.check },
+    h('td', null, statusPill(c.status === 'fail' && !c.hard ? 'warn' : c.status)),
+    h('td', null, c.check, c.hard ? h('span', { class: 'tag' }, 'required') : null),
+    h('td', null, c.detail)));
+  const next = btn('Next', () => wizGo(2), { primary: true });
+  if (d.blocked) next.disabled = true;
+  return [
+    h('h2', null, 'Checks'),
+    h('p', { class: 'sub' }, 'The doctor’s checks. A required one that fails stops the setup; the others only say what will not work yet (Claude Code missing or signed out: add an account later; vmnet: only --network nat needs it).'),
+    table(['', 'Check', 'Detail'], rows),
+    d.blocked ? h('div', { class: 'notice bad' }, 'A required check failed — fix it, then Check again.') : null,
+    wizButtons(btn('Back', () => wizGo(0)), btn('Check again', async () => { w.data = await api('onboarding'); renderWizard(true); }), next),
+  ];
+}
+function wizStep2(d, w) {
+  if (!w.account) w.account = d.preferredAccount;
+  const opts = d.accountOptions.map((o) => {
+    const input = h('input', { type: 'radio', name: 'wiz-account', value: o.value });
+    input.checked = o.value === w.account;
+    input.addEventListener('change', () => { w.account = o.value; renderWizard(true); });
+    return h('label', { class: 'wiz-choice' + (o.value === w.account ? ' chosen' : ''), 'data-account': o.value }, input,
+      h('span', null, o.label, o.value === d.preferredAccount ? h('span', { class: 'tag' }, 'recommended') : null));
+  });
+  const chosen = d.accountOptions.find((o) => o.value === w.account);
+  return [
+    h('h2', null, 'Claude account'),
+    h('p', null, d.macSignedIn
+      ? 'Claude Code is signed in on this Mac. Sandboxes can use that login: nothing is copied into them — the Mac’s proxy adds it to their requests to Anthropic, and the Mac keeps renewing it.'
+      : 'Claude Code is not signed in on this Mac. A sandbox can use an Anthropic API key or a Claude setup token instead (added with the CLI), or you can decide later.'),
+    h('fieldset', { class: 'wiz-choices' }, h('legend', null, 'How should sandboxes reach Claude?'), opts),
+    chosen && chosen.commands.length ? h('div', { class: 'panel wiz-cmds' },
+      h('div', null, 'Afterwards, in a terminal on this Mac (a key or a token is never typed in a browser):'),
+      h('pre', { class: 'mono' }, chosen.commands.join('\n'))) : null,
+    h('p', { class: 'muted' }, 'The setup never logs in for you, never copies Claude Code’s refresh token and never writes the keychain. The store’s default account now: ' + d.defaultAccount + '.'),
+    wizButtons(btn('Back', () => wizGo(1)), btn('Next', async (ev) => {
+      const b = ev.currentTarget;
+      b.disabled = true;
+      try {
+        const target = w.account === 'mac' ? 'mac' : w.account === 'none' ? 'none' : null;
+        if (target && target !== d.defaultAccount) await actOrThrow({ action: 'account-default', account: target });
+        wizGo(3);
+      } catch (e) { toast(e.message || String(e), true); b.disabled = false; }
+    }, { primary: true })),
+  ];
+}
+function wizStep3(d, w) {
+  wizChosenImages();
+  const items = d.images.map((i) => {
+    const input = h('input', { type: 'checkbox', value: i.name });
+    input.checked = w.images.has(i.name);
+    input.addEventListener('change', () => { if (input.checked) w.images.add(i.name); else w.images.delete(i.name); renderWizard(true); });
+    return h('label', { class: 'wiz-choice wiz-image' + (input.checked ? ' chosen' : ''), 'data-image': i.name }, input,
+      h('span', null, h('strong', null, i.name), i.recommended ? h('span', { class: 'tag' }, 'recommended') : null,
+        i.prepared ? h('span', { class: 'pill st-ok' }, 'ready') : null,
+        h('div', null, i.summary),
+        h('div', { class: 'muted' }, i.prepared ? 'already prepared in this store' : i.download + ' · ' + i.estimate)));
+  });
+  const need = wizDiskNeed();
+  const short = d.freeBytes != null && need > d.freeBytes;
+  const chosen = wizChosenImages();
+  const todo = chosen.filter((n) => !d.images.find((i) => i.name === n).prepared);
+  const go = btn(todo.length ? 'Prepare and continue' : 'Continue', async (ev) => {
+    const b = ev.currentTarget;
+    b.disabled = true;
+    try {
+      w.config = await api('onboarding/config', { method: 'POST', json: { defaultImage: chosen[0] || 'claude-code', account: w.account || d.preferredAccount } });
+      await actOrThrow({ action: 'onboard', images: chosen });
+      w.prepImages = todo;
+      wizGo(todo.length ? 4 : 5);
+    } catch (e) { toast(e.message || String(e), true); b.disabled = false; }
+  }, { primary: true });
+  if (short) go.disabled = true;
+  return [
+    h('h2', null, 'Images'),
+    h('p', { class: 'sub' }, 'Preparing an image downloads its base and bakes it — the part a first start would otherwise make you wait for. claude-code is ticked; pi and lab are optional (each can also be prepared later, or by its first start).'),
+    h('div', { class: 'wiz-choices' }, items),
+    h('p', { class: short ? 'st-fail' : 'muted', 'data-disk': '1' }, need ? 'About ' + bytes(need) + ' of disk needed (with room for a first sandbox)' +
+      (d.freeBytes != null ? '; ' + bytes(d.freeBytes) + ' free' : '') + (short ? ' — free some space or choose fewer images.' : '.') : 'Nothing to download.'),
+    wizButtons(btn('Back', () => wizGo(2)), go),
+  ];
+}
+function prepCard(p) {
+  const running = prepRunning(p);
+  const bar = h('div', { class: 'wiz-bar', role: 'progressbar', 'aria-valuemin': '0', 'aria-valuemax': '100' });
+  const fill = h('span');
+  if (p.transferFraction != null) { fill.style.width = (p.transferFraction * 100).toFixed(1) + '%'; bar.setAttribute('aria-valuenow', (p.transferFraction * 100).toFixed(0)); }
+  else bar.classList.add('indeterminate');
+  bar.append(fill);
+  return h('div', { class: 'prep-card prep-' + p.state, 'data-prep': p.image },
+    h('div', { class: 'prep-head' }, running ? h('span', { class: 'mini-spin', 'aria-hidden': 'true' }) : h('span', { class: 'op-state' }, p.state === 'done' ? '✓' : '✕'),
+      h('strong', null, p.image), h('span', { class: 'muted' }, ' · ' + (running ? Math.round(p.seconds) + ' s so far' : p.state + ' in ' + ms(p.seconds * 1000)) + ' · asked by ' + p.requestedBy.join(', '))),
+    running && p.step ? h('div', { class: 'prep-step' }, p.step, h('span', { class: 'muted' }, '  ' + Math.round(p.stepSeconds || 0) + ' s')) : null,
+    running && (p.transferLine || p.step) ? bar : null,
+    running && p.transferLine ? h('div', { class: 'mono prep-transfer' }, p.transferLine) : null,
+    running && p.output.length ? h('div', { class: 'mono muted prep-output' }, p.output.map((l) => h('div', null, '│ ' + l))) : null,
+    p.error && p.state !== 'cancelled' ? h('div', { class: 'notice bad' }, p.error) : null,
+    p.lines.length ? h('details', { class: 'prep-lines' }, h('summary', null, 'Finished steps (' + p.lines.length + ')'),
+      h('div', { class: 'mono' }, p.lines.map((l) => h('div', null, l)))) : null);
+}
+function wizStep4(d, w) {
+  const mine = w.prepImages || [];
+  const preps = state.preps.filter((p) => mine.includes(p.image)).filter((p, i, a) => a.findIndex((x) => x.image === p.image) === i);
+  const running = preps.some(prepRunning);
+  const failed = preps.filter((p) => !prepRunning(p) && p.state !== 'done');
+  const next = btn('Next', () => wizGo(5), { primary: true });
+  if (running || failed.length) next.disabled = true;
+  return [
+    h('h2', null, 'Preparing'),
+    h('p', { class: 'sub' }, 'In the host — not in this page: closing the tab changes nothing, and doz onboard --status in a terminal shows the same. Whoever starts a sandbox of these images meanwhile joins this preparation instead of starting another.'),
+    preps.length ? h('div', { class: 'prep-cards' }, preps.map(prepCard)) : h('p', { class: 'muted' }, 'Starting…'),
+    wizButtons(
+      running ? btn('Cancel preparation', () => act({ action: 'prepare-cancel', images: mine }), { danger: true }) : null,
+      failed.length ? btn('Try again', async () => {
+        try { await actOrThrow({ action: 'onboard', images: failed.map((p) => p.image) }); await loadPreparations(); renderWizard(true); } catch (e) { toast(e.message || String(e), true); }
+      }) : null,
+      running ? btn('Continue in the background', () => { toast('It goes on in the host — Operations shows it.'); wizGo(5); }) : null,
+      next),
+  ];
+}
+function wizStep5(d, w) {
+  const chosen = wizChosenImages();
+  const imgs = [...new Set([...chosen, ...d.images.filter((i) => i.prepared).map((i) => i.name)])];
+  const name = h('input', { type: 'text', name: 'wiz-name', placeholder: 'a-z 0-9 -', autocomplete: 'off', spellcheck: 'false' });
+  name.value = w.firstName || 'first';
+  const image = h('select', { name: 'wiz-image' }, (imgs.length ? imgs : ['claude-code', 'pi', 'lab']).map((n) => h('option', { value: n }, n)));
+  const ws = h('input', { type: 'text', name: 'wiz-workspace', placeholder: '/Users/you/code/project', autocomplete: 'off', spellcheck: 'false' });
+  ws.value = w.firstWorkspace || '';
+  const none = h('input', { type: 'checkbox', name: 'wiz-no-workspace' });
+  const error = h('div', { class: 'dlg-error', role: 'alert' });
+  const create = btn('Create sandbox', async (ev) => {
+    const b = ev.currentTarget;
+    error.textContent = '';
+    const n = name.value.trim(), path = ws.value.trim();
+    w.firstName = n;
+    w.firstWorkspace = path;
+    if (!/^[a-z0-9][a-z0-9-]{0,39}$/.test(n)) { error.textContent = 'The name: 1–40 of a-z 0-9 - (not starting with -).'; return; }
+    if (!path && !none.checked) { error.textContent = 'Give a workspace folder, or tick “No workspace”.'; return; }
+    if (path && none.checked) { error.textContent = 'Either a workspace folder or “No workspace”, not both.'; return; }
+    b.disabled = true;
+    try {
+      const body = { action: 'create', sandbox: n, image: image.value };
+      if (path) body.workspace = path;
+      await actOrThrow(body);
+      w.created = n;
+      wizGo(6);
+    } catch (e) { error.textContent = e.message || String(e); b.disabled = false; }
+  }, { primary: true });
+  return [
+    h('h2', null, 'First sandbox (optional)'),
+    h('p', { class: 'sub' }, 'A sandbox for one project. Its workspace is a folder on this Mac, shared live at /workspace — type or paste its path (a browser cannot open a folder picker for the host). It is created off; Start boots it.'),
+    h('label', { class: 'field' }, h('span', null, 'Name'), name),
+    h('label', { class: 'field' }, h('span', null, 'Image'), image),
+    h('label', { class: 'field' }, h('span', null, 'Workspace (a folder on this Mac)'), ws),
+    h('label', { class: 'field check' }, h('span', null, 'No workspace — /workspace is private to the VM (nothing is shared with the Mac)'), none),
+    error,
+    h('p', { class: 'muted' }, 'In a terminal the same is: doz init in the project folder, then doz up.'),
+    wizButtons(btn('Skip', () => wizGo(6)), create),
+  ];
+}
+function wizStep6(d, w) {
+  const c = w.config;
+  const fileLine = (label, outcome, path) => h('li', null, label + ': ', h('code', null, path || '—'),
+    outcome === 'written' ? ' — written' : outcome === 'kept' ? ' — it existed, left exactly as it was' : ' — none');
+  const preps = state.preps.filter((p) => (w.prepImages || []).includes(p.image));
+  const still = preps.filter(prepRunning).map((p) => p.image);
+  return [
+    h('h2', null, 'Done'),
+    h('p', null, still.length ? 'This Mac is set up; ' + still.join(', ') + ' ' + (still.length === 1 ? 'is' : 'are') + ' still being prepared in the host (Operations shows it) — the onboarding is recorded when it is ready.'
+                              : 'This Mac is set up.'),
+    h('ul', { class: 'plain wiz-summary' },
+      h('li', null, 'Claude account: ' + (d.accountOptions.find((o) => o.value === w.account) || { label: w.account || '—' }).label),
+      c ? fileLine('Settings', c.settings, c.settingsPath) : null,
+      c ? fileLine('Your environment prompt template', c.promptTemplate, c.promptTemplatePath) : null,
+      h('li', null, 'Images: ' + (wizChosenImages().join(', ') || 'none now (each is prepared by its first start)')),
+      w.created ? h('li', null, 'First sandbox: ', h('a', { href: '#/sandbox/' + w.created }, w.created)) : null),
+    h('p', { class: 'muted' }, 'From a terminal: doz init in a project folder, then doz up there. This wizard is always here: Doctor › Run onboarding again.'),
+    wizButtons(w.created ? btn('Open ' + w.created, () => { location.hash = '#/sandbox/' + w.created; }, { icon: 'box' }) : null,
+      btn('Open Sandboxes', () => { state.wiz = null; location.hash = '#/overview'; }, { primary: true })),
+  ];
 }
 
 // ── terminals (591) ─────────────────────────────────────────────────────────
@@ -2132,6 +2460,11 @@ setButton($('sign-out'), 'Sign out');
   if (await bootstrap()) {
     if (!/^#\/[a-z]/.test(location.hash)) history.replaceState(null, '', location.pathname + '#/overview');
     await loadSettings();
+    // 594 (D8): a store never onboarded opens on the setup wizard (once per page load).
+    try {
+      const o = await api('overview');
+      if (o.onboarded === false && location.hash === '#/overview') history.replaceState(null, '', location.pathname + '#/onboarding');
+    } catch (_) { /* the overview says so itself */ }
     route();
     connect();
     setInterval(() => {

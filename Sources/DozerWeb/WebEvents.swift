@@ -137,6 +137,7 @@ actor WebMonitor {
     private var lastSlow: Data?
     private var hostWasRunning: Bool?
     private var lastPhases: [String: String]?
+    private var lastPreparations: Data?
     private var activity: [WebActivity] = []
     private var pokes = 0
     let activityLimit = 200
@@ -229,8 +230,19 @@ actor WebMonitor {
             }
         }
         if !topics.isEmpty { hub.broadcast("changed", ["topics": topics]) }
+        // 594: the host's image preparations (a CLI `doz onboard` or a start's, too) — told to every
+        // page while any runs, and once more when the last one ends.
+        var preparing = false
+        if o.host.running || lastPreparations != nil {
+            let preps = (try? await data.preparations()) ?? []
+            preparing = preps.contains { $0.state == "running" || $0.state == "cancelling" }
+            if let d = try? WebJSON.encoder.encode(preps), d != lastPreparations {
+                if preparing || lastPreparations != nil { hub.broadcast("preparations", preps) }
+                lastPreparations = preparing || !preps.isEmpty ? d : nil
+            }
+        }
         // Follow the host's events only while something is live (see the type's comment).
-        let follow = o.host.running && !o.host.liveSandboxes.isEmpty
+        let follow = o.host.running && (!o.host.liveSandboxes.isEmpty || preparing)
         if follow && events == nil, let stream = data.hostEvents() {
             events = Task { [weak self] in
                 for await e in stream {
