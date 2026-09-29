@@ -38,6 +38,11 @@ public struct DozerCommand: AsyncParsableCommand {
     public init() {}
 }
 
+/// 593: `--progress auto|plain`.
+public enum ProgressFlag: String, ExpressibleByArgument, Sendable {
+    case auto, plain
+}
+
 /// Options every command takes.
 public struct GlobalOptions: ParsableArguments {
     @Option(name: .long, help: "The store directory (default $DOZ_STORE, else the settings' store.path, else ~/Library/Application Support/dozer-sandbox).")
@@ -52,7 +57,16 @@ public struct GlobalOptions: ParsableArguments {
     @Flag(name: [.short, .long], help: "Print no progress.")
     public var quiet = false
 
+    @Option(name: .long, help: "How progress shows on a terminal: auto (animated: a spinner, download bars) or plain (one line per step). Default $DOZ_PROGRESS, else the settings' ui.progress. Not a terminal, --json or NO_COLOR: always plain.")
+    public var progress: ProgressFlag?
+
     public init() {}
+
+    /// The progress rendering this command uses on stderr.
+    public var progressMode: ProgressMode {
+        guard isatty(STDERR_FILENO) == 1, !json, ProcessInfo.processInfo.environment["NO_COLOR"] == nil else { return .plain }
+        return DozerSettings.load().progressMode(flag: progress?.rawValue)
+    }
 
     public var dozerStore: DozerStore { DozerStore.resolve(store) }
 }
@@ -133,26 +147,111 @@ func fail(_ e: HostError, _ g: GlobalOptions, code: Int32? = nil) -> ExitCode {
 
 /// Progress lines on stderr: held back for the first second, so a quick operation prints nothing
 /// but its result; `-v` prints them all, `-q` none.
-final class Progress {
+///
+/// 593: on a terminal (and `ui.progress` animated) the same view as the web UI's boot view —
+/// `ProgressTerminal`: a spinner on the step under way, a transfer's bar, the output's last lines,
+/// finished lines above — ticking on its own timer while the request blocks. Elsewhere plain lines,
+/// as before, plus each transfer's summary; the host's own lines (notes, phases) are kept as they were.
+final class Progress: @unchecked Sendable {
     let verbose: Bool, quiet: Bool
     let started = Date()
+    private let lock = NSLock()
     private var held: [String] = []
     private var flowing = false
+    private let view: ProgressTerminal
+    private var timer: DispatchSourceTimer?
 
     init(_ g: GlobalOptions) {
         verbose = g.verbose
         quiet = g.quiet
+        view = ProgressTerminal(mode: g.progressMode, color: true, plainPrefix: "  · ")
     }
 
     func handle(_ e: HostEvent) {
         guard !quiet else { return }
-        let line = "  · " + e.line
-        if verbose || flowing { Out.stderr(line + "\n"); return }
-        held.append(line)
+        lock.withLock {
+            view.width = Self.terminalWidth()
+            if view.mode == .animated { animated(e) } else { plain(e) }
+        }
+    }
+
+    /// stderr's width in columns (80 when it is not a terminal or does not say).
+    static func terminalWidth() -> Int {
+        var w = winsize()
+        return ioctl(STDERR_FILENO, TIOCGWINSZ, &w) == 0 && w.ws_col > 0 ? Int(w.ws_col) : 80
+    }
+
+    /// Plain: the host's line per event as before; a started step, output and transfer ticks say
+    /// nothing; a finished transfer says its summary.
+    private func plain(_ e: HostEvent) {
+        let finals = view.board.apply(e)
+        var lines: [String] = []
+        switch e.kind {
+        case .started, .output, .progress: break
+        default: lines.append("  · " + e.line)
+        }
+        for f in finals { if case .transferDone = f { lines.append(view.format(f).replacingOccurrences(of: "\r\n", with: "")) } }
+        emitLines(lines)
+    }
+
+    private func emitLines(_ lines: [String]) {
+        guard !lines.isEmpty else { return }
+        if verbose || flowing { for l in lines { Out.stderr(l + "\n") }; return }
+        held += lines
         if Date().timeIntervalSince(started) > 1 {
             flowing = true
             for l in held { Out.stderr(l + "\n") }
             held = []
+        }
+    }
+
+    /// Animated: nothing for the first second (a quick operation prints nothing but its result),
+    /// then the view — finished lines and the live block — and a tick every 100 ms.
+    private func animated(_ e: HostEvent) {
+        let finals = view.board.apply(e)
+        let host: [ProgressFinal] = switch e.kind {
+        case .phase: [.raw("  · " + e.line)]
+        default: []
+        }
+        let out = finals + host
+        guard verbose || flowing || Date().timeIntervalSince(started) > 1 else {
+            held += out.map { view.format($0) }
+            return
+        }
+        if !flowing {
+            flowing = true
+            Out.stderr(view.write(held.map { .raw($0) }))
+            held = []
+            startTimer()
+        }
+        Out.stderr(view.write(out))
+    }
+
+    private func startTimer() {
+        let t = DispatchSource.makeTimerSource(queue: .global())
+        t.schedule(deadline: .now() + .milliseconds(100), repeating: .milliseconds(100))
+        t.setEventHandler { [weak self] in
+            guard let self else { return }
+            self.lock.withLock {
+                self.view.width = Self.terminalWidth()
+                Out.stderr(self.view.tick())
+            }
+        }
+        t.resume()
+        timer = t
+    }
+
+    /// The request ended: nothing stays live on the terminal.
+    func finish() {
+        lock.withLock {
+            timer?.cancel()
+            timer = nil
+            guard !quiet else { return }
+            if view.mode == .animated, flowing { Out.stderr(view.finish()) }
+            else if view.mode == .plain {
+                let s = view.finish()
+                if !s.isEmpty, flowing || verbose { Out.stderr(s.replacingOccurrences(of: "\r\n", with: "\n")) }
+            }
         }
     }
 }
@@ -167,6 +266,7 @@ func call(_ r: HostRequest, _ g: GlobalOptions, autostart: Bool = true) throws -
 /// The host's final message, whatever it says (a failure to REACH the host is thrown, printed).
 func rawCall(_ r: HostRequest, _ g: GlobalOptions, autostart: Bool = true) throws -> HostMessage {
     let progress = Progress(g)
+    defer { progress.finish() }
     do {
         return try HostClient.request(r, store: g.dozerStore, autostart: autostart) { progress.handle($0) }
     } catch let e as HostError {

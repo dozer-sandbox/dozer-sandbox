@@ -320,16 +320,35 @@ final class WebTerminalHTTPTests: XCTestCase {
             }
         }
         try readUntil("── starting demo ──")
-        fake.emit(HostEvent(kind: .step, sandbox: "demo", text: "downloading images", milliseconds: nil))
-        fake.emit(HostEvent(kind: .progress, sandbox: "demo", text: "pulling alpine", completedBytes: 5 << 20, totalBytes: 5 << 20))
+        // 593: animated (the default) — a spinner on the step under way, the pull's bar, the output tail.
+        let digest = String(repeating: "0123456789abcdef", count: 4)
+        fake.emit(HostEvent(kind: .note, sandbox: "demo", text: "baking image pi from docker.io/library/node@sha256:\(digest) (one-time)"))
+        fake.emit(HostEvent(kind: .started, sandbox: "demo", text: "pulled the base image node"))
+        try readUntil("⠋\u{1B}[0m pulled the base image node")
+        var p = HostEvent(kind: .progress, sandbox: "demo", text: "pulling node@0123456789ab", completedBytes: 40_000_000, totalBytes: 100_000_000)
+        p.completedItems = 1
+        p.totalItems = 3
+        fake.emit(p)
+        try readUntil("40 / 100 MB")
+        XCTAssertTrue(seen.contains("████████░░░░░░░░░░░░") && seen.contains("(1/3 layers)"), "the download's bar and layers")
+        fake.emit(HostEvent(kind: .output, sandbox: "demo", text: "npm \u{1B}[31mWARN\u{1B}]52;c;eA==\u{07} deprecated"))
+        try readUntil("deprecated")
+        usleep(400_000)                                                         // a few ticks: the spinner moves
+        p.completedBytes = 100_000_000
+        p.completedItems = 3
+        fake.emit(p)
+        fake.emit(HostEvent(kind: .step, sandbox: "demo", text: "pulled the base image node", milliseconds: 2100))
+        try readUntil("✓\u{1B}[0m pulled the base image node")
+        XCTAssertTrue(seen.contains("pulled node@0123456789ab: 100 MB in"), "the download's summary line")
+        XCTAssertTrue(seen.contains("node@0123456789ab (one-time)") && !seen.contains(digest), "digests trimmed to 12")
+        XCTAssertTrue(["⠙", "⠹", "⠸"].contains { seen.contains($0) }, "the spinner ticked")
+        XCTAssertFalse(seen.contains("\u{1B}]52") || seen.contains("\u{1B}[31m"), "the guest's output is inert")
         fake.emit(HostEvent(kind: .step, sandbox: "demo", text: "VM created and booted", milliseconds: 252))
         wait("the console subscription") { fake.consoleSubscribers >= 1 }
         fake.console("[    0.000000] Linux version 6.18")
         fake.console("evil \u{1B}]52;c;cHduZWQ=\u{07}\u{1B}]8;;javascript:x\u{1B}\\link\u{9B}2J done")
         try readUntil("done")
-        XCTAssertTrue(seen.contains("[doz] downloading images"))
-        XCTAssertTrue(seen.contains("pulling alpine: 5 MiB of 5 MiB"), "first-start progress shows")
-        XCTAssertTrue(seen.contains("[doz] VM created and booted — 252 ms"))
+        XCTAssertTrue(seen.contains("✓\u{1B}[0m VM created and booted"))
         XCTAssertTrue(seen.contains("[    0.000000] Linux version 6.18"))
         XCTAssertTrue(seen.contains("evil ]52;c;cHduZWQ=]8;;javascript:x\\link2J done"), "guest console text is inert: no ESC, BEL or C1 survives")
         // It runs: the image's own session is opened, then attached in the same pane.
@@ -347,6 +366,49 @@ final class WebTerminalHTTPTests: XCTestCase {
         XCTAssertFalse(String(decoding: snap, as: UTF8.self).contains("\u{1B}c"), "no full reset")
         XCTAssertFalse(String(decoding: snap, as: UTF8.self).contains("\u{1B}[3J"), "the scrollback is not cleared")
         _ = try ws.readText(containing: #""kind":"none""#)
+        ws.close()
+    }
+
+    /// 593: ui.progress = plain (here: $DOZ_PROGRESS in the UI's environment) — one line per step, a
+    /// download's summary, no spinner, no bar, no output tail.
+    func testPlainProgressInTheBootView() async throws {
+        await server.close()
+        _ = try? await serveTask.value
+        server = try await DozerWebServer.bind(data: fake, assets: try WebAssets.load(), version: "test",
+                                                settings: WebSettingsStore(environment: ["DOZ_PROGRESS": "plain"]),
+                                                capability: capability, pollInterval: .milliseconds(200))
+        let s = server!
+        serveTask = Task { try await s.run() }
+        fake.phase = "off"
+        let (cookie, csrf) = try signIn()
+        let ws = try socket(try ticket(cookie, csrf), cookie: cookie)
+        XCTAssertEqual(ws.status, 101)
+        _ = try ws.readText(containing: #""kind":"shutDown""#)
+        fake.hostUp = true
+        usleep(400_000)
+        fake.emit(HostEvent(kind: .phase, sandbox: "demo", text: "booting", phase: "booting"))
+        _ = try ws.readText(containing: #""kind":"boot""#)
+        var seen = ""
+        func readUntil(_ needle: String) throws {
+            let end = Date().addingTimeInterval(5)
+            while !seen.contains(needle) {
+                guard Date() < end else { XCTFail("no \(needle) in \(seen.debugDescription)"); throw POSIXError(.ETIMEDOUT) }
+                let (op, p) = try ws.readFrame(seconds: 5)
+                if op == 2 { seen += String(decoding: p, as: UTF8.self) }
+            }
+        }
+        try readUntil("── starting demo ──")
+        fake.emit(HostEvent(kind: .started, sandbox: "demo", text: "pulled the base image node"))
+        fake.emit(HostEvent(kind: .progress, sandbox: "demo", text: "pulling node@0123456789ab", completedBytes: 40_000_000, totalBytes: 100_000_000))
+        fake.emit(HostEvent(kind: .output, sandbox: "demo", text: "added 3 packages"))
+        usleep(400_000)
+        fake.emit(HostEvent(kind: .progress, sandbox: "demo", text: "pulling node@0123456789ab", completedBytes: 100_000_000, totalBytes: 100_000_000))
+        fake.emit(HostEvent(kind: .step, sandbox: "demo", text: "pulled the base image node", milliseconds: 2100))
+        try readUntil("[doz] pulled the base image node — 2100 ms")
+        XCTAssertTrue(seen.contains("[doz] pulled node@0123456789ab: 100 MB in"), "the download's summary line")
+        for animated in ["⠋", "⠙", "█", "░", "added 3 packages", "\u{1B}[J", "\u{1B}[1A"] {
+            XCTAssertFalse(seen.contains(animated), "plain: no \(animated.debugDescription)")
+        }
         ws.close()
     }
 

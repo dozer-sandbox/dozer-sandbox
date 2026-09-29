@@ -247,6 +247,7 @@ actor WebMonitor {
 
     private func hostEvent(_ e: HostEvent) {
         guard e.kind != .progress || (e.completedBytes ?? 0) == (e.totalBytes ?? -1) else { return }   // progress: only its end
+        guard e.kind != .output, e.kind != .started else { return }     // 593: live-only lines (the boot view shows them)
         record(WebActivity(seq: hub.nextSeq(), e))
         if e.kind == .phase || e.kind == .host { poke() }
     }

@@ -84,7 +84,7 @@ final class WebOperations: @unchecked Sendable {
     /// on at most once a second, so a two-minute first start (a pull, a flatten, a bake) visibly
     /// moves instead of looking stuck (590 bug 2).
     private func progress(_ id: String, _ e: HostEvent) {
-        if e.kind == .progress {
+        if e.kind == .progress || e.kind == .output {
             let now = Date()
             let due: Bool = lock.withLock {
                 if let last = lastProgress[id], now.timeIntervalSince(last) < 1 { return false }

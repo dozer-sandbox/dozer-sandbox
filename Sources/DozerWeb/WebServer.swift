@@ -253,7 +253,9 @@ public final class DozerWebServer: @unchecked Sendable {
     /// 591 — one browser terminal, for as long as the socket lives.
     private func terminal(_ socket: Socket, _ grant: WebTerminalGrant) async {
         try? await socket.executeThenClose { inbound, outbound in
-            let bridge = WebTerminalBridge(grant: grant, data: data, hub: terminals, sessions: sessions, channel: socket.channel, outbound: outbound)
+            // 593: the boot view's progress as this UI's settings say (ui.progress; $DOZ_PROGRESS in its environment).
+            let bridge = WebTerminalBridge(grant: grant, data: data, hub: terminals, sessions: sessions, channel: socket.channel, outbound: outbound,
+                                           progressMode: settings.current.progressMode())
             guard terminals.add(bridge) else {
                 await bridge.end(.policyViolation, "too-many-terminals")
                 return

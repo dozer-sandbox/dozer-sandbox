@@ -327,6 +327,9 @@ func cliSuite() async throws {
         let ha = h.run(["exec", "clia", "--", "hostname"]).out, hb = h.run(["exec", "clib", "--", "hostname"]).out
         check(ha == "clia\n" && hb == "clib\n", "exec reaches each: \(ha.trimmingCharacters(in: .whitespacesAndNewlines)) / \(hb.trimmingCharacters(in: .whitespacesAndNewlines))")
 
+        print("cli: progress — plain off a terminal, animated on one (593)")
+        cliProgressChecks(h)
+
         print("cli: lineage, templates, duplicate (593)")
         cliLineageChecks(h, ws: ws)
 
@@ -398,6 +401,44 @@ func cliSuite() async throws {
     }
     cleanUp()
     check(!h.hostRunning, "cleanup: no host left running")
+}
+
+/// 593: how `doz image bake lab -v` shows its progress — plain (no escape, no \r, no spinner) when
+/// stderr is not a terminal; animated (a spinner, ✓ lines) on one (`script` gives it a pty);
+/// plain on one too with --progress plain, DOZ_PROGRESS=plain or NO_COLOR.
+func cliProgressChecks(_ h: CLIHarness) {
+    let r = h.run(["image", "bake", "lab", "-v"], timeout: 600)
+    check(r.code == 0 && r.err.contains("  · ") && !r.err.contains("\u{1B}") && !r.err.contains("\r") && !r.err.contains("⠋"),
+          "not a terminal: plain lines, no escape, no \\r, no spinner")
+    func onPTY(_ extra: [String], env: [String: String] = [:]) -> String {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/script")
+        p.arguments = ["-q", "/dev/null", h.binary, "image", "bake", "lab", "-v"] + extra
+        var e = h.env
+        for (k, v) in env { e[k] = v }
+        p.environment = e
+        let o = Pipe()
+        p.standardOutput = o
+        p.standardError = o
+        p.standardInput = FileHandle.nullDevice
+        do { try p.run() } catch { return "" }
+        let c = PipeCollector(o.fileHandleForReading)
+        let deadline = Date().addingTimeInterval(600)
+        while p.isRunning && Date() < deadline { usleep(50_000) }
+        if p.isRunning { p.terminate() }
+        p.waitUntilExit()
+        c.wait(5)
+        return c.text
+    }
+    let animated = onPTY(["--progress", "auto"])
+    check(animated.contains("✓") && ProgressFormat.spinnerFrames.contains(where: { animated.contains($0) }) && animated.contains("\u{1B}[J"),
+          "on a terminal: a spinner redrawn in place, then ✓ lines")
+    for (what, extra, env) in [("--progress plain", ["--progress", "plain"], [String: String]()), ("DOZ_PROGRESS=plain", [], ["DOZ_PROGRESS": "plain"]),
+                               ("NO_COLOR", ["--progress", "auto"], ["NO_COLOR": "1"])] {
+        let out = onPTY(extra, env: env)
+        check(out.contains("  · ") && !ProgressFormat.spinnerFrames.contains(where: { out.contains($0) }) && !out.contains("\u{1B}[J"),
+              "on a terminal with \(what): plain")
+    }
 }
 
 /// 593: `doz image ls --tree`, `doz template`, `doz duplicate` — on clia (running, lab, a workspace)

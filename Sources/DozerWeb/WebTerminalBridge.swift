@@ -138,8 +138,14 @@ final class WebTerminalBridge: @unchecked Sendable {
     private var wakeVerb = "woke"
     private var notice: String?
 
+    /// 593: the boot view's progress — animated (a spinner on the step under way, a download's bar,
+    /// the bake's last output lines, redrawn in place below the finished lines) or plain (`ui.progress`).
+    private let progress: ProgressTerminal
+    private var progressTicker: Task<Void, Never>?
+
     init(grant: WebTerminalGrant, data: DozerWebData, hub: WebTerminalHub, sessions: WebSessionStore, channel: Channel,
-         outbound: NIOAsyncChannelOutboundWriter<WebSocketFrame>) {
+         outbound: NIOAsyncChannelOutboundWriter<WebSocketFrame>, progressMode: ProgressMode = .animated) {
+        progress = ProgressTerminal(mode: progressMode, color: true, plainPrefix: "[doz] ", plainStyle: "2")
         self.grant = grant
         self.data = data
         self.hub = hub
@@ -383,7 +389,6 @@ final class WebTerminalBridge: @unchecked Sendable {
         guard lock.withLock({ bootEvents == nil }), let stream = data.hostEvents() else { return }
         let name = grant.sandbox
         let t = Task { [weak self] in
-            var lastProgress = Date.distantPast
             for await e in stream where e.sandbox == name {
                 guard let self else { return }
                 switch e.kind {
@@ -397,15 +402,12 @@ final class WebTerminalBridge: @unchecked Sendable {
                         if ph == Phase.booting.rawValue { await self.enterBootView() }
                         if changed { await self.pushState() }
                     }
-                case .step, .note:
+                case .step, .note, .started, .failed, .progress, .output:
+                    // 593: through the progress view — finished lines into the scrollback, the live
+                    // block (animated) redrawn beneath them.
                     guard self.lock.withLock({ self.bootView }) else { continue }
-                    await self.bootWrite("[doz] " + (e.text ?? "") + (e.milliseconds.map { String(format: " — %.0f ms", $0) } ?? ""), dim: true)
-                    if (e.text ?? "").contains("VM created") { self.startBootConsole() }
-                case .progress:
-                    let done = (e.completedBytes ?? 0) == (e.totalBytes ?? -1)
-                    guard self.lock.withLock({ self.bootView }), done || Date().timeIntervalSince(lastProgress) >= 1 else { continue }
-                    lastProgress = Date()
-                    await self.bootWrite("[doz] " + e.line.dropFirst(name.count + 2), dim: true)
+                    await self.bootProgress(e)
+                    if e.kind == .step, (e.text ?? "").contains("VM created") { self.startBootConsole() }
                 default:
                     continue
                 }
@@ -426,14 +428,57 @@ final class WebTerminalBridge: @unchecked Sendable {
     /// Stop the boot streams AND wait for their last writes, so nothing of the boot lands after the
     /// switch into the session.
     private func stopBootStreams() async {
-        let (a, b): (Task<Void, Never>?, Task<Void, Never>?) = lock.withLock {
-            defer { bootEvents = nil; bootConsoleTask = nil }
-            return (bootEvents, bootConsoleTask)
+        let (a, b, c): (Task<Void, Never>?, Task<Void, Never>?, Task<Void, Never>?) = lock.withLock {
+            defer { bootEvents = nil; bootConsoleTask = nil; progressTicker = nil }
+            return (bootEvents, bootConsoleTask, progressTicker)
         }
         a?.cancel()
         b?.cancel()
+        c?.cancel()
         await a?.value
         await b?.value
+        await c?.value
+        // 593: nothing stays live — what was under way becomes finished lines; the block is erased.
+        let tail = lock.withLock { progress.finish() }
+        if !tail.isEmpty { await sendBinary(Array(tail.utf8)[...]) }
+    }
+
+    /// 593: an event through the progress view. The live block ticks (a spinner frame every 120 ms)
+    /// while anything is under way; the bytes of FINISHED lines count against the boot view's cap.
+    private func bootProgress(_ e: HostEvent) async {
+        let out: String = lock.withLock {
+            guard bootBytes < WebTerminalWire.maximumBootBytes else { return "" }
+            progress.width = size.cols > 0 ? Int(size.cols) : 80
+            let s = progress.apply(e)
+            bootBytes += e.kind == .output || e.kind == .progress || e.kind == .started ? 0 : (e.text?.utf8.count ?? 0) + 8
+            return s
+        }
+        if !out.isEmpty { await sendBinary(Array(out.utf8)[...]) }
+        startProgressTicker()
+    }
+
+    private func startProgressTicker() {
+        guard progress.mode == .animated else { return }
+        let start: Bool = lock.withLock {
+            guard progressTicker == nil, progress.board.isLive else { return false }
+            return true
+        }
+        guard start else { return }
+        let t = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .milliseconds(120))
+                guard let self, !Task.isCancelled else { return }
+                let out: String = self.lock.withLock {
+                    self.progress.width = self.size.cols > 0 ? Int(self.size.cols) : 80
+                    return self.bootView ? self.progress.tick() : ""
+                }
+                if !out.isEmpty { await self.sendBinary(Array(out.utf8)[...]) }
+                let live = self.lock.withLock { self.progress.board.isLive || self.progress.hasBlock }
+                if !live { break }
+            }
+            self?.lock.withLock { self?.progressTicker = nil }
+        }
+        lock.withLock { if progressTicker == nil { progressTicker = t } else { t.cancel() } }
     }
 
     /// One line of the boot view: inert text (no control character survives), capped per line and in all.
@@ -447,7 +492,12 @@ final class WebTerminalBridge: @unchecked Sendable {
         guard state > 0 else { return }
         let text = state == 2 ? "[doz] the boot view stops here (1 MiB) — doz console \(grant.sandbox) has the rest" : line
         let style = bold ? "\u{1B}[1m" : dim ? "\u{1B}[2m" : ""
-        await sendBinary(Array((style + text + (style.isEmpty ? "" : "\u{1B}[0m") + "\r\n").utf8)[...])
+        // 593: through the progress view, so its live block stays beneath every finished line.
+        let out = lock.withLock {
+            progress.width = size.cols > 0 ? Int(size.cols) : 80
+            return progress.write([.raw(style + text + (style.isEmpty ? "" : "\u{1B}[0m"))])
+        }
+        await sendBinary(Array(out.utf8)[...])
     }
 
     /// Caller holds `lock`: the one-line "woke in N s" for the page.
