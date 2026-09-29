@@ -208,7 +208,7 @@ func cliSuite() async throws {
     }
     // A previous run that died part-way.
     if h.hostRunning { h.run(["host", "stop"]) }
-    for n in ["clia", "clib", "clic", "clid", "clis", "clibt"] where FileManager.default.fileExists(atPath: DozerStore(root: storeRoot).configFile(n).path) {
+    for n in ["clia", "clib", "clic", "clid", "clis", "clibt", "clires"] where FileManager.default.fileExists(atPath: DozerStore(root: storeRoot).configFile(n).path) {
         h.run(["rm", n, "--yes"])
     }
     h.run(["template", "rm", "clitpl", "--yes"])
@@ -415,6 +415,8 @@ func cliSuite() async throws {
         check(h.run(["rm", "clis", "--yes"]).code == 0 && !FileManager.default.fileExists(atPath: clisLayout.sandboxDirectory.path), "rm clis")
         check(h.waitFor(60) { h.row("clib").map { $0.phase == "asleep" && !$0.busy } ?? false },
               "clib, asleep when the host died, was restored and is asleep again")
+        print("cli: resources — refusals while snapshots need the guest init (595)")
+        cliResourcesRefusals(h)
         r = h.run(["wake", "clia"])
         check(r.code == 0 && h.sessions("clia").first { $0.name == "tick2" }?.pid == p1, "wake clia in the new host: tick2 has the same pid (\(p1.map(String.init) ?? "?"))")
         r = h.run(["wake", "clib"])
@@ -435,6 +437,8 @@ func cliSuite() async throws {
         check(r.code == 0 && h.row("clia") == nil, "rm --yes: clia is gone")
         r = h.run(["shutdown", "clib", "--yes"])
         check(r.code == 0, "shutdown clib")
+        print("cli: resources — the account, delete and re-create, clean, logs and metrics, the kernel (595)")
+        cliResourcesChecks(h)
         h.run(["host", "stop"])
         check(!h.hostRunning, "host stop: no host")
         _ = h.ls()
@@ -795,6 +799,134 @@ func cliConfigChecks(_ h: CLIHarness) {
     r = h.run(["config", "show"])
     check(r.code == 0 && r.err.contains("unknown setting later.thing"), "an unknown key: a warning on stderr, exit 0")
     try? FileManager.default.removeItem(at: xdg)
+}
+
+/// What `du -sk` says a directory holds, in bytes.
+func duBytes(_ url: URL) -> Int64 {
+    let p = Process()
+    p.executableURL = URL(fileURLWithPath: "/usr/bin/du")
+    p.arguments = ["-sk", url.path]
+    let pipe = Pipe()
+    p.standardOutput = pipe
+    p.standardError = FileHandle.nullDevice
+    guard (try? p.run()) != nil else { return -1 }
+    let out = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+    p.waitUntilExit()
+    return (Int64(out.split(separator: "\t").first ?? "") ?? -1) * 1024
+}
+
+/// 595: while clia is hibernated and clib asleep — their snapshots need the guest init (and the kernel):
+/// refused, with the reason, and nothing deleted; a sandbox's disks are refused too.
+func cliResourcesRefusals(_ h: CLIHarness) {
+    let initfs = h.store.appendingPathComponent("initfs.ext4")
+    let plan = h.json(["resources", "rm", "initfs", "sandbox:clia", "sandbox:clib/root", "--dry-run"], ResourcePlan.self)
+    let reason = plan?.refused.first { $0.id == "initfs" }?.reason ?? ""
+    check(plan != nil && plan!.items.isEmpty && Set(plan!.refused.map(\.id)) == ["initfs", "sandbox:clia", "sandbox:clib/root"]
+          && (reason.contains("hibernated") || reason.contains("asleep")),
+          "resources rm --dry-run: the guest init is refused while a snapshot needs it (\(reason.prefix(90))); a sandbox's disks too")
+    let r = h.run(["resources", "rm", "initfs", "--yes"])
+    check(r.code != 0 && FileManager.default.fileExists(atPath: initfs.path), "resources rm initfs --yes: refused (exit \(r.code)), nothing deleted")
+    let rep = h.json(["resources"], ResourceReport.self)
+    check(rep?.memory.contains { $0.name == "clib" && $0.heldBytes > 0 } ?? false, "resources: clib (asleep) holds its memory")
+    check(rep?.memory.contains { $0.kind == "host" && $0.heldBytes > 0 } ?? false, "resources: the host's own memory is on the account")
+    check(!(rep?.memory.contains { $0.name == "clia" } ?? true), "…and clia (hibernated) holds none")
+}
+
+/// 595: with every sandbox off — the account adds up to du, --dry-run deletes nothing, a deletion frees
+/// what it said and is re-created on next use, clean is the safe set, logs and metrics clear, the kernel choice.
+func cliResourcesChecks(_ h: CLIHarness) {
+    let fm = FileManager.default
+    let store = h.store
+    let off = h.ls().allSatisfy { $0.phase == "off" }
+    check(off, "resources: every sandbox is off for these checks (\(h.ls().map { "\($0.name) \($0.phase)" }.joined(separator: ", ")))")
+    guard let rep = h.json(["resources"], ResourceReport.self) else { check(false, "resources --json"); return }
+    let du = duBytes(store)
+    check(rep.unattributedBytes == 0, "resources: every byte of the store is on a row (unattributed \(rep.unattributedBytes) of \(DozerImages.formatBytes(rep.totalBytes)))")
+    check(abs(rep.totalBytes - du) <= 2 << 20, "resources: the total is what du counts (\(rep.totalBytes) vs du \(du))")
+    let top = rep.items.filter { $0.parent == nil && $0.group != "outside" }.reduce(Int64(0)) { $0 + ($1.sizeBytes ?? 0) }
+    check(top == rep.totalBytes, "resources: the top-level rows add up to the total")
+    check(rep.items.first { $0.id == "sandbox:clib" }.map { !$0.deletable && $0.link == "sandbox:clib" } ?? false,
+          "resources: a sandbox is not deleted here — it links to its page")
+    check(rep.items.first { $0.id == "stray:workspace-cli" }?.refusal?.contains("workspace") ?? false,
+          "resources: a folder in the store that is a sandbox's workspace is refused")
+    check(rep.items.contains { $0.id == "outside:settings" } && rep.items.contains { $0.id == "outside:keychain" },
+          "resources: the settings file and the keychain entries (names) are shown outside the store")
+    let text = h.run(["resources"])
+    check(text.code == 0 && text.out.contains("unattributed") && text.out.contains("SANDBOXES") && text.out.contains("MEMORY"),
+          "resources (text): the groups, the unattributed row, memory")
+
+    // A stale kernel file in the store's own kernels/ (the suite's kernel cache is elsewhere): unused → clean-up.
+    let stale = store.appendingPathComponent("kernels/vmlinux-0.0-clitest")
+    try? fm.createDirectory(at: stale.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try? Data(repeating: 7, count: 256 << 10).write(to: stale)
+    let dryClean = h.json(["resources", "clean", "--dry-run"], ResourcePlan.self)
+    let never = ["template:", "sandbox:", "point:", "screens:", "boots:", "stray:", "outside:"]
+    check(dryClean != nil && dryClean!.items.contains { $0.id == "kernel:0.0-clitest" }
+          && !dryClean!.items.contains { e in never.contains { e.id.hasPrefix($0) } || ["logs", "metrics", "initfs", "store"].contains(e.id) }
+          && fm.fileExists(atPath: stale.path),
+          "resources clean --dry-run: the safe set (\(dryClean?.items.map(\.id).joined(separator: " ") ?? "?")), nothing deleted")
+
+    // --dry-run deletes nothing.
+    let initfs = store.appendingPathComponent("initfs.ext4"), content = store.appendingPathComponent("content")
+    let golden = (try? fm.contentsOfDirectory(atPath: store.appendingPathComponent("golden").path))?.filter { !$0.hasSuffix(".fsck.ext4") && $0.hasSuffix(".ext4") } ?? []
+    let ids = ["initfs", "cache:downloads", "image:lab", "kernel:0.0-clitest"]
+    let dry = h.json(["resources", "rm"] + ids + ["--dry-run"], ResourcePlan.self)
+    check(dry.map { $0.dryRun && Set($0.items.map(\.id)) == Set(ids) && $0.refused.isEmpty } ?? false
+          && fm.fileExists(atPath: initfs.path) && fm.fileExists(atPath: content.path) && !golden.isEmpty,
+          "resources rm --dry-run: the plan (frees \(DozerImages.formatBytes(dry?.freedBytes ?? 0))), and nothing deleted")
+    check(dry?.items.first { $0.id == "image:lab" }?.later?.contains("re-prepared") ?? false, "…with what each costs later")
+
+    // Delete them: one operation; the volume gets back what it said.
+    let before = rep.occupiedBytes
+    let r = h.run(["resources", "rm"] + ids + ["--yes", "--json"])
+    let done = try? HostWire.decoder.decode(ResourcePlan.self, from: r.outData)
+    check(r.code == 0 && done.map { !$0.dryRun && Set($0.deleted) == Set(ids) && $0.failed.isEmpty } ?? false,
+          "resources rm --yes: deleted \(done?.deleted.joined(separator: ", ") ?? "?")")
+    check(!fm.fileExists(atPath: initfs.path) && !fm.fileExists(atPath: content.path) && !fm.fileExists(atPath: stale.path)
+          && ((try? fm.contentsOfDirectory(atPath: store.appendingPathComponent("golden").path))?.filter { !$0.hasSuffix(".fsck.ext4") && $0.hasSuffix(".ext4") } ?? []).isEmpty,
+          "the guest init, the download cache, the lab's prepared disks and the stale kernel are gone")
+    let after = h.json(["resources"], ResourceReport.self)
+    let got = before - (after?.occupiedBytes ?? before)
+    let said = done?.freedBytes ?? 0
+    check(after?.unattributedBytes == 0 && abs(got - said) <= 4 << 20,
+          "the volume got back what it said: \(DozerImages.formatBytes(got)) of \(DozerImages.formatBytes(said)) (host.log and metrics grow meanwhile)")
+
+    // Re-created on next use: clib (a clone of the deleted lab disk) still starts — the guest init is
+    // rebuilt (the download cache pulled again); a new lab sandbox re-prepares the lab.
+    var s = h.run(["start", "clib"], timeout: 600)
+    check(s.code == 0 && h.row("clib")?.phase == "running" && fm.fileExists(atPath: initfs.path),
+          "start clib: a sandbox cloned from the deleted image still starts; the guest init is re-created")
+    check(h.run(["shutdown", "clib", "--yes"]).code == 0, "shutdown clib")
+    s = h.run(["create", "clires", "--image", "lab", "--memory", "512M", "--isolated"])
+    s = h.run(["start", "clires"], timeout: 900)
+    let regolden = (try? fm.contentsOfDirectory(atPath: store.appendingPathComponent("golden").path))?.filter { !$0.hasSuffix(".fsck.ext4") && $0.hasSuffix(".ext4") } ?? []
+    check(s.code == 0 && !regolden.isEmpty && fm.fileExists(atPath: content.path), "a new lab sandbox re-prepares the lab (and the download cache)")
+    check(h.run(["rm", "clires", "--yes"]).code == 0, "rm clires")
+
+    // Clean up: only re-creatable, unused things — and it says so.
+    let c = h.run(["resources", "clean", "--yes", "--json"])
+    let cleaned = try? HostWire.decoder.decode(ResourcePlan.self, from: c.outData)
+    check(c.code == 0 && (cleaned?.deleted.contains("cache:downloads") ?? false)
+          && !(cleaned?.deleted.contains { d in never.contains { d.hasPrefix($0) } || ["logs", "metrics", "initfs", "store"].contains(d) } ?? true),
+          "resources clean --yes: \(cleaned?.deleted.joined(separator: " ") ?? "?") — never templates, sandboxes, points, logs, settings")
+    check(h.row("clib") != nil && fm.fileExists(atPath: DozerStore(root: store).layout("clib").rootfs.path), "clib and its disk are untouched")
+
+    // Logs and metrics clear.
+    let log = store.appendingPathComponent("host.log")
+    let logBefore = (try? fm.attributesOfItem(atPath: log.path)[.size] as? Int) ?? 0
+    let runsBefore = (h.json(["metrics"], [MetricsSummaryRow].self) ?? []).reduce(0) { $0 + $1.count }
+    let lm = h.run(["resources", "rm", "logs", "metrics", "--yes"])
+    let logAfter = (try? fm.attributesOfItem(atPath: log.path)[.size] as? Int) ?? 0
+    let runsAfter = (h.json(["metrics"], [MetricsSummaryRow].self) ?? []).reduce(0) { $0 + $1.count }
+    check(lm.code == 0 && logAfter < logBefore && runsAfter < runsBefore,
+          "resources rm logs metrics: host.log \(logBefore) → \(logAfter) bytes; metrics rows \(runsBefore) → \(runsAfter)")
+
+    // The kernel new sandboxes boot.
+    check(h.run(["resources", "kernel", "kernel:0.0-nope"]).code == 2, "resources kernel kernel:0.0-nope: not found (exit 2)")
+    check(h.run(["resources", "kernel", "/tmp/vmlinux"]).code != 0, "resources kernel /tmp/vmlinux: not an id")
+    let k = h.run(["resources", "kernel", "pinned"])
+    let kp = h.run(["config", "get", "kernel.path"]).out.trimmingCharacters(in: .whitespacesAndNewlines)
+    check(k.code == 0 && (kp.isEmpty || kp == "\"\""), "resources kernel pinned: kernel.path is automatic again (\(kp.debugDescription))")
 }
 
 /// The CLI's own exit codes the suite checks (the CLI target is not linked here).

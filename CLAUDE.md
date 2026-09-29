@@ -76,6 +76,7 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
 | `Sources/DozerHost/Preparations.swift`, `Onboarding.swift`, `AgentPrompt.swift`; `Sources/DozerCLI/OnboardCommands.swift`, `ProjectFile.swift`, `Prompting.swift`, `UninstallCommand.swift`; `Sources/doz-vmtest/OnboardingSuite.swift`, `PullBench.swift` | 594: image preparation in the host (single-flight, joined, cancelled) + `onboarded.json`; onboarding's checks / account step / settings-only-when-missing; the agent's environment prompt + the `dozer` skill; `doz onboard`/`init`/`uninstall`, `doz_project.yaml` (Yams), TTY questions; `make test-cli`'s onboarding part (`make test-cli-onboarding`); `make pullbench` (D12) |
 | `Sources/DozerKit/SavedScreens.swift`; `Sources/DozerHost/TerminalLayout.swift`; `Sources/DozerWeb/WebSessionMemory.swift` | 593 §9: the sessions' saved screens (`<sandbox>/screens/NAME.{vt,txt,json}`; the capture is `Sandbox.captureScreensLocked`, the `.captureScreens` step); the web UI's terminal layout kept by the host (`terminal-layout.json`); their web projections and the layout's strict decoder |
 | `Sources/DozerHost/BootLogs.swift`; `Sources/DozerWeb/WebBootLogs.swift` | 593: each sandbox's kept boots (`<sandbox>/boots/`), the recorder, the one renderer; the web's Boot log projections |
+| `Sources/DozerHost/Resources.swift`, `HostCore+Resources.swift`; `Sources/DozerCLI/ResourcesCommands.swift`; `Sources/DozerWeb/WebResources.swift`; `Tests/DozerCLITests/ResourcesTests.swift` | 595: the account of everything Dozer uses (the walk, one leaf per entry, the three numbers from `DiskAccounting.exclusive`), refusals, the plan and the deletion; the host ops `resources` / `resources-rm` / `resources-clean` / `resources-kernel`; `doz resources`; the web projection + preview route |
 | `Tests/DozerWebTests/` | 590: the security rules one by one, and a real listener driven with raw HTTP |
 | `Tests/DozerKitTests/` | Unit tests — no VM |
 
@@ -558,6 +559,44 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   the web's Boot log (`GET …/boots`, `GET …/boots/N`, rendered on the server, drawn in the frame's saved
   mode — read-only, no socket, any phase) use it. `boot-log` is a read-only host op (in-process when no
   host runs; the host adds the boot under way as number 1).
+
+### Resources (595) — design: workspace `changes/595-*/595.01-DESIGN.md`
+
+- **Everything adds up.** `Resources.walk` measures the store as `du` does (allocated blocks, `lstat`,
+  a hard link once) and `classify` puts EVERY entry on exactly one leaf row; the report's
+  `unattributedBytes` = the walk's total − the entries of the rows shown, and must be 0 (the page shows
+  it red otherwise; `ResourcesTests` checks it against `/usr/bin/du`). A new kind of file in the store
+  gets its leaf in `classify` — never a silent fall-through (anything unknown is `stray:<top name>`).
+- **Three numbers**: size (allocated — a clone in full), freed if deleted (`DiskAccounting.exclusive`:
+  the blocks only that group's disks reference, plus the allocation of its non-disk files), used by.
+  Reuse 587's extents (`F_LOG2PHYS_EXT`); never re-measure differently. "Freed" of a selection is one
+  sweep over the whole selection (blocks shared between its items counted once).
+- **Deleting never breaks a sandbox**: a sandbox's disks are refused (its page removes it); the
+  current kernel and `initfs.ext4` are refused while any sandbox is paused/asleep/hibernated (their
+  snapshots need them) or running; any kernel a snapshot needs or a sandbox's spec names
+  (`SandboxSpec.kernelPath`, from `kernel.path` at its create), and a current kernel that is not this
+  build's pinned one (only the pinned one is fetched again); images being prepared, and the download cache/base disks while any
+  is; a stray folder that is a sandbox's workspace or share; anything outside the store; Dozer's own
+  records. A parent with a refused part is refused whole.
+- **Paths come from ids, never from a request.** Ids are `Resources.isValidID` (and the web's strict
+  decoders); `plan` validates them against a FRESH inventory; `execute` removes only the entries its
+  own walk classifies under the leaves (top-most first) or the fixed places (restore point dir, screens,
+  boots, `content` + `state.json`, `initfs.ext4`); logs are truncated, metrics cleared through
+  `MetricsStore.clearHistory` (the running host's own run kept).
+- **Serialised with the lifecycle**: `resources-rm`/`-clean` wait (≤ 2 min, a `note` event says why)
+  until `diskOpsInFlight` is 0 (every op in `HostCore.diskOps` counts itself in `handle`; a wake by
+  use counts in `ensureRunning`), no preparation runs and no sandbox is busy or booting — then read the
+  facts, re-check synchronously, and plan + delete with NO suspension point (the actor runs nothing
+  else). A dry run is read-only (in-process with no host); a deletion needs the host.
+- **Clean up** = `cleanIDs`: cleanable (re-creatable AND unused — an image key no sandbox was created
+  from in `resources.clean_unused_days`), deletable, not refused — and never templates, sandboxes,
+  points, screens, boots, logs, metrics, the guest init, stray or outside rows, or an image parent. The
+  page and the CLI delete exactly the ids the preview showed (`resources-rm`), never a re-computed set.
+- **The page measures on arrival, Refresh and an operation's end** — never on a live `changed` event
+  (it reads every disk's extent map). The web projection drops `path`; the preview is a CSRF-checked
+  POST that changes nothing; there is no delete ROUTE — only the typed actions.
+- **"Use this kernel"** writes `kernel.path` (nil = the pinned one): new sandboxes only (the kernel is
+  baked into a sandbox's spec at create); refused when `DOZ_KERNEL` sets it.
 
 ### Browser terminals (591, on by default — owner ruling) — design: workspace `changes/591-*/591.01-DESIGN.md`
 

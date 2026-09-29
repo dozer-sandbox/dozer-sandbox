@@ -380,6 +380,33 @@ public final class MetricsStore: @unchecked Sendable {
         return Counts(runs: n("runs"), events: n("events"), sessions: n("sessions"), networkMinutes: n("network"))
     }
 
+    // MARK: 595 — Resources
+
+    /// Proxy traffic per sandbox: since `sinceMinute` (minutes since 1970), and in all.
+    public func networkTotals(sinceMinute: Int64) -> [ResourceNetwork] {
+        let rows = (try? query("""
+            SELECT sandbox, SUM(bytes_up), SUM(bytes_down), SUM(allowed + denied + failed),
+                   SUM(CASE WHEN minute >= ? THEN bytes_up ELSE 0 END), SUM(CASE WHEN minute >= ? THEN bytes_down ELSE 0 END)
+            FROM network GROUP BY sandbox ORDER BY sandbox
+            """, [.int(sinceMinute), .int(sinceMinute)]) { st in
+            ResourceNetwork(sandbox: Self.text(st, 0) ?? "?", upToday: Self.int(st, 4) ?? 0, downToday: Self.int(st, 5) ?? 0,
+                            upTotal: Self.int(st, 1) ?? 0, downTotal: Self.int(st, 2) ?? 0, connectionsTotal: Int(Self.int(st, 3) ?? 0))
+        }) ?? []
+        return rows
+    }
+
+    /// Clear the history (Resources › metrics): every row but `keepingRun`'s (the running host's), then
+    /// the file shrinks.
+    public func clearHistory(keepingRun: Int64?) throws {
+        let keep = keepingRun ?? -1
+        try execute("DELETE FROM network WHERE run != ?", [.int(keep)])
+        try execute("DELETE FROM sessions WHERE run != ?", [.int(keep)])
+        try execute("DELETE FROM events WHERE run != ?", [.int(keep)])
+        try execute("DELETE FROM runs WHERE id != ?", [.int(keep)])
+        try exec("PRAGMA wal_checkpoint(TRUNCATE)")
+        try exec("VACUUM")
+    }
+
     // MARK: CSV
 
     public static let csvHeader = ["id", "run", "app_version", "machine", "macos", "kind", "sandbox", "image", "action", "parent",

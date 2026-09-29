@@ -42,6 +42,13 @@ public enum WebAction: Equatable, Sendable {
     case onboard([String])
     /// 594: cancel the preparation of these images (all running ones when empty).
     case prepareCancel([String])
+    /// 595 (R3): delete these resources (ids as the Resources page lists them) — one host operation,
+    /// serialised with the lifecycle. A plain confirmation on the page (owner: no typed names).
+    case resourcesRemove([String])
+    /// 595 (R4): Clean up — the re-creatable, unused set.
+    case resourcesClean
+    /// 595 (R5): the kernel NEW sandboxes boot (`kernel:<version>` or `pinned`).
+    case resourcesKernel(String)
 
     public static let lifecycleOps: [String: HostOp] = [
         "start": .start, "wake": .wake, "pause": .pause, "resume": .resume, "sleep": .sleep, "hibernate": .hibernate,
@@ -58,7 +65,8 @@ public enum WebAction: Equatable, Sendable {
              .pointFork(let n, _, _), .pointRemove(let n, _), .pointSaveImage(let n, _, _, _), .netPolicy(let n, _), .keyPolicy(let n, _),
              .keyRemove(let n, _), .accountUse(let n, _), .templateCreate(let n, _, _, _), .duplicate(let n, _, _, _):
             return n
-        case .imageBake, .imageRemove, .accountDefault, .accountKeepalive, .accountVerify, .accountRemove, .onboard, .prepareCancel:
+        case .imageBake, .imageRemove, .accountDefault, .accountKeepalive, .accountVerify, .accountRemove, .onboard, .prepareCancel,
+             .resourcesRemove, .resourcesClean, .resourcesKernel:
             return nil
         }
     }
@@ -80,11 +88,18 @@ public enum WebAction: Equatable, Sendable {
     /// (and session, point, image or account). A double-clicked "open session" is one operation.
     public var dedupeKey: String {
         let r = hostRequest
-        return [r.op.rawValue, r.name ?? "", r.session ?? "", r.point ?? r.pointName ?? "", r.image ?? "", r.account ?? "", r.newName ?? ""].joined(separator: "|")
+        return [r.op.rawValue, r.name ?? "", r.session ?? "", r.point ?? r.pointName ?? "", r.image ?? "", r.account ?? "", r.newName ?? "",
+                r.ids?.joined(separator: ",") ?? "", r.kernel ?? ""].joined(separator: "|")
     }
 
     /// A short label for the progress line ("hibernate lab1").
     public var label: String {
+        switch self {
+        case .resourcesRemove(let ids): return ids.count == 1 ? "delete \(ids[0])" : "delete \(ids.count) resources"
+        case .resourcesClean: return "clean up"
+        case .resourcesKernel(let k): return "use \(k) for new sandboxes"
+        default: break
+        }
         let r = hostRequest
         return [r.op.rawValue, r.name ?? r.image ?? r.account].compactMap { $0 }.joined(separator: " ")
     }
@@ -188,6 +203,16 @@ public enum WebAction: Equatable, Sendable {
             var r = HostRequest(.prepareCancel)
             r.images = images.isEmpty ? nil : images
             return r
+        case .resourcesRemove(let ids):
+            var r = HostRequest(.resourcesRemove)
+            r.ids = ids
+            return r
+        case .resourcesClean:
+            return HostRequest(.resourcesClean)
+        case .resourcesKernel(let k):
+            var r = HostRequest(.resourcesKernel)
+            r.kernel = k
+            return r
         }
     }
 
@@ -222,6 +247,9 @@ public enum WebAction: Equatable, Sendable {
             "account-rm": ["account", "confirm"],
             "onboard": ["images"],
             "prepare-cancel": ["images"],
+            "resources-rm": ["ids"],
+            "resources-clean": [],
+            "resources-kernel": ["kernel"],
         ]
         for (verb, op) in lifecycleOps { f[verb] = [.reset, .rm].contains(op) ? ["sandbox", "confirm"] : ["sandbox"] }
         return f
@@ -307,6 +335,14 @@ public enum WebAction: Equatable, Sendable {
             a = .onboard(try f.builtInImages("images"))
         case "prepare-cancel":
             a = .prepareCancel(try f.builtInImages("images"))
+        case "resources-rm":
+            a = .resourcesRemove(try f.resourceIDs("ids"))
+        case "resources-clean":
+            a = .resourcesClean
+        case "resources-kernel":
+            let k = try f.required(f.string("kernel", max: 120), "kernel")
+            guard k == "pinned" || (k.hasPrefix("kernel:") && Resources.isValidID(k)) else { throw Invalid("kernel: kernel:<version> or pinned") }
+            a = .resourcesKernel(k)
         default:
             guard let op = lifecycleOps[verb] else { throw Invalid("unknown action") }
             a = .lifecycle(op, name: try f.sandbox("sandbox"))
@@ -404,6 +440,17 @@ public enum WebAction: Equatable, Sendable {
             var out: [String] = []
             for x in a {
                 guard let s = x as? String, DozerImages.builtIn.contains(s), !out.contains(s) else { throw Invalid("\(key): lab, claude-code, pi — each once") }
+                out.append(s)
+            }
+            return out
+        }
+
+        /// 595: resource ids (`Resources.isValidID`), 1–500, each once.
+        func resourceIDs(_ key: String) throws -> [String] {
+            guard let a = d[key] as? [Any], (1...500).contains(a.count) else { throw Invalid("\(key): a list of 1–500 resource ids") }
+            var out: [String] = []
+            for x in a {
+                guard let s = x as? String, Resources.isValidID(s), !out.contains(s) else { throw Invalid("\(key): resource ids as the Resources page lists them, each once") }
                 out.append(s)
             }
             return out

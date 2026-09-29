@@ -620,7 +620,8 @@ What you can do from it:
 | **Sandboxes** | New sandbox (image or template, network, account, CPUs, memory, workspace folder). Per sandbox: start, pause, resume, sleep, hibernate, wake, shut down, reset, remove. |
 | **A sandbox** | The lifecycle; browser terminals; Open in Terminal; run a command in a new detached session; take a restore point, and revert, fork, save as a template, duplicate or delete one; **Duplicate…** and **Save as template…** (below); edit the network policy, with a preview of exactly what changes; set the key policy and the account; remove a key. |
 | **All sessions** | A live, read-only view of every session of every running sandbox (below). |
-| **Images** | Bake a built-in image; remove an image or a template. **Version** says an agent image's version (and a newer one available, and being prepared). **Lineage** shows the tree. |
+| **Images** | Bake a built-in image; remove an image or a template. **Version** says an agent image's version (and a newer one available, and being prepared). **Own / Shared**: each image's own blocks and the blocks it reuses from the disk it was made from, as a size and a % of its size, in a two-colour bar. **Lineage** shows the tree. |
+| **Resources** | Everything Dozer uses, and deleting what has no other home (below). Its total size is beside it in the navigation. |
 | **Onboarding** | The setup wizard again (a dot beside it until this store is onboarded) — the same as Doctor › Run onboarding again. |
 | **Operations** | Every action this UI started, newest first, with its live progress, how long it took and its result; filter by sandbox. |
 | **Accounts & keys** | Make an account the default; verify one; remove one; keep-alive on or off. |
@@ -659,7 +660,31 @@ change.
 
 **Images › Lineage** draws the tree — OCI base → image → template → the sandboxes on each — with
 each disk's size, what it shares with its parent and its own bytes, the same as `doz image ls
---tree`. It is measured when you open it (Refresh measures again).
+--tree`, each also as a % of the disk's size (■ Own ■ Shared in the bar). It is measured when you
+open it (Refresh measures again).
+
+**Resources** is `doz resources` as a page (595). It is an account first: every byte of the store
+on a row, grouped — Sandboxes (each one's root disk, state disk, snapshot, restore points, saved
+screens and boot logs), Images & templates, Caches (the download cache, base disks, the guest init,
+kernels, preparation leftovers), Logs & metrics, Stray files, Dozer's own records — and Outside the
+store (the settings file, the keychain entries by name, the CLI, project folders: shown, never
+deleted here). Each row has its size on disk, what deleting it would free (a clone frees only what
+it does not share) and what uses it, and links to where it is managed: an image to **Images**, a
+sandbox's parts to **its page**, accounts to **Accounts & keys**. The rows add up to the total
+(what `du` counts); a last row, **unattributed**, is what no row explains — it should be 0 and is
+red when it is not. The bar on top shows what Dozer keeps, what **Clean up** would free and the
+volume's free space. Below: the memory each sandbox with a VM holds, the host's and this UI's, the
+CPUs given to sandboxes, each sandbox's proxy traffic (today and in all) and the kernels — with
+**Use this kernel** for the one new sandboxes boot (existing ones keep theirs).
+
+Tick what should go (or **Select all re-creatable**), then **Delete selected…**: one plain
+confirmation lists each item, what it frees, what it costs later ("re-prepared when next needed
+(about 3 min, needs network)") and what is refused and why, and the deletion runs as one operation
+(Operations shows it) — the host waits until nothing that uses the disks is under way. **Clean up…**
+is the safe set: what is re-creatable AND unused (the download cache, base disks, kernels nothing
+needs, images no sandbox was created from in `resources.clean_unused_days` days, leftovers) — never
+templates, sandboxes, restore points, settings or keys. The page is measured when you open it, on
+Refresh and when an operation ends.
 
 **Save as template…** saves the sandbox's root disk (now — a running sandbox pauses for
 milliseconds — or a restore point's) as a template: everything installed or written on the root

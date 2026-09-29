@@ -163,6 +163,14 @@ final class WebOperations: @unchecked Sendable {
         case .prepareCancel:
             let ps = (try? v.decode([PreparationInfo].self)) ?? []
             return ps.isEmpty ? "nothing was being prepared" : "cancelling the preparation of \(ps.map(\.image).joined(separator: ", "))"
+        case .resourcesRemove, .resourcesClean:
+            guard let p = try? v.decode(ResourcePlan.self) else { return "deleted" }
+            var s = p.deleted.isEmpty ? "nothing deleted" : "deleted \(p.deleted.count) item\(p.deleted.count == 1 ? "" : "s") — freed \(DozerImages.formatBytes(p.freedBytes))"
+            if !p.refused.isEmpty { s += "; refused \(p.refused.count) (\(p.refused[0].reason))" }
+            if !p.failed.isEmpty { s += "; \(p.failed.count) failed (\(p.failed[0].reason))" }
+            return s
+        case .resourcesKernel:
+            return (try? v.decode(ResourceKernelChoice.self)).map { "new sandboxes boot \($0.kernel) — existing ones keep theirs" } ?? "kernel chosen"
         }
     }
 

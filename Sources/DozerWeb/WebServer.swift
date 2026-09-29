@@ -573,6 +573,12 @@ public final class DozerWebServer: @unchecked Sendable {
             let start = try WebFolderPicker.decodeStart(body)
             let projects = (Workspace.defaultPath(name: "x", settings: settings.current) as NSString).deletingLastPathComponent
             return json(try await folderPicker.choose(start: WebFolderPicker.startFolder(start, projectsDir: projects)))
+        case .resources:
+            return json(try await data.resources())
+        case .resourcesPreview:
+            // Changes nothing (a dry run); POST (CSRF, above) because it carries ids.
+            try Self.requireJSONBody(md)
+            return json(try await data.resourcesPreview(try WebResourcePreview.decode(body)))
         case .events:
             return json(await monitor.recent)
         case .doctor:

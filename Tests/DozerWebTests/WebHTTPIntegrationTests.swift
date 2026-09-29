@@ -221,6 +221,40 @@ final class WebHTTPIntegrationTests: XCTestCase {
         XCTAssertEqual(post.status, 404, "not a route")
     }
 
+    /// 595: Resources — a session-only GET projected without paths (plus this UI's memory); the preview
+    /// is a CSRF-checked POST with a strict body that changes nothing; deleting is only the typed action.
+    func testResourcesAreASessionOnlyProjectionAndThePreviewNeedsCSRF() async throws {
+        try await start()
+        XCTAssertEqual(try get("/api/v1/resources").status, 401)
+        let (cookie, csrf) = try signIn()
+        let r = try get("/api/v1/resources", ["Cookie": cookie])
+        XCTAssertEqual(r.status, 200, r.text)
+        let rep = try WebJSON.decoder.decode(ResourceReport.self, from: r.body)
+        XCTAssertEqual(rep.items.map(\.id), ["cache:downloads", "unattributed"])
+        XCTAssertTrue(rep.items.allSatisfy { $0.path == nil }, "no path reaches the browser")
+        XCTAssertFalse(r.text.contains("/tmp/fake-store/content"))
+        XCTAssertEqual(rep.memory.map(\.kind), ["sandbox", "ui"], "the UI's own memory is on the account")
+        let json = ["Cookie": cookie, "Origin": origin, "X-Doz-CSRF": csrf, "Content-Type": "application/json"]
+        var noCSRF = json; noCSRF["X-Doz-CSRF"] = nil
+        XCTAssertEqual(try get("/api/v1/resources/preview", noCSRF, method: "POST", body: #"{"ids":["logs"]}"#).status, 403)
+        var noOrigin = json; noOrigin["Origin"] = nil
+        XCTAssertEqual(try get("/api/v1/resources/preview", noOrigin, method: "POST", body: #"{"ids":["logs"]}"#).status, 403)
+        XCTAssertEqual(fake.previews.count, 0)
+        let p = try get("/api/v1/resources/preview", json, method: "POST", body: #"{"ids":["logs","initfs"]}"#)
+        XCTAssertEqual(p.status, 200, p.text)
+        XCTAssertEqual(try WebJSON.decoder.decode(ResourcePlan.self, from: p.body).items.map(\.id), ["logs", "initfs"])
+        XCTAssertEqual(try get("/api/v1/resources/preview", json, method: "POST", body: #"{"clean":true}"#).status, 200)
+        XCTAssertEqual(fake.previews.map(\.clean), [false, true])
+        for bad in [#"{"ids":["../x"]}"#, #"{"ids":[]}"#, #"{"clean":true,"ids":["logs"]}"#, #"{"ids":["logs"],"dryRun":false}"#] {
+            XCTAssertEqual(try get("/api/v1/resources/preview", json, method: "POST", body: bad).status, 400, bad)
+        }
+        XCTAssertEqual(fake.previews.count, 2)
+        // Nothing near them is a route: no DELETE, no GET preview, no per-item path.
+        XCTAssertEqual(try get("/api/v1/resources", json, method: "POST", body: "{}").status, 404)
+        XCTAssertEqual(try get("/api/v1/resources/preview", ["Cookie": cookie]).status, 404)
+        XCTAssertEqual(try get("/api/v1/resources/cache:downloads", json, method: "DELETE").status, 404)
+    }
+
     /// 593 §9 (S3): a saved screen is a session-only GET, projected (VT as base64, no host path).
     func testASavedScreenIsASessionOnlyProjection() async throws {
         try await start()
@@ -460,6 +494,26 @@ final class FakeData: DozerWebData, @unchecked Sendable {
     }
 
     func images() async throws -> [WebImage] { [] }
+    /// 595: a small account (with a path the projection must drop), and what a preview would plan.
+    private(set) var previews: [WebResourcePreview] = []
+    func resources() async throws -> WebResources {
+        let items = [
+            ResourceItem(id: "cache:downloads", group: "caches", name: "download cache", sizeBytes: 400 << 20, freedBytes: 400 << 20,
+                         deletable: true, recreatable: true, later: "re-downloaded", cleanable: true, path: "/tmp/fake-store/content"),
+            ResourceItem(id: "unattributed", group: "store", name: "unattributed", sizeBytes: 0, refusal: "nothing to delete"),
+        ]
+        let r = ResourceReport(store: storePath, measuredAt: Date(timeIntervalSince1970: 0), milliseconds: 5, totalBytes: 400 << 20,
+                               attributedBytes: 400 << 20, unattributedBytes: 0, occupiedBytes: 400 << 20, cleanableBytes: 400 << 20,
+                               volumeFreeBytes: 1 << 40, volumeTotalBytes: 2 << 40, items: items,
+                               memory: [ResourceMemory(kind: "sandbox", name: "demo", phase: "running", heldBytes: 900 << 20, allocationBytes: 1 << 30, cpus: 2)],
+                               machineCPUs: 8, allocatedCPUs: 2, network: [ResourceNetwork(sandbox: "demo", upToday: 10, downToday: 20)],
+                               kernels: [], unusedDays: 30)
+        return WebResources(r, uiFootprint: 30 << 20)
+    }
+    func resourcesPreview(_ p: WebResourcePreview) async throws -> ResourcePlan {
+        lock.withLock { previews.append(p) }
+        return ResourcePlan(items: p.ids.map { .init(id: $0, name: $0, freedBytes: 1) }, freedBytes: Int64(p.ids.count), dryRun: true, clean: p.clean)
+    }
     /// 593: base → image → a sandbox, as the host would measure it.
     func imageTree() async throws -> WebImageTree {
         WebImageTree(ImageTree(disks: [

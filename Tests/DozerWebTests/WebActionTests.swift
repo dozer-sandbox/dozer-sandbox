@@ -41,6 +41,9 @@ final class WebActionTests: XCTestCase {
         "account-rm": #"{"action":"account-rm","account":"work","confirm":"work"}"#,
         "onboard": #"{"action":"onboard","images":["claude-code","lab"]}"#,
         "prepare-cancel": #"{"action":"prepare-cancel","images":["pi"]}"#,
+        "resources-rm": #"{"action":"resources-rm","ids":["cache:downloads","kernel:6.12.1-1","point:web/rp-1"]}"#,
+        "resources-clean": #"{"action":"resources-clean"}"#,
+        "resources-kernel": #"{"action":"resources-kernel","kernel":"kernel:6.12.1-1"}"#,
     ]
 
     /// Everything the web layer may send to the host — and, as important, what it may never.
@@ -48,8 +51,54 @@ final class WebActionTests: XCTestCase {
         .create, .start, .wake, .pause, .resume, .sleep, .hibernate, .shutdown, .reset, .rm, .openSession,
         .pointTake, .pointRevert, .pointFork, .pointRm, .pointSaveImage, .imageBake, .imageRm, .netPolicy,
         .keyPolicy, .keyRm, .accountUse, .accountDefault, .accountKeepalive, .accountVerify, .accountRemove,
-        .templateCreate, .duplicate, .onboard, .prepareCancel,
+        .templateCreate, .duplicate, .onboard, .prepareCancel, .resourcesRemove, .resourcesClean, .resourcesKernel,
     ]
+
+    /// 595: resources — ids by their rule, each once; no typed name (a plain confirmation: owner);
+    /// never a dry-run flag or a path from the browser.
+    func testResourceActionsDecodeStrictly() throws {
+        let r = try decode(Self.samples["resources-rm"]!)
+        XCTAssertEqual(r.hostRequest.op, .resourcesRemove)
+        XCTAssertEqual(r.hostRequest.ids, ["cache:downloads", "kernel:6.12.1-1", "point:web/rp-1"])
+        XCTAssertNil(r.hostRequest.dryRun, "an action deletes; the preview route is the dry run")
+        XCTAssertNil(r.confirmationTarget)
+        XCTAssertNil(r.sandbox)
+        XCTAssertEqual(r.label, "delete 3 resources")
+        XCTAssertNotEqual(r.dedupeKey, try decode(#"{"action":"resources-rm","ids":["logs"]}"#).dedupeKey)
+        XCTAssertEqual(try decode(Self.samples["resources-clean"]!).hostRequest.op, .resourcesClean)
+        XCTAssertEqual(try decode(Self.samples["resources-kernel"]!).hostRequest.kernel, "kernel:6.12.1-1")
+        XCTAssertEqual(try decode(#"{"action":"resources-kernel","kernel":"pinned"}"#).hostRequest.kernel, "pinned")
+        invalid(#"{"action":"resources-rm"}"#)
+        invalid(#"{"action":"resources-rm","ids":[]}"#)
+        invalid(#"{"action":"resources-rm","ids":"logs"}"#)
+        invalid(#"{"action":"resources-rm","ids":["logs","logs"]}"#)
+        invalid(#"{"action":"resources-rm","ids":["image:../../etc"]}"#)
+        invalid(#"{"action":"resources-rm","ids":["/etc/passwd"]}"#)
+        invalid(#"{"action":"resources-rm","ids":["stray:a b"]}"#)
+        invalid(#"{"action":"resources-rm","ids":[1]}"#)
+        invalid(#"{"action":"resources-rm","ids":["logs"],"dryRun":false}"#)
+        invalid(#"{"action":"resources-rm","ids":["logs"],"confirm":"logs"}"#)
+        let many = "[" + (0..<501).map { "\"stray:f\($0)\"" }.joined(separator: ",") + "]"
+        invalid(#"{"action":"resources-rm","ids":"# + many + "}")
+        invalid(#"{"action":"resources-clean","ids":["logs"]}"#)
+        invalid(#"{"action":"resources-kernel"}"#)
+        invalid(#"{"action":"resources-kernel","kernel":"/tmp/vmlinux"}"#)
+        invalid(#"{"action":"resources-kernel","kernel":"image:pi"}"#)
+        invalid(#"{"action":"resources-kernel","kernel":"kernel:../x"}"#)
+    }
+
+    /// 595: the preview's body — exactly {ids} or {clean: true}.
+    func testResourcePreviewDecodesStrictly() throws {
+        XCTAssertEqual(try WebResourcePreview.decode(Data(#"{"ids":["logs","initfs"]}"#.utf8)).hostRequest.ids, ["logs", "initfs"])
+        let c = try WebResourcePreview.decode(Data(#"{"clean":true}"#.utf8))
+        XCTAssertEqual(c.hostRequest.op, .resourcesClean)
+        XCTAssertEqual(c.hostRequest.dryRun, true)
+        XCTAssertEqual(try WebResourcePreview.decode(Data(#"{"ids":["logs"]}"#.utf8)).hostRequest.dryRun, true)
+        for bad in [#"{}"#, #"[]"#, #"{"ids":[]}"#, #"{"clean":false}"#, #"{"clean":1}"#, #"{"clean":true,"ids":["logs"]}"#,
+                    #"{"ids":["logs"],"dryRun":false}"#, #"{"ids":["../x"]}"#] {
+            XCTAssertThrowsError(try WebResourcePreview.decode(Data(bad.utf8)), bad)
+        }
+    }
 
     /// 594: onboard and prepare-cancel — built-in images only, each once; onboard never waits.
     func testOnboardingActionsDecodeStrictly() throws {
@@ -317,6 +366,14 @@ final class WebActionTests: XCTestCase {
         XCTAssertEqual(WebRoute.parse(method: .get, target: "/api/v1/images/tree"), .imageTree)
         for (m, t) in [(WebHTTPMethod.post, "/api/v1/images/tree"), (.get, "/api/v1/images/tree/"), (.get, "/api/v1/images/tree/x"),
                        (.get, "/api/v1/images/Tree"), (.delete, "/api/v1/images/tree"), (.get, "/api/v1/images/lab")] {
+            XCTAssertNil(WebRoute.parse(method: m, target: t), t)
+        }
+        // 595: the account (GET) and the preview (POST); deleting is an action, never a route.
+        XCTAssertEqual(WebRoute.parse(method: .get, target: "/api/v1/resources"), .resources)
+        XCTAssertEqual(WebRoute.parse(method: .post, target: "/api/v1/resources/preview"), .resourcesPreview)
+        for (m, t) in [(WebHTTPMethod.post, "/api/v1/resources"), (.delete, "/api/v1/resources"), (.get, "/api/v1/resources/preview"),
+                       (.post, "/api/v1/resources/delete"), (.post, "/api/v1/resources/clean"), (.get, "/api/v1/resources/logs"),
+                       (.get, "/api/v1/resources/")] {
             XCTAssertNil(WebRoute.parse(method: m, target: t), t)
         }
     }

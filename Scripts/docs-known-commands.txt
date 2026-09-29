@@ -74,3 +74,8 @@ config/set
 config/unset
 config/init
 config/path
+resources
+resources/ls
+resources/rm
+resources/clean
+resources/kernel

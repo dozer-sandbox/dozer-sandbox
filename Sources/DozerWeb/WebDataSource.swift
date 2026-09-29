@@ -56,6 +56,10 @@ public protocol DozerWebData: Sendable {
     /// `doz key set NAME --anthropic` sends (`HostRequest.keySet`, source `browser`), no progress
     /// callback. Returns the sandbox's keys (never a secret).
     func setKey(_ k: WebKeySet) async throws -> [WebCredential]
+    /// 595: the Resources account (the host's `resources`; in-process when no host runs), and what a
+    /// deletion would do (a dry run — changes nothing).
+    func resources() async throws -> WebResources
+    func resourcesPreview(_ p: WebResourcePreview) async throws -> ResourcePlan
 }
 
 extension DozerWebData {
@@ -63,6 +67,8 @@ extension DozerWebData {
     public func preparations() async throws -> [WebPreparation] { [] }
     public func addAccount(_ a: WebAccountAdd) async throws -> WebAccounts { throw HostError(.notImplemented, "accounts") }
     public func setKey(_ k: WebKeySet) async throws -> [WebCredential] { throw HostError(.notImplemented, "keys") }
+    public func resources() async throws -> WebResources { throw HostError(.notImplemented, "resources") }
+    public func resourcesPreview(_ p: WebResourcePreview) async throws -> ResourcePlan { throw HostError(.notImplemented, "resources") }
 }
 
 /// `GET /api/v1/metrics[.csv]?image=…&days=…&steps=0|1`.

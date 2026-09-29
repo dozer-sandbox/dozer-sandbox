@@ -79,11 +79,20 @@ public enum HostOp: String, Codable, Sendable, CaseIterable {
     /// latest): its events and kernel console. Read-only; from the sandbox's directory (plus, from the
     /// host, a boot under way).
     case bootLog = "boot-log"
+    /// 595: everything Dozer uses (`ResourceReport`: every byte of the store attributed, memory, CPUs,
+    /// traffic, kernels). Read-only; answered in-process when no host runs.
+    case resources
+    /// 595: delete resources by id (`ids`), or the safe set (`resources-clean`); `dryRun` plans only.
+    /// Run with nothing starting, waking or being prepared (serialised with the lifecycle).
+    case resourcesRemove = "resources-rm"
+    case resourcesClean = "resources-clean"
+    /// 595 (R5): which kernel NEW sandboxes boot — `kernel` = a kernel id (`kernel:<version>`) or `pinned`.
+    case resourcesKernel = "resources-kernel"
 
     /// Operations that only read — answered from the store in-process when no host is running.
     public var isReadOnly: Bool {
         switch self {
-        case .ping, .ls, .inspect, .pointList, .imageList, .keyList, .accountList, .imageTree, .prepareStatus, .sessionScreen, .terminalLayout, .bootLog: true
+        case .ping, .ls, .inspect, .pointList, .imageList, .keyList, .accountList, .imageTree, .prepareStatus, .sessionScreen, .terminalLayout, .bootLog, .resources: true
         case .netPolicy: false        // decided per request (a change needs the host)
         default: false
         }
@@ -218,6 +227,11 @@ public struct HostRequest: Codable, Equatable, Sendable {
     /// 593 `boot-log`: which kept boot (1 = the latest), or the list of them.
     public var boot: Int?
     public var list: Bool?
+    /// 595 `resources-rm`: the resource ids; `dryRun`: plan only (both resources-rm and -clean);
+    /// `resources-kernel`: `kernel`.
+    public var ids: [String]?
+    public var dryRun: Bool?
+    public var kernel: String?
 
     public init(_ op: HostOp, name: String? = nil) {
         v = HostProtocol.version

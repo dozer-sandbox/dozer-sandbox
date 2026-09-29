@@ -305,6 +305,43 @@ history). **Duplicate** makes a new sandbox from an existing one's disk (an APFS
 name and any of a new workspace (made when it does not exist) or `--isolated`, CPUs, memory, network or
 account; its state disk starts fresh unless `--copy-state`. Keys are not copied.
 
+### Resources
+
+```bash
+doz resources [ls] [--json]                        # everything Dozer uses: disk to the byte, memory, CPUs, traffic, kernels
+doz resources rm ID… [--dry-run] [--yes] [--json]  # delete what can go (ids as doz resources lists them)
+doz resources clean [--dry-run] [--yes] [--json]   # the safe set: re-creatable AND unused
+doz resources kernel kernel:VERSION|pinned          # the kernel NEW sandboxes boot
+```
+
+`doz resources` is an **account**: every byte of the store is on a row — sandboxes (root disk, state
+disk, snapshot, restore points, saved screens, boot logs), images and templates, caches (the download
+cache, base disks, the guest init, kernels, preparation leftovers), logs and metrics, stray files,
+Dozer's own records — and the total is what `du` counts; a last row, **unattributed**, is what no
+row explains and should be 0. Each row has three numbers: its **size** (allocated, as `du` counts
+it — an APFS clone in full each time), what deleting it **frees** (the blocks only it holds —
+a clone frees only what it does not share) and what **uses** it. Outside the store it shows the
+settings file, the keychain entries (names only), the CLI and the project folders — never deleted
+here. Then the memory each sandbox with a VM holds (after the balloon), the host's and the UI's, the
+CPUs given to sandboxes, each sandbox's proxy traffic (today and in all) and the kernels (version,
+digest, size, current, and the snapshots that need each).
+
+`rm` and `clean` first show the plan — each item, what it frees, what it costs later
+("re-prepared when next needed (about 3 min, needs network)") and what is refused and why — and ask
+once (`--yes` skips it; `--dry-run` deletes nothing). The deletion runs in the host as one operation,
+waiting until nothing that uses the store's disks is under way. What is refused: a sandbox and its
+disks (remove it with `doz rm`), anything outside the store, Dozer's own records; the current kernel
+and the guest init while any sandbox is paused, asleep or hibernated (their snapshots need them —
+allowed once all are off); an image while it is being prepared (and the download cache and base
+disks while any is); a stray folder that is a sandbox's workspace. Restore points, saved screens and
+boot logs are deletable; templates too, with a warning that they cannot be re-created; logs are
+cleared and metrics' history is cleared. **clean** deletes only what is re-creatable and unused — the
+download cache, base disks, kernels no snapshot needs and new boots do not use, images no sandbox was
+created from in `resources.clean_unused_days` (30) days, leftovers — never templates, sandboxes,
+restore points, logs, settings or keys. `resources kernel` changes `kernel.path`: it applies to
+sandboxes created from now on; existing ones keep theirs, and a wake keeps its snapshot's kernel.
+`doz image rm` stays as it was.
+
 ### The host
 
 ```bash
@@ -330,7 +367,9 @@ doz ui link [--store DIR]                             # a fresh one-use sign-in 
 A browser dashboard for sandboxes, images, accounts, metrics, activity and doctor, with the
 lifecycle and every other action. Each sandbox has its own page (a child of Sandboxes in the
 navigation): a control bar, its terminals filling the page, and a details panel. **All sessions**
-is a grid of live, read-only views of every session; **Images** has a Lineage view; **Operations**
+is a grid of live, read-only views of every session; **Images** has a Lineage view, and both views show
+each image's own and shared size and %; **Resources** is `doz resources` as a page (its total in the
+navigation), with multi-select, one confirmation and **Clean up**; **Operations**
 lists what the UI asked the host to do. It listens on `127.0.0.1` only. Each link works once and is
 exchanged for a strict session cookie; `Host` and `Origin` are checked exactly. An account's API key
 or setup token may be typed in a masked field (the wizard, Accounts & keys) while
@@ -364,7 +403,7 @@ doz config path            # ${XDG_CONFIG_HOME:-~/.config}/dozer-sandbox/doz.tom
 ```
 
 One settings file, `doz.toml`, lists every setting grouped in sections (`[ui]`, `[host]`,
-`[store]`, `[claude]`, `[defaults]`, `[agent]`, `[images.lab]`, `[images.claude-code]`, `[images.pi]`,
+`[store]`, `[claude]`, `[defaults]`, `[agent]`, `[resources]`, `[images.lab]`, `[images.claude-code]`, `[images.pi]`,
 `[kernel]`), each with a description and `# key = default` commented out; only what you set is
 uncommented. Precedence: a command-line flag, then its environment variable, then the file, then
 the default. `ui.boot_view_on_start` (default `true`) makes Start in the web UI open a terminal on

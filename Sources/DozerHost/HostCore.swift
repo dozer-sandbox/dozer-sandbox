@@ -31,8 +31,10 @@ public actor HostCore {
     public nonisolated let store: DozerStore
     public nonisolated let readOnly: Bool
     public nonisolated let version: String
-    private let metrics: MetricsStore?
-    private let metricsRun: Int64
+    let metrics: MetricsStore?
+    let metricsRun: Int64
+    /// 595: operations that touch the store's disks under way now (a deletion waits for none).
+    var diskOpsInFlight = 0
     nonisolated let hub = HostEventHub()
     /// 588: the store's accounts (metadata only), the keychain / verifier / Claude probes (fakes in
     /// tests), and ONE watcher per Mac login in use.
@@ -390,9 +392,13 @@ public actor HostCore {
         // started to write it. With a host running, the host writes it (serialised with `rm`).
         if readOnly && !(r.op.isReadOnly || (r.op == .netPolicy && isPolicyQuery(r)) || r.op == .sessions || (r.op == .netLog && r.follow != true)
                          || (r.op == .console && r.follow != true) || (r.op == .agentPrompt && r.prompt == nil && r.clearPrompt != true)
-                         || r.op == .terminalLayoutSet) {
+                         || r.op == .terminalLayoutSet || ([.resourcesRemove, .resourcesClean].contains(r.op) && r.dryRun == true)) {
             return .failure(HostError(.unavailable, "\(r.op.rawValue) needs the host"))
         }
+        // 595: a deletion waits until nothing that uses the store's disks is under way.
+        let touchesDisks = Self.diskOps.contains(r.op)
+        if touchesDisks { diskOpsInFlight += 1 }
+        defer { if touchesDisks { diskOpsInFlight -= 1 } }
         do {
             return .success(try await perform(r, emit: emit))
         } catch {
@@ -494,6 +500,12 @@ public actor HostCore {
             return try JSONValue(encoding: SessionScreen(name: m.name, saved))
         case .bootLog:
             return try bootLog(r)
+        case .resources:
+            return try JSONValue(encoding: await resourceReport())
+        case .resourcesRemove, .resourcesClean:
+            return try JSONValue(encoding: try await resourcesRemove(r, emit: emit))
+        case .resourcesKernel:
+            return try JSONValue(encoding: try await resourcesKernel(r))
         case .terminalLayout:
             let m = try get(r.name)
             guard let l = TerminalLayout.read(store, m.name) else { return .null }
@@ -819,6 +831,9 @@ public actor HostCore {
             case .running where !busy: return
             case .paused where wake && !busy: try await m.sandbox.resume(); return
             case .asleep where wake && !busy, .hibernated where wake && !busy:
+                // 595: a wake by use reads the kernel and the guest init — a resource deletion waits for it.
+                diskOpsInFlight += 1
+                defer { diskOpsInFlight -= 1 }
                 let row = beginAction(m, "wake", phaseBefore: p.rawValue)
                 let t0 = ContinuousClock.now
                 beginBoot(m, kind: "wake")

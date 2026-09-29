@@ -256,6 +256,9 @@ function paintTransition(name) {
 }
 function trackOp(op) {
   const before = state.ops.get(op.id);
+  // 595: a fast operation's end (SSE) can arrive before the POST's own "running" answer — never
+  // let the older news overwrite the end (it left the page thinking it still ran).
+  if (before && before.state !== 'running' && op.state === 'running') return;
   state.ops.set(op.id, op);
   if (state.ops.size > 60) state.ops.delete(state.ops.keys().next().value);
   renderOps();
@@ -267,6 +270,9 @@ function trackOp(op) {
     endTransition(op.sandbox, op.action, op.state === 'failed');
     if (op.state === 'failed') toast(op.label + ': ' + op.text, true);
     refreshNav();
+    // 595: an operation's end may have changed the disks — measure again (the nav's total too).
+    remeasure();
+    scheduleResTotal();
     // The sandbox this page shows is gone: back to the list (route() refreshes) instead of a 404.
     if (op.state === 'done' && op.action === 'rm' && state.view === 'sandbox' && state.param === op.sandbox) { location.hash = '#/overview'; return; }
     refresh(false);
@@ -855,6 +861,7 @@ function route() {
   if (state.view !== 'operations') state.opsBox = null;
   if (state.view === 'operations') { acknowledgeOps(); loadPreparations(); }
   if (state.view !== 'onboarding') wizardStopPolling();
+  if (state.view === 'images' || state.view === 'resources') remeasure();   // 595: measured on arrival, Refresh, an op's end
   if (onSbx) { showSandbox(); return; }
   if (onGrid) { gridEnter(); return; }
   refresh(true);
@@ -869,7 +876,7 @@ async function refresh(scrollTop) {
   if (refreshing) { again = true; return; }
   refreshing = true;
   try {
-    const views = { overview: viewOverview, images: viewImages, operations: viewOperations, accounts: viewAccounts,
+    const views = { overview: viewOverview, images: viewImages, resources: viewResources, operations: viewOperations, accounts: viewAccounts,
                     metrics: viewMetrics, activity: viewActivity, doctor: viewDoctor, settings: viewSettings, onboarding: viewOnboarding };
     const fn = views[state.view] || viewOverview;
     const node = await fn();
@@ -1563,13 +1570,62 @@ function imagesToggle() {
   };
   return h('div', { class: 'segmented', role: 'group', 'aria-label': 'View' }, mk('table', 'Table'), mk('lineage', 'Lineage'));
 }
+// ── 595 (R9, owner: "show the shared block reuse size and percentage per image and use a different
+// colour in the size bar … a legend in the bar column header Own / Shared"). Own = the blocks only this
+// disk holds (what deleting it frees — Resources' "freed if deleted"); Shared = the blocks it reuses
+// from the disk it was made from (APFS clones — 587's DiskAccounting). Each also as a % of its size.
+function pct(part, whole) { return whole > 0 && part != null ? Math.round((part / whole) * 100) + '%' : '—'; }
+function sizeBar(size, own, shared) {
+  const whole = Math.max(1, size || 0);
+  const bar = h('div', { class: 'lin-bar', 'data-own': String(own || 0), 'data-shared': String(shared || 0),
+    title: 'own ' + bytes(own || 0) + ' (' + pct(own || 0, size) + ') · shared ' + bytes(shared || 0) + ' (' + pct(shared || 0, size) + ')' +
+      ((size - (own || 0) - (shared || 0)) > 0 ? ' · the rest is shared with other disks' : '') });
+  const a = h('span', { class: 'lin-shared' }), b = h('span', { class: 'lin-own' });
+  a.style.width = Math.min(100, ((shared || 0) / whole) * 100).toFixed(1) + '%';
+  b.style.width = Math.min(100, ((own || 0) / whole) * 100).toFixed(1) + '%';
+  bar.append(a, b);
+  return bar;
+}
+function barLegend() {
+  return h('span', { class: 'bar-legend', 'data-legend': '' },
+    h('span', { class: 'sw sw-own', 'aria-hidden': 'true' }), 'Own', h('span', { class: 'sw sw-shared', 'aria-hidden': 'true' }), 'Shared');
+}
+function sizePart(n, size) { return n == null ? '—' : [bytes(n), h('span', { class: 'muted pct' }, ' · ' + pct(n, size))]; }
+/// The lineage node of an Images row (built-in: `image` NAME@KEY12; lab: its prepared disk; a template by name).
+function treeNodeFor(tree, r) {
+  if (!tree) return null;
+  return tree.nodes.find((n) => r.kind === 'custom' ? n.kind === 'template' && n.name === r.name
+    : r.name === 'lab' ? n.kind === 'prepared' && r.key && (n.name + '-' + String(n.detail || '').split(' ').pop()) === r.key
+    : n.kind === 'image' && n.name === r.name && !!r.key && n.detail === r.key) || null;
+}
+/// A measurement (the Resources report, the lineage): read when a page is arrived at, on Refresh and
+/// when an operation ends — never on a live update (it reads every disk's extent map).
+state.measured = { stale: new Set(['resources', 'tree']), resources: null, tree: null };
+function remeasure() { state.measured.stale.add('resources'); state.measured.stale.add('tree'); }
+async function measured(key, path) {
+  if (state.measured[key] && !state.measured.stale.has(key)) return state.measured[key];
+  const v = await api(path);
+  state.measured[key] = v;
+  state.measured.stale.delete(key);
+  if (key === 'resources') paintResTotal(v);
+  return v;
+}
 async function viewImages() {
   if (state.imagesMode === 'lineage') return viewLineage();
-  const rows = (await api('images')).map((r) => h('tr', null,
+  const [images, tree] = await Promise.all([api('images'), measured('tree', 'images/tree').catch(() => null)]);
+  const rows = images.map((r) => {
+    const n = treeNodeFor(tree, r);
+    const size = n ? n.allocatedBytes : r.allocatedBytes;
+    // Shared: with the disk it was made from (none for a disk with no parent — the lab's prepared disk).
+    const own = n ? n.uniqueBytes : null, shared = n ? n.sharedWithParentBytes ?? null : null;
+    return h('tr', { 'data-image': r.name },
     h('td', null, r.name, r.kind === 'custom' ? h('span', { class: 'tag tpl' }, 'template') : null),
     h('td', null, r.kind === 'custom' ? 'template' : r.kind),
     h('td', null, r.baked ? (r.bakedAt ? full(r.bakedAt) : 'yes') : h('span', { class: 'muted' }, 'no — bakes on first start')),
     h('td', { class: 'num' }, r.allocatedBytes ? bytes(r.allocatedBytes) : '—'),
+    h('td', { class: 'num', 'data-own-cell': '' }, n ? sizePart(own, size) : '—'),
+    h('td', { class: 'num', 'data-shared-cell': '' }, n ? sizePart(shared, size) : '—'),
+    h('td', { class: 'bar-cell' }, n ? sizeBar(size, own, shared) : null),
     // 594: an agent image's version — the one a new sandbox gets, and a newer one available (and
     // being prepared in the background: the next new sandbox gets it).
     h('td', { 'data-version': r.version || '', 'data-available': r.available || '' },
@@ -1587,41 +1643,262 @@ async function viewImages() {
       r.kind === 'builtin' ? btn(r.baked ? 'Re-bake' : 'Bake', () => act({ action: 'image-bake', image: r.name }), { small: true, title: 'Minutes, needs network' }) : null,
       r.baked || r.kind === 'custom' ? btn('Remove', () => confirmAction('Remove ' + (r.kind === 'custom' ? 'template ' : 'image ') + r.name,
         r.kind === 'custom' ? 'The template is deleted; sandboxes created from it keep working.' : 'Its baked disk is deleted (it is baked again when next needed); sandboxes cloned from it keep working.',
-        r.name, { action: 'image-rm', image: r.name }), { small: true, danger: true }) : null))));
-  return h('div', null, h('div', { class: 'head' }, h('h1', null, 'Images'), imagesToggle()),
-    h('p', { class: 'sub' }, 'Built-in images, and templates saved from sandboxes (a sandbox’s root disk — never its state disk). Progress of a bake shows under Operations.'),
-    panel(table(['Image', 'Kind', 'Baked', 'Size', 'Version', 'Note', 'Key', ''], rows, [3])));
+        r.name, { action: 'image-rm', image: r.name }), { small: true, danger: true }) : null)));
+  });
+  return h('div', null, h('div', { class: 'head' }, h('h1', null, 'Images'),
+      h('div', { class: 'actions' }, btn('Refresh', () => { remeasure(); refresh(false); }, { small: true, title: 'Measure again' }), imagesToggle())),
+    h('p', { class: 'sub' }, 'Built-in images, and templates saved from sandboxes (a sandbox’s root disk — never its state disk). Own is what only this image holds (what removing it frees); shared is what it reuses from the disk it was made from. Progress of a bake shows under Operations. Everything Dozer uses: ',
+      h('a', { href: '#/resources' }, 'Resources'), '.'),
+    panel(table(['Image', 'Kind', 'Baked', 'Size', 'Own', 'Shared', barLegend(), 'Version', 'Note', 'Key', ''], rows, [3, 4, 5])));
 }
 async function viewLineage() {
-  const t = await api('images/tree');
+  const t = await measured('tree', 'images/tree');
   const labels = { base: 'OCI base', image: 'image', template: 'template', prepared: 'prepared disk', sandbox: 'sandbox', restorePoint: 'restore point' };
   const rows = t.nodes.map((n) => {
-    const shared = n.sharedWithParentBytes || 0;
     const own = n.uniqueBytes || 0;
-    const whole = Math.max(1, n.allocatedBytes);
-    const bar = h('div', { class: 'lin-bar', title: 'shared with its parent ' + bytes(shared) + ' · its own ' + bytes(own) });
-    const a = h('span', { class: 'lin-shared' }), b = h('span', { class: 'lin-own' });
-    a.style.width = Math.min(100, (shared / whole) * 100).toFixed(1) + '%';
-    b.style.width = Math.min(100, (own / whole) * 100).toFixed(1) + '%';
-    bar.append(a, b);
+    const bar = sizeBar(n.allocatedBytes, own, n.sharedWithParentBytes || 0);
     const name = n.kind === 'sandbox' ? h('a', { href: '#/sandbox/' + n.sandbox }, n.name) : h('span', null, n.name);
     return h('div', { class: 'lin-row depth-' + Math.min(n.depth, 8) + ' lin-' + n.kind, 'data-kind': n.kind, 'data-name': n.name, 'data-depth': String(n.depth) },
       h('div', { class: 'lin-name' }, h('span', { class: 'lin-branch', 'aria-hidden': 'true' }, n.depth ? '└ ' : ''), name,
         h('span', { class: 'tag lin-kind' }, labels[n.kind] || n.kind), n.detail ? h('span', { class: 'muted mono lin-detail' }, n.detail) : null),
       h('div', { class: 'num lin-size' }, bytes(n.allocatedBytes), n.stateAllocatedBytes ? h('div', { class: 'muted' }, '+ state ' + bytes(n.stateAllocatedBytes)) : null),
-      h('div', { class: 'num lin-shared-n' }, n.sharedWithParentBytes != null ? bytes(n.sharedWithParentBytes) : '—'),
-      h('div', { class: 'num lin-own-n' }, bytes(own)),
+      h('div', { class: 'num lin-shared-n' }, n.sharedWithParentBytes != null ? sizePart(n.sharedWithParentBytes, n.allocatedBytes) : '—'),
+      h('div', { class: 'num lin-own-n' }, sizePart(own, n.allocatedBytes)),
       bar);
   });
   return h('div', null, h('div', { class: 'head' }, h('h1', null, 'Images'),
-      h('div', { class: 'actions' }, btn('Refresh', () => refresh(false), { small: true, title: 'Measure again' }), imagesToggle())),
-    h('p', { class: 'sub' }, 'The lineage: OCI base → image → template → the sandboxes on each. Size is what the disk holds; shared is what it shares with its parent (APFS clones); own is what removing it frees. All disks together: ' +
+      h('div', { class: 'actions' }, btn('Refresh', () => { remeasure(); refresh(false); }, { small: true, title: 'Measure again' }), imagesToggle())),
+    h('p', { class: 'sub' }, 'The lineage: OCI base → image → template → the sandboxes on each. Size is what the disk holds; shared is what it reuses from its parent (APFS clones); own is what removing it frees — each also as a % of its size. All disks together: ' +
       bytes(t.unionBytes) + ' (measured in ' + Math.round(t.milliseconds) + ' ms).'),
     t.nodes.length
       ? h('div', { class: 'panel lineage' },
-          h('div', { class: 'lin-row lin-headrow' }, h('div', null, 'Image / sandbox'), h('div', { class: 'num' }, 'Size'), h('div', { class: 'num' }, 'Shared'), h('div', { class: 'num' }, 'Own'), h('div', null, '')),
+          h('div', { class: 'lin-row lin-headrow' }, h('div', null, 'Image / sandbox'), h('div', { class: 'num' }, 'Size'), h('div', { class: 'num' }, 'Shared'), h('div', { class: 'num' }, 'Own'), h('div', null, barLegend())),
           rows)
       : panel(null, 'No disks yet — bake an image or start a sandbox.'));
+}
+
+// ── 595: Resources ──────────────────────────────────────────────────────────
+// Owner (2026-09-30): "the Resources section should break down ALL the usage". An ACCOUNT first: every
+// byte of the store on a row (the last, "unattributed", is ~0 — red when not), the memory and CPUs Dozer
+// holds, the proxy's traffic, the kernels. Management stays where it lives — a row links to Images, the
+// sandbox's page or Accounts & keys; this page deletes only what has no other home. A deletion is
+// previewed (POST resources/preview — changes nothing), confirmed once (no typed names: the owner's
+// ruling), and runs as ONE operation (`resources-rm` with exactly the ids shown).
+const RES_GROUPS = [['sandboxes', 'Sandboxes'], ['images', 'Images & templates'], ['caches', 'Caches'], ['logs', 'Logs & metrics'],
+                    ['stray', 'Stray files'], ['store', 'Dozer’s own'], ['outside', 'Outside the store']];
+state.resSel = new Set();
+state.resToggled = new Set();
+let resTotalTimer = null;
+function paintResTotal(r) {
+  const el = $('res-total');
+  if (!el || !r) return;
+  el.hidden = false;
+  el.textContent = bytes(r.totalBytes);
+  el.title = 'Dozer uses ' + bytes(r.totalBytes) + ' of disk' + (r.unattributedBytes ? ' — ' + bytes(r.unattributedBytes) + ' unattributed' : '');
+  el.classList.toggle('bad', r.unattributedBytes !== 0);
+}
+/// The nav's total, measured a moment after an operation ends (or at load) — never on a live update.
+function scheduleResTotal(delay = 2000) {
+  clearTimeout(resTotalTimer);
+  resTotalTimer = setTimeout(async () => {
+    if (state.view === 'resources') return;            // the page measures (and paints the total) itself
+    try { await measured('resources', 'resources'); } catch (_) { /* the last total */ }
+  }, delay);
+}
+function resOpen(it) { return (it.group === 'sandboxes') !== state.resToggled.has(it.id); }
+function resLink(link) {
+  if (!link) return null;
+  if (link === 'images') return h('a', { href: '#/images', 'data-link': 'images' }, 'Images');
+  if (link === 'accounts') return h('a', { href: '#/accounts', 'data-link': 'accounts' }, 'Accounts & keys');
+  if (link === 'settings') return h('a', { href: '#/settings', 'data-link': 'settings' }, 'Settings');
+  if (link.startsWith('sandbox:')) { const n = link.slice(8); return h('a', { href: '#/sandbox/' + n, 'data-link': 'sandbox' }, n); }
+  return null;
+}
+function resSelectable(it) { return it.deletable && !it.refusal; }
+function resRow(it, kids) {
+  const cb = h('input', { type: 'checkbox', 'data-res-check': it.id, 'aria-label': 'Select ' + it.name });
+  cb.checked = state.resSel.has(it.id);
+  if (!resSelectable(it)) { cb.disabled = true; cb.title = it.refusal || 'not deleted here'; cb.checked = false; }
+  cb.addEventListener('change', () => {
+    if (cb.checked) state.resSel.add(it.id); else state.resSel.delete(it.id);
+    paintResSelection();
+  });
+  let toggle = null;
+  if (kids) {
+    const open = resOpen(it);
+    toggle = h('button', { type: 'button', class: 'res-toggle' + (open ? ' open' : ''), 'aria-expanded': open ? 'true' : 'false',
+                           title: (open ? 'Hide' : 'Show') + ' its ' + kids + ' part' + (kids === 1 ? '' : 's') }, icon('chevron-down'));
+    toggle.addEventListener('click', () => {
+      if (state.resToggled.has(it.id)) state.resToggled.delete(it.id); else state.resToggled.add(it.id);
+      renderResources();
+    });
+  }
+  const bad = it.id === 'unattributed' && it.sizeBytes !== 0;
+  const notes = [];
+  if (it.refusal && it.deletable) notes.push(h('div', { class: 'res-refusal' }, 'Not now: ' + it.refusal));
+  else if (it.refusal) notes.push(h('div', { class: 'muted' }, it.refusal));
+  if (it.later && !it.refusal) notes.push(h('div', null, h('span', { class: 'muted' }, 'Later: '), it.later));
+  if (it.warning) notes.push(h('div', { class: 'res-warn' }, '⚠ ' + it.warning));
+  if (it.id === 'unattributed') notes.push(h('div', { class: bad ? 'res-refusal' : 'muted' }, it.detail));
+  return h('tr', { class: 'res-row' + (it.parent ? ' res-child' : '') + (bad ? ' res-bad' : ''), 'data-res': it.id, 'data-group': it.group },
+    h('td', { class: 'res-check' }, cb),
+    h('td', { class: 'res-name' }, h('div', { class: 'res-name-line' }, toggle, h('span', null, it.name),
+        it.current ? h('span', { class: 'tag res-current' }, 'current') : null,
+        it.cleanable && resSelectable(it) ? h('span', { class: 'tag res-clean', title: 'Clean up removes it: re-creatable and unused' }, 'clean-up') : null),
+      it.detail && it.id !== 'unattributed' ? h('div', { class: 'muted res-detail' }, it.detail) : null,
+      h('div', { class: 'muted mono res-id' }, it.id)),
+    h('td', { class: 'num' }, it.sizeBytes == null ? '—' : bytes(it.sizeBytes)),
+    h('td', { class: 'num' }, it.freedBytes == null ? '—' : bytes(it.freedBytes)),
+    h('td', null, it.usedBy.length ? it.usedBy.join(', ') : h('span', { class: 'muted' }, '—')),
+    h('td', { class: 'res-notes' }, notes),
+    h('td', null, resLink(it.link)));
+}
+function resGroupPanel(r, group, title) {
+  const items = r.items.filter((i) => i.group === group);
+  if (!items.length) return null;
+  const rows = [];
+  let total = 0;
+  for (const p of items.filter((i) => !i.parent)) {
+    const kids = items.filter((i) => i.parent === p.id);
+    total += p.sizeBytes || 0;
+    rows.push(resRow(p, kids.length));
+    if (kids.length && resOpen(p)) for (const k of kids) rows.push(resRow(k, 0));
+  }
+  return h('section', { class: 'res-group', 'data-res-group': group },
+    h('div', { class: 'head' }, h('h2', null, title), h('span', { class: 'muted' }, group === 'outside' ? 'shown, never deleted here' : bytes(total))),
+    panel(table(['', 'Item', 'Size', 'Freed if deleted', 'Used by', 'Notes', 'Managed in'], rows, [2, 3])));
+}
+function resTotalBar(r) {
+  const free = r.volumeFreeBytes || 0;
+  const clean = Math.min(r.cleanableBytes, r.occupiedBytes);
+  const keep = Math.max(0, r.occupiedBytes - clean);
+  const whole = Math.max(1, keep + clean + free);
+  // A part that is not zero stays visible however large the volume (min-width), so Dozer never vanishes.
+  const seg = (cls, n, label) => {
+    const s = h('span', { class: cls, title: label + ': ' + bytes(n) });
+    s.style.width = ((n / whole) * 100).toFixed(2) + '%';
+    if (n > 0 && cls !== 'res-seg-free') s.style.minWidth = '4px';
+    return s;
+  };
+  return h('div', { class: 'res-total' },
+    h('div', { class: 'res-bar', 'data-res-bar': '' }, seg('res-seg-used', keep, 'Dozer keeps'), seg('res-seg-clean', clean, 'Clean up frees'), seg('res-seg-free', free, 'Free on the volume')),
+    h('div', { class: 'res-legend' },
+      h('span', null, h('span', { class: 'sw res-sw-used', 'aria-hidden': 'true' }), 'Dozer ', h('strong', { 'data-total': '' }, bytes(r.totalBytes)),
+        h('span', { class: 'muted' }, ' as du counts it · ' + bytes(r.occupiedBytes) + ' on the volume (shared blocks once)')),
+      h('span', null, h('span', { class: 'sw res-sw-clean', 'aria-hidden': 'true' }), 'Clean up frees ', h('strong', { 'data-cleanable': '' }, bytes(r.cleanableBytes))),
+      h('span', null, h('span', { class: 'sw res-sw-free', 'aria-hidden': 'true' }), 'Free on the volume ', h('strong', null, bytes(r.volumeFreeBytes)))));
+}
+function resMemoryPanel(r) {
+  const held = r.memory.reduce((a, m) => a + m.heldBytes, 0);
+  const kinds = { sandbox: 'sandbox', host: 'the host', ui: 'this UI' };
+  const rows = r.memory.map((m) => h('tr', { 'data-mem': m.kind + ':' + m.name },
+    h('td', null, m.kind === 'sandbox' ? h('a', { href: '#/sandbox/' + m.name }, m.name) : m.name, h('span', { class: 'muted' }, ' · ' + (kinds[m.kind] || m.kind))),
+    h('td', null, m.phase ? phasePill(m.phase) : '—'),
+    h('td', { class: 'num' }, bytes(m.heldBytes), m.allocationBytes ? meter(m.heldBytes, m.allocationBytes) : null),
+    h('td', { class: 'num' }, m.allocationBytes ? bytes(m.allocationBytes) : '—'),
+    h('td', { class: 'num' }, m.cpus ?? '—')));
+  return h('section', { class: 'res-group', 'data-res-group': 'memory' },
+    h('div', { class: 'head' }, h('h2', null, 'Memory and CPUs'), h('span', { class: 'muted' }, bytes(held) + ' held · ' + r.allocatedCPUs + ' of ' + r.machineCPUs + ' CPUs given to sandboxes')),
+    panel(table(['What', 'Phase', 'Held now', 'Allocation', 'CPUs'], rows, [2, 3, 4]), 'No sandbox has a VM, and no host is running.'));
+}
+function resNetworkPanel(r) {
+  const rows = r.network.map((n) => h('tr', { 'data-net': n.sandbox },
+    h('td', null, h('a', { href: '#/sandbox/' + n.sandbox }, n.sandbox)),
+    h('td', { class: 'num' }, bytes(n.upToday)), h('td', { class: 'num' }, bytes(n.downToday)),
+    h('td', { class: 'num' }, bytes(n.upTotal)), h('td', { class: 'num' }, bytes(n.downTotal)), h('td', { class: 'num' }, n.connectionsTotal)));
+  return h('section', { class: 'res-group', 'data-res-group': 'network' },
+    h('div', { class: 'head' }, h('h2', null, 'Network'), h('span', { class: 'muted' }, 'through each sandbox’s proxy, from the metrics')),
+    panel(table(['Sandbox', 'Up today', 'Down today', 'Up in all', 'Down in all', 'Connections'], rows, [1, 2, 3, 4, 5]), 'No proxied traffic recorded yet.'));
+}
+function resKernelsPanel(r) {
+  const rows = r.kernels.map((k) => h('tr', { 'data-kernel': k.id },
+    h('td', null, h('span', { class: 'mono' }, k.version), k.current ? h('span', { class: 'tag res-current' }, 'current') : null, k.pinned ? h('span', { class: 'tag' }, 'this build’s') : null,
+      k.inStore ? null : h('div', { class: 'muted' }, 'in a kernel cache outside this store')),
+    h('td', { class: 'mono muted' }, k.sha256 || '—'),
+    h('td', { class: 'num' }, bytes(k.sizeBytes)),
+    h('td', null, k.usedBy.length ? k.usedBy.join(', ') : h('span', { class: 'muted' }, 'none')),
+    h('td', null, k.current ? h('span', { class: 'muted' }, 'new sandboxes boot it')
+      : btn('Use this kernel', () => act({ action: 'resources-kernel', kernel: k.id }), { small: true, title: 'New sandboxes boot it; existing ones keep theirs (a wake keeps its snapshot’s kernel)' }))));
+  return h('section', { class: 'res-group', 'data-res-group': 'kernels' },
+    h('div', { class: 'head' }, h('h2', null, 'Kernels'), h('span', { class: 'muted' }, '“Use this kernel” is for sandboxes created from now on')),
+    panel(table(['Version', 'sha256', 'Size', 'Needed by', ''], rows, [2]), 'No kernel yet — the first start fetches it.'));
+}
+function paintResSelection() {
+  const n = [...state.resSel].length;
+  const b = document.querySelector('[data-res-delete]');
+  if (b) { b.disabled = n === 0; setButton(b, n ? 'Delete ' + n + ' selected…' : 'Delete selected…', 'trash-2'); }
+}
+async function viewResources() {
+  const r = await measured('resources', 'resources');
+  // A selection that no longer exists (or can no longer go) is dropped.
+  const ok = new Set(r.items.filter(resSelectable).map((i) => i.id));
+  for (const id of [...state.resSel]) if (!ok.has(id)) state.resSel.delete(id);
+  return resourcesNode(r);
+}
+function renderResources() {
+  if (state.view !== 'resources' || !state.measured.resources) return;
+  const top = $('main').scrollTop;
+  $('view').replaceChildren(resourcesNode(state.measured.resources));
+  $('main').scrollTop = top;
+}
+function resourcesNode(r) {
+  const del = btn('Delete selected…', () => resDelete([...state.resSel], false), { danger: true, icon: 'trash-2' });
+  del.setAttribute('data-res-delete', '');
+  const selAll = btn('Select all re-creatable', () => {
+    for (const i of r.items) if (resSelectable(i) && i.recreatable && !(i.parent && state.resSel.has(i.parent))) state.resSel.add(i.id);
+    // A parent selected covers its parts.
+    for (const i of r.items) if (i.parent && state.resSel.has(i.parent)) state.resSel.delete(i.id);
+    renderResources();
+  }, { icon: 'list-checks', title: 'Everything that is re-created when next needed (built-in images, caches, kernels, the guest init)' });
+  const clear = btn('Clear selection', () => { state.resSel.clear(); renderResources(); }, { icon: 'x' });
+  const node = h('div', { class: 'resources' },
+    h('div', { class: 'head' }, h('h1', null, 'Resources'),
+      h('div', { class: 'actions' }, btn('Refresh', () => { remeasure(); refresh(false); }, { small: true, title: 'Measure again' }),
+        btn('Clean up…', () => resDelete([], true), { primary: true, icon: 'badge-check',
+          title: 'Re-creatable AND unused: the download cache, base disks, old kernels, images no sandbox was created from in ' + r.unusedDays + ' days, leftovers. Never templates, sandboxes, restore points, settings or keys.' }))),
+    h('p', { class: 'sub' }, 'Everything Dozer uses. Images are managed on ', h('a', { href: '#/images' }, 'Images'), ', a sandbox on its page, accounts on ',
+      h('a', { href: '#/accounts' }, 'Accounts & keys'), ' — the rows link there. Deleting here is for what has no other home. Measured in ' + Math.round(r.milliseconds) + ' ms.'),
+    resTotalBar(r),
+    h('div', { class: 'res-toolbar' }, selAll, clear, del),
+    RES_GROUPS.map(([g, t]) => resGroupPanel(r, g, t)),
+    h('p', { class: 'res-sum', 'data-res-sum': '' }, 'The rows add up to ' + bytes(r.attributedBytes) + ' of the ' + bytes(r.totalBytes) + ' measured — unattributed: ',
+      h('strong', { class: r.unattributedBytes ? 'res-refusal' : null }, bytes(r.unattributedBytes)), '.'),
+    resMemoryPanel(r), resNetworkPanel(r), resKernelsPanel(r));
+  const n = state.resSel.size;
+  del.disabled = n === 0;
+  if (n) setButton(del, 'Delete ' + n + ' selected…', 'trash-2');
+  return node;
+}
+/// Preview (changes nothing), then ONE plain confirmation listing what goes, what it frees and what
+/// each costs later; the operation deletes exactly those ids (a change since is refused, never widened).
+async function resDelete(ids, clean) {
+  if (!clean && !ids.length) return;
+  let plan;
+  try { plan = await api('resources/preview', { method: 'POST', json: clean ? { clean: true } : { ids } }); }
+  catch (e) { toast(e.message || String(e), true); return; }
+  if (!plan.items.length) {
+    toast(clean ? 'Nothing to clean up — everything re-creatable is in use or already gone.' : 'Nothing can be deleted: ' + (plan.refused[0] ? plan.refused[0].reason : 'no such item'), !clean);
+    return;
+  }
+  const n = plan.items.length;
+  const list = h('div', { class: 'res-plan', 'data-res-plan': '' },
+    table(['Item', 'Frees', 'Later'], plan.items.map((e) => h('tr', { 'data-plan-item': e.id },
+      h('td', null, e.name, h('div', { class: 'muted mono' }, e.id)),
+      h('td', { class: 'num' }, bytes(e.freedBytes)),
+      h('td', null, e.later || '—', e.warning ? h('div', { class: 'res-warn' }, '⚠ ' + e.warning) : null))), [1]),
+    plan.refused.length ? h('div', { class: 'res-refused' }, h('strong', null, 'Not deleted: '),
+      plan.refused.map((x) => h('div', { 'data-plan-refused': x.id }, x.id + ' — ' + x.reason))) : null,
+    h('p', { class: 'res-plan-total' }, 'Frees ', h('strong', { 'data-plan-freed': '' }, bytes(plan.freedBytes)), ' in all (blocks shared between them counted once).'));
+  const title = clean ? 'Clean up' : 'Delete ' + n + ' item' + (n === 1 ? '' : 's');
+  const d = dialog(title, (clean ? 'Re-creatable and unused — never templates, sandboxes, restore points, settings or keys. ' : '') +
+    'One operation: the host waits until nothing that uses the disks is under way.', [],
+    clean ? 'Clean up' : 'Delete', async () => {
+      const op = await actOrThrow({ action: 'resources-rm', ids: plan.items.map((e) => e.id) });
+      state.resSel.clear();
+      return op;
+    }, { danger: true, icon: clean ? 'badge-check' : 'trash-2' });
+  d.querySelector('.dlg-extra').append(list);
+  d.classList.add('dlg-wide');
 }
 
 // ── adding an account from a key or a token (594, owner ruling) ──────────────
@@ -3292,7 +3569,7 @@ function detachTile(tile) {
 
 // ── start ───────────────────────────────────────────────────────────────────
 // The static page's own controls get their icons here (index.html holds no SVG).
-const NAV_ICONS = { overview: 'box', sessions: 'layout-grid', images: 'layers', operations: 'list-checks', accounts: 'key-round',
+const NAV_ICONS = { overview: 'box', sessions: 'layout-grid', images: 'layers', resources: 'cylinder', operations: 'list-checks', accounts: 'key-round',
                     metrics: 'chart-line', activity: 'activity', onboarding: 'rocket', doctor: 'stethoscope', settings: 'settings' };
 for (const a of document.querySelectorAll('#nav > a[data-view]')) if (NAV_ICONS[a.dataset.view]) a.prepend(icon(NAV_ICONS[a.dataset.view]));
 setButton($('sign-out'), 'Sign out');
@@ -3310,6 +3587,7 @@ setButton($('sign-out'), 'Sign out');
     } catch (_) { /* the overview says so itself */ }
     route();
     connect();
+    if (state.view !== 'resources') scheduleResTotal(0);   // 595: the nav's total (the page measures on its own)
     setInterval(() => {
       if (![...state.ops.values()].some((o) => o.state === 'running')) return;
       paintRowOps();

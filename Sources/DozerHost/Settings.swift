@@ -245,6 +245,8 @@ public enum SettingKey {
     public static let projectsDir = "defaults.projects_dir"
     public static let kernelPath = "kernel.path"
     public static let kernelCache = "kernel.cache"
+    /// 595 (R4): Clean up removes a prepared image no sandbox was created from in this many days.
+    public static let resourcesUnusedDays = "resources.clean_unused_days"
     /// `images.<lab|claude-code|pi>.memory_mib` / `.network`.
     public static func memory(_ image: String) -> String { "images.\(image).memory_mib" }
     public static func network(_ image: String) -> String { "images.\(image).network" }
@@ -337,6 +339,9 @@ public struct DozerSettings: Sendable {
             .init("agent", "prompt", .bool, .bool(true),
                   "Tell the agent where it runs: a short facts block appended to its system prompt (the sandbox, its /workspace share, the network, credentials) and the dozer skill, written at every session start. Your own template: agent-prompt.md beside this file.",
                   applies: .nextSession),
+            .init("resources", "clean_unused_days", .int(1...3650), .int(30),
+                  "Clean up (the Resources page, doz resources clean) removes a prepared image no sandbox was created from in this many days; it is prepared again when next needed.",
+                  applies: .now),
         ]
         s.append(.init("images", "claude_code_version", .version, .string("latest"),
                        "The Claude Code the claude-code image is prepared with: latest (asked of the npm registry when the image is prepared, then installed at that exact version, integrity-checked; a newer one is prepared in the background, and the next new sandbox gets it) or an exact version like 2.1.227. A sandbox keeps the version it was created with; doz reset NAME moves it to the image's current one.",

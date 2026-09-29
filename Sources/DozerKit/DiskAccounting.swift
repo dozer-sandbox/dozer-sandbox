@@ -268,6 +268,49 @@ public enum DiskAccounting {
         return intersect(merge(data), try i.freeRanges())
     }
 
+    // MARK: groups (595)
+
+    /// 595: what deleting a GROUP of files frees — the bytes referenced only by files of that group
+    /// (an image's keys together, a sandbox's disks together, a selection of items), per group, for
+    /// files on one volume. `groups[i]` is file i's group. The same sweep as `measure`'s: a byte is
+    /// freed by deleting group g exactly when every file mapping it is in g.
+    public static func exclusive(_ lists: [[Extent]], groups: [Int]) -> (freed: [Int: Int64], union: Int64) {
+        precondition(lists.count == groups.count)
+        var ev: [(pos: Int64, delta: Int32, file: Int)] = []
+        ev.reserveCapacity(lists.reduce(0) { $0 + $1.count } * 2)
+        for (i, l) in lists.enumerated() {
+            for e in l where e.length > 0 { ev.append((e.physical, 1, i)); ev.append((e.physical + e.length, -1, i)) }
+        }
+        ev.sort { $0.pos < $1.pos }
+        var counts = [Int32](repeating: 0, count: lists.count)
+        var active = Set<Int>()
+        var freed: [Int: Int64] = [:]
+        var union: Int64 = 0
+        var prev: Int64 = 0
+        var k = 0
+        while k < ev.count {
+            let pos = ev[k].pos
+            let len = pos - prev
+            if !active.isEmpty, len > 0 {
+                union += len
+                let g = groups[active.first!]
+                if active.allSatisfy({ groups[$0] == g }) { freed[g, default: 0] += len }
+            }
+            while k < ev.count, ev[k].pos == pos {
+                let i = ev[k].file
+                counts[i] += ev[k].delta
+                if counts[i] > 0 { active.insert(i) } else { active.remove(i) }
+                k += 1
+            }
+            prev = pos
+        }
+        return (freed, union)
+    }
+
+    /// The extents of each file (an unreadable file maps nothing — it then counts as its allocation
+    /// elsewhere; the caller decides).
+    public static func extentLists(_ urls: [URL]) -> [[Extent]] { urls.map { (try? extents(of: $0)) ?? [] } }
+
     // MARK: the sweep
 
     struct Sweep {
