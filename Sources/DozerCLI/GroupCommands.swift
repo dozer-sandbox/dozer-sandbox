@@ -13,9 +13,16 @@ struct ImageCommand: AsyncParsableCommand {
 }
 
 struct ImageList: AsyncParsableCommand {
-    static let configuration = CommandConfiguration(commandName: "ls", abstract: "List the images and whether each is baked in this store.")
+    static let configuration = CommandConfiguration(commandName: "ls", abstract: "List the images and whether each is baked in this store (--tree: the lineage, with sizes).")
     @OptionGroup var g: GlobalOptions
+    @Flag(name: .long, help: "The lineage: OCI base → image → template → the sandboxes on each, with each disk's size, the bytes it shares with its parent, and its own.")
+    var tree = false
     func run() async throws {
+        if tree {
+            let t = try decode(try await query(HostRequest(.imageTree), g), ImageTree.self, g)
+            if g.json { Out.json(t) } else { Out.stdout(renderImageTree(t)) }
+            return
+        }
         let rows = try decode(try await query(HostRequest(.imageList), g), [ImageRow].self, g)
         if g.json { Out.json(rows); return }
         var t = [["IMAGE", "KIND", "BAKED", "SIZE", "NOTE"]]
@@ -25,6 +32,30 @@ struct ImageList: AsyncParsableCommand {
         }
         Out.stdout(Out.table(t))
     }
+}
+
+/// 593: the lineage as an indented table (box-drawing branches).
+func renderImageTree(_ tree: ImageTree) -> String {
+    if tree.nodes.isEmpty { return "no disks in this store yet — doz image bake lab, or create and start a sandbox\n" }
+    let children = Dictionary(grouping: tree.nodes.filter { $0.parent != nil }, by: { $0.parent! })
+    var lastChild: Set<Int> = []
+    for (_, kids) in children { if let l = kids.last { lastChild.insert(l.id) } }
+    var t = [["IMAGE / SANDBOX", "KIND", "SIZE", "SHARED", "OWN", ""]]
+    let byID = Dictionary(uniqueKeysWithValues: tree.nodes.map { ($0.id, $0) })
+    for n in tree.nodes {
+        var prefix = ""
+        var up = n.parent.flatMap { byID[$0] }
+        while let a = up, a.parent != nil {
+            prefix = (lastChild.contains(a.id) ? "   " : "│  ") + prefix
+            up = a.parent.flatMap { byID[$0] }
+        }
+        if n.parent != nil { prefix += lastChild.contains(n.id) ? "└─ " : "├─ " }
+        let kind = n.kind == "restorePoint" ? "point" : n.kind
+        let extra = [n.detail, n.stateAllocatedBytes.map { "+ state \(DozerImages.formatBytes($0))" }].compactMap { $0 }.joined(separator: " · ")
+        t.append([prefix + n.name, kind, DozerImages.formatBytes(n.allocatedBytes),
+                  n.sharedWithParentBytes.map(DozerImages.formatBytes) ?? "—", DozerImages.formatBytes(n.uniqueBytes), extra])
+    }
+    return Out.table(t) + "\nall disks together: \(DozerImages.formatBytes(tree.unionBytes)) (shared blocks counted once) · measured in \(Int(tree.milliseconds)) ms\n"
 }
 
 struct ImageBake: AsyncParsableCommand {

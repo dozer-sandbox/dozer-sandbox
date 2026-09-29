@@ -59,6 +59,11 @@ host/status
 ui
 ui/link
 ui/serve
+template
+template/create
+template/ls
+template/rm
+duplicate
 config
 config/show
 config/get
