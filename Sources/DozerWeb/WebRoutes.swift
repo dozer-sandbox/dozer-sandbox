@@ -53,6 +53,10 @@ public enum WebRoute: Equatable, Sendable {
     case onboarding                // GET  /api/v1/onboarding
     case onboardingConfig          // POST /api/v1/onboarding/config
     case preparations              // GET  /api/v1/preparations
+    // 594 (owner ruling) — an account from a key or a setup token typed in a masked field. NOT an
+    // action: an action is an operation (a title, progress, an outcome on every page); this is one
+    // synchronous request whose body alone carries the secret, allowed while ui.allow_secret_entry.
+    case accountAdd                // POST /api/v1/accounts  ({name, kind, secret, plan?})
 
     public var isStatic: Bool {
         switch self { case .index, .asset, .terminalFrame: true; default: false }
@@ -84,6 +88,7 @@ public enum WebRoute: Equatable, Sendable {
         case (.post, 1) where rest[0] == "actions": return .actions
         case (.post, 1) where rest[0] == "settings": return .settingsChange
         case (.post, 2) where rest == ["onboarding", "config"]: return .onboardingConfig
+        case (.post, 1) where rest[0] == "accounts": return .accountAdd
         case (.post, 4) where rest[0] == "sandboxes" && isSandboxName(rest[1]) && rest[2] == "network" && rest[3] == "preview":
             return .policyPreview(rest[1])
         case (.post, 3) where rest[0] == "sandboxes" && isSandboxName(rest[1]) && rest[2] == "terminal":

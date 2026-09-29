@@ -523,6 +523,19 @@ public final class DozerWebServer: @unchecked Sendable {
             return json(try settings.writeOnboardingConfig(try WebOnboardingConfig.decode(body)))
         case .preparations:
             return json(try await data.preparations())
+        case .accountAdd:
+            // CSRF-checked (an unsafe method, above), then the setting, then a strict body. The
+            // secret is in this request's body only; a failure's message is scrubbed of it.
+            try Self.requireJSONBody(md)
+            guard settings.secretEntryAllowed else { throw WebRejection.secretEntryOff }
+            let a = try WebAccountAdd.decode(body)
+            do {
+                return json(try await data.addAccount(a))
+            } catch let e as HostError {
+                throw HostError(e.code, a.scrub(e.message))
+            } catch {
+                throw HostError(.failed, a.scrub(error.localizedDescription))
+            }
         case .events:
             return json(await monitor.recent)
         case .doctor:

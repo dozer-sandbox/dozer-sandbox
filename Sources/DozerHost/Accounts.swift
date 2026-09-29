@@ -142,6 +142,25 @@ public struct AccountStore: Sendable {
     }
 }
 
+extension HostRequest {
+    /// The request `doz account add` sends — the ONE path a secret takes into an account (594: `doz
+    /// onboard`'s account step and the web UI's masked field build it here too). The host keeps the
+    /// secret in the login keychain (`doz-claude:NAME` / `doz-anthropic:NAME`) after one check request.
+    public static func accountAdd(name: String, kind: AccountKind, plan: String?, secret: String?, verify: Bool = true, force: Bool = false,
+                                  configDir: String? = nil, keychain: String? = nil) -> HostRequest {
+        var r = HostRequest(.accountAdd)
+        r.account = name
+        r.accountKind = kind.rawValue
+        r.plan = plan
+        r.configDir = configDir
+        r.keychainService = keychain
+        r.verify = verify
+        r.force = force
+        r.secret = secret
+        return r
+    }
+}
+
 /// `account ls` — never a secret.
 public struct AccountRow: Codable, Equatable, Sendable {
     public var name: String

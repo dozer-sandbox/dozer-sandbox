@@ -225,16 +225,43 @@ final class OnboardingTests: XCTestCase {
         XCTAssertGreaterThan(Onboarding.requiredBytes(["claude-code", "pi"], prepared: []), Onboarding.requiredBytes(["claude-code"], prepared: []))
     }
 
-    func testTheAccountStepOffersWhatIsThereAndNeverAddsASecret() {
+    func testTheAccountStepOffersWhatIsThere() {
+        XCTAssertEqual(Onboarding.accountOptions(macSignedIn: true).options, [.mac, .apiKey, .setupToken, .later])
         XCTAssertEqual(Onboarding.accountOptions(macSignedIn: true).preferred, .mac)
-        XCTAssertEqual(Onboarding.accountOptions(macSignedIn: false).preferred, .skip)
-        XCTAssertEqual(Set(Onboarding.accountOptions(macSignedIn: false).options), [.apiKey, .setupToken, .mac, .none, .skip])
+        XCTAssertEqual(Onboarding.accountOptions(macSignedIn: false).options, [.apiKey, .setupToken, .mac, .later])
+        XCTAssertEqual(Onboarding.accountOptions(macSignedIn: false).preferred, .later)
+        XCTAssertEqual(Onboarding.Account.later.label, "Decide later", "owner ruling: one option for 'none' and 'skip'")
         XCTAssertEqual(Onboarding.defaultAccount(for: .mac), "mac")
-        XCTAssertEqual(Onboarding.defaultAccount(for: .none), "none")
-        XCTAssertNil(Onboarding.defaultAccount(for: .skip))
-        XCTAssertNil(Onboarding.defaultAccount(for: .apiKey), "a key is added later, with the CLI")
+        XCTAssertNil(Onboarding.defaultAccount(for: .later))
+        XCTAssertNil(Onboarding.defaultAccount(for: .apiKey), "the account added becomes the default, once it is")
         XCTAssertTrue(Onboarding.accountCommands(.setupToken).contains { $0.hasPrefix("doz account add work --setup-token") })
         XCTAssertTrue(Onboarding.accountCommands(.mac).isEmpty)
+    }
+
+    /// 594: the ONE request a secret takes into an account — `doz account add`'s, which onboarding
+    /// and the web UI build too — through the host, into an IN-MEMORY keychain (never the real one).
+    func testAnAccountFromAKeyGoesTheAccountAddWayIntoTheMemoryKeychain() async throws {
+        let services = CredentialServices.forHost(environment: ["DOZ_TEST_CREDENTIALS": "memory"])
+        XCTAssertTrue(services.keychain is MemoryKeychain)
+        XCTAssertTrue(CredentialServices.forHost(environment: [:]).keychain is SystemKeychain)
+        let core = HostCore(store: DozerStore(root: root), readOnly: false, version: "t", services: services, newStoreDefaultAccount: "mac")
+        let key = "sk-ant-api03-" + String(repeating: "Z", count: 40)
+        let r = HostRequest.accountAdd(name: "work", kind: .apiKey, plan: nil, secret: key)
+        XCTAssertEqual(r.op, .accountAdd)
+        XCTAssertEqual(r.verify, true)
+        let m = await core.handle(r)
+        XCTAssertEqual(m.ok, true, m.error?.message ?? "")
+        let rows = try XCTUnwrap(m.result?.decode([AccountRow].self))
+        let row = try XCTUnwrap(rows.first { $0.name == "work" })
+        XCTAssertEqual(row.keychainService, "doz-anthropic:work")
+        XCTAssertEqual(row.verification?.hasPrefix("unverified"), true, "the memory seam sends nothing")
+        XCTAssertEqual(services.keychain.read(service: "doz-anthropic:work", account: nil), .found(key))
+        let file = try String(contentsOf: root.appendingPathComponent("accounts.json"), encoding: .utf8)
+        XCTAssertFalse(file.contains(key), "accounts.json never holds the secret")
+        let token = "sk-ant-oat01-" + String(repeating: "Y", count: 40)
+        let t = await core.handle(HostRequest.accountAdd(name: "sub", kind: .setupToken, plan: "max", secret: token))
+        XCTAssertEqual(t.ok, true)
+        XCTAssertEqual(try t.result?.decode([AccountRow].self).first { $0.name == "sub" }?.plan, "max")
     }
 
     func testTheSettingsFileIsWrittenOnlyWhenMissing() throws {

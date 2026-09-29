@@ -84,6 +84,10 @@ public final class WebSettingsStore: @unchecked Sendable {
         if r.source == .env { throw HostError(.invalidPhase, "\(d.key) is set by $\(d.environment ?? "?") in the environment of this doz ui — change it there") }
         if r.source == .flag { throw HostError(.invalidPhase, "\(d.key) is set on the command line of this doz ui") }
         if let e = s.fileError { throw HostError(.invalidPhase, "\(e) — fix it (or remove it) first; the UI does not overwrite it") }
+        // 594: the browser can take secret entry away, never grant it (a reset would grant it: the default is on).
+        if d.key == SettingKey.allowSecretEntry, change.value != .bool(false), s.resolve(d.key).value == .bool(false) {
+            throw HostError(.invalid, "\(d.key) can be turned on only from a terminal: doz config set \(d.key) true")
+        }
         do {
             return try s.writing(d.key, change.value).report(flags: flags)
         } catch let e as SettingsError {
@@ -93,6 +97,9 @@ public final class WebSettingsStore: @unchecked Sendable {
 
     /// `ui.terminals` — off, no ticket is minted.
     public var terminalsEnabled: Bool { current.bool(SettingKey.terminals) }
+
+    /// 594: `ui.allow_secret_entry` — off, the account route refuses and the page shows the CLI command.
+    public var secretEntryAllowed: Bool { current.bool(SettingKey.allowSecretEntry) }
 
     /// 594 (D7): the onboarding's settings — doz.toml and the prompt template, each written only when
     /// missing (an existing file is never touched), with `defaults.image` and the account's default.
@@ -115,6 +122,58 @@ public final class WebSettingsStore: @unchecked Sendable {
         let s = DozerSettings.fileURL(environment: environment)
         let t = AgentPrompt.userTemplateURL(environment: environment)
         return (s?.path, s.map { fm.fileExists(atPath: $0.path) } ?? false, t?.path, t.map { fm.fileExists(atPath: $0.path) } ?? false)
+    }
+}
+
+/// 594 (owner ruling): `POST /api/v1/accounts`, decoded STRICTLY: {name, kind, secret, plan?}. The
+/// secret is checked for shape only; no message ever echoes it (nor any value). Its description is
+/// redacted, so no interpolation can print it.
+public struct WebAccountAdd: Equatable, Sendable, CustomStringConvertible, CustomDebugStringConvertible, CustomReflectable {
+    public let name: String
+    public let kind: AccountKind
+    public let plan: String?
+    public let secret: String
+
+    public var description: String { "WebAccountAdd(\(name), \(kind.rawValue), secret: <redacted>)" }
+    public var debugDescription: String { description }
+    public var customMirror: Mirror { Mirror(self, children: ["name": name, "kind": kind.rawValue, "secret": "<redacted>"]) }
+
+    public static func decode(_ body: Data) throws -> WebAccountAdd {
+        guard let obj = try? JSONSerialization.jsonObject(with: body), let d = obj as? [String: Any] else {
+            throw WebAction.Invalid("the body must be a JSON object")
+        }
+        let keys = Set(d.keys)
+        guard keys.isSuperset(of: ["name", "kind", "secret"]), keys.isSubset(of: ["name", "kind", "secret", "plan"]) else {
+            throw WebAction.Invalid("exactly name, kind, secret (and plan for a setup token)")
+        }
+        guard let name = d["name"] as? String, name.count <= 40, (try? AccountStore.validateName(name)) != nil else {
+            throw WebAction.Invalid("name: an account name, 1–40 of a-z 0-9 - (not default or none)")
+        }
+        guard let k = d["kind"] as? String, let kind = AccountKind(rawValue: k), kind != .mac else {
+            throw WebAction.Invalid("kind: api-key or setup-token")
+        }
+        var plan: String?
+        if let p = d["plan"], !(p is NSNull) {
+            guard kind == .setupToken, let s = p as? String, ["max", "pro", "team", "enterprise"].contains(s) else {
+                throw WebAction.Invalid("plan: max, pro, team or enterprise — for a setup token")
+            }
+            plan = s
+        }
+        guard let secret = d["secret"] as? String, (20...4096).contains(secret.utf8.count),
+              !secret.unicodeScalars.contains(where: { $0.value < 0x20 && $0 != "\n" && $0 != "\r" && $0 != "\t" }) else {
+            throw WebAction.Invalid("secret: the key or token as it was printed (20–4096 characters)")
+        }
+        return WebAccountAdd(name: name, kind: kind, plan: plan, secret: secret)
+    }
+
+    /// Any text with the secret (and its whitespace-free form) replaced — for an error message.
+    public func scrub(_ text: String) -> String {
+        var out = text
+        for s in Set([secret, secret.trimmingCharacters(in: .whitespacesAndNewlines),
+                      AccountStore.normalizeToken(secret) ?? ""]) where s.count >= 8 {
+            out = out.replacingOccurrences(of: s, with: "…")
+        }
+        return out
     }
 }
 

@@ -31,6 +31,42 @@ public struct CredentialServices: Sendable {
                            home: FileManager.default.homeDirectoryForCurrentUser, keepaliveRunner: ProcessKeepaliveRunner(),
                            isClaudeRunning: { ClaudeLogin.isClaudeRunning() }, watchInterval: .seconds(120))
     }
+
+    /// 594, a TEST seam for real host processes (`make test-cli`, the browser probes):
+    /// `DOZ_TEST_CREDENTIALS=memory` — a keychain that lives in the host's memory (never the login
+    /// keychain: no item written, no prompt), a verifier that sends nothing ("unverified"), no `claude`,
+    /// no keep-alive. Anything else: the real services.
+    public static func forHost(environment: [String: String] = ProcessInfo.processInfo.environment) -> CredentialServices {
+        guard environment["DOZ_TEST_CREDENTIALS"] == "memory" else { return .system }
+        return CredentialServices(keychain: MemoryKeychain(), verifier: OfflineVerifier(), claudeBinary: { nil },
+                                  home: URL(fileURLWithPath: "/var/empty"), keepaliveRunner: NoKeepalive(),
+                                  isClaudeRunning: { false }, watchInterval: .seconds(3600))
+    }
+}
+
+/// 594: a keychain in this process's memory (`DOZ_TEST_CREDENTIALS=memory`).
+public final class MemoryKeychain: KeychainAccess, @unchecked Sendable {
+    private let lock = NSLock()
+    private var items: [String: String] = [:]
+    public init() {}
+    public func read(service: String, account: String?) -> KeychainRead {
+        lock.withLock { items[service].map(KeychainRead.found) ?? .absent }
+    }
+    public func write(service: String, account: String, secret: String) throws { lock.withLock { items[service] = secret } }
+    public func delete(service: String, account: String) throws { lock.withLock { items[service] = nil } }
+    public func items(servicePrefix: String) -> [KeychainItemInfo] {
+        lock.withLock { items.keys.filter { $0.hasPrefix(servicePrefix) }.sorted().map { KeychainItemInfo(service: $0, account: Keychain.user, modified: nil) } }
+    }
+}
+
+/// 594: sends nothing — every credential is "unverified" (the memory seam).
+public struct OfflineVerifier: AccountVerifying {
+    public init() {}
+    public func verify(kind: AccountKind, secret: String) async -> AccountVerification { .unavailable("not checked (DOZ_TEST_CREDENTIALS=memory)") }
+}
+
+struct NoKeepalive: KeepaliveRunning {
+    func run(binary: String, arguments: [String], environment: [String: String], directory: URL, timeout: TimeInterval) -> Int32 { 1 }
 }
 
 /// The account a sandbox resolves to.

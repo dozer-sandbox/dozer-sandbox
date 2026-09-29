@@ -394,6 +394,17 @@ final class FakeData: DozerWebData, @unchecked Sendable {
                       freeBytes: 100 << 30, macSignedIn: false, defaultAccount: "mac")
     }
     func preparations() async throws -> [WebPreparation] { [] }
+    // 594: an account from a key — recorded (in memory: nothing is ever stored). The name `boom` fails
+    // with a message that quotes the secret, as a careless host message would: the server must scrub it.
+    private var _added: [WebAccountAdd] = []
+    var addedAccounts: [WebAccountAdd] { lock.withLock { _added } }
+    func addAccount(_ a: WebAccountAdd) async throws -> WebAccounts {
+        if a.name == "boom" { throw HostError(.failed, "Anthropic rejected \(a.secret) (HTTP 401)") }
+        lock.withLock { _added.append(a) }
+        let json = #"{"name":"\#(a.name)","kind":"\#(a.kind.rawValue)","verification":"unverified: fake","isDefault":false,"usedBy":[],"state":"ok","keychainService":"doz-anthropic:\#(a.name)","fingerprint":"abcdef123456"}"#
+        let row = try JSONDecoder().decode(AccountRow.self, from: Data(json.utf8))
+        return WebAccounts(accounts: [WebAccount(row)], defaultAccount: "mac", keepalive: false)
+    }
     // 591: scripted host events and boot console (only after `hostUp`: nil before, as with no host).
     var hostUp: Bool {
         get { lock.withLock { _hostUp } }

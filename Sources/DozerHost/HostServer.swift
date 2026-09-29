@@ -36,7 +36,7 @@ public final class HostServer: @unchecked Sendable {
         self.version = version
         // 591: the settings' keep-alive for a store that has not chosen (read once, at start).
         let settings = DozerSettings.load()
-        core = HostCore(store: store, readOnly: false, version: version,
+        core = HostCore(store: store, readOnly: false, version: version, services: .forHost(),
                         newStoreKeepalive: settings.bool(SettingKey.keepalive),
                         newStoreDefaultAccount: settings.string(SettingKey.defaultAccount) ?? "mac")
     }
@@ -63,6 +63,9 @@ public final class HostServer: @unchecked Sendable {
         try server.takeLock(waitSeconds: 60)
         HostLog.enabled = true
         HostLog.line("doz host \(version) (pid \(getpid())) — store \(store.root.path), idle timeout \(idleTimeoutMinutes) min")
+        if ProcessInfo.processInfo.environment["DOZ_TEST_CREDENTIALS"] == "memory" {
+            HostLog.line("TEST: DOZ_TEST_CREDENTIALS=memory — accounts' secrets live in this host's memory, never the keychain; nothing is verified")
+        }
         // 591: the VM layouts this host records name it; and it remembers the file it runs from, to
         // tell a later "Internal Virtualization error" caused by an update underneath it.
         VMLayout.recorder = "doz \(version)"

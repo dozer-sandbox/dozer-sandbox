@@ -224,6 +224,8 @@ public enum SettingKey {
     public static let defaultAccount = "defaults.account"
     /// 594 (D16): the environment prompt (the facts block and the dozer skill) — on, or off.
     public static let agentPrompt = "agent.prompt"
+    /// 594 (owner ruling): the web UI may take an API key or a setup token (a masked field).
+    public static let allowSecretEntry = "ui.allow_secret_entry"
     public static let kernelPath = "kernel.path"
     public static let kernelCache = "kernel.cache"
     /// `images.<lab|claude-code|pi>.memory_mib` / `.network`.
@@ -262,6 +264,9 @@ public struct DozerSettings: Sendable {
                   applies: .now),
             .init("ui", "details_open", .bool, .bool(true),
                   "A sandbox's page shows its details panel (sessions, restore points, network, keys) beside the terminals; false: collapsed.",
+                  applies: .now),
+            .init("ui", "allow_secret_entry", .bool, .bool(true),
+                  "The web UI's account step and Accounts & keys page take an Anthropic API key or a Claude setup token in a masked field (sent once, in a request body; stored exactly as doz account add stores it — the login keychain). false: they show the doz account add command instead. The UI can turn this off, never on.",
                   applies: .now),
             .init("ui", "grid_live_tiles", .int(1...12), .int(8),
                   "All sessions: at most this many tiles show their session live at once (each is a terminal engine and a socket); the rest say so.",
@@ -325,7 +330,7 @@ public struct DozerSettings: Sendable {
         "the web UI's checks: exact Host, Origin + CSRF on every change, the Content-Security-Policy",
         "the browser terminal's safety: one-use 30 s tickets, the 1 MiB paste cap and the unsafe-paste confirmation",
         "the guest binaries (DOZ_DECKHOLD / DOZ_DOZNET are developer overrides, environment only)",
-        "credentials: keys and tokens live in the Keychain or the host's memory, never in this file",
+        "credentials: keys and tokens live in the Keychain or the host's memory, never in this file (ui.allow_secret_entry only decides whether the web UI may take one)",
     ]
 
     // MARK: the file

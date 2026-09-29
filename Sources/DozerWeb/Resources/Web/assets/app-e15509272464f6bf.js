@@ -609,7 +609,9 @@ function connect() {
   // value; nor is Operations (its own events keep it current), nor the onboarding wizard (its own).
   es.addEventListener('changed', () => {
     refreshNav();
-    if (state.view !== 'settings' && state.view !== 'operations' && state.view !== 'onboarding') refresh(false);
+    // (Nor a page whose masked key field is being filled in: a re-render would drop it.)
+    const typing = [...document.querySelectorAll('[data-secret]')].some((e) => e.value);
+    if (state.view !== 'settings' && state.view !== 'operations' && state.view !== 'onboarding' && !typing) refresh(false);
   });
   // 594: the host's image preparations, while any runs (and once when the last ends).
   es.addEventListener('preparations', (ev) => {
@@ -1287,6 +1289,75 @@ async function viewLineage() {
       : panel(null, 'No disks yet — bake an image or start a sandbox.'));
 }
 
+// ── adding an account from a key or a token (594, owner ruling) ──────────────
+// While ui.allow_secret_entry (default on), the wizard's account step and this page take an API key or
+// a setup token in a MASKED field. The value is read once, the field is emptied at once, and it goes
+// out only in the body of one CSRF-checked POST /api/v1/accounts — never a URL, the page's state, a
+// toast or an operation. The host stores it exactly as `doz account add` does (the login keychain,
+// one check request). Off: the terminal commands instead.
+function secretEntryAllowed() { return setting('ui.allow_secret_entry', true) === true; }
+const ACCOUNT_COMMANDS = {
+  'api-key': ['doz account add work --api-key       (it asks for the key, not echoed)', 'doz account default work'],
+  'setup-token': ['claude setup-token                    (on this Mac: prints a 1-year token)',
+    'doz account add work --setup-token   (paste it; not echoed)', 'doz account default work'],
+};
+function accountCommandsNode(kind) {
+  return h('div', { class: 'panel wiz-cmds' },
+    h('div', null, 'In a terminal on this Mac' + (secretEntryAllowed() ? ':' : ' (keys and tokens are not taken in this browser — ui.allow_secret_entry is off):')),
+    h('pre', { class: 'mono' }, ACCOUNT_COMMANDS[kind].join('\n')));
+}
+/// opts: {kind (fixed) | null (a choice), name, onAdded(result, name)}.
+function accountForm(opts) {
+  const kindSel = h('select', { name: 'acct-kind', 'aria-label': 'Kind' },
+    h('option', { value: 'api-key' }, 'Anthropic API key'), h('option', { value: 'setup-token' }, 'Claude setup token'));
+  if (opts.kind) kindSel.value = opts.kind;
+  const name = h('input', { type: 'text', name: 'acct-name', autocomplete: 'off', spellcheck: 'false', placeholder: 'a-z 0-9 -' });
+  name.value = opts.name || 'work';
+  const plan = h('select', { name: 'acct-plan', 'aria-label': 'Plan' }, ['max', 'pro', 'team', 'enterprise'].map((p) => h('option', { value: p }, p)));
+  const secret = h('input', { type: 'password', name: 'acct-secret', autocomplete: 'off', spellcheck: 'false', autocapitalize: 'off',
+                              'data-secret': '1', placeholder: 'paste it here' });
+  const error = h('div', { class: 'dlg-error', role: 'alert' });
+  const planRow = h('label', { class: 'field' }, h('span', null, 'Plan (what Claude Code shows; it picks its default model by it)'), plan);
+  const secretLabel = h('span', null, '');
+  const hint = h('small', null, '');
+  const paint = () => {
+    const token = kindSel.value === 'setup-token';
+    planRow.hidden = !token;
+    secretLabel.textContent = token ? 'Setup token' : 'API key';
+    hint.textContent = token ? 'Run claude setup-token on this Mac and paste what it prints (it starts sk-ant-oat…; valid a year). Not shown, not kept in this page.'
+                             : 'An Anthropic API key (sk-ant-api…). Not shown, not kept in this page.';
+  };
+  kindSel.addEventListener('change', paint);
+  paint();
+  const add = btn('Add account', async (ev) => {
+    const b = ev.currentTarget;
+    error.textContent = '';
+    const value = secret.value;
+    secret.value = '';                                     // gone from the page before the request
+    const n = name.value.trim();
+    if (!/^[a-z0-9][a-z0-9-]{0,39}$/.test(n) || n === 'default' || n === 'none') { error.textContent = 'The name: 1–40 of a-z 0-9 - (not default or none).'; return; }
+    if (value.trim().length < 20) { error.textContent = 'Paste the whole ' + (kindSel.value === 'setup-token' ? 'token' : 'key') + '.'; return; }
+    b.disabled = true;
+    try {
+      const body = { name: n, kind: kindSel.value, secret: value };
+      if (kindSel.value === 'setup-token') body.plan = plan.value;
+      const r = await api('accounts', { method: 'POST', json: body });
+      opts.onAdded(r, n);
+    } catch (e) {
+      error.textContent = e.message || String(e);
+    } finally {
+      b.disabled = false;
+    }
+  }, { primary: true, icon: 'key-round' });
+  return h('div', { class: 'panel acct-form' },
+    opts.kind ? null : h('label', { class: 'field' }, h('span', null, 'Kind'), kindSel),
+    h('label', { class: 'field' }, h('span', null, 'Account name'), name),
+    planRow,
+    h('label', { class: 'field' }, secretLabel, secret, hint),
+    error,
+    h('div', { class: 'wiz-buttons' }, add));
+}
+
 async function viewAccounts() {
   const a = await api('accounts');
   const rows = a.accounts.map((x) => h('tr', null,
@@ -1313,8 +1384,16 @@ async function viewAccounts() {
         h('div', { class: 'n' }, 'runs the Mac’s own claude -p near expiry while a sandbox uses the login'))),
     h('div', { class: 'head' }, h('h2', null, 'Accounts'), btn('Set the default to none', () => act({ action: 'account-default', account: 'none' }), { small: true })),
     panel(table(['Account', 'Kind', 'Identity', 'State', 'Expires', 'Fingerprint', 'Used by', ''], rows)),
-    h('p', { class: 'muted' }, 'Adding an account takes a secret, which is never typed in a browser: ',
-      h('code', null, 'claude setup-token'), ' then ', h('code', null, 'doz account add NAME --setup-token'), ' in a terminal.'));
+    h('h2', null, 'Add an account'),
+    secretEntryAllowed()
+      ? accountForm({ kind: null, onAdded: (r, name) => {
+          const row = r.accounts.find((x) => x.name === name);
+          toast('account ' + name + ' added' + (row && row.verification ? ' (' + row.verification + ')' : ''));
+          refresh(false);
+        } })
+      : h('div', null, accountCommandsNode('setup-token'), accountCommandsNode('api-key')),
+    h('p', { class: 'muted' }, 'Stored exactly as doz account add stores it: the login keychain (doz-claude:NAME, doz-anthropic:NAME), after one tiny check request. ',
+      'This page keeps no copy. ui.allow_secret_entry (Settings) turns the field off.'));
 }
 
 async function viewMetrics() {
@@ -1487,23 +1566,35 @@ function wizStep2(d, w) {
     return h('label', { class: 'wiz-choice' + (o.value === w.account ? ' chosen' : ''), 'data-account': o.value }, input,
       h('span', null, o.label, o.value === d.preferredAccount ? h('span', { class: 'tag' }, 'recommended') : null));
   });
-  const chosen = d.accountOptions.find((o) => o.value === w.account);
+  const keyed = w.account === 'api-key' || w.account === 'setup-token';
+  let entry = null;
+  if (keyed && w.added) {
+    entry = h('div', { class: 'notice', 'data-added': w.added.name }, 'Account ', h('strong', null, w.added.name), ' added (' + w.added.kind +
+      (w.added.verification ? ', ' + w.added.verification : '') + ') — the store’s default account. Its secret is in the login keychain, not in this page.');
+  } else if (keyed && secretEntryAllowed()) {
+    entry = accountForm({ kind: w.account, name: 'work', onAdded: async (r, name) => {
+      const row = r.accounts.find((x) => x.name === name) || { kind: w.account };
+      try { await actOrThrow({ action: 'account-default', account: name }); } catch (e) { toast(e.message || String(e), true); }
+      w.added = { name, kind: row.kind, verification: row.verification };
+      renderWizard(true);
+    } });
+  } else if (keyed) {
+    entry = accountCommandsNode(w.account);
+  }
   return [
     h('h2', null, 'Claude account'),
     h('p', null, d.macSignedIn
       ? 'Claude Code is signed in on this Mac. Sandboxes can use that login: nothing is copied into them — the Mac’s proxy adds it to their requests to Anthropic, and the Mac keeps renewing it.'
-      : 'Claude Code is not signed in on this Mac. A sandbox can use an Anthropic API key or a Claude setup token instead (added with the CLI), or you can decide later.'),
+      : 'Claude Code is not signed in on this Mac. A sandbox can use an Anthropic API key or a Claude setup token instead, or you can decide later.'),
     h('fieldset', { class: 'wiz-choices' }, h('legend', null, 'How should sandboxes reach Claude?'), opts),
-    chosen && chosen.commands.length ? h('div', { class: 'panel wiz-cmds' },
-      h('div', null, 'Afterwards, in a terminal on this Mac (a key or a token is never typed in a browser):'),
-      h('pre', { class: 'mono' }, chosen.commands.join('\n'))) : null,
-    h('p', { class: 'muted' }, 'The setup never logs in for you, never copies Claude Code’s refresh token and never writes the keychain. The store’s default account now: ' + d.defaultAccount + '.'),
+    entry,
+    h('p', { class: 'muted' }, 'The setup never logs in for you and never copies Claude Code’s refresh token. A key or a token is stored as doz account add stores it (the login keychain). The store’s default account now: ' +
+      (w.added ? w.added.name : d.defaultAccount) + '.'),
     wizButtons(btn('Back', () => wizGo(1)), btn('Next', async (ev) => {
       const b = ev.currentTarget;
       b.disabled = true;
       try {
-        const target = w.account === 'mac' ? 'mac' : w.account === 'none' ? 'none' : null;
-        if (target && target !== d.defaultAccount) await actOrThrow({ action: 'account-default', account: target });
+        if (w.account === 'mac' && d.defaultAccount !== 'mac') await actOrThrow({ action: 'account-default', account: 'mac' });
         wizGo(3);
       } catch (e) { toast(e.message || String(e), true); b.disabled = false; }
     }, { primary: true })),
@@ -1634,7 +1725,8 @@ function wizStep6(d, w) {
     h('p', null, still.length ? 'This Mac is set up; ' + still.join(', ') + ' ' + (still.length === 1 ? 'is' : 'are') + ' still being prepared in the host (Operations shows it) — the onboarding is recorded when it is ready.'
                               : 'This Mac is set up.'),
     h('ul', { class: 'plain wiz-summary' },
-      h('li', null, 'Claude account: ' + (d.accountOptions.find((o) => o.value === w.account) || { label: w.account || '—' }).label),
+      h('li', null, 'Claude account: ' + (w.added ? 'the account ' + w.added.name + ' (' + w.added.kind + '), the store default'
+        : (d.accountOptions.find((o) => o.value === w.account) || { label: w.account || '—' }).label)),
       c ? fileLine('Settings', c.settings, c.settingsPath) : null,
       c ? fileLine('Your environment prompt template', c.promptTemplate, c.promptTemplatePath) : null,
       h('li', null, 'Images: ' + (wizChosenImages().join(', ') || 'none now (each is prepared by its first start)')),

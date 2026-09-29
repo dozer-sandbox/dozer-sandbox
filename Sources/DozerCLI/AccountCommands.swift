@@ -75,14 +75,8 @@ struct AccountAdd: AsyncParsableCommand {
     }
 
     func run() async throws {
-        var r = HostRequest(.accountAdd)
-        r.account = name
-        r.accountKind = setupToken ? AccountKind.setupToken.rawValue : apiKey ? AccountKind.apiKey.rawValue : AccountKind.mac.rawValue
-        r.plan = plan
-        r.configDir = configDir
-        r.keychainService = keychain
-        r.verify = !noVerify
-        r.force = force
+        var r = HostRequest.accountAdd(name: name, kind: setupToken ? .setupToken : apiKey ? .apiKey : .mac, plan: plan, secret: nil,
+                             verify: !noVerify, force: force, configDir: configDir, keychain: keychain)
         if setupToken || (apiKey && keychain == nil) {
             let s = try readSecret(setupToken ? "setup token from `claude setup-token` (not echoed): " : "Anthropic API key (not echoed): ", g)
             guard !s.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw fail(HostError(.invalid, "nothing read (pipe it in, or paste it at the prompt)"), g) }

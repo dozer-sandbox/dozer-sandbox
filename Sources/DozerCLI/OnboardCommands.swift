@@ -12,6 +12,8 @@ struct OnboardReport: Encodable {
     var store: String
     var checks: [OnboardingCheck]
     var account: String
+    /// The account added now (a key or a token), when one was.
+    var accountAdded: String?
     var accountCommands: [String]
     var settings: String
     var settingsPath: String?
@@ -30,6 +32,11 @@ struct OnboardingFlow {
     let accountFlag: Onboarding.Account?
     /// Print human output (false: `--json`, or `init` doing it quietly).
     let talk: Bool
+    /// A key / token account: its name, its plan (setup token), read the secret from stdin, replace.
+    var accountName: String? = nil
+    var plan: String? = nil
+    var secretStdin = false
+    var force = false
 
     func say(_ s: String) { if talk { Out.stdout(s + "\n") } }
 
@@ -51,7 +58,8 @@ struct OnboardingFlow {
             throw fail(HostError(.failed, "onboarding stopped: \(stop.check) — \(stop.detail)"), g)
         }
 
-        // 2. The Claude account (D6): offered, never logged in, no keychain write.
+        // 2. The Claude account (D6): offered, never logged in. A key or a token goes EXACTLY the way
+        //    `doz account add` takes it: pasted at a no-echo prompt (or, with --secret-stdin, stdin).
         say("\n2. Claude account")
         let choice: Onboarding.Account
         if let a = accountFlag {
@@ -65,15 +73,18 @@ struct OnboardingFlow {
             let i = asker.choose("  How should sandboxes reach Claude?", options.map(\.label), preferred: options.firstIndex(of: preferred) ?? 0)
             choice = options[i]
         }
-        if let d = Onboarding.defaultAccount(for: choice) {
+        var added: String?
+        switch choice {
+        case .mac:
             var r = HostRequest(.accountDefault)
-            r.account = d
+            r.account = "mac"
             _ = try call(r, g)
-            say("  the store's default account: \(d)")
-        } else {
-            say("  " + (choice == .skip ? "skipped — nothing changed (a claude-code sandbox asks at its first session)" : "nothing is added now:"))
+            say("  the store's default account: mac")
+        case .later:
+            say("  decide later — nothing changed (a claude-code sandbox says what it needs at its first session)")
+        case .apiKey, .setupToken:
+            added = try addAccount(choice)
         }
-        for c in Onboarding.accountCommands(choice) { say("    " + c) }
 
         // 3. Images (D2): claude-code ticked; lab and pi opt-in.
         say("\n3. Images")
@@ -125,9 +136,51 @@ struct OnboardingFlow {
             say("\nDone — this Mac is onboarded (\(rec.images.isEmpty ? "no image prepared yet" : rec.images.joined(separator: ", ") + " ready")).")
             say("Next: doz init in a project folder (then doz up there), or doz up NAME --workspace DIR · the UI: doz ui")
         }
-        return OnboardReport(store: store.root.path, checks: checks, account: choice.rawValue, accountCommands: Onboarding.accountCommands(choice),
+        return OnboardReport(store: store.root.path, checks: checks, account: choice.rawValue, accountAdded: added,
+                             accountCommands: added == nil ? Onboarding.accountCommands(choice) : [],
                              settings: settings.rawValue, settingsPath: settingsPath, promptTemplate: template.rawValue,
                              promptTemplatePath: templatePath, images: chosen, result: result)
+    }
+
+    /// A key or a setup token, added exactly as `doz account add` adds it, then made the store default.
+    /// On a terminal it is pasted at a no-echo prompt; off one only with `--secret-stdin` (stdin), as
+    /// `doz account add` reads it; otherwise nothing is added and the commands are shown. The secret
+    /// is never printed, and never part of an error. Returns the account's name when one was added.
+    private func addAccount(_ choice: Onboarding.Account) throws -> String? {
+        let kind: AccountKind = choice == .setupToken ? .setupToken : .apiKey
+        let what = kind == .setupToken ? "setup token" : "API key"
+        let name = accountName ?? asker.text("  Account name", default: "work") { (try? AccountStore.validateName($0)) == nil ? "1–40 of a-z 0-9 - (not default or none)" : nil }
+        do { try AccountStore.validateName(name) } catch { throw fail(HostError.from(error), g) }
+        let plan = kind == .setupToken ? (plan ?? asker.text("  Plan (max, pro, team, enterprise)", default: "max") {
+            ["max", "pro", "team", "enterprise"].contains($0.lowercased()) ? nil : "max, pro, team or enterprise"
+        }) : nil
+        var secret: String?
+        if asker.interactive && isatty(STDIN_FILENO) == 1 {
+            if kind == .setupToken { say("  run `claude setup-token` in another terminal, then paste the token here") }
+            secret = try readSecret("  \(what) (not echoed): ", g)
+        } else if secretStdin {
+            secret = String(decoding: FileHandle.standardInput.readDataToEndOfFile(), as: UTF8.self)
+        }
+        guard let secret, !secret.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            say("  no \(what) given now (off a terminal, --secret-stdin reads one from stdin) — add it later:")
+            for c in Onboarding.accountCommands(choice) { say("    " + c) }
+            return nil
+        }
+        let m = try rawCall(HostRequest.accountAdd(name: name, kind: kind, plan: plan, secret: secret, force: force), g)
+        guard m.ok == true else {
+            // The host's message names the account, never the secret; it is scrubbed anyway.
+            let why = (m.error?.message ?? "no reason").replacingOccurrences(of: secret.trimmingCharacters(in: .whitespacesAndNewlines), with: "…")
+            say("  could not add \(name): \(why)")
+            say("  onboarding goes on without it — later: \(Onboarding.accountCommands(choice).dropFirst(kind == .setupToken ? 1 : 0).first ?? "doz account add")")
+            return nil
+        }
+        let rows = (try? m.result?.decode([AccountRow].self)) ?? []
+        var r = HostRequest(.accountDefault)
+        r.account = name
+        _ = try call(r, g)
+        let row = rows.first { $0.name == name }
+        say("  account \(name) added (\(kind.rawValue)\(row?.verification.map { ", \($0)" } ?? ""); keychain \(row?.keychainService ?? "?"), fingerprint \(row?.fingerprint ?? "?")) — the store's default account")
+        return name
     }
 
     private func settingsOutcome(_ body: () throws -> (Onboarding.ConfigOutcome, String?)) throws -> (Onboarding.ConfigOutcome, String?) {
@@ -192,7 +245,11 @@ struct Onboard: AsyncParsableCommand {
     @Option(name: .long, help: "The images to prepare, comma-separated: claude-code, pi, lab (default: claude-code).") var images: String?
     @Flag(name: .long, help: "Prepare all three images (claude-code, pi, lab — ~15+ min the first time).") var allImages = false
     @Flag(name: .long, help: "Prepare no image now (the first start of each does it).") var noImages = false
-    @Option(name: .long, help: "The Claude account step without asking: mac (this Mac's login), none, or skip. Given, the Claude Code checks are not run.") var account: String?
+    @Option(name: .long, help: "The Claude account step without asking: mac (this Mac's login), api-key, setup-token, or later. Given, the Claude Code checks are not run.") var account: String?
+    @Option(name: .long, help: "With --account api-key|setup-token: the account's name (default: work; asked on a terminal).") var accountName: String?
+    @Option(name: .long, help: "With --account setup-token: the plan (max, pro, team, enterprise).") var plan: String?
+    @Flag(name: .long, help: "With --account api-key|setup-token off a terminal: read the key or token from stdin (as doz account add does). On a terminal it is pasted at a no-echo prompt.") var secretStdin = false
+    @Flag(name: .long, help: "With --account api-key|setup-token: replace an account of that name.") var force = false
     @Flag(name: [.short, .long], help: "Accept every default; ask nothing.") var yes = false
 
     func validate() throws {
@@ -205,7 +262,11 @@ struct Onboard: AsyncParsableCommand {
                 throw ValidationError("--images: claude-code, pi, lab (not \(n))")
             }
         }
-        if let a = account, !["mac", "none", "skip"].contains(a) { throw ValidationError("--account: mac, none or skip") }
+        if let a = account, Onboarding.Account(rawValue: a) == nil { throw ValidationError("--account: mac, api-key, setup-token or later") }
+        let keyed = account == "api-key" || account == "setup-token"
+        if !keyed && (accountName != nil || secretStdin || force) { throw ValidationError("--account-name, --secret-stdin and --force go with --account api-key|setup-token") }
+        if plan != nil && account != "setup-token" { throw ValidationError("--plan goes with --account setup-token") }
+        if let p = plan, !["max", "pro", "team", "enterprise"].contains(p.lowercased()) { throw ValidationError("--plan: max, pro, team or enterprise") }
     }
 
     var imageList: [String]? {
@@ -217,8 +278,12 @@ struct Onboard: AsyncParsableCommand {
     func run() async throws {
         if status { try await showStatus(); return }
         if cancel { try cancelPreparations(); return }
-        let flow = OnboardingFlow(g: g, asker: Asker(yes: yes, json: g.json), imagesFlag: imageList,
+        var flow = OnboardingFlow(g: g, asker: Asker(yes: yes, json: g.json), imagesFlag: imageList,
                                   accountFlag: account.flatMap(Onboarding.Account.init(rawValue:)), talk: !g.json)
+        flow.accountName = accountName
+        flow.plan = plan?.lowercased()
+        flow.secretStdin = secretStdin
+        flow.force = force
         let report = try await flow.run()
         if g.json { Out.json(report) }
     }

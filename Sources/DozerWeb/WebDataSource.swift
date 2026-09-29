@@ -39,11 +39,16 @@ public protocol DozerWebData: Sendable {
     func onboarding() async throws -> WebOnboarding
     /// 594: the image preparations in the host (running, then recent); empty with no host.
     func preparations() async throws -> [WebPreparation]
+    /// 594 (owner ruling): add an account from a key or a token — the host's `account-add`, exactly
+    /// the request `doz account add` sends (`HostRequest.accountAdd`), with no progress callback (so
+    /// nothing of it reaches an operation or an event). Returns the accounts (never a secret).
+    func addAccount(_ a: WebAccountAdd) async throws -> WebAccounts
 }
 
 extension DozerWebData {
     public func onboarding() async throws -> WebOnboarding { throw HostError(.notImplemented, "onboarding") }
     public func preparations() async throws -> [WebPreparation] { [] }
+    public func addAccount(_ a: WebAccountAdd) async throws -> WebAccounts { throw HostError(.notImplemented, "accounts") }
 }
 
 /// `GET /api/v1/metrics[.csv]?image=…&days=…&steps=0|1`.
@@ -144,6 +149,14 @@ public final class HostWebData: DozerWebData, @unchecked Sendable {
         let file = AccountStore(store: store, settings: .load()).load()
         return WebOnboarding(status: status, checks: checks, freeBytes: Onboarding.volume(of: store)?.free, macSignedIn: signedIn,
                              defaultAccount: file.defaultAccount)
+    }
+
+    public func addAccount(_ a: WebAccountAdd) async throws -> WebAccounts {
+        let store = self.store
+        let r = HostRequest.accountAdd(name: a.name, kind: a.kind, plan: a.plan, secret: a.secret)
+        let m = try await blocking { try HostClient.request(r, store: store, autostart: true) }
+        guard m.ok == true else { throw m.error ?? HostError(.failed, "the host gave no reason") }
+        return try await accounts()
     }
 
     public func preparations() async throws -> [WebPreparation] {

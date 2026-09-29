@@ -221,6 +221,9 @@ final class WebSettingsHTTPTests: XCTestCase {
         XCTAssertEqual(WebRoute.parse(method: .get, target: "/api/v1/onboarding"), .onboarding)
         XCTAssertEqual(WebRoute.parse(method: .post, target: "/api/v1/onboarding/config"), .onboardingConfig)
         XCTAssertEqual(WebRoute.parse(method: .get, target: "/api/v1/preparations"), .preparations)
+        XCTAssertEqual(WebRoute.parse(method: .post, target: "/api/v1/accounts"), .accountAdd)
+        XCTAssertNil(WebRoute.parse(method: .delete, target: "/api/v1/accounts"))
+        XCTAssertNotEqual(WebRoute.parse(method: .get, target: "/api/v1/accounts"), .accountAdd, "GET is the list")
         XCTAssertNil(WebRoute.parse(method: .post, target: "/api/v1/onboarding"))
         XCTAssertNil(WebRoute.parse(method: .get, target: "/api/v1/onboarding/config"))
         XCTAssertNil(WebRoute.parse(method: .post, target: "/api/v1/preparations"))
@@ -253,7 +256,7 @@ final class WebSettingsHTTPTests: XCTestCase {
         let text = try String(contentsOf: file, encoding: .utf8)
         XCTAssertTrue(text.contains("\nimage = \"claude-code\"\n"))
         XCTAssertTrue(text.contains("\naccount = \"mac\"\n"))
-        let again = try JSONDecoder().decode(WebOnboardingConfigResult.self, from: try post(#"{"defaultImage":"lab","account":"none"}"#, csrf: csrf).body)
+        let again = try JSONDecoder().decode(WebOnboardingConfigResult.self, from: try post(#"{"defaultImage":"lab","account":"later"}"#, csrf: csrf).body)
         XCTAssertEqual(again.settings, "kept")
         XCTAssertEqual(try String(contentsOf: file, encoding: .utf8), text, "never overwritten")
         // The wizard's facts and the host's preparations: read with the session.
@@ -267,7 +270,70 @@ final class WebSettingsHTTPTests: XCTestCase {
         XCTAssertTrue(ob.settingsExists)
         XCTAssertEqual(ob.defaultImage, "claude-code")
         XCTAssertFalse(ob.blocked)
-        XCTAssertEqual(ob.preferredAccount, "skip", "no Mac login: skip is the default")
+        XCTAssertEqual(ob.preferredAccount, "later", "no Mac login: decide later is the default")
+        XCTAssertEqual(ob.accountOptions.map(\.value), ["api-key", "setup-token", "mac", "later"])
         XCTAssertEqual(try request("/api/v1/preparations", ["Cookie": cookie]).text, "[]")
+    }
+
+    /// 594 (owner ruling): a key or a token typed in the browser — ONE CSRF-checked POST, a strict body,
+    /// allowed only while ui.allow_secret_entry; no response (success, refusal or failure) carries it.
+    func testAnAccountFromAMaskedFieldNeverComesBack() throws {
+        let (cookie, csrf) = try signIn()
+        let key = "sk-ant-api03-FAKE" + String(repeating: "q", count: 40)
+        func post(_ body: String, csrf c: String? = nil, origin o: String? = nil) throws -> RawResponse {
+            var h = ["Cookie": cookie, "Origin": o ?? origin, "Content-Type": "application/json"]
+            if let c { h["X-Doz-CSRF"] = c }
+            return try request("/api/v1/accounts", h, method: "POST", body: body)
+        }
+        func clean(_ r: RawResponse, _ what: String, file: StaticString = #filePath, line: UInt = #line) {
+            XCTAssertFalse(r.text.contains(key) || r.text.contains("FAKEqqqq"), "\(what): the secret came back: \(r.text)", file: file, line: line)
+        }
+        let good = #"{"name":"work","kind":"api-key","secret":"\#(key)"}"#
+        var r = try post(good)
+        XCTAssertEqual(r.status, 403, "no CSRF token")
+        clean(r, "no CSRF")
+        r = try post(good, csrf: csrf, origin: "http://evil.example")
+        XCTAssertEqual(r.status, 403, "a foreign Origin")
+        XCTAssertTrue(fake.addedAccounts.isEmpty)
+        XCTAssertNotEqual(WebRoute.parse(method: .get, target: "/api/v1/accounts?secret=x"), .accountAdd, "only a POST adds")
+        for bad in [#"{"name":"work","kind":"api-key","secret":"\#(key)","note":"x"}"#,          // an unknown field
+                    #"{"name":"work","kind":"mac","secret":"\#(key)"}"#,                         // the Mac login takes no secret
+                    #"{"name":"default","kind":"api-key","secret":"\#(key)"}"#,                  // reserved
+                    #"{"name":"work","kind":"api-key","secret":"\#(key)","plan":"max"}"#,         // plan is a token's
+                    #"{"name":"work","kind":"api-key","secret":"short"}"#,
+                    #"{"name":"work","kind":"api-key"}"#] {
+            r = try post(bad, csrf: csrf)
+            XCTAssertEqual(r.status, 400, bad)
+            clean(r, "a refusal")
+        }
+        r = try post(good, csrf: csrf)
+        XCTAssertEqual(r.status, 200, r.text)
+        clean(r, "the stored-state summary")
+        XCTAssertTrue(r.text.contains("doz-anthropic:work") && r.text.contains("abcdef123456"), "the summary: the item's name and a fingerprint")
+        XCTAssertEqual(fake.addedAccounts.map(\.name), ["work"])
+        XCTAssertEqual(fake.addedAccounts.first?.secret, key, "the host got it")
+        XCTAssertFalse("\(fake.addedAccounts[0])".contains(key), "its description is redacted")
+        XCTAssertFalse(String(reflecting: fake.addedAccounts[0]).contains(key))
+        r = try post(#"{"name":"sub","kind":"setup-token","plan":"max","secret":"sk-ant-oat01-\#(String(repeating: "t", count: 40))"}"#, csrf: csrf)
+        XCTAssertEqual(r.status, 200, r.text)
+        XCTAssertEqual(fake.addedAccounts.last?.plan, "max")
+        r = try post(#"{"name":"boom","kind":"api-key","secret":"\#(key)"}"#, csrf: csrf)
+        XCTAssertEqual(r.status, 500)
+        clean(r, "a failure whose host message quoted it")
+        XCTAssertTrue(r.text.contains("Anthropic rejected … (HTTP 401)"), r.text)
+
+        // The browser can turn secret entry off, never on; off, the route refuses.
+        func setting(_ body: String) throws -> RawResponse {
+            try request("/api/v1/settings", ["Cookie": cookie, "Origin": origin, "Content-Type": "application/json", "X-Doz-CSRF": csrf],
+                        method: "POST", body: body)
+        }
+        XCTAssertEqual(try setting(#"{"key":"ui.allow_secret_entry","value":false}"#).status, 200)
+        r = try post(good, csrf: csrf)
+        XCTAssertEqual(r.status, 403)
+        XCTAssertTrue(r.text.contains("secret-entry-off"), r.text)
+        clean(r, "secret entry off")
+        XCTAssertEqual(try setting(#"{"key":"ui.allow_secret_entry","value":true}"#).status, 400, "never on from the browser")
+        XCTAssertEqual(try setting(#"{"key":"ui.allow_secret_entry","reset":true}"#).status, 400, "a reset would turn it on")
+        XCTAssertEqual(fake.addedAccounts.count, 2)
     }
 }

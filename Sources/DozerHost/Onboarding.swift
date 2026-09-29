@@ -113,35 +113,33 @@ public enum Onboarding {
 
     // MARK: D6 — the Claude account
 
-    /// The account step's answers. Onboarding never logs in, never touches Claude Code's refresh
-    /// token and never writes the keychain (588): a key or a setup token is added LATER with the
-    /// CLI command it shows (it reads the secret from a no-echo prompt — never a browser field).
+    /// The account step's answers. Onboarding never logs in and never touches Claude Code's refresh
+    /// token (588). A key or a setup token is added exactly as `doz account add` adds one (the login
+    /// keychain, the one check request): pasted at a no-echo prompt in `doz onboard`, typed in a masked
+    /// field in the UI (while `ui.allow_secret_entry`), or — when neither — with the CLI command shown.
     public enum Account: String, Codable, Sendable, CaseIterable {
         /// This Mac's own Claude Code login (the built-in account `mac`) — the store default.
         case mac
-        /// No account: sandboxes follow `none` until one is added.
-        case none
-        /// Change nothing now (the claude-code image asks at its first session).
-        case skip
-        /// Show how to add an API key / a setup token (and change nothing now).
+        /// An Anthropic API key / a Claude setup token, added now and made the store default.
         case apiKey = "api-key"
         case setupToken = "setup-token"
+        /// Change nothing now (owner ruling: "No account for now" and "Skip" are one option).
+        case later
 
         public var label: String {
             switch self {
             case .mac: "Use this Mac's Claude Code login (the account mac)"
-            case .none: "No account for now (sandboxes get none)"
-            case .skip: "Skip — decide at the first session"
-            case .apiKey: "Add an Anthropic API key (with the CLI, afterwards)"
-            case .setupToken: "Add a Claude setup token (with the CLI, afterwards)"
+            case .apiKey: "Add an Anthropic API key"
+            case .setupToken: "Add a Claude setup token (claude setup-token)"
+            case .later: "Decide later"
             }
         }
     }
 
     /// D6: what the step offers on this Mac, and its default — the Mac's login when Claude Code is
-    /// signed in on it; otherwise a key, a token, or skip.
+    /// signed in on it; otherwise a key, a token, or later.
     public static func accountOptions(macSignedIn: Bool) -> (options: [Account], preferred: Account) {
-        macSignedIn ? ([.mac, .apiKey, .setupToken, .none, .skip], .mac) : ([.apiKey, .setupToken, .mac, .none, .skip], .skip)
+        macSignedIn ? ([.mac, .apiKey, .setupToken, .later], .mac) : ([.apiKey, .setupToken, .mac, .later], .later)
     }
 
     /// The commands a choice that needs a secret leaves to run (nothing is run for you).
@@ -154,13 +152,9 @@ public enum Onboarding {
         }
     }
 
-    /// The store default a choice sets (nil: none is set).
+    /// The store default a choice sets by itself (a key or a token: the account added, once it is).
     public static func defaultAccount(for a: Account) -> String? {
-        switch a {
-        case .mac: "mac"
-        case .none: "none"
-        default: nil
-        }
+        a == .mac ? "mac" : nil
     }
 
     // MARK: D7 — the settings file, only when missing
