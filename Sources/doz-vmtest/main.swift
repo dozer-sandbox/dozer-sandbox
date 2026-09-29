@@ -234,10 +234,10 @@ func lifecycleSuite() async throws {
     for cycle in 1...2 {
         print("vmtest: sleep to disk / wake (cycle \(cycle))")
         let t1 = Date()
-        try await sb.deepSleep()
+        try await sb.hibernate()
         let sleepMs = Date().timeIntervalSince(t1) * 1000
         let st2 = await sb.status
-        check(st2.phase == .deepAsleep && st2.ramHeldMiB == 0, String(format: "asleep on disk, RAM freed (%.0f ms)", sleepMs))
+        check(st2.phase == .hibernated && st2.ramHeldMiB == 0, String(format: "asleep on disk, RAM freed (%.0f ms)", sleepMs))
         _ = await rec.wait(2) { $0.finished }
         check(rec.last == .detached(.sandboxSleeping), "the attached connection was told the sandbox is sleeping")
         var attachRefused = false
@@ -359,7 +359,7 @@ func lifecycleSuite() async throws {
     let dirGone = !FileManager.default.fileExists(atPath: StoreLayout(spec: sb.spec).sandboxDirectory.path)
     check(await sb.phase == .off && dirGone, "Delete sandbox (from running) stopped it and removed its whole directory")
 
-    for (label, park) in [("paused", { try await sb.pause() }), ("on disk", { try await sb.deepSleep() })] as [(String, () async throws -> Void)] {
+    for (label, park) in [("paused", { try await sb.pause() }), ("on disk", { try await sb.hibernate() })] as [(String, () async throws -> Void)] {
         print("vmtest: stop while \(label) (revived, then stopped gracefully)")
         try await sb.start()
         try await sb.openSession("tick", argv: ["bash", "/work/tick.sh"])
@@ -393,7 +393,7 @@ func crashSave() async throws -> Int32 {
     await sleepS(1)
     let pid = try await sb.sessions().first { $0.name == "tick" }?.pid ?? -1
     try "\(pid)".write(to: storeRoot.appendingPathComponent("crash-pid.txt"), atomically: true, encoding: .utf8)
-    // Quit the way a host app does: prepareForExit from RUNNING — Deep Sleep, never a cold stop.
+    // Quit the way a host app does: prepareForExit from RUNNING — Hibernate, never a cold stop.
     await sb.prepareForExit()
     log.cancel()
     print("        · [child] quit with session tick (pid \(pid)) running → \(await sb.phase.label); exiting WITHOUT shutting down")
@@ -418,7 +418,7 @@ func crashSuite(skipChild: Bool = false) async throws {
     let log = logEvents(sb)
     defer { log.cancel() }
     let t0 = Date()
-    try await sb.wake()                       // in a new process: adopts the deep-asleep VM
+    try await sb.wake()                       // in a new process: adopts the hibernated VM
     check(await sb.phase == .running, String(format: "woke into this process in %.2f s (pinned machine id)", Date().timeIntervalSince(t0)))
     let pid = Int((try? String(contentsOf: storeRoot.appendingPathComponent("crash-pid.txt"), encoding: .utf8)) ?? "")
     let s = try await sb.sessions().first { $0.name == "tick" }
@@ -592,7 +592,7 @@ func agentSuite(_ imageSpec: ImageSpec) async throws {
 
     print("vmtest[\(imageSpec.name)]: sleep to disk → wake mid-session")
     let t1 = Date()
-    try await sb.deepSleep()
+    try await sb.hibernate()
     let sleepMs = Date().timeIntervalSince(t1) * 1000
     _ = await rec.wait(2) { $0.finished }
     let t2 = Date()
@@ -816,8 +816,8 @@ Task {
             await sleepS(2)
             let pid = try await sb.sessions().first { $0.name == "agent" }?.pid ?? -1
             try "\(pid)".write(to: storeRoot.appendingPathComponent("agent-crash-pid.txt"), atomically: true, encoding: .utf8)
-            await sb.prepareForExit()            // quit with the agent RUNNING: Deep Sleep, not a cold stop
-            guard await sb.phase == .deepAsleep else { exit(4) }
+            await sb.prepareForExit()            // quit with the agent RUNNING: Hibernate, not a cold stop
+            guard await sb.phase == .hibernated else { exit(4) }
             exit(0)
         case "agent-crash-restore":
             guard let r = args.dropFirst().first(where: { !$0.hasPrefix("-") && $0 != "agent-crash-restore" }).flatMap(agentImageSpec) else { exit(2) }
@@ -870,7 +870,7 @@ Task {
                 try await sb.start()
                 try await net("cycle \(i) boot")
                 if withSleep {
-                    try await sb.deepSleep(); try await sb.wake()
+                    try await sb.hibernate(); try await sb.wake()
                     try await net("cycle \(i) after wake")
                 }
                 try await sb.shutDown()

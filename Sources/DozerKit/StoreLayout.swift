@@ -64,7 +64,7 @@ public struct StoreLayout: Sendable, Equatable {
 /// the NIC's MAC address and the vmnet subnet are pinned for the same reason).
 public struct PersistedSandbox: Codable, Sendable, Equatable {
     public var spec: SandboxSpec
-    /// The last durable phase: `running`, `asleep`, `deepAsleep`, or `off` (shut down; the root
+    /// The last durable phase: `running`, `asleep`, `hibernated`, or `off` (shut down; the root
     /// disk is kept for the next Start).
     public var phase: Phase
     /// `VZGenericMachineIdentifier.dataRepresentation`.
@@ -90,7 +90,7 @@ public struct PersistedSandbox: Codable, Sendable, Equatable {
     /// record — treated as no journal.
     public var rootJournaled: Bool?
     public var stateJournaled: Bool?
-    /// 587: what the guest's file systems held (`df` used, MiB) at the last Stop or Deep Sleep —
+    /// 587: what the guest's file systems held (`df` used, MiB) at the last Stop or Hibernate —
     /// `DiskAccounting`'s garbage is the host file's allocation beyond it.
     public var guestUsedMiB: Double?
     public var stateGuestUsedMiB: Double?

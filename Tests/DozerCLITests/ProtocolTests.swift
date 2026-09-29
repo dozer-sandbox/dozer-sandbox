@@ -22,7 +22,7 @@ final class ProtocolTests: XCTestCase {
     }
 
     func testOpNamesAreTheWireNames() {
-        XCTAssertEqual(HostOp.deepSleep.rawValue, "deep-sleep")
+        XCTAssertEqual(HostOp.hibernate.rawValue, "hibernate")
         XCTAssertEqual(HostOp.pointSaveImage.rawValue, "point-save-image")
         XCTAssertEqual(HostOp.hostStop.rawValue, "host-stop")
         XCTAssertTrue(HostOp.ls.isReadOnly)
@@ -36,7 +36,7 @@ final class ProtocolTests: XCTestCase {
     }
 
     func testMessagesCarryTypedResults() throws {
-        let info = SandboxInfo(name: "box", image: "lab", phase: "deepAsleep", busy: false, cpus: 2, memoryMiB: 1024, ramHeldMiB: 0,
+        let info = SandboxInfo(name: "box", image: "lab", phase: "hibernated", busy: false, cpus: 2, memoryMiB: 1024, ramHeldMiB: 0,
                                memoryReturnedMiB: 0, diskBytes: 123_456_789, sessions: nil, network: "bake", deniedConnections: 3,
                                workspace: "/tmp/ws", createdAt: Date(timeIntervalSince1970: 1_790_000_000.25), diedWithHost: nil)
         let m = HostMessage.success(try JSONValue(encoding: [info]))
@@ -54,7 +54,7 @@ final class ProtocolTests: XCTestCase {
 
     func testErrorsMapFromLibraryErrors() {
         XCTAssertEqual(HostError.from(SandboxError.invalidPhase(operation: "pause", phase: .off)).code, .invalidPhase)
-        XCTAssertEqual(HostError.from(SandboxError.notRunning(.deepAsleep)).code, .invalidPhase)
+        XCTAssertEqual(HostError.from(SandboxError.notRunning(.hibernated)).code, .invalidPhase)
         XCTAssertEqual(HostError.from(SandboxError.restorePointNotFound("x")).code, .notFound)
         XCTAssertEqual(HostError.from(SandboxError.alreadyExists("x")).code, .exists)
         XCTAssertEqual(HostError.from(SandboxError.invalidSpec("x")).code, .invalid)
@@ -67,8 +67,8 @@ final class ProtocolTests: XCTestCase {
         let e = try XCTUnwrap(HostEvent(.step("saved VM state to disk", milliseconds: 312.4), sandbox: "box"))
         XCTAssertEqual(e.kind, .step)
         XCTAssertEqual(e.line, "box: saved VM state to disk — 312 ms")
-        XCTAssertEqual(HostEvent(.phase(.deepAsleep), sandbox: "box")?.phase, "deepAsleep")
-        XCTAssertEqual(HostEvent(.phase(.deepAsleep), sandbox: "box")?.text, "deep asleep")
+        XCTAssertEqual(HostEvent(.phase(.hibernated), sandbox: "box")?.phase, "hibernated")
+        XCTAssertEqual(HostEvent(.phase(.hibernated), sandbox: "box")?.text, "hibernated")
         XCTAssertNil(HostEvent(.status(SandboxStatus(phase: .off, busy: false, ramHeldMiB: 0, snapshotBytes: 0)), sandbox: "box"))
         let m = HostMessage(event: e)
         let back = try HostWire.decoder.decode(HostMessage.self, from: HostWire.encoder.encode(m))

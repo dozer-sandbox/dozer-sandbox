@@ -77,7 +77,7 @@ final class WebTerminalHub: @unchecked Sendable {
         let op: HostOp
         switch phase.flatMap(Phase.init(rawValue:)) {
         case .paused: op = .resume
-        case .asleep, .deepAsleep: op = .wake
+        case .asleep, .hibernated: op = .wake
         default: return false
         }
         guard let operations else { return false }
@@ -284,7 +284,7 @@ final class WebTerminalBridge: @unchecked Sendable {
                 pending = Array(pending.suffix(hold))
             }
             if !pending.isEmpty { await sendBinary(pending[...]) }
-            // Closed without the end notice: a Deep Sleep (the guest session lives on) or a lost
+            // Closed without the end notice: a hibernation (the guest session lives on) or a lost
             // transport. Reattach — the host holds us until the sandbox runs.
             lock.withLock {
                 if attachment === att { attachment = nil }
@@ -306,7 +306,7 @@ final class WebTerminalBridge: @unchecked Sendable {
         phase = p
         phaseSince = Date()
         // 591: a wake (or resume) is timed from when this terminal first saw it to its screen back.
-        let sleeping: Set<String> = [Phase.paused.rawValue, Phase.asleep.rawValue, Phase.deepAsleep.rawValue]
+        let sleeping: Set<String> = [Phase.paused.rawValue, Phase.asleep.rawValue, Phase.hibernated.rawValue]
         if let before, sleeping.contains(before), p == Phase.running.rawValue {
             if wakeStart == nil { wakeStart = Date() }
             wakeVerb = before == Phase.paused.rawValue ? "resumed" : "woke"
@@ -507,12 +507,12 @@ final class WebTerminalBridge: @unchecked Sendable {
         notice = String(format: "%@ in %.1f s", wakeVerb, Date().timeIntervalSince(s))
     }
 
-    /// A phase seen by the monitor. While this terminal is attached and has its screen, a Deep Sleep
+    /// A phase seen by the monitor. While this terminal is attached and has its screen, a hibernation
     /// or a shutdown would have closed the connection — such a report is stale and ignored.
     func monitorPhase(_ p: String) {
         let changed: Bool = lock.withLock {
             let live = attachment != nil && !awaitingScreen
-            if live, p == Phase.deepAsleep.rawValue || p == Phase.off.rawValue || p == Phase.failed.rawValue { return false }
+            if live, p == Phase.hibernated.rawValue || p == Phase.off.rawValue || p == Phase.failed.rawValue { return false }
             let before = phase
             setPhaseLocked(p)
             return before != phase

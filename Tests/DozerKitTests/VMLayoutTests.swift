@@ -135,7 +135,7 @@ final class VMLayoutTests: XCTestCase {
 
     func testARecordWithoutALayoutStillDecodesAndOneWithItRoundTrips() throws {
         let spec = SandboxSpec(name: "a", storeRoot: dir)
-        var p = PersistedSandbox(spec: spec, phase: .deepAsleep, machineIdentifier: Data([1, 2]), macAddress: nil, subnet: nil, shareTags: [:])
+        var p = PersistedSandbox(spec: spec, phase: .hibernated, machineIdentifier: Data([1, 2]), macAddress: nil, subnet: nil, shareTags: [:])
         let url = dir.appendingPathComponent("state.json")
         try p.write(to: url)
         XCTAssertNil(PersistedSandbox.read(from: url)?.vmLayout, "a pre-591 record: no layout")

@@ -65,7 +65,7 @@ doz resume lab1
 doz sleep lab1                     # pause + snapshot to disk; RAM still held
 doz wake lab1
 
-doz deep-sleep lab1                # snapshot, then the VM stops: RAM held goes to —
+doz hibernate lab1                 # snapshot, then the VM stops: RAM held goes to —
 doz ls
 doz attach lab1                    # wakes it (~0.3 s) and reattaches: top is still running
 ```
@@ -156,8 +156,8 @@ the policy, logs the connection and swaps in the real key on the way to Anthropi
 ## 5. Quit and come back (2 min)
 
 ```bash
-doz deep-sleep try
-doz host stop                      # deep-sleeps anything still running, then exits
+doz hibernate try
+doz host stop                      # hibernates anything still running, then exits
 doz host status                    # no host
 doz ls                             # still answers (read from the store, no host started)
 ```
@@ -170,7 +170,7 @@ doz up try                         # a new host starts, wakes `try`, reattaches
 ```
 
 You are back in the **same Claude Code conversation**, on the same screen, with the same process.
-A Deep Sleep keeps the running program itself, not just its files.
+Hibernate keeps the running program itself, not just its files.
 
 ## 6. Numbers and clean-up (1 min)
 

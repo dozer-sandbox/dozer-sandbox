@@ -3,9 +3,9 @@
 //
 //   A. THE PREVIOUS RELEASE sleeps, THIS BUILD wakes. With the old `doz` (the last release tag's,
 //      built once by the Makefile): create a lab sandbox and an agent-image sandbox, start them, run a
-//      session in each that prints a marker and keeps running, write a marker file, deep-sleep both and
+//      session in each that prints a marker and keeps running, write a marker file, hibernate both and
 //      stop the old host. With this build: wake each — the session is the same process, its screen
-//      still shows the marker, the file is there. Then deep-sleep and wake again with this build: the
+//      still shows the marker, the file is there. Then hibernate and wake again with this build: the
 //      layout this build recorded is compatible with the VM it rebuilds.
 //   B. THE INCIDENT (591, the owner's store): the file a running host executes is overwritten in place
 //      (cp + codesign, as the old install did). The host reports "its program was updated underneath
@@ -65,7 +65,7 @@ func upgradeSuite() async throws {
         _ = old.waitFor(10) { old.sessions(b.name).first { $0.name == "keep" }?.pid != nil }
         pids[b.name] = old.sessions(b.name).first { $0.name == "keep" }?.pid
         check(pids[b.name] != nil, "\(b.name): session keep runs, pid \(pids[b.name].map(String.init) ?? "?")")
-        check(old.run(["deep-sleep", b.name], timeout: 120).code == 0, "\(oldVersion): deep-sleep \(b.name)")
+        check(old.run(["hibernate", b.name], timeout: 120).code == 0, "\(oldVersion): hibernate \(b.name)")
     }
     check(old.run(["host", "stop"], timeout: 120).code == 0, "\(oldVersion): host stop")
     _ = old.waitFor(30) { !old.hostRunning }
@@ -91,7 +91,7 @@ func upgradeSuite() async throws {
     for b in boxes { wakeIntact(new, b.name, "\(newVersion) (slept by \(oldVersion))") }
     // The layout this build records, on its own next wake.
     for b in boxes {
-        check(new.run(["deep-sleep", b.name], timeout: 120).code == 0, "\(newVersion): deep-sleep \(b.name)")
+        check(new.run(["hibernate", b.name], timeout: 120).code == 0, "\(newVersion): hibernate \(b.name)")
         let rec = PersistedSandbox.read(from: DozerStore(root: storeRoot).layout(b.name).persistedState)
         check(rec?.vmLayout != nil && rec?.vmLayout?.recordedBy == "doz \(newVersion)",
               "\(b.name): the snapshot's VM layout is recorded (\(rec?.vmLayout?.recordedBy ?? "none"), \(rec?.vmLayout?.disks.count ?? 0) disks)")
@@ -120,9 +120,9 @@ func upgradeSuite() async throws {
     check(sh(["/bin/cp", newBin, t]) == 0 && sh(["/usr/bin/codesign", "--force", "--sign", "-", "--entitlements", entitlements, t]) == 0,
           "a copy of this build to run a host from")
     let under = CLIHarness(binary: t, store: storeRoot)
-    new.run(["host", "stop"])                                          // deep-sleeps both
+    new.run(["host", "stop"])                                          // hibernates both
     _ = new.waitFor(30) { !new.hostRunning }
-    check(boxes.allSatisfy { new.row($0.name)?.phase == "deepAsleep" }, "both are deep asleep")
+    check(boxes.allSatisfy { new.row($0.name)?.phase == "hibernated" }, "both are hibernated")
     check(under.run(["host", "start"], timeout: 60).code == 0 && under.waitFor(30) { under.hostRunning }, "a host runs from the copy")
     // A held attach (no wake) keeps a connection open, so the host does not exit by itself (part C).
     let held = try AttachedClient(under, ["attach", "upa", "keep", "--no-wake"])
@@ -149,7 +149,7 @@ func upgradeSuite() async throws {
           w.code != 0 ? "a wake it cannot do says why (not a raw Virtualization error)"
                       : "the overwritten host still woke upl (macOS did not refuse it this time) — the error mapping was not exercised")
     held.close()
-    if w.code == 0 { new.run(["deep-sleep", "upl"], timeout: 120) }
+    if w.code == 0 { new.run(["hibernate", "upl"], timeout: 120) }
     let stop = new.run(["host", "stop"], timeout: 120)
     _ = new.waitFor(60) { !new.hostRunning }
     check(stop.code == 0 || !new.hostRunning, "host stop")
@@ -158,12 +158,12 @@ func upgradeSuite() async throws {
         check(FileManager.default.fileExists(atPath: layoutL.snapshot.path), "upl's snapshot is kept after the failed wake and the stop")
     }
     // A host of THIS build (its intact file) wakes it, session and all.
-    if new.row("upl")?.phase == "running" { new.run(["deep-sleep", "upl"], timeout: 120) }
+    if new.row("upl")?.phase == "running" { new.run(["hibernate", "upl"], timeout: 120) }
     wakeIntact(new, "upl", "\(newVersion) after the incident")
     wakeIntact(new, "upa", "\(newVersion) after the incident")
 
     // ── C. replaced by an update (rename): an idle host exits by itself.
-    for b in boxes { new.run(["deep-sleep", b.name], timeout: 120) }
+    for b in boxes { new.run(["hibernate", b.name], timeout: 120) }
     new.run(["host", "stop"])
     _ = new.waitFor(30) { !new.hostRunning }
     check(sh(["/bin/cp", newBin, t + ".new"]) == 0 && sh(["/usr/bin/codesign", "--force", "--sign", "-", "--entitlements", entitlements, t + ".new"]) == 0

@@ -11,7 +11,7 @@ import Virtualization
 ///
 ///     start ─▶ running ⇄ paused (1 ms) ─ sleep ─▶ asleep (+ snapshot, ~0.5 s) ─ wake ─▶ running
 ///                 │                                   │
-///                 └────────── deepSleep ──────────────┴─▶ deepAsleep (RAM freed) ─ wake (~0.35 s) ─▶ running
+///                 └────────── hibernate ──────────────┴─▶ hibernated (RAM freed) ─ wake (~0.35 s) ─▶ running
 ///     any ─ shutDown ─▶ off (disk kept)    a new process ─ wake / restoreAfterCrash ─▶ running   (pinned machine id)
 ///
 /// Terminal sessions live in the guest under `deckhold`, so they survive every transition;
@@ -114,7 +114,7 @@ public actor Sandbox {
     /// VM that slept was stopped without unmounting it. Only for a sandbox no process is running.
     public nonisolated static func discardRestorableState(for spec: SandboxSpec) {
         // Stop semantics: the snapshot goes; the root disk stays and the next Start cold-boots it.
-        // 583: the disk was never unmounted (Deep Sleep stops the VM at the VZ level), and a
+        // 583: the disk was never unmounted (Hibernate stops the VM at the VZ level), and a
         // journal-less ext4 booted as it is corrupts (582: 12 of 15 boots failed) — mark it (and
         // the state disk) for e2fsck on that boot. 587: a journaled disk needs no mark — the
         // kernel replays its journal on mount (586: 0 of 45 boots needed more).
@@ -246,7 +246,7 @@ public actor Sandbox {
     }
 
     // The owner's vocabulary (2026-09-25): Pause (Suspend) → Resume · Sleep → Wake ·
-    // Deep Sleep (Hibernate) → Wake · Shut Down → Start (Cold Boot).
+    // Hibernate → Wake · Shut Down → Start (Cold Boot).
 
     /// Pause: VZ pause, guest CPU 0, RAM kept (~1 ms). `resume()` continues.
     public func pause() async throws { try await perform(.pause) }
@@ -256,12 +256,10 @@ public actor Sandbox {
     public func resume() async throws { try await perform(.resume) }
     /// Sleep: pause + snapshot to disk; RAM kept. From here a crash is survivable. `wake()` resumes it in place.
     public func sleep() async throws { try await perform(.sleep) }
-    /// Deep Sleep: pause + snapshot + VM stop — RAM returned. Attached connections are detached with
+    /// Hibernate: pause + snapshot + VM stop — RAM returned. Attached connections are detached with
     /// `.sandboxSleeping` first; attach again after `wake()`.
-    public func deepSleep() async throws { try await perform(.deepSleep) }
-    /// Hibernate — the same as `deepSleep()`.
-    public func hibernate() async throws { try await deepSleep() }
-    /// Wake from Sleep (resume in place, snapshot deleted) or from Deep Sleep (restore + resume +
+    public func hibernate() async throws { try await perform(.hibernate) }
+    /// Wake from Sleep (resume in place, snapshot deleted) or from hibernation (restore + resume +
     /// clock re-sync + share re-mount + snapshot deleted). In a NEW process — the app quit or crashed
     /// while the sandbox slept — this adopts it (`restoreAfterCrash()`), sessions and all.
     public func wake() async throws {
@@ -275,8 +273,6 @@ public actor Sandbox {
     /// Cold Boot — the same as `start()`.
     public func coldBoot() async throws { try await start() }
 
-    @available(*, deprecated, renamed: "deepSleep()")
-    public func sleepToDisk() async throws { try await deepSleep() }
     @available(*, deprecated, renamed: "wake()")
     public func wakeFromDisk() async throws { try await wake() }
     @available(*, deprecated, renamed: "shutDown()")
@@ -309,7 +305,7 @@ public actor Sandbox {
         let taken: RestorePoint.TakenWhile
         switch phase {
         case .off: taken = .stopped
-        case .running, .paused, .asleep, .deepAsleep: taken = .running
+        case .running, .paused, .asleep, .hibernated: taken = .running
         case .booting, .failed: throw SandboxError.invalidPhase(operation: "take a restore point", phase: phase)
         }
         let persisted = identity ?? PersistedSandbox.read(from: layout.persistedState)
@@ -521,7 +517,7 @@ public actor Sandbox {
 
     // MARK: memory (583)
 
-    /// Whether every wake from Deep Sleep ends with `returnFreeMemory()` (default: true).
+    /// Whether every wake from hibernation ends with `returnFreeMemory()` (default: true).
     public private(set) var returnsFreeMemoryOnWake = true
 
     public func setReturnsFreeMemoryOnWake(_ on: Bool) { returnsFreeMemoryOnWake = on }
@@ -540,17 +536,17 @@ public actor Sandbox {
     /// guest's free pages, leaving it `keepingFreeMiB` free (default `defaultFreeReserveMiB`). The
     /// page cache and every process are untouched.
     ///
-    /// Why: the Mac charges a VM for every guest page it has EVER touched. After a wake from Deep
-    /// Sleep that is the whole allocation (restoring a snapshot faults every page in — 582: a 1 GiB
+    /// Why: the Mac charges a VM for every guest page it has EVER touched. After a wake from
+    /// hibernation that is the whole allocation (restoring a snapshot faults every page in — 582: a 1 GiB
     /// Lab held 1,273 MiB woken vs 215 MiB cold-booted), and after work it is the high-water mark.
     /// Ballooned pages leave the VM's footprint at once and are the first the Mac takes back.
     ///
     /// The balloon STAYS inflated — deflating it would charge the pages to the VM again. The guest
     /// still has its whole allocation in an emergency (VZ's balloon deflates on guest OOM, slowly), and
-    /// gets it back at once with `restoreGuestMemory()`. Sleep and Deep Sleep deflate it first (a
+    /// gets it back at once with `restoreGuestMemory()`. Sleep and Hibernate deflate it first (a
     /// snapshot of an inflated balloon does not restore). `wake()` calls this by itself
     /// (`setReturnsFreeMemoryOnWake`). nil when the sandbox is not running or its VM has no balloon
-    /// (one deep-slept by a build before 583, until its next cold boot).
+    /// (one hibernated by a build before 583, until its next cold boot).
     @discardableResult
     public func returnFreeMemory(keepingFreeMiB: UInt64? = nil) async throws -> MemoryReturn? {
         await acquire(); defer { release() }
@@ -637,13 +633,13 @@ public actor Sandbox {
     /// This sandbox has a root disk that the next `start()` will boot (rather than a fresh clone).
     public nonisolated var hasRootDisk: Bool { FileManager.default.fileExists(atPath: layout.rootfs.path) }
 
-    /// What a host app does at quit (owner ruling 2026-09-25): **Deep Sleep**, never a cold stop.
+    /// What a host app does at quit (owner ruling 2026-09-25): **Hibernate**, never a cold stop.
     /// A running, paused or sleeping sandbox is snapshotted and its VM stopped, so the next launch
-    /// `wake()`s it with every session and pid where it was. Deep asleep: left as it is. Booting or
-    /// failed (nothing worth keeping): shut down. If the Deep Sleep itself fails, it shuts down.
+    /// `wake()`s it with every session and pid where it was. Hibernated: left as it is. Booting or
+    /// failed (nothing worth keeping): shut down. If hibernating itself fails, it shuts down.
     ///
     /// 583: a program a session started less than `settle` ago is given the rest of that time before
-    /// the Deep Sleep (580: Claude Code deep-slept within ~1 s of launching exited after the wake in
+    /// it hibernates (580: Claude Code hibernated within ~1 s of launching exited after the wake in
     /// 2 of ~7 runs). Pass `.zero` not to wait.
     public func prepareForExit(settle: Duration = .seconds(3)) async {
         await acquire(); defer { release() }
@@ -651,7 +647,7 @@ public actor Sandbox {
             let wait = Self.exitSettleDelay(sinceLastSessionStart: lastSessionStart.map { ContinuousClock.now - $0 }, settle: settle)
             if wait > .zero {
                 let s = { (d: Duration) in Double(d.components.seconds) + Double(d.components.attoseconds) / 1e18 }
-                note(String(format: "a session's program started %.1f s ago — letting it settle for %.1f s before the Deep Sleep",
+                note(String(format: "a session's program started %.1f s ago — letting it settle for %.1f s before hibernating",
                             s(settle - wait), s(wait)))
                 try? await Task.sleep(for: wait)
             }
@@ -660,15 +656,15 @@ public actor Sandbox {
         case .running, .paused, .asleep:
             let from = phase
             do {
-                for step in LifecyclePlanner.plan(.deepSleep, from: from) ?? [] { try await run(step, target: .deepAsleep) }
-                setPhase(.deepAsleep)
-                note("deep asleep for the quit — the next launch wakes it, sessions and all")
+                for step in LifecyclePlanner.plan(.hibernate, from: from) ?? [] { try await run(step, target: .hibernated) }
+                setPhase(.hibernated)
+                note("hibernated for the quit — the next launch wakes it, sessions and all")
             } catch {
-                note("deep sleep at quit FAILED (\(error.localizedDescription)) — shutting down instead")
+                note("hibernate at quit FAILED (\(error.localizedDescription)) — shutting down instead")
                 await runStopSteps(from: phase)
                 setPhase(.off)
             }
-        case .deepAsleep:
+        case .hibernated:
             for c in connections.values { c.detach(.sandboxSleeping) }
             connections.removeAll()
         case .failed where Self.restorableState(for: spec) != nil:
@@ -779,10 +775,10 @@ public actor Sandbox {
         case .stopVMDirect:
             guard let handle else { return }
             if vzStateIsStopped(handle) { return }
-            try await timed(target == .deepAsleep ? "deep sleep: stopped the VM — RAM freed, state on disk" : "stopped the VM") {
+            try await timed(target == .hibernated ? "hibernate: stopped the VM — RAM freed, state on disk" : "stopped the VM") {
                 try await vz(handle, .stop)
             }
-            if target == .deepAsleep { setPhase(.deepAsleep) }
+            if target == .hibernated { setPhase(.hibernated) }
         case .reviveForStop:
             guard let handle else { return }
             let vmState = handle.queue.sync { handle.vm.state }

@@ -5,7 +5,7 @@ Instant, persistent and resumable Linux sandboxes for your agents, on your own M
 ## Overview
 
 Each *Dozer sandbox* is a full Linux computer with its own VM, its own kernel and a real disk. It
-pauses in about a millisecond. It sleeps, or deep-sleeps and gives your RAM back, then wakes, with
+pauses in about a millisecond. It sleeps, or hibernates and gives your RAM back, then wakes, with
 Claude Code back in well under a second: the same process, the same conversation, the same screen,
 even after your app crashes. It has no network card, only a proxy you control, and your API keys
 never enter it. Keep it as long as you like, throw it away in a click, or fork it into as many
@@ -15,7 +15,7 @@ copies as you need.
 |---|---|
 | **Instant** | pauses in ~1 ms; every sandbox is an instant copy-on-write clone of its image |
 | **Persistent** | a real disk: install once and it is there after every sleep, shut-down and start |
-| **Resumable** | an agent back from Deep Sleep in under a second, same process, same conversation |
+| **Resumable** | an agent back from hibernation in under a second, same process, same conversation |
 | **Crash-proof** | restores after the host app dies, every process at the same PID |
 | **Attachable** | terminal sessions live inside it; attach from anywhere, at any size |
 | **Forkable** | restore points in milliseconds; revert, fork, or save one as an image |
@@ -39,7 +39,7 @@ The vocabulary is the same whether you drive a sandbox through the Swift API or 
 |---|---|---|---|
 | **Pause** (also **Suspend**) | the VM's CPUs freeze | kept | **Resume** |
 | **Sleep** | pause + a snapshot on disk: crash-safe | kept | **Wake** |
-| **Deep Sleep** (also **Hibernate**) | snapshot, then the VM stops | **freed** | **Wake**, in under a second |
+| **Hibernate** | snapshot, then the VM stops | **freed** | **Wake**, in under a second |
 | **Shut Down** | a cold stop: programs end, the disk is kept | freed | **Start** (also **Cold Boot**) |
 
 See <doc:Concepts> for the full vocabulary (images, sessions, network, keys and accounts) and

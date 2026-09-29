@@ -132,7 +132,7 @@ func networkSuite() async throws {
 
     // Sleep to disk → wake.
     print("vmtest[network]: sleep to disk → wake")
-    try await sb.deepSleep()
+    try await sb.hibernate()
     try await sb.wake()
     check(proxy.isListening, "the proxy listens again after the wake")
     try await networkChecks(sb, log: log, phase: "after wake")
@@ -164,18 +164,18 @@ func networkCrashSave() async throws -> Int32 {
     try await sb.start()
     let r = try await sb.exec(["sh", "-c", "getent hosts registry.npmjs.org >/dev/null && echo ok"], privileged: true)
     guard r.output.contains("ok") else { return 3 }
-    // A session to find again, then QUIT the way an app does (prepareForExit from RUNNING = Deep Sleep).
+    // A session to find again, then QUIT the way an app does (prepareForExit from RUNNING = Hibernate).
     try await sb.openSession("hold", argv: ["sleep", "3600"])
     let pid = try await sb.sessions().first { $0.name == "hold" }?.pid ?? -1
     try "\(pid)".write(to: storeRoot.appendingPathComponent("net-crash-pid.txt"), atomically: true, encoding: .utf8)
     await sb.prepareForExit()
-    return await sb.phase == .deepAsleep ? 0 : 4
+    return await sb.phase == .hibernated ? 0 : 4
 }
 
 /// Crash restore of a PROXIED sandbox: a new process adopts it, the proxy listens on the adopted
 /// VM, the guest's shim (still running in the restored memory) reaches it, the policy still applies.
 func networkCrashSuite() async throws {
-    print("vmtest[network]: quit while RUNNING → relaunch: a child quits (prepareForExit = Deep Sleep), this process wakes it")
+    print("vmtest[network]: quit while RUNNING → relaunch: a child quits (prepareForExit = Hibernate), this process wakes it")
     let spec = netSpec("net-crash", policy: .agent)
     if Sandbox.restorableState(for: spec) != nil { Sandbox.discardRestorableState(for: spec) }
     try? await Sandbox(spec: spec).delete()
@@ -184,8 +184,8 @@ func networkCrashSuite() async throws {
     child.arguments = ["net-crash-save", "--store", storeRoot.path]
     try child.run()
     child.waitUntilExit()
-    check(child.terminationStatus == 0 && Sandbox.restorableState(for: spec)?.phase == .deepAsleep,
-          "quitting with the proxied sandbox RUNNING left it deep asleep, not shut down (\(child.terminationStatus))")
+    check(child.terminationStatus == 0 && Sandbox.restorableState(for: spec)?.phase == .hibernated,
+          "quitting with the proxied sandbox RUNNING left it hibernated, not shut down (\(child.terminationStatus))")
     let sb = try Sandbox(spec: spec)
     let t0 = Date()
     try await sb.wake()

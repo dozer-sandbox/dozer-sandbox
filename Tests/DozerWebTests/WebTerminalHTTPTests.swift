@@ -176,11 +176,11 @@ final class WebTerminalHTTPTests: XCTestCase {
     }
 
     func testWatchOnlyNeverReachesTheHostAndNeverResizesTheSession() throws {
-        fake.phase = "deepAsleep"
-        let a = FakeAttachment(.held(session: "shell", phase: "deepAsleep"))
+        fake.phase = "hibernated"
+        let a = FakeAttachment(.held(session: "shell", phase: "hibernated"))
         let (ws, _, _) = try open(a, body: #"{"mode":"watch","cols":100,"rows":30}"#)
-        let s = try ws.readText(containing: #""kind":"deepAsleep""#)
-        XCTAssertTrue(s.contains(#""headline":"Sandbox in deep sleep""#), s)
+        let s = try ws.readText(containing: #""kind":"hibernated""#)
+        XCTAssertTrue(s.contains(#""headline":"Sandbox hibernated""#), s)
         XCTAssertTrue(s.contains(#""mode":"watch""#))
         XCTAssertEqual(fake.attaches.first?.size, TermSize(cols: 0, rows: 0), "HELLO 0×0 keeps the session's size")
         try ws.sendBinary(Array("x".utf8))
@@ -220,10 +220,10 @@ final class WebTerminalHTTPTests: XCTestCase {
     func testWhileNotRunningAKeystrokeWakesAndAReportNeverDoes() throws {
         fake.hold = true                                                      // the wake stays in flight
         defer { fake.hold = false }
-        fake.phase = "deepAsleep"
-        let a = FakeAttachment(.held(session: "shell", phase: "deepAsleep"))
+        fake.phase = "hibernated"
+        let a = FakeAttachment(.held(session: "shell", phase: "hibernated"))
         let (ws, _, _) = try open(a)
-        _ = try ws.readText(containing: #""headline":"Sandbox in deep sleep · press any key to wake""#)
+        _ = try ws.readText(containing: #""headline":"Sandbox hibernated · press any key to wake""#)
         for report in ["\u{1B}[I", "\u{1B}[O", "\u{1B}[12;40R", "\u{1B}[?62;22c", "\u{1B}[<35;1;1M"] {
             try ws.sendBinary(Array(report.utf8))
         }
@@ -413,10 +413,10 @@ final class WebTerminalHTTPTests: XCTestCase {
     }
 
     func testAWakeByKeySaysHowLongItTook() throws {
-        fake.phase = "deepAsleep"
-        let a = FakeAttachment(.held(session: "shell", phase: "deepAsleep"))
+        fake.phase = "hibernated"
+        let a = FakeAttachment(.held(session: "shell", phase: "hibernated"))
         let (ws, _, _) = try open(a)
-        _ = try ws.readText(containing: #""kind":"deepAsleep""#)
+        _ = try ws.readText(containing: #""kind":"hibernated""#)
         try ws.sendBinary(Array("x".utf8))
         wait("the wake") { fake.performedOps == [.wake] }
         usleep(300_000)
@@ -441,15 +441,15 @@ final class WebTerminalHTTPTests: XCTestCase {
         ws.close()
     }
 
-    func testADeepSleepReattachesOnTheSameSocket() throws {
+    func testAHibernateReattachesOnTheSameSocket() throws {
         let first = FakeAttachment(.attached(session: "shell"))
-        let second = FakeAttachment(.held(session: "shell", phase: "deepAsleep"))
+        let second = FakeAttachment(.held(session: "shell", phase: "hibernated"))
         let (ws, _, _) = try open(first)
         fake.script(second)                                                    // what the reattach gets
         first.feed("before")
         XCTAssertEqual(try ws.readBinary(), Array("before".utf8))
-        first.hangUp()                                                         // Deep Sleep closes the host connection
-        _ = try ws.readText(containing: #""kind":"deepAsleep""#)
+        first.hangUp()                                                         // Hibernate closes the host connection
+        _ = try ws.readText(containing: #""kind":"hibernated""#)
         wait("the reattach") { fake.attachCount == 2 }
         second.feed("\u{1B}c" + "before")                                      // woken: the host attaches it and sends the SNAPSHOT
         XCTAssertEqual(try ws.readBinary(), Array("\u{1B}cbefore".utf8))

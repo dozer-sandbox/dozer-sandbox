@@ -23,8 +23,7 @@ public enum HostProtocol {
 /// Every operation the host serves.
 public enum HostOp: String, Codable, Sendable, CaseIterable {
     case ping
-    case create, start, wake, pause, resume, sleep
-    case deepSleep = "deep-sleep"
+    case create, start, wake, pause, resume, sleep, hibernate
     case shutdown, reset, rm
     case ls, inspect, sessions
     case openSession = "open-session"
@@ -318,7 +317,7 @@ public enum PhaseName {
         case .running: "running"
         case .paused: "paused"
         case .asleep: "asleep"
-        case .deepAsleep: "deep asleep"
+        case .hibernated: "hibernated"
         case .failed: "failed"
         }
     }
@@ -331,14 +330,14 @@ public struct SandboxInfo: Codable, Equatable, Sendable {
     public var name: String
     /// `lab`, `claude-code`, `pi`, or `custom:<name>`.
     public var image: String
-    /// `Phase.rawValue`: off, booting, running, paused, asleep, deepAsleep, failed.
+    /// `Phase.rawValue`: off, booting, running, paused, asleep, hibernated, failed.
     public var phase: String
     public var busy: Bool
     public var cpus: Int
     /// The guest's allocation.
     public var memoryMiB: UInt64
     /// Guest RAM the Mac is charged for now: the allocation while a VM exists, less what the
-    /// memory balloon handed back; 0 deep asleep or off.
+    /// memory balloon handed back; 0 hibernated or off.
     public var ramHeldMiB: UInt64
     /// What the balloon currently holds for the Mac (583).
     public var memoryReturnedMiB: UInt64

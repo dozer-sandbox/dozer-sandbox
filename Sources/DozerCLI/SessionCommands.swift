@@ -40,7 +40,7 @@ struct Inspect: AsyncParsableCommand {
 }
 
 struct Sessions: AsyncParsableCommand {
-    static let configuration = CommandConfiguration(abstract: "The sandbox's terminal sessions (they survive pause, sleep and deep sleep).")
+    static let configuration = CommandConfiguration(abstract: "The sandbox's terminal sessions (they survive pause, sleep and hibernate).")
     @OptionGroup var g: GlobalOptions
     @Argument var name: String
 
@@ -60,7 +60,7 @@ struct Sessions: AsyncParsableCommand {
 struct Attach: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         abstract: "Attach this terminal to a session (a paused or sleeping sandbox is woken).",
-        discussion: "Ctrl-] detaches (the session keeps running). A Deep Sleep disconnects you; the client waits and reattaches when the sandbox runs again.")
+        discussion: "Ctrl-] detaches (the session keeps running). Hibernating disconnects you; the client waits and reattaches when the sandbox runs again.")
     @OptionGroup var g: GlobalOptions
     @Argument var name: String
     @Argument(help: "The session (default: the image's own — claude, pi or shell).") var session: String?

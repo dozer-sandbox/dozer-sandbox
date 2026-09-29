@@ -56,12 +56,12 @@
     @Section(title: "The lifecycle") {
         @ContentAndMedia {
             Try each step and watch `doz ls` between them. `top` never stops counting from its
-            own point of view: same process, same PID, same screen, even across a deep sleep.
+            own point of view: same process, same PID, same screen, even across a hibernation.
         }
 
         @Steps {
             @Step {
-                Pause, sleep and deep-sleep the sandbox, then reattach.
+                Pause, sleep and hibernate the sandbox, then reattach.
 
                 @Code(name: "Terminal", file: "02-lifecycle.sh")
             }
@@ -124,8 +124,8 @@
 
     @Section(title: "Quit and come back") {
         @ContentAndMedia {
-            A Deep Sleep keeps the running program itself, not just its files. Stopping the host
-            deep-sleeps everything still running first.
+            Hibernate keeps the running program itself, not just its files. Stopping the host
+            hibernates everything still running first.
         }
 
         @Steps {

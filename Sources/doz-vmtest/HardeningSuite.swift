@@ -5,17 +5,17 @@ import DozerKit
 // 583 — the hardening suite (`doz-vmtest hardening`, or one of its parts by name). Each part is
 // the regression test for a hazard the 582 scaling probe found:
 //
-//   discard     582 §8: `discardRestorableState` + `start()` cold-booted a root disk its deep-slept
+//   discard     582 §8: `discardRestorableState` + `start()` cold-booted a root disk its hibernated
 //               VM never unmounted (ext4, no journal) — 12 of 15 boots failed. N cycles of
-//               start → write → Deep Sleep → discard (a NEW Sandbox object, as a new process)
+//               start → write → Hibernate → discard (a NEW Sandbox object, as a new process)
 //               → start, each boot checked for ext4 errors. Must be 0 failures.
 //   leak        582 §7: every VM instance the host made kept an 8-thread NIO event-loop group
-//               after Deep Sleep (~5 threads, ~6 kqueue fds, ~1 MiB per cycle, never returned).
-//               N Deep Sleep → Wake cycles, alternating a same-object wake with a wake through a
+//               after Hibernate (~5 threads, ~6 kqueue fds, ~1 MiB per cycle, never returned).
+//               N Hibernate → Wake cycles, alternating a same-object wake with a wake through a
 //               NEW Sandbox object (a new VM instance — the path that leaked); the host's thread,
 //               fd and footprint counts must stay flat.
 //   concurrent  582 §8: 2 of 31 concurrent wakes threw "The channel was closed" although the
-//               sandbox came up. N sandboxes deep-slept together and woken together, same-object
+//               sandbox came up. N sandboxes hibernated together and woken together, same-object
 //               and new-object rounds; 0 errors, and every one answers an exec afterwards.
 //
 // Inputs: the suite's usual --store / $DOZ_SUBNET; HARDEN_CYCLES (discard, default 15),
@@ -45,7 +45,7 @@ func hostFDs(_ p: pid_t = getpid()) -> Int {
     return Int(proc_pidinfo(p, PROC_PIDLISTFDS, 0, &fds, Int32(fds.count * MemoryLayout<proc_fdinfo>.stride))) / MemoryLayout<proc_fdinfo>.stride
 }
 
-/// Sandboxes a part created but may not drop: a deep-asleep `Sandbox` object still owns the
+/// Sandboxes a part created but may not drop: a hibernated `Sandbox` object still owns the
 /// package's objects for its VM (as a host's registry would keep it).
 nonisolated(unsafe) var hardeningKeep: [Sandbox] = []
 
@@ -87,7 +87,7 @@ func discardSuite() async throws {
         let w = try await sb.exec(["sh", "-c", "mkdir -p /root/d\(i) && for n in $(seq 1 40); do echo \(i)-$n > /root/d\(i)/f$n; done; echo ok"])
         if !w.output.contains("ok") { info("cycle \(i): write failed \(w.errorOutput)") }
         try await sb.openSession("s\(i)", argv: ["bash", "-l"], size: .standard)
-        try await sb.deepSleep()
+        try await sb.hibernate()
         // What a host does when a wake failed or the user chose to start fresh: throw the
         // snapshot away (as a new process would) and cold-boot the kept disk.
         Sandbox.discardRestorableState(for: spec)
@@ -141,7 +141,7 @@ final class NoteLog: @unchecked Sendable {
     func stop() { task?.cancel() }
 }
 
-// MARK: Deep Sleep → Wake cycles: threads, fds, footprint (item 2)
+// MARK: Hibernate → Wake cycles: threads, fds, footprint (item 2)
 
 struct HostSample: CustomStringConvertible {
     let threads: Int, fds: Int, footprintMiB: Double
@@ -152,7 +152,7 @@ struct HostSample: CustomStringConvertible {
 func leakSuite() async throws {
     // A: what a long-lived host does — one Sandbox object per sandbox, cycled.
     // B: a NEW Sandbox object (a new VM instance — the path that stranded an event-loop group) every
-    //    cycle; the old object is kept, as a host registry would keep it (dropping a deep-asleep one
+    //    cycle; the old object is kept, as a host registry would keep it (dropping a hibernated one
     //    is not supported), so each still holds its VM's boot-log file: +1 fd per object, expected.
     try await leakCycles("A same object", cycles: envInt("HARDEN_LEAK_CYCLES", 200), newObjects: false)
     try await leakCycles("B new object", cycles: envInt("HARDEN_LEAK_NEW_CYCLES", 60), newObjects: true)
@@ -163,11 +163,11 @@ func leakCycles(_ label: String, cycles: Int, newObjects: Bool) async throws {
     var spec = try hardenSpec("harden-leak")
     spec.network = .none
     var sb = try await freshSandbox(spec)
-    print("vmtest[hardening]: leak \(label): \(cycles) Deep Sleep → Wake cycles")
+    print("vmtest[hardening]: leak \(label): \(cycles) Hibernate → Wake cycles")
     try await sb.start()
     try await sb.openSession("tick", argv: ["bash", "/work/tick.sh"], size: .standard)
     let pid = try await sb.sessions().first { $0.name == "tick" }?.pid
-    try await sb.deepSleep()
+    try await sb.hibernate()
     let start = HostSample.now()
     info("before the cycles: \(start)")
     let warmup = min(20, cycles / 2)
@@ -183,11 +183,11 @@ func leakCycles(_ label: String, cycles: Int, newObjects: Bool) async throws {
         do {
             try await sb.wake()
             wakeMs.append(Date().timeIntervalSince(t0) * 1000)
-            try await sb.deepSleep()
+            try await sb.hibernate()
         } catch {
             errors += 1
             info("cycle \(i): \(error)")
-            if await sb.phase != .deepAsleep { break }
+            if await sb.phase != .hibernated { break }
         }
         if i == warmup { try? await Task.sleep(for: .seconds(1)); base = HostSample.now(); info("after \(i) cycles (baseline): \(base)") }
         if i % 50 == 0 { info("after \(i) cycles: \(HostSample.now())") }
@@ -197,7 +197,7 @@ func leakCycles(_ label: String, cycles: Int, newObjects: Bool) async throws {
     let n = cycles - warmup
     info("after \(cycles) cycles: \(end)")
     info(String(format: "wake p50 %.0f ms · max %.0f ms", wakeMs.sorted()[wakeMs.count / 2], wakeMs.max() ?? 0))
-    check(errors == 0, "leak \(label): \(cycles) Deep Sleep → Wake cycles, \(errors) errors")
+    check(errors == 0, "leak \(label): \(cycles) Hibernate → Wake cycles, \(errors) errors")
     check(end.threads - base.threads <= 4, "leak \(label): threads flat over the last \(n) cycles: \(base.threads) → \(end.threads) (from \(start.threads) before any)")
     check(end.fds - base.fds <= 4 + objects,
           "leak \(label): fds flat over the last \(n) cycles: \(base.fds) → \(end.fds) (from \(start.fds))" + (newObjects ? " — \(objects) kept objects' boot-log files allowed" : ""))
@@ -225,10 +225,10 @@ func concurrentSuite() async throws {
         let sb = try await freshSandbox(s)
         try await sb.start()
         try await sb.openSession("tick", argv: ["bash", "/work/tick.sh"], size: .standard)
-        try await sb.deepSleep()
+        try await sb.hibernate()
         sbs.append(sb)
     }
-    info("\(n) sandboxes deep asleep")
+    info("\(n) sandboxes hibernated")
     var wakeErrors = 0, sleepErrors = 0, deadAfter = 0, total = 0
     func all(_ label: String, _ op: @escaping @Sendable (Sandbox) async throws -> Void) async -> [(Int, Double, String?)] {
         await withTaskGroup(of: (Int, Double, String?).self) { g in
@@ -270,17 +270,17 @@ func concurrentSuite() async throws {
             if r?.output.contains("up") != true { dead += 1 }
         }
         deadAfter += dead
-        let d = await all("deep sleep") { try await $0.deepSleep() }
+        let d = await all("hibernate") { try await $0.hibernate() }
         let dErr = d.filter { $0.2 != nil }
         sleepErrors += dErr.count
-        for e in dErr { info("round \(round): \(specs[e.0].name) deep sleep threw: \(e.2!)") }
+        for e in dErr { info("round \(round): \(specs[e.0].name) hibernate threw: \(e.2!)") }
         let per = w.map(\.1).sorted()
-        info(String(format: "round %d%@: %d woken together in %.0f ms (each p50 %.0f · max %.0f ms) · wake errors %d · not answering %d · deep-sleep errors %d",
+        info(String(format: "round %d%@: %d woken together in %.0f ms (each p50 %.0f · max %.0f ms) · wake errors %d · not answering %d · hibernate errors %d",
                     round, newObjects ? " (new objects: restore)" : "", n, ms, per[per.count / 2], per.last ?? 0, errs.count, dead, dErr.count))
     }
     check(wakeErrors == 0, "\(total) concurrent wakes (\(n) at a time): \(wakeErrors) errors")
     check(deadAfter == 0, "every woken sandbox answered an exec (\(deadAfter) did not)")
-    check(sleepErrors == 0, "concurrent Deep Sleeps: \(sleepErrors) errors")
+    check(sleepErrors == 0, "concurrent hibernations: \(sleepErrors) errors")
     for sb in sbs { try? await sb.shutDown(); try? await sb.delete() }
 }
 
@@ -325,11 +325,11 @@ func memorySuite() async throws {
         return vmHelper(of: spec.name).map { hostFootprintMiB($0) } ?? -1
     }
     let cold = await footprint()
-    try await sb.deepSleep()
+    try await sb.hibernate()
     await sb.setReturnsFreeMemoryOnWake(false)
     try await sb.wake()
     let plain = await footprint()
-    try await sb.deepSleep()
+    try await sb.hibernate()
     await sb.setReturnsFreeMemoryOnWake(true)
     let t0 = Date()
     try await sb.wake()
@@ -340,14 +340,14 @@ func memorySuite() async throws {
                 cold, plain, ballooned, held, wakeMs))
     check(plain > 1000, String(format: "woken without the balloon the VM holds its allocation (%.0f MiB)", plain))
     check(held > 500 && ballooned < plain * 0.6, String(format: "woken, it gives %llu MiB back: %.0f → %.0f MiB", held, plain, ballooned))
-    // Every snapshot path deflates first — from running (Sleep, Deep Sleep) and from Pause.
+    // Every snapshot path deflates first — from running (Sleep, Hibernate) and from Pause.
     try await sb.pause()
     try await sb.sleep()
     try await sb.wake()
-    try await sb.deepSleep()
+    try await sb.hibernate()
     try await sb.wake()
     let s = try await sb.sessions().first { $0.name == "tick" }
-    check(await sb.phase == .running && s?.isEnded == false, "Pause → Sleep → Wake → Deep Sleep → Wake with the balloon held: running, session alive")
+    check(await sb.phase == .running && s?.isEnded == false, "Pause → Sleep → Wake → Hibernate → Wake with the balloon held: running, session alive")
     try await sb.restoreGuestMemory()
     check(await sb.memoryReturnedMiB == 0, "restoreGuestMemory gives the guest its whole allocation back")
     let r = try await sb.returnFreeMemory()
@@ -385,8 +385,8 @@ func subnetSuite() async throws {
     check(pool.contains(subnets[0]) && pool.contains(subnets[1]), "no subnet asked for → one from the pool (\(subnets[0]), \(subnets[1]))")
     check(subnets[0] != subnets[1], "two sandboxes in one process get different subnets")
     check(subnets[2] == override, "an explicit SandboxSpec.subnet stays an override (\(subnets[2]))")
-    // Deep Sleep → Wake keeps the subnet (a restore needs its guest's addresses).
-    try await a.deepSleep()
+    // Hibernate → Wake keeps the subnet (a restore needs its guest's addresses).
+    try await a.hibernate()
     try await a.wake()
     let after = PersistedSandbox.read(from: a.layout.persistedState)?.subnet
     check(after == subnets[0], "a wake keeps the automatic subnet (\(after ?? "?"))")
@@ -403,7 +403,7 @@ func settleSuite() async throws {
     let t0 = Date()
     await sb.prepareForExit()
     let waited = Date().timeIntervalSince(t0)
-    check(await sb.phase == .deepAsleep && waited >= 2.3, String(format: "a session opened just now: the quit waited %.1f s, then deep-slept", waited))
+    check(await sb.phase == .hibernated && waited >= 2.3, String(format: "a session opened just now: the quit waited %.1f s, then hibernated", waited))
     try await sb.wake()
     let s = try await sb.sessions().first { $0.name == "tick" }
     check(s != nil && s?.isEnded == false, "the program is alive after the wake")

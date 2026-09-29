@@ -12,7 +12,7 @@ import DozerHost
 /// and `account add` (a secret is never entered in a browser — owner ruling D3), `host stop`.
 public enum WebAction: Equatable, Sendable {
     case create(name: String, options: CreateOptions)
-    /// start, wake, pause, resume, sleep, deep-sleep, shutdown, reset, rm.
+    /// start, wake, pause, resume, sleep, hibernate, shutdown, reset, rm.
     case lifecycle(HostOp, name: String)
     /// A session: the image's own when `argv` is nil, else a new one running `argv` (detached — no
     /// shell in front, inside the sandbox only).
@@ -38,7 +38,7 @@ public enum WebAction: Equatable, Sendable {
     case accountRemove(String)
 
     public static let lifecycleOps: [String: HostOp] = [
-        "start": .start, "wake": .wake, "pause": .pause, "resume": .resume, "sleep": .sleep, "deep-sleep": .deepSleep,
+        "start": .start, "wake": .wake, "pause": .pause, "resume": .resume, "sleep": .sleep, "hibernate": .hibernate,
         "shutdown": .shutdown, "reset": .reset, "rm": .rm,
     ]
 
@@ -77,7 +77,7 @@ public enum WebAction: Equatable, Sendable {
         return [r.op.rawValue, r.name ?? "", r.session ?? "", r.point ?? r.pointName ?? "", r.image ?? "", r.account ?? "", r.newName ?? ""].joined(separator: "|")
     }
 
-    /// A short label for the progress line ("deep-sleep lab1").
+    /// A short label for the progress line ("hibernate lab1").
     public var label: String {
         let r = hostRequest
         return [r.op.rawValue, r.name ?? r.image ?? r.account].compactMap { $0 }.joined(separator: " ")

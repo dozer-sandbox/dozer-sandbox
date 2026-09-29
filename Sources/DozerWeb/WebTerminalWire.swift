@@ -221,11 +221,11 @@ public enum TerminalInputClassifier {
 }
 
 /// 591 — what covers a terminal: nothing while the sandbox runs and the screen is back; the state and
-/// its one action while it is paused, asleep, deep asleep or shut down; a spinner while something is
+/// its one action while it is paused, asleep, hibernated or shut down; a spinner while something is
 /// in flight. SandboxLab's `PaneCover` (581), ported — the same states, the same wording.
 public struct WebTerminalCover: Equatable, Encodable, Sendable {
     public enum Kind: String, Encodable, Sendable {
-        case none, paused, asleep, deepAsleep, shutDown, failed, working, reattaching
+        case none, paused, asleep, hibernated, shutDown, failed, working, reattaching
         /// 591: the boot view — no cover; the pane itself shows the boot as it happens.
         case boot
     }
@@ -266,10 +266,10 @@ public struct WebTerminalCover: Equatable, Encodable, Sendable {
         case .asleep:
             return WebTerminalCover(kind: .asleep, headline: "Sandbox asleep" + (watch ? "" : key + "wake"), detail: "RAM kept, state saved to disk",
                                     action: .wake, spinner: false, since: since, elapsedVerb: "asleep")
-        case .deepAsleep:
-            return WebTerminalCover(kind: .deepAsleep, headline: "Sandbox in deep sleep" + (watch ? "" : key + "wake"),
+        case .hibernated:
+            return WebTerminalCover(kind: .hibernated, headline: "Sandbox hibernated" + (watch ? "" : key + "wake"),
                                     detail: "RAM freed, state on disk — every process comes back", action: .wake, spinner: false, since: since,
-                                    elapsedVerb: "asleep")
+                                    elapsedVerb: "hibernated")
         case .off:
             return WebTerminalCover(kind: .shutDown, headline: "Sandbox shut down",
                                     detail: hasRootDisk ? "The disk is kept; Start cold-boots it." : "Start boots a fresh copy of the image.",
@@ -295,7 +295,7 @@ public struct WebTerminalCover: Equatable, Encodable, Sendable {
         case "resume": "Resuming…"
         case "pause": "Pausing…"
         case "sleep": "Going to sleep…"
-        case "deep-sleep": "Going into deep sleep…"
+        case "hibernate": "Hibernating…"
         case "shutdown": "Shutting down…"
         case "reset": "Resetting to the image…"
         case "rm": "Deleting the sandbox…"

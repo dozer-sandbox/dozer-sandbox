@@ -17,8 +17,8 @@ Like for like: the same pinned images, median of 5 runs (feature 580).
 | cold start → working (agents: first screen) | 0.74 s | 1.46 s | 2.52 s* |
 | pause / resume | ~1 ms / ~1 ms | ~2 ms / ~1 ms | ~2 ms / ~1 ms |
 | sleep (snapshot, RAM kept) / wake | 0.40 s / 3 ms | 1.25 s / 6 ms | 1.14 s / 5 ms |
-| deep sleep (RAM returned) | 0.41 s | 1.16 s | 1.18 s |
-| **back after deep sleep, same process** | **0.29 s** | **0.57 s** | **0.56 s** |
+| hibernate (RAM returned) | 0.41 s | 1.16 s | 1.18 s |
+| **back after hibernation, same process** | **0.29 s** | **0.57 s** | **0.56 s** |
 | reattached terminal redrawn | 8–56 ms | ~25 ms | 11–36 ms |
 | restore after the host app crashed | 0.3–0.7 s | 0.8–1.3 s | ~0.7 s |
 | snapshot size, idle | 66 MiB | 150–236 MiB | 148–190 MiB |
@@ -33,7 +33,7 @@ Like for like: the same pinned images, median of 5 runs (feature 580).
 The same image spec measured four ways: **cold** (nothing cached — pull, flatten, bake), **baked**
 (today's normal `start()` — the image is already cached), **warm** (a baked image whose bake also
 ran the agent once, so its first launch has no first-run setup screens) and **hot** (a template
-sandbox woken from Deep Sleep — a **cloned**, not fresh, identity):
+sandbox woken from hibernation — a **cloned**, not fresh, identity):
 
 | kind | cold | baked | warm | hot (wake) |
 |---|---:|---:|---:|---:|
@@ -52,12 +52,12 @@ Measured on an M3 MacBook Air (24 GB, fanless) while its owner's other apps alre
 
 | tier | how many on this Air | limited by |
 |---|---:|---|
-| **cold** (deep asleep) | **~14,000** | disk — 100 built in 8.5 minutes, 0 errors, 10.66 GiB total |
+| **cold** (hibernated) | **~14,000** | disk — 100 built in 8.5 minutes, 0 errors, 10.66 GiB total |
 | **hot, cold-booted** | 8–12 | RAM (215 MiB lab / 647 MiB claude-code each) |
-| **hot, woken from Deep Sleep** | 6 | RAM (1,273 MiB lab / ~2,340 MiB claude-code — mostly zero pages, which compress) |
+| **hot, woken from hibernation** | 6 | RAM (1,273 MiB lab / ~2,340 MiB claude-code — mostly zero pages, which compress) |
 
 Wake stays fast under load (redrawn screen ~0.5 s lab / ~0.95 s claude-code, flat from 1 to 12
-running); 200 wake → work → deep-sleep cycles ran with 0 errors, no slowdown, and memory back to
+running); 200 wake → work → hibernate cycles ran with 0 errors, no slowdown, and memory back to
 baseline every time. A memory balloon (583) narrows the "hot, woken" line: a woken sandbox now
 gives back what it does not use, roughly halving its held RAM (see the library guide's Sandbox
 maintenance calls).
@@ -69,7 +69,7 @@ blocks with the base and each other:
 
 | | before 587 (journal-less) | with the 587 journal (default, 16 MiB) |
 |---|---|---|
-| cold boot after a discarded Deep Sleep | `e2fsck` helper VM, ~1,030 ms | journal replay, **~380 ms**, 15/15 `e2fsck -fn` clean |
+| cold boot after a discarded hibernation | `e2fsck` helper VM, ~1,030 ms | journal replay, **~380 ms**, 15/15 `e2fsck -fn` clean |
 | fsync-heavy work | baseline | ~1.7× slower (0.16 vs 0.09 ms/fsync) |
 | metadata-heavy work (many small files + sync) | baseline | ~3× faster |
 
@@ -86,7 +86,7 @@ boot ID):
 
 | | cold start → first screen | park (RAM freed) | back → first screen | what survived |
 |---|---:|---:|---:|---|
-| **DozerKit** | 1.46 s | deep sleep 1.16 s | **0.57 s** | **the same process, session and screen** (15/15) |
+| **DozerKit** | 1.46 s | hibernate 1.16 s | **0.57 s** | **the same process, session and screen** (15/15) |
 | Docker containers | 0.78 s | `docker stop` 0.12 s | 0.71 s | a restart; files only |
 | Docker Sandboxes (`sbx`) | 5.12 s | `sbx stop` 5.31 s | 1.28 s | a restart; files only |
 | Apple `container` CLI | 2.24 s | `container stop` 0.18 s | 2.01 s | a restart; files only |

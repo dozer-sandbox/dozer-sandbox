@@ -1,6 +1,6 @@
 # `doz` user guide
 
-`doz` runs Linux sandboxes on your Mac that pause in a millisecond, deep-sleep to disk and wake
+`doz` runs Linux sandboxes on your Mac that pause in a millisecond, hibernate to disk and wake
 in about a third of a second, with the programs inside them still running where they were. It is
 the command-line face of DozerKit. New to it? Start with the
 [walkthrough](CLI-WALKTHROUGH.md).
@@ -11,7 +11,7 @@ the command-line face of DozerKit. New to it? Start with the
 |---|---|
 | **Sandbox** | One Linux VM with its own disk, named by you (`a-z 0-9 -`, 1–40 characters). |
 | **Image** | What a sandbox starts from: a baked, read-only disk. Built in: `lab` (Alpine + bash, 1 GiB RAM), `claude-code` and `pi` (Debian `node` + the agent, 2 GiB). Custom images are saved from a sandbox. |
-| **Session** | A terminal program living in the sandbox (a shell, `claude`, `pi`). It survives pause, sleep and deep sleep. You *attach* to it and *detach* from it; it keeps running either way. |
+| **Session** | A terminal program living in the sandbox (a shell, `claude`, `pi`). It survives pause, sleep and hibernate. You *attach* to it and *detach* from it; it keeps running either way. |
 | **Workspace** | A folder of your Mac shared into the sandbox at `/workspace`. |
 | **Host** | One background `doz` process per user and store. It owns every running VM, the network proxy and the keys. It starts when needed and exits when idle, so you never manage it. |
 | **Store** | Where everything lives on disk: `~/Library/Application Support/dozer-sandbox` unless `--store` or `$DOZ_STORE` says otherwise. Each store has its own images, sandboxes and host. |
@@ -37,7 +37,7 @@ development.
     ▲                             │  ▲                 resume
     │ shutdown (keeps the disk)   │  │ wake
     └─────────────────────────────┤  ├──────────── asleep       (sleep: snapshot, RAM kept)
-                                  │  └──────────── deep asleep  (deep-sleep / hibernate: snapshot, RAM returned)
+                                  │  └──────────── hibernated   (hibernate: snapshot, RAM returned)
 ```
 
 | command | does | typical time | RAM | programs |
@@ -45,7 +45,7 @@ development.
 | `start NAME` (`cold-boot`) | boots; wakes it if asleep, resumes it if paused | ~0.4 s (the first ever start also bakes the image) | allocated as used | start fresh |
 | `pause NAME` (`suspend`) · `resume NAME` | stops the guest CPU | ~1 ms | kept | frozen, then continue |
 | `sleep NAME` · `wake NAME` | pause + snapshot to disk; survives the host crashing | ~0.3 s | kept | continue |
-| `deep-sleep NAME` (`hibernate`) · `wake NAME` | snapshot, then the VM stops | ~0.35 s / ~0.3 s | **returned** | continue: same PIDs, same screens |
+| `hibernate NAME` · `wake NAME` | snapshot, then the VM stops | ~0.35 s / ~0.3 s | **returned** | continue: same PIDs, same screens |
 | `shutdown NAME` | a cold stop; the disk is kept | | returned | end |
 | `reset NAME` | shut down and go back to a fresh copy of the image (restore points and the agent's state disk stay) | | | end |
 | `rm NAME` | remove the sandbox and everything it has on disk | | | end |
@@ -53,7 +53,7 @@ development.
 `shutdown`, `reset` and `rm` ask first. `--yes` skips the question. Without a terminal and without
 `--yes` they refuse (exit 5), so a script can never destroy something by accident.
 
-A program started less than 3 s before a deep sleep gets the rest of those 3 s first. Programs cut
+A program started less than 3 s before hibernating gets the rest of those 3 s first. Programs cut
 off mid-startup (Claude Code's first network calls, for example) can otherwise fail on wake.
 
 ## Creating and entering sandboxes
@@ -78,14 +78,14 @@ doz up NAME [same options] [--session S] [-d] [-- CMD …]
 
 | | |
 |---|---|
-| `doz attach NAME [SESSION]` | Your terminal becomes that session. **Ctrl-]** detaches (`--detach-key ctrl-x` or `none`). A paused or sleeping sandbox is woken first (`--no-wake` waits instead). If the sandbox deep-sleeps while you are attached, the client waits and reattaches by itself when it wakes. |
+| `doz attach NAME [SESSION]` | Your terminal becomes that session. **Ctrl-]** detaches (`--detach-key ctrl-x` or `none`). A paused or sleeping sandbox is woken first (`--no-wake` waits instead). If the sandbox hibernates while you are attached, the client waits and reattaches by itself when it wakes. |
 | `doz run NAME [--session S] [-d] -- CMD …` | Open a **new** session running CMD and attach. It exits with CMD's exit code. There is no shell in front, so write `bash -lc '…'` if you want one. |
 | `doz exec NAME [--user U] [--workdir D] [-e K=V] [--timeout S] -- CMD …` | One-shot, no terminal: stdout, stderr and the exit code pass straight through (default timeout 120 s). On agent images it runs as the agent's user in `/workspace`; `--user root` for root. |
 | `doz sessions NAME` | The sandbox's sessions. |
 | `doz ls` · `doz inspect NAME` | Every sandbox: image, phase, RAM held, disk, sessions, network · everything about one, as JSON. |
 
 **RAM held** in `ls` is what the VM costs your Mac right now: the allocation, less what the memory
-balloon handed back after a wake. It is shown as `—` when the sandbox is off or deep asleep.
+balloon handed back after a wake. It is shown as `—` when the sandbox is off or hibernated.
 
 ## Agents and keys
 
@@ -213,7 +213,7 @@ doz key rm NAME --anthropic
   `host stop`, a reboot), set it again. Accounts and keychain keys are read again whenever a new
   host loads the sandbox.
 - **Sessions survive a host restart with their credentials.** The sandbox's `doz.json` keeps
-  a sha256 of each live placeholder, never the placeholder itself, so a session that deep-slept
+  a sha256 of each live placeholder, never the placeholder itself, so a session that hibernated
   through `host stop` keeps working in the new host. `shutdown`, `reset` and `rm` revoke them.
 - To store a key in the keychain yourself: `security add-generic-password -s doz-anthropic -a
   "$USER" -w` (it prompts for the key).
@@ -321,16 +321,16 @@ The host is started for you by the first command that needs it. It runs detached
 | **Idle exit** | It exits after 5 minutes with no running, paused or sleeping VM and no attached client (`$DOZ_HOST_IDLE` minutes, 0 = never). |
 | **Looking never starts it** | `ls`, `inspect`, `point ls`, `image ls`, `net policy` (shown) and `key ls` read the store directly when no host runs. |
 | `doz host status` | Is one running, and what does it hold? Never starts one. |
-| `doz host stop` | Deep-sleeps everything that runs, then exits. The next command starts a new host; `wake`, `attach`, `up` and `exec` bring each sandbox back. |
+| `doz host stop` | Hibernates everything that runs, then exits. The next command starts a new host; `wake`, `attach`, `up` and `exec` bring each sandbox back. |
 | `doz host [--foreground] [--idle-timeout MIN]` | Run it by hand (in the foreground, it logs to the terminal). |
-| **If it crashes** | The next command starts a new one. Sleeping sandboxes are restored with their sessions. Deep-sleeping ones are untouched. Ones that were running are reported as died (`ls`; `inspect` shows `diedWithHost`), and their disk is checked with `e2fsck` at the next start. |
+| **If it crashes** | The next command starts a new one. Sleeping sandboxes are restored with their sessions. Hibernated ones are untouched. Ones that were running are reported as died (`ls`; `inspect` shows `diedWithHost`), and their disk is checked with `e2fsck` at the next start. |
 | **If its program changes** | A host knows the file it runs from. If an update wrote into that file while it ran, macOS stops trusting it and refuses its virtual machines: every start or wake then says "this host's program was updated underneath it — `doz host stop`, then retry", and `host status` and `doctor` say so too. An update that puts a new file in place (as `make install-cli` does) is harmless: the host keeps running its own copy, `host status` notes it, and once nothing runs and nobody is attached it exits by itself so the next command runs the new build. |
 
 ### Updating doz
 
 ```bash
 make install-cli          # the new build goes in next to the running one — nothing running is touched
-doz host stop          # sandboxes that run deep-sleep; the host of the old build exits
+doz host stop          # sandboxes that run hibernate; the host of the old build exits
 doz wake NAME          # (or attach / up / the web UI) — each wakes on the new build, sessions and all
 ```
 
@@ -384,7 +384,7 @@ What you can do from it:
 
 | Page | Actions |
 |---|---|
-| **Sandboxes** | New sandbox (image or template, network, account, CPUs, memory, workspace folder). Per sandbox: start, pause, resume, sleep, deep sleep, wake, shut down, reset, remove. |
+| **Sandboxes** | New sandbox (image or template, network, account, CPUs, memory, workspace folder). Per sandbox: start, pause, resume, sleep, hibernate, wake, shut down, reset, remove. |
 | **A sandbox** | The lifecycle; browser terminals; Open in Terminal; run a command in a new detached session; take a restore point, and revert, fork, save as a template, duplicate or delete one; **Duplicate…** and **Save as template…** (below); edit the network policy, with a preview of exactly what changes; set the key policy and the account; remove a key. |
 | **All sessions** | A live, read-only view of every session of every running sandbox (below). |
 | **Images** | Bake a built-in image; remove an image or a template. **Lineage** shows the tree. |
@@ -448,7 +448,7 @@ view — the session keeps running, as Ctrl-] does in `doz attach`.
 - **A new terminal is a new shell.** **New shell**, **Terminal…** and **Split** start a new shell session
   (`shell-2`, `shell-3`, …); attaching to or watching a session that already runs is a choice in the
   New terminal dialog. Two tabs on one session are marked "shared with tab N".
-- **A sleeping sandbox.** When the sandbox is paused, asleep, in deep sleep or shut down, the
+- **A sleeping sandbox.** When the sandbox is paused, asleep, hibernated or shut down, the
   terminal is covered with its state and one button. **Any key you type wakes it** (or resumes it)
   and the screen comes back where it was, with a note of how long it took ("woke in 0.5 s"). What your terminal answers by itself — focus changes,
   cursor-position and colour replies — never wakes it. A watcher's keys never wake it either.

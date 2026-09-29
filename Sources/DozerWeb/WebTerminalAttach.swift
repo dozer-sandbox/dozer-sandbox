@@ -10,7 +10,7 @@ import DozerHost
 public enum WebAttachStart: Equatable, Sendable {
     /// Relaying now (the session's SNAPSHOT comes first).
     case attached(session: String)
-    /// The sandbox is not running (paused, asleep, deep asleep): the host holds the connection and
+    /// The sandbox is not running (paused, asleep, hibernated): the host holds the connection and
     /// attaches it by itself when the sandbox runs again.
     case held(session: String, phase: String)
 }
@@ -22,7 +22,7 @@ public enum WebAttachStart: Equatable, Sendable {
 public protocol WebTerminalAttachment: AnyObject, Sendable {
     var start: WebAttachStart { get }
     /// The next bytes from the host; nil once the host closed the connection — the session's end
-    /// (after the ended notice), a Deep Sleep or Sleep (the guest session lives on: reattach), or `close()`.
+    /// (after the ended notice), a hibernation or Sleep (the guest session lives on: reattach), or `close()`.
     func read() async -> Data?
     /// Raw attach-wire bytes: keystrokes, or a `ClientWire.resize` frame.
     func send(_ bytes: [UInt8])

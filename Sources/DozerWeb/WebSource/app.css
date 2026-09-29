@@ -9,7 +9,7 @@
   --run: #2b8a3e;
   --pause: #b7791f;
   --sleep: #5f3dc4;
-  --deep: #364fc7;
+  --hibernated: #364fc7;
   --off: #868e96;
   --fail: #c92a2a;
   --bar: #dbe4ff;
@@ -32,7 +32,7 @@
   --run: #51cf66;
   --pause: #fcc419;
   --sleep: #b197fc;
-  --deep: #91a7ff;
+  --hibernated: #91a7ff;
   --off: #868e96;
   --fail: #ff6b6b;
   --bar: #2b3263;
@@ -50,7 +50,7 @@
     --run: #51cf66;
     --pause: #fcc419;
     --sleep: #b197fc;
-    --deep: #91a7ff;
+    --hibernated: #91a7ff;
     --off: #868e96;
     --fail: #ff6b6b;
     --bar: #2b3263;
@@ -113,7 +113,7 @@ tr.click:hover td { background: var(--bg); }
 .ph-booting { color: var(--accent); }
 .ph-paused { color: var(--pause); }
 .ph-asleep { color: var(--sleep); }
-.ph-deepAsleep { color: var(--deep); }
+.ph-hibernated { color: var(--hibernated); }
 .ph-off { color: var(--off); }
 .ph-failed { color: var(--fail); }
 .st-ok { color: var(--run); }
@@ -362,7 +362,7 @@ nav a.active .ph-dot { box-shadow: 0 0 0 1.5px var(--bg); }
 .icon { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .btn, .seg, .link-button { display: inline-flex; align-items: center; gap: 6px; }
 .btn.small .icon, .seg .icon { width: 14px; height: 14px; }
-/* A two-icon glyph (Sleep = moon + memory stick, Deep sleep = moon + hard drive): one tight group. */
+/* A two-icon glyph (Sleep = moon + cpu, Hibernate = moon + cylinder): one tight group. */
 .icon-pair { display: inline-flex; align-items: center; gap: 1px; flex: none; }
 .tc-glyph { display: inline-flex; color: #c5cbff; }
 .tc-glyph[hidden] { display: none; }

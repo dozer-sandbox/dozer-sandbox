@@ -12,9 +12,9 @@ import DozerKit
 ///     and a new one waits for the old one to finish exiting before it loads anything;
 ///   · exits by itself once NO sandbox has a VM (booting, running, paused, asleep) and no client is
 ///     connected for `idleTimeoutMinutes` (default 5; 0 = never) — so no daemon runs when nothing does;
-///   · `doz host stop`, SIGTERM or SIGINT: Deep Sleep everything (quit = Deep Sleep) and exit;
+///   · `doz host stop`, SIGTERM or SIGINT: Hibernate everything (quit = Hibernate) and exit;
 ///   · after a crash (kill -9): the next CLI call starts a new host, which restores what was asleep
-///     and reports what died (`HostCore.recoverAfterStart`). Deep-asleep sandboxes wake on demand.
+///     and reports what died (`HostCore.recoverAfterStart`). Hibernated sandboxes wake on demand.
 public final class HostServer: @unchecked Sendable {
     public let store: DozerStore
     public let idleTimeoutMinutes: Double
@@ -105,7 +105,7 @@ public final class HostServer: @unchecked Sendable {
             let src = DispatchSource.makeSignalSource(signal: sig, queue: .global())
             src.setEventHandler { [weak self] in
                 guard let self else { return }
-                HostLog.line("signal \(sig): deep-sleeping every sandbox, then exiting")
+                HostLog.line("signal \(sig): hibernating every sandbox, then exiting")
                 Task.detached { await self.shutdown(prepare: true, reply: nil) }
             }
             src.resume()
@@ -150,7 +150,7 @@ public final class HostServer: @unchecked Sendable {
     var idleSeconds: Double? { lock.withLock { idleSince.map { Date().timeIntervalSince($0) } } }
     var connectionCount: Int { lock.withLock { connections } }
 
-    /// Stop serving, (optionally) Deep Sleep everything, answer the `host stop` that asked, exit.
+    /// Stop serving, (optionally) Hibernate everything, answer the `host stop` that asked, exit.
     func shutdown(prepare: Bool, reply: HostConnection?) async {
         let first: Bool = lock.withLock {
             if stopping { return false }
@@ -324,7 +324,7 @@ public final class HostServer: @unchecked Sendable {
 
     /// `attach`: answer `{state: attached|held}`, then relay the terminal. A client that attaches
     /// while the sandbox is not running (and did not ask to wake it) is HELD until it runs, then
-    /// attached with the size it last sent. Deep Sleep closes the connection (the guest session
+    /// attached with the size it last sent. Hibernate closes the connection (the guest session
     /// survives; the client reconnects and is held); the end of the session sends the notice.
     private func attach(_ conn: HostConnection, reader: LineReader, request req: HostRequest) {
         let state = AttachState(size: TermSize(cols: req.cols ?? 80, rows: req.rows ?? 24))

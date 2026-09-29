@@ -178,7 +178,7 @@ func claudeSuite() async throws {
         check(r.code == 0, "a looping session sends its placeholder every 2 s")
         usleep(6_000_000)
         r = h.run(["host", "stop"])
-        check(r.code == 0 && !h.hostRunning, "host stop (the sandbox deep-sleeps with the session)")
+        check(r.code == 0 && !h.hostRunning, "host stop (the sandbox hibernates with the session)")
         r = h.run(["wake", name])
         check(r.code == 0, "wake in a NEW host")
         usleep(9_000_000)

@@ -201,7 +201,7 @@ actor WebMonitor {
         hostWasRunning = o.host.running
         terminals?.updatePhases(o.sandboxes.map { ($0.name, $0.phase) })
         // A phase change the host's stream did not report (the UI follows it only while something is
-        // live, so a wake from deep sleep happens before it re-subscribes): note it from the poll.
+        // live, so a wake from hibernation happens before it re-subscribes): note it from the poll.
         let phases = Dictionary(o.sandboxes.map { ($0.name, $0.phaseLabel) }, uniquingKeysWith: { a, _ in a })
         if let before = lastPhases, events == nil {
             for (name, now) in phases.sorted(by: { $0.key < $1.key }) where before[name] != nil && before[name] != now {

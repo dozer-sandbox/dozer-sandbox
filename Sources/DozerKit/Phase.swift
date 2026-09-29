@@ -4,7 +4,7 @@ import Foundation
 ///
 ///     Start (Cold Boot) ─▶ running ─ Pause (Suspend) ─▶ paused ─ Resume ─▶ running
 ///                          running ─ Sleep ───────────▶ asleep ─ Wake ───▶ running   RAM kept, snapshot on disk
-///                          running ─ Deep Sleep (Hibernate) ─▶ deepAsleep ─ Wake ─▶ running   RAM freed
+///                          running ─ Hibernate ───────▶ hibernated ─ Wake ─▶ running   RAM freed
 ///                          any ─ Shut Down ─▶ off (the disk is kept; running programs end)
 public enum Phase: String, Sendable, Codable, CaseIterable {
     /// Shut down: no VM. `start()` (`coldBoot()`) boots the kept disk.
@@ -16,8 +16,8 @@ public enum Phase: String, Sendable, Codable, CaseIterable {
     case paused
     /// Asleep: paused AND its full state saved to disk — crash-safe; RAM still held. Wake resumes in place.
     case asleep
-    /// Deep asleep (hibernated): saved to disk and the VM stopped — RAM returned. Wake restores it in ~0.35 s.
-    case deepAsleep
+    /// Hibernated: saved to disk and the VM stopped — RAM returned. Wake restores it in ~0.35 s.
+    case hibernated
     /// `start()` failed. `start()` again, or `shutDown()` to clean up.
     case failed
 
@@ -29,7 +29,7 @@ public enum Phase: String, Sendable, Codable, CaseIterable {
         case .running: "Running"
         case .paused: "Paused"
         case .asleep: "Asleep — RAM kept, snapshot on disk"
-        case .deepAsleep: "Deep asleep — RAM freed"
+        case .hibernated: "Hibernated — RAM freed"
         case .failed: "Failed"
         }
     }
@@ -37,10 +37,10 @@ public enum Phase: String, Sendable, Codable, CaseIterable {
     /// The VM holds host RAM in this phase.
     public var holdsRAM: Bool { [.booting, .running, .paused, .asleep].contains(self) }
     /// A snapshot on disk is valid (and needed) only in these phases; every other phase deletes it.
-    public var keepsSnapshot: Bool { self == .asleep || self == .deepAsleep }
+    public var keepsSnapshot: Bool { self == .asleep || self == .hibernated }
 
     /// Decodes today's names AND the names persisted before the 2026-09-25 rename (`pausedSaved`,
-    /// `onDisk`) — a sandbox left deep asleep by an older build must still wake.
+    /// `onDisk`) — a sandbox left hibernated by an older build must still wake.
     public init?(rawValue: String) {
         switch rawValue {
         case "off": self = .off
@@ -48,7 +48,10 @@ public enum Phase: String, Sendable, Codable, CaseIterable {
         case "running": self = .running
         case "paused": self = .paused
         case "asleep", "pausedSaved": self = .asleep
-        case "deepAsleep", "onDisk", "hibernated": self = .deepAsleep
+        // The ONE compatibility shim of the 593 rename to Hibernate (owner ruling 2026-09-29, no
+        // aliases anywhere else): a record persisted as "deepAsleep" still decodes, so a store
+        // written before the rename still loads.
+        case "hibernated", "onDisk", "deepAsleep": self = .hibernated
         case "failed": self = .failed
         default: return nil
         }
@@ -61,15 +64,15 @@ public enum Phase: String, Sendable, Codable, CaseIterable {
         case .running: "running"
         case .paused: "paused"
         case .asleep: "asleep"
-        case .deepAsleep: "deepAsleep"
+        case .hibernated: "hibernated"
         case .failed: "failed"
         }
     }
 
     @available(*, deprecated, renamed: "asleep")
     public static var pausedSaved: Phase { .asleep }
-    @available(*, deprecated, renamed: "deepAsleep")
-    public static var onDisk: Phase { .deepAsleep }
+    @available(*, deprecated, renamed: "hibernated")
+    public static var onDisk: Phase { .hibernated }
 }
 
 /// The lifecycle operations, and — as pure data — the steps each performs from a given phase.
@@ -81,15 +84,14 @@ public enum Phase: String, Sendable, Codable, CaseIterable {
 /// unclosed, and their deallocation is a fatal error); the snapshot is deleted the moment the VM
 /// runs again; attached sessions are detached before anything severs their exec stdio.
 public enum LifecycleOperation: String, Sendable, CaseIterable {
-    /// Pause (alias Suspend) → Resume. Sleep → Wake. Deep Sleep (alias Hibernate) → Wake.
+    /// Pause (alias Suspend) → Resume. Sleep → Wake. Hibernate → Wake.
     /// Shut Down → Start (alias Cold Boot; `start()` is not a planned operation — it boots).
-    case pause, resume, sleep, deepSleep, wake, shutDown
+    case pause, resume, sleep, hibernate, wake, shutDown
     /// Shut down (if needed), then discard the root disk: the next Start clones the prepared/baked disk.
     case resetToImage
     /// Shut down (if needed), then remove everything the sandbox has on disk.
     case delete
 
-    @available(*, deprecated, renamed: "deepSleep") public static var sleepToDisk: Self { .deepSleep }
     @available(*, deprecated, renamed: "wake") public static var wakeFromDisk: Self { .wake }
     @available(*, deprecated, renamed: "shutDown") public static var stop: Self { .shutDown }
 }
@@ -106,7 +108,7 @@ public enum LifecycleStep: Equatable, Sendable {
     /// Tell every attached session connection it is detached, with this reason, BEFORE its exec
     /// stdio is severed — so nothing is written into a connection that is going away.
     case detachSessions(DetachReason)
-    /// VZ `stop` directly on the virtual machine — Deep Sleep only: it keeps the container's
+    /// VZ `stop` directly on the virtual machine — Hibernate only: it keeps the container's
     /// objects for the wake.
     case stopVMDirect
     /// Shut Down only: make the VM runnable again WITHOUT reporting a phase change — resume a paused
@@ -131,9 +133,9 @@ public enum LifecycleStep: Equatable, Sendable {
     /// 583: deflate the balloon before the VM is paused for a snapshot — a snapshot of an inflated
     /// balloon does not restore.
     case restoreGuestMemory
-    /// 587: best effort, never fails the operation — `sync` in the guest (so a discarded Deep Sleep
+    /// 587: best effort, never fails the operation — `sync` in the guest (so a discarded hibernation
     /// loses nothing written before it) and record what its file systems hold (`df`), for
-    /// `DiskAccounting`'s garbage. Before a Deep Sleep's pause, and before a Stop's graceful stop.
+    /// `DiskAccounting`'s garbage. Before a hibernation's pause, and before a Stop's graceful stop.
     case syncGuest
     /// Drop the in-memory VM objects and the network lease, and persist the phase as off (shut
     /// down). The ROOT DISK STAYS: the next Start (Cold Boot) boots it (owner ruling 2026-09-25 — "Stop destroys the VM"
@@ -156,7 +158,7 @@ public enum LifecyclePlanner {
         case .pause: .paused
         case .resume: .running
         case .sleep: .asleep
-        case .deepSleep: .deepAsleep
+        case .hibernate: .hibernated
         case .wake: .running
         case .shutDown, .resetToImage, .delete: .off
         }
@@ -177,15 +179,15 @@ public enum LifecyclePlanner {
             return [.restoreGuestMemory, .pauseVM, .saveSnapshot, .persistState]
         case (.sleep, .paused):
             return [.saveSnapshot, .persistState]
-        case (.deepSleep, .running):
-            // 587: the guest syncs first — a Deep Sleep may be discarded, and what the guest had not
+        case (.hibernate, .running):
+            // 587: the guest syncs first — a hibernation may be discarded, and what the guest had not
             // written back would be lost with it (586: the last ~5 s, journal or not).
             return [.restoreGuestMemory, .syncGuest, .pauseVM, .saveSnapshot, .detachSessions(.sandboxSleeping), .stopVMDirect, .persistState]
-        case (.deepSleep, .paused):
+        case (.hibernate, .paused):
             return [.saveSnapshot, .detachSessions(.sandboxSleeping), .stopVMDirect, .persistState]
-        case (.deepSleep, .asleep):
+        case (.hibernate, .asleep):
             return [.detachSessions(.sandboxSleeping), .stopVMDirect, .persistState]
-        case (.wake, .deepAsleep):
+        case (.wake, .hibernated):
             return [.restoreSnapshot, .resyncClock, .remountShares, .deleteSnapshot, .returnFreeMemory, .persistState]
         case (.shutDown, _):
             return stopSteps(from: phase)
@@ -210,7 +212,7 @@ public enum LifecyclePlanner {
         case .paused:
             // A paused guest cannot answer its agent: resume it first.
             return [.detachSessions(.sandboxStopped), .reviveForStop, .syncGuest, .stopContainer, .deleteSnapshot, .releaseRuntime]
-        case .asleep, .deepAsleep:
+        case .asleep, .hibernated:
             // One on disk has no VM running at all. (Its disk usage was recorded when it slept.)
             return [.detachSessions(.sandboxStopped), .reviveForStop, .stopContainer, .deleteSnapshot, .releaseRuntime]
         case .off:

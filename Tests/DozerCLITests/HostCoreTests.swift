@@ -112,7 +112,7 @@ final class HostCoreTests: XCTestCase {
         let (s, n) = try DozerImages.spec(name: "x", options: CreateOptions(image: "lab"), store: store, environment: [:])
         try SandboxConfig(name: "x", image: n, spec: s, workspace: nil).write(store.configFile("x"))
         XCTAssertEqual(store.needsRecovery(), [])
-        for (phase, needs) in [(Phase.off, false), (.deepAsleep, false), (.running, true), (.asleep, true)] {
+        for (phase, needs) in [(Phase.off, false), (.hibernated, false), (.running, true), (.asleep, true)] {
             try PersistedSandbox(spec: s, phase: phase, machineIdentifier: Data([1]), macAddress: nil, subnet: nil, shareTags: [:])
                 .write(to: store.layout("x").persistedState)
             XCTAssertEqual(store.needsRecovery() == ["x"], needs, "\(phase)")
@@ -140,16 +140,16 @@ final class HostCoreTests: XCTestCase {
         future.v = HostProtocol.version + 1
         let v = await core.handle(future)
         XCTAssertEqual(v.error?.code, .version)
-        // A deep-asleep record left by another process reads as deep asleep.
+        // A hibernated record left by another process reads as hibernated.
         let layout = store.layout("x")
         try FileManager.default.createDirectory(at: layout.sandboxDirectory, withIntermediateDirectories: true)
         try Data("disk".utf8).write(to: layout.rootfs)
         try Data("snap".utf8).write(to: layout.snapshot)
-        try PersistedSandbox(spec: s, phase: .deepAsleep, machineIdentifier: Data([1]), macAddress: nil, subnet: nil, shareTags: [:])
+        try PersistedSandbox(spec: s, phase: .hibernated, machineIdentifier: Data([1]), macAddress: nil, subnet: nil, shareTags: [:])
             .write(to: layout.persistedState)
         let lsAgain = await core.handle(HostRequest(.ls))
         let again = try XCTUnwrap(lsAgain.result).decode([SandboxInfo].self)
-        XCTAssertEqual(again.first?.phase, "deepAsleep")
+        XCTAssertEqual(again.first?.phase, "hibernated")
     }
 
     func testAllocatedBytesOfAFileAndADirectory() throws {
@@ -185,7 +185,7 @@ final class HostCoreTests: XCTestCase {
     func testMetricsStoreIsSandboxLabsSchema() throws {
         let m = try MetricsStore(url: root.appendingPathComponent("metrics.sqlite"))
         let run = m.beginRun(.current(kind: "doz host", version: "test"))
-        let id = m.begin(run: run, action: "wake", sandbox: "x", image: "lab", phaseBefore: "deepAsleep")
+        let id = m.begin(run: run, action: "wake", sandbox: "x", image: "lab", phaseBefore: "hibernated")
         m.record(run: run, action: MetricsStepKey.key(for: "restored VM state from disk"), kind: .step, sandbox: "x", image: "lab",
                  startedAt: Date(), durationMs: 230, parent: id)
         m.finish(id, phaseAfter: "running", durationMs: 300, ok: true)

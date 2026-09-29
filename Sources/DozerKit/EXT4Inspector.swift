@@ -9,7 +9,7 @@ import Foundation
 /// - `freeRanges()` is ext4's free-block list (what `dumpe2fs` prints as "Free blocks"), as byte
 ///   ranges of the file — what `reclaim()` punches out and `rederive()` skips.
 ///
-/// Only a disk nothing has mounted is read reliably: a running (or deep-asleep) guest keeps newer
+/// Only a disk nothing has mounted is read reliably: a running (or hibernated) guest keeps newer
 /// bitmaps in its memory.
 public struct EXT4Inspector: Sendable {
     public let url: URL

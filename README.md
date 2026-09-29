@@ -18,7 +18,7 @@ Linux equivalent, so there is no Linux build and no Linux CI job. The VM needs t
 | Product | What it is |
 |---|---|
 | `DozerKit` | `Sandbox` (the actor that owns one VM and its lifecycle), `SandboxSpec`, `SessionConnection` (one viewer's connection to a guest terminal session), the `deckhold` wire protocol, and the committed `deckhold` guest binary as a resource. |
-| `doz` (executable, 585) | The command-line tool: create, start, pause, sleep, deep-sleep and wake sandboxes, attach to their sessions, restore points, network policy, metrics — see [The `doz` CLI](#the-doz-cli). Built on the library; the library does not depend on it. |
+| `doz` (executable, 585) | The command-line tool: create, start, pause, sleep, hibernate and wake sandboxes, attach to their sessions, restore points, network policy, metrics — see [The `doz` CLI](#the-doz-cli). Built on the library; the library does not depend on it. |
 
 ## What it does, measured
 
@@ -54,27 +54,27 @@ Task { for await out in conn.output {               // .snapshot first, then .da
     switch out {                                   // … and one final .ended / .detached
     case .snapshot(let vt), .data(let vt): terminal.write(vt)
     case .ended(let code): print("exited \(code.map(String.init) ?? "—")")
-    case .detached(.sandboxSleeping): break        // attach again after wakeFromDisk()
+    case .detached(.sandboxSleeping): break        // attach again after wake()
     case .detached: break
     }
 }}
 conn.send(Data("ls\r".utf8)); conn.resize(TermSize(cols: 100, rows: 30))
 
-try await sandbox.sleepToDisk()                    // RAM freed; the session keeps its state
-try await sandbox.wakeFromDisk()
+try await sandbox.hibernate()                      // RAM freed; the session keeps its state
+try await sandbox.wake()
 // …a later process, after a crash or quit while asleep:
 if Sandbox.restorableState(for: spec) != nil { try await sandbox.restoreAfterCrash() }
 ```
 
-Lifecycle: `start` · `pause` / `resume` · `sleep` (pause + snapshot) · `sleepToDisk` · `wakeFromDisk`
+Lifecycle: `start` · `pause` / `resume` · `sleep` (pause + snapshot) · `hibernate` · `wake`
 · `stop` · `restoreAfterCrash` · `prepareForExit` (keep a sleeping sandbox restorable, stop anything
 else; 583: a program a session started less than `settle` — 3 s — ago gets the rest of it first) · `resetToImage` · `delete`. **Stop keeps the root disk**: the next Start cold-boots the same
 disk (what you installed is still there); Reset to image starts again from a fresh clone of the
 prepared disk; Delete removes everything the sandbox has on disk. A disk that was not cleanly
-unmounted — `Sandbox.discardRestorableState(for:)` (a deep-slept VM is stopped without unmounting it),
+unmounted — `Sandbox.discardRestorableState(for:)` (a hibernated VM is stopped without unmounting it),
 a failed restore, a crash while running — is replayed from its **journal** on the next cold boot, or,
-on a journal-less disk, checked with `e2fsck` first (583; see **Journal** below). Deep Sleep and Stop
-`sync` the guest first, so a discarded Deep Sleep loses nothing written before it. Guest: `exec(argv)`
+on a journal-less disk, checked with `e2fsck` first (583; see **Journal** below). Hibernate and Stop
+`sync` the guest first, so a discarded hibernation loses nothing written before it. Guest: `exec(argv)`
 (no shell unless you pass one), `sessions()` (`deckhold ls`), `screenText(name)` (`deckhold dump`),
 `bootConsole()`.
 
@@ -105,7 +105,7 @@ image and re-bakes). Credentials go to `openSession(environment:)` only.
 
 **Journal (587): on by default, 16 MiB — a toggle.** `ImageSpec.journalMiB` (the image's root and
 every sandbox's state disk) and `SandboxSpec.journalMiB` (the lab's prepared disk): default 16, `nil`
-= no journal. 586/587 measured it: after Deep Sleep → discard, a journaled disk cold-boots by
+= no journal. 586/587 measured it: after Hibernate → discard, a journaled disk cold-boots by
 journal replay in **~380 ms** with no e2fsck (15/15 `e2fsck -fn` clean afterwards); a journal-less
 one goes through the helper VM's `e2fsck` (~1,030 ms), as before 587. The cost: 16 MiB per base
 (shared) and up to 16 MiB per sandbox once the ring wraps; `fsync`-heavy work ~1.7× slower
@@ -125,7 +125,7 @@ images, prepared disks, sandbox root and state disks, restore points) with its `
 (APFS's own number — they agree to 0.0 MiB on every disk, unless a file outside the store is a clone
 of one inside it: `uniqueBytes` is scoped to the STORE, APFS's number to the whole volume), `extentsPerGiB`, and `garbageBytes`: the
 host file's data in blocks ext4 considers free (exact, from the disk's bitmaps, on a cleanly unmounted
-disk; otherwise allocated − the guest's `df` recorded at the last Stop / Deep Sleep,
+disk; otherwise allocated − the guest's `df` recorded at the last Stop / Hibernate,
 `PersistedSandbox.guestUsedMiB`). It reads APFS's extent map (`F_LOG2PHYS_EXT`): ~5 ms per disk.
 Measure stopped disks, on one volume.
 
@@ -147,7 +147,7 @@ unmounted, is refused):
 - `checkDisks()` runs `e2fsck -fn` (read-only) on the disks in the helper VM.
 
 **Memory (583): a woken sandbox gives back what it does not use.** The Mac charges a VM for every
-guest page it has ever touched, and restoring a snapshot touches them all: woken from Deep Sleep, a
+guest page it has ever touched, and restoring a snapshot touches them all: woken from hibernation, a
 1 GiB Lab held **1,273 MiB** (cold-booted: 213) and a 2 GiB claude-code **2,340 MiB** (cold: 645).
 Every VM now has a virtio memory balloon, and `wake()` inflates it over the guest's free pages,
 leaving the guest `defaultFreeReserveMiB` free (¼ of the allocation, ≥ 256 MiB): woken, the Lab holds
@@ -157,8 +157,8 @@ untouched, and a guest that needs more still gets it (VZ deflates on guest OOM �
 allocation above the reserve took ~0.35–0.5 s instead of ~0.12 s). `returnFreeMemory(keepingFreeMiB:)`
 does it on demand (e.g. after heavy work: −130–160 MiB after a 300 MiB turn), `restoreGuestMemory()`
 gives the guest everything back, `setReturnsFreeMemoryOnWake(false)` turns the wake's off, and
-`memoryReturnedMiB` reads it. Sleep and Deep Sleep deflate first (+~80–150 ms): a snapshot of an
-inflated balloon does not restore. A sandbox deep-slept by an older build wakes without a balloon
+`memoryReturnedMiB` reads it. Sleep and Hibernate deflate first (+~80–150 ms): a snapshot of an
+inflated balloon does not restore. A sandbox hibernated by an older build wakes without a balloon
 (`PersistedSandbox.memoryBalloon`) and gets one at its next cold boot. Measured by
 `probes/583-*/wake-memory` in the workspace; `hardening memory` is the regression test.
 
@@ -260,10 +260,10 @@ command but cannot boot a VM (`doz doctor` says so).
 | `doz start NAME` [`cold-boot`] | Boot — or wake it if it is asleep, resume it if paused. |
 | `doz pause NAME` [`suspend`] · `doz resume NAME` | Guest CPU to 0 in ~1 ms, RAM kept. |
 | `doz sleep NAME` | Pause + snapshot to disk: RAM kept, and it survives a host crash. |
-| `doz deep-sleep NAME` [`hibernate`] · `doz wake NAME` | Snapshot + VM stopped: RAM returned. Wake ~0.3 s, sessions and pids where they were. A program started less than 3 s ago gets the rest of that time first (583). |
+| `doz hibernate NAME` · `doz wake NAME` | Snapshot + VM stopped: RAM returned. Wake ~0.3 s, sessions and pids where they were. A program started less than 3 s ago gets the rest of that time first (583). |
 | `doz shutdown NAME` · `doz reset NAME` · `doz rm NAME` | Cold stop keeping the disk · discard the disk (back to the image) · remove everything. Each asks first on the terminal; `--yes` skips; with no terminal and no `--yes` they refuse (exit 5). |
-| `doz ls` · `doz inspect NAME` · `doz sessions NAME` | Name, image, phase, RAM held (the allocation less what the balloon returned; 0 deep asleep or off), disk, sessions, network · everything as JSON · the guest's terminal sessions. |
-| `doz attach NAME [SESSION] [--no-wake]` | A raw-tty client of a guest session. **Ctrl-]** detaches (`--detach-key ctrl-x\|none`); the session keeps running. A Deep Sleep disconnects you and the client waits, then reattaches by itself when the sandbox runs again. A paused or sleeping sandbox is woken first unless `--no-wake`. |
+| `doz ls` · `doz inspect NAME` · `doz sessions NAME` | Name, image, phase, RAM held (the allocation less what the balloon returned; 0 hibernated or off), disk, sessions, network · everything as JSON · the guest's terminal sessions. |
+| `doz attach NAME [SESSION] [--no-wake]` | A raw-tty client of a guest session. **Ctrl-]** detaches (`--detach-key ctrl-x\|none`); the session keeps running. Hibernating disconnects you and the client waits, then reattaches by itself when the sandbox runs again. A paused or sleeping sandbox is woken first unless `--no-wake`. |
 | `doz run NAME [--session S] [-d] -- CMD…` | A NEW session running CMD (no shell in front — say `bash -lc '…'` for one), attached; exits with the program's exit code. |
 | `doz exec NAME [--user U] [--workdir D] [-e K=V] [--timeout S] -- CMD…` | One-shot and non-interactive: stdout, stderr and the exit code pass through. Runs like a session (an agent image's user in `/workspace`). |
 | `doz image ls\|bake NAME\|rm NAME` | The built-in images and templates; bake now rather than at the first start; `ls --tree`: the lineage with each disk's size, shared and own bytes. `pull`/`push` answer "not yet" (584.B2). |
@@ -278,13 +278,13 @@ command but cannot boot a VM (`doz doctor` says so).
 | `doz doctor` · `doz events [NAME]` | Checks · follow the host's phases, steps and notes. |
 | `doz console NAME [--follow]` | The boot console (kernel + init), or follow it as the sandbox boots. |
 | `doz ui [--open\|--print-url]` · `doz ui link` | 590: a local web UI of the whole store — sandboxes, sessions, restore points, network policy and log, keys and accounts (fingerprints only), images, metrics (filters, CSV), doctor, live activity — and its actions: create and the whole lifecycle, sessions (open, run detached), Open in Terminal (Terminal.app), restore points (take, revert, fork, delete, save as image), policy edits with a preview, key policy, account use/default/verify/remove/keep-alive, image bake/remove. Destructive actions need the name typed; a secret is never entered in the browser. Loopback only, on a port the OS picks; the browser signs in with a one-use, five-minute link (opened for you, or printed on the terminal with `--print-url`); `ui link` mints another for the running UI. A client of the host like every command; one UI per store; Ctrl-C stops it. |
-| `doz host [--foreground] [--idle-timeout MIN]` · `host stop` · `host status` | The host (normally started for you) · Deep Sleep everything and stop it · is one running (never starts one). |
+| `doz host [--foreground] [--idle-timeout MIN]` · `host stop` · `host status` | The host (normally started for you) · hibernate everything and stop it · is one running (never starts one). |
 
 Every command takes `--json` (machine-readable output on stdout; errors as `{"error":{"code","message"}}`),
 `--store DIR` (default `$DOZ_STORE`, else the settings' `store.path`, else `~/Library/Application Support/dozer-sandbox`),
 `-v` (every progress step; by default only an operation slower than a second shows its steps, on
 stderr) and `-q`. JSON documents only ever gain fields. Phases on the wire are `off`, `booting`,
-`running`, `paused`, `asleep`, `deepAsleep`, `failed`.
+`running`, `paused`, `asleep`, `hibernated`, `failed`.
 
 **Exit codes:** 0 ok · 1 failed · 2 not found · 3 not possible in this phase · 4 already exists ·
 5 not confirmed · 6 host unavailable · 7 not implemented yet · 64 usage. `exec`, `run` and
@@ -319,18 +319,18 @@ thin client of that socket.
   commands — `ls`, `inspect`, `point ls`, `image ls`, `net policy` (shown), `key ls` — answer from the
   store in-process when no host runs, so **no daemon runs when no sandbox is running**, and looking
   never starts one.
-- **Quit = Deep Sleep.** `doz host stop`, SIGTERM and SIGINT deep-sleep every running, paused or
+- **Quit = Hibernate.** `doz host stop`, SIGTERM and SIGINT hibernate every running, paused or
   sleeping sandbox (the library's `prepareForExit`, with its settle delay) and then exit. The next
   command starts a new host; `wake` (or `attach`, `up`, `exec`) brings each back, sessions and pids
   intact.
 - **Crash.** After `kill -9` (or a crash) the next command starts a new host, which, for each
   sandbox: **asleep** (its VM died with the host, the snapshot is on disk) → restored and put back to
-  sleep, sessions intact; **deep asleep** → nothing to do, `wake` adopts it in the new process;
+  sleep, sessions intact; **hibernated** → nothing to do, `wake` adopts it in the new process;
   **running** → reported as died (`ls` shows it; `inspect` has `diedWithHost`), its disk — never
   unmounted, and the ext4 has no journal — marked for e2fsck at the next start. A read-only command
   that finds such a record starts the host so it can recover.
 - **The protocol** (`Sources/DozerHost/HostProtocol.swift`) is JSON lines: one request line
-  (`{"v":1,"op":"deep-sleep","name":"myproj"}`), then zero or more `{"event":…}` progress lines and one
+  (`{"v":1,"op":"hibernate","name":"myproj"}`), then zero or more `{"event":…}` progress lines and one
   final `{"ok":true,"result":…}` / `{"ok":false,"error":{"code","message"}}`. `attach` switches to raw
   after its `ok` line (`{"state":"attached"|"held"}`): VT bytes from the host; keystrokes plus in-band
   `0xFF 'H'|'R' cols rows` frames from the client (SandboxLab's attach wire); the end of a session is

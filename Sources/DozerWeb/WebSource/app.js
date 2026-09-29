@@ -60,13 +60,14 @@ const $ = (id) => document.getElementById(id);
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const SPRITE = (() => { const m = document.querySelector('meta[name="doz-icons"]'); return m ? m.getAttribute('content') : ''; })();
 const ICON_FALLBACK = 'circle-dot';
-/// 593 (owner): the two sleeps are told apart by a second glyph — Sleep keeps RAM (a memory stick),
-/// Deep sleep frees it and keeps the state on disk (a hard drive). Used wherever those states show.
-const ICON_SLEEP = 'moon+memory-stick', ICON_DEEP_SLEEP = 'moon+hard-drive';
+/// 593 (owner): Sleep and Hibernate are told apart by a second glyph — Sleep keeps the machine in
+/// memory (a CPU), Hibernate frees it and keeps the state on disk (a cylinder — storage). Used
+/// wherever those states show.
+const ICON_SLEEP = 'moon+memory-stick', ICON_HIBERNATE = 'moon+hard-drive';
 /// A phase (or a cover's kind) → its glyph, where it has one.
-const PHASE_GLYPH = { paused: 'pause', asleep: ICON_SLEEP, deepAsleep: ICON_DEEP_SLEEP, off: 'power', shutDown: 'power' };
+const PHASE_GLYPH = { paused: 'pause', asleep: ICON_SLEEP, hibernated: ICON_HIBERNATE, off: 'power', shutDown: 'power' };
 /// An operation's action → its glyph (the lifecycle verbs; the rest have none).
-const OP_GLYPH = { start: 'play', pause: 'pause', resume: 'play', sleep: ICON_SLEEP, 'deep-sleep': ICON_DEEP_SLEEP, wake: 'sun',
+const OP_GLYPH = { start: 'play', pause: 'pause', resume: 'play', sleep: ICON_SLEEP, hibernate: ICON_HIBERNATE, wake: 'sun',
                    shutdown: 'power', reset: 'rotate-ccw', rm: 'trash-2', duplicate: 'copy', 'template-create': 'layout-template' };
 /// `name`, or a pair `a+b`: a glyph drawn as two icons side by side (both hidden, one tight group).
 function icon(name) {
@@ -91,14 +92,14 @@ const ICON_EXACT = {
   'save template': 'layout-template', 'hide details': 'panel-right', 'details': 'panel-right', 'take a restore point…': 'camera', 'take': 'camera',
   'key policy…': 'key-round', 'account…': 'user-round', 'edit policy…': 'shield', 'terminal…': 'terminal', 'new shell': 'plus',
   'new sandbox': 'plus', 'run detached…': 'play', 'default': 'rotate-ccw', 'apply anyway': 'check', 'download csv': 'download',
-  'deep sleep': ICON_DEEP_SLEEP, 'deep-sleep': ICON_DEEP_SLEEP, 'shut down': 'power', 'sign out': 'log-out', 'unsplit': 'columns-2',
+  'shut down': 'power', 'sign out': 'log-out', 'unsplit': 'columns-2',
 };
 const ICON_WORD = {
-  start: 'play', pause: 'pause', resume: 'play', sleep: ICON_SLEEP, wake: 'sun', reset: 'rotate-ccw', remove: 'trash-2', delete: 'trash-2',
+  start: 'play', pause: 'pause', resume: 'play', sleep: ICON_SLEEP, hibernate: ICON_HIBERNATE, wake: 'sun', reset: 'rotate-ccw', remove: 'trash-2', delete: 'trash-2',
   open: 'terminal', split: 'columns-2', duplicate: 'copy', revert: 'history', fork: 'git-fork', copy: 'clipboard', copied: 'check',
   select: 'clipboard', refresh: 'refresh-cw', create: 'plus', bake: 'flame', 're-bake': 'flame', verify: 'badge-check', watch: 'eye',
   set: 'check', use: 'check', run: 'play', save: 'layout-template', preview: 'eye', apply: 'check', cancel: 'x', paste: 'clipboard-paste',
-  reconnect: 'refresh-cw', table: 'table', lineage: 'list-tree', shut: 'power', deep: ICON_DEEP_SLEEP, attach: 'link', close: 'x',
+  reconnect: 'refresh-cw', table: 'table', lineage: 'list-tree', shut: 'power', attach: 'link', close: 'x',
 };
 function iconFor(label) {
   const l = String(label).trim().toLowerCase();
@@ -716,8 +717,8 @@ const VERBS = {
   pause: ['Pause', 'Suspend: guest CPU to 0 in ~1 ms, RAM kept'],
   resume: ['Resume', 'Run again after a pause'],
   sleep: ['Sleep', 'Pause + snapshot to disk: RAM kept, survives a host crash'],
-  'deep-sleep': ['Deep sleep', 'Hibernate: snapshot and stop the VM — RAM returned; wake in ~0.3 s'],
-  wake: ['Wake', 'Back from sleep or deep sleep, sessions where they were'],
+  hibernate: ['Hibernate', 'Snapshot and stop the VM — RAM returned; wake in ~0.3 s'],
+  wake: ['Wake', 'Back from sleep or hibernation, sessions where they were'],
   shutdown: ['Shut down', 'Cold stop, keeping the disk (running programs end)'],
   reset: ['Reset', 'Discard the disk — back to the image'],
   rm: ['Remove', 'Remove the sandbox and everything it has on disk'],
@@ -730,10 +731,10 @@ const DESTRUCTIVE = {
 function verbsFor(phase) {
   switch (phase) {
     case 'off': return ['start'];
-    case 'running': return ['pause', 'sleep', 'deep-sleep', 'shutdown'];
-    case 'paused': return ['resume', 'sleep', 'deep-sleep', 'shutdown'];
-    case 'asleep': return ['wake', 'deep-sleep', 'shutdown'];
-    case 'deepAsleep': return ['wake', 'shutdown'];
+    case 'running': return ['pause', 'sleep', 'hibernate', 'shutdown'];
+    case 'paused': return ['resume', 'sleep', 'hibernate', 'shutdown'];
+    case 'asleep': return ['wake', 'hibernate', 'shutdown'];
+    case 'hibernated': return ['wake', 'shutdown'];
     case 'failed': return ['start'];
     default: return [];
   }
@@ -911,9 +912,9 @@ function sandboxArrived(name, want) {
 function sandboxParts(name, d, net, accounts) {
   const i = d.info;
   const running = i.phase === 'running';
-  // Sessions need a VM: running, or one a session request wakes (paused, asleep, deep asleep) — never
+  // Sessions need a VM: running, or one a session request wakes (paused, asleep, hibernated) — never
   // while off, failed, booting, busy or while another operation on it runs (590 bug 2).
-  const sessionsReady = ['running', 'paused', 'asleep', 'deepAsleep'].includes(i.phase) && !i.busy && !opRunningFor(name);
+  const sessionsReady = ['running', 'paused', 'asleep', 'hibernated'].includes(i.phase) && !i.busy && !opRunningFor(name);
   const whyNot = sessionsReady ? null : i.phase === 'off' || i.phase === 'failed' ? 'Start it first' : 'Wait until it is running';
   const gated = (b) => { if (!sessionsReady) { b.disabled = true; b.title = whyNot; } return b; };
   const fact = (k, v) => h('div', null, h('div', { class: 'k' }, k), h('div', { class: 'v' }, v));
@@ -1943,7 +1944,7 @@ function gridBuild() {
   const root = $('grid');
   const sandboxSel = h('select', { 'aria-label': 'Sandbox' });
   const phaseSel = h('select', { 'aria-label': 'Phase' }, [['', 'every phase'], ['running', 'running'], ['paused', 'paused'], ['asleep', 'asleep'],
-    ['deepAsleep', 'deep asleep'], ['off', 'shut down'], ['failed', 'failed']].map(([v, l]) => h('option', { value: v }, l)));
+    ['hibernated', 'hibernated'], ['off', 'shut down'], ['failed', 'failed']].map(([v, l]) => h('option', { value: v }, l)));
   const sizeSel = h('select', { 'aria-label': 'Tile size' }, ['small', 'medium', 'large'].map((s) => h('option', { value: s }, s + ' tiles')));
   sandboxSel.addEventListener('change', () => { grid.sandbox = sandboxSel.value; gridRender(); });
   phaseSel.addEventListener('change', () => { grid.phase = phaseSel.value; gridRender(); });
@@ -2061,7 +2062,7 @@ function paintTile(tile, w) {
   tile.title.textContent = w.session ? w.sandbox + ' · ' + w.session : w.sandbox;
   tile.title.title = w.command ? w.command : '';
   tile.phase.textContent = s.phaseLabel;
-  const verb = { paused: 'resume', asleep: 'wake', deepAsleep: 'wake', off: 'start', failed: 'start' }[s.phase];
+  const verb = { paused: 'resume', asleep: 'wake', hibernated: 'wake', off: 'start', failed: 'start' }[s.phase];
   tile.act.replaceChildren(verb && !w.session && !s.busy ? btn(VERBS[verb][0], () => lifecycle(verb, w.sandbox), { small: true }) : '');
   if (!w.session) {
     const known = grid.sessions[w.sandbox] || [];

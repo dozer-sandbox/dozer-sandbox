@@ -488,7 +488,7 @@ final class FakeAttachment: WebTerminalAttachment, @unchecked Sendable {
 
     func feed(_ s: String) { continuation.yield(Data(s.utf8)) }
     func feed(_ d: Data) { continuation.yield(d) }
-    /// The host closed the connection (a Deep Sleep, or after the ended notice).
+    /// The host closed the connection (a hibernation, or after the ended notice).
     func hangUp() { continuation.finish() }
     var sent: [UInt8] { lock.withLock { _sent } }
     var sentText: String { String(decoding: sent, as: UTF8.self) }
@@ -502,7 +502,7 @@ final class FakeAttachment: WebTerminalAttachment, @unchecked Sendable {
 }
 
 extension HostOp {
-    static let lifecycle: Set<HostOp> = [.start, .wake, .pause, .resume, .sleep, .deepSleep, .shutdown, .reset, .rm]
+    static let lifecycle: Set<HostOp> = [.start, .wake, .pause, .resume, .sleep, .hibernate, .shutdown, .reset, .rm]
 }
 
 // MARK: raw HTTP

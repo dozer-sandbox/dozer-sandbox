@@ -1,5 +1,5 @@
-doz deep-sleep try
-doz host stop                      # deep-sleeps anything still running, then exits
+doz hibernate try
+doz host stop                      # hibernates anything still running, then exits
 doz host status                    # no host
 doz ls                             # still answers (read from the store, no host started)
 

@@ -4,7 +4,7 @@ Every `doz` command, by task. New to it? <doc:DozerWalkthrough> is a first run, 
 
 ## Overview
 
-`doz` runs Linux sandboxes on your Mac that pause in a millisecond, deep-sleep to disk and wake
+`doz` runs Linux sandboxes on your Mac that pause in a millisecond, hibernate to disk and wake
 in about a third of a second, with the programs inside them still running where they were. It is
 the command-line face of `DozerKit`.
 
@@ -30,13 +30,13 @@ See <doc:Concepts> for what each word means.
 | `start NAME` (`cold-boot`) | boots; wakes it if asleep, resumes it if paused | ~0.4 s | allocated as used | start fresh |
 | `pause NAME` (`suspend`) · `resume NAME` | stops the guest CPU | ~1 ms | kept | frozen, then continue |
 | `sleep NAME` · `wake NAME` | pause + snapshot to disk; survives the host crashing | ~0.3 s | kept | continue |
-| `deep-sleep NAME` (`hibernate`) · `wake NAME` | snapshot, then the VM stops | ~0.35 s / ~0.3 s | **returned** | continue: same PIDs, same screens |
+| `hibernate NAME` · `wake NAME` | snapshot, then the VM stops | ~0.35 s / ~0.3 s | **returned** | continue: same PIDs, same screens |
 | `shutdown NAME` | a cold stop; the disk is kept | | returned | end |
 | `reset NAME` | shut down and go back to a fresh copy of the image (restore points and the agent's state disk stay) | | | end |
 | `rm NAME` | remove the sandbox and everything it has on disk | | | end |
 
 `shutdown`, `reset` and `rm` ask first; `--yes` skips the question; with no terminal and no
-`--yes` they refuse (exit 5). A program started less than 3 s before a deep sleep gets the rest of
+`--yes` they refuse (exit 5). A program started less than 3 s before hibernating gets the rest of
 those 3 s first (Claude Code's first network calls, for example, can otherwise fail on wake).
 
 ### Creating and entering sandboxes
@@ -61,14 +61,14 @@ doz up NAME [same options] [--session S] [-d] [-- CMD …]
 
 | command | what |
 |---|---|
-| `attach NAME [SESSION] [--no-wake]` | Your terminal becomes that session. **Ctrl-]** detaches (`--detach-key ctrl-x\|none`). A paused or sleeping sandbox wakes first unless `--no-wake`. Deep-sleeps while attached: the client waits and reattaches by itself on wake. |
+| `attach NAME [SESSION] [--no-wake]` | Your terminal becomes that session. **Ctrl-]** detaches (`--detach-key ctrl-x\|none`). A paused or sleeping sandbox wakes first unless `--no-wake`. Hibernated while attached: the client waits and reattaches by itself on wake. |
 | `run NAME [--session S] [-d] -- CMD …` | A **new** session running `CMD`, attached; exits with `CMD`'s exit code. No shell in front — write `bash -lc '…'` for one. |
 | `exec NAME [--user U] [--workdir D] [-e K=V] [--timeout S] -- CMD …` | One-shot, no terminal: stdout, stderr and the exit code pass straight through (default timeout 120 s). Agent images run as the agent's user in `/workspace`; `--user root` for root. |
 | `sessions NAME` | The sandbox's terminal sessions. |
 | `ls` · `inspect NAME` | Every sandbox: image, phase, RAM held, disk, sessions, network · everything as JSON. |
 
 **RAM held** in `ls` is what the VM costs the Mac right now: the allocation, less what the memory
-balloon returned after a wake — shown as `—` when the sandbox is off or deep asleep.
+balloon returned after a wake — shown as `—` when the sandbox is off or hibernated.
 
 ### Agents, keys and accounts
 
@@ -201,7 +201,7 @@ account; its state disk starts fresh unless `--copy-state`. Keys are not copied.
 
 ```bash
 doz host [--foreground] [--idle-timeout MIN]   # run it by hand
-doz host stop                                    # deep-sleeps everything running, then exits
+doz host stop                                    # hibernates everything running, then exits
 doz host status                                  # is one running, and what does it hold? never starts one
 ```
 
@@ -209,7 +209,7 @@ Started for you by the first command that needs it; runs detached (`<store>/host
 `<store>/host.sock`); exits after 5 minutes idle (`$DOZ_HOST_IDLE`, 0 = never). `ls`,
 `inspect`, `point ls`, `image ls`, `net policy` (shown) and `key ls` read the store directly when
 no host runs, so **looking never starts one**. If it crashes, the next command starts a new one:
-sleeping sandboxes are restored with their sessions, deep-sleeping ones are untouched, and running
+sleeping sandboxes are restored with their sessions, hibernated ones are untouched, and running
 ones are reported as died with their disk checked at the next start.
 
 ### The web UI

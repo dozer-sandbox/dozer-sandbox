@@ -26,7 +26,7 @@ Task { for await out in conn.output {               // .snapshot first, then .da
 }}
 conn.send(Data("ls\r".utf8)); conn.resize(TermSize(cols: 100, rows: 30))
 
-try await sandbox.deepSleep()                      // RAM freed; the session keeps its state
+try await sandbox.hibernate()                      // RAM freed; the session keeps its state
 try await sandbox.wake()
 // …a later process, after a crash or quit while asleep:
 if Sandbox.restorableState(for: spec) != nil { try await sandbox.restoreAfterCrash() }
@@ -41,7 +41,7 @@ calls use.
 - ``SandboxSpec`` is the imageSpec: name, store root, image or `bakePackages`, ``Share``s, network
   mode, CPU/memory, and (587) journal size.
 - ``Sandbox`` is the actor that owns one VM and its lifecycle: `start`, `pause`/`resume`, `sleep`,
-  `deepSleep`/`wake`, `shutDown`, `resetToImage`, `delete`, `restoreAfterCrash`,
+  `hibernate`/`wake`, `shutDown`, `resetToImage`, `delete`, `restoreAfterCrash`,
   `prepareForExit(settle:)` (keep a sleeping sandbox restorable, stop anything else). Guest-facing
   calls: `exec(argv:)` (no shell unless you pass one), `openSession`/`attach`, `sessions()`
   (`deckhold ls`), `screenText(name:)` (`deckhold dump`), `bootConsole()`.
@@ -53,7 +53,7 @@ calls use.
 
 ``SessionConnection`` is one viewer's connection to a guest terminal session; ``SessionOutput`` is
 what it delivers (a snapshot first, then live data, then exactly one `ended` or ``DetachReason``).
-A session survives Deep Sleep because it lives inside the guest (deckhold), not on the connection
+A session survives hibernation because it lives inside the guest (deckhold), not on the connection
 — see <doc:HowItWorks>. One-shot, non-interactive commands use ``ExecResult`` instead.
 
 ### Images

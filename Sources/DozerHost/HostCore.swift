@@ -52,7 +52,7 @@ public actor HostCore {
         var actionRow: Int64?
         var lastAction: (row: Int64, at: Date)?
         var networkCounted: Set<UUID> = []
-        /// When a session last started a program (a Deep Sleep lets it settle first — 583).
+        /// When a session last started a program (hibernating lets it settle first — 583).
         var lastSessionOpen: ContinuousClock.Instant?
         var sessionRows: [String: Int64] = [:]
         init(sandbox: Sandbox, config: SandboxConfig) {
@@ -142,7 +142,7 @@ public actor HostCore {
     /// What the host does when it starts (not in read-only mode): a sandbox left ASLEEP (its VM was
     /// in a host that died) is restored and put back to sleep — the library's restore after a crash;
     /// one whose record says running died with that host: it is reported, and its disk (never
-    /// unmounted) is marked for e2fsck at the next start. Deep-asleep sandboxes need nothing: `wake`
+    /// unmounted) is marked for e2fsck at the next start. Hibernated sandboxes need nothing: `wake`
     /// adopts them in this process, sessions and pids intact.
     public func recoverAfterStart() async {
         for m in managed.values {
@@ -174,7 +174,7 @@ public actor HostCore {
                 note(m.name, "was running when the previous host died — its programs are gone; the next start checks its disk (e2fsck)")
                 metrics?.record(run: metricsRun, action: "died with host", sandbox: m.name, image: m.config.image,
                                 phaseBefore: "running", phaseAfter: "off", startedAt: Date(), durationMs: nil, ok: false)
-            case .off, .deepAsleep:
+            case .off, .hibernated:
                 break
             }
         }
@@ -249,10 +249,10 @@ public actor HostCore {
     }
 
     /// The phase as the user sees it: in a new process a sandbox that is off but has a restorable
-    /// snapshot is deep asleep (its VM, if it had one, is gone — `wake` restores it).
+    /// snapshot is hibernated (its VM, if it had one, is gone — `wake` restores it).
     func effectivePhase(_ m: Managed) async -> Phase {
         let p = await m.sandbox.phase
-        if p == .off, let r = Sandbox.restorableState(for: m.sandbox.spec) { return r.phase == .asleep ? .deepAsleep : r.phase }
+        if p == .off, let r = Sandbox.restorableState(for: m.sandbox.spec) { return r.phase == .asleep ? .hibernated : r.phase }
         return p
     }
 
@@ -376,7 +376,7 @@ public actor HostCore {
             return try JSONValue(encoding: await status())
         case .create:
             return try JSONValue(encoding: try await create(r))
-        case .start, .wake, .pause, .resume, .sleep, .deepSleep, .shutdown, .reset, .rm:
+        case .start, .wake, .pause, .resume, .sleep, .hibernate, .shutdown, .reset, .rm:
             return try JSONValue(encoding: try await lifecycle(r.op, name: r.name, emit: emit))
         case .ls:
             var rows: [SandboxInfo] = []
@@ -528,7 +528,7 @@ public actor HostCore {
             switch before {
             case .running: break
             case .paused: action = ("resume", { try await sb.resume() })
-            case .asleep, .deepAsleep: action = ("wake", { try await sb.wake() })
+            case .asleep, .hibernated: action = ("wake", { try await sb.wake() })
             case .off, .failed: action = ("start", { try await sb.start() })
             case .booting: throw invalid()
             }
@@ -536,7 +536,7 @@ public actor HostCore {
             switch before {
             case .running: break
             case .paused: action = ("resume", { try await sb.resume() })
-            case .asleep, .deepAsleep: action = ("wake", { try await sb.wake() })
+            case .asleep, .hibernated: action = ("wake", { try await sb.wake() })
             case .off, .failed: throw invalid(" — `doz start \(m.name)` boots it")
             case .booting: throw invalid()
             }
@@ -552,15 +552,15 @@ public actor HostCore {
             case .running, .paused: action = ("sleep", { try await sb.sleep() })
             default: throw invalid()
             }
-        case .deepSleep:
+        case .hibernate:
             switch before {
-            case .deepAsleep: break
+            case .hibernated: break
             case .running, .paused, .asleep:
                 // 583: a program a session started less than 3 s ago gets the rest of that time first.
                 let wait = Self.settleDelay(since: m.lastSessionOpen.map { ContinuousClock.now - $0 })
-                action = ("deep sleep", {
+                action = ("hibernate", {
                     if wait > .zero { try? await Task.sleep(for: wait) }
-                    try await sb.deepSleep()
+                    try await sb.hibernate()
                 })
             default: throw invalid()
             }
@@ -568,7 +568,7 @@ public actor HostCore {
             let actorPhase = await sb.phase
             if actorPhase == .off {
                 if Sandbox.restorableState(for: sb.spec) != nil {
-                    // Deep asleep from an earlier host: wake it so it stops gracefully (a clean
+                    // Hibernated by an earlier host: wake it so it stops gracefully (a clean
                     // unmount), and only if that fails throw the snapshot away (the disk gets e2fsck).
                     let spec = sb.spec
                     action = ("shut down", {
@@ -621,7 +621,7 @@ public actor HostCore {
         return await result(true)
     }
 
-    /// How long a Deep Sleep waits for a program started `since` ago (the rest of 3 s).
+    /// How long hibernating waits for a program started `since` ago (the rest of 3 s).
     static func settleDelay(since: Duration?, settle: Duration = .seconds(3)) -> Duration {
         guard let since, since >= .zero, since < settle else { return .zero }
         return settle - since
@@ -637,7 +637,7 @@ public actor HostCore {
             switch p {
             case .running where !busy: return
             case .paused where wake && !busy: try await m.sandbox.resume(); return
-            case .asleep where wake && !busy, .deepAsleep where wake && !busy:
+            case .asleep where wake && !busy, .hibernated where wake && !busy:
                 let row = beginAction(m, "wake", phaseBefore: p.rawValue)
                 let t0 = ContinuousClock.now
                 do { try await m.sandbox.wake() } catch {
@@ -648,7 +648,7 @@ public actor HostCore {
                 return
             case .off, .failed:
                 throw HostError(.invalidPhase, "\(m.name) is \(PhaseName.label(p)) — `doz start \(m.name)` boots it")
-            case .paused, .asleep, .deepAsleep:
+            case .paused, .asleep, .hibernated:
                 if !wake && !busy { throw HostError(.invalidPhase, "\(m.name) is \(PhaseName.label(p))") }
             case .booting, .running:
                 break
@@ -688,14 +688,14 @@ public actor HostCore {
         metrics?.sessionEnded(id, exitCode: exitCode)
     }
 
-    /// Deep-sleep everything with a VM (quit = Deep Sleep, owner ruling 2026-09-25) — `host stop`
+    /// Hibernate everything with a VM (quit = Hibernate, owner ruling 2026-09-25) — `host stop`
     /// and a SIGTERM. The next wake restores each with its sessions and pids.
     public func prepareAllForExit() async {
         var rows: [(Managed, Int64?)] = []
         for m in managed.values {
             let before = await m.sandbox.phase
             guard [.running, .paused, .asleep, .booting, .failed].contains(before) else { continue }
-            rows.append((m, beginAction(m, "quit (deep sleep)", phaseBefore: before.rawValue)))
+            rows.append((m, beginAction(m, "quit (hibernate)", phaseBefore: before.rawValue)))
         }
         let t0 = ContinuousClock.now
         let sandboxes = rows.map { $0.0.sandbox }
@@ -889,7 +889,7 @@ public actor HostCore {
         case .pointRevert:
             let p = try resolvePoint(m, r.point)
             if await sb.phase == .off, Sandbox.restorableState(for: sb.spec) != nil {
-                // Deep asleep from an earlier host: revert discards what it holds anyway.
+                // Hibernated by an earlier host: revert discards what it holds anyway.
                 Sandbox.discardRestorableState(for: sb.spec)
             }
             let row = beginAction(m, "revert", phaseBefore: (await effectivePhase(m)).rawValue)
@@ -933,7 +933,7 @@ public actor HostCore {
 
     // MARK: templates and duplicates (593)
 
-    /// The sandbox is stopped AND its record says so (a deep sleep of an earlier host is `off` in
+    /// The sandbox is stopped AND its record says so (a hibernation by an earlier host is `off` in
     /// memory but holds a snapshot: its disk is not a clean stop).
     private func stoppedOnDisk(_ m: Managed) async -> Bool {
         guard await m.sandbox.phase == .off else { return false }

@@ -87,7 +87,7 @@ public struct ExecutableIdentity: Codable, Equatable, Sendable {
                 + "their snapshots and wake on the new build"
         case .replaced:
             "a newer doz is installed (\(path)); this host still runs the previous build — `doz host stop` switches "
-                + "(sandboxes deep-sleep and wake on the new one)"
+                + "(sandboxes hibernate and wake on the new one)"
         case .removed:
             "this host's program (\(path)) is gone — `doz host stop`, then run the installed doz"
         }

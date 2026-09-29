@@ -9,8 +9,8 @@ import Foundation
 //   bake        1  claude-code and pi bake on a WARM base in ≤ 20 s each; ≥ 250 MiB of the base
 //                  shared by both images (DiskAccounting); each image's fstrim share (item 4)
 //   discard     4  a 300 MiB file deleted inside a running sandbox leaves < 32 MiB of garbage
-//   sync        5  a file written but not synced survives Deep Sleep → discard → cold boot
-//   journal     2  root + state journaled; 15 × (Deep Sleep → discard → cold boot): no e2fsck,
+//   sync        5  a file written but not synced survives Hibernate → discard → cold boot
+//   journal     2  root + state journaled; 15 × (Hibernate → discard → cold boot): no e2fsck,
 //                  15/15 clean `e2fsck -fn`, median cold boot < 600 ms
 //   nojournal   3  journalMiB nil: the 583 e2fsck path, 15/15 (the hardening discard test)
 //   accounting  6  unique == PRIVATESIZE (±1 MiB) on every disk of the store; deleting a disk frees
@@ -21,7 +21,7 @@ import Foundation
 //                  garbage, identical content; a failure part-way leaves the original disk
 //   children    P2 deleting an image and its base leaves a sandbox cloned from it working
 //
-// Item 10 (a sandbox deep-slept by v0.4.0 wakes under this build) was retired by 592: the product was
+// Item 10 (a sandbox hibernated by v0.4.0 wakes under this build) was retired by 592: the product was
 // renamed with no backward compatibility (owner ruling), so an older release's store is not expected
 // to wake. The journal-less e2fsck path it also covered is `nojournal` (item 3).
 //
@@ -165,10 +165,10 @@ func lineageDiscard() async throws {
     try await sb.delete()
 }
 
-// MARK: 5 — sync before Deep Sleep
+// MARK: 5 — sync before Hibernate
 
 func lineageSync() async throws {
-    print("vmtest[lineage]: 5 — a file written (not synced) right before Deep Sleep survives a discard")
+    print("vmtest[lineage]: 5 — a file written (not synced) right before hibernating survives a discard")
     for (label, spec) in [("journaled pi", lineageSpec("lineage-sync")), ("journal-less lab", { var s = lineageSpec("lineage-sync-nj", imageSpec: nil); s.journalMiB = nil; return s }())] {
         var sb = try await lineageFresh(spec)
         try await sb.start()
@@ -177,7 +177,7 @@ func lineageSync() async throws {
         for i in 1...n {
             let token = UUID().uuidString
             _ = try await sb.exec(["sh", "-c", "echo \(token) > /root/unsynced-\(i).txt"])     // no sync
-            try await sb.deepSleep()
+            try await sb.hibernate()
             Sandbox.discardRestorableState(for: spec)
             lineageKeep.append(sb)
             sb = try Sandbox(spec: spec)
@@ -185,7 +185,7 @@ func lineageSync() async throws {
             let got = try await sb.exec(["sh", "-c", "cat /root/unsynced-\(i).txt 2>/dev/null || echo MISSING"]).output
             if got.contains(token) { kept += 1 } else { info("\(label) cycle \(i): \(got)") }
         }
-        check(kept == n, "\(label): \(kept)/\(n) files written without sync survived Deep Sleep → discard → cold boot (586: 0/40 without the sync)")
+        check(kept == n, "\(label): \(kept)/\(n) files written without sync survived Hibernate → discard → cold boot (586: 0/40 without the sync)")
         try await sb.shutDown()
         try await sb.delete()
     }
@@ -195,7 +195,7 @@ func lineageSync() async throws {
 
 func lineageJournal() async throws {
     let cycles = envInt("LINEAGE_CYCLES", 15)
-    print("vmtest[lineage]: 2 — journaled root + state: \(cycles) × Deep Sleep → discard → cold boot")
+    print("vmtest[lineage]: 2 — journaled root + state: \(cycles) × Hibernate → discard → cold boot")
     let spec = lineageSpec("lineage-journal")
     var sb = try await lineageFresh(spec)
     try await sb.start()
@@ -208,7 +208,7 @@ func lineageJournal() async throws {
     for i in 1...cycles {
         _ = try await sb.exec(["sh", "-c", "mkdir -p /root/d\(i) && for n in $(seq 1 40); do echo \(i)-$n > /root/d\(i)/f$n; done; head -c 32M /dev/urandom > /home/agent/.pi/agent/blob\(i); echo ok"], privileged: true)
         try await sb.openSession("s\(i)", argv: ["bash", "-l"], size: .standard)
-        try await sb.deepSleep()
+        try await sb.hibernate()
         Sandbox.discardRestorableState(for: spec)
         let marked = PersistedSandbox.read(from: l.persistedState)?.fsckOnNextBoot == true
         lineageKeep.append(sb)

@@ -44,7 +44,7 @@ public enum DiskAccounting {
     public enum GarbageSource: String, Sendable, Codable {
         /// Exact: the file's data lying in blocks ext4's bitmaps say are free (a cleanly unmounted disk).
         case ext4FreeBlocks
-        /// Estimated: allocated − the guest's `df` used at its last Stop / Deep Sleep (a disk not
+        /// Estimated: allocated − the guest's `df` used at its last Stop / Hibernate (a disk not
         /// cleanly unmounted). `df` leaves out ext4's own metadata, so this reads a little high.
         case guestDF
     }
@@ -70,7 +70,7 @@ public enum DiskAccounting {
         public var extents: Int
         /// Extents per GiB of data — fragmentation. 586: no threshold is needed (1000/GiB cost nothing).
         public var extentsPerGiB: Double
-        /// What the guest held at its last Stop / Deep Sleep (`df`), for sandbox disks.
+        /// What the guest held at its last Stop / Hibernate (`df`), for sandbox disks.
         public var guestUsedBytes: Int64?
         /// The host file's allocation beyond what the file system holds (see `GarbageSource`).
         public var garbageBytes: Int64?

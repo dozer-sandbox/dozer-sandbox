@@ -56,7 +56,7 @@ here — the library builds and caches **disks** (``ImageSpec``, ``ImageBaker``)
 Credentials are never baked: a key is passed to one session when it starts, and is never written
 to any disk.
 
-### Pause, sleep, deep sleep, wake
+### Pause, sleep, hibernate, wake
 
 See the lifecycle table in <doc:Concepts>. The rules learned the hard way:
 

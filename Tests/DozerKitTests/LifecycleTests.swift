@@ -13,7 +13,7 @@ final class LifecycleTests: XCTestCase {
         // 587: a running (or paused, once resumed) guest syncs and reports its disk usage first.
         XCTAssertEqual(plan(.shutDown, .running), [.detachSessions(.sandboxStopped), .syncGuest, .stopContainer, .deleteSnapshot, .releaseRuntime])
         XCTAssertEqual(plan(.shutDown, .paused), [.detachSessions(.sandboxStopped), .reviveForStop, .syncGuest, .stopContainer, .deleteSnapshot, .releaseRuntime])
-        for p in [Phase.asleep, .deepAsleep] {
+        for p in [Phase.asleep, .hibernated] {
             XCTAssertEqual(plan(.shutDown, p), [.detachSessions(.sandboxStopped), .reviveForStop, .stopContainer, .deleteSnapshot, .releaseRuntime], "\(p)")
         }
         for p in [Phase.failed, .booting] {
@@ -69,24 +69,24 @@ final class LifecycleTests: XCTestCase {
                 XCTAssertGreaterThan(steps.firstIndex(of: .deleteSnapshot)!, resumeAt, "delete only once running: \(op) from \(p)")
             }
         }
-        XCTAssertTrue(plan(.shutDown, .deepAsleep)!.contains(.deleteSnapshot))
+        XCTAssertTrue(plan(.shutDown, .hibernated)!.contains(.deleteSnapshot))
     }
 
     /// Wake resyncs the clock and re-mounts shares, after the restore and before the snapshot goes.
     func test_wakeRestoresThenResyncsClockAndRemountsShares() {
-        XCTAssertEqual(plan(.wake, .deepAsleep), [.restoreSnapshot, .resyncClock, .remountShares, .deleteSnapshot, .returnFreeMemory, .persistState])
+        XCTAssertEqual(plan(.wake, .hibernated), [.restoreSnapshot, .resyncClock, .remountShares, .deleteSnapshot, .returnFreeMemory, .persistState])
         XCTAssertNil(plan(.wake, .running))
     }
 
     /// Sleep to disk saves before it severs anything, detaches sessions before the VZ stop, and
     /// never pauses twice.
-    func test_deepSleepOrdering() {
-        let fromRunning = plan(.deepSleep, .running)!
-        // 587: the guest syncs before the pause — a discarded Deep Sleep must not lose its last writes.
+    func test_hibernateOrdering() {
+        let fromRunning = plan(.hibernate, .running)!
+        // 587: the guest syncs before the pause — a discarded hibernation must not lose its last writes.
         XCTAssertEqual(fromRunning, [.restoreGuestMemory, .syncGuest, .pauseVM, .saveSnapshot, .detachSessions(.sandboxSleeping), .stopVMDirect, .persistState])
-        XCTAssertEqual(plan(.deepSleep, .paused), [.saveSnapshot, .detachSessions(.sandboxSleeping), .stopVMDirect, .persistState])
-        XCTAssertEqual(plan(.deepSleep, .asleep), [.detachSessions(.sandboxSleeping), .stopVMDirect, .persistState])
-        XCTAssertNil(plan(.deepSleep, .deepAsleep))
+        XCTAssertEqual(plan(.hibernate, .paused), [.saveSnapshot, .detachSessions(.sandboxSleeping), .stopVMDirect, .persistState])
+        XCTAssertEqual(plan(.hibernate, .asleep), [.detachSessions(.sandboxSleeping), .stopVMDirect, .persistState])
+        XCTAssertNil(plan(.hibernate, .hibernated))
     }
 
     func test_pauseResumeSleepAvailability() {
@@ -94,7 +94,7 @@ final class LifecycleTests: XCTestCase {
         XCTAssertNil(plan(.pause, .paused))
         XCTAssertEqual(plan(.resume, .paused), [.resumeVM, .deleteSnapshot, .persistState])
         XCTAssertEqual(plan(.resume, .asleep), [.resumeVM, .deleteSnapshot, .persistState])
-        XCTAssertNil(plan(.resume, .deepAsleep), "on disk needs a wake, not a resume")
+        XCTAssertNil(plan(.resume, .hibernated), "on disk needs a wake, not a resume")
         XCTAssertEqual(plan(.sleep, .running), [.restoreGuestMemory, .pauseVM, .saveSnapshot, .persistState])
         XCTAssertEqual(plan(.sleep, .paused), [.saveSnapshot, .persistState])
         XCTAssertNil(plan(.sleep, .asleep))
@@ -109,13 +109,13 @@ final class LifecycleTests: XCTestCase {
             XCTAssertNotNil(deflate, "\(op)")
             XCTAssertLessThan(deflate ?? .max, steps.firstIndex(of: .pauseVM) ?? save, "\(op): deflate while the guest runs")
         }
-        XCTAssertEqual(plan(.wake, .deepAsleep)?.firstIndex(of: .returnFreeMemory).map { $0 > 0 }, true)
+        XCTAssertEqual(plan(.wake, .hibernated)?.firstIndex(of: .returnFreeMemory).map { $0 > 0 }, true)
     }
 
     func test_phaseProperties() {
         XCTAssertTrue(Phase.paused.holdsRAM)
-        XCTAssertFalse(Phase.deepAsleep.holdsRAM)
-        XCTAssertEqual(Phase.allCases.filter(\.keepsSnapshot), [.asleep, .deepAsleep])
+        XCTAssertFalse(Phase.hibernated.holdsRAM)
+        XCTAssertEqual(Phase.allCases.filter(\.keepsSnapshot), [.asleep, .hibernated])
         XCTAssertEqual(LifecyclePlanner.target(of: .shutDown), .off)
     }
 }
@@ -204,7 +204,7 @@ final class PersistedSandboxTests: XCTestCase {
     func test_machineIdentifierRoundTrip() throws {
         let spec = SandboxSpec(name: "lab", storeRoot: dir, bakePackages: ["bash"], shares: [Share(hostPath: "/tmp/w", guestPath: "/work")])
         let mid = Data((0..<48).map { _ in UInt8.random(in: 0...255) })
-        let p = PersistedSandbox(spec: spec, phase: .deepAsleep, machineIdentifier: mid, macAddress: PersistedSandbox.randomMAC(),
+        let p = PersistedSandbox(spec: spec, phase: .hibernated, machineIdentifier: mid, macAddress: PersistedSandbox.randomMAC(),
                                  subnet: "192.168.64.1/24", shareTags: ["/work": "abc"])
         let url = StoreLayout(spec: spec).persistedState
         try p.write(to: url)
@@ -213,14 +213,14 @@ final class PersistedSandboxTests: XCTestCase {
         XCTAssertEqual(back.spec, spec)
         XCTAssertEqual(back.macAddress, p.macAddress)
         XCTAssertEqual(back.shareTags, ["/work": "abc"])
-        XCTAssertEqual(back.phase, .deepAsleep)
+        XCTAssertEqual(back.phase, .hibernated)
     }
 
     func test_restorableOnlyWhenAsleepWithSnapshotAndDisk() throws {
         let spec = SandboxSpec(name: "lab", storeRoot: dir)
         let layout = StoreLayout(spec: spec)
         try FileManager.default.createDirectory(at: layout.sandboxDirectory, withIntermediateDirectories: true)
-        var p = PersistedSandbox(spec: spec, phase: .deepAsleep, machineIdentifier: Data([1]), macAddress: nil, subnet: nil, shareTags: [:])
+        var p = PersistedSandbox(spec: spec, phase: .hibernated, machineIdentifier: Data([1]), macAddress: nil, subnet: nil, shareTags: [:])
         XCTAssertFalse(p.isRestorable(layout: layout), "no files yet")
         try Data("s".utf8).write(to: layout.snapshot)
         try Data("r".utf8).write(to: layout.rootfs)
@@ -238,10 +238,10 @@ final class PersistedSandboxTests: XCTestCase {
         XCTAssertEqual(PersistedSandbox.read(from: layout.persistedState)?.phase, .off)
         XCTAssertNotNil(Sandbox.keptRootDisk(layout), "the next Start cold-boots the kept disk")
         XCTAssertEqual(PersistedSandbox.read(from: layout.persistedState)?.fsckOnNextBoot, true,
-                       "583: the deep-slept VM never unmounted the disk — the cold boot runs e2fsck first")
+                       "583: the hibernated VM never unmounted the disk — the cold boot runs e2fsck first")
     }
 
-    /// 583: at quit, a program started less than `settle` ago gets the rest of it before the Deep Sleep.
+    /// 583: at quit, a program started less than `settle` ago gets the rest of it before it hibernates.
     func test_exitSettleDelay() {
         let three = Duration.seconds(3)
         XCTAssertEqual(Sandbox.exitSettleDelay(sinceLastSessionStart: nil, settle: three), .zero, "no session opened here")
@@ -267,7 +267,7 @@ final class PersistedSandboxTests: XCTestCase {
         var p = PersistedSandbox(spec: spec, phase: .off, machineIdentifier: Data([1]), macAddress: nil, subnet: nil, shareTags: [:])
         XCTAssertFalse(Sandbox.keptDiskNeedsFsck(p, snapshotPresent: false), "a clean Shut Down")
         XCTAssertTrue(Sandbox.keptDiskNeedsFsck(p, snapshotPresent: true), "a snapshot beside the disk: it was asleep, never unmounted")
-        for phase in [Phase.running, .paused, .asleep, .deepAsleep, .booting, .failed] {
+        for phase in [Phase.running, .paused, .asleep, .hibernated, .booting, .failed] {
             p.phase = phase
             XCTAssertTrue(Sandbox.keptDiskNeedsFsck(p, snapshotPresent: false), "last durable phase \(phase)")
         }
@@ -278,7 +278,7 @@ final class PersistedSandboxTests: XCTestCase {
         XCTAssertTrue(Sandbox.keptDiskNeedsFsck(p, snapshotPresent: false, journaled: true), "an explicit mark, journaled")
         p.fsckOnNextBoot = nil
         XCTAssertFalse(Sandbox.keptDiskNeedsFsck(p, snapshotPresent: true, journaled: true), "journaled: a snapshot beside it needs no e2fsck")
-        for phase in [Phase.running, .deepAsleep, .failed] {
+        for phase in [Phase.running, .hibernated, .failed] {
             p.phase = phase
             XCTAssertFalse(Sandbox.keptDiskNeedsFsck(p, snapshotPresent: false, journaled: true), "journaled, last durable phase \(phase)")
         }
@@ -293,7 +293,7 @@ final class PersistedSandboxTests: XCTestCase {
         }
     }
 
-    // MARK: the 2026-09-25 vocabulary (Pause/Suspend · Sleep · Deep Sleep/Hibernate · Wake · Shut Down · Start/Cold Boot)
+    // MARK: the 2026-09-25 vocabulary (Pause/Suspend · Sleep · Hibernate · Wake · Shut Down · Start/Cold Boot)
 
     func test_wakeFromSleepResumesInPlace_andResumeStillWorksFromSleep() {
         XCTAssertEqual(LifecyclePlanner.plan(.wake, from: .asleep), [.resumeVM, .deleteSnapshot, .persistState])
@@ -301,41 +301,43 @@ final class PersistedSandboxTests: XCTestCase {
         XCTAssertNil(LifecyclePlanner.plan(.wake, from: .running))
         XCTAssertNil(LifecyclePlanner.plan(.wake, from: .paused), "a paused sandbox resumes, it does not wake")
         XCTAssertEqual(LifecyclePlanner.target(of: .wake), .running)
-        XCTAssertEqual(LifecyclePlanner.target(of: .deepSleep), .deepAsleep)
+        XCTAssertEqual(LifecyclePlanner.target(of: .hibernate), .hibernated)
     }
 
     func test_phaseLabelsAreTheOwnersNames() {
         XCTAssertEqual(Phase.paused.label, "Paused")
         XCTAssertTrue(Phase.asleep.label.hasPrefix("Asleep"))
-        XCTAssertTrue(Phase.deepAsleep.label.hasPrefix("Deep asleep"))
+        XCTAssertTrue(Phase.hibernated.label.hasPrefix("Hibernated"))
         XCTAssertEqual(Phase.off.label, "Shut down")
     }
 
-    /// A sandbox left asleep by a build from before the rename must still decode — and wake.
+    /// A sandbox left asleep by a build from before a rename must still decode — and wake.
     func test_oldPersistedPhasesDecode() throws {
-        for (old, new) in [("pausedSaved", Phase.asleep), ("onDisk", .deepAsleep), ("hibernated", .deepAsleep),
+        // "deepAsleep": the name before the 593 rename to Hibernate — the one shim that rename keeps.
+        for (old, new) in [("pausedSaved", Phase.asleep), ("onDisk", .hibernated), ("deepAsleep", .hibernated),
                            ("running", .running), ("off", .off), ("paused", .paused)] {
             XCTAssertEqual(try JSONDecoder().decode(Phase.self, from: Data("\"\(old)\"".utf8)), new, old)
             XCTAssertEqual(Phase(rawValue: old), new)
         }
         XCTAssertThrowsError(try JSONDecoder().decode(Phase.self, from: Data("\"nonsense\"".utf8)))
-        XCTAssertEqual(String(decoding: try JSONEncoder().encode(Phase.deepAsleep), as: UTF8.self), "\"deepAsleep\"", "new files use the new name")
-        // A whole persisted sandbox.json from before the rename.
+        XCTAssertEqual(String(decoding: try JSONEncoder().encode(Phase.hibernated), as: UTF8.self), "\"hibernated\"", "new files use the new name")
+        // A whole persisted sandbox.json from before the renames.
         let spec = SandboxSpec(name: "old", storeRoot: URL(fileURLWithPath: "/tmp/old-store"))
-        let p = PersistedSandbox(spec: spec, phase: .deepAsleep, machineIdentifier: Data([1, 2]), macAddress: nil, subnet: nil, shareTags: [:])
-        let json = String(decoding: try JSONEncoder().encode(p), as: UTF8.self).replacingOccurrences(of: "\"deepAsleep\"", with: "\"onDisk\"")
-        XCTAssertTrue(json.contains("\"onDisk\""))
-        XCTAssertEqual(try JSONDecoder().decode(PersistedSandbox.self, from: Data(json.utf8)).phase, .deepAsleep)
+        let p = PersistedSandbox(spec: spec, phase: .hibernated, machineIdentifier: Data([1, 2]), macAddress: nil, subnet: nil, shareTags: [:])
+        let encoded = String(decoding: try JSONEncoder().encode(p), as: UTF8.self)
+        for old in ["onDisk", "deepAsleep"] {
+            let json = encoded.replacingOccurrences(of: "\"hibernated\"", with: "\"\(old)\"")
+            XCTAssertTrue(json.contains("\"\(old)\""))
+            XCTAssertEqual(try JSONDecoder().decode(PersistedSandbox.self, from: Data(json.utf8)).phase, .hibernated, old)
+        }
     }
 
     @available(*, deprecated)
     func test_deprecatedNamesForward() {
-        XCTAssertEqual(Phase.onDisk, .deepAsleep)
+        XCTAssertEqual(Phase.onDisk, .hibernated)
         XCTAssertEqual(Phase.pausedSaved, .asleep)
-        XCTAssertEqual(LifecycleOperation.sleepToDisk, .deepSleep)
         XCTAssertEqual(LifecycleOperation.wakeFromDisk, .wake)
         XCTAssertEqual(LifecycleOperation.stop, .shutDown)
-        XCTAssertEqual(LifecyclePlanner.plan(.sleepToDisk, from: .running), LifecyclePlanner.plan(.deepSleep, from: .running))
     }
 
     /// The forwarding METHODS, without a VM: each must reach the same planned operation — observed
@@ -348,8 +350,8 @@ final class PersistedSandboxTests: XCTestCase {
         func opName(_ body: () async throws -> Void) async -> String? {
             do { try await body(); return nil } catch SandboxError.invalidPhase(let op, _) { return op } catch { return "\(error)" }
         }
-        let a = await opName { try await sb.sleepToDisk() }, b = await opName { try await sb.deepSleep() }, c = await opName { try await sb.hibernate() }
-        XCTAssertEqual(a, "deepSleep"); XCTAssertEqual(b, "deepSleep"); XCTAssertEqual(c, "deepSleep")
+        let h = await opName { try await sb.hibernate() }
+        XCTAssertEqual(h, "hibernate")
         let w1 = await opName { try await sb.wakeFromDisk() }, w2 = await opName { try await sb.wake() }
         XCTAssertEqual(w1, "wake"); XCTAssertEqual(w2, "wake")
         let p1 = await opName { try await sb.suspend() }

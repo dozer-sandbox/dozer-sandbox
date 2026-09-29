@@ -4,6 +4,6 @@ doz resume lab1
 doz sleep lab1                     # pause + snapshot to disk; RAM still held
 doz wake lab1
 
-doz deep-sleep lab1                # snapshot, then the VM stops: RAM held goes to —
+doz hibernate lab1                 # snapshot, then the VM stops: RAM held goes to —
 doz ls
 doz attach lab1                    # wakes it (~0.3 s) and reattaches: top is still running

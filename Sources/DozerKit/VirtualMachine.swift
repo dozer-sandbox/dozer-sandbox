@@ -13,9 +13,9 @@ import Virtualization
 /// The ONE event-loop group every sandbox VM instance in this process uses (its vminitd gRPC
 /// clients and time syncer run on it). 583: `VZVirtualMachineInstance` otherwise makes its own
 /// `MultiThreadedEventLoopGroup(numberOfThreads: coreCount)` and shuts it down only in its own
-/// `stop()` — which Deep Sleep never calls (it stops the VM at the VZ level and keeps the instance
+/// `stop()` — which Hibernate never calls (it stops the VM at the VZ level and keeps the instance
 /// for the wake). Every instance a host made therefore kept 8 threads and 8 kqueue fds for the life
-/// of the process (582 churn: +~5 threads, +~6 fds, +~1 MiB per wake/Deep Sleep cycle; the
+/// of the process (582 churn: +~5 threads, +~6 fds, +~1 MiB per wake/hibernate cycle; the
 /// per-process thread cap is 6,144). A group the instance did not create is never shut down by it.
 enum SharedEventLoop {
     static let group: any EventLoopGroup = MultiThreadedEventLoopGroup(numberOfThreads: System.coreCount)

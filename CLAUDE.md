@@ -64,7 +64,7 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
 | `Sources/DozerHost/ClaudeLogin.swift`, `Accounts.swift`, `LoginWatcher.swift`, `HostCore+Accounts.swift` | 588: the Mac's Claude Code login (read-only), the keychain through `/usr/bin/security`, accounts (`<store>/accounts.json`, never a secret), ONE watcher per Mac login, the keep-alive, key policy |
 | `Sources/DozerHost/HostProtocol.swift` | 585: the host protocol (JSON lines, `HostOp`, results) — fields only ever added |
 | `Sources/DozerHost/HostCore.swift` | 585: the host's model — every sandbox as a `Sandbox`, every operation, crash recovery, metrics rows; also used read-only in-process |
-| `Sources/DozerHost/HostServer.swift` | 585: `doz host` — the lock, the socket, the attach relay (held clients), streams, idle exit, quit = Deep Sleep |
+| `Sources/DozerHost/HostServer.swift` | 585: `doz host` — the lock, the socket, the attach relay (held clients), streams, idle exit, quit = Hibernate |
 | `Sources/DozerHost/HostClient.swift`, `UnixSocket.swift` | 585: the detached-child launcher, the client, socket plumbing, `ClientWire` (SandboxLab's attach wire) |
 | `Sources/DozerHost/DozerStore.swift`, `Metrics.swift` | 585: the CLI store's files, `SandboxConfig` (`doz.json`), images → specs; the metrics DB (SandboxLab's schema) |
 | `Sources/DozerCLI/` | 585: the commands (ArgumentParser), the attach client, `doctor`; 590: `UICommand.swift` (`doz ui`, `ui link`) |
@@ -98,10 +98,10 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   192.168.201/202.0/24. `hardening subnets` is the test.
 - **Every sandbox VM uses the ONE shared event-loop group** (`SharedEventLoop.group`, 583). Left to
   itself `VZVirtualMachineInstance` makes an 8-thread group and shuts it down only in its own `stop()`,
-  which Deep Sleep never calls — each VM instance a host made kept 8 threads + 8 kqueues forever (582;
+  which Hibernate never calls — each VM instance a host made kept 8 threads + 8 kqueues forever (582;
   thread cap 6,144). `hardening leak` is the regression test (threads, fds, footprint flat).
 - **Quit lets a just-started program settle** (583). `prepareForExit(settle:)` waits out the rest of 3 s
-  since the last `openSession` before the Deep Sleep (580: Claude Code deep-slept within ~1 s of its
+  since the last `openSession` before it hibernates (580: Claude Code hibernated within ~1 s of its
   launch exited after the wake in 2 of ~7 runs). `hardening settle` is the test.
 - **Stop decides from the phase it was CALLED in** (`perform()` reads `phase` before going busy).
 - **Every VM has a memory balloon; a snapshot is never taken with it inflated** (583). A device is a
@@ -142,7 +142,7 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   first (`FsckHelper`) — journal or not. e2fsck runs on the image FILE over virtio-fs: a container's
   device cgroup refuses a raw block node even to a privileged exec.
 - **A kept disk that was not cleanly unmounted is replayed or e2fsck'd before it cold-boots** (583,
-  587). Deep Sleep stops the VM at the VZ level, so a discarded snapshot (`discardRestorableState`),
+  587). Hibernate stops the VM at the VZ level, so a discarded snapshot (`discardRestorableState`),
   a failed restore, a crash while running or a VZ-level stop fallback leaves a disk that was never
   unmounted. A JOURNALED disk (587's default, 16 MiB) is replayed by the kernel on mount — no mark,
   no e2fsck (`lineage journal`: 15/15 clean, ~380 ms). A journal-less one (`journalMiB: nil`, and
@@ -153,8 +153,8 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   `SandboxSpec.journalMiB` in the prepared-disk key (a journal-less one keeps its pre-587 key, and so
   does the e2fsck helper's). A record written before 587 decodes as `nil` = no journal — its disks
   have none. Never default a DECODED value to 16.
-- **Deep Sleep and Stop sync the guest first** (587, `.syncGuest`, best effort): a discarded Deep
-  Sleep lost the last ~5 s of writes in every journal mode (586). It also records `df` usage for
+- **Hibernate and Stop sync the guest first** (587, `.syncGuest`, best effort): a discarded
+  hibernation lost the last ~5 s of writes in every journal mode (586). It also records `df` usage for
   `DiskAccounting`'s fallback garbage.
 - **Mount options are not VM inputs** (587): `discard` on the root and state disks goes to the guest's
   mount only (Containerization maps only `ro` into the VZ attachment), so a snapshot taken before 587
@@ -388,11 +388,11 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
 - **The bridge adds no HostOp**: it sends the CLI's `attach` with `wake: false` (a watcher: size 0×0 =
   keep the session's size), relays PULLED reads (backpressure — no queue grows), strips `0xFF` from
   input (the attach wire's frame byte), turns the host's end notice into an `ended` frame (never on
-  screen — `holdBack` covers the `ESC[0m` in front), and reattaches across a Deep Sleep.
+  screen — `holdBack` covers the `ESC[0m` in front), and reattaches across a hibernation.
 - **The 541 rule lives in the UI process** (`TerminalInputClassifier`, SandboxLab's cases as tests):
   while not running, a keystroke starts `resume`/`wake` as an ordinary operation and is DROPPED; a
   control report is dropped and counted. Input for a running sandbox goes straight through. Phases come
-  from the monitor (which terminals keep polling); a Deep Sleep or off reported while a terminal is
+  from the monitor (which terminals keep polling); a hibernated or off phase reported while a terminal is
   attached with its screen is stale and ignored.
 - **The cover is derived here** (`WebTerminalCover`, SandboxLab's PaneCover wording); the page only draws
   it. Reattaching lasts until the first bytes, ≤ 10 s.
@@ -408,7 +408,7 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   `terminal.html` → `/terminal-frame`), each with its one script and style; the page-code rules apply to
   all six files.
 - **An open terminal keeps the host alive** (T3: an explicit attach, like `doz attach` — even held on
-  a deep-asleep sandbox); the dashboard alone still lets it idle out (`t3-host-alive.mjs`).
+  a hibernated sandbox); the dashboard alone still lets it idle out (`t3-host-alive.mjs`).
 - **The engine runs ONLY in a sandboxed, opaque-origin iframe** (owner ruling T2): `/terminal-frame`
   (`terminal.html` + `frame.js` + `frame.css`), loaded with `sandbox="allow-scripts"` only — no cookie,
   storage, same-origin access, popups or forms. Its CSP (`WebSecurity.frameHeaders`) allows

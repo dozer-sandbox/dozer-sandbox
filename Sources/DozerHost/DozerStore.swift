@@ -76,7 +76,7 @@ public struct DozerStore: Sendable, Equatable {
     public func needsRecovery() -> [String] {
         sandboxNames().filter { name in
             guard let p = PersistedSandbox.read(from: layout(name).persistedState) else { return false }
-            return p.phase != .off && p.phase != .deepAsleep
+            return p.phase != .off && p.phase != .hibernated
         }
     }
 }

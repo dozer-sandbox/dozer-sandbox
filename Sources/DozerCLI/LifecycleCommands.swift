@@ -108,16 +108,16 @@ struct SleepCommand: AsyncParsableCommand {
     func run() async throws { _ = try lifecycle(.sleep, name, g) }
 }
 
-struct DeepSleep: AsyncParsableCommand {
-    static let configuration = CommandConfiguration(commandName: "deep-sleep",
-        abstract: "Deep sleep: snapshot to disk and stop the VM — RAM returned; sessions come back on wake.", aliases: ["hibernate"])
+struct Hibernate: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(commandName: "hibernate",
+        abstract: "Hibernate: snapshot to disk and stop the VM — RAM returned; sessions come back on wake.")
     @OptionGroup var g: GlobalOptions
     @Argument var name: String
-    func run() async throws { _ = try lifecycle(.deepSleep, name, g) }
+    func run() async throws { _ = try lifecycle(.hibernate, name, g) }
 }
 
 struct Wake: AsyncParsableCommand {
-    static let configuration = CommandConfiguration(abstract: "Wake from sleep or deep sleep (~0.3 s), sessions and pids where they were.")
+    static let configuration = CommandConfiguration(abstract: "Wake from sleep or hibernation (~0.3 s), sessions and pids where they were.")
     @OptionGroup var g: GlobalOptions
     @Argument var name: String
     func run() async throws { _ = try lifecycle(.wake, name, g) }

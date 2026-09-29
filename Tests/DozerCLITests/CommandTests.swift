@@ -11,8 +11,7 @@ final class CommandTests: XCTestCase {
     private func parse(_ args: [String]) throws -> ParsableCommand { try DozerCommand.parseAsRoot(args) }
 
     func testTheOwnersAliases() throws {
-        XCTAssertTrue(try parse(["hibernate", "box"]) is DeepSleep)
-        XCTAssertTrue(try parse(["deep-sleep", "box"]) is DeepSleep)
+        XCTAssertTrue(try parse(["hibernate", "box"]) is Hibernate)
         XCTAssertTrue(try parse(["suspend", "box"]) is Pause)
         XCTAssertTrue(try parse(["cold-boot", "box"]) is Start)
         XCTAssertTrue(try parse(["start", "box"]) is Start)
@@ -24,7 +23,7 @@ final class CommandTests: XCTestCase {
     func testEveryCommandTakesJSONAndStore() throws {
         let lines: [[String]] = [
             ["create", "b", "--image", "lab"], ["up", "b"], ["start", "b"], ["pause", "b"], ["resume", "b"], ["sleep", "b"],
-            ["deep-sleep", "b"], ["wake", "b"], ["shutdown", "b"], ["reset", "b"], ["rm", "b"], ["ls"], ["inspect", "b"],
+            ["hibernate", "b"], ["wake", "b"], ["shutdown", "b"], ["reset", "b"], ["rm", "b"], ["ls"], ["inspect", "b"],
             ["sessions", "b"], ["attach", "b"], ["run", "b", "--", "top"], ["exec", "b", "--", "ls"], ["image", "ls"],
             ["image", "bake", "lab"], ["image", "rm", "lab"], ["point", "take", "b"], ["point", "ls", "b"],
             ["point", "revert", "b", "p"], ["point", "fork", "b", "p", "c"], ["point", "rm", "b", "p"],
@@ -123,7 +122,7 @@ final class CommandTests: XCTestCase {
     }
 
     func testLifecycleAndSessionShapes() throws {
-        let r = LifecycleResult(name: "b", operation: "deep-sleep", phaseBefore: "running", phase: "deepAsleep", changed: true,
+        let r = LifecycleResult(name: "b", operation: "hibernate", phaseBefore: "running", phase: "hibernated", changed: true,
                                 milliseconds: 351, info: nil)
         XCTAssertEqual(try keys(r), ["name", "operation", "phaseBefore", "phase", "changed", "milliseconds"])
         let s = SessionRow(SessionInfo(name: "tick", pid: 27, size: TermSize(cols: 80, rows: 24), clients: 1, screen: "primary", command: "bash"))
@@ -137,8 +136,8 @@ final class CommandTests: XCTestCase {
     }
 
     func testPhaseNamesOnTheWire() {
-        XCTAssertEqual(Phase.allCases.map(\.rawValue), ["off", "booting", "running", "paused", "asleep", "deepAsleep", "failed"])
-        XCTAssertEqual(Out.phaseLabel("deepAsleep"), "deep asleep")
+        XCTAssertEqual(Phase.allCases.map(\.rawValue), ["off", "booting", "running", "paused", "asleep", "hibernated", "failed"])
+        XCTAssertEqual(Out.phaseLabel("hibernated"), "hibernated")
         XCTAssertEqual(Out.mib(0), "—")
         XCTAssertEqual(Out.mib(2048), "2 GiB")
         XCTAssertEqual(Out.mib(585), "585 MiB")

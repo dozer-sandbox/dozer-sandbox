@@ -1,5 +1,5 @@
 // 585 — the host's lifecycle metrics, ported from SandboxLab (581, `Sources/SandboxLabCore/Metrics.swift`):
-// every action the host performs — start, pause/resume, sleep, deep sleep, wake, shut down, restore
+// every action the host performs — start, pause/resume, sleep, hibernate, wake, shut down, restore
 // points, sessions, the network — with its timing, in `<store>/metrics.sqlite`. The SAME schema as
 // SandboxLab's, so the two can be analysed side by side.
 //
@@ -179,7 +179,7 @@ public enum MetricsStepKey {
         else if has("paused the VM") { k = "vm pause" }
         else if l == "resumed the VM" { k = "vm resume" }
         else if has("saved VM state to disk") { k = "save state" }
-        else if has("deep sleep: stopped the VM") || l == "stopped the VM" { k = "vm stop" }
+        else if has("hibernate: stopped the VM") || l == "stopped the VM" { k = "vm stop" }
         else if has("resumed the VM to stop it") || has("restored the VM to stop it") { k = "stop prep" }
         else if has("stopped the container") { k = "container stop" }
         else if has("restored VM state from disk") { k = "restore state" }

@@ -16,8 +16,8 @@ it, ``SandboxSpec`` describes how to make one, and ``Sandbox`` is the live actor
 |---|---|---|---|---|
 | **Pause** (also **Suspend**) | VZ freezes the guest's CPUs | kept | ~1 ms | **Resume** (~1 ms) |
 | **Sleep** | pause + save the VM's memory and device state to a snapshot file: crash-safe | kept | ~0.3–1.2 s | **Wake**: resume in place, delete the snapshot |
-| **Deep Sleep** (also **Hibernate**) | sleep + stop the VM | **freed** | ~0.35–1.2 s | **Wake**: rebuild the identical VM, restore the snapshot, resume, re-sync the guest clock, re-mount the shares, delete the snapshot |
-| **restore after a crash** | a Wake from a new process, when the app died without deep-sleeping | — | ~0.3–1.3 s | — |
+| **Hibernate** | sleep + stop the VM | **freed** | ~0.35–1.2 s | **Wake**: rebuild the identical VM, restore the snapshot, resume, re-sync the guest clock, re-mount the shares, delete the snapshot |
+| **restore after a crash** | a Wake from a new process, when the app died without hibernating | — | ~0.3–1.3 s | — |
 | **Shut Down** | a cold stop: running programs end, the disk is kept | freed | — | **Start** (also **Cold Boot**) |
 
 Two more operations act on the disk rather than the running VM:
@@ -27,7 +27,7 @@ Two more operations act on the disk rather than the running VM:
 - **Delete** (CLI `rm`) removes everything the sandbox has on disk.
 
 These are the exact names the CLI, the README and `CLAUDE.md` use; old API names
-(`sleepToDisk`/`wakeFromDisk`/`stop`) are kept as deprecated forwarders and old persisted phases
+(`wakeFromDisk`/`stop`) are kept as deprecated forwarders and old persisted phases
 still decode, but every new call site should use the table above. See ``Phase`` for the state
 machine and ``LifecyclePlanner`` for how an operation becomes ordered steps.
 
@@ -51,7 +51,7 @@ image** (``CustomImage``) is saved from a restore point.
 ### Session
 
 A terminal program living in the sandbox — a shell, `claude`, `pi` — held by **deckhold** inside
-the guest so it survives a sleep, a deep sleep and a crash of the host app. You *attach*
+the guest so it survives a sleep, a hibernation and a crash of the host app. You *attach*
 (``SessionConnection``) to a session and *detach* from it (``DetachReason``); it keeps running
 either way. See <doc:HowItWorks> for why this needs a guest-side holder at all.
 

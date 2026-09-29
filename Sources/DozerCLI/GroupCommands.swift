@@ -496,7 +496,7 @@ func describe(_ st: HostStatus) -> String {
 
 struct HostStop: AsyncParsableCommand {
     static let configuration = CommandConfiguration(commandName: "stop",
-        abstract: "Deep-sleep every running sandbox and stop the host (the next command starts a new one; wake brings each back).")
+        abstract: "Hibernate every running sandbox and stop the host (the next command starts a new one; wake brings each back).")
     @OptionGroup var g: GlobalOptions
     func run() async throws {
         let store = g.dozerStore
@@ -508,7 +508,7 @@ struct HostStop: AsyncParsableCommand {
         // It answers before it exits: wait for the lock to go.
         let deadline = Date().addingTimeInterval(30)
         while store.hostIsRunning() && Date() < deadline { usleep(50_000) }
-        if g.json { Out.json(["stopped": true]) } else { Out.stdout("host stopped — every sandbox that was running is deep asleep\n") }
+        if g.json { Out.json(["stopped": true]) } else { Out.stdout("host stopped — every sandbox that was running is hibernated\n") }
     }
 }
 

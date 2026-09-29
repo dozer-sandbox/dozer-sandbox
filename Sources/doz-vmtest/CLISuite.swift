@@ -3,12 +3,12 @@
 // processes start (a detached child of the first), exactly as a user gets it.
 //
 //   up (attached) → exec → run + attach from a second process → close the first → reattach, same pid
-//   pause / resume → deep sleep (hibernate) → wake: the SAME attached client is held and reattached
+//   pause / resume → hibernate → wake: the SAME attached client is held and reattached
 //   restore point take → revert → cold-boot → the change is gone
 //   two sandboxes at once; `ls --json` from another process; key set via stdin (a fake key: the guest
 //   sees only a placeholder); net policy / log; metrics; doctor
 //   kill -9 the host → the next call starts a new one: the sandbox left asleep is restored (and asleep
-//   again), the deep-asleep one wakes with the same pid
+//   again), the hibernated one wakes with the same pid
 //   shutdown / rm; a read-only command starts no host; the host exits by itself when idle.
 //
 // Inputs: --doz PATH (default .build/debug/doz), --store DIR (default $TMPDIR/doz-clitest-store),
@@ -260,7 +260,7 @@ func cliSuite() async throws {
         check(c3.wait(10) { $0.lastTick > aLast }, "reattach: the same session, further along (tick \(aLast) → \(c3.lastTick))")
         check(h.sessions("clia").first { $0.name == "tick" }?.pid == pid, "the session's pid is unchanged")
 
-        print("cli: pause / resume, deep sleep / wake with a client attached")
+        print("cli: pause / resume, hibernate / wake with a client attached")
         var r = h.run(["pause", "clia"])
         let paused = h.row("clia")
         check(r.code == 0 && paused?.phase == "paused" && (paused?.ramHeldMiB ?? 0) > 0,
@@ -276,8 +276,8 @@ func cliSuite() async throws {
         check(r.code == 0 && h.row("clia")?.phase == "paused", "suspend (alias of pause)")
         h.run(["resume", "clia"])
         r = h.run(["hibernate", "clia"])
-        let deep = h.row("clia")
-        check(r.code == 0 && deep?.phase == "deepAsleep" && deep?.ramHeldMiB == 0, "hibernate (deep sleep): deep asleep, RAM held 0")
+        let hib = h.row("clia")
+        check(r.code == 0 && hib?.phase == "hibernated" && hib?.ramHeldMiB == 0, "hibernate: hibernated, RAM held 0")
         check(c3.wait(5) { $0.err.text.contains("reattaching") }, "the attached client is told and waits (held)")
         let beforeWake = c3.lastTick
         let tw = Date()
@@ -354,7 +354,7 @@ func cliSuite() async throws {
         r = h.run(["run", "clib", "-d", "--session", "tb", "--", "bash", "/workspace/tick.sh"])
         let p2 = h.sessions("clib").first { $0.name == "tb" }?.pid
         check(p1 != nil && p2 != nil, "sessions tick2 (pid \(p1.map(String.init) ?? "?")) in clia, tb (pid \(p2.map(String.init) ?? "?")) in clib")
-        check(h.run(["deep-sleep", "clia"]).code == 0 && h.run(["sleep", "clib"]).code == 0, "clia deep asleep, clib asleep (RAM kept, snapshot on disk)")
+        check(h.run(["hibernate", "clia"]).code == 0 && h.run(["sleep", "clib"]).code == 0, "clia hibernated, clib asleep (RAM kept, snapshot on disk)")
         guard let hostPID = h.hostPID() else { throw SandboxError.timedOut("no host pid") }
         kill(hostPID, SIGKILL)
         check(h.waitFor(10) { !h.hostRunning }, "kill -9 \(hostPID): the host is gone")
@@ -362,7 +362,7 @@ func cliSuite() async throws {
         let after = h.ls()
         check(h.hostRunning && h.hostPID() != hostPID, String(format: "the next call (ls) started a new host (pid %@, %.2f s)",
                                                                h.hostPID().map(String.init) ?? "?", Date().timeIntervalSince(t9)))
-        check(after.contains { $0.name == "clia" && $0.phase == "deepAsleep" }, "clia is still deep asleep")
+        check(after.contains { $0.name == "clia" && $0.phase == "hibernated" }, "clia is still hibernated")
         check(h.waitFor(60) { h.row("clib").map { $0.phase == "asleep" && !$0.busy } ?? false },
               "clib, asleep when the host died, was restored and is asleep again")
         r = h.run(["wake", "clia"])
@@ -372,7 +372,7 @@ func cliSuite() async throws {
 
         print("cli: metrics")
         let rows = h.json(["metrics"], [MetricsSummaryRow].self) ?? []
-        for action in ["start", "wake", "deep sleep", "restore after crash"] {
+        for action in ["start", "wake", "hibernate", "restore after crash"] {
             check(rows.contains { $0.action == action && $0.count > 0 }, "metrics --json has \(action) rows")
         }
 

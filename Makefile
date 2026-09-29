@@ -102,10 +102,10 @@ test-vm-agents: vmtest-host ## 579 agent images: bake claude-code + pi (cold: mi
 test-vm-network: vmtest-host ## 580 proxied network: no NIC, policy, DNS, UDP, credentials, CA, bake preset, sleep → wake (network, claude-code image)
 	perl -e 'alarm shift; exec @ARGV' 1800 $(VMTEST_BIN) network --store "$(VMTEST_STORE)"
 
-test-vm-hardening: vmtest-host ## 583 regression tests: discard → cold boot (e2fsck), 200 Deep Sleep cycles with flat threads/fds/footprint, 16 concurrent wakes (HARDENING=discard|leak|concurrent for one)
+test-vm-hardening: vmtest-host ## 583 regression tests: discard → cold boot (e2fsck), 200 hibernate cycles with flat threads/fds/footprint, 16 concurrent wakes (HARDENING=discard|leak|concurrent for one)
 	perl -e 'alarm shift; exec @ARGV' 2400 $(VMTEST_BIN) hardening $(HARDENING) --store "$(VMTEST_STORE)"
 
-# 587's item 10 (a sandbox deep-slept by the v0.4.0 test host, built from the tag, woken here) was
+# 587's item 10 (a sandbox hibernated by the v0.4.0 test host, built from the tag, woken here) was
 # retired by 592: the rename kept no backward compatibility (owner ruling), so an older release's
 # store is not expected to wake. The journal-less e2fsck path it also covered is `lineage nojournal`.
 test-vm-lineage: vmtest-host ## 587 image lineage: warm-base bakes, journal, discard, sync, accounting, reclaim, rederive, children (LINEAGE=part)
@@ -171,7 +171,7 @@ install-cli: ## Build doz (release), sign it, install into PREFIX (default ~/.lo
 	ln -sf "$(PREFIX)/libexec/doz/doz" "$(PREFIX)/bin/doz"
 	@echo "installed $(PREFIX)/bin/doz — run: doz doctor"
 	@"$(PREFIX)/libexec/doz/doz" host status 2>/dev/null | grep -q '^host .* running' \
-	  && echo "note: a doz host is running the PREVIOUS build (it keeps working); \`doz host stop\` switches to this one — sandboxes deep-sleep and wake on it" || true
+	  && echo "note: a doz host is running the PREVIOUS build (it keeps working); \`doz host stop\` switches to this one — sandboxes hibernate and wake on it" || true
 
 test-cli: cli vmtest-host ## 585 CLI suite: the signed doz from separate processes (up/exec/run/attach, lifecycle, points, two sandboxes, kill -9 host, idle exit)
 	perl -e 'alarm shift; exec @ARGV' 1500 $(VMTEST_BIN) cli --doz $(CLI_BIN) --store "$(CLITEST_STORE)"

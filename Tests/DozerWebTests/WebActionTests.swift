@@ -18,7 +18,7 @@ final class WebActionTests: XCTestCase {
         "create": #"{"action":"create","sandbox":"new1","image":"lab","cpus":2,"memoryMiB":1024,"network":"bake","account":"default"}"#,
         "start": #"{"action":"start","sandbox":"a"}"#, "wake": #"{"action":"wake","sandbox":"a"}"#,
         "pause": #"{"action":"pause","sandbox":"a"}"#, "resume": #"{"action":"resume","sandbox":"a"}"#,
-        "sleep": #"{"action":"sleep","sandbox":"a"}"#, "deep-sleep": #"{"action":"deep-sleep","sandbox":"a"}"#,
+        "sleep": #"{"action":"sleep","sandbox":"a"}"#, "hibernate": #"{"action":"hibernate","sandbox":"a"}"#,
         "shutdown": #"{"action":"shutdown","sandbox":"a"}"#, "reset": #"{"action":"reset","sandbox":"a","confirm":"a"}"#,
         "rm": #"{"action":"rm","sandbox":"a","confirm":"a"}"#,
         "open-session": #"{"action":"open-session","sandbox":"a","session":"worker","argv":["sleep","60"]}"#,
@@ -43,7 +43,7 @@ final class WebActionTests: XCTestCase {
 
     /// Everything the web layer may send to the host — and, as important, what it may never.
     static let allowedOps: Set<HostOp> = [
-        .create, .start, .wake, .pause, .resume, .sleep, .deepSleep, .shutdown, .reset, .rm, .openSession,
+        .create, .start, .wake, .pause, .resume, .sleep, .hibernate, .shutdown, .reset, .rm, .openSession,
         .pointTake, .pointRevert, .pointFork, .pointRm, .pointSaveImage, .imageBake, .imageRm, .netPolicy,
         .keyPolicy, .keyRm, .accountUse, .accountDefault, .accountKeepalive, .accountVerify, .accountRemove,
         .templateCreate, .duplicate,
@@ -96,7 +96,7 @@ final class WebActionTests: XCTestCase {
         for forbidden: HostOp in [.exec, .attach, .keySet, .accountAdd, .hostStop, .events, .ping] {
             XCTAssertFalse(ops.contains(forbidden), "\(forbidden) must never be reachable from the browser")
         }
-        XCTAssertEqual(WebAction.lifecycleOps["deep-sleep"], .deepSleep)
+        XCTAssertEqual(WebAction.lifecycleOps["hibernate"], .hibernate)
     }
 
     func testFieldsMapToTheRequest() throws {
@@ -112,7 +112,7 @@ final class WebActionTests: XCTestCase {
         XCTAssertEqual(n.hostRequest.deny, ["evil.example"])
         XCTAssertEqual(try decode(Self.samples["account-keepalive"]!).hostRequest.enabled, true)
         XCTAssertEqual(try decode(Self.samples["point-revert"]!).hostRequest.point, "rp-20260927-094949-330-bc2e")
-        XCTAssertEqual(try decode(Self.samples["deep-sleep"]!).sandbox, "a")
+        XCTAssertEqual(try decode(Self.samples["hibernate"]!).sandbox, "a")
         XCTAssertNil(try decode(Self.samples["image-bake"]!).sandbox)
     }
 
@@ -182,7 +182,7 @@ final class WebActionTests: XCTestCase {
         // Not destructive: a confirm field is not even allowed.
         invalid(#"{"action":"pause","sandbox":"a","confirm":"a"}"#)
         XCTAssertNil(try decode(Self.samples["pause"]!).confirmationTarget)
-        XCTAssertNil(try decode(Self.samples["deep-sleep"]!).confirmationTarget)
+        XCTAssertNil(try decode(Self.samples["hibernate"]!).confirmationTarget)
     }
 
     func testAWorkspaceIsResolvedToAnExistingDirectory() throws {
@@ -293,8 +293,8 @@ final class WebActionTests: XCTestCase {
     }
 
     func testOperationSummariesComeFromTheResultNotThroughIt() throws {
-        let r = try JSONDecoder().decode(JSONValue.self, from: Data(#"{"name":"a","operation":"deep-sleep","phaseBefore":"running","phase":"deepAsleep","changed":true,"milliseconds":510}"#.utf8))
-        XCTAssertEqual(WebOperations.summary(.lifecycle(.deepSleep, name: "a"), r), "a: running → deep asleep in 510 ms")
+        let r = try JSONDecoder().decode(JSONValue.self, from: Data(#"{"name":"a","operation":"hibernate","phaseBefore":"running","phase":"hibernated","changed":true,"milliseconds":510}"#.utf8))
+        XCTAssertEqual(WebOperations.summary(.lifecycle(.hibernate, name: "a"), r), "a: running → hibernated in 510 ms")
         let same = try JSONDecoder().decode(JSONValue.self, from: Data(#"{"name":"a","operation":"pause","phaseBefore":"paused","phase":"paused","changed":false,"milliseconds":0}"#.utf8))
         XCTAssertEqual(WebOperations.summary(.lifecycle(.pause, name: "a"), same), "a is already paused")
         XCTAssertEqual(WebOperations.summary(.imageBake("lab"), .null), "lab baked")

@@ -1,6 +1,6 @@
 // The terminal client of `doz attach` / `run` / `up` — SandboxLab's `attach` (576.03/581) ported:
 // the tty in raw mode, bytes relayed to the host (which relays them to the guest's deckhold
-// session), window resizes as RESIZE frames, and REATTACH: a Deep Sleep closes the connection
+// session), window resizes as RESIZE frames, and REATTACH: hibernating closes the connection
 // while the session lives on in the guest, so the client reconnects and the host holds it until the
 // sandbox runs again. When the host says the session is over (`ClientWire` notice) it exits with
 // the program's exit code. Ctrl-] (or --detach-key) detaches; so does closing the terminal, or
