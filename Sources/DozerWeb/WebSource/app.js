@@ -2011,6 +2011,8 @@ function gridSchedule() {
     const cap = setting('ui.grid_live_tiles', 8);
     const tiles = [...grid.body.children].map((el) => grid.tiles.get(el.dataset.key)).filter(Boolean);
     for (const t of tiles) if (t.term && (!t.visible || !t.liveable)) detachTile(t);
+    // A lowered cap: the live tiles beyond it (the later ones, in page order) let go.
+    tiles.filter((t) => t.term).slice(cap).forEach(detachTile);
     let live = tiles.filter((t) => t.term).length;
     let capped = 0;
     for (const t of tiles) {
