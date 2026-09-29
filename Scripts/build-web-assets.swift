@@ -61,12 +61,20 @@ struct Vendor: Decodable {
         let file: String
         let fromTarball: String
         let sha256: String
-        /// `script` (served as JavaScript), `wasm` (served as application/wasm), `licence` (bundled only).
+        /// `script` (served as JavaScript), `wasm` (served as application/wasm), `licence` (bundled only),
+        /// `icon` (593: an SVG icon, served only inside the package's generated sprite).
         let serve: String
         let publicName: String?
         /// What index.html writes for it (rewritten to the hashed public path).
         let indexReference: String?
     }
+    /// 593: the package's `icon` files, as ONE generated SVG sprite (a `<symbol id="NAME">` per
+    /// file, holding that file's drawing elements byte for byte) — `assets/<publicName>-<sha16>.svg`.
+    struct Sprite: Decodable {
+        let publicName: String
+        let indexReference: String
+    }
+    let sprite: Sprite?
     let package: String
     let version: String
     let tarball: String
@@ -81,6 +89,53 @@ struct Vendor: Decodable {
 let allowedLicences: Set<String> = ["MIT", "BSD-2-Clause", "BSD-3-Clause", "Apache-2.0", "ISC"]
 
 func sha256(_ d: Data) -> String { SHA256.hash(data: d).map { String(format: "%02x", $0) }.joined() }
+
+/// 593: an icon file's drawing, checked: an optional `<!-- @license … -->`, then ONE `<svg …
+/// viewBox="0 0 24 24" …>` whose children are only path / circle / ellipse / line / polyline /
+/// polygon / rect elements with geometry attributes — no script, style, link, event handler or
+/// reference of any kind. Returns the children as they are in the file.
+func iconBody(_ file: String, _ text: String) throws -> String {
+    var t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    if t.hasPrefix("<!--") {
+        guard let end = t.range(of: "-->") else { throw Failure.source("\(file): an unclosed comment") }
+        guard t[..<end.lowerBound].contains("@license") else { throw Failure.source("\(file): only the licence comment is expected") }
+        t = String(t[end.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+    guard t.hasPrefix("<svg"), t.hasSuffix("</svg>"), let open = t.range(of: ">") else { throw Failure.source("\(file): not one <svg> element") }
+    guard t[..<open.lowerBound].contains("viewBox=\"0 0 24 24\"") else { throw Failure.source("\(file): the viewBox is not 0 0 24 24") }
+    let body = String(t[open.upperBound..<t.index(t.endIndex, offsetBy: -6)]).trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !body.isEmpty else { throw Failure.source("\(file): an empty drawing") }
+    let allowedTags: Set<String> = ["path", "circle", "ellipse", "line", "polyline", "polygon", "rect"]
+    let allowedAttributes: Set<String> = ["d", "cx", "cy", "r", "rx", "ry", "x", "y", "x1", "y1", "x2", "y2", "width", "height", "points"]
+    let tag = try NSRegularExpression(pattern: #"<\s*(/?)\s*([A-Za-z:-]+)([^<>]*)>"#)
+    let attr = try NSRegularExpression(pattern: #"([A-Za-z:_-]+)\s*=\s*"([^"]*)""#)
+    let ns = body as NSString
+    var covered = 0
+    for m in tag.matches(in: body, range: NSRange(location: 0, length: ns.length)) {
+        guard ns.substring(with: NSRange(location: covered, length: m.range.location - covered)).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw Failure.source("\(file): text outside an element")
+        }
+        covered = m.range.location + m.range.length
+        let name = ns.substring(with: m.range(at: 2))
+        guard allowedTags.contains(name) else { throw Failure.source("\(file): <\(name)> is not an allowed drawing element") }
+        let attrs = ns.substring(with: m.range(at: 3)).replacingOccurrences(of: "/", with: " ")
+        let an = attrs as NSString
+        var rest = attrs
+        for a in attr.matches(in: attrs, range: NSRange(location: 0, length: an.length)) {
+            let key = an.substring(with: a.range(at: 1)), value = an.substring(with: a.range(at: 2))
+            // A dot drawn filled (key-round's) takes the icon's colour: currentColor, or none.
+            if key == "fill", value == "currentColor" || value == "none" { rest = rest.replacingOccurrences(of: an.substring(with: a.range), with: ""); continue }
+            guard allowedAttributes.contains(key) else { throw Failure.source("\(file): attribute \(key) is not allowed") }
+            guard value.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber || " .,-".contains($0)) }) else {
+                throw Failure.source("\(file): \(key) holds more than geometry")
+            }
+            rest = rest.replacingOccurrences(of: an.substring(with: a.range), with: "")
+        }
+        guard rest.trimmingCharacters(in: .whitespaces).isEmpty else { throw Failure.source("\(file): an attribute that is not name=\"value\"") }
+    }
+    guard ns.substring(from: covered).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw Failure.source("\(file): text after the drawing") }
+    return body
+}
 
 func isPlainName(_ s: String) -> Bool {
     !s.isEmpty && s != "." && s != ".." && s.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || ".-_".contains($0)) }
@@ -139,7 +194,10 @@ func main() throws {
     let pageFiles = docText.map { ($0.key, $0.value) } + styles.map { ($0.key + ".css", String(decoding: $0.value, as: UTF8.self)) }
         + scripts.map { ($0.key + ".js", String(decoding: $0.value, as: UTF8.self)) }
     for (name, text) in pageFiles {
-        if text.range(of: #"(https?:)?//[a-z0-9.-]+\.[a-z]{2,}/"#, options: [.regularExpression, .caseInsensitive]) != nil {
+        // 593: the SVG namespace is a name, not a URL anything loads (createElementNS).
+        let scanned = text.replacingOccurrences(of: "\"http://www.w3.org/2000/svg\"", with: "\"svg-ns\"")
+            .replacingOccurrences(of: "'http://www.w3.org/2000/svg'", with: "'svg-ns'")
+        if scanned.range(of: #"(https?:)?//[a-z0-9.-]+\.[a-z]{2,}/"#, options: [.regularExpression, .caseInsensitive]) != nil {
             throw Failure.source("\(name) references an external URL — the UI loads nothing from outside its own origin")
         }
         if name.hasSuffix(".js"), text.contains("innerHTML") || text.contains("insertAdjacentHTML") {
@@ -170,6 +228,7 @@ func main() throws {
         guard v.files.contains(where: { $0.file == v.licenceFile && $0.serve == "licence" }) else {
             throw Failure.source("vendor/\(pkg): the licence file must be listed (serve: licence)")
         }
+        var symbols: [String] = []
         let listed = Set(v.files.map(\.file))
         let present = Set(((try? fm.contentsOfDirectory(atPath: dir.path)) ?? []).filter { $0 != ".DS_Store" })
         let unlisted = present.subtracting(listed).subtracting(["VENDOR.json"])
@@ -195,9 +254,28 @@ func main() throws {
                 assets.append(Asset(publicPath: "/" + path, resourcePath: path,
                                     mimeType: f.serve == "script" ? "application/javascript; charset=utf-8" : "application/wasm",
                                     sha256: f.sha256, cachePolicy: immutable, class: "vendor"))
+            case "icon":
+                guard f.file.hasSuffix(".svg"), v.sprite != nil else { throw Failure.source("vendor/\(pkg)/\(f.file): an icon is an .svg of a package with a sprite") }
+                let id = String(f.file.dropLast(4))
+                guard id.allSatisfy({ ($0.isLowercase && $0.isASCII) || $0.isNumber || $0 == "-" }) else { throw Failure.source("vendor/\(pkg)/\(f.file): an icon name is a-z 0-9 -") }
+                symbols.append("<symbol id=\"\(id)\" viewBox=\"0 0 24 24\">\(try iconBody("vendor/\(pkg)/\(f.file)", String(decoding: data, as: UTF8.self)))</symbol>")
             default:
-                throw Failure.source("vendor/\(pkg)/\(f.file): serve must be script, wasm or licence")
+                throw Failure.source("vendor/\(pkg)/\(f.file): serve must be script, wasm, icon or licence")
             }
+        }
+        if let s = v.sprite {
+            guard !symbols.isEmpty, isPlainName(s.publicName), s.publicName.hasPrefix("vendor-"), s.indexReference.hasPrefix("/vendor/") else {
+                throw Failure.source("vendor/\(pkg): a sprite needs icons, a publicName (vendor-…) and an indexReference (/vendor/…)")
+            }
+            guard docText.values.contains(where: { $0.contains("\"\(s.indexReference)\"") }) else { throw Failure.source("no document references \(s.indexReference)") }
+            // Generated from the pinned files (sorted by name), deterministic: a changed pin is a changed sprite.
+            let sprite = Data(("<svg xmlns=\"http://www.w3.org/2000/svg\">\n<!-- \(v.package) \(v.version) (\(v.licence)), generated by Scripts/build-web-assets.swift from the files VENDOR.json pins -->\n"
+                + symbols.sorted().joined(separator: "\n") + "\n</svg>\n").utf8)
+            let digest = sha256(sprite)
+            let path = "assets/\(s.publicName)-\(digest.prefix(16)).svg"
+            for (k, t) in docText { docText[k] = t.replacingOccurrences(of: "\"\(s.indexReference)\"", with: "\"/\(path)\"") }
+            expected[path] = sprite
+            assets.append(Asset(publicPath: "/" + path, resourcePath: path, mimeType: "image/svg+xml", sha256: digest, cachePolicy: immutable, class: "vendor"))
         }
     }
     for (file, text) in docText {

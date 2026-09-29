@@ -270,6 +270,33 @@ final class WebTerminalHTTPTests: XCTestCase {
         }
     }
 
+    /// 593: the icon sprite — generated from the pinned Lucide files: a same-origin SVG with the
+    /// page's rules (no cross-site load), holding only <symbol>s of drawing elements, named in the page.
+    func testTheIconSpriteIsASameOriginSVGOfSymbolsOnly() throws {
+        let web = try WebAssets.load()
+        let sprite = try XCTUnwrap(web.assets.values.first { $0.publicPath.hasPrefix("/assets/vendor-lucide-icons-") })
+        XCTAssertEqual(sprite.mimeType, "image/svg+xml")
+        let text = String(decoding: sprite.data, as: UTF8.self)
+        XCTAssertTrue(text.hasPrefix("<svg xmlns=\"http://www.w3.org/2000/svg\">"))
+        for id in ["play", "pause", "moon", "moon-star", "sun", "power", "rotate-ccw", "trash-2", "square-terminal", "copy", "layout-template",
+                   "panel-right", "camera", "history", "git-fork", "shield", "clipboard", "refresh-cw", "settings", "log-out", "flame",
+                   "badge-check", "heart-pulse", "box", "layout-grid", "layers", "list-checks", "key-round", "chart-line", "activity", "stethoscope"] {
+            XCTAssertTrue(text.contains("<symbol id=\"\(id)\" viewBox=\"0 0 24 24\">"), id)
+        }
+        for forbidden in ["<script", "href", "on", "style", "<foreignObject", "<image", "url("] where forbidden != "on" {
+            XCTAssertFalse(text.contains(forbidden), forbidden)
+        }
+        XCTAssertNil(text.range(of: #"\son[a-z]+="#, options: .regularExpression), "no event handler")
+        let index = String(decoding: try XCTUnwrap(web.assets["/"]).data, as: UTF8.self)
+        XCTAssertTrue(index.contains("content=\"\(sprite.publicPath)\""), "the page names the hashed sprite")
+        let r = try request(sprite.publicPath, ["Sec-Fetch-Site": "same-origin", "Sec-Fetch-Dest": "image"])
+        XCTAssertEqual(r.status, 200)
+        XCTAssertEqual(r.header("content-type"), "image/svg+xml")
+        XCTAssertEqual(r.header("x-content-type-options"), "nosniff")
+        XCTAssertEqual(r.header("cross-origin-resource-policy"), "same-origin")
+        XCTAssertEqual(try request(sprite.publicPath, ["Sec-Fetch-Site": "cross-site"]).status, 403, "not loadable by another site")
+    }
+
     // MARK: 591 polish — the boot view, the wake note
 
     func testAnOffSandboxShowsItsBootThenTheImagesSessionInTheSamePane() throws {

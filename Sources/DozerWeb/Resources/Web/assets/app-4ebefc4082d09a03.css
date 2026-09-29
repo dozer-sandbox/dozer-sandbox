@@ -357,6 +357,23 @@ nav a.active .ph-dot { box-shadow: 0 0 0 1.5px var(--bg); }
 @keyframes tc-spin { to { transform: rotate(360deg); } }
 .term-wrap[data-cover="ended"] .term-cover, .term-wrap[data-cover="error"] .term-cover { align-items: flex-end; background: none; backdrop-filter: none; }
 .term-wrap[data-cover="ended"] .tc-box, .term-wrap[data-cover="error"] .tc-box { margin-bottom: 14px; }
+/* 593: icons (Lucide, one sprite). They take the control's colour — the theme's ink, a danger red,
+   a primary button's inverse — and sit before the label at one size and gap. */
+.icon { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.btn, .seg, .link-button { display: inline-flex; align-items: center; gap: 6px; }
+.btn.small .icon, .seg .icon { width: 14px; height: 14px; }
+.btn.split-caret { padding-left: 6px; padding-right: 6px; }
+nav a { display: flex; align-items: center; gap: 9px; }
+nav a > .icon { width: 17px; height: 17px; opacity: 0.85; }
+.tab .icon { width: 13px; height: 13px; }
+.tab-x { display: inline-flex; align-items: center; }
+.tab-x .icon { width: 13px; height: 13px; }
+.menu-item { display: flex; align-items: center; gap: 8px; white-space: nowrap; }
+.menu-check { margin-left: auto; color: var(--accent); display: inline-flex; }
+.tile-hit-icon { position: absolute; top: 8px; right: 8px; padding: 5px; border-radius: 6px; background: color-mix(in srgb, #1d1f2b 85%, transparent);
+  color: #c5cbff; display: inline-flex; opacity: 0; transition: opacity 0.15s; }
+.tile-hit:hover .tile-hit-icon, .tile-hit:focus-visible .tile-hit-icon { opacity: 1; }
+
 /* 591: Settings */
 .settings { padding: 0; }
 .setting { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 14px; align-items: center; padding: 12px 16px; border-top: 1px solid var(--line); }

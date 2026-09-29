@@ -305,9 +305,10 @@ final class WebSecurityTests: XCTestCase {
             let path = "/assets/\(name)-\(WebAssets.sha256Hex(d).prefix(16)).\(ext)"
             XCTAssertEqual(loaded.assets[path]?.data, d, "stale \(name).\(ext) — run make web-assets")
         }
-        // index + app.css + app.js; (591) the terminal frame + frame.css + frame.js; the engine's script and WebAssembly.
-        XCTAssertEqual(loaded.assets.count, 8)
-        XCTAssertEqual(loaded.assets.keys.filter { $0.hasPrefix("/assets/vendor-") }.count, 2)
+        // index + app.css + app.js; (591) the terminal frame + frame.css + frame.js; the engine's script and
+        // WebAssembly; (593) the icon sprite.
+        XCTAssertEqual(loaded.assets.count, 9)
+        XCTAssertEqual(loaded.assets.keys.filter { $0.hasPrefix("/assets/vendor-") }.count, 3)
     }
 
     func testAnAlteredAssetRefusesToLoad() throws {

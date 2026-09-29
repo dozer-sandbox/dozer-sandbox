@@ -53,6 +53,48 @@ function h(tag, attrs, ...kids) {
 }
 const $ = (id) => document.getElementById(id);
 
+// ── icons (593): Lucide (lucide-static, ISC — vendored and pinned; one generated sprite, a same-origin
+// asset). An icon is <svg class="icon"><use href="SPRITE#name"></svg>, made with createElementNS; its
+// colour is the button's (stroke: currentColor, in app.css) and it is hidden from assistive tech —
+// every button keeps its text (or its aria-label). One map says which icon a label gets.
+const SVG_NS = 'http://www.w3.org/2000/svg';
+const SPRITE = (() => { const m = document.querySelector('meta[name="doz-icons"]'); return m ? m.getAttribute('content') : ''; })();
+const ICON_FALLBACK = 'circle-dot';
+function icon(name) {
+  const svg = document.createElementNS(SVG_NS, 'svg');
+  svg.setAttribute('class', 'icon');
+  svg.setAttribute('aria-hidden', 'true');
+  svg.setAttribute('focusable', 'false');
+  svg.setAttribute('data-icon', name);
+  const use = document.createElementNS(SVG_NS, 'use');
+  use.setAttribute('href', SPRITE + '#' + name);
+  svg.append(use);
+  return svg;
+}
+/// A label's icon: the exact label, else its first word; the fallback is a visible "missing" (the probe fails on it).
+const ICON_EXACT = {
+  'open in terminal': 'square-terminal', 'set the default to none': 'ban', 'make default': 'star', 'save as template…': 'layout-template',
+  'save template': 'layout-template', 'hide details': 'panel-right', 'details': 'panel-right', 'take a restore point…': 'camera', 'take': 'camera',
+  'key policy…': 'key-round', 'account…': 'user-round', 'edit policy…': 'shield', 'terminal…': 'terminal', 'new shell': 'plus',
+  'new sandbox': 'plus', 'run detached…': 'play', 'default': 'rotate-ccw', 'apply anyway': 'check', 'download csv': 'download',
+  'deep sleep': 'moon-star', 'shut down': 'power', 'sign out': 'log-out', 'unsplit': 'columns-2',
+};
+const ICON_WORD = {
+  start: 'play', pause: 'pause', resume: 'play', sleep: 'moon', wake: 'sun', reset: 'rotate-ccw', remove: 'trash-2', delete: 'trash-2',
+  open: 'terminal', split: 'columns-2', duplicate: 'copy', revert: 'history', fork: 'git-fork', copy: 'clipboard', copied: 'check',
+  select: 'clipboard', refresh: 'refresh-cw', create: 'plus', bake: 'flame', 're-bake': 'flame', verify: 'badge-check', watch: 'eye',
+  set: 'check', use: 'check', run: 'play', save: 'layout-template', preview: 'eye', apply: 'check', cancel: 'x', paste: 'clipboard-paste',
+  reconnect: 'refresh-cw', table: 'table', lineage: 'list-tree', shut: 'power', deep: 'moon-star', attach: 'link', close: 'x',
+};
+function iconFor(label) {
+  const l = String(label).trim().toLowerCase();
+  return ICON_EXACT[l] || ICON_WORD[l.split(/\s+/)[0].replace(/[…:.,]+$/, '')] || ICON_FALLBACK;
+}
+/// A button's label with its icon in front (the label stays text).
+function withIcon(name, label) { return [icon(name), h('span', { class: 'btn-label' }, label)]; }
+/// Put (or replace) the icon of an existing button, keeping its text.
+function setButton(b, label, name) { b.replaceChildren(...withIcon(name || iconFor(label), label)); }
+
 // ── formatting ──────────────────────────────────────────────────────────────
 function bytes(n) {
   if (n === undefined || n === null) return '—';
@@ -257,8 +299,8 @@ function dialog(title, intro, fields, submitLabel, onSubmit, opts = {}) {
       h('span', null, f.label), input, f.help ? h('small', null, f.help) : null);
   });
   const extra = h('div', { class: 'dlg-extra' });
-  const submit = h('button', { type: 'submit', class: 'btn primary' + (opts.danger ? ' danger' : '') }, submitLabel);
-  const cancel = h('button', { type: 'button', class: 'btn', on: { click: () => d.close() } }, 'Cancel');
+  const submit = h('button', { type: 'submit', class: 'btn primary' + (opts.danger ? ' danger' : '') }, withIcon(opts.icon || iconFor(submitLabel), submitLabel));
+  const cancel = h('button', { type: 'button', class: 'btn', on: { click: () => d.close() } }, withIcon('x', 'Cancel'));
   const error = h('div', { class: 'dlg-error', role: 'alert' });
   form.append(h('h2', null, title), intro ? h('p', { class: 'sub' }, intro) : null, ...rows, extra, error,
     h('div', { class: 'dlg-buttons' }, cancel, submit));
@@ -647,9 +689,11 @@ function meter(part, whole) {
   bar.style.width = pct.toFixed(1) + '%';
   return h('div', { class: 'meter', title: pct.toFixed(0) + '% of the allocation' }, bar);
 }
+/// A button: its icon (opts.icon, else the label's — `iconFor`) and its text label.
 function btn(label, onClick, opts = {}) {
   return h('button', { type: 'button', class: 'btn' + (opts.danger ? ' danger' : '') + (opts.primary ? ' primary' : '') + (opts.small ? ' small' : ''),
-                       title: opts.title || null, on: { click: (ev) => { ev.stopPropagation(); onClick(ev); } } }, label);
+                       title: opts.title || null, on: { click: (ev) => { ev.stopPropagation(); onClick(ev); } } },
+    withIcon(opts.icon || iconFor(label), label));
 }
 
 // The owner's vocabulary (2026-09-25); aliases in the tooltips.
@@ -861,8 +905,8 @@ function sandboxParts(name, d, net, accounts) {
   const fact = (k, v) => h('div', null, h('div', { class: 'k' }, k), h('div', { class: 'v' }, v));
   const copy = btn('Copy', async (ev) => {
     const b = ev.currentTarget;
-    try { await navigator.clipboard.writeText(d.attachCommand); b.textContent = 'Copied'; } catch (_) { b.textContent = 'Select and copy'; }
-    setTimeout(() => { b.textContent = 'Copy'; }, 1500);
+    try { await navigator.clipboard.writeText(d.attachCommand); setButton(b, 'Copied'); } catch (_) { setButton(b, 'Select and copy'); }
+    setTimeout(() => { setButton(b, 'Copy'); }, 1500);
   });
   const terminal = (session) => async () => {
     try {
@@ -1068,7 +1112,7 @@ function policyDialog(name, policy) {
       h('details', null, h('summary', null, 'The whole policy after (' + p.after.rules.length + ' rules, in order)'),
         h('ol', null, p.after.rules.map((r) => h('li', { class: r.action === 'allow' ? 'st-ok' : 'st-fail' }, r.label + (r.note ? ' — ' + r.note : '')))))));
     ui.submit.dataset.previewed = JSON.stringify(edit);
-    ui.submit.textContent = p.changed ? 'Apply' : 'Apply anyway';
+    setButton(ui.submit, p.changed ? 'Apply' : 'Apply anyway');
     return 'keep-open';
   });
 }
@@ -1103,7 +1147,7 @@ function networkPanel(net) {
 function imagesToggle() {
   const mk = (mode, label) => {
     const b = h('button', { type: 'button', class: 'seg' + (state.imagesMode === mode ? ' active' : ''), 'aria-pressed': state.imagesMode === mode ? 'true' : 'false', 'data-mode': mode },
-      label);
+      withIcon(iconFor(label), label));
     b.addEventListener('click', () => { if (state.imagesMode !== mode) { state.imagesMode = mode; refresh(false); } });
     return b;
   };
@@ -1211,7 +1255,7 @@ async function viewMetrics() {
   for (const el of [imageSel, daysSel, steps]) {
     el.addEventListener('change', () => { state.metricsFilter = { image: imageSel.value, days: daysSel.value, steps: steps.checked }; refresh(false); });
   }
-  const csv = h('a', { class: 'btn small', href: '/api/v1/metrics.csv?' + qs, download: 'dozer-metrics.csv' }, 'Download CSV');
+  const csv = h('a', { class: 'btn small', href: '/api/v1/metrics.csv?' + qs, download: 'dozer-metrics.csv' }, withIcon('download', 'Download CSV'));
   const toolbar = h('div', { class: 'toolbar' }, imageSel, daysSel, h('label', null, steps, ' steps inside actions'), csv);
   if (!m.available) return h('div', null, h('h1', null, 'Metrics'), toolbar, panel(null, 'No metrics yet — the host records every action it times.'));
   const max = Math.max(1, ...m.summary.map((r) => r.p90Ms || r.medianMs || 0));
@@ -1551,8 +1595,8 @@ function safePaste(t, raw, bracketed) {
   if (!reasons.length) { toFrame(t, { t: 'paste', text }); return; }
   const lines = text.split('\r');
   const d = h('dialog', { class: 'dlg paste-dialog' });
-  const ok = h('button', { type: 'button', class: 'btn primary' }, 'Paste');
-  const cancel = h('button', { type: 'button', class: 'btn' }, 'Cancel');
+  const ok = h('button', { type: 'button', class: 'btn primary' }, withIcon('clipboard-paste', 'Paste'));
+  const cancel = h('button', { type: 'button', class: 'btn' }, withIcon('x', 'Cancel'));
   ok.addEventListener('click', () => { d.close(); toFrame(t, { t: 'paste', text }); focusTerm(t); });
   cancel.addEventListener('click', () => { d.close(); focusTerm(t); });
   d.append(h('form', { method: 'dialog' },
@@ -1604,7 +1648,7 @@ function paintCover(t) {
   e.detail.hidden = !detail;
   e.spin.hidden = !spinner;
   e.action.hidden = !action;
-  e.action.textContent = action || '';
+  if (action) setButton(e.action, action); else e.action.replaceChildren();
   e.action.title = action === 'Reconnect' ? 'Open the terminal again' : action ? action + ' — so does any key typed in the terminal' : '';
   t.coverAction = action;
 }
@@ -1655,7 +1699,8 @@ function renderTerminals() {
           splitWith(kind).catch((e) => toast(e.message || String(e), true));
         } } }, label)));
     const caret = h('button', { type: 'button', class: 'btn small split-caret', title: 'What the split adds', 'aria-haspopup': 'menu',
-      on: { click: (ev) => { ev.stopPropagation(); termUI.splitMenu.hidden = !termUI.splitMenu.hidden; } } }, '▾');
+      'aria-label': 'What the split adds', on: { click: (ev) => { ev.stopPropagation(); termUI.splitMenu.hidden = !termUI.splitMenu.hidden; } } },
+      icon('chevron-down'));
     document.addEventListener('click', () => { termUI.splitMenu.hidden = true; });
     termUI.splitBtn = h('div', { class: 'split-button' }, termUI.splitMain, caret, termUI.splitMenu);
     termUI.panes = [0, 1].map((i) => {
@@ -1737,11 +1782,12 @@ function tabElement(t, pane) {
   const select = h('button', { type: 'button', role: 'tab', class: 'tab' + (t.id === v.selected[pane] ? ' active' : ''),
                                title: t.title ? t.title + ' — ' + label : label, 'data-term': String(t.id),
                                on: { click: () => { v.selected[pane] = t.id; v.focusedPane = pane; renderTerminals(); focusTerm(t); } } },
-    h('span', { class: 'tab-dot ph-' + phase, 'aria-hidden': 'true' }), label, t.mode === 'watch' ? h('span', { class: 'tag' }, 'watch') : null, shared);
-  const move = v.split ? h('button', { type: 'button', class: 'tab-x', title: 'Move to the other pane',
-    on: { click: () => { t.pane = 1 - t.pane; v.selected[t.pane] = t.id; renderTerminals(); focusTerm(t); } } }, '⇄') : null;
+    h('span', { class: 'tab-dot ph-' + phase, 'aria-hidden': 'true' }), icon(t.mode === 'watch' ? 'eye' : 'terminal'), label,
+    t.mode === 'watch' ? h('span', { class: 'tag' }, 'watch') : null, shared);
+  const move = v.split ? h('button', { type: 'button', class: 'tab-x', title: 'Move to the other pane', 'aria-label': 'Move ' + label + ' to the other pane',
+    on: { click: () => { t.pane = 1 - t.pane; v.selected[t.pane] = t.id; renderTerminals(); focusTerm(t); } } }, icon('arrow-left-right')) : null;
   const close = h('button', { type: 'button', class: 'tab-x', title: 'Close this terminal (the session keeps running)', 'aria-label': 'Close ' + label,
-    on: { click: () => closeTerminal(t.id) } }, '×');
+    on: { click: () => closeTerminal(t.id) } }, icon('x'));
   return h('div', { class: 'tab-wrap' }, select, move, close);
 }
 
@@ -1753,14 +1799,17 @@ const SPLIT_KINDS = {
   dialog: 'terminal you choose (New terminal…)',
 };
 termUI.splitKind = 'shell';   // until the settings load (ui.split_default)
+const SPLIT_ICONS = { shell: 'plus', watch: 'eye', attach: 'link', dialog: 'terminal' };
 function paintSplitButton() {
   if (!termUI.splitMain) return;
   const split = state.param ? sview(state.param).split : false;
-  termUI.splitMain.textContent = split ? 'Unsplit' : 'Split';
+  setButton(termUI.splitMain, split ? 'Unsplit' : 'Split', 'columns-2');
   termUI.splitMain.title = split ? 'Back to one pane (the right pane’s terminals move left)'
                                  : 'Two terminals side by side — the right one is a ' + SPLIT_KINDS[termUI.splitKind];
   for (const item of termUI.splitMenu.children) {
-    item.textContent = (item.dataset.kind === termUI.splitKind ? '✓ ' : '   ') + (split ? 'Add a ' : 'Split with a ') + SPLIT_KINDS[item.dataset.kind];
+    item.replaceChildren(icon(SPLIT_ICONS[item.dataset.kind]), h('span', { class: 'btn-label' },
+      (split ? 'Add a ' : 'Split with a ') + SPLIT_KINDS[item.dataset.kind]),
+      item.dataset.kind === termUI.splitKind ? h('span', { class: 'menu-check', title: 'the default (ui.split_default)' }, icon('check')) : null);
   }
 }
 /// Split (if needed) and fill the right pane with `kind` — so a split always creates something.
@@ -1975,7 +2024,9 @@ function makeTile(w) {
   const act = h('span', { class: 'tile-act' });
   const screen = h('div', { class: 'tile-screen' });
   const note = h('div', { class: 'tile-note', hidden: true });
-  const hit = h('button', { type: 'button', class: 'tile-hit', title: 'Open on its sandbox’s page' });
+  const hit = h('button', { type: 'button', class: 'tile-hit', title: 'Open on its sandbox’s page',
+                            'aria-label': 'Open ' + (w.session ? w.sandbox + ' · ' + w.session : w.sandbox) + ' on its page' },
+    h('span', { class: 'tile-hit-icon' }, icon('maximize-2')));
   const el = h('div', { class: 'tile', 'data-key': w.key, 'data-sandbox': w.sandbox, 'data-session': w.session || '' },
     h('div', { class: 'tile-head' }, dot, title, phase, act),
     h('div', { class: 'tile-body' }, screen, note, hit));
@@ -2050,6 +2101,12 @@ function detachTile(tile) {
 }
 
 // ── start ───────────────────────────────────────────────────────────────────
+// The static page's own controls get their icons here (index.html holds no SVG).
+const NAV_ICONS = { overview: 'box', sessions: 'layout-grid', images: 'layers', operations: 'list-checks', accounts: 'key-round',
+                    metrics: 'chart-line', activity: 'activity', doctor: 'stethoscope', settings: 'settings' };
+for (const a of document.querySelectorAll('#nav > a[data-view]')) if (NAV_ICONS[a.dataset.view]) a.prepend(icon(NAV_ICONS[a.dataset.view]));
+setButton($('sign-out'), 'Sign out');
+
 (async () => {
   if (await bootstrap()) {
     if (!/^#\/[a-z]/.test(location.hash)) history.replaceState(null, '', location.pathname + '#/overview');

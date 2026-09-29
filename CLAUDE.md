@@ -349,6 +349,15 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   operations and shows a dot for a failure that ended after the page was last viewed.
 - **`image-tree` is a read** (answered in-process when no host runs), measured OFF the host actor;
   the page fetches it only when Lineage is shown. `ImageTree.build` is pure (unit-tested).
+- **Every button has an icon** (owner, 593): Lucide (`vendor/lucide-static/`, pinned like ghostty-web;
+  `serve: icon`) compiled by `build-web-assets.swift` into ONE sprite of `<symbol>`s — the compiler
+  admits an icon file only as geometry (path/circle/ellipse/line/polyline/polygon/rect with geometry
+  attributes, `fill` only currentColor/none), never script, style, links or handlers; the page names the
+  hashed sprite in `<meta name="doz-icons">`. `icon(name)` builds `<svg class="icon"><use href>` with
+  `createElementNS` (aria-hidden; the button keeps its text or aria-label); `btn()` takes `opts.icon`,
+  else `iconFor(label)` (ONE map: the exact label, then its first word). The fallback `circle-dot` is a
+  bug the probe fails on. Colour is CSS (`stroke: currentColor`). The CSP is unchanged (`img-src 'self'`
+  covers `<use>`). The compiler's external-URL rule ignores only the SVG namespace string.
 - **A template NEVER contains the state disk** (the agent's logins and history) — `saveAsImage` clones
   the root only; `RestorePointTests.test_aTemplateNeverHoldsTheStateDisk` and `make test-vm-templates`
   keep it. From a live sandbox, `template-create` and `duplicate` go through a TEMPORARY restore point

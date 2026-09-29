@@ -46,6 +46,7 @@ public domain).
 
 | Component | Licence | Notes |
 |---|---|---|
+| [Lucide](https://lucide.dev) icons — `lucide-static` 1.48.0 | ISC | 593: `Sources/DozerWeb/WebSource/vendor/lucide-static/` — 49 of its SVG icons, byte-identical to the npm registry tarball (`VENDOR.json` pins its integrity and each file's sha256). `Scripts/build-web-assets.swift` turns them into one generated sprite (`Resources/Web/assets/vendor-lucide-icons-*.svg`: a `<symbol>` per icon, the drawing elements as they are in each file). Served by `doz ui` to the browser only; the licence text ships in the resource bundle (`Resources/Web/licences/`). |
 | [ghostty-web](https://github.com/coder/ghostty-web) 0.4.0 (Coder), which embeds Ghostty's VT parser compiled to WebAssembly | MIT (ghostty-web); MIT (Ghostty) | 591: `Sources/DozerWeb/WebSource/vendor/ghostty-web/` — `ghostty-web.umd.cjs` and `ghostty-vt.wasm`, byte-identical to the npm registry tarball (`VENDOR.json` pins its integrity and each file's sha256). Served by `doz ui` to the browser only; the licence text ships in the resource bundle (`Resources/Web/licences/`). |
 
 ## The Linux kernel (downloaded at run time, not in this repository)

@@ -6,23 +6,23 @@
       "mimeType" : "text/html; charset=utf-8",
       "publicPath" : "/",
       "resourcePath" : "index.html",
-      "sha256" : "ccc90248840de68df83b52b4a0d289443800ff4b36c136eb6b66b2d5ece27e25"
+      "sha256" : "92f9cb542e5b5cb92790a6e473730899343c1dcfb2ef4eda793fdee98f3274c8"
     },
     {
       "cachePolicy" : "public, max-age=31536000, immutable",
       "class" : "page",
       "mimeType" : "text/css; charset=utf-8",
-      "publicPath" : "/assets/app-1c4a1acb3267e3dd.css",
-      "resourcePath" : "assets/app-1c4a1acb3267e3dd.css",
-      "sha256" : "1c4a1acb3267e3dd2da01b215733da780c0c6f1ff22792e67d2a6e3cf5ee73be"
+      "publicPath" : "/assets/app-4ebefc4082d09a03.css",
+      "resourcePath" : "assets/app-4ebefc4082d09a03.css",
+      "sha256" : "4ebefc4082d09a030b8849ffe96ba3e339987cfaaebbecbc06d96d3f6caa8717"
     },
     {
       "cachePolicy" : "public, max-age=31536000, immutable",
       "class" : "page",
       "mimeType" : "application/javascript; charset=utf-8",
-      "publicPath" : "/assets/app-21054816dea660ac.js",
-      "resourcePath" : "assets/app-21054816dea660ac.js",
-      "sha256" : "21054816dea660acc5b2a83611e6cb4e5179c69d0292656ddd4232e3776abdb9"
+      "publicPath" : "/assets/app-579135cfc758e0ee.js",
+      "resourcePath" : "assets/app-579135cfc758e0ee.js",
+      "sha256" : "579135cfc758e0eee11cc29e4c1232ad41414472b572ab89270139ce20fb0e24"
     },
     {
       "cachePolicy" : "public, max-age=31536000, immutable",
@@ -55,6 +55,14 @@
       "publicPath" : "/assets/vendor-ghostty-web-5464be03cef979ca.js",
       "resourcePath" : "assets/vendor-ghostty-web-5464be03cef979ca.js",
       "sha256" : "5464be03cef979ca685ed8beb7a2afc3db42956ecc3c3e9528c63c728dc0a640"
+    },
+    {
+      "cachePolicy" : "public, max-age=31536000, immutable",
+      "class" : "vendor",
+      "mimeType" : "image/svg+xml",
+      "publicPath" : "/assets/vendor-lucide-icons-b6eaf34c368e0500.svg",
+      "resourcePath" : "assets/vendor-lucide-icons-b6eaf34c368e0500.svg",
+      "sha256" : "b6eaf34c368e05006557767309b98a8864b60f925d0f74afbce65b86e6634808"
     },
     {
       "cachePolicy" : "no-store",
