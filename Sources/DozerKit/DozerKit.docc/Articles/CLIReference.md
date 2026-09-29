@@ -24,7 +24,8 @@ doctor` says so. `make cli` builds a signed debug binary at `.build/debug/doz` f
 ### Setting up: onboard, init, uninstall
 
 ```bash
-doz onboard [--images claude-code,pi,lab | --all-images | --no-images] [--account mac|none|skip] [--yes]
+doz onboard [--images claude-code,pi,lab | --all-images | --no-images] [--account mac|api-key|setup-token|later] [--yes]
+            [--account-name NAME] [--plan PLAN] [--secret-stdin] [--force]
 doz onboard --status        # the onboarding record and the images; follows a preparation that runs
 doz onboard --cancel        # cancel the images being prepared
 doz init [DIR] [--name N] [--image I] [--cpus N] [--memory M] [--network …] [--account A] [--yes] [--force]
@@ -35,9 +36,11 @@ doz uninstall [--keep-store] [--keep-config] [--yes]
 - **`onboard`** sets up this Mac, once: the doctor's checks (a *required* one that fails —
   not Apple silicon, macOS too old, no virtualization, the entitlement, the store not on APFS, too
   little disk for the chosen images — stops it; the rest only warn), the **Claude account** (this
-  Mac's Claude Code login when it is signed in; otherwise it shows the `doz account add` command
-  for an API key or a setup token — it never logs in, never copies Claude Code's refresh token and
-  never writes the keychain), the settings file and your prompt template (each written **only when
+  Mac's Claude Code login when it is signed in; otherwise an API key or a setup token **pasted at a
+  hidden prompt** and stored exactly as `doz account add` stores it — the login keychain, one tiny
+  check request, `--plan` for a token — then made the default; or **Decide later**. It never logs in
+  and never copies Claude Code's refresh token. Off a terminal a key is read from stdin only with
+  `--secret-stdin`; otherwise that step is skipped and the command shown), the settings file and your prompt template (each written **only when
   missing**), then **prepares the images** — the kernel, the guest init disk, the base image and
   the bake, the waiting a first start would do. `claude-code` is prepared by default; `pi` and
   `lab` are opt-in. The preparation runs **in the host**: Ctrl-C detaches (it goes on; `--status`
@@ -305,8 +308,11 @@ lifecycle and every other action. Each sandbox has its own page (a child of Sand
 navigation): a control bar, its terminals filling the page, and a details panel. **All sessions**
 is a grid of live, read-only views of every session; **Images** has a Lineage view; **Operations**
 lists what the UI asked the host to do. It listens on `127.0.0.1` only. Each link works once and is
-exchanged for a strict session cookie; `Host` and `Origin` are checked exactly. Secrets are never
-entered in the browser: add keys and accounts with the CLI. **Open in Terminal** runs
+exchanged for a strict session cookie; `Host` and `Origin` are checked exactly. An account's API key
+or setup token may be typed in a masked field (the wizard, Accounts & keys) while
+`ui.allow_secret_entry` is on (the default): one CSRF-checked POST body, stored as `doz account add`
+stores it, never echoed; off, the page shows the command. A sandbox's own key (`doz key set`) is
+CLI-only. **Open in Terminal** runs
 `doz attach` in your default terminal app. The UI is a client of the host, like any other
 command, so it can't do anything the CLI can't.
 

@@ -294,7 +294,9 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   point revert/rm, image rm, account rm) carry `confirm` equal to the name. Shutdown keeps the disk,
   so it carries no `confirm` (owner, 591): the page asks with a plain dialog that can stop asking
   (the setting `ui.confirm_shutdown`, doz.toml — no longer localStorage). **No secret is ever an
-  input** (owner ruling D3): keys and accounts are added with the CLI.
+  action's input** (590's D3). Since 594 (owner ruling) an ACCOUNT's key or token may be typed in a
+  masked field — through the one typed route `POST /api/v1/accounts`, never an action, while
+  `ui.allow_secret_entry` (see the 594 section); a sandbox's own key (`key set`) stays CLI-only.
 - **An action is an operation**: 202 at once, the host call in `WebOperations` (≤ 8 running), its
   progress and outcome as SSE `op` events. The outcome is a line written from the result — never
   the result passed through.
@@ -391,10 +393,21 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   (Ctrl-C = detach, exit 130) or a closed wizard still completes the onboarding.
 - **Settings and the prompt template are written ONLY when missing** (`Onboarding.write…IfMissing`) — an
   existing file is never touched, by the CLI or the UI's `POST /api/v1/onboarding/config`.
-- **The account step never logs in, never reads a refresh token for use, never writes the keychain**:
-  it sets the store default (`mac`/`none`) or shows the `doz account add` command. `doz onboard
-  --account …` skips the Claude Code checks entirely; `doz ui` under `DOZ_TEST_NO_MAC_LOGIN=1` (a test
-  seam, the probes') never looks at the Mac's login.
+- **The account step never logs in and never reads a refresh token for use.** Options: `mac`, `api-key`,
+  `setup-token`, `later` ("Decide later" — owner ruling: one option for none/skip). A key or a token goes
+  ONLY through `HostRequest.accountAdd` — the request `doz account add` sends (the login keychain, the one
+  check request, `--plan`) — from `doz onboard`'s no-echo prompt (off a TTY only with `--secret-stdin`) or
+  the web UI's masked field. `doz onboard --account …` skips the Claude Code checks entirely; `doz ui`
+  under `DOZ_TEST_NO_MAC_LOGIN=1` (a test seam, the probes') never looks at the Mac's login.
+- **Secret entry in the browser** (owner ruling, 594): `ui.allow_secret_entry` (default on; the UI can turn
+  it off, never on — a reset would turn it on, so that is refused too). On: `POST /api/v1/accounts` — a
+  typed route, deliberately NOT a `WebAction` (an action is an operation: a title, progress, SSE); strict
+  body `{name, kind, secret, plan?}`; the page empties the masked field before the request; refusals never
+  echo; a failure's message is scrubbed (`WebAccountAdd.scrub`); `WebAccountAdd`'s description is redacted.
+  Off: 403 `secret-entry-off` and the page shows the command. `account-add` stays OUT of the action set.
+- **Unattended tests never touch the login keychain**: a real host under `DOZ_TEST_CREDENTIALS=memory`
+  keeps accounts' secrets in its memory and verifies nothing (`CredentialServices.forHost`, said in
+  host.log). `make test-cli`'s onboarding part and the wizard probe use it.
 - **The environment prompt** (`AgentPrompt.swift`) is rendered from the sandbox's CURRENT facts at every
   `open-session` of a claude-code/pi sandbox and written by a root utility exec (contents base64 in the
   script): `/run/dozer/agent-prompt.md` and ONLY the skill dir `~/.claude/skills/dozer` (pi:

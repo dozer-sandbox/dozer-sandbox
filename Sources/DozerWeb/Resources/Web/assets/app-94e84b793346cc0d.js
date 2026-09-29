@@ -8,8 +8,9 @@
 //     before anything else, and sent only in the bootstrap's Authorization header.
 //   · The CSRF token lives in this page's memory only (never storage, a cookie or a URL).
 //   · Every action is one typed request (POST /api/v1/actions, {action, …}); a destructive one carries
-//     `confirm`, filled only from a name the person typed. No secret is ever typed here (owner ruling
-//     D3): adding a key or an account is a CLI command the page shows.
+//     `confirm`, filled only from a name the person typed. No action ever carries a secret (590's D3).
+//     594 (owner ruling): an ACCOUNT's key or token may be typed in a masked field (accountForm) — one
+//     POST /api/v1/accounts body, while ui.allow_secret_entry; a sandbox's own key stays CLI-only.
 //   · Forms live in <dialog>s outside the view, so a live refresh never wipes what is being typed.
 'use strict';
 
@@ -1472,8 +1473,8 @@ async function viewDoctor() {
 // The same model as every page: facts from GET /api/v1/onboarding; changes through the typed actions
 // (account-default, onboard, prepare-cancel, create) and ONE typed route for the settings file and
 // the prompt template (POST /api/v1/onboarding/config — each written only when missing, never
-// overwritten). No secret is typed here: a key or a setup token is added with the CLI command the
-// account step shows. The preparation runs in the HOST: "Continue in the background" leaves it
+// overwritten). A key or a setup token: the masked field (accountForm) while ui.allow_secret_entry,
+// else the CLI command. The preparation runs in the HOST: "Continue in the background" leaves it
 // running (Operations shows it), and closing this tab changes nothing.
 const WIZ_STEPS = ['Welcome', 'Checks', 'Claude account', 'Images', 'Preparing', 'First sandbox', 'Done'];
 const WIZ_ORDER = ['claude-code', 'pi', 'lab'];

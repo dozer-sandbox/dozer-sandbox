@@ -9,7 +9,8 @@ import DozerHost
 /// is passed through.
 ///
 /// Not here, on purpose: `exec` and `attach` (a terminal is Terminal.app, `WebTerminal`), `key set`
-/// and `account add` (a secret is never entered in a browser — owner ruling D3), `host stop`.
+/// and `account add` (no ACTION carries a secret — 590's D3; since 594 an account's key or token has
+/// its own typed route, `POST /api/v1/accounts`, gated by `ui.allow_secret_entry`), `host stop`.
 public enum WebAction: Equatable, Sendable {
     case create(name: String, options: CreateOptions)
     /// start, wake, pause, resume, sleep, hibernate, shutdown, reset, rm.

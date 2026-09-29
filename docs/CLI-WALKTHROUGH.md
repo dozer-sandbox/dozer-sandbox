@@ -42,9 +42,10 @@ Enter takes the recommended answer:
    disk (APFS, room for the images), the kernel, vmnet, Claude Code. A *required* one that fails
    stops here, with the reason; the others only warn.
 2. **Claude account** — if Claude Code is signed in on this Mac, sandboxes can use that login
-   (nothing is copied into them; the Mac's proxy adds it and the Mac keeps renewing it). Otherwise it
-   shows the `doz account add` command for an API key or a setup token, to run afterwards — onboarding
-   never logs in for you and never writes the keychain.
+   (nothing is copied into them; the Mac's proxy adds it and the Mac keeps renewing it). Otherwise:
+   an API key or a setup token (`claude setup-token`), **pasted right there at a hidden prompt** — it
+   is stored exactly as `doz account add` stores it (the login keychain, one tiny check request) and
+   becomes the default — or **Decide later**. Onboarding never logs in for you.
 3. **Images** — a checklist: `claude-code` ticked; `pi` and `lab` optional, each with its download
    and an estimate.
 4. **Settings** — `~/.config/dozer-sandbox/doz.toml` (every setting listed at its default; your
@@ -256,8 +257,10 @@ A store that was never onboarded opens on the **setup wizard**: Welcome → Chec
 required ones marked) → Claude account → Images (sizes and estimates; claude-code ticked) →
 Preparing (the host's progress; **Continue in the background** leaves it running — **Operations**
 shows it) → First sandbox (a name, an image and a workspace folder typed or pasted — a browser cannot
-pick a local folder for the host) → Done. A key or a token is never typed in the browser: the account
-step shows the CLI command. Afterwards the wizard is always under **Doctor › Run onboarding again**.
+pick a local folder for the host) → Done. The account
+step takes an API key or a setup token in a masked field (sent once, stored as `doz account add`
+stores it, and cleared from the page) — or, with `doz config set ui.allow_secret_entry false`, shows
+the CLI command instead. Afterwards the wizard is always under **Doctor › Run onboarding again**.
 
 Try **Continue in the background**, then open the new sandbox's page while the image still prepares:
 its Start joins the same preparation. A sandbox's page shows its **Environment prompt** and whether

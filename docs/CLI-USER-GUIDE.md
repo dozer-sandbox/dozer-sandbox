@@ -35,7 +35,8 @@ A VM can only be booted by a binary signed with Apple's virtualization entitleme
 doz onboard                                   # asks on a terminal; Enter takes the recommended answer
 doz onboard --images claude-code,pi --yes     # scripts: ask nothing (--yes, --json or no terminal)
 doz onboard --all-images | --no-images        # every image (~15+ min the first time) · none now
-doz onboard --account mac|none|skip           # answer the account step (and skip the Claude Code checks)
+doz onboard --account mac|api-key|setup-token|later   # answer the account step (and skip the Claude Code checks)
+doz onboard --account setup-token --account-name work --plan max --secret-stdin --yes < token.txt   # scripts: the token from stdin
 doz onboard --status                          # the record and the images; follows a preparation that runs
 doz onboard --cancel                          # stop the images being prepared
 ```
@@ -48,10 +49,13 @@ It does, in order:
    signed out (a claude-code sandbox still works with an account added later), vmnet (only
    `--network nat` needs it).
 2. **Claude account** — offered, never logged in for you. Claude Code signed in on this Mac: "use
-   this Mac's login" (the account `mac`) is the default. Otherwise: an API key or a setup token —
-   onboarding shows the `doz account add …` command to run (the secret is read from a no-echo prompt
-   then; onboarding itself never writes the keychain and never touches Claude Code's refresh token)
-   — or skip.
+   this Mac's login" (the account `mac`) is the default. Otherwise: **an API key or a setup token,
+   pasted right there** at a no-echo prompt (with its account name, and the plan for a token) and
+   stored exactly as `doz account add` stores it — the login keychain (`doz-anthropic:NAME`,
+   `doz-claude:NAME`) after one tiny check request — then made the store's default; or **Decide
+   later** (nothing changes). Off a terminal the key is read from stdin only with `--secret-stdin`
+   (as `doz account add` reads it); otherwise the step is skipped and the command shown. Onboarding
+   never touches Claude Code's refresh token.
 3. **Images** — `claude-code` is prepared by default; `pi` and `lab` are opt-in.
 4. **Settings** — `doz.toml` (every setting at its default, with `defaults.image` and
    `defaults.account` from your answers) and `agent-prompt.md` beside it (see "The agent's
@@ -505,7 +509,7 @@ the Claude accounts, the metrics, `doz doctor`, and the host's activity as it ha
 **The setup wizard** (594). A store that was never onboarded opens on it — the steps of
 `doz onboard`: **Welcome → Checks** (the doctor's, the required ones marked; a failing one stops it,
 with Check again) **→ Claude account** (the Mac's login when it is signed in; an API key or a setup
-token shows the CLI command to run — no secret is typed in the browser) **→ Images** (a checklist,
+token in a masked field — or, with `ui.allow_secret_entry` off, the CLI command; or Decide later) **→ Images** (a checklist,
 claude-code ticked, each with its download, an estimate and the disk it needs) **→ Preparing** (the
 host's progress: the step under way, a download bar, the last lines of output, the finished steps;
 **Continue in the background** leaves it running, **Cancel preparation** stops it) **→ First
@@ -573,8 +577,15 @@ sandbox can take a session, and clicking an action again while it runs does noth
 already under way). The list has no session count, since counting asks every session inside the
 guest; each sandbox's page lists its sessions.
 
-One thing is CLI-only on purpose: **a secret is never typed into the browser**. Add an account
-(`doz account add`) or set a key (`doz key set`) in a terminal; the page shows the command.
+**Keys and tokens in the browser** (594, owner ruling; the setting `ui.allow_secret_entry`, on by
+default). The setup wizard's account step and **Accounts & keys › Add an account** take an Anthropic
+API key or a Claude setup token (with its plan) in a masked field (`type=password`, no autocomplete, no
+spellcheck). The page reads it once and empties the field at once; it goes out only in the body of one
+CSRF-checked `POST /api/v1/accounts` — never a URL, a log line, an event, an Operation or an error
+message — and the host stores it exactly as `doz account add` does (the login keychain, one tiny check
+request). With `doz config set ui.allow_secret_entry false` the page shows the `doz account add` command
+instead, and the route refuses; the browser can turn the setting off but never on. A sandbox's own key
+(`doz key set`) is still CLI-only.
 
 **Terminals in the browser** (on each sandbox's page). **Open** in the empty terminal area attaches
 to its own session (starting it if needed); each session row has **Open** and **Watch**;

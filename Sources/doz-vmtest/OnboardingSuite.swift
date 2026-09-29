@@ -38,6 +38,8 @@ func onboardingHarness(_ binary: String, _ tag: String, seed items: [String]) ->
     }
     let h = CLIHarness(binary: binary, store: root)
     h.env["DOZ_HOST_IDLE"] = "2"
+    // Accounts' secrets live in the host's memory: never the login keychain, never a prompt.
+    h.env["DOZ_TEST_CREDENTIALS"] = "memory"
     // The settings live beside the store (the harness put them under it already).
     return h
 }
@@ -81,21 +83,46 @@ func cliOnboardingSuite(binary: String) async {
         try? FileManager.default.removeItem(at: a.store)
     }
     print("cli: onboard — off a terminal it never asks; the settings only when missing")
-    var r = a.run(["onboard", "--no-images", "--account", "skip"], timeout: 120)
+    var r = a.run(["onboard", "--no-images", "--account", "later"], timeout: 120)
     check(r.code == 0 && r.out.contains("Done — this Mac is onboarded"), "onboard --no-images --account skip, no terminal, no --yes: completes without asking (exit \(r.code))")
     check((try? String(contentsOf: toml, encoding: .utf8))?.contains("\nimage = \"claude-code\"\n") == true, "doz.toml written, with defaults.image set")
     check(FileManager.default.fileExists(atPath: xdg.appendingPathComponent("dozer-sandbox/agent-prompt.md").path), "agent-prompt.md written beside it")
     check(OnboardingRecord.read(DozerStore(root: a.store)) != nil, "onboarded.json recorded")
     let tomlBefore = (try? String(contentsOf: toml, encoding: .utf8)) ?? ""
 
+    print("cli: onboard takes a key the doz account add way (owner ruling; the memory keychain)")
+    let fakeKey = "sk-ant-api03-DOZFAKE" + String(repeating: "k", count: 40)
+    r = a.run(["onboard", "--no-images", "--account", "api-key", "--account-name", "t1"], stdin: Data((fakeKey + "\n").utf8), timeout: 120)
+    check(r.code == 0 && r.out.contains("no API key given now") && r.out.contains("doz account add work --api-key"),
+          "off a terminal WITHOUT --secret-stdin: stdin is not read, the commands are shown (exit \(r.code))")
+    check(!(a.json(["account", "ls"], [AccountRow].self) ?? []).contains { $0.name == "t1" }, "no account t1")
+    r = a.run(["onboard", "--no-images", "--account", "api-key", "--account-name", "t1", "--secret-stdin"], stdin: Data((fakeKey + "\n").utf8), timeout: 120)
+    let t1 = (a.json(["account", "ls"], [AccountRow].self) ?? []).first { $0.name == "t1" }
+    check(r.code == 0 && r.out.contains("account t1 added"), "--secret-stdin: account t1 added (exit \(r.code))")
+    check(t1?.isDefault == true && t1?.keychainService == "doz-anthropic:t1" && t1?.kind == "api-key" && t1?.fingerprint != nil,
+          "t1: api-key, doz-anthropic:t1, a fingerprint, the store default")
+    let stored = try? String(contentsOf: a.store.appendingPathComponent("accounts.json"), encoding: .utf8)
+    check(stored?.contains(fakeKey) == false && !r.out.contains(fakeKey) && !r.err.contains(fakeKey) && !hostLog(a).contains(fakeKey),
+          "the key is in no output, accounts.json or host.log")
+    // The real login keychain: an attribute lookup (no -w: no prompt, no secret) finds no such item.
+    let sec = Process()
+    sec.executableURL = URL(fileURLWithPath: "/usr/bin/security")
+    sec.arguments = ["find-generic-password", "-s", "doz-anthropic:t1"]
+    sec.standardOutput = FileHandle.nullDevice
+    sec.standardError = FileHandle.nullDevice
+    try? sec.run()
+    sec.waitUntilExit()
+    check(sec.terminationStatus != 0, "the login keychain has no doz-anthropic:t1 (the host's memory keychain held it)")
+    check(a.run(["account", "default", "none"]).code == 0, "account default none")
+
     print("cli: onboard stops on a hard check")
     let longStore = "/tmp/dzo-" + String(repeating: "x", count: 100)
-    r = a.run(["onboard", "--no-images", "--account", "skip", "--yes", "--store", longStore], timeout: 60)
+    r = a.run(["onboard", "--no-images", "--account", "later", "--yes", "--store", longStore], timeout: 60)
     check(r.code == 1 && r.err.contains("onboarding stopped: socket"), "a store whose socket path is too long: stopped, with the reason (exit \(r.code))")
     try? FileManager.default.removeItem(atPath: longStore)
 
     print("cli: a start during onboarding joins its preparation (D4)")
-    let onboard = try? AttachedClient(a, ["onboard", "--images", "lab", "--account", "skip", "--yes"])
+    let onboard = try? AttachedClient(a, ["onboard", "--images", "lab", "--account", "later", "--yes"])
     let running = a.waitFor(120) { preparations(a).contains { $0.image == "lab" && $0.running } }
     check(running, "onboard --images lab: the lab is being prepared in the host")
     let ws = a.store.appendingPathComponent("ws-j1")
@@ -112,7 +139,7 @@ func cliOnboardingSuite(binary: String) async {
     check(lab?.state == "done" && lab?.requestedBy.contains("start j1") == true && lab?.requestedBy.first == "doz onboard",
           "the preparation: done, asked by \(lab?.requestedBy.joined(separator: ", ") ?? "?")")
     check(OnboardingRecord.read(DozerStore(root: a.store))?.images.contains("lab") == true, "onboarded.json records the lab")
-    r = a.run(["onboard", "--images", "lab", "--account", "skip", "--yes"], timeout: 120)
+    r = a.run(["onboard", "--images", "lab", "--account", "later", "--yes"], timeout: 120)
     check(r.code == 0 && r.out.contains("already prepared") && r.out.contains("left exactly as it is"),
           "re-running: prepares nothing, leaves doz.toml alone (exit \(r.code))")
     check((try? String(contentsOf: toml, encoding: .utf8)) == tomlBefore, "doz.toml unchanged")
@@ -211,7 +238,7 @@ func cliOnboardingSuite(binary: String) async {
 
     print("cli: Ctrl-C detaches onboarding; --cancel cancels (D3)")
     try? FileManager.default.removeItem(at: c.store.appendingPathComponent("images/pi"))
-    let ob = try? AttachedClient(c, ["onboard", "--images", "pi", "--account", "skip", "--yes"])
+    let ob = try? AttachedClient(c, ["onboard", "--images", "pi", "--account", "later", "--yes"])
     check(c.waitFor(180) { preparations(c).contains { $0.image == "pi" && $0.running } }, "onboard --images pi: preparing in the host")
     if let ob { kill(ob.process.processIdentifier, SIGINT) }
     let code = ob?.exited(within: 20)
@@ -243,7 +270,8 @@ func cliOnboardingSuite(binary: String) async {
     let ustore = u.appendingPathComponent("s")
     let uh = CLIHarness(binary: prefix.appendingPathComponent("bin/doz").path, store: ustore)
     uh.env["XDG_CONFIG_HOME"] = u.appendingPathComponent("xdg").path
-    check(uh.run(["onboard", "--no-images", "--account", "skip", "--yes"], timeout: 120).code == 0, "an installed copy, onboarded on a throwaway store")
+    uh.env["DOZ_TEST_CREDENTIALS"] = "memory"
+    check(uh.run(["onboard", "--no-images", "--account", "later", "--yes"], timeout: 120).code == 0, "an installed copy, onboarded on a throwaway store")
     uh.run(["host", "stop"])
     let config = u.appendingPathComponent("xdg/dozer-sandbox")
     r = uh.run(["uninstall"])
