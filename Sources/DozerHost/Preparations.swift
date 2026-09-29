@@ -136,6 +136,24 @@ public struct PrepareResult: Codable, Equatable, Sendable {
     }
 }
 
+/// sha256 of a file, remembered by (path, inode, size, mtime) — `image ls` and the UI's poll ask
+/// whether each image is prepared for this build, which needs the kernel's and deckhold's digests.
+final class FileDigests: @unchecked Sendable {
+    static let shared = FileDigests()
+    private let lock = NSLock()
+    private var cache: [String: (stamp: [Int64], digest: String)] = [:]
+
+    func sha256(_ url: URL) -> String? {
+        var st = stat()
+        guard stat(url.path, &st) == 0 else { return nil }
+        let stamp = [Int64(bitPattern: UInt64(st.st_ino)), Int64(st.st_size), Int64(st.st_mtimespec.tv_sec), Int64(st.st_mtimespec.tv_nsec)]
+        if let hit = lock.withLock({ cache[url.path] }), hit.stamp == stamp { return hit.digest }
+        guard let d = try? KernelProvider.sha256(of: url) else { return nil }
+        lock.withLock { cache[url.path] = (stamp, d) }
+        return d
+    }
+}
+
 /// One image being prepared. Its events are kept (bounded) so a joiner sees it from the start.
 final class Preparation: @unchecked Sendable {
     let id: String
@@ -267,7 +285,7 @@ extension HostCore {
         let kernel = spec.kernelPath.map { URL(fileURLWithPath: $0) }
             ?? KernelProvider(cacheDirectory: spec.kernelCacheDirectory ?? StoreLayout(spec: spec).kernels).cachedKernel
         guard FileManager.default.fileExists(atPath: kernel.path), let deckhold = DeckholdBinary.locate(),
-              let k = try? KernelProvider.sha256(of: kernel), let d = try? KernelProvider.sha256(of: deckhold) else { return false }
+              let k = FileDigests.shared.sha256(kernel), let d = FileDigests.shared.sha256(deckhold) else { return false }
         return ImageBaker(storeRoot: store.root).cached(imageSpec, key: imageSpec.bakeKey(kernelSHA256: k, deckholdSHA256: d)) != nil
     }
 
