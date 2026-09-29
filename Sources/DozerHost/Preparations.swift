@@ -50,6 +50,17 @@ public struct PreparationInfo: Codable, Equatable, Sendable {
     public var output: [String]
     /// Finished lines, oldest first (the newest 40).
     public var lines: [String]
+    /// 594 (owner: "more progress detail"): step N of M — N the timed steps done plus the one under
+    /// way, M the plan (this store's last run of the image, else the image spec's) — never N > M.
+    public var stepIndex: Int?
+    public var plannedSteps: Int?
+    /// Every finished step (and each download's summary), oldest first, as data.
+    public var steps: [PreparationStep]?
+    /// How long the step under way took last time, and about how long is left — only when this store
+    /// prepared the image before; `estimateBasis` says which, or "first time: no estimate yet".
+    public var stepUsualSeconds: Double?
+    public var remainingSeconds: Double?
+    public var estimateBasis: String?
 
     public var running: Bool { state == "running" || state == "cancelling" }
 
@@ -68,6 +79,96 @@ public struct PreparationInfo: Codable, Equatable, Sendable {
         self.transfer = transfer
         self.output = output
         self.lines = lines
+    }
+}
+
+/// 594: one finished step of a preparation.
+public struct PreparationStep: Codable, Equatable, Sendable {
+    public var label: String
+    /// step · failed · transfer (a download's summary — not one of the plan's steps)
+    public var kind: String
+    public var seconds: Double
+    /// What it took the last time this store prepared the image.
+    public var usualSeconds: Double?
+    public var error: String?
+    /// A failed step's last output lines (guest text, inert).
+    public var output: [String]?
+
+    public init(label: String, kind: String, seconds: Double, usualSeconds: Double? = nil, error: String? = nil, output: [String]? = nil) {
+        self.label = label
+        self.kind = kind
+        self.seconds = seconds
+        self.usualSeconds = usualSeconds
+        self.error = error
+        self.output = output?.isEmpty == true ? nil : output
+    }
+}
+
+/// 594: the last SUCCESSFUL preparation of each image in this store — its timed steps and their
+/// times (`<store>/preparations.json`), the plan and the estimates of the next one.
+public struct PreparationRecord: Codable, Equatable, Sendable {
+    public struct Step: Codable, Equatable, Sendable {
+        public var key: String
+        public var label: String
+        public var seconds: Double
+    }
+    public var image: String
+    public var finishedAt: Date
+    public var seconds: Double
+    public var steps: [Step]
+
+    /// A step's identity across runs: the label without what varies (cached or downloaded, sizes,
+    /// durations in parentheses) — "base image node (cached)" and "pulled the base image node" are one.
+    public static func key(_ label: String) -> String {
+        if label.hasPrefix("kernel ready") { return "kernel" }
+        if label.hasPrefix("guest init image ready") { return "guest init" }
+        // A bake's base image and base disk (the metrics' key folds both into "image …").
+        if label.hasPrefix("pulled the base image") || label.hasPrefix("base image ") { return "base image" }
+        if label.hasPrefix("base disk") { return "base disk" }
+        let m = MetricsStepKey.key(for: label)
+        switch m.hasPrefix("step: ") ? String(m.dropFirst(6)) : m {
+        case "image pull", "image cached": return "base image"
+        case "other", "network setup": break
+        case let k: if !k.hasPrefix("bake step ") { return k }
+        }
+        let cut = label.range(of: " (")?.lowerBound ?? label.endIndex
+        return String(label[..<cut])
+    }
+
+    public func usual(_ label: String) -> Double? {
+        let k = Self.key(label)
+        return steps.first { $0.key == k }.map(\.seconds)
+    }
+
+    /// About how long is left: the rest of the step under way (as long as it took last time, less what
+    /// it has run) and every step after it, by the last run's order and times.
+    public func remaining(after done: Int, current: String?, currentSeconds: Double) -> Double {
+        var from = done
+        var left = 0.0
+        if let current {
+            let k = Self.key(current)
+            // The step's place in the last run: its first occurrence at or after the steps done now
+            // (a key can recur — the lab's first boot times the guest init again).
+            let lo = min(done, steps.count)
+            if let i = steps[lo...].firstIndex(where: { $0.key == k }) ?? steps.firstIndex(where: { $0.key == k }) { from = i }
+            left += max(0, (steps.indices.contains(from) ? steps[from].seconds : 0) - currentSeconds)
+            from += 1
+        }
+        if from < steps.count { left += steps[from...].reduce(0) { $0 + $1.seconds } }
+        return left
+    }
+
+    public static func url(_ store: DozerStore) -> URL { store.root.appendingPathComponent("preparations.json") }
+
+    public static func all(_ store: DozerStore) -> [String: PreparationRecord] {
+        guard let d = try? Data(contentsOf: url(store)) else { return [:] }
+        return (try? HostWire.decoder.decode([String: PreparationRecord].self, from: d)) ?? [:]
+    }
+
+    public static func save(_ r: PreparationRecord, store: DozerStore) {
+        var all = all(store)
+        all[r.image] = r
+        try? HostWire.prettyEncoder.encode(all).write(to: url(store), options: .atomic)
     }
 }
 
@@ -168,19 +269,34 @@ final class Preparation: @unchecked Sendable {
     private var dropped = 0
     private var subscribers: [UUID: @Sendable (HostEvent) -> Void] = [:]
     private var finished: [String] = []
-    private let board = ProgressBoard(tailLines: 3)
+    /// 594 (owner: "more progress detail"): the same model as 593's boot view and the CLI — with the
+    /// output's last 6 lines — plus the steps as data: each finished one, the plan, the last run's times.
+    private let board = ProgressBoard(tailLines: Preparation.tailLines)
     private let formatter = ProgressTerminal(mode: .plain, color: false)
     private var waiters: [CheckedContinuation<Void, Error>] = []
     private var outcome: Result<Void, Error>?
+    private var steps: [PreparationStep] = []
+    private var open: [String: Date] = [:]
+    private var lastOutput: [String] = []
+    /// Timed steps a run of this image takes (the last run's count, else the image spec's plan).
+    let planned: Int?
+    /// The last successful run of this image in this store (its steps' times) — nil: the first time.
+    let previous: PreparationRecord?
     var task: Task<Void, Never>?
 
     static let maximumEvents = 600
+    static let tailLines = 6
 
-    init(image: String, requestedBy: String) {
+    init(image: String, requestedBy: String, planned: Int? = nil, previous: PreparationRecord? = nil) {
         id = String(UUID().uuidString.prefix(8)).lowercased()
         self.image = image
         _requestedBy = [requestedBy]
+        self.planned = previous.map { $0.steps.count } ?? planned
+        self.previous = previous
     }
+
+    /// Timed steps, finished (ok or failed) — for the record of this run.
+    var finishedSteps: [PreparationStep] { lock.withLock { steps.filter { $0.kind != "transfer" } } }
 
     var state: String { lock.withLock { _state } }
     var isRunning: Bool { lock.withLock { _state == "running" || _state == "cancelling" } }
@@ -190,9 +306,33 @@ final class Preparation: @unchecked Sendable {
     /// An event of this preparation: kept, applied to the board, passed to every subscriber.
     func emit(_ e: HostEvent) {
         let subs: [@Sendable (HostEvent) -> Void] = lock.withLock {
+            let text = ProgressFormat.trimDigests(ProgressFormat.inert(e.text ?? "", limit: 400))
+            // The steps as data: a timed step is one that STARTED and then ended (a bare step event —
+            // "flattened the base once" inside a timed step — is not one of the plan's).
+            switch e.kind {
+            case .started:
+                open[text] = e.time
+                lastOutput = []
+            case .output:
+                if !text.isEmpty { lastOutput.append(text); if lastOutput.count > Self.tailLines { lastOutput.removeFirst() } }
+            case .step where open.removeValue(forKey: text) != nil:
+                steps.append(PreparationStep(label: text, kind: "step", seconds: (e.milliseconds ?? 0) / 1000,
+                                             usualSeconds: previous?.usual(text)))
+            case .failed:
+                open[text] = nil
+                steps.append(PreparationStep(label: text, kind: "failed", seconds: (e.milliseconds ?? 0) / 1000,
+                                             error: e.error.map { ProgressFormat.trimDigests(ProgressFormat.inert($0)) }, output: lastOutput))
+            default: break
+            }
             let finals = board.apply(e)
-            for f in finals { finished.append(formatter.format(f)) }
+            for f in finals {
+                finished.append(formatter.format(f))
+                if case .transferDone(let label, let bytes, let secs) = f {
+                    steps.append(PreparationStep(label: ProgressTerminal.pulled(label, bytes, secs), kind: "transfer", seconds: secs))
+                }
+            }
             if finished.count > 40 { finished.removeFirst(finished.count - 40) }
+            if steps.count > 120 { steps.removeFirst(steps.count - 120) }
             // Keep what a joiner needs: every step and note; transfer ticks and output only as the latest.
             if e.kind == .progress || e.kind == .output, let last = events.last, last.kind == e.kind, last.text == e.text || e.kind == .output {
                 events[events.count - 1] = e
@@ -265,9 +405,26 @@ final class Preparation: @unchecked Sendable {
                 PreparationTransfer(label: $0.label, completedBytes: $0.done, totalBytes: $0.total, completedItems: $0.items,
                                     totalItems: $0.totalItems, line: ProgressBoard.transferLine($0, now: now))
             }
-            return PreparationInfo(id: id, image: image, state: _state, requestedBy: _requestedBy, startedAt: startedAt, finishedAt: _finishedAt,
-                                   seconds: (_finishedAt ?? now).timeIntervalSince(startedAt), error: _error, step: step, stepSeconds: stepSeconds,
-                                   transfer: transfer, output: output, lines: finished)
+            var p = PreparationInfo(id: id, image: image, state: _state, requestedBy: _requestedBy, startedAt: startedAt, finishedAt: _finishedAt,
+                                    seconds: (_finishedAt ?? now).timeIntervalSince(startedAt), error: _error, step: step, stepSeconds: stepSeconds,
+                                    transfer: transfer, output: output, lines: finished)
+            // Step N of M: the timed steps done, plus the one under way; M the plan (never below N).
+            let done = steps.filter { $0.kind == "step" }.count
+            let running = _state == "running" || _state == "cancelling"
+            p.stepIndex = done + (running && step != nil ? 1 : 0)
+            if let m = planned { p.plannedSteps = max(m, p.stepIndex ?? 0) }
+            p.steps = steps
+            // Estimates only from this store's last run of this image; none the first time.
+            if let prev = previous {
+                p.stepUsualSeconds = step.flatMap { prev.usual($0) }
+                if running {
+                    p.remainingSeconds = prev.remaining(after: done, current: step, currentSeconds: stepSeconds ?? 0)
+                }
+                p.estimateBasis = "from this store's last preparation of \(image) (\(prev.finishedAt.formatted(date: .abbreviated, time: .shortened)))"
+            } else {
+                p.estimateBasis = "first time: no estimate yet"
+            }
+            return p
         }
     }
 }
@@ -326,7 +483,8 @@ extension HostCore {
             return p
         }
         guard !readOnly else { throw HostError(.unavailable, "preparing an image needs the host") }
-        let p = Preparation(image: image, requestedBy: who)
+        let p = Preparation(image: image, requestedBy: who, planned: Self.plannedSteps(image),
+                            previous: PreparationRecord.all(store)[image])
         preparations[image] = p
         let store = self.store
         let hub = self.hub
@@ -362,7 +520,27 @@ extension HostCore {
         let i = p.info
         note(nil, "preparation of \(p.image) \(i.state)" + (i.error.map { ": \($0)" } ?? "") + String(format: " (%.0f s)", i.seconds))
         recordPreparation(p.image, started: started, t0: t0, ok: ok, error: i.error)
+        // The next preparation's plan and estimates: this run's steps and times (successful runs only).
+        let steps = p.finishedSteps.filter { $0.kind == "step" }
+        if ok, !steps.isEmpty {
+            PreparationRecord.save(PreparationRecord(image: p.image, finishedAt: Date(), seconds: i.seconds,
+                                                     steps: steps.map { .init(key: PreparationRecord.key($0.label), label: $0.label, seconds: $0.seconds) }),
+                                   store: store)
+        }
     }
+
+    /// The timed steps a FIRST preparation of `image` takes (a later one follows the last run):
+    /// kernel + guest init, then — an image spec — base image, base disk, clone, bake VM boot, bake
+    /// network, each of its steps and verify checks, trim and stop; the lab — its first boot
+    /// (measured: 594.02-RESULTS.md).
+    static func plannedSteps(_ image: String) -> Int? {
+        guard let spec = DozerImages.imageSpec(image) else { return image == "lab" ? 2 + labBootSteps : nil }
+        return 2 + 7 + spec.steps.count + spec.verify.count
+    }
+
+    /// The lab's first boot, counted on a real run (2026-09-29): guest init (again), alpine ready,
+    /// flatten, root disk clone, VM boot, container start, deckhold, guest prep, network, container stop.
+    static let labBootSteps = 10
 
     /// The work itself, off the actor: the kernel and guest init disk, then the image's bake (the lab:
     /// its prepared disk, made by booting a throwaway sandbox once).

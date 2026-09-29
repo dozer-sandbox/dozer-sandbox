@@ -389,6 +389,13 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   so cancellation cannot skip the clean stop). A running preparation keeps the host up (`idleLoop`);
   quitting the host cancels it. "Prepared" means THIS build's bake key (`HostCore.isPrepared`,
   `ImageRow.current`) — a re-run prepares nothing. Tests substitute the work: `setPreparationRunner`.
+  **Its progress as data** (`PreparationInfo`): `stepIndex`/`plannedSteps` (N of M — M from the last
+  run's step count, else `HostCore.plannedSteps(image)`), `steps` (finished: step · failed with its last
+  output · transfer), the 593 `ProgressBoard` tail (6 lines), and estimates ONLY from
+  `<store>/preparations.json` (`PreparationRecord`, saved on success; steps keyed so a digest or a
+  size in the label does not break the match). The UI's `prepCard` renders it; the probe
+  `probes/594-*/progress.mjs` pins it. A bake step's output is the tail, so keep steps' output visible
+  (the dev baseline's apt is not silenced).
 - **`<store>/onboarded.json`, never `state.json`** — that name at the store's root is Containerization's
   image-store index. The HOST writes the record once every chosen image is ready, so a detached CLI
   (Ctrl-C = detach, exit 130) or a closed wizard still completes the onboarding.

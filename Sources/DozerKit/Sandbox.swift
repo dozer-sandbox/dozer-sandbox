@@ -1181,12 +1181,17 @@ public actor Sandbox {
     /// the first start. Never touches this sandbox's own VM or disks.
     public func prepareAssets() async throws {
         let broadcaster = self.broadcaster
-        // The provider says what it did itself (cached and verified, copied from a seed, or downloaded).
-        let kernelURL = try await kernelProvider.resolve(override: spec.kernelPath) { e in
-            switch e {
-            case .step(let s, let ms): broadcaster.yield(.step(s, milliseconds: ms))
-            case .note(let s): broadcaster.yield(.note(s))
-            case .progress(let s, let done, let total): broadcaster.yield(.progress(s, completedBytes: done, totalBytes: total))
+        // ONE timed step, whatever the provider does (a preparation counts its steps — 594); what it did
+        // inside (cached and verified, copied from a seed, downloaded and extracted) is said as notes,
+        // and a download's progress passes through.
+        let cachedKernel = FileManager.default.fileExists(atPath: kernelProvider.cachedKernel.path)
+        let kernelURL = try await timed("kernel ready (\(KernelArtifact.recommended.fileName)\(spec.kernelPath != nil ? ", explicit" : cachedKernel ? ", cached" : ": downloaded"))") {
+            try await kernelProvider.resolve(override: spec.kernelPath) { e in
+                switch e {
+                case .step(let s, let ms): broadcaster.yield(.note(String(format: "%@ — %.0f ms", s, ms)))
+                case .note(let s): broadcaster.yield(.note(s))
+                case .progress(let s, let done, let total): broadcaster.yield(.progress(s, completedBytes: done, totalBytes: total))
+                }
             }
         }
         let kernel = Kernel(path: kernelURL, platform: .linuxArm)

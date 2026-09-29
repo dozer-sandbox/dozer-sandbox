@@ -282,14 +282,16 @@ function prepProgressText(p) {
   return p.lines.length ? p.lines[p.lines.length - 1] : 'starting…';
 }
 function preparationsSection() {
-  const rows = state.preps.map((p) => h('tr', { class: 'op-row op-' + (prepRunning(p) ? 'running' : p.state === 'done' ? 'done' : 'failed'), 'data-prep': p.image },
+  // A row per preparation and, beneath it, the same card as the wizard's (the running ones in full).
+  const rows = state.preps.flatMap((p) => [h('tr', { class: 'op-row op-' + (prepRunning(p) ? 'running' : p.state === 'done' ? 'done' : 'failed'), 'data-prep': p.image },
     h('td', null, prepRunning(p) ? h('span', { class: 'mini-spin', title: p.state }) : h('span', { class: 'op-state', title: p.state }, p.state === 'done' ? '✓' : '✕')),
     h('td', { class: 'op-action' }, icon('flame'), 'prepare ' + p.image),
     h('td', null, p.requestedBy.join(', ')),
     h('td', null, clock(p.startedAt)), h('td', { class: 'num' }, Math.round(p.seconds) + ' s'),
     h('td', { class: 'op-text' }, prepProgressText(p)),
     h('td', null, prepRunning(p) && p.state !== 'cancelling'
-      ? btn('Cancel preparation', () => act({ action: 'prepare-cancel', images: [p.image] }), { small: true, danger: true }) : null)));
+      ? btn('Cancel preparation', () => act({ action: 'prepare-cancel', images: [p.image] }), { small: true, danger: true }) : null)),
+    h('tr', { class: 'prep-detail-row', 'data-prep-detail': p.image }, h('td', { colspan: '7' }, prepCard(p, { open: false })))]);
   return h('div', { class: 'ops-preps' }, h('h2', null, 'Image preparations (in the host)'),
     h('p', { class: 'sub' }, 'The kernel, the base image and the bake of a built-in image — asked for by doz onboard, the onboarding wizard, doz image bake or a first start. One per image at a time; whoever asks next joins it.'),
     panel(table(['', 'Image', 'Asked by', 'Started', 'Took', 'Progress', ''], rows, [4])));
@@ -1676,35 +1678,81 @@ function wizStep3(d, w) {
     wizButtons(btn('Back', () => wizGo(2)), go),
   ];
 }
-function prepCard(p) {
-  const running = prepRunning(p);
-  const bar = h('div', { class: 'wiz-bar', role: 'progressbar', 'aria-valuemin': '0', 'aria-valuemax': '100' });
+/// 594 (owner: "more progress detail"): ONE card for a host preparation — the wizard's Preparing step and
+/// the Operations page both draw it — from the host's model (593's ProgressBoard: the step under way, the
+/// transfer, the output's last lines; plus step N of M, the finished steps, the last run's times).
+///   · overall: "Step N of M" and a DETERMINATE bar (steps done / M), about how long is left;
+///   · the step under way: its label, its seconds, "usually ~X" — and an animated strip, never a full bar;
+///   · a download: its own determinate bar with bytes, speed and time left;
+///   · the output's last lines (guest text, already inert; cut to the width here);
+///   · the finished steps (open in the wizard), ✓ with the time each took, ✕ with why and its last output.
+function dur(s) { return s == null ? '—' : s < 1 ? Math.round(s * 1000) + ' ms' : s < 60 ? (s < 10 ? s.toFixed(1) : Math.round(s)) + ' s' : Math.floor(s / 60) + ' min ' + Math.round(s % 60) + ' s'; }
+function approx(s) { return s < 60 ? '~' + Math.max(1, Math.round(s)) + ' s' : '~' + Math.round(s / 60) + ' min'; }
+function determinate(fraction, cls, label) {
+  const bar = h('div', { class: 'wiz-bar ' + (cls || ''), role: 'progressbar', 'aria-valuemin': '0', 'aria-valuemax': '100', 'aria-label': label || null,
+                         'aria-valuenow': (fraction * 100).toFixed(0), 'data-fraction': fraction.toFixed(3) });
   const fill = h('span');
-  if (p.transferFraction != null) { fill.style.width = (p.transferFraction * 100).toFixed(1) + '%'; bar.setAttribute('aria-valuenow', (p.transferFraction * 100).toFixed(0)); }
-  else bar.classList.add('indeterminate');
+  fill.style.width = (Math.max(0, Math.min(1, fraction)) * 100).toFixed(1) + '%';
   bar.append(fill);
+  return bar;
+}
+function prepCard(p, opts = {}) {
+  const running = prepRunning(p);
+  const n = p.stepIndex || 0, m = p.plannedSteps;
+  const done = running ? Math.max(0, n - 1) : n;
+  const overall = m ? h('div', { class: 'prep-overall', 'data-step': String(n), 'data-steps': String(m) },
+    h('div', { class: 'prep-overall-line' },
+      h('span', null, 'Step ' + n + ' of ' + m),
+      h('span', { class: 'muted prep-estimate' }, running
+        ? (p.remainingSeconds != null ? 'about ' + approx(p.remainingSeconds).slice(1) + ' left' : (p.estimateBasis || ''))
+        : '')),
+    determinate(done / m, 'prep-overall-bar', 'steps done')) : null;
+  const current = running && p.step ? h('div', { class: 'prep-current' },
+    h('div', { class: 'prep-step' }, h('span', { class: 'mini-spin', 'aria-hidden': 'true' }), ' ', p.step,
+      h('span', { class: 'muted' }, '  ' + dur(p.stepSeconds || 0) + (p.stepUsualSeconds != null ? ' · usually ' + approx(p.stepUsualSeconds) : ''))),
+    h('div', { class: 'wiz-bar indeterminate prep-step-bar', 'aria-hidden': 'true' }, h('span'))) : null;
+  const pulling = running && p.transferLine && (p.transferFraction == null || p.transferFraction < 1);
+  const transfer = pulling ? h('div', { class: 'prep-transfer-block' },
+    p.transferFraction != null ? determinate(p.transferFraction, 'prep-transfer-bar', 'downloaded') : null,
+    h('div', { class: 'mono prep-transfer' }, p.transferLine)) : null;
+  const tail = running && p.output.length ? h('div', { class: 'mono prep-output', 'data-tail': String(p.output.length) },
+    p.output.map((l) => h('div', null, '│ ' + l))) : null;
+  const items = p.steps.map((s) => h('li', { class: 'prep-done-' + s.kind },
+    h('span', { class: 'op-state' }, s.kind === 'failed' ? '✕' : s.kind === 'transfer' ? '↓' : '✓'), ' ', s.label,
+    h('span', { class: 'muted' }, s.kind === 'transfer' ? '' : ' — ' + dur(s.seconds) + (s.usualSeconds != null ? ' (last time ' + dur(s.usualSeconds) + ')' : '')),
+    s.error ? h('div', { class: 'st-fail' }, s.error) : null,
+    s.output ? h('div', { class: 'mono prep-output' }, s.output.map((l) => h('div', null, '│ ' + l))) : null));
+  const key = 'prep-open-' + p.id;
+  const details = items.length ? h('details', { class: 'prep-lines' },
+    h('summary', null, 'Finished steps (' + p.steps.filter((s) => s.kind !== 'transfer').length + ')'),
+    h('ul', { class: 'prep-steps' }, items)) : null;
+  if (details) {
+    const want = state[key] ?? !!opts.open;
+    if (want) details.open = true;
+    details.addEventListener('toggle', () => { state[key] = details.open; });
+  }
   return h('div', { class: 'prep-card prep-' + p.state, 'data-prep': p.image },
     h('div', { class: 'prep-head' }, running ? h('span', { class: 'mini-spin', 'aria-hidden': 'true' }) : h('span', { class: 'op-state' }, p.state === 'done' ? '✓' : '✕'),
-      h('strong', null, p.image), h('span', { class: 'muted' }, ' · ' + (running ? Math.round(p.seconds) + ' s so far' : p.state + ' in ' + ms(p.seconds * 1000)) + ' · asked by ' + p.requestedBy.join(', '))),
-    running && p.step ? h('div', { class: 'prep-step' }, p.step, h('span', { class: 'muted' }, '  ' + Math.round(p.stepSeconds || 0) + ' s')) : null,
-    running && (p.transferLine || p.step) ? bar : null,
-    running && p.transferLine ? h('div', { class: 'mono prep-transfer' }, p.transferLine) : null,
-    running && p.output.length ? h('div', { class: 'mono muted prep-output' }, p.output.map((l) => h('div', null, '│ ' + l))) : null,
+      h('strong', null, p.image), h('span', { class: 'muted' }, ' · ' + (running ? dur(p.seconds) + ' so far' : p.state + ' in ' + dur(p.seconds)) + ' · asked by ' + p.requestedBy.join(', '))),
+    overall, current, transfer, tail,
     p.error && p.state !== 'cancelled' ? h('div', { class: 'notice bad' }, p.error) : null,
-    p.lines.length ? h('details', { class: 'prep-lines' }, h('summary', null, 'Finished steps (' + p.lines.length + ')'),
-      h('div', { class: 'mono' }, p.lines.map((l) => h('div', null, l)))) : null);
+    running && p.estimateBasis && p.remainingSeconds == null && !m ? h('div', { class: 'muted' }, p.estimateBasis) : null,
+    details);
 }
 function wizStep4(d, w) {
   const mine = w.prepImages || [];
-  const preps = state.preps.filter((p) => mine.includes(p.image)).filter((p, i, a) => a.findIndex((x) => x.image === p.image) === i);
-  const running = preps.some(prepRunning);
-  const failed = preps.filter((p) => !prepRunning(p) && p.state !== 'done');
+  // Every preparation the host runs (another image's too — each with its own progress), and this
+  // wizard's own; the newest of each image.
+  const preps = state.preps.filter((p) => mine.includes(p.image) || prepRunning(p)).filter((p, i, a) => a.findIndex((x) => x.image === p.image) === i);
+  const ours = preps.filter((p) => mine.includes(p.image));
+  const running = ours.some(prepRunning);
+  const failed = ours.filter((p) => !prepRunning(p) && p.state !== 'done');
   const next = btn('Next', () => wizGo(5), { primary: true });
   if (running || failed.length) next.disabled = true;
   return [
     h('h2', null, 'Preparing'),
     h('p', { class: 'sub' }, 'In the host — not in this page: closing the tab changes nothing, and doz onboard --status in a terminal shows the same. Whoever starts a sandbox of these images meanwhile joins this preparation instead of starting another.'),
-    preps.length ? h('div', { class: 'prep-cards' }, preps.map(prepCard)) : h('p', { class: 'muted' }, 'Starting…'),
+    preps.length ? h('div', { class: 'prep-cards' }, preps.map((p) => prepCard(p, { open: true }))) : h('p', { class: 'muted' }, 'Starting…'),
     wizButtons(
       running ? btn('Cancel preparation', () => act({ action: 'prepare-cancel', images: mine }), { danger: true }) : null,
       failed.length ? btn('Try again', async () => {

@@ -250,8 +250,10 @@ public enum AgentImages {
 
     static let devBaseline = BakeStep.script("install the developer baseline (\(devBaselinePackages.joined(separator: " ")))", """
         export DEBIAN_FRONTEND=noninteractive
-        apt-get update -qq
-        apt-get install -y -qq --no-install-recommends \(devBaselinePackages.joined(separator: " ")) >/dev/null
+        # 594 (owner: "more progress detail"): apt's own lines (Get:, Unpacking, Setting up) are the
+        # live tail the preparation card and the CLI show while this step runs — not silenced.
+        apt-get update
+        apt-get install -y --no-install-recommends -o Dpkg::Use-Pty=0 \(devBaselinePackages.joined(separator: " "))
         rm -rf /var/lib/apt/lists/*
         """)
 

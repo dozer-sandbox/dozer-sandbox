@@ -441,6 +441,23 @@ ul.plain { margin: 0; padding: 12px 16px 12px 32px; }
 .wiz-bar.indeterminate > span { width: 30%; position: absolute; animation: wiz-slide 1.4s ease-in-out infinite; }
 @keyframes wiz-slide { from { left: -30%; } to { left: 100%; } }
 @media (prefers-reduced-motion: reduce) { .wiz-bar.indeterminate > span { animation: none; left: 0; width: 100%; opacity: 0.4; } }
+/* 594: the preparation card's detail — overall step N of M, the step under way, the tail, the list. */
+.prep-overall { display: flex; flex-direction: column; gap: 4px; }
+.prep-overall-line { display: flex; justify-content: space-between; gap: 12px; font-size: 13px; font-weight: 550; }
+.prep-estimate { font-weight: 400; }
+.prep-current { display: flex; flex-direction: column; gap: 4px; }
+.prep-step { display: block; line-height: 1.45; }
+.prep-step .mini-spin { display: inline-block; vertical-align: -1px; margin-right: 2px; }
+.wiz-bar.prep-step-bar { height: 3px; }
+.prep-transfer-block { display: flex; flex-direction: column; gap: 3px; }
+.prep-output { font-size: 11.5px; color: var(--muted); background: var(--code); border-radius: 6px; padding: 6px 8px; overflow: hidden; }
+.prep-output > div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+ul.prep-steps { list-style: none; margin: 6px 0 0; padding: 0; font-size: 12.5px; display: flex; flex-direction: column; gap: 3px; }
+ul.prep-steps .op-state { color: var(--run); display: inline-block; width: 1em; }
+ul.prep-steps .prep-done-failed .op-state { color: var(--fail); }
+ul.prep-steps .prep-done-transfer { color: var(--muted); }
+.prep-detail-row > td { padding-top: 0; }
+.prep-detail-row .prep-card { border-style: dashed; }
 .acct-form { padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; max-width: 560px; }
 .acct-form input[type="password"] { font-family: var(--mono); }
 .ops-preps { margin-bottom: 26px; }

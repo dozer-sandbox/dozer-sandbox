@@ -455,6 +455,70 @@ final class OnboardingTests: XCTestCase {
         XCTAssertNotNil(roStatus.result, "looking does not")
     }
 
+    /// 594 (owner: "more progress detail"): step N of M, the output's last 6 lines, the finished steps as
+    /// data, and — only from this store's last run — per-step and overall estimates; a failed step keeps
+    /// its last output.
+    func testAPreparationSaysStepNOfMItsTailAndLastRunsEstimates() async throws {
+        let gate = Gate()
+        let c = HostCore(store: DozerStore(root: root), readOnly: false, version: "t", newStoreDefaultAccount: "mac")
+        await c.setPreparationRunner({ image, _, emit in
+            func ev(_ k: HostEvent.Kind, _ t: String, ms: Double? = nil) { emit(HostEvent(kind: k, sandbox: image, text: t, milliseconds: ms)) }
+            ev(.started, "kernel ready (vmlinux, cached)"); ev(.step, "kernel ready (vmlinux, cached)", ms: 2000)
+            ev(.started, "step: install things (a b c)")
+            for i in 1...8 { ev(.output, "line \(i)") }
+            while !gate.isReleased { try await Task.sleep(for: .milliseconds(20)) }
+            if gate.fail { ev(.failed, "step: install things (a b c)", ms: 3000); throw HostError(.failed, "exit 1") }
+            ev(.step, "step: install things (a b c)", ms: 30_000)
+        }, prepared: { _, _ in false })
+        func status() async throws -> PreparationInfo {
+            try await c.handle(HostRequest(.prepareStatus)).result!.decode(PrepareStatus.self).preparations.first!
+        }
+        func start() async {
+            var r = HostRequest(.prepare)
+            r.images = ["lab"]
+            r.follow = false
+            _ = await c.handle(r)
+            try? await Task.sleep(for: .milliseconds(200))
+        }
+        // The first run: a plan, no estimate.
+        await start()
+        var p = try await status()
+        XCTAssertEqual(p.stepIndex, 2, "the kernel done, the install under way")
+        XCTAssertEqual(p.plannedSteps, HostCore.plannedSteps("lab"))
+        XCTAssertEqual(p.output, (3...8).map { "line \($0)" }, "the last 6 lines")
+        XCTAssertEqual(p.steps?.map(\.label), ["kernel ready (vmlinux, cached)"])
+        XCTAssertNil(p.remainingSeconds)
+        XCTAssertNil(p.stepUsualSeconds)
+        XCTAssertEqual(p.estimateBasis, "first time: no estimate yet")
+        gate.lock.withLock { gate.released = true }
+        try await Task.sleep(for: .milliseconds(300))
+        let rec = try XCTUnwrap(PreparationRecord.all(DozerStore(root: root))["lab"])
+        XCTAssertEqual(rec.steps.map(\.key), ["kernel", "step: install things"])
+        XCTAssertEqual(rec.steps.map(\.seconds), [2, 30])
+        // The second run: M from the last run, estimates from its times.
+        gate.lock.withLock { gate.released = false }
+        await start()
+        p = try await status()
+        XCTAssertEqual(p.plannedSteps, 2)
+        XCTAssertEqual(p.stepIndex, 2)
+        XCTAssertEqual(p.stepUsualSeconds, 30)
+        let left = try XCTUnwrap(p.remainingSeconds)
+        XCTAssertTrue(left > 29 && left <= 30, "about the install's 30 s, less what it has run: \(left)")
+        XCTAssertEqual(p.steps?.first?.usualSeconds, 2)
+        XCTAssertTrue(p.estimateBasis?.hasPrefix("from this store's last preparation of lab") == true)
+        // A failed step: ✕ with its last output.
+        gate.lock.withLock { gate.fail = true; gate.released = true }
+        try await Task.sleep(for: .milliseconds(300))
+        p = try await status()
+        XCTAssertEqual(p.state, "failed")
+        let failed = try XCTUnwrap(p.steps?.last)
+        XCTAssertEqual(failed.kind, "failed")
+        XCTAssertEqual(failed.output?.count, 6)
+        XCTAssertEqual(failed.output?.last, "line 8")
+        XCTAssertEqual(PreparationRecord.all(DozerStore(root: root))["lab"]?.steps.count, 2, "a failed run does not replace the record")
+        XCTAssertEqual(PreparationRecord.key("base image node (cached)"), PreparationRecord.key("pulled the base image node"))
+    }
+
     // MARK: D13 — uninstall
 
     func testUninstallKnowsAnInstallationAndAStore() throws {

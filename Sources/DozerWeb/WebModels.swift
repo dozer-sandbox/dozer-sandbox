@@ -313,6 +313,22 @@ public struct WebPreparation: Codable, Equatable, Sendable {
     public var transferFraction: Double?
     public var output: [String]
     public var lines: [String]
+    /// 594 (owner: "more progress detail"): step N of M, the finished steps, the estimates.
+    public var stepIndex: Int?
+    public var plannedSteps: Int?
+    public var steps: [WebPreparationStep]
+    public var stepUsualSeconds: Double?
+    public var remainingSeconds: Double?
+    public var estimateBasis: String?
+
+    public struct WebPreparationStep: Codable, Equatable, Sendable {
+        public var label: String
+        public var kind: String
+        public var seconds: Double
+        public var usualSeconds: Double?
+        public var error: String?
+        public var output: [String]?
+    }
 
     public init(_ p: PreparationInfo) {
         id = p.id
@@ -330,6 +346,13 @@ public struct WebPreparation: Codable, Equatable, Sendable {
         if let t = p.transfer, let total = t.totalBytes, total > 0 { transferFraction = min(1, Double(t.completedBytes) / Double(total)) }
         output = p.output
         lines = p.lines
+        stepIndex = p.stepIndex
+        plannedSteps = p.plannedSteps
+        steps = (p.steps ?? []).map { WebPreparationStep(label: $0.label, kind: $0.kind, seconds: $0.seconds, usualSeconds: $0.usualSeconds,
+                                                         error: $0.error, output: $0.output) }
+        stepUsualSeconds = p.stepUsualSeconds
+        remainingSeconds = p.remainingSeconds
+        estimateBasis = p.estimateBasis
     }
 }
 

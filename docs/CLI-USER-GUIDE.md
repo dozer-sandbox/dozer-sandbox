@@ -70,6 +70,17 @@ prepared **joins** that preparation — it shows the same progress from its star
 download and one bake. A start of an image never prepared starts the preparation itself, and a
 second start joins it. Re-running `doz onboard` prepares only what is missing for this build.
 
+**What a preparation shows** (the web UI's preparation card — the wizard's Preparing step, a row of
+**Operations** — in the same terms as the CLI's progress): **Step N of M** with a bar of the steps done
+(M is the plan for the image: kernel, guest init, base pull, base disk, the bake's steps, the checks);
+the step under way with its time and an animated strip (never a full bar — its length is not known);
+during a download, its own bar with bytes and speed; the **last 6 lines of output** of the step under
+way (a bake step's own output, e.g. apt's `Get:` and `Setting up` lines); and the finished steps, each
+✓ with its time (✕ with its last output lines when one failed). **Estimates** come only from this
+store's last successful preparation of the same image (`<store>/preparations.json`: each step's
+time): "usually ~37 s" for the step under way and "about 2 min left" overall. The first time there
+is nothing to go on, and it says so: "first time: no estimate yet".
+
 ## Projects: `doz init` and `doz_project.yaml`
 
 ```bash
@@ -511,7 +522,8 @@ the Claude accounts, the metrics, `doz doctor`, and the host's activity as it ha
 with Check again) **→ Claude account** (the Mac's login when it is signed in; an API key or a setup
 token in a masked field — or, with `ui.allow_secret_entry` off, the CLI command; or Decide later) **→ Images** (a checklist,
 claude-code ticked, each with its download, an estimate and the disk it needs) **→ Preparing** (the
-host's progress: the step under way, a download bar, the last lines of output, the finished steps;
+host's progress, a card per image: Step N of M, the step under way, a download bar, the last lines of
+output, estimates from this store's last run, the finished steps with their times;
 **Continue in the background** leaves it running, **Cancel preparation** stops it) **→ First
 sandbox** (optional: a name, an image and a workspace folder typed or pasted — a browser cannot
 open a folder picker for the host — or an explicit "No workspace") **→ Done**. The settings file
