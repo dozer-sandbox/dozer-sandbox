@@ -342,7 +342,9 @@ function prepProgressText(p) {
 }
 function preparationsSection() {
   // A row per preparation and, beneath it, the same card as the wizard's (the running ones in full).
-  const rows = state.preps.flatMap((p) => [h('tr', { class: 'op-row op-' + (prepRunning(p) ? 'running' : p.state === 'done' ? 'done' : 'failed'), 'data-prep': p.image },
+  // (prep-row, not op-row: a preparation is the host's, not one of this page's operations — the
+  // operations table's filter and its "newest first" are the UI's own actions only.)
+  const rows = state.preps.flatMap((p) => [h('tr', { class: 'prep-row op-' + (prepRunning(p) ? 'running' : p.state === 'done' ? 'done' : 'failed'), 'data-prep': p.image },
     h('td', null, prepRunning(p) ? h('span', { class: 'mini-spin', title: p.state }) : h('span', { class: 'op-state', title: p.state }, p.state === 'done' ? '✓' : '✕')),
     h('td', { class: 'op-action' }, icon('flame'), 'prepare ' + p.image),
     h('td', null, p.requestedBy.join(', ')),

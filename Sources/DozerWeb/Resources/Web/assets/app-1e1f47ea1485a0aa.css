@@ -279,8 +279,8 @@ nav a.active .ph-dot { box-shadow: 0 0 0 1.5px var(--bg); }
 .nav-alert { width: 8px; height: 8px; border-radius: 50%; background: var(--fail); margin-left: auto; }
 .nav-alert.nav-todo { background: var(--accent); }
 .mini-spin { width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--accent); border-top-color: transparent; animation: tc-spin 0.9s linear infinite; display: inline-block; }
-.op-row.op-failed .op-text, .op-row.op-failed .op-state { color: var(--fail); }
-.op-row.op-done .op-state { color: var(--run); }
+.op-row.op-failed .op-text, .op-row.op-failed .op-state, .prep-row.op-failed .op-text, .prep-row.op-failed .op-state { color: var(--fail); }
+.op-row.op-done .op-state, .prep-row.op-done .op-state { color: var(--run); }
 
 /* ── 593: All sessions — tiles. A tile's screen is laid out at 960 × 560 and scaled (--s). ── */
 .grid-view { --s: 0.42; }
