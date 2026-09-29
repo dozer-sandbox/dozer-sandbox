@@ -159,6 +159,17 @@ extension HostRequest {
         r.secret = secret
         return r
     }
+
+    /// The request `doz key set NAME --anthropic` sends — the ONE path a sandbox's own key takes (594:
+    /// the web UI's masked field builds it here too). The host holds it in memory (a stdin/prompt/browser
+    /// key lasts while the host runs), gives the guest a placeholder, and forgets the other credential.
+    public static func keySet(name: String, secret: String, source: String) -> HostRequest {
+        var r = HostRequest(.keySet, name: name)
+        r.binding = CredentialBinding.anthropic.id
+        r.secret = secret.trimmingCharacters(in: .whitespacesAndNewlines)
+        r.source = source
+        return r
+    }
 }
 
 /// `account ls` — never a secret.

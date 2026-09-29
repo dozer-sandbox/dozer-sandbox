@@ -114,7 +114,7 @@ public enum WebRejection: String, Error, Equatable, Sendable {
         case .tooManyTerminals: "too many terminals are open — close one first"
         case .upgradeRequired: "the terminal socket is a WebSocket, opened as the first request of a connection"
         case .terminalsOff: "browser terminals are off (Settings: ui.terminals) — Open in Terminal still works"
-        case .secretEntryOff: "keys and tokens are not taken in the browser (ui.allow_secret_entry = false) — doz account add NAME --api-key|--setup-token in a terminal"
+        case .secretEntryOff: "keys and tokens are not taken in the browser (ui.allow_secret_entry = false) — in a terminal: doz account add NAME --api-key|--setup-token, or doz key set SANDBOX --anthropic"
         }
     }
 }

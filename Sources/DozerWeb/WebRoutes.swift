@@ -57,6 +57,9 @@ public enum WebRoute: Equatable, Sendable {
     // action: an action is an operation (a title, progress, an outcome on every page); this is one
     // synchronous request whose body alone carries the secret, allowed while ui.allow_secret_entry.
     case accountAdd                // POST /api/v1/accounts  ({name, kind, secret, plan?})
+    // 594 (owner ruling: "allow sandbox keys in the browser also") — a sandbox's own Anthropic key,
+    // what `doz key set NAME --anthropic` does; same setting, same guarantees as accountAdd.
+    case sandboxKey(String)        // POST /api/v1/sandboxes/{name}/key  ({secret})
 
     public var isStatic: Bool {
         switch self { case .index, .asset, .terminalFrame: true; default: false }
@@ -95,6 +98,8 @@ public enum WebRoute: Equatable, Sendable {
             return .terminal(rest[1])
         case (.post, 3) where rest[0] == "sandboxes" && isSandboxName(rest[1]) && rest[2] == "terminal-ticket":
             return .terminalTicket(rest[1])
+        case (.post, 3) where rest[0] == "sandboxes" && isSandboxName(rest[1]) && rest[2] == "key":
+            return .sandboxKey(rest[1])
         default: break
         }
         guard method == .get else { return nil }

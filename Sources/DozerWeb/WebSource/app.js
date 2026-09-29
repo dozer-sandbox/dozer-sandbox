@@ -10,7 +10,8 @@
 //   · Every action is one typed request (POST /api/v1/actions, {action, …}); a destructive one carries
 //     `confirm`, filled only from a name the person typed. No action ever carries a secret (590's D3).
 //     594 (owner ruling): an ACCOUNT's key or token may be typed in a masked field (accountForm) — one
-//     POST /api/v1/accounts body, while ui.allow_secret_entry; a sandbox's own key stays CLI-only.
+//     POST /api/v1/accounts body, while ui.allow_secret_entry; a sandbox's own key likewise (keyEntry,
+//     POST /api/v1/sandboxes/NAME/key).
 //   · Forms live in <dialog>s outside the view, so a live refresh never wipes what is being typed.
 'use strict';
 
@@ -1091,7 +1092,7 @@ function sandboxParts(name, d, net, accounts) {
           await actOrThrow({ action: 'account-use', sandbox: name, account: v.account });
         }), { small: true }) : null)),
     panel(table(['Key', 'Set', 'Source', 'State', 'Policy', ''], creds), 'No keys — the sandbox uses none.'),
-    h('p', { class: 'muted' }, 'A key is never typed here: ', h('code', null, 'doz key set ' + name + ' --anthropic --keychain SERVICE'), ' (or from stdin) in a terminal.'),
+    keyEntry(name, proxied),
     foreign.length ? h('h2', null, 'Credentials the guest brought itself (fingerprints only)') : null,
     foreign.length ? panel(table(['Kind', 'Prefix', 'Fingerprint', 'Header', 'Requests', 'Last seen'], foreign, [4])) : null,
     h('h2', null, 'Configuration'),
@@ -1357,6 +1358,44 @@ function accountForm(opts) {
     h('label', { class: 'field' }, secretLabel, secret, hint),
     error,
     h('div', { class: 'wiz-buttons' }, add));
+}
+
+/// 594 (owner ruling: sandbox keys in the browser too): a sandbox's own Anthropic key — what `doz key set
+/// NAME --anthropic` does — under the same setting and rules as accountForm: a masked field, emptied
+/// before the request, one CSRF-checked POST /api/v1/sandboxes/NAME/key body; off: the commands.
+function keyEntry(name, proxied) {
+  if (!proxied) return h('p', { class: 'muted' }, 'Not proxied: a key would have to enter the sandbox — create it with a proxied network (agent, open, …) to give it one.');
+  if (!secretEntryAllowed()) {
+    return h('div', { class: 'panel wiz-cmds', 'data-key-commands': name },
+      h('div', null, 'In a terminal on this Mac (keys are not taken in this browser — ui.allow_secret_entry is off):'),
+      h('pre', { class: 'mono' }, ['doz key set ' + name + ' --anthropic                       (it asks for the key, not echoed)',
+        'doz key set ' + name + ' --anthropic --keychain SERVICE      (read from a keychain item)'].join('\n')));
+  }
+  const secret = h('input', { type: 'password', name: 'key-secret', autocomplete: 'off', spellcheck: 'false', autocapitalize: 'off',
+                              'data-secret': '1', placeholder: 'sk-ant-api… — paste it here' });
+  const error = h('div', { class: 'dlg-error', role: 'alert' });
+  const set = btn('Set key', async (ev) => {
+    const b = ev.currentTarget;
+    error.textContent = '';
+    const value = secret.value;
+    secret.value = '';                                     // gone from the page before the request
+    if (value.trim().length < 20) { error.textContent = 'Paste the whole key.'; return; }
+    b.disabled = true;
+    try {
+      await api('sandboxes/' + name + '/key', { method: 'POST', json: { secret: value } });
+      toast('anthropic key set for ' + name + ' (held by the host, in memory; never in the sandbox)');
+      refreshSandbox();
+    } catch (e) {
+      error.textContent = e.message || String(e);
+    } finally {
+      b.disabled = false;
+    }
+  }, { primary: true, small: true, icon: 'key-round' });
+  return h('div', { class: 'panel acct-form key-form', 'data-key-form': name },
+    h('label', { class: 'field' }, h('span', null, 'Set an Anthropic API key for ' + name), secret,
+      h('small', null, 'Held by the host in memory (as doz key set from a prompt): it lasts while the host runs, replaces this sandbox’s account, and the guest only ever sees a placeholder. Not shown, not kept in this page.')),
+    error, h('div', { class: 'wiz-buttons' }, set),
+    h('div', { class: 'muted' }, 'From a keychain item instead: ', h('code', null, 'doz key set ' + name + ' --anthropic --keychain SERVICE'), ' in a terminal.'));
 }
 
 async function viewAccounts() {

@@ -43,12 +43,17 @@ public protocol DozerWebData: Sendable {
     /// the request `doz account add` sends (`HostRequest.accountAdd`), with no progress callback (so
     /// nothing of it reaches an operation or an event). Returns the accounts (never a secret).
     func addAccount(_ a: WebAccountAdd) async throws -> WebAccounts
+    /// 594 (owner ruling): a sandbox's own Anthropic key — the host's `key-set`, exactly the request
+    /// `doz key set NAME --anthropic` sends (`HostRequest.keySet`, source `browser`), no progress
+    /// callback. Returns the sandbox's keys (never a secret).
+    func setKey(_ k: WebKeySet) async throws -> [WebCredential]
 }
 
 extension DozerWebData {
     public func onboarding() async throws -> WebOnboarding { throw HostError(.notImplemented, "onboarding") }
     public func preparations() async throws -> [WebPreparation] { [] }
     public func addAccount(_ a: WebAccountAdd) async throws -> WebAccounts { throw HostError(.notImplemented, "accounts") }
+    public func setKey(_ k: WebKeySet) async throws -> [WebCredential] { throw HostError(.notImplemented, "keys") }
 }
 
 /// `GET /api/v1/metrics[.csv]?image=…&days=…&steps=0|1`.
@@ -157,6 +162,14 @@ public final class HostWebData: DozerWebData, @unchecked Sendable {
         let m = try await blocking { try HostClient.request(r, store: store, autostart: true) }
         guard m.ok == true else { throw m.error ?? HostError(.failed, "the host gave no reason") }
         return try await accounts()
+    }
+
+    public func setKey(_ k: WebKeySet) async throws -> [WebCredential] {
+        let store = self.store
+        let r = HostRequest.keySet(name: k.sandbox, secret: k.secret, source: "browser")
+        let m = try await blocking { try HostClient.request(r, store: store, autostart: true) }
+        guard m.ok == true else { throw m.error ?? HostError(.failed, "the host gave no reason") }
+        return try (m.result ?? .null).decode([CredentialRow].self).map(WebCredential.init)
     }
 
     public func preparations() async throws -> [WebPreparation] {

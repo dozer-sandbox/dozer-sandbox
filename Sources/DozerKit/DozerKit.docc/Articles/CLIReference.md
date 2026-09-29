@@ -311,8 +311,9 @@ lists what the UI asked the host to do. It listens on `127.0.0.1` only. Each lin
 exchanged for a strict session cookie; `Host` and `Origin` are checked exactly. An account's API key
 or setup token may be typed in a masked field (the wizard, Accounts & keys) while
 `ui.allow_secret_entry` is on (the default): one CSRF-checked POST body, stored as `doz account add`
-stores it, never echoed; off, the page shows the command. A sandbox's own key (`doz key set`) is
-CLI-only. **Open in Terminal** runs
+stores it, never echoed; off, the page shows the command. A sandbox's own key (`doz key set NAME
+--anthropic`) likewise, on its page (Keys & account; `POST /api/v1/sandboxes/NAME/key`, held by the
+host as `doz key set` holds it). **Open in Terminal** runs
 `doz attach` in your default terminal app. The UI is a client of the host, like any other
 command, so it can't do anything the CLI can't.
 

@@ -238,6 +238,31 @@ final class OnboardingTests: XCTestCase {
         XCTAssertTrue(Onboarding.accountCommands(.mac).isEmpty)
     }
 
+    /// 594: a sandbox's own key — `doz key set NAME --anthropic`'s request, which the web UI builds too:
+    /// held in the host's vault (memory), a placeholder for the guest, never on disk.
+    func testASandboxKeyGoesTheKeySetWay() async throws {
+        let core = HostCore(store: DozerStore(root: root), readOnly: false, version: "t",
+                            services: .forHost(environment: ["DOZ_TEST_CREDENTIALS": "memory"]), newStoreDefaultAccount: "mac")
+        var c = HostRequest(.create, name: "kb")
+        c.create = CreateOptions(image: "lab", network: "agent", account: "none")
+        let created = await core.handle(c)
+        XCTAssertEqual(created.ok, true, created.error?.message ?? "")
+        let key = "sk-ant-api03-" + String(repeating: "V", count: 40)
+        let r = HostRequest.keySet(name: "kb", secret: "  " + key + "\n", source: "browser")
+        XCTAssertEqual(r.op, .keySet)
+        XCTAssertEqual(r.binding, CredentialBinding.anthropic.id)
+        XCTAssertEqual(r.secret, key, "trimmed, as doz key set trims it")
+        let m = await core.handle(r)
+        XCTAssertEqual(m.ok, true, m.error?.message ?? "")
+        let rows = try XCTUnwrap(m.result?.decode([CredentialRow].self))
+        let row = try XCTUnwrap(rows.first { $0.binding == CredentialBinding.anthropic.id })
+        XCTAssertTrue(row.set)
+        XCTAssertEqual(row.source, "browser")
+        let cfg = try String(contentsOf: DozerStore(root: root).configFile("kb"), encoding: .utf8)
+        XCTAssertFalse(cfg.contains(key), "doz.json holds the source, never the key")
+        XCTAssertTrue(cfg.contains("\"browser\""))
+    }
+
     /// 594: the ONE request a secret takes into an account — `doz account add`'s, which onboarding
     /// and the web UI build too — through the host, into an IN-MEMORY keychain (never the real one).
     func testAnAccountFromAKeyGoesTheAccountAddWayIntoTheMemoryKeychain() async throws {

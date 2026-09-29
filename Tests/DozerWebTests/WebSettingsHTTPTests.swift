@@ -222,6 +222,9 @@ final class WebSettingsHTTPTests: XCTestCase {
         XCTAssertEqual(WebRoute.parse(method: .post, target: "/api/v1/onboarding/config"), .onboardingConfig)
         XCTAssertEqual(WebRoute.parse(method: .get, target: "/api/v1/preparations"), .preparations)
         XCTAssertEqual(WebRoute.parse(method: .post, target: "/api/v1/accounts"), .accountAdd)
+        XCTAssertEqual(WebRoute.parse(method: .post, target: "/api/v1/sandboxes/demo/key"), .sandboxKey("demo"))
+        XCTAssertNil(WebRoute.parse(method: .get, target: "/api/v1/sandboxes/demo/key"))
+        XCTAssertNil(WebRoute.parse(method: .post, target: "/api/v1/sandboxes/Bad_Name/key"))
         XCTAssertNil(WebRoute.parse(method: .delete, target: "/api/v1/accounts"))
         XCTAssertNotEqual(WebRoute.parse(method: .get, target: "/api/v1/accounts"), .accountAdd, "GET is the list")
         XCTAssertNil(WebRoute.parse(method: .post, target: "/api/v1/onboarding"))
@@ -273,6 +276,56 @@ final class WebSettingsHTTPTests: XCTestCase {
         XCTAssertEqual(ob.preferredAccount, "later", "no Mac login: decide later is the default")
         XCTAssertEqual(ob.accountOptions.map(\.value), ["api-key", "setup-token", "mac", "later"])
         XCTAssertEqual(try request("/api/v1/preparations", ["Cookie": cookie]).text, "[]")
+    }
+
+    /// 594 (owner ruling: sandbox keys in the browser too): POST /api/v1/sandboxes/NAME/key — the same
+    /// guarantees as an account: CSRF, a strict {secret} body, the setting, never echoed, scrubbed errors.
+    func testASandboxKeyFromAMaskedFieldNeverComesBack() throws {
+        let (cookie, csrf) = try signIn()
+        let key = "sk-ant-api03-SBXFAKE" + String(repeating: "w", count: 40)
+        func post(_ sandbox: String, _ body: String, csrf c: String? = nil) throws -> RawResponse {
+            var h = ["Cookie": cookie, "Origin": origin, "Content-Type": "application/json"]
+            if let c { h["X-Doz-CSRF"] = c }
+            return try request("/api/v1/sandboxes/\(sandbox)/key", h, method: "POST", body: body)
+        }
+        func clean(_ r: RawResponse, _ what: String, file: StaticString = #filePath, line: UInt = #line) {
+            XCTAssertFalse(r.text.contains(key) || r.text.contains("SBXFAKEwww"), "\(what): the key came back: \(r.text)", file: file, line: line)
+        }
+        let good = #"{"secret":"\#(key)"}"#
+        var r = try post("demo", good)
+        XCTAssertEqual(r.status, 403, "no CSRF token")
+        clean(r, "no CSRF")
+        for bad in [#"{"secret":"\#(key)","binding":"claude-oauth"}"#,   // the binding is not the browser's to pick
+                    #"{"secret":"\#(key)","source":"keychain:x"}"#,
+                    #"{"secret":"\#(key)","sandbox":"other"}"#,          // the sandbox comes from the path
+                    #"{"secret":"short"}"#, #"{"secret":7}"#, #"{}"#] {
+            r = try post("demo", bad, csrf: csrf)
+            XCTAssertEqual(r.status, 400, bad)
+            clean(r, "a refusal")
+        }
+        XCTAssertTrue(fake.keysSet.isEmpty)
+        r = try post("demo", good, csrf: csrf)
+        XCTAssertEqual(r.status, 200, r.text)
+        clean(r, "the stored-state summary")
+        XCTAssertTrue(r.text.contains("\"source\":\"browser\"") && r.text.contains("\"set\":true"), r.text)
+        XCTAssertEqual(fake.keysSet.map(\.sandbox), ["demo"])
+        XCTAssertEqual(fake.keysSet.first?.secret, key)
+        XCTAssertFalse("\(fake.keysSet[0])".contains(key) || String(reflecting: fake.keysSet[0]).contains(key), "redacted")
+        r = try post("boom", good, csrf: csrf)
+        XCTAssertEqual(r.status, 400)
+        clean(r, "a failure whose host message quoted it")
+        XCTAssertTrue(r.text.contains("the key … was refused"), r.text)
+        r = try post("nope", good, csrf: csrf)
+        XCTAssertEqual(r.status, 404)
+        clean(r, "not found")
+        // Off: refused, like an account.
+        XCTAssertEqual(try request("/api/v1/settings", ["Cookie": cookie, "Origin": origin, "Content-Type": "application/json", "X-Doz-CSRF": csrf],
+                                   method: "POST", body: #"{"key":"ui.allow_secret_entry","value":false}"#).status, 200)
+        r = try post("demo", good, csrf: csrf)
+        XCTAssertEqual(r.status, 403)
+        XCTAssertTrue(r.text.contains("secret-entry-off") && r.text.contains("doz key set"), r.text)
+        clean(r, "secret entry off")
+        XCTAssertEqual(fake.keysSet.count, 1)
     }
 
     /// 594 (owner ruling): a key or a token typed in the browser — ONE CSRF-checked POST, a strict body,

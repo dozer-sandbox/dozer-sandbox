@@ -584,8 +584,14 @@ spellcheck). The page reads it once and empties the field at once; it goes out o
 CSRF-checked `POST /api/v1/accounts` — never a URL, a log line, an event, an Operation or an error
 message — and the host stores it exactly as `doz account add` does (the login keychain, one tiny check
 request). With `doz config set ui.allow_secret_entry false` the page shows the `doz account add` command
-instead, and the route refuses; the browser can turn the setting off but never on. A sandbox's own key
-(`doz key set`) is still CLI-only.
+instead, and the route refuses; the browser can turn the setting off but never on.
+
+A **sandbox's own key** (what `doz key set NAME --anthropic` does) is taken the same way, under the same
+setting: its page, **Keys & account**, has a masked field — one CSRF-checked
+`POST /api/v1/sandboxes/NAME/key` body, stored exactly as `doz key set` from a prompt stores it (held by
+the host in memory, source `browser`; the guest sees a placeholder; it replaces the sandbox's account and
+lasts while the host runs). Off: the page shows the `doz key set` commands. A key from a keychain item
+(`--keychain SERVICE`) is still a terminal command.
 
 **Terminals in the browser** (on each sandbox's page). **Open** in the empty terminal area attaches
 to its own session (starting it if needed); each session row has **Open** and **Watch**;

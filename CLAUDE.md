@@ -296,7 +296,8 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   (the setting `ui.confirm_shutdown`, doz.toml — no longer localStorage). **No secret is ever an
   action's input** (590's D3). Since 594 (owner ruling) an ACCOUNT's key or token may be typed in a
   masked field — through the one typed route `POST /api/v1/accounts`, never an action, while
-  `ui.allow_secret_entry` (see the 594 section); a sandbox's own key (`key set`) stays CLI-only.
+  `ui.allow_secret_entry` (see the 594 section); and a sandbox's own key through `POST
+  /api/v1/sandboxes/NAME/key` (owner ruling, same setting and rules).
 - **An action is an operation**: 202 at once, the host call in `WebOperations` (≤ 8 running), its
   progress and outcome as SSE `op` events. The outcome is a line written from the result — never
   the result passed through.
@@ -405,6 +406,9 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   body `{name, kind, secret, plan?}`; the page empties the masked field before the request; refusals never
   echo; a failure's message is scrubbed (`WebAccountAdd.scrub`); `WebAccountAdd`'s description is redacted.
   Off: 403 `secret-entry-off` and the page shows the command. `account-add` stays OUT of the action set.
+  A sandbox's own key: `POST /api/v1/sandboxes/NAME/key`, strict `{secret}` (the binding — anthropic —
+  and the sandbox are not the body's), `HostRequest.keySet` (source `browser`) — `doz key set`'s own
+  request; `WebKeySet` redacted, errors scrubbed (`WebSecretText`); `key-set` stays OUT of the action set.
 - **Unattended tests never touch the login keychain**: a real host under `DOZ_TEST_CREDENTIALS=memory`
   keeps accounts' secrets in its memory and verifies nothing (`CredentialServices.forHost`, said in
   host.log). `make test-cli`'s onboarding part and the wizard probe use it.

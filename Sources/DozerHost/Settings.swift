@@ -266,7 +266,7 @@ public struct DozerSettings: Sendable {
                   "A sandbox's page shows its details panel (sessions, restore points, network, keys) beside the terminals; false: collapsed.",
                   applies: .now),
             .init("ui", "allow_secret_entry", .bool, .bool(true),
-                  "The web UI's account step and Accounts & keys page take an Anthropic API key or a Claude setup token in a masked field (sent once, in a request body; stored exactly as doz account add stores it — the login keychain). false: they show the doz account add command instead. The UI can turn this off, never on.",
+                  "The web UI takes an Anthropic API key or a Claude setup token in a masked field — an account (the setup wizard, Accounts & keys: stored exactly as doz account add stores it, the login keychain) or a sandbox's own key (its page: exactly as doz key set does, held by the host) — sent once, in a request body. false: the pages show the command instead. The UI can turn this off, never on.",
                   applies: .now),
             .init("ui", "grid_live_tiles", .int(1...12), .int(8),
                   "All sessions: at most this many tiles show their session live at once (each is a terminal engine and a socket); the rest say so.",

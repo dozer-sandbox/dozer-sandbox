@@ -396,6 +396,16 @@ final class FakeData: DozerWebData, @unchecked Sendable {
     func preparations() async throws -> [WebPreparation] { [] }
     // 594: an account from a key — recorded (in memory: nothing is ever stored). The name `boom` fails
     // with a message that quotes the secret, as a careless host message would: the server must scrub it.
+    // 594: a sandbox's own key — recorded; `boom` fails quoting the key; only `demo` exists.
+    private var _keys: [WebKeySet] = []
+    var keysSet: [WebKeySet] { lock.withLock { _keys } }
+    func setKey(_ k: WebKeySet) async throws -> [WebCredential] {
+        if k.sandbox == "boom" { throw HostError(.invalid, "the key \(k.secret) was refused") }
+        guard k.sandbox == "demo" else { throw HostError(.notFound, "no sandbox \(k.sandbox)") }
+        lock.withLock { _keys.append(k) }
+        let json = #"{"binding":"anthropic","hosts":["api.anthropic.com"],"set":true,"source":"browser"}"#
+        return [WebCredential(try JSONDecoder().decode(CredentialRow.self, from: Data(json.utf8)))]
+    }
     private var _added: [WebAccountAdd] = []
     var addedAccounts: [WebAccountAdd] { lock.withLock { _added } }
     func addAccount(_ a: WebAccountAdd) async throws -> WebAccounts {

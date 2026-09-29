@@ -159,15 +159,20 @@ public struct WebAccountAdd: Equatable, Sendable, CustomStringConvertible, Custo
             }
             plan = s
         }
-        guard let secret = d["secret"] as? String, (20...4096).contains(secret.utf8.count),
-              !secret.unicodeScalars.contains(where: { $0.value < 0x20 && $0 != "\n" && $0 != "\r" && $0 != "\t" }) else {
+        guard let secret = d["secret"] as? String, WebSecretText.valid(secret) else {
             throw WebAction.Invalid("secret: the key or token as it was printed (20–4096 characters)")
         }
         return WebAccountAdd(name: name, kind: kind, plan: plan, secret: secret)
     }
 
     /// Any text with the secret (and its whitespace-free form) replaced — for an error message.
-    public func scrub(_ text: String) -> String {
+    public func scrub(_ text: String) -> String { WebSecretText.scrub(text, secret) }
+}
+
+/// 594: the secret-entry routes' shared rules.
+public enum WebSecretText {
+    /// `text` with `secret` — as typed, trimmed, and normalised — replaced by "…".
+    public static func scrub(_ text: String, _ secret: String) -> String {
         var out = text
         for s in Set([secret, secret.trimmingCharacters(in: .whitespacesAndNewlines),
                       AccountStore.normalizeToken(secret) ?? ""]) where s.count >= 8 {
@@ -175,6 +180,36 @@ public struct WebAccountAdd: Equatable, Sendable, CustomStringConvertible, Custo
         }
         return out
     }
+
+    /// The shape a pasted key or token must have (never echoed when it does not).
+    static func valid(_ s: String) -> Bool {
+        (20...4096).contains(s.utf8.count) && !s.unicodeScalars.contains(where: { $0.value < 0x20 && $0 != "\n" && $0 != "\r" && $0 != "\t" })
+    }
+}
+
+/// 594 (owner ruling): `POST /api/v1/sandboxes/{name}/key`, decoded STRICTLY: exactly {secret} — a
+/// sandbox's own Anthropic key, what `doz key set NAME --anthropic` sets (the sandbox comes from the
+/// path). Redacted description; no message echoes the value.
+public struct WebKeySet: Equatable, Sendable, CustomStringConvertible, CustomDebugStringConvertible, CustomReflectable {
+    public let sandbox: String
+    public let secret: String
+
+    public var description: String { "WebKeySet(\(sandbox), secret: <redacted>)" }
+    public var debugDescription: String { description }
+    public var customMirror: Mirror { Mirror(self, children: ["sandbox": sandbox, "secret": "<redacted>"]) }
+
+    public static func decode(_ body: Data, sandbox: String) throws -> WebKeySet {
+        guard let obj = try? JSONSerialization.jsonObject(with: body), let d = obj as? [String: Any] else {
+            throw WebAction.Invalid("the body must be a JSON object")
+        }
+        guard Set(d.keys) == ["secret"] else { throw WebAction.Invalid("exactly secret") }
+        guard let s = d["secret"] as? String, WebSecretText.valid(s), !s.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw WebAction.Invalid("secret: the key as it was printed (20–4096 characters)")
+        }
+        return WebKeySet(sandbox: sandbox, secret: s)
+    }
+
+    public func scrub(_ text: String) -> String { WebSecretText.scrub(text, secret) }
 }
 
 /// 594: `POST /api/v1/onboarding/config`, decoded strictly: exactly {defaultImage, account}.

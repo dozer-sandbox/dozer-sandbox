@@ -536,6 +536,18 @@ public final class DozerWebServer: @unchecked Sendable {
             } catch {
                 throw HostError(.failed, a.scrub(error.localizedDescription))
             }
+        case .sandboxKey(let name):
+            // The same model as accountAdd: CSRF (above), the setting, a strict body, scrubbed errors.
+            try Self.requireJSONBody(md)
+            guard settings.secretEntryAllowed else { throw WebRejection.secretEntryOff }
+            let k = try WebKeySet.decode(body, sandbox: name)
+            do {
+                return json(try await data.setKey(k))
+            } catch let e as HostError {
+                throw HostError(e.code, k.scrub(e.message))
+            } catch {
+                throw HostError(.failed, k.scrub(error.localizedDescription))
+            }
         case .events:
             return json(await monitor.recent)
         case .doctor:
