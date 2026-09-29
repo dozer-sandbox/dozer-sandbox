@@ -193,7 +193,7 @@ public actor HostCore {
     private func handleEvent(_ name: String, _ e: SandboxEvent) {
         if let he = HostEvent(e, sandbox: name) {
             hub.yield(he)
-            if he.kind != .progress { HostLog.line(he.line) }
+            if he.kind != .progress, he.kind != .output { HostLog.line(he.line) }   // 593: a bake's output is live only
         }
         guard case .step(let label, let ms) = e, let metrics, let m = managed[name] else { return }
         let recent = m.lastAction.flatMap { Date().timeIntervalSince($0.at) < 1.5 ? $0.row : nil }

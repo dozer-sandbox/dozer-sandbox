@@ -237,7 +237,9 @@ public struct HostError: Codable, Equatable, Sendable, Error, LocalizedError {
 /// or (net-log --follow) a connection record.
 public struct HostEvent: Codable, Equatable, Sendable {
     /// 591: `console` — one line of a sandbox's boot console (guest-written text: display it as data).
-    public enum Kind: String, Codable, Sendable { case phase, step, note, progress, connection, host, console }
+    /// 593: `started` — a timed step began (`step` or `failed` ends it, same text); `failed` — it failed
+    /// (`error` says why); `output` — a line a bake step printed (guest text, already inert).
+    public enum Kind: String, Codable, Sendable { case phase, step, note, progress, connection, host, console, started, failed, output }
     public var kind: Kind
     public var time: Date
     public var sandbox: String?
@@ -247,6 +249,10 @@ public struct HostEvent: Codable, Equatable, Sendable {
     public var completedBytes: Int64?
     public var totalBytes: Int64?
     public var connection: ConnectionRecord?
+    /// 593: a pull's layers (progress), and a failed step's reason.
+    public var completedItems: Int?
+    public var totalItems: Int?
+    public var error: String?
 
     public init(kind: Kind, sandbox: String?, text: String? = nil, phase: String? = nil, milliseconds: Double? = nil,
                 completedBytes: Int64? = nil, totalBytes: Int64? = nil, connection: ConnectionRecord? = nil, time: Date = Date()) {
@@ -269,6 +275,15 @@ public struct HostEvent: Codable, Equatable, Sendable {
         case .note(let s): self.init(kind: .note, sandbox: sandbox, text: s)
         case .progress(let s, let done, let total):
             self.init(kind: .progress, sandbox: sandbox, text: s, completedBytes: done, totalBytes: total)
+        case .transfer(let s, let done, let total, let items, let totalItems):
+            self.init(kind: .progress, sandbox: sandbox, text: s, completedBytes: done, totalBytes: total)
+            completedItems = items
+            self.totalItems = totalItems
+        case .stepStarted(let s): self.init(kind: .started, sandbox: sandbox, text: s)
+        case .stepFailed(let s, let ms, let why):
+            self.init(kind: .failed, sandbox: sandbox, text: s, milliseconds: ms)
+            error = why
+        case .output(let s): self.init(kind: .output, sandbox: sandbox, text: s)
         case .status: return nil
         }
     }
@@ -281,6 +296,10 @@ public struct HostEvent: Codable, Equatable, Sendable {
         case .progress:
             let done = (completedBytes ?? 0) / 1_048_576
             return who + "\(text ?? ""): \(done) MiB" + (totalBytes.map { " of \($0 / 1_048_576) MiB" } ?? "")
+                + (totalItems.map { " · \(completedItems ?? 0)/\($0) layers" } ?? "")
+        case .started: return who + (text ?? "") + " …"
+        case .failed: return who + "FAILED: " + (text ?? "") + (error.map { " — \($0)" } ?? "")
+        case .output: return who + "  │ " + (text ?? "")
         case .phase: return who + "→ " + (text ?? phase ?? "")
         case .connection:
             guard let c = connection else { return who }

@@ -211,6 +211,7 @@ public enum SettingKey {
     public static let detailsOpen = "ui.details_open"
     public static let gridLiveTiles = "ui.grid_live_tiles"
     public static let gridTileSize = "ui.grid_tile_size"
+    public static let progress = "ui.progress"
     public static let idleTimeout = "host.idle_timeout_minutes"
     public static let keepalive = "host.keepalive"
     public static let storePath = "store.path"
@@ -262,6 +263,9 @@ public struct DozerSettings: Sendable {
             .init("ui", "grid_tile_size", .choice(["small", "medium", "large"]), .string("medium"),
                   "All sessions: the size of a tile.",
                   applies: .now),
+            .init("ui", "progress", .choice(["animated", "plain"]), .string("animated"),
+                  "How a start, wake or bake shows its progress — in the web UI's boot view and in the CLI on a terminal: animated (a spinner on the step under way, download bars, the output's last lines) or plain (one line per step, and a summary line per download). Not a terminal, --json or NO_COLOR: always plain.",
+                  env: "DOZ_PROGRESS", flag: "--progress auto|plain", applies: .now),
             .init("host", "idle_timeout_minutes", .int(0...10_080), .int(5),
                   "Minutes with nothing running before the host exits; 0 = never.",
                   env: "DOZ_HOST_IDLE", flag: "doz host start --idle-timeout", applies: .hostRestart),
