@@ -179,7 +179,7 @@ final class ImageSpecTests: XCTestCase {
         XCTAssertTrue(s.contains("mountpoint -q '/home/agent/.pi/agent' ||"), "idempotent")
         XCTAssertTrue(s.contains("chown agent:agent '/state/home_agent_.pi_agent'"))
         XCTAssertEqual(GuestCommand.prepareGuest(imageSpec: nil), "set -e; rm -rf /run/deckhold; mkdir -p /run/deckhold; chmod 1777 /run/deckhold; "
-                       + GuestCommand.ownHostnameScript + "; " + GuestCommand.openShimInstall,
+                       + GuestCommand.ownHostnameScript + "; " + GuestCommand.debconfNoninteractiveScript + "; " + GuestCommand.openShimInstall,
                        "a kept root disk must not carry the last boot's sessions")
         let layout = StoreLayout(root: URL(fileURLWithPath: "/tmp/s"), name: "lab")
         XCTAssertEqual(layout.stateDisk.path, "/tmp/s/sandboxes/lab/state.ext4")

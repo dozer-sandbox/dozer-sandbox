@@ -252,6 +252,13 @@ public enum GuestCommand {
     /// sandbox's policy denied and logged each. Never fails the caller.
     public static let ownHostnameScript = #"{ h=$(hostname 2>/dev/null) && [ -n "$h" ] && { awk -v h="$h" '{ for (i = 2; i <= NF; i++) if ($i == h) f = 1 } END { exit !f }' /etc/hosts 2>/dev/null || printf '127.0.1.1\t%s\n' "$h" >> /etc/hosts; }; } || true"#
 
+    /// 594 W31 (the owner's `sudo apt-get install`, 2026-10-01, stopped at "Configuring
+    /// keyboard-configuration … Keyboard layout:"): Debian's package configuration never asks —
+    /// debconf's frontend is set to Noninteractive in its own database, so it holds however apt runs
+    /// (sudo drops DEBIAN_FRONTEND from the environment; `doz exec --user root`; a script). An agent
+    /// would otherwise hang on the question. Debian/Ubuntu only (no debconf elsewhere); never fails the caller.
+    public static let debconfNoninteractiveScript = #"{ command -v debconf-set-selections >/dev/null 2>&1 && echo 'debconf debconf/frontend select Noninteractive' | debconf-set-selections; } >/dev/null 2>&1 || true"#
+
     /// 594 W23 (owner ruling 2026-09-30: "yes, passwordless sudo by default"): where the agent's sudo
     /// rule lives. sudo reads every file in /etc/sudoers.d whose name has no dot and no trailing `~`.
     public static let agentSudoersPath = "/etc/sudoers.d/dozer-agent"
@@ -397,7 +404,8 @@ public enum GuestCommand {
     public static func prepareGuest(imageSpec: ImageSpec?, agentSudo: Bool = true, timeZone: GuestTimeZone? = nil) -> String {
         var s = "set -e; rm -rf /run/deckhold; mkdir -p /run/deckhold; chmod 1777 /run/deckhold"
         s += "; " + ownHostnameScript
-        s += "; " + openShimInstall                    // 599: the browser bridge's xdg-open (every image)
+        s += "; " + debconfNoninteractiveScript        // 594 W31: apt never asks (keyboard-configuration …)
+        s += "; " + openShimInstall                   // 599: the browser bridge's xdg-open (every image)
         if let tz = timeZone { s += "; " + tz.script }
         guard let r = imageSpec else { return s }
         s += "; " + agentSudoScript(user: r.user, on: agentSudo)
