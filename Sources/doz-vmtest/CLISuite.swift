@@ -453,6 +453,7 @@ func cliSuite() async throws {
     check(!h.hostRunning, "cleanup: no host left running")
     // 594: onboarding, projects, the environment prompt, uninstall — stores of their own.
     await cliOnboardingSuite(binary: h.binary)
+    await cliTerminalRestoreSuite(binary: h.binary)
 }
 
 /// 593: how `doz image bake lab -v` shows its progress — plain (no escape, no \r, no spinner) when

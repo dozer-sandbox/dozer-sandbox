@@ -43,6 +43,33 @@ private func typeOrKeep(_ bytes: Data) {
     if fd >= 0 { UnixSocket.writeAll(fd, bytes) }
 }
 
+/// 594 (W13): the modes the session's bytes left set in the OUTER terminal, and whether they were
+/// undone. `outputLock` orders the session's bytes and the restore: once restored, nothing more of the
+/// session is written (the restore is always after its last byte).
+nonisolated(unsafe) private var outerModes = TerminalModes()
+nonisolated(unsafe) private var outerRestored = false
+private let outputLock = NSLock()
+
+/// Write session bytes to the terminal (following the modes they set) — unless it was restored.
+private func writeSession(_ bytes: ArraySlice<UInt8>) {
+    guard !bytes.isEmpty else { return }
+    outputLock.lock(); defer { outputLock.unlock() }
+    guard !outerRestored else { return }
+    outerModes.feed(bytes)
+    UnixSocket.writeAll(STDOUT_FILENO, Data(bytes))
+}
+
+/// Put the outer terminal back (once): its modes, when stdout is a terminal, then the saved termios.
+private func restoreTerminal() {
+    outputLock.lock()
+    if !outerRestored {
+        outerRestored = true
+        if isatty(STDOUT_FILENO) != 0 { UnixSocket.writeAll(STDOUT_FILENO, Data(outerModes.restoreSequence.utf8)) }
+    }
+    outputLock.unlock()
+    restoreTTY()
+}
+
 private func restoreTTY() { if rawMode { tcsetattr(STDIN_FILENO, TCSANOW, &savedTermios) } }
 
 /// A notice on stderr (with \r\n: the tty is raw).
@@ -51,8 +78,14 @@ private func say(_ s: String) {
     FileHandle.standardError.write(Data(line.utf8))
 }
 
+/// The last line of an attach: the terminal is put back first, so the line is read in a normal terminal.
+private func sayLast(_ s: String) {
+    restoreTerminal()
+    say(s)
+}
+
 private func finish(_ code: Int32) -> Never {
-    restoreTTY()
+    restoreTerminal()
     exit(code)
 }
 
@@ -83,7 +116,7 @@ enum AttachClient {
             cfmakeraw(&raw)
             tcsetattr(STDIN_FILENO, TCSANOW, &raw)
             rawMode = true
-            atexit { restoreTTY() }
+            atexit { restoreTerminal() }
         }
         // Window resizes → RESIZE frames.
         signal(SIGWINCH, SIG_IGN)
@@ -118,6 +151,7 @@ enum AttachClient {
                     bytes = Array(bytes[..<i])
                     let fd = currentSocket()
                     if fd >= 0, !bytes.isEmpty { UnixSocket.writeAll(fd, Data(bytes)) }
+                    restoreTerminal()
                     if !quiet { say("detached — the session keeps running (doz attach \(sandbox)\(session.map { " \($0)" } ?? ""))") }
                     finish(0)
                 }
@@ -131,7 +165,7 @@ enum AttachClient {
         while true {
             let client: HostClient
             do { client = try HostClient.connect(store: store, autostart: true) } catch {
-                if first { say(error.localizedDescription); finish(DozerExit.dozerFailed) }
+                if first { sayLast(error.localizedDescription); finish(DozerExit.dozerFailed) }
                 sleep(1)
                 continue
             }
@@ -149,13 +183,13 @@ enum AttachClient {
                 reply = nil
             }
             guard let reply, reply.ok != nil else {
-                if first { say("the host closed the connection"); finish(DozerExit.dozerFailed) }
+                if first { sayLast("the host closed the connection"); finish(DozerExit.dozerFailed) }
                 usleep(500_000)
                 continue
             }
             if reply.ok == false {
                 let e = reply.error ?? HostError(.failed, "attach failed")
-                say(e.message)
+                sayLast(e.message)
                 finish(first ? DozerExit.code(for: e) == DozerExit.failed ? DozerExit.dozerFailed : DozerExit.code(for: e) : DozerExit.failed)
             }
             first = false
@@ -178,6 +212,8 @@ enum AttachClient {
                 if let (e, start) = ClientWire.findEnding(in: pending) {
                     writeOut(pending[..<start])
                     let rest = pending[start...]
+                    // The session is over: the terminal is put back before the host's last word.
+                    restoreTerminal()
                     if let bel = rest.firstIndex(of: 0x07) {
                         let text = String(decoding: rest[(bel + 1)...], as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
                         if !quiet && !text.isEmpty { say(text.replacingOccurrences(of: "[doz] ", with: "")) }
@@ -210,10 +246,7 @@ enum AttachClient {
 
     nonisolated(unsafe) private static var retained: [DispatchSourceSignal] = []
 
-    private static func writeOut(_ bytes: ArraySlice<UInt8>) {
-        guard !bytes.isEmpty else { return }
-        UnixSocket.writeAll(STDOUT_FILENO, Data(bytes))
-    }
+    private static func writeOut(_ bytes: ArraySlice<UInt8>) { writeSession(bytes) }
 
     /// How many trailing bytes might be the start of the ended notice (hold them for the next read).
     static func holdBack(_ bytes: [UInt8]) -> Int {
