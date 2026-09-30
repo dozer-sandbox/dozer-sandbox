@@ -356,14 +356,17 @@ public final class HostWebData: DozerWebData, @unchecked Sendable {
             return WebNetwork(name: name, proxied: false, mode: info.info.network, policy: nil, log: [], logTotal: 0, denied: 0,
                               logAvailable: false, note: "not proxied (network \(info.info.network)) — it has no policy or connection log")
         }
+        // 597: what the agent can do (and, with a host, what it was refused lately).
+        let perms = (try? await query(HostRequest(.netPermissions, name: name)).0.decode(PermissionReport.self)).map(WebPermissions.init)
         guard store.hostIsRunning() else {
             return WebNetwork(name: name, proxied: true, mode: info.info.network, policy: info.policy.map(WebPolicy.init), log: [], logTotal: 0,
-                              denied: 0, logAvailable: false, note: "the connection log lives in the host, from its start — no host is running")
+                              denied: 0, logAvailable: false, note: "the connection log lives in the host, from its start — no host is running",
+                              permissions: perms)
         }
         let recs = try await query(HostRequest(.netLog, name: name)).0.decode([ConnectionRecord].self)
         return WebNetwork(name: name, proxied: true, mode: info.info.network, policy: info.policy.map(WebPolicy.init),
                           log: recs.suffix(logLimit).map(WebConnection.init), logTotal: recs.count,
-                          denied: recs.filter { $0.verdict == .denied }.count, logAvailable: true, note: nil)
+                          denied: recs.filter { $0.verdict == .denied }.count, logAvailable: true, note: nil, permissions: perms)
     }
 
     public func images() async throws -> [WebImage] {
@@ -415,8 +418,9 @@ public final class HostWebData: DozerWebData, @unchecked Sendable {
         let d = try await query(HostRequest(.inspect, name: name)).0.decode(SandboxDetail.self)
         guard let live = d.policy else { throw HostError(.invalid, "\(name) is not proxied (network \(d.info.network)) — it has no policy") }
         // `before` without the strict sign-in block, like `after`: the host re-derives that block.
-        let before = try HostCore.editedPolicy(live, HostRequest(.netPolicy, name: name))
-        return WebPolicyPreview(before: before, after: try HostCore.editedPolicy(live, edit.request(name)))
+        let base = d.info.base.flatMap { BaseCatalogue.base($0) != nil ? $0 : nil }
+        let before = try HostCore.editedPolicy(live, HostRequest(.netPolicy, name: name), base: base)
+        return WebPolicyPreview(before: before, after: try HostCore.editedPolicy(live, edit.request(name), base: base))
     }
 
     public func openTerminal(_ name: String, session: String?) async throws -> String {

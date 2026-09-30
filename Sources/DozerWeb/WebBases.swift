@@ -58,6 +58,24 @@ public struct WebBases: Codable, Equatable, Sendable {
     /// B11: the DeckStack recipes card (disabled).
     public var deckstack: String
     public var agents: [[String]]
+    /// 597 (P4): the permission switches New Sandbox shows (and the Settings page's default) — every
+    /// permission, and Standard per base (`""`: a Dockerfile's, system packages only), and the default
+    /// set the setting `defaults.permissions` gives per base.
+    public var permissions: [WebPermissions.Row] = WebBases.permissionRows
+    public var standard: [String: [String]] = WebBases.standardByBase
+    public var defaults: [String: [String]] = [:]
+
+    public static var permissionRows: [WebPermissions.Row] {
+        AgentPermissions.all.map { p in
+            WebPermissions.Row(id: p.id, title: p.title, summary: p.summary, on: false, locked: p.locked, warning: p.warning, group: p.group,
+                               hosts: p.hosts.map { $0.host + ($0.pathPrefixes != nil ? " (the agent's own package)" : "") }, standard: false)
+        }
+    }
+    public static var standardByBase: [String: [String]] {
+        var m: [String: [String]] = ["": AgentPermissions.preset("agent", base: nil) ?? []]
+        for b in BaseCatalogue.ids { m[b] = AgentPermissions.preset("agent", base: b) ?? [] }
+        return m
+    }
 
     public static let deckstackNote = "DeckStack recipes — coming soon."
     public static let agentChoices: [[String]] = [["claude-code", "Claude Code"], ["pi", "pi"], ["none", "none — a shell only"]]
@@ -67,8 +85,13 @@ extension HostWebData {
     public func bases() async throws -> WebBases {
         let rows = try await query(HostRequest(.bases)).0.decode([BaseRow].self)
         let builder = try await query(HostRequest(.builderStatus)).0.decode(ContainerToolStatus.self)
-        return WebBases(bases: rows.map(WebBase.init), builder: WebBuilder(builder), outsidePolicy: Dockerfiles.outsidePolicyNote,
-                        deckstack: WebBases.deckstackNote, agents: WebBases.agentChoices)
+        var b = WebBases(bases: rows.map(WebBase.init), builder: WebBuilder(builder), outsidePolicy: Dockerfiles.outsidePolicyNote,
+                         deckstack: WebBases.deckstackNote, agents: WebBases.agentChoices)
+        // 597: what defaults.permissions gives a new sandbox of each base.
+        let words = SettingType.permissionWords(DozerSettings.load().string(SettingKey.permissions) ?? "standard") ?? ["standard"]
+        b.defaults[""] = PermissionPolicy.names(from: words, base: nil)
+        for id in BaseCatalogue.ids { b.defaults[id] = PermissionPolicy.names(from: words, base: id) }
+        return b
     }
 }
 

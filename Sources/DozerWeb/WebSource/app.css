@@ -652,3 +652,28 @@ dialog.dlg:has(.image-picker) { width: min(780px, calc(100vw - 32px)); }
 .image-summary { margin-top: 2px; }
 .dlg-why { color: var(--muted); font-size: 12px; text-align: right; }
 .dlg-why:empty { display: none; }
+/* 597: what the agent can do. */
+.perm-panel { padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; }
+.perm-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.perm-list { display: flex; flex-direction: column; gap: 2px; }
+.perm { padding: 6px 8px; border-radius: 8px; }
+.perm:hover { background: color-mix(in srgb, var(--accent) 5%, transparent); }
+.perm-main { display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; }
+.perm-main input { width: 30px; height: 16px; accent-color: var(--run); }
+.perm-title { font-weight: 600; }
+.perm-summary { font-size: 12px; margin-left: 38px; }
+.perm-warn { color: var(--pause); font-weight: 600; }
+.perm-sub { margin-left: 30px; padding: 3px 8px; }
+.perm-group { border: 1px solid var(--line); }
+.perm-hosts { margin-left: 38px; font-size: 11.5px; }
+.perm-hosts summary { cursor: pointer; color: var(--muted); }
+.perm-suggestions { display: flex; flex-direction: column; gap: 6px; }
+.perm-suggest { border: 1px solid var(--line); border-left: 4px solid var(--pause); border-radius: 8px; padding: 6px 10px; font-size: 12.5px;
+                display: flex; align-items: center; gap: 4px; flex-wrap: wrap; background: color-mix(in srgb, var(--pause) 7%, var(--panel)); }
+.perm-suggest .icon { width: 14px; height: 14px; }
+.perm-sites { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 12.5px; }
+.perm-sites input { font: inherit; padding: 3px 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--ink); width: 200px; }
+.net-rules summary { cursor: pointer; color: var(--muted); margin: 6px 0; }
+.perm-field .perm-list { border: 1px solid var(--line); border-radius: 8px; padding: 4px; max-height: 320px; overflow: auto; }
+.perm-field[hidden] { display: none; }
+.perm-setting { display: flex; flex-direction: column; gap: 6px; min-width: 320px; }

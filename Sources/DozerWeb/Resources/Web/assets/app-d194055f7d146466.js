@@ -715,6 +715,8 @@ function imagePicker({ images = [], bases = null, value = 'claude-code', dockerf
       return agent === 'none' ? null : agent;
     },
     dockerfile() { return kind === 'dockerfile' ? dfPath.value.trim() : null; },
+    /// 597: the catalogue base (a Dockerfile's: '', a template's: null) — its permissions' Standard.
+    base() { return kind === 'recommended' ? base : kind === 'dockerfile' ? '' : null; },
     /// Why Create cannot go ahead now (null: it can).
     blocked() {
       if (kind === 'deckstack') return 'DeckStack recipes are coming soon.';
@@ -887,6 +889,32 @@ function settingControl(r) {
       return o;
     }));
     input.addEventListener('change', () => changeSetting(r.key, input.value));
+  } else if (r.type === 'permissions') {
+    // 597 (P4): the default permissions of new sandboxes — the same switches (on a base with no
+    // language of its own; a base's ecosystem joins Standard for it), saved as words on Standard.
+    input = h('div', { class: 'perm-setting', 'data-perm-setting': '' }, h('span', { class: 'muted' }, '…'));
+    api('bases').then((b) => {
+      const std = new Set(b.standard[''] || []);
+      let on = new Set(b.defaults[''] || []);
+      const all = b.permissions.map((x) => x.id);
+      const words = () => {
+        const same = (a, c) => a.size === c.size && [...a].every((x) => c.has(x));
+        if (same(on, std)) return 'standard';
+        if (same(on, new Set(['model']))) return 'locked';
+        if (same(on, new Set(all))) return 'open';
+        return [...all.filter((x) => on.has(x) && !std.has(x)).map((x) => '+' + x), ...all.filter((x) => !on.has(x) && std.has(x)).map((x) => '-' + x)].join(',');
+      };
+      const paint = () => input.replaceChildren(h('code', { 'data-perm-words': '' }, words()),
+        permissionSwitches(b.permissions, on, (id, v) => {
+          const apply = () => {
+            const inst = b.permissions.filter((x) => x.group === 'install').map((x) => x.id);
+            for (const x of id === 'install' ? inst : [id]) { if (v) on.add(x); else on.delete(x); }
+            changeSetting(r.key, words());
+          };
+          if (id === 'web' && v) confirmWeb(async () => apply()); else apply();
+        }, { hosts: false }));
+      paint();
+    }).catch(() => input.replaceChildren(h('code', null, String(r.value))));
   } else if (r.type === 'int') {
     input = h('input', { type: 'number', min: String(r.min), max: String(r.max), step: '1', 'aria-label': r.key });
     input.value = String(r.value);
@@ -1504,7 +1532,8 @@ async function createDialog() {
   let images = [], accounts = { accounts: [] }, bases = null;
   try { [images, accounts] = await Promise.all([api('images'), api('accounts')]); } catch (_) { /* defaults */ }
   try { bases = await api('bases'); } catch (_) { /* no catalogue: the picker shows what it can */ }
-  const slot = h('div'), acctSlot = h('div'), imgSlot = h('div');
+  const slot = h('div'), acctSlot = h('div'), imgSlot = h('div'), permSlot = h('div');
+  let perms = { value: () => null };
   // 594 W28 (owner: "i dont think we should rebuild images without the user agreeing … better to warn"):
   // an out-of-date image is said here, with the choice — use it as it is (the default), or rebuild first.
   const imgNote = h('div', { class: 'img-choice', 'data-image-choice': '', hidden: true });
@@ -1535,10 +1564,12 @@ async function createDialog() {
       return picker.image();
     } },
     { name: 'dockerfile', type: 'custom', el: h('span', { hidden: true }), get: () => picker.dockerfile() },
+    // 597 (P4): what the agent can do — preset from the base (and the Network choice).
+    { name: 'permissions', type: 'custom', el: permSlot, get: () => perms.value() },
     { name: 'imageChoice', type: 'custom', el: imgNote, get: () => imgChoice },
     { name: 'network', label: 'Network', type: 'select', value: '',
-      options: [['', 'default (per image, Settings)'],['agent', 'agent — proxied, Anthropic, Claude Code, GitHub + registries'], ['bake', 'bake — proxied, package registries'],
-        ['locked', 'locked — proxied, nothing'], ['open', 'open — proxied, everything (logged)'], ['nat', 'nat — a real interface (vmnet)'], ['none', 'none']] },
+      options: [['', 'default — the permissions below (Settings)'], ['agent', 'Standard permissions'], ['bake', 'bake — proxied, package registries only'],
+        ['locked', 'Locked — its AI model only'], ['open', 'Open — everything, the web included (logged)'], ['nat', 'nat — a real interface (vmnet), not filtered'], ['none', 'none']] },
     // 594: only the accounts the image's agent can use; pi with none: the key right here.
     { name: 'account', type: 'custom', el: acctSlot, get: () => {
       if (!acct.ok()) throw new Error((AGENT_NAMES[agentOf()] || 'This agent') + ' needs an Anthropic API key — add one above.');
@@ -1551,6 +1582,7 @@ async function createDialog() {
   ], 'Create', async (v) => {
     const body = { action: 'create', sandbox: v.sandbox, image: v.image, ...v.ws };
     if (v.dockerfile) body.dockerfile = v.dockerfile;
+    if (v.permissions) body.permissions = v.permissions;
     if (v.imageChoice === 'rebuild') body.rebuild = true;
     if (v.network) body.network = v.network;
     if (v.account) body.account = v.account;
@@ -1568,7 +1600,7 @@ async function createDialog() {
     submit.disabled = !!w || (acct ? !acct.ok() : false);
   };
   const picker = imagePicker({ images, bases, value: setting('defaults.image', 'claude-code'),
-    onChange: () => { if (chooser) chooser.imageChanged(); if (acct) acct.agentChanged(); renderImgNote(picker.image()); gate(); },
+    onChange: () => { if (chooser) chooser.imageChanged(); if (acct) acct.agentChanged(); renderImgNote(picker.image()); if (perms.baseChanged) perms.baseChanged(); gate(); },
     onDockerfile: (folder) => { if (chooser) chooser.suggest(folder); } });
   imgSlot.replaceWith(picker.el);
   chooser = workspaceChooser({ nameInput: dlg.inputs.sandbox, image: () => pickerNameHint(picker) });
@@ -1577,8 +1609,47 @@ async function createDialog() {
   acct = accountChooser({ accounts, agent: () => (netProxied() ? picker.agent() : null), onChange: gate });
   acctSlot.replaceWith(acct.el);
   renderImgNote(picker.image());
+  perms = newSandboxPermissions(bases, picker, dlg.inputs.network);
+  permSlot.replaceWith(perms.el);
   gate();
-  dlg.inputs.network.addEventListener('change', () => acct.agentChanged());
+  dlg.inputs.network.addEventListener('change', () => { acct.agentChanged(); perms.networkChanged(); });
+}
+
+/// 597 (P4): New Sandbox's switches — the default for the base (defaults.permissions), or the Network
+/// choice's preset; changed by hand, they stay as set. Hidden for bake / nat / none and a template.
+function newSandboxPermissions(bases, picker, network) {
+  const el = h('div', { class: 'field perm-field', 'data-new-permissions': '' });
+  if (!bases || !bases.permissions) return { el, value: () => null, baseChanged() {}, networkChanged() {} };
+  let on = new Set(), touched = false;
+  const baseKey = () => { const b = picker.base(); return b === null ? null : b; };
+  const presetFor = (net, b) => net === 'locked' ? ['model'] : net === 'open' ? bases.permissions.map((r) => r.id)
+    : net === 'agent' ? (bases.standard[b] || bases.standard[''] || []) : (bases.defaults[b] || bases.defaults[''] || []);
+  const visible = () => baseKey() !== null && !['bake', 'nat', 'none'].includes(network.value);
+  const reset = () => { if (!touched) on = new Set(presetFor(network.value, baseKey() || '')); paint(); };
+  const change = (id, v) => {
+    const apply = () => {
+      touched = true;
+      const inst = bases.permissions.filter((r) => r.group === 'install').map((r) => r.id);
+      for (const x of id === 'install' ? inst : [id]) { if (v) on.add(x); else on.delete(x); }
+      paint();
+    };
+    if (id === 'web' && v) confirmWeb(async () => apply()); else apply();
+  };
+  function paint() {
+    el.hidden = !visible();
+    const std = new Set(bases.standard[baseKey() || ''] || []);
+    const same = (a, b) => a.size === b.size && [...a].every((x) => b.has(x));
+    const label = same(on, std) ? 'Standard' : same(on, new Set(['model'])) ? 'Locked' : same(on, new Set(bases.permissions.map((r) => r.id))) ? 'Open' : 'Custom';
+    el.replaceChildren(h('span', null, 'What the agent can do ', h('span', { class: 'tag', 'data-new-perm-preset': label }, label)),
+      permissionSwitches(bases.permissions, on, change, { hosts: true }));
+  }
+  reset();
+  return {
+    el,
+    value: () => (visible() ? [...on] : null),
+    baseChanged: reset,
+    networkChanged() { touched = false; reset(); },
+  };
 }
 
 // ── a sandbox's page (593): a control bar, the terminal area, a collapsible details panel ──────
@@ -1981,7 +2052,8 @@ function duplicateDialog(name, d, accounts, pointID) {
       { name: 'cpus', label: 'CPUs', type: 'number', min: 1, max: 64, placeholder: String(d.cpus) + ' (the same)' },
       { name: 'memoryMiB', label: 'Memory (MiB)', type: 'number', min: 256, placeholder: String(d.memoryMiB) + ' (the same)' },
       { name: 'network', label: 'Network', type: 'select', value: '',
-        options: [['', i.network + ' (the same, its policy included)'], ['agent', 'agent'], ['bake', 'bake'], ['locked', 'locked'], ['open', 'open'], ['nat', 'nat'], ['none', 'none']] },
+        options: [['', i.network + ' (the same — its permissions and sites copied)'], ['agent', 'Standard permissions'], ['bake', 'bake'], ['locked', 'Locked — its AI model only'],
+          ['open', 'Open — everything (logged)'], ['nat', 'nat'], ['none', 'none']] },
       // 594: only the accounts the agent can use ("the same" only when that one fits).
       { name: 'account', type: 'custom', el: acctSlot, get: () => {
         if (!acct.ok()) throw new Error((AGENT_NAMES[i.agent] || 'This agent') + ' needs an Anthropic API key — add one above.');
@@ -2041,6 +2113,77 @@ function policyDialog(name, policy) {
   });
 }
 
+// ── 597: what the agent can do ────────────────────────────────────────────
+// Owner ruling (2026-09-30, P1–P7): a proxied sandbox's network as plain-language permissions, each a
+// switch; hosts only under details. Presets Locked / Standard / Open; a changed switch is "Custom".
+// Install software has a sub-switch per ecosystem (preset from the sandbox's base). Stored BY NAME:
+// the hosts behind a permission come from the running doz.
+const PRESET_LABEL = { locked: 'Locked', agent: 'Standard', open: 'Open' };
+/// The switches: `rows` (id, title, summary, locked, warning, group, hosts), `on` (a Set), `change(id, on)`.
+function permissionSwitches(rows, on, change, opts = {}) {
+  const sw = (r, indent) => {
+    const box = h('input', { type: 'checkbox', role: 'switch', 'data-permission': r.id, 'aria-label': r.title });
+    box.checked = on.has(r.id) || r.locked;
+    box.disabled = !!r.locked || !!opts.disabled;
+    box.addEventListener('change', () => { const v = box.checked; box.checked = !v; change(r.id, v); });
+    return h('div', { class: 'perm' + (indent ? ' perm-sub' : '') + (box.checked ? ' perm-on' : ''), 'data-perm-row': r.id },
+      h('label', { class: 'perm-main' }, box, h('span', { class: 'perm-title' }, r.title, r.locked ? h('span', { class: 'muted' }, ' — always') : null)),
+      h('div', { class: 'perm-summary muted' }, r.summary, r.warning ? h('span', { class: 'perm-warn' }, ' ' + r.warning) : null),
+      opts.hosts === false ? null : h('details', { class: 'perm-hosts' }, h('summary', null, 'hosts'), h('div', { class: 'mono muted' }, r.hosts.join(', '))));
+  };
+  const top = rows.filter((r) => r.group !== 'install'), inst = rows.filter((r) => r.group === 'install');
+  const anyInstall = inst.some((r) => on.has(r.id));
+  const master = h('input', { type: 'checkbox', role: 'switch', 'data-permission': 'install', 'aria-label': 'Install software' });
+  master.checked = anyInstall;
+  master.disabled = !!opts.disabled;
+  master.addEventListener('change', () => { const v = master.checked; master.checked = !v; change('install', v); });
+  const installBlock = h('div', { class: 'perm perm-group' + (anyInstall ? ' perm-on' : ''), 'data-perm-row': 'install' },
+    h('label', { class: 'perm-main' }, master, h('span', { class: 'perm-title' }, 'Install software')),
+    h('div', { class: 'perm-summary muted' }, 'Install packages for your project — per ecosystem:'),
+    inst.map((r) => sw(r, true)));
+  const out = [];
+  for (const r of top) { out.push(sw(r, false)); if (r.id === 'update') out.push(installBlock); }
+  return h('div', { class: 'perm-list', 'data-permissions': '' }, out);
+}
+/// "Browse the web" (and Open) warn first.
+function confirmWeb(then) {
+  dialog('Let the agent browse the web?', 'The agent could send your code anywhere — use with care. Every connection is still proxied and logged, and you can switch it off again.',
+    [], 'Allow the web', async () => { await then(); }, { danger: true });
+}
+function permissionsPanel(name, net) {
+  const p = net.permissions;
+  if (!p) return null;
+  const on = new Set(p.rows.filter((r) => r.on).map((r) => r.id));
+  const send = async (body) => { try { await actOrThrow({ action: 'net-policy', sandbox: name, ...body }); } catch (e) { toast(e.message || String(e), true); } };
+  const change = (id, v) => {
+    if (id === 'web' && v) return confirmWeb(() => send({ grant: ['web'] }));
+    send(v ? { grant: [id] } : { revoke: [id] });
+  };
+  const presetBtn = (id) => {
+    const b = h('button', { type: 'button', class: 'seg' + (p.preset === id ? ' active' : ''), 'data-perm-preset': id, 'aria-pressed': p.preset === id ? 'true' : 'false' },
+      withIcon(id === 'locked' ? 'shield' : id === 'open' ? 'eye' : 'check', PRESET_LABEL[id]));
+    b.addEventListener('click', () => { if (id === 'open') confirmWeb(() => send({ preset: 'open' })); else send({ preset: id }); });
+    return b;
+  };
+  const suggestions = p.suggestions.map((s) => h('div', { class: 'perm-suggest', 'data-suggest': s.grant },
+    icon('shield'), ' The agent tried to ', h('strong', null, s.permission ? s.what : 'reach ' + s.what),
+    ' (' + s.hosts.join(', ') + ', ' + s.count + ' time' + (s.count === 1 ? '' : 's') + ') ',
+    btn(s.permission ? 'Allow' : 'Allow this site', () => (s.permission === 'web' ? confirmWeb(() => send({ grant: [s.grant] })) : send({ grant: [s.grant] })),
+      { small: true, icon: 'check' })));
+  const sites = p.sites.map((host) => h('span', { class: 'tag perm-site', 'data-site': host }, host, ' ',
+    h('button', { type: 'button', class: 'link-button', title: 'Deny ' + host, on: { click: () => send({ revoke: ['site:' + host] }) } }, '×')));
+  const siteInput = h('input', { type: 'text', placeholder: 'api.example.com', 'aria-label': 'A site to allow', 'data-site-input': '', spellcheck: 'false' });
+  return h('div', { class: 'panel perm-panel', 'data-perm-panel': name },
+    h('div', { class: 'perm-head' }, h('strong', null, 'What the agent can do'),
+      h('div', { class: 'segmented', role: 'group', 'aria-label': 'Preset' }, presetBtn('locked'), presetBtn('agent'), presetBtn('open')),
+      p.preset ? null : h('span', { class: 'tag', 'data-perm-custom': '' }, 'Custom'),
+      p.inferred ? h('span', { class: 'muted' }, ' an older policy, shown as permissions (stored as names at its first change)') : null),
+    suggestions.length ? h('div', { class: 'perm-suggestions' }, suggestions) : null,
+    permissionSwitches(p.rows, on, change),
+    h('div', { class: 'perm-sites' }, h('span', null, 'Other sites: '), sites.length ? sites : h('span', { class: 'muted' }, 'none'), ' ', siteInput,
+      btn('Allow site', () => { const v = siteInput.value.trim().toLowerCase(); if (v) send({ grant: ['site:' + v] }); }, { small: true, icon: 'plus' })));
+}
+
 function networkPanel(net) {
   if (!net.proxied) return panel(null, net.note || 'Not proxied.');
   const rules = net.policy.rules.map((r, n) => h('tr', null, h('td', { class: 'num' }, String(n + 1)),
@@ -2056,10 +2199,14 @@ function networkPanel(net) {
   const toggle = h('input', { type: 'checkbox', id: 'denied-only' });
   toggle.checked = state.deniedOnly;
   toggle.addEventListener('change', () => { state.deniedOnly = toggle.checked; refresh(false); });
-  return h('div', null,
+  const policyParts = [
     h('div', { class: 'panel' }, h('div', { class: 'empty' },
-      (net.policy.preset ? net.policy.preset + ' preset' : 'custom policy') + ' · anything else: ' + net.policy.defaultAction)),
-    h('div', { class: 'panel' }, table(['#', 'Rule', 'Host', 'Note'], rules, [0]) || h('div', { class: 'empty' }, 'No rules.')),
+      (net.policy.preset ? (PRESET_LABEL[net.policy.preset] || net.policy.preset) + ' preset' : 'custom policy') + ' · anything else: ' + net.policy.defaultAction)),
+    h('div', { class: 'panel' }, table(['#', 'Rule', 'Host', 'Note'], rules, [0]) || h('div', { class: 'empty' }, 'No rules.'))];
+  return h('div', null,
+    // 597: the permissions first; the rules (every host they amount to) under details.
+    net.permissions ? permissionsPanel(net.name, net) : null,
+    net.permissions ? h('details', { class: 'net-rules', 'data-net-rules': '' }, h('summary', null, 'Details: the rules and hosts'), policyParts) : policyParts,
     h('h2', null, 'Connection log'),
     h('div', { class: 'toolbar' }, h('label', null, toggle, ' denied only'),
       net.logAvailable ? net.logTotal + ' connections since the host started · ' + net.denied + ' denied' + (net.logTotal > net.log.length ? ' · newest ' + net.log.length + ' shown' : '') : (net.note || '')),

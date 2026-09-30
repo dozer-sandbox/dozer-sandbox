@@ -473,10 +473,51 @@ public struct WebPolicy: Codable, Equatable, Sendable {
     public var defaultAction: String
     public var rules: [WebRule]
 
+    /// 597: its permissions by name (nil: an older policy of rules).
+    public var permissions: [String]?
+
     public init(_ p: NetworkPolicy) {
         preset = p.preset
-        defaultAction = p.defaultAction.rawValue
-        rules = p.rules.map { WebRule(action: $0.action.rawValue, label: $0.label, note: $0.note) }
+        defaultAction = p.effectiveDefault.rawValue
+        // 597: every rule evaluated — the user's own first, then the permissions' (this build's hosts).
+        rules = p.effectiveRules.map { WebRule(action: $0.action.rawValue, label: $0.label, note: $0.note) }
+        permissions = p.permissions
+    }
+}
+
+/// 597: "What the agent can do" — the host's `PermissionReport`, field by field.
+public struct WebPermissions: Codable, Equatable, Sendable {
+    public struct Row: Codable, Equatable, Sendable {
+        public var id: String
+        public var title: String
+        public var summary: String
+        public var on: Bool
+        public var locked: Bool
+        public var warning: String?
+        public var group: String?
+        public var hosts: [String]
+        public var standard: Bool
+    }
+    public struct Suggestion: Codable, Equatable, Sendable {
+        public var permission: String?
+        public var what: String
+        public var hosts: [String]
+        public var count: Int
+        public var grant: String
+    }
+    public var preset: String?
+    public var rows: [Row]
+    public var sites: [String]
+    public var suggestions: [Suggestion]
+    public var inferred: Bool
+
+    public init(_ r: PermissionReport) {
+        preset = r.preset
+        rows = r.permissions.map { Row(id: $0.id, title: $0.title, summary: $0.summary, on: $0.on, locked: $0.locked, warning: $0.warning,
+                                       group: $0.group, hosts: $0.hosts, standard: $0.standard) }
+        sites = r.sites
+        suggestions = r.suggestions.map { Suggestion(permission: $0.permission, what: $0.what, hosts: $0.hosts, count: $0.count, grant: $0.grant) }
+        inferred = r.inferred
     }
 }
 
@@ -757,6 +798,8 @@ public struct WebNetwork: Codable, Equatable, Sendable {
     /// The log lives in the host, from its start: false when no host runs (nothing to show).
     public var logAvailable: Bool
     public var note: String?
+    /// 597: what the agent can do (nil: not proxied).
+    public var permissions: WebPermissions? = nil
 }
 
 public struct WebImage: Codable, Equatable, Sendable {

@@ -256,7 +256,7 @@ public enum WebAction: Equatable, Sendable {
     /// Fields each action may carry (besides `action`).
     static let fields: [String: Set<String>] = {
         var f: [String: Set<String>] = [
-            "create": ["sandbox", "image", "cpus", "memoryMiB", "workspace", "isolated", "network", "subnet", "account", "rebuild", "dockerfile"],
+            "create": ["sandbox", "image", "cpus", "memoryMiB", "workspace", "isolated", "network", "subnet", "account", "rebuild", "dockerfile", "permissions", "sites"],
             "open-session": ["sandbox", "session", "argv"],
             "point-take": ["sandbox", "point", "note"],
             "point-revert": ["sandbox", "point", "confirm"],
@@ -267,7 +267,7 @@ public enum WebAction: Equatable, Sendable {
             "duplicate": ["sandbox", "newName", "point", "workspace", "isolated", "cpus", "memoryMiB", "network", "account", "copyState"],
             "image-bake": ["image"],
             "image-rm": ["image", "confirm"],
-            "net-policy": ["sandbox", "preset", "allow", "deny", "remove"],
+            "net-policy": ["sandbox", "preset", "allow", "deny", "remove", "grant", "revoke"],
             "key-policy": ["sandbox", "policy"],
             "key-rm": ["sandbox", "binding"],
             "account-use": ["sandbox", "account"],
@@ -309,6 +309,15 @@ public enum WebAction: Equatable, Sendable {
             o.isolated = try f.flag("isolated")
             // 594 W28: the New Sandbox form's "Rebuild first" (an out-of-date image is otherwise used as it is).
             o.rebuild = try f.flag("rebuild")
+            // 597 (P4): the form's switches — exactly these permissions; its sites on top.
+            if d["permissions"] != nil, !(d["permissions"] is NSNull) {
+                let p = try f.permissionWords("permissions")
+                guard !p.contains(where: { $0.hasPrefix("site:") || $0 == "install" }) else { throw Invalid("permissions: permission ids (sites go in sites)") }
+                o.permissions = p
+            }
+            let sites = try f.permissionWords("sites")
+            guard sites.allSatisfy({ $0.hasPrefix("site:") }) else { throw Invalid("sites: site:HOST each") }
+            if !sites.isEmpty { o.allow = sites }
             // 596 (B6): a Dockerfile base — an absolute path (the host checks the file); the image then
             // only carries the agent (claude-code, pi or lab = none).
             if let df = try f.dockerfile("dockerfile") {
@@ -358,8 +367,10 @@ public enum WebAction: Equatable, Sendable {
         case "image-rm":
             a = .imageRemove(try f.image("image"))
         case "net-policy":
-            let e = WebPolicyEdit(preset: try f.oneOf("preset", ["locked", "bake", "agent", "open"]), allow: try f.hosts("allow"),
+            var e = WebPolicyEdit(preset: try f.oneOf("preset", ["locked", "bake", "agent", "open"]), allow: try f.hosts("allow"),
                                   deny: try f.hosts("deny"), remove: try f.hosts("remove"))
+            e.grant = try f.permissionWords("grant")
+            e.revoke = try f.permissionWords("revoke")
             guard !e.isEmpty else { throw Invalid("net-policy: nothing to change") }
             a = .netPolicy(name: try f.sandbox("sandbox"), edit: e)
         case "key-policy":
@@ -553,6 +564,26 @@ public enum WebAction: Equatable, Sendable {
             }
         }
 
+        /// 597: permission ids (`install:python`, `web`, `install`) or `site:HOST`; ≤ 32, each once.
+        func permissionWords(_ key: String) throws -> [String] {
+            guard let v = d[key], !(v is NSNull) else { return [] }
+            guard let a = v as? [Any], a.count <= 32 else { throw Invalid("\(key): a list of at most 32 permissions") }
+            var out: [String] = []
+            for x in a {
+                guard let s = x as? String, s.count <= 260 else { throw Invalid("\(key): a permission id or site:HOST") }
+                if s.hasPrefix("site:") {
+                    guard s.dropFirst(5).range(of: #"^(\*\.)?[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$"#, options: .regularExpression) != nil else {
+                        throw Invalid("\(key): site:HOST, a host name like api.example.com")
+                    }
+                } else {
+                    guard s == "install" || AgentPermissions.isValid(s) else { throw Invalid("\(key): a permission id (doz net permissions) or site:HOST") }
+                }
+                guard !out.contains(s) else { throw Invalid("\(key): each once") }
+                out.append(s)
+            }
+            return out
+        }
+
         /// A detached session's program: 1–64 arguments, no NUL, ≤ 4 KiB each, 16 KiB in all.
         func argv(_ key: String) throws -> [String]? {
             guard let v = d[key], !(v is NSNull) else { return nil }
@@ -575,8 +606,11 @@ public struct WebPolicyEdit: Equatable, Sendable {
     public var allow: [String]
     public var deny: [String]
     public var remove: [String]
+    /// 597 (P6): permissions switched on / off, or `site:HOST`.
+    public var grant: [String] = []
+    public var revoke: [String] = []
 
-    public var isEmpty: Bool { preset == nil && allow.isEmpty && deny.isEmpty && remove.isEmpty }
+    public var isEmpty: Bool { preset == nil && allow.isEmpty && deny.isEmpty && remove.isEmpty && grant.isEmpty && revoke.isEmpty }
 
     public func request(_ name: String) -> HostRequest {
         var r = HostRequest(.netPolicy, name: name)
@@ -584,6 +618,8 @@ public struct WebPolicyEdit: Equatable, Sendable {
         r.allow = allow
         r.deny = deny
         r.removeHosts = remove
+        r.grant = grant.isEmpty ? nil : grant
+        r.revoke = revoke.isEmpty ? nil : revoke
         return r
     }
 }
