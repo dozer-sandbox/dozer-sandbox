@@ -292,15 +292,37 @@ connection against a policy and logs it.
 | `nat` | a normal NAT network card, not proxied, no log | |
 | `none` | no network at all | |
 
+**What the agent can do (597).** A proxied sandbox's policy is a set of plain-language
+**permissions**, each a switch: *Talk to its AI model* (`model`, always on), *Sign in* (`sign-in`),
+*Update itself* (`update` — downloads.claude.ai, pi.dev, the agents' own npm packages), *Install
+software* per ecosystem (`install:system` apt/apk, `install:node`, `install:python`, `install:go`,
+`install:rust`, `install:java`, `install:ruby`, `install:dotnet`; `install` = all), *Use GitHub*
+(`github`), *Send error reports* (`error-reports` — Claude Code's Datadog intake), *Browse the web*
+(`web`, any site — warns first), plus sites you allow (`site:HOST`). Presets are combinations:
+**locked** = the model only; **standard** (`agent`) = model, update, system packages + the base's
+language packages, GitHub, error reports; **open** = everything. A policy stores the permission
+NAMES — the hosts behind them come from the running doz, so an update that adds a host reaches every
+sandbox that has the permission. Your own site rules win over permissions. `--network bake` stays a
+policy of rules (image preparation).
+
 ```bash
-doz net policy NAME                                  # show
+doz net NAME                                         # the checklist (= doz net show NAME), and what was refused lately
+doz net allow NAME install:python site:api.example.com   # live; web / open ask first (--yes)
+doz net deny NAME update github site:example.com
+doz net allow NAME standard|locked|open              # a preset
+doz net permissions                                  # every permission, what it means, its hosts
+doz create NAME --allow web,site:api.example.com --allow=-error-reports   # on top of defaults.permissions
+doz net policy NAME                                  # the raw rules (every rule evaluated, yours first)
 doz net policy NAME --allow github.com --allow '*.githubusercontent.com'
 doz net policy NAME --deny example.com --remove github.com
 doz net policy NAME --preset open
 doz net log NAME [--denied] [--follow]              # host, verdict, rule, bytes; never contents
 ```
 
-A name the policy cannot allow does not even resolve. Current limits: IPv4 only, HTTP/1.1 on hosts
+A refused connection to a known permission's host is offered as "the agent tried to install Python
+packages (PyPI) — doz net allow NAME install:python"; an unknown host as `site:HOST`. The setting
+`defaults.permissions` (standard · locked · open, or `+web,-error-reports`) is what a new proxied
+sandbox gets. A name the policy cannot allow does not even resolve. Current limits: IPv4 only, HTTP/1.1 on hosts
 the proxy decrypts, UDP refused, no port forwards from the Mac into a sandbox yet.
 
 ### Restore points and images
@@ -539,7 +561,7 @@ JSON documents only ever gain fields.
 | An agent's sessions do not start: "the agent prompt does not render" | A `{{variable}}` that is not on the list in `agent-prompt.md` or the sandbox's own prompt — `doz inspect NAME --prompt` names it. |
 | Start over from nothing | `doz uninstall` (it lists what goes; a Homebrew `doz` is left to `brew uninstall doz`), then `brew install doz` and `doz onboard`. |
 | An agent says it has no key / 401 | `doz key ls NAME` — a stdin key is gone after the host stopped; set it again or use `--keychain`. |
-| A package install fails | Check the policy: `doz net log NAME --denied`, then `doz net policy NAME --allow HOST`. |
+| A package install fails | `doz net NAME` names what was refused and the permission that allows it (`doz net allow NAME install:python`, or `site:HOST`); the raw log is `doz net log NAME --denied`. |
 | A sandbox shows as died | The host crashed while it ran — `doz start NAME` checks the disk and cold-boots it. |
 | Anything else | `<store>/host.log` and `doz events`. |
 

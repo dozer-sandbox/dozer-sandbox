@@ -520,9 +520,47 @@ connection against a policy and logs it.
 | `nat` | a normal NAT network card, not proxied, no log | |
 | `none` | no network at all | |
 
-A sandbox keeps the policy it was created with: when a preset gains a host (the `agent` preset's
-Claude Code and GitHub hosts came in 594), a sandbox made before gets it with
-`doz net policy NAME --preset agent` — which replaces any rules you added by hand.
+Since 597 the proxied presets (`agent` = Standard, `locked`, `open`) are sets of **permissions**,
+below, stored by name — a Dozer update that adds a host to a permission reaches every sandbox that
+has it. A sandbox made before 597 keeps its rules: `doz net NAME` shows them as the permissions they
+amount to, and its first permission change stores them as permissions (anything no permission covers
+stays as your own site rules).
+
+### What the agent can do — permissions
+
+Most of the time you do not need hosts at all. A proxied sandbox's network is a short list of
+permissions, each a switch:
+
+| permission | id | Standard |
+|---|---|---|
+| Talk to its AI model | `model` | always on |
+| Sign in | `sign-in` | off (Dozer's proxy supplies the credential) |
+| Update itself | `update` | on |
+| Install software — system packages, Node, Python, Go, Rust, Java, Ruby, .NET | `install:system`, `install:node`, … (`install` = all) | system packages + your base's language |
+| Use GitHub | `github` | on |
+| Send error reports | `error-reports` | on |
+| Browse the web | `web` | off — the agent could send your code anywhere |
+| Sites you allow | `site:HOST` | none |
+
+Presets: **locked** (the model only), **standard**, **open** (everything). The default for new
+sandboxes is the setting `defaults.permissions`.
+
+```bash
+doz net NAME                                         # the checklist, and what the agent was refused lately
+doz net allow NAME install:python                    # live: the next connection
+doz net allow NAME site:api.example.com
+doz net deny NAME github
+doz net allow NAME web --yes                         # asks first without --yes
+doz net permissions                                  # every permission and the hosts behind it
+doz create NAME --allow install:rust,site:api.example.com
+```
+
+When the agent is refused something a permission would allow, `doz net NAME` (and the sandbox page
+in `doz ui`) says so — "the agent tried to install Python packages (PyPI), 3 times" — with the
+command (or button) that allows it. A sandbox stores its permissions by name, so a Dozer update that
+adds a host to "Update itself" fixes every sandbox that has it.
+
+The raw rules are still there:
 
 ```bash
 doz net policy NAME                                  # show
@@ -987,7 +1025,7 @@ is created, and become part of it.
 | The agent does not know where it runs | `doz inspect NAME --prompt`. A claude-code sandbox from an image baked before 594 lacks the launcher part: `doz reset NAME`. |
 | Start over from nothing | `doz uninstall` (it lists what goes), `brew uninstall doz`, then `brew install doz`, `doz onboard`. |
 | An agent says it has no key / 401 | `doz key ls NAME`. A stdin key is gone after the host stopped, so set it again or use `--keychain`. |
-| A package install fails | The policy: `doz net log NAME --denied`, then `doz net policy NAME --allow HOST`. |
+| A package install fails | `doz net NAME` says what was refused and the permission that allows it (`doz net allow NAME install:python`, or `site:HOST`); the raw log is `doz net log NAME --denied`. |
 | A sandbox shows as died | The host crashed while it ran. `doz start NAME` checks the disk and cold-boots it. |
 | The UI says "sign in with a new link" | Its link was used or expired, or the UI restarted. `doz ui link`. |
 | A browser terminal says "Disconnected" | The UI stopped, the browser signed out, or the tab was silent for a long time. Reconnect (or a new link: `doz ui link`). |

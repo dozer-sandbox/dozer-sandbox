@@ -49,6 +49,10 @@ point/revert
 point/fork
 point/rm
 point/save-image
+net/show
+net/allow
+net/deny
+net/permissions
 net/policy
 net/log
 key/set

@@ -79,6 +79,7 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
 | `Scripts/release.sh` (`make release`), `Makefile.config.example`; `ReleaseStamp` in `Sources/DozerCLI/DozerCommand.swift`; `HostUpgradeCheck` in `GroupCommands.swift`; `HostCore.programGone`; `Tests/DozerCLITests/ReleaseTests.swift` | 598: the Homebrew artefact (signed; Developer ID + notarised when configured), the version stamp, `doz host upgrade-check`, the refusal when an upgrade removed a running host's keg |
 | `Sources/DozerHost/Resources.swift`, `HostCore+Resources.swift`; `Sources/DozerCLI/ResourcesCommands.swift`; `Sources/DozerWeb/WebResources.swift`; `Tests/DozerCLITests/ResourcesTests.swift` | 595: the account of everything Dozer uses (the walk, one leaf per entry, the three numbers from `DiskAccounting.exclusive`), refusals, the plan and the deletion; the host ops `resources` / `resources-rm` / `resources-clean` / `resources-kernel`; `doz resources`; the web projection + preview route |
 | `Sources/DozerKit/BaseCatalogue.swift`, `OCIImport.swift`; `Sources/DozerHost/BaseImages.swift`, `ContainerTool.swift`, `AppleContainerResources.swift`; `Sources/DozerCLI/BaseCommands.swift`; `Sources/DozerWeb/WebBases.swift`; `Sources/doz-vmtest/BasesSuite.swift` | 596: base × agent images — the catalogue, `ImageChoice` names, `ImageComposer` (+ `recompose` for W28), native Claude Code, pi's Node, digests; the store's base digests and Dockerfiles; Apple's `container` (status/start/install/build) and its storage in Resources; `doz base`, `doz builder`; the bases route and the Dockerfile picker; `make test-cli-bases` |
+| `Sources/DozerKit/AgentPermissions.swift`; `Sources/DozerHost/Permissions.swift`; `Sources/DozerCLI/NetPermissionCommands.swift`; `Sources/doz-vmtest/PermissionsSuite.swift` | 597: agent permissions — the catalogue and presets per base, `NetworkPolicy.permissions` (stored by name, `effectiveRules`); edits/report/suggestions/facts; `doz net NAME/allow/deny/permissions`, `--allow`; `make test-cli-permissions` |
 | `Tests/DozerWebTests/` | 590: the security rules one by one, and a real listener driven with raw HTTP |
 | `Tests/DozerKitTests/` | Unit tests — no VM |
 
@@ -773,6 +774,33 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
 - **Never rebuild a running test's `doz` in place**: a long VM run (the matrix) runs from a COPY of the
   binary and its bundles — `make cli` under a running host is the 591 incident.
 
+### Agent permissions (597) — design: workspace `changes/597-*/597.01-DESIGN.md`
+
+- **A proxied policy is permissions, stored BY NAME** (`NetworkPolicy.permissions`; the catalogue is
+  `AgentPermissions.all` in the library). Evaluation uses `effectiveRules` (the user's own `rules` FIRST,
+  so they win, then the hosts of each permission as THIS build defines them) and `effectiveDefault`
+  (`web` → allow). Anything that reads a policy's hosts must use those two, never `rules` /
+  `defaultAction` directly — a permissions policy's `rules` are only the user's sites. A pre-597 policy
+  (`permissions == nil`) evaluates exactly as before; `PermissionPolicy.inferred` shows it as
+  permissions and its first permission edit converts it (`asPermissions`: what it allowed stays allowed).
+- **Presets `locked` / `agent` (Standard) / `open` are sets of permissions per base**
+  (`AgentPermissions.preset(_:base:)`, Standard = model, update, `install:system` + the base's
+  ecosystems, github, error-reports); `bake` stays a policy of RULES (preparation). `DozerImages.spec`
+  gives a new proxied sandbox: the form's exact `permissions`, else the preset named by `--network` or
+  the image's network setting (resolved `source != .default` — `settings.string` returns defaults too),
+  else `defaults.permissions`; `--allow` words on top (`site:HOST` → a user rule).
+- **Claude Code's hosts must keep working** under Standard: api/statsig (model), downloads.claude.ai +
+  pi.dev + the agents' own npm packages by path (update), the Datadog intakes (error-reports), GitHub
+  (github). `AgentPermissionsTests.testClaudeCodesOwnHostsBelongToItsPermissionsAndKeepWorking` and
+  `make test-cli-permissions` (real curls from the guest) pin it. "Update itself"'s npm rule is
+  path-conditioned (the proxy decrypts) — dropped when `install:node` allows npm whole.
+- `model` cannot be revoked; `web` / `open` warn and ask (CLI `confirm`, page `confirmWeb`). Sign in is
+  off in Standard; the strict sign-in block still applies on top when it is on.
+- Edits: `HostRequest.grant/revoke` on `net-policy` (`PermissionPolicy.edited`, pure — the web preview
+  uses it too); the checklist + suggestions from the log are `net-permissions` (read-only,
+  `PermissionReport`). The facts block's `network.permissions` / `network.description` list them in
+  plain words (`PermissionPolicy.facts`).
+
 ### Browser terminals (591, on by default — owner ruling) — design: workspace `changes/591-*/591.01-DESIGN.md`
 
 - **A terminal is two steps.** `POST …/terminal-ticket` (CSRF, strict body) mints a 256-bit ticket that
@@ -859,6 +887,7 @@ make test-vm-templates # 593: templates and duplicates on pi — no state disk i
 make test-cli-onboarding # 594: test-cli's onboarding part alone (onboard, a joining start, detach/cancel, init/up, the agent prompt, uninstall)
 make test-cli-timezone # 594 W10: the Mac's (stubbed) zone at boot and every wake, or sandbox.timezone
 make test-cli-bases  # 596: base × agent — cli, Dockerfiles via a fake container, the real container build (SKIPs unless Apple's services run; BASES_START_BUILDER=1), the VM matrix (BASES_PARTS=…)
+make test-cli-permissions # 597: agent permissions — net show/allow/deny/permissions, create --allow, Claude Code's hosts reached under Standard, suggestions, live changes, facts, stored by name (prepares claude-code; network)
 make test-cli-points # 594 W25–W27: point names/lookup, check before asking, exec/run start an off sandbox
 make test-cli-agentsudo # 594 W23: the agent's sudo in a fresh claude-code sandbox (prepares it; network), --no-agent-sudo, the setting at the next boot, root reaches no more
 make test-cli-hoststop # 594 W22: test-cli's host-stop part alone (per-sandbox progress plain/animated, --json, nothing running, a host killed mid-stop)
