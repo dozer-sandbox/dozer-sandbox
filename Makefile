@@ -255,8 +255,8 @@ doznet-verify: ## Rebuild doznet from scratch and check the committed bytes matc
 	FORCE=1 Guest/doznet/build.sh
 	@cmp $(DOZNET_OUT) $(DOZNET_RES) && echo "ok doznet: the committed binary is exactly what the pinned source builds"
 
-docs-drift-check: ## 589: the CLI reference's documented command names vs real `doz --help` (cheap; names only)
-	@Scripts/docs-drift-check.sh
+docs-drift-check: ## 589: the CLI reference's documented command names vs real `doz --help` (cheap; names only); the user manual's commands, flags, settings and links (docs/manual)
+	@JOBS=$(JOBS) Scripts/docs-drift-check.sh
 
 docs: docs-drift-check ## 589: build the static docs site (DocC) into DOCC_OUT (default .docc-build); DOCC_BASE_PATH for hosting (default /DozerKit/)
 	swift package dump-symbol-graph --minimum-access-level public

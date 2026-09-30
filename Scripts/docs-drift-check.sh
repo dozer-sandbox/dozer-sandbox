@@ -28,7 +28,7 @@ fail() {
 [[ -f "$KNOWN" ]] || fail "missing $KNOWN"
 
 echo "docs-drift-check: building the CLI (unsigned — --help needs no entitlement) …"
-(cd "$PACKAGE" && swift build -j 8 --product doz) >/dev/null
+(cd "$PACKAGE" && swift build -j "${JOBS:-8}" --product doz) >/dev/null
 
 [[ -x "$BIN" ]] || fail "missing $BIN after build"
 
@@ -64,3 +64,9 @@ if [[ -n "$missing_from_docs" || -n "$stale_in_docs" ]]; then
 fi
 
 printf 'ok docs-drift-check: %d command names match the CLI exactly (top level + %s)\n' "$(wc -l < "$actual" | tr -d ' ')" "$CMD_GROUPS"
+
+# The user manual (docs/manual): its commands, flags, setting keys, settings table and links, checked
+# against this build (Scripts/manual-check.swift; --write regenerates the settings table).
+if [[ -d "$PACKAGE/docs/manual" ]]; then
+    (cd "$PACKAGE" && swift Scripts/manual-check.swift --doz "$BIN" --manual docs/manual)
+fi
