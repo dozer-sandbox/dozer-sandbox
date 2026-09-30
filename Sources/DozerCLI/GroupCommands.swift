@@ -640,6 +640,8 @@ struct HostUpgradeCheck: AsyncParsableCommand {
         var thisExecutable: String
         var sameBuild: Bool?
         var note: String?
+        /// 594 W28: agent images an older doz prepared ("claude-code: prepared by an older doz — …").
+        var olderImages: [String]?
     }
 
     func run() async throws {
@@ -662,10 +664,25 @@ struct HostUpgradeCheck: AsyncParsableCommand {
                     + "working; `doz host stop` switches to doz \(DozerCommand.version) (running sandboxes hibernate, and wake on the new build)"
             }
         }
+        // 594 W28: an upgrade can change what this doz's agent images contain; name the images an older
+        // doz prepared — never rebuilt here (owner: "better to warn / nag the user about out-of-date images").
+        if store.root.path.isEmpty == false, FileManager.default.fileExists(atPath: store.root.path) {
+            let settings = DozerSettings.load()
+            let older = ["claude-code", "pi"].compactMap { image in
+                AgentVersions.standing(image, store: store, settings: settings).olderRecipeLine.map { "\(image): \($0)" }
+            }
+            if !older.isEmpty { a.olderImages = older }
+        }
         if g.json { Out.json(a); return }
         // 594 W4 (owner's walkthrough): Homebrew's post-install runs this on EVERY install, first ones
-        // included — speak only when an older host is running; otherwise there is nothing to say.
+        // included — speak only when an older host is running or an image is out of date; otherwise
+        // there is nothing to say.
         if let note = a.note { Out.stdout("note: \(note)\n") }
+        if let older = a.olderImages {
+            Out.stdout("note: images prepared by an older doz — " + older.joined(separator: "; ")
+                + ". Rebuild when ready: " + older.map { "doz image bake \($0.prefix { $0 != ":" })" }.joined(separator: ", ")
+                + " (existing sandboxes keep their disks; new sandboxes and doz reset use the new image)\n")
+        }
     }
 
     /// A process's executable path (the kernel's record — `proc_pidpath`), or nil.
