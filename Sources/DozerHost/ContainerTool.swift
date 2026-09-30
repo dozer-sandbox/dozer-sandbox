@@ -159,19 +159,27 @@ public enum ContainerTool {
         return "opened \(pkg.lastPathComponent) in macOS Installer — approve it there, then start its services"
     }
 
-    /// `container build` into an OCI archive. Output lines go to `onLine` as they come.
+    /// `container build` (into Apple's image store, tagged `tag`), then `container image save` of its
+    /// linux/arm64 image as an OCI archive at `output`. Output lines go to `onLine` as they come.
+    /// (596: `build -o type=oci,dest=…` of container 1.2.2 fails after exporting — "The file … doesn't
+    /// exist" — so the image is saved from Apple's store instead; it stays there under `tag`, which
+    /// Resources counts as Dozer's share of Apple's storage.)
     public static func build(dockerfile: String, context: String, tag: String, output: URL,
                              env: [String: String] = ProcessInfo.processInfo.environment,
                              isCancelled: @escaping @Sendable () -> Bool = { false },
                              onLine: @escaping @Sendable (String) -> Void) throws {
         guard let exe = executable(env) else { throw HostError(.unavailable, "Apple's container tool is not installed") }
-        let r = run(exe, ["build", "--platform", "linux/arm64", "--progress", "plain", "-f", dockerfile, "-t", tag,
-                          "-o", "type=oci,dest=\(output.path)", context], env: env, timeout: 3600, onLine: onLine, isCancelled: isCancelled)
+        let r = run(exe, ["build", "--platform", "linux/arm64", "--progress", "plain", "-f", dockerfile, "-t", tag, context],
+                    env: env, timeout: 3600, onLine: onLine, isCancelled: isCancelled)
         if isCancelled() { throw CancellationError() }
         guard r.status == 0 else {
             throw HostError(.failed, "container build failed (exit \(r.status)): " + r.output.split(separator: "\n").suffix(6).joined(separator: " | "))
         }
-        guard FileManager.default.fileExists(atPath: output.path) else { throw HostError(.failed, "container build wrote no archive at \(output.path)") }
+        let s = run(exe, ["image", "save", "--platform", "linux/arm64", "-o", output.path, tag], env: env, timeout: 900, onLine: onLine, isCancelled: isCancelled)
+        if isCancelled() { throw CancellationError() }
+        guard s.status == 0, FileManager.default.fileExists(atPath: output.path) else {
+            throw HostError(.failed, "container image save \(tag) failed (exit \(s.status)): " + s.output.split(separator: "\n").suffix(4).joined(separator: " | "))
+        }
     }
 
     // MARK: running it

@@ -164,12 +164,16 @@ func fakeContainer(_ dir: URL, state: String) -> String {
               start) echo running > "$d/state"; echo "Verifying apiserver is running..."; exit 0;;
             esac;;
           build)
-            dest=""
-            for a in "$@"; do case "$a" in type=oci,dest=*) dest="${a#type=oci,dest=}";; esac; done
             echo "#1 [internal] load build definition from Dockerfile"
             echo "#2 [1/2] FROM (fake)"
             echo "#3 exporting to oci image format"
-            cp "$d/next.tar" "$dest" && echo "#3 DONE 0.1s" && exit 0
+            echo "#3 DONE 0.1s"
+            exit 0;;
+          image)
+            [ "$2" = save ] || exit 2
+            out=""; prev=""
+            for a in "$@"; do [ "$prev" = -o ] && out="$a"; prev="$a"; done
+            cp "$d/next.tar" "$out" && exit 0
             exit 1;;
         esac
         exit 2
@@ -249,8 +253,9 @@ func basesDockerfilePart(_ binary: String) async {
           "start d1: built + imported (\(Int(firstSeconds)) s)")
     check(said.contains("OUTSIDE Dozer's network policy"), "the preparation says it too (the Operations log records it)")
     let calls = (try? String(contentsOf: fake.appendingPathComponent("calls.log"), encoding: .utf8)) ?? ""
-    check(calls.contains("build --platform linux/arm64 --progress plain -f \(df.resolvingSymlinksInPath().path) -t dozer/\(base):latest -o type=oci,dest="),
-          "container build --platform linux/arm64 -f … -o type=oci,dest=… (the context: its folder)")
+    check(calls.contains("build --platform linux/arm64 --progress plain -f \(df.resolvingSymlinksInPath().path) -t dozer/\(base):latest \(app.resolvingSymlinksInPath().path)")
+          && calls.contains("image save --platform linux/arm64 -o ") && calls.contains(" dozer/\(base):latest"),
+          "container build --platform linux/arm64 -f … -t dozer/<base>:latest <its folder>, then container image save -o … (linux/arm64)")
     check(h.run(["exec", "d1", "--", "cat", "/etc/os-release"]).out.contains("Debian"), "d1 boots the Dockerfile's base (Debian)")
     check(h.run(["exec", "d1", "--", "sh", "-c", "id -un; sudo -n true && echo sudo-ok"]).out == "agent\nsudo-ok\n", "the agent user and its sudo are added (the baseline)")
     check(h.run(["exec", "d1", "--", "cat", "/workspace/Dockerfile"]).out.contains("FROM debian"), "/workspace is the Dockerfile's folder")
@@ -328,8 +333,18 @@ func basesRealBuildPart(_ binary: String) async {
     }
     let app = URL(fileURLWithPath: h.store.path + "-app")
     try? FileManager.default.createDirectory(at: app, withIntermediateDirectories: true)
-    defer { try? FileManager.default.removeItem(at: app) }
     let df = app.appendingPathComponent("Dockerfile")
+    defer {
+        try? FileManager.default.removeItem(at: app)
+        // This run's image in Apple's store (doz keeps a Dockerfile's tag there; a test does not).
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/local/bin/container")
+        p.arguments = ["image", "delete", "dozer/\(ImageChoice.dockerfileBase(path: df.resolvingSymlinksInPath().path)):latest"]
+        p.standardOutput = FileHandle.nullDevice
+        p.standardError = FileHandle.nullDevice
+        try? p.run()
+        p.waitUntilExit()
+    }
     try? "FROM docker.io/library/debian:bookworm\nRUN apt-get update && apt-get install -y --no-install-recommends cowsay && rm -rf /var/lib/apt/lists/*\nENV APP_GREETING=hello-from-dockerfile\n"
         .write(to: df, atomically: true, encoding: .utf8)
     let fk = "sk-ant-api03-DOZFAKE" + String(repeating: "r", count: 40)
