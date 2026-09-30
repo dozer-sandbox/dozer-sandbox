@@ -132,6 +132,7 @@ public actor HostCore {
         let m = Managed(sandbox: sb, config: cfg)
         managed[cfg.name] = m
         sb.setAgentSudo(Self.agentSudo(cfg))
+        if !readOnly { sb.setTimeZone(Self.guestTimeZone()) }
         if !readOnly {
             let name = cfg.name
             let events = sb.events()
@@ -470,8 +471,30 @@ public actor HostCore {
         cfg.agentSudo ?? settings().bool(SettingKey.agentSudo)
     }
 
+    /// 594 W10: the guest's time zone — `sandbox.timezone`: `mac` (this Mac's zone, read NOW, so a
+    /// wake after the Mac changed zone follows it) or a zone name. `DOZ_TEST_MAC_TIMEZONE` (a TEST
+    /// seam: a zone name, or a file holding one) stands in for the Mac's.
+    static func guestTimeZone(settings: DozerSettings = .load(),
+                              environment: [String: String] = ProcessInfo.processInfo.environment) -> GuestTimeZone? {
+        let v = settings.string(SettingKey.timeZone) ?? "mac"
+        guard v == "mac" else { return GuestTimeZone(named: v) }
+        return GuestTimeZone(named: macTimeZoneName(environment: environment))
+    }
+
+    static func macTimeZoneName(environment: [String: String] = ProcessInfo.processInfo.environment) -> String {
+        if let t = environment["DOZ_TEST_MAC_TIMEZONE"], !t.isEmpty {
+            if t.hasPrefix("/") { return (try? String(contentsOfFile: t, encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "UTC" }
+            return t
+        }
+        NSTimeZone.resetSystemTimeZone()        // a long-lived host: the Mac may have changed zone since
+        return NSTimeZone.system.identifier
+    }
+
     private func perform(_ r: HostRequest, emit: @escaping @Sendable (HostEvent) -> Void) async throws -> JSONValue {
-        if let n = r.name, let m = managed[n] { m.sandbox.setAgentSudo(Self.agentSudo(m.config)) }
+        if let n = r.name, let m = managed[n] {
+            m.sandbox.setAgentSudo(Self.agentSudo(m.config))
+            m.sandbox.setTimeZone(Self.guestTimeZone())
+        }
         switch r.op {
         case .ping:
             return try JSONValue(encoding: await status())
@@ -832,6 +855,8 @@ public actor HostCore {
     @discardableResult
     func ensureRunning(_ m: Managed, wake: Bool, start: Bool = false,
                        emit: @escaping @Sendable (HostEvent) -> Void = { _ in }) async throws -> EnsureOutcome {
+        // 594 W10: a wake by use (an attach, a terminal) follows the Mac's zone as it is now.
+        m.sandbox.setTimeZone(Self.guestTimeZone())
         let deadline = ContinuousClock.now + .seconds(300)
         while true {
             let p = await effectivePhase(m)

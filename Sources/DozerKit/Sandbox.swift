@@ -851,6 +851,13 @@ public actor Sandbox {
                     await closeKeepingOnFailure(agent)
                 }
             }
+            // 594 W10: the zone too — the Mac may have changed zone while this sandbox slept. Best
+            // effort: a wake never fails for it.
+            if let tz = timeZone {
+                _ = try? await retryingFirstGuestCall("set the guest's time zone") {
+                    try await execInContainer(["sh", "-c", tz.script], privileged: true, timeout: 15)
+                }
+            }
         case .remountShares:
             let tags = (identity?.shareTags ?? [:]).map { (tag: $0.value, guestPath: $0.key) }.sorted { $0.guestPath < $1.guestPath }
             guard !tags.isEmpty else { return }
@@ -1160,7 +1167,7 @@ public actor Sandbox {
                 try await c.copyIn(from: deckhold, to: URL(fileURLWithPath: GuestCommand.deckholdPath), mode: 0o755)
             }
             try await timed(spec.imageSpec == nil ? "prepared the guest" : "prepared the guest (persist dirs bound from the state disk)") {
-                let r = try await Self.exec(on: c, ["sh", "-c", GuestCommand.prepareGuest(imageSpec: spec.imageSpec, agentSudo: agentSudo)], environment: [:],
+                let r = try await Self.exec(on: c, ["sh", "-c", GuestCommand.prepareGuest(imageSpec: spec.imageSpec, agentSudo: agentSudo, timeZone: timeZone)], environment: [:],
                                             workingDirectory: "/", privileged: true, timeout: 30)
                 if r.exitCode != 0 { throw SandboxError.commandFailed(command: "prepare guest", exitCode: r.exitCode, output: r.output + r.errorOutput) }
             }
@@ -1365,6 +1372,19 @@ public actor Sandbox {
     public nonisolated var agentSudo: Bool { agentSudoFlag.value }
     public nonisolated func setAgentSudo(_ on: Bool) { agentSudoFlag.value = on }
     private nonisolated let agentSudoFlag = LockedFlag(true)
+
+    /// 594 W10: the guest's time zone, written at every fresh boot and every wake (nil: left as the
+    /// image has it — UTC). The host sets it from the Mac's zone or the setting.
+    public nonisolated var timeZone: GuestTimeZone? { timeZoneBox.withLock { $0 } }
+    public nonisolated func setTimeZone(_ tz: GuestTimeZone?) { timeZoneBox.withLock { $0 = tz } }
+    private nonisolated let timeZoneBox = LockedBox<GuestTimeZone?>(nil)
+
+    final class LockedBox<T: Sendable>: @unchecked Sendable {
+        private let lock = NSLock()
+        private var v: T
+        init(_ v: T) { self.v = v }
+        func withLock<R>(_ f: (inout T) -> R) -> R { lock.withLock { f(&v) } }
+    }
 
     final class LockedFlag: @unchecked Sendable {
         private let lock = NSLock()

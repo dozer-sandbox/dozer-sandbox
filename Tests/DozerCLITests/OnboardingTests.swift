@@ -543,6 +543,26 @@ final class OnboardingTests: XCTestCase {
         XCTAssertTrue(Uninstall.looksLikeStore(s))
     }
 
+    /// 594 W10: the sandboxes' time zone — the Mac's (read now) or the setting's; the facts say it.
+    func testTheTimeZoneFollowsTheMacOrTheSetting() throws {
+        let none = DozerSettings(text: nil)
+        XCTAssertEqual(HostCore.guestTimeZone(settings: none, environment: ["DOZ_TEST_MAC_TIMEZONE": "Australia/Sydney"])?.name, "Australia/Sydney")
+        let file = root.appendingPathComponent("tz")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try "America/New_York\n".write(to: file, atomically: true, encoding: .utf8)
+        XCTAssertEqual(HostCore.guestTimeZone(settings: none, environment: ["DOZ_TEST_MAC_TIMEZONE": file.path])?.name, "America/New_York",
+                       "the seam's file is read at each look (a wake after the Mac changed zone)")
+        XCTAssertEqual(HostCore.guestTimeZone(settings: none, environment: [:])?.name, NSTimeZone.system.identifier, "mac: this Mac's")
+        let tokyo = DozerSettings(text: "[sandbox]\ntimezone = \"Asia/Tokyo\"\n")
+        XCTAssertEqual(HostCore.guestTimeZone(settings: tokyo, environment: ["DOZ_TEST_MAC_TIMEZONE": "Australia/Sydney"])?.name, "Asia/Tokyo")
+        XCTAssertThrowsError(try DozerSettings.definition("sandbox.timezone")!.parse("Mars/Olympus"))
+        XCTAssertThrowsError(try DozerSettings.definition("sandbox.timezone")!.parse("../x"))
+        XCTAssertNoThrow(try DozerSettings.definition("sandbox.timezone")!.parse("mac"))
+        let v = AgentPrompt.values(name: "n", image: "pi", cpus: 1, memoryMiB: 1024, workspace: nil, network: .none, account: nil, version: "1",
+                                   hostname: "h", timeZone: "Australia/Sydney")
+        XCTAssertTrue(try AgentPrompt.render(AgentPrompt.builtInTemplate, v, source: "b").contains("- Time zone: Australia/Sydney (the Mac's"))
+    }
+
     /// 594 W6: the Images list says what WILL be installed — never a stale pin.
     func testTheImagesListSaysWhatWillBeInstalled() throws {
         let store = DozerStore(root: root)

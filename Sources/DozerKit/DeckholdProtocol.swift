@@ -279,8 +279,10 @@ public enum GuestCommand {
     /// Idempotent.
     /// 594 W23: `agentSudo` — the image's user gets passwordless sudo (a sudoers drop-in) or not (the
     /// drop-in removed); applied at every fresh boot, so it follows the sandbox's setting without a rebake.
-    public static func prepareGuest(imageSpec: ImageSpec?, agentSudo: Bool = true) -> String {
+    /// 594 W10: `timeZone` — the guest's /etc/localtime (every image, the lab too).
+    public static func prepareGuest(imageSpec: ImageSpec?, agentSudo: Bool = true, timeZone: GuestTimeZone? = nil) -> String {
         var s = "set -e; rm -rf /run/deckhold; mkdir -p /run/deckhold; chmod 1777 /run/deckhold"
+        if let tz = timeZone { s += "; " + tz.script }
         guard let r = imageSpec else { return s }
         s += "; " + agentSudoScript(user: r.user, on: agentSudo)
         for d in r.resolvedPersistDirs {

@@ -29,6 +29,14 @@ public enum SettingType: Sendable, Equatable {
     case subnet
     /// 594: a package version — `latest` (resolved when an image is prepared) or an exact `1.2.3`.
     case version
+    /// 594 W10: `mac` (follow this Mac's zone) or an IANA zone name (`Australia/Sydney`).
+    case timeZone
+
+    /// An IANA zone name this Mac knows (plain characters only — it becomes a guest file's content).
+    public static func isTimeZoneName(_ s: String) -> Bool {
+        s.count <= 64 && s.range(of: #"^[A-Za-z][A-Za-z0-9_+-]*(/[A-Za-z0-9_+-]+)*$"#, options: .regularExpression) != nil
+            && TimeZone(identifier: s) != nil
+    }
 
     public var name: String {
         switch self {
@@ -38,6 +46,7 @@ public enum SettingType: Sendable, Equatable {
         case .path: "path (\"\" = automatic)"
         case .subnet: "IPv4 subnet, a.b.c.d/nn (\"\" = a free one)"
         case .version: "latest, or an exact version like 2.1.227"
+        case .timeZone: "mac, or a time zone like Australia/Sydney"
         }
     }
 
@@ -62,6 +71,8 @@ public enum SettingApplies: String, Codable, Sendable, CaseIterable {
     case hostRestart = "host-restart"
     case newStore = "new-store"
     case nextBoot = "next-boot"
+    /// 594 W10: at each sandbox's next start or wake.
+    case nextStartOrWake = "next-start-or-wake"
 
     public var note: String {
         switch self {
@@ -72,6 +83,7 @@ public enum SettingApplies: String, Codable, Sendable, CaseIterable {
         case .hostRestart: "applies after doz host stop (the next host reads it)"
         case .newStore: "the choice for a store that has not made one (doz account keepalive wins)"
         case .nextBoot: "applies when the next boot of a sandbox is kept"
+        case .nextStartOrWake: "applies at each sandbox's next start or wake"
         }
     }
 }
@@ -128,6 +140,9 @@ public struct SettingDefinition: Sendable {
         case (.version, .string(let s)):
             guard s == "latest" || SettingType.isExactVersion(s) else { throw SettingsError("\(key) is latest, or an exact version like 2.1.227") }
             return v
+        case (.timeZone, .string(let s)):
+            guard s == "mac" || SettingType.isTimeZoneName(s) else { throw SettingsError("\(key) is mac, or a time zone like Australia/Sydney") }
+            return v
         default:
             throw SettingsError("\(key) is a \(type.name), not a \(v.typeName)")
         }
@@ -146,7 +161,7 @@ public struct SettingDefinition: Sendable {
         case .int:
             guard let i = Int(t) else { throw SettingsError("\(key) is a whole number") }
             return try validate(.int(i))
-        case .choice, .path, .subnet, .version:
+        case .choice, .path, .subnet, .version, .timeZone:
             return try validate(.string(t))
         }
     }
@@ -241,6 +256,8 @@ public enum SettingKey {
     public static let agentPrompt = "agent.prompt"
     /// 594 W23: the agent's passwordless sudo inside its sandbox (default on).
     public static let agentSudo = "sandbox.agent_sudo"
+    /// 594 W10: the sandboxes' time zone (`mac` or an IANA name).
+    public static let timeZone = "sandbox.timezone"
     /// 594 (owner ruling): the web UI may take an API key or a setup token (a masked field).
     public static let allowSecretEntry = "ui.allow_secret_entry"
     /// 594 W19 (owner: "a new web page opening up every time i run doz ui"): when `doz ui` opens a tab.
@@ -347,6 +364,9 @@ public struct DozerSettings: Sendable {
             .init("sandbox", "agent_sudo", .bool, .bool(true),
                   "The agent (the image's user in claude-code and pi sandboxes) has passwordless sudo inside its sandbox, so it can install system packages (sudo apt-get install …). The VM, the network policy and the absent credentials are the boundary — root inside reaches no more than the agent does. Applied at every boot and every agent session start (no image is rebuilt); a sandbox's own choice (doz create --no-agent-sudo, agent_sudo in doz_project.yaml) wins over this.",
                   flag: "doz create --no-agent-sudo / --agent-sudo", applies: .nextSession),
+            .init("sandbox", "timezone", .timeZone, .string("mac"),
+                  "The sandboxes' time zone: mac (this Mac's, read again at every boot and wake — a laptop that travels while a sandbox sleeps is followed) or a zone like Australia/Sydney. Written to the guest's /etc/localtime; the agent's facts say it.",
+                  applies: .nextStartOrWake),
         ]
         s.append(.init("images", "claude_code_version", .version, .string("latest"),
                        "The Claude Code the claude-code image is prepared with: latest (asked of the npm registry when the image is prepared, then installed at that exact version, integrity-checked; a newer one is prepared in the background, and the next new sandbox gets it) or an exact version like 2.1.227. A sandbox keeps the version it was created with; doz reset NAME moves it to the image's current one.",
@@ -541,6 +561,7 @@ public struct DozerSettings: Sendable {
             case .path: kind = "path"
             case .subnet: kind = "subnet"
             case .version: kind = "version"
+            case .timeZone: kind = "timezone"
             }
             var note: String?
             switch r.source {

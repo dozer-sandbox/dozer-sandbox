@@ -141,6 +141,22 @@ final class ImageSpecTests: XCTestCase {
         }
     }
 
+    /// 594 W10: the guest's time zone — this Mac's TZif file, written at boot (every image) and wake.
+    func test_guestTimeZone() throws {
+        let tz = try XCTUnwrap(GuestTimeZone(named: "Australia/Sydney"))
+        XCTAssertTrue(tz.tzif.starts(with: Data("TZif".utf8)))
+        XCTAssertTrue(tz.script.contains(tz.tzif.base64EncodedString()))
+        XCTAssertTrue(tz.script.contains("mv -f /etc/.doz-localtime /etc/localtime"))
+        XCTAssertTrue(tz.script.contains("printf '%s\\n' 'Australia/Sydney' > /etc/timezone"))
+        for bad in ["../../etc/passwd", "Australia/../../x", "a b", "x';rm -rf /;'", "", "Nowhere/Land"] {
+            XCTAssertNil(GuestTimeZone(named: bad), bad)
+        }
+        XCTAssertNil(GuestTimeZone(name: "UTC", tzif: Data("not a zone".utf8)), "only TZif bytes")
+        XCTAssertTrue(GuestCommand.prepareGuest(imageSpec: nil, timeZone: tz).contains(tz.script), "the lab too")
+        XCTAssertTrue(GuestCommand.prepareGuest(imageSpec: AgentImages.pi, timeZone: tz).contains(tz.script))
+        XCTAssertFalse(GuestCommand.prepareGuest(imageSpec: nil).contains("localtime"), "none given: the image's own")
+    }
+
     func test_stateDiskLayoutScript() {
         XCTAssertEqual(GuestCommand.stateKey("/home/agent/.pi/agent"), "home_agent_.pi_agent")
         let s = GuestCommand.prepareGuest(imageSpec: AgentImages.pi)

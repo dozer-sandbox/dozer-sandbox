@@ -309,6 +309,14 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   `stopHostShowingProgress` (the CLI's progress view: animated on a tty, plain lines else) or, in the
   UI, Restart host's operation (`WebOperation.lines`). A host that dies mid-stop: the client reports
   what it saw (`HostStopView.seen`), never hangs. `make test-cli-hoststop` (in `test-cli` too).
+- **The sandbox follows the Mac's time zone** (594 W10): `GuestTimeZone` — the zone's TZif bytes from
+  THIS Mac's `/usr/share/zoneinfo` (portable to glibc and musl; the Alpine lab has no tzdata) — written to
+  `/etc/localtime` (+ `/etc/timezone`) by `prepareGuest` at every fresh boot and by `.resyncClock` at
+  every wake (best effort; no new planner step). The host sets it (`HostCore.guestTimeZone`: the setting
+  `sandbox.timezone` = `mac`, read NOW with `NSTimeZone.resetSystemTimeZone()`, or a zone) at adopt,
+  every named request and every `ensureRunning`. The facts say it (`sandbox.timezone`).
+  `DOZ_TEST_MAC_TIMEZONE` (a name, or a file holding one, read at each look) stubs the Mac's zone;
+  `make test-cli-timezone`.
 - **Names are never cut; a point is found by what a person types** (594 W25): a restore point's name is
   stored as given, ≤ `RestorePoint.maximumNameLength` (64; longer is refused with the limit — names live
   only in meta.json, a point's directory is its id). `RestorePoint.resolve`: exact id, exact name
@@ -711,6 +719,7 @@ make test-vm-claude  # 588: Claude credentials through the proxy with a FAKE key
 make test-vm-upgrade # 591: the previous release sleeps sandboxes, this build wakes them; the in-place overwrite incident (scratch store $TMPDIR/doz-upgrade-store)
 make test-vm-templates # 593: templates and duplicates on pi — no state disk in a template; duplicate's workspace and fresh/copied state disk
 make test-cli-onboarding # 594: test-cli's onboarding part alone (onboard, a joining start, detach/cancel, init/up, the agent prompt, uninstall)
+make test-cli-timezone # 594 W10: the Mac's (stubbed) zone at boot and every wake, or sandbox.timezone
 make test-cli-points # 594 W25–W27: point names/lookup, check before asking, exec/run start an off sandbox
 make test-cli-agentsudo # 594 W23: the agent's sudo in a fresh claude-code sandbox (prepares it; network), --no-agent-sudo, the setting at the next boot, root reaches no more
 make test-cli-hoststop # 594 W22: test-cli's host-stop part alone (per-sandbox progress plain/animated, --json, nothing running, a host killed mid-stop)

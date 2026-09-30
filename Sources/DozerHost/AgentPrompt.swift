@@ -65,6 +65,7 @@ public enum AgentPrompt {
         ("account.name", "the Anthropic account the proxy injects, or none"),
         ("credentials.description", "a sentence: how credentials reach the agent"),
         ("sandbox.sudo", "yes or no: the agent has passwordless sudo (sandbox.agent_sudo)"),
+        ("sandbox.timezone", "the VM's time zone, e.g. Australia/Sydney (the Mac's, by default)"),
         ("sudo.description", "a sentence: sudo, and that the network policy still applies to root"),
         ("mac.hostname", "the Mac's name"),
         ("dozer.version", "the doz that rendered it"),
@@ -79,6 +80,7 @@ public enum AgentPrompt {
     - Network: {{network.description}}
     - Credentials: {{credentials.description}}
     - System: {{sudo.description}}
+    - Time zone: {{sandbox.timezone}} (the Mac's — `date` shows the user's local time).
     - The user may pause, sleep or hibernate this VM between your turns; your processes, files and sessions survive it.
     - More — what persists (root disk, state disk, restore points), the network policy, what you cannot do from inside — is in the `dozer` skill.
     """
@@ -169,8 +171,11 @@ public enum AgentPrompt {
     /// The values of every variable for a sandbox, from its current record.
     public static func values(name: String, image: String, cpus: Int, memoryMiB: UInt64, workspace: String?,
                               network: NetworkMode, account: String?, version: String,
-                              hostname: String = macHostname(), credentialProblem: String? = nil, agentSudo: Bool = true) -> [String: String] {
+                              hostname: String = macHostname(), credentialProblem: String? = nil, agentSudo: Bool = true,
+                              timeZone: String? = nil) -> [String: String] {
         var v: [String: String] = [:]
+        // 594 W10: the VM follows the Mac's time zone (or the setting's).
+        v["sandbox.timezone"] = timeZone ?? "UTC"
         // 594 W23: the agent's passwordless sudo, and what it does not change.
         v["sandbox.sudo"] = agentSudo ? "yes" : "no"
         v["sudo.description"] = agentSudo
@@ -286,7 +291,8 @@ public enum AgentPrompt {
         let network: NetworkMode = policy.map { .proxied($0) } ?? config.spec.network
         let vals = values(name: config.name, image: config.image, cpus: config.spec.cpus, memoryMiB: config.spec.memoryMiB,
                           workspace: config.workspace, network: network, account: account, version: version, hostname: hostname,
-                          credentialProblem: credentialProblem, agentSudo: HostCore.agentSudo(config, settings: settings))
+                          credentialProblem: credentialProblem, agentSudo: HostCore.agentSudo(config, settings: settings),
+                          timeZone: HostCore.guestTimeZone(settings: settings, environment: settings.environment)?.name)
         var r = AgentPromptReport(enabled: settings.bool(SettingKey.agentPrompt), agent: agent, text: nil, error: nil, layers: [],
                                   skill: nil, promptPath: guestPromptPath,
                                   skillPath: skillDirectory(agent: agent, home: imageSpec.home) + "/SKILL.md")
