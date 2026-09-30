@@ -309,7 +309,7 @@ account; its state disk starts fresh unless `--copy-state`. Keys are not copied.
 
 ```bash
 doz host [--foreground] [--idle-timeout MIN]   # run it by hand
-doz host stop                                    # hibernates everything running, then exits
+doz host stop                                    # hibernates everything running (a line each, then a summary), then exits
 doz host status                                  # is one running, and what does it hold? never starts one
 ```
 

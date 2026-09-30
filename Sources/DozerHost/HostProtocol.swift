@@ -300,6 +300,9 @@ public struct HostEvent: Codable, Equatable, Sendable {
     public var completedItems: Int?
     public var totalItems: Int?
     public var error: String?
+    /// 594 W22: a `step`/`failed` whose text differs from the `started` it ends ("hibernating X" →
+    /// "hibernated X"): the started text, so a progress view ends the right line.
+    public var startedAs: String?
 
     public init(kind: Kind, sandbox: String?, text: String? = nil, phase: String? = nil, milliseconds: Double? = nil,
                 completedBytes: Int64? = nil, totalBytes: Int64? = nil, connection: ConnectionRecord? = nil, time: Date = Date()) {

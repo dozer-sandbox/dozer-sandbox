@@ -323,10 +323,12 @@ function renderOperations() {
       h('td', null, o.state === 'running' ? h('span', { class: 'mini-spin', title: 'running' }) : h('span', { class: 'op-state', title: o.state }, o.state === 'done' ? '✓' : '✕')),
       h('td', { class: 'op-action' }, OP_GLYPH[o.action] ? icon(OP_GLYPH[o.action]) : null, o.action), h('td', null, o.sandbox ? h('a', { href: '#/sandbox/' + o.sandbox }, o.sandbox) : '—'),
       h('td', null, clock(o.startedAt)), h('td', { class: 'num' }, secs),
-      h('td', { class: 'op-text' }, o.text));
+      // 594 W22: an operation of several parts (Restart host) lists each finished one.
+      h('td', { class: 'op-text' }, o.text, o.lines && o.lines.length ? h('ul', { class: 'op-lines' }, o.lines.map((l) => h('li', null, l))) : null));
   });
+  // (replaceChildren writes a null as the text "null" — h() skips it, replaceChildren does not.)
   box.replaceChildren(h('h1', null, 'Operations'),
-    state.preps.length ? preparationsSection() : null,
+    ...(state.preps.length ? [preparationsSection()] : []),
     h('p', { class: 'sub' }, 'What this UI asked the host to do, newest first: live progress while it runs, then its result. A failure also raises a message.'),
     h('div', { class: 'toolbar' }, filter, list.length + ' of ' + all.length),
     panel(table(['', 'Action', 'Sandbox', 'Started', 'Took', 'Progress / result'], rows, [4]), 'Nothing yet — actions you take show here.'));
@@ -893,7 +895,6 @@ function hostLastKnown() {
   }
   return 'The host was not running when this page last heard.';
 }
-function clock(t) { return t ? new Date(t).toLocaleTimeString() : '—'; }
 async function uiRetryTick() {
   clearTimeout(state.uiRetry);
   state.uiRetry = null;

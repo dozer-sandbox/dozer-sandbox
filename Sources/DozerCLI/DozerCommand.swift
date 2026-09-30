@@ -181,9 +181,14 @@ final class Progress: @unchecked Sendable {
     private let view: ProgressTerminal
     private var timer: DispatchSourceTimer?
 
-    init(_ g: GlobalOptions) {
-        verbose = g.verbose
+    /// 594 W22: plain lines from the board (the view's own finished lines) rather than the host's
+    /// per-event line, and nothing held back — `doz host stop`'s per-sandbox lines.
+    private let boardLines: Bool
+
+    init(_ g: GlobalOptions, immediate: Bool = false) {
+        verbose = g.verbose || immediate
         quiet = g.quiet
+        boardLines = immediate
         view = ProgressTerminal(mode: g.progressMode, color: true, plainPrefix: "  · ")
     }
 
@@ -205,6 +210,10 @@ final class Progress: @unchecked Sendable {
     /// nothing; a finished transfer says its summary.
     private func plain(_ e: HostEvent) {
         let finals = view.board.apply(e)
+        if boardLines {
+            emitLines(finals.map { view.format($0) })
+            return
+        }
         var lines: [String] = []
         switch e.kind {
         case .started, .output, .progress: break

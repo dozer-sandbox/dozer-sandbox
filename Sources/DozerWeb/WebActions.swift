@@ -529,4 +529,7 @@ public struct WebOperation: Codable, Equatable, Sendable {
     public var text: String
     public var startedAt: Date
     public var milliseconds: Double?
+    /// 594 W22: finished lines, for an operation that does several things at once (Restart host: each
+    /// sandbox's hibernation — "✓ hibernated w1 (snapshot 40 MB) — 0.4 s").
+    public var lines: [String]? = nil
 }

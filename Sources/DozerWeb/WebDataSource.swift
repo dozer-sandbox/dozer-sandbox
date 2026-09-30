@@ -251,13 +251,16 @@ public final class HostWebData: DozerWebData, @unchecked Sendable {
         guard WebVersion.compare(st.version, ui) == .orderedAscending else {
             throw HostError(.invalid, "the host (\(st.version)) is not older than doz ui (\(ui)) — nothing to restart")
         }
+        // 594 W22: each sandbox's hibernation reaches the operation as it happens (`onEvent`).
         let stopped = try await blocking { try HostClient.request(HostRequest(.hostStop), store: store, autostart: false, onEvent: onEvent) }
         if stopped.ok != true { throw stopped.error ?? HostError(.failed, "the host did not stop") }
+        let stop = try? (stopped.result ?? .null).decode(HostStopResult.self)
         // It exits once it has hibernated everything; a new host would wait for its lock anyway.
         for _ in 0..<600 where store.hostIsRunning() { try await Task.sleep(for: .milliseconds(100)) }
         let m = try await blocking { try HostClient.request(HostRequest(.ping), store: store, autostart: true) }
-        if m.ok == true { return m.result ?? .null }
-        throw m.error ?? HostError(.failed, "the host gave no reason")
+        guard m.ok == true else { throw m.error ?? HostError(.failed, "the host gave no reason") }
+        let host = try? (m.result ?? .null).decode(HostStatus.self)
+        return try JSONValue(encoding: WebHostRestart(stop: stop, host: host))
     }
 
     public func hostAnswers() -> Bool {

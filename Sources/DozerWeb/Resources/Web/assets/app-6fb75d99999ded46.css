@@ -99,6 +99,9 @@ nav a.active { background: var(--ink); color: var(--bg); }
 .banner .b-acts { display: flex; gap: 8px; align-items: center; flex: none; }
 .banner .b-x { background: none; border: 0; color: var(--muted); cursor: pointer; font-size: 16px; line-height: 1; padding: 2px 4px; }
 .banner .b-x:hover { color: var(--ink); }
+/* 594 W22: an operation's finished parts (Restart host: each sandbox's hibernation). */
+.op-lines { margin: 4px 0 0; padding: 0; list-style: none; color: var(--muted); font-size: 12px; }
+.op-lines li { font-variant-numeric: tabular-nums; }
 /* 594 W21: doz ui is gone — the page is paused under an overlay; the banner strip stays IN FRONT of it
    (and outside the inert parts), pinned to the top of the viewport. */
 .ui-overlay { position: fixed; inset: 0; z-index: 50; background: rgba(8, 10, 14, 0.55); display: flex;
