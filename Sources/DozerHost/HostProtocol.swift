@@ -645,6 +645,8 @@ public struct SessionOpened: Codable, Equatable, Sendable {
     public var name: String
     public var session: String
     public var created: Bool
+    /// 594 (W17): the sandbox's default session (what `doz attach NAME` attaches to).
+    public var defaultSession: String? = nil
 }
 
 /// `image ls`.

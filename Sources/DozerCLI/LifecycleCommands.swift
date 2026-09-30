@@ -308,7 +308,7 @@ struct Up: AsyncParsableCommand {
             if g.json { Out.json(["name": .string(name), "session": .string(opened.session), "phase": .string(started.phase),
                                   "created": .bool(!exists), "sessionCreated": .bool(opened.created),
                                   "milliseconds": .number(started.milliseconds)] as [String: JSONValue]) }
-            else { Out.stdout("\(name) is \(Out.phaseLabel(started.phase)); session \(opened.session)\(opened.created ? " started" : "") — doz attach \(name) \(opened.session)\n") }
+            else { Out.stdout("\(name) is \(Out.phaseLabel(started.phase)); session \(opened.session)\(opened.created ? " started" : "") — \(reattachCommand(sandbox: name, session: opened.session, defaultSession: opened.defaultSession))\n") }
             return
         }
         if !g.quiet {

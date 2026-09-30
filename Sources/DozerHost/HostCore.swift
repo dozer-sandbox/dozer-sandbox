@@ -539,7 +539,9 @@ public actor HostCore {
             guard let l = TerminalLayout.read(store, m.name) else { return .null }
             return try JSONValue(encoding: l)
         case .openSession:
-            return try JSONValue(encoding: try await openSession(r))
+            var opened = try await openSession(r)
+            opened.defaultSession = defaultSessionName(r.name)      // 594 (W17): the shortest reattach hint
+            return try JSONValue(encoding: opened)
         case .exec:
             return try JSONValue(encoding: try await exec(r))
         case .pointTake, .pointList, .pointRevert, .pointFork, .pointRm, .pointSaveImage:
@@ -887,6 +889,11 @@ public actor HostCore {
     }
 
     /// For the server's attach relay.
+    /// 594 (W17): the session `doz attach NAME` (no session) attaches to.
+    func defaultSessionName(_ name: String?) -> String? {
+        name.flatMap { managed[$0] }?.config.defaultSession.name
+    }
+
     func sandboxForAttach(_ name: String?, session: String?, wake: Bool) async throws -> (Sandbox, String) {
         let m = try get(name)
         if wake { try await ensureRunning(m, wake: true) }
