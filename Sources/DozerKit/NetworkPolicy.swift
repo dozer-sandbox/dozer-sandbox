@@ -31,6 +31,10 @@ public struct NetworkPolicy: Sendable, Codable, Equatable {
     /// The preset this policy was made from, for display ("agent", "bake", …); nil once edited
     /// into something no preset describes.
     public var preset: String?
+    /// 597 (P5): the permissions it has, BY NAME (`AgentPermissions`) — their hosts come from the
+    /// running build at every evaluation; `rules` are then the user's own (they come first). nil: a
+    /// policy of rules only (every policy before 597, and `bake`).
+    public var permissions: [String]?
 
     public init(defaultAction: Action = .deny, rules: [EgressRule] = [], preset: String? = nil) {
         self.defaultAction = defaultAction
@@ -122,6 +126,7 @@ public struct NetworkPolicy: Sendable, Codable, Equatable {
     /// known only for requests the proxy can read (plain HTTP, and hosts it decrypts); a rule with
     /// a method or path condition never matches when they are unknown.
     public func evaluate(host: String, port: UInt16, method: String? = nil, path: String? = nil) -> Verdict {
+        let rules = effectiveRules, defaultAction = effectiveDefault
         for (i, r) in rules.enumerated() where r.matches(host: host, port: port) {
             if r.hasHTTPConditions {
                 guard let method, let path else { continue }
@@ -135,6 +140,7 @@ public struct NetworkPolicy: Sendable, Codable, Equatable {
     /// The verdict for a CONNECTION, before any request is seen. A host that only HTTP-conditioned
     /// rules could allow is let through as `inspect`: the proxy must decrypt it and judge each request.
     public func evaluateConnection(host: String, port: UInt16) -> ConnectionVerdict {
+        let rules = effectiveRules, defaultAction = effectiveDefault
         for (i, r) in rules.enumerated() where r.matches(host: host, port: port) {
             if r.hasHTTPConditions {
                 if r.action == .allow { return ConnectionVerdict(kind: .inspect, rule: r.label, ruleIndex: i) }
@@ -152,11 +158,11 @@ public struct NetworkPolicy: Sendable, Codable, Equatable {
     /// Whether a DNS question for `name` is answered: when a connection to it could be allowed on
     /// ANY port. (Docker gates DNS too: a denied name does not even resolve.)
     public func allowsName(_ name: String) -> Bool {
-        for r in rules where r.matchesName(name) {
+        for r in effectiveRules where r.matchesName(name) {
             if r.action == .allow { return true }
             if !r.hasHTTPConditions && r.ports == nil { return false }
         }
-        return defaultAction == .allow
+        return effectiveDefault == .allow
     }
 
     /// Add `allow host` ahead of every other rule (the "allow this host" button).
