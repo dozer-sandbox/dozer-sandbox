@@ -87,6 +87,18 @@ struct Doctor: AsyncParsableCommand {
         } else {
             out.append(DoctorCheck(check: "kernel", status: .warn, detail: "not cached yet — the first start downloads it (~570 MiB, once)"))
         }
+        // 594 W28: an agent image an older doz made, or a newer agent release — said, never rebuilt by itself.
+        let settings = DozerSettings.load()
+        for image in ["claude-code", "pi"] {
+            let s = AgentVersions.standing(image, store: store, settings: settings)
+            guard s.version != nil else { continue }
+            var parts: [String] = []
+            if let o = s.olderRecipeLine { parts.append(o) }
+            if let a = s.available, let v = s.version { parts.append("\(AgentImages.agentName(image) ?? image) \(a) is available (image has \(v))") }
+            out.append(parts.isEmpty
+                ? DoctorCheck(check: "image \(image)", status: .ok, detail: "up to date (\(s.version!))")
+                : DoctorCheck(check: "image \(image)", status: .warn, detail: parts.joined(separator: "; ") + " — rebuild when ready: doz image bake \(image) (existing sandboxes keep their disks)"))
+        }
         out.append(DoctorCheck(check: "vmnet", status: .ok,
                                detail: "needed only for --network nat (a free 192.168.100–199.0/24 subnet is picked); proxied sandboxes have no interface"))
         // The host.

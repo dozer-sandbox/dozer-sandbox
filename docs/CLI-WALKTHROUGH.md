@@ -65,8 +65,9 @@ doz image ls                       # claude-code 2.1.285 (latest), once it is do
 
 The Claude Code installed is the **latest** one, asked of the npm registry while the image is
 prepared, then installed at that exact version (integrity-checked). When a newer one comes out, the
-next `doz create` or `doz up` still starts at once on the image you have, and the newer version is
-prepared in the background for the sandbox after it. For a fixed version:
+next `doz create` or `doz up` still starts at once on the image you have, and `doz image ls` says the
+newer version is available — `doz image bake claude-code` rebuilds when you are ready (nothing is
+rebuilt without you). For a fixed version:
 `doz config set images.claude_code_version 2.1.227`.
 
 (`doz onboard --cancel` would stop it.) A `doz up` of that image meanwhile would *join* the same

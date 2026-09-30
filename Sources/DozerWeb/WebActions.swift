@@ -215,7 +215,7 @@ public enum WebAction: Equatable, Sendable {
     /// Fields each action may carry (besides `action`).
     static let fields: [String: Set<String>] = {
         var f: [String: Set<String>] = [
-            "create": ["sandbox", "image", "cpus", "memoryMiB", "workspace", "isolated", "network", "subnet", "account"],
+            "create": ["sandbox", "image", "cpus", "memoryMiB", "workspace", "isolated", "network", "subnet", "account", "rebuild"],
             "open-session": ["sandbox", "session", "argv"],
             "point-take": ["sandbox", "point", "note"],
             "point-revert": ["sandbox", "point", "confirm"],
@@ -261,6 +261,8 @@ public enum WebAction: Equatable, Sendable {
                                   workspace: try f.workspace("workspace"), network: try f.oneOf("network", ["agent", "bake", "locked", "open", "nat", "none"]),
                                   subnet: try f.subnet("subnet"), account: try f.accountRef("account", allowDefault: true))
             o.isolated = try f.flag("isolated")
+            // 594 W28: the New Sandbox form's "Rebuild first" (an out-of-date image is otherwise used as it is).
+            o.rebuild = try f.flag("rebuild")
             guard !(o.isolated == true && o.workspace != nil) else { throw Invalid("isolated: or a workspace, not both") }
             a = .create(name: try f.sandbox("sandbox"), options: o)
         case "open-session":
