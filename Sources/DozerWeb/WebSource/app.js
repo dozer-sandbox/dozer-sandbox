@@ -669,6 +669,14 @@ function imagePicker({ images = [], bases = null, value = 'claude-code', dockerf
   tplSelect.addEventListener('change', () => { template = tplSelect.value; onChange(); });
   const tplPanel = h('div', { class: 'tpl-panel' }, tplSelect, h('small', { class: 'muted' }, 'A template is a saved root disk: its base and agent are the ones it was saved from.'));
   const summary = h('small', { class: 'muted image-summary', 'data-image-summary': '' });
+  // The image by its name, too (hidden): what a script or an older page names — setting it moves the choices.
+  const names = [...new Set(['claude-code', 'pi', 'lab', ...catalogue.flatMap((b) => AGENTS.map(([a]) => imageNameOf(b.id, a))), ...templates.map((t) => t.name)])];
+  const byName = h('select', { name: 'image', hidden: true, 'aria-hidden': 'true', tabindex: '-1' }, names.map((n) => h('option', { value: n }, n)));
+  byName.addEventListener('change', () => {
+    const p = parseImageName(byName.value, ids.length ? ids : ['node', 'alpine']);
+    if (p) { agent = p.agent; base = p.base; kind = 'recommended'; } else if (templates.some((t) => t.name === byName.value)) { kind = 'template'; template = byName.value; tplSelect.value = template; }
+    changed();
+  });
   function paint() {
     for (const [a, b] of Object.entries(agentSegs)) { b.classList.toggle('active', a === agent); b.setAttribute('aria-pressed', a === agent ? 'true' : 'false'); b.disabled = kind === 'template'; }
     for (const [k, b] of Object.entries(kindSegs)) { b.classList.toggle('active', k === kind); b.setAttribute('aria-pressed', k === kind ? 'true' : 'false'); }
@@ -684,6 +692,8 @@ function imagePicker({ images = [], bases = null, value = 'claude-code', dockerf
     tplPanel.hidden = kind !== 'template';
     paintBuilder();
     const b = catalogue.find((x) => x.id === base);
+    const now = kind === 'template' ? template : kind === 'dockerfile' ? null : imageNameOf(base, agent);
+    if (now && [...byName.options].some((o) => o.value === now)) byName.value = now;
     summary.textContent = kind === 'template' ? 'Template ' + template
       : kind === 'dockerfile' ? 'Your Dockerfile · ' + (AGENTS.find((x) => x[0] === agent) || [0, agent])[1]
       : (b ? b.title : base) + ' · ' + (AGENTS.find((x) => x[0] === agent) || [0, agent])[1] + ' — image ' + imageNameOf(base, agent);
@@ -691,7 +701,7 @@ function imagePicker({ images = [], bases = null, value = 'claude-code', dockerf
   paint();
   const el = h('div', { class: 'field image-picker' },
     h('span', null, 'Agent'), agentCtl,
-    h('span', null, 'Base'), kindCtl, grid, dfPanel, deckPanel, tplPanel, summary);
+    h('span', null, 'Base'), kindCtl, grid, dfPanel, deckPanel, tplPanel, summary, byName);
   return {
     el,
     /// The image name the host is sent (a Dockerfile's: the agent's carrier — the host names it by its file).
@@ -2778,6 +2788,8 @@ function wizDiskNeed() {
 }
 function wizardNode() {
   const w = state.wiz, d = w.data;
+  // 596: the base catalogue for the First sandbox step, read early (a late answer never re-renders a typed form).
+  if (!w.basesAsked) { w.basesAsked = true; api('bases').then((b) => { w.bases = b; }).catch(() => { w.bases = null; }); }
   const stepper = h('ol', { class: 'wiz-steps', 'aria-label': 'Steps' }, WIZ_STEPS.map((s, i) =>
     h('li', { class: i === w.step ? 'current' : i < w.step ? 'done' : null, 'aria-current': i === w.step ? 'step' : null }, h('span', { class: 'wiz-n' }, String(i + 1)), s)));
   const body = [wizStep0, wizStep1, wizStep2, wizStep3, wizStep4, wizStep5, wizStep6][w.step](d, w);
@@ -2979,8 +2991,7 @@ function wizStep5(d, w) {
   const imgs = [...new Set([...chosen, ...d.images.filter((i) => i.prepared).map((i) => i.name)])];
   const name = h('input', { type: 'text', name: 'wiz-name', placeholder: 'a-z 0-9 -', autocomplete: 'off', spellcheck: 'false' });
   name.value = w.firstName || '';
-  // 596 (B1): the same Agent × Base choice as New Sandbox (the catalogue read once for the wizard).
-  if (!w.bases) api('bases').then((b) => { w.bases = b; if (w.step === 5) renderWizard(true); }).catch(() => { w.bases = null; });
+  // 596 (B1): the same Agent × Base choice as New Sandbox (the catalogue read when the wizard opened).
   let chooser = null;
   const picker = imagePicker({ images: [], bases: w.bases || null, value: w.firstImage || imgs[0] || 'claude-code', dockerfile: w.firstDockerfile || '',
     onChange: () => { w.firstImage = picker.image(); w.firstDockerfile = picker.dockerfile() || ''; if (chooser) chooser.imageChanged(); if (acct) acct.agentChanged(); },
