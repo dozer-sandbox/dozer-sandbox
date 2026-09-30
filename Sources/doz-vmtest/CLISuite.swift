@@ -466,6 +466,7 @@ func cliSuite() async throws {
     // 599: the session bridges.
     await cliClipboardSuite(binary: h.binary)
     await cliBrowserSuite(binary: h.binary)
+    await cliTmuxSuite(binary: h.binary)
 }
 
 /// 593: how `doz image bake lab -v` shows its progress — plain (no escape, no \r, no spinner) when

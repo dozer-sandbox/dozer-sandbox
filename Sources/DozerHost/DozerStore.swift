@@ -161,7 +161,8 @@ public struct SandboxConfig: Codable, Equatable, Sendable {
 public enum DozerImages {
     public static let builtIn = ["lab", "claude-code", "pi"]
     /// The lab's apk packages (Alpine 3.20).
-    public static let labPackages = ["bash", "ncurses", "fd"]
+    /// 599 (594.B3): tmux too (sessions.tmux).
+    public static let labPackages = ["bash", "ncurses", "fd", "tmux"]
 
     /// Where a workspace is shared in the guest.
     public static let workspaceGuestPath = "/workspace"

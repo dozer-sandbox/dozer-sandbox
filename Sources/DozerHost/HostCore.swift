@@ -1180,11 +1180,14 @@ public actor HostCore {
         let all = Set(list.map(\.name))
         var argv: [String]
         let session: String
+        // 599 (594.B3): the session inside tmux (the sandbox's own choice, else sessions.tmux).
+        let tmuxWanted = Self.sandboxValue(m.config, SettingKey.tmux) == .bool(true)
         if let s = r.session {
             try GuestCommand.validateSessionName(s)
             if live.contains(s) {
                 // The same program again (a repeated click, a retried `run`) is the session already running.
-                if let a = r.argv, list.first(where: { $0.name == s && !$0.isEnded })?.command != a.joined(separator: " ") {
+                let running = list.first(where: { $0.name == s && !$0.isEnded })?.command
+                if let a = r.argv, running != a.joined(separator: " "), running != GuestCommand.inTmux(session: s, argv: a).joined(separator: " ") {
                     throw HostError(.exists, "session \(s) is already running in \(m.name) — attach to it, or pick another name")
                 }
                 return SessionOpened(name: m.name, session: s, created: false)
@@ -1209,7 +1212,16 @@ public actor HostCore {
         // 594 W28: never claim sudo the guest does not have (a disk from an older image).
         // 599 (594.B2): the browser bridge's xdg-open — written at every fresh boot; here too, for a
         // sandbox that has run since before this doz (a wake keeps its old disk state). Idempotent, ~20 ms.
-        _ = try? await m.sandbox.exec(["sh", "-c", GuestCommand.openShimInstall], timeoutSeconds: 10)
+        // 599 (594.B3): with tmux asked for, its configuration too, and whether the image has tmux.
+        let prepared = try? await m.sandbox.exec(["sh", "-c", GuestCommand.openShimInstall + (tmuxWanted ? "; " + GuestCommand.tmuxPrepare : "")],
+                                                 timeoutSeconds: 10)
+        var tmuxNotice: String?
+        let inTmux = tmuxWanted && prepared?.output.contains("tmux=yes") == true
+        if tmuxWanted && !inTmux {
+            tmuxNotice = "sessions.tmux is on, but this sandbox's image has no tmux (an older doz prepared it) — \(session) runs without it; "
+                + (m.config.spec.imageSpec != nil ? "doz image bake \(m.config.image) and doz reset \(m.name) bring it" : "install it in the sandbox (apk add tmux)")
+            note(m.name, tmuxNotice!)
+        }
         let sudoInstalled: Bool? = m.config.spec.imageSpec == nil ? nil
             : ((try? await m.sandbox.exec(["test", "-x", "/usr/bin/sudo"], timeoutSeconds: 10))?.exitCode).map { $0 == 0 }
         if let report = agentPromptReport(m, sudoInstalled: sudoInstalled) {
@@ -1223,6 +1235,7 @@ public actor HostCore {
         }
         let size = TermSize(cols: r.cols ?? 120, rows: r.rows ?? 36)
         let workdir: String? = m.config.spec.imageSpec == nil && m.config.workspace != nil ? DozerImages.workspaceGuestPath : nil
+        if inTmux { argv = GuestCommand.inTmux(session: session, argv: argv) }
         let t0 = ContinuousClock.now
         let started = Date()
         do {
@@ -1249,7 +1262,10 @@ public actor HostCore {
                                            command: argv.joined(separator: " "), openedAt: started, openMs: openMs) {
             m.sessionRows[session] = id
         }
-        return SessionOpened(name: m.name, session: session, created: true)
+        var opened = SessionOpened(name: m.name, session: session, created: true)
+        opened.tmux = inTmux ? true : nil
+        opened.notice = tmuxNotice
+        return opened
     }
 
     private func exec(_ r: HostRequest, emit: @escaping @Sendable (HostEvent) -> Void = { _ in }) async throws -> ExecOutput {

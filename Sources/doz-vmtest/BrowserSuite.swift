@@ -29,6 +29,9 @@ func cliBrowserSuite(binary: String) async {
     check(r.code == 0, "up bb --image lab --network none --detach (exit \(r.code))")
     r = t.run(["exec", "bb", "--", "sh", "-c", "ls -l /usr/local/lib/doz/bin/ | tr -s ' ' | cut -d' ' -f9-; nc 2>&1 | head -1"])
     check(r.out.contains("xdg-open") && r.out.contains("sensible-browser -> xdg-open"), "the shim and its aliases are in the guest (\(r.out.debugDescription))")
+    // A login shell (the lab's own session is `bash -l`): /etc/profile resets PATH; the drop-in puts it back.
+    r = t.run(["exec", "bb", "--", "bash", "-lc", "command -v xdg-open"])
+    check(r.out.trimmingCharacters(in: .whitespacesAndNewlines) == "/usr/local/lib/doz/bin/xdg-open", "a login shell finds the shim too (\(r.out.trimmingCharacters(in: .whitespacesAndNewlines)))")
     // A fake OAuth callback server, as a real one behaves: it reads the request, then answers
     // (busybox nc -e runs it on the connection; its first argument is where the request line goes).
     r = t.run(["exec", "bb", "--", "sh", "-c",

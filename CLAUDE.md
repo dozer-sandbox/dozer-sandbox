@@ -755,6 +755,17 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   relays each connection through `Sandbox.openGuestStream([deckhold, connect, -p, PORT])` (no NIC
   needed), ends 3 s after the first answered callback or at 10 min; one per sandbox. Notices and the
   host log show `BrowserBridge.shown` (scheme, host, path) — never the query (a sign-in's state).
+- **A login shell resets PATH** (/etc/profile on Alpine and Debian): the shim's dir comes back through
+  `/etc/profile.d/doz-browser-bridge.sh` (written with the shim). A test in `bash --norc -i` would not
+  have caught it — `test-cli-browser` checks `bash -lc`.
+- **tmux (B3) runs INSIDE deckhold**, never instead of it: `GuestCommand.inTmux` = `tmux -L doz-NAME -f
+  tmuxConfPath new-session -A -s NAME ARGV…` — a server PER SESSION (a shared server would give a later
+  session the first one's environment: its placeholders, its `$DOZ_TTY`). `tmuxPrepare` writes the conf
+  and answers `tmux=yes|no` in the one root exec the session open already makes; no tmux → run without
+  it + `SessionOpened.notice`. The conf keeps the bridges alive (`set-clipboard on` + the clipboard
+  feature: tmux passes OSC 52 out; the shim sends its marker to `$DOZ_TTY` when `$TMUX` is set, because
+  tmux drops a sequence it does not know). The "already running" check compares the wrapped argv too.
+  tmux is in `devBaselinePackages` and `labPackages` — a recipe change: W28's "older recipe" names it.
 - **Tests never touch the Mac**: `DOZ_TEST_PASTEBOARD=<file>` replaces pbcopy; `DOZ_TEST_OPEN_URL=<file>`
   replaces `/usr/bin/open` and plays the browser's last step (GET the callback on the Mac's port).
   A fake OAuth server must READ before it answers (busybox `nc -e`), as a real one does.

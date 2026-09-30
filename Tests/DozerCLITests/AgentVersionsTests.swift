@@ -239,6 +239,11 @@ final class AgentVersionsTests: XCTestCase {
         XCTAssertFalse(AgentVersions.isCurrentRecipe(old))
         XCTAssertTrue(AgentVersions.isCurrentRecipe(AgentImages.claudeCode))
         XCTAssertEqual(AgentVersions.recipeChanges(old), ["sudo", "apt-utils", "package lists"])
+        // 599 (594.B3): an image 0.12.0-rc.9 prepared (sudo, apt-utils — no tmux) is named for what it lacks.
+        var rc9 = AgentImages.claudeCode
+        let rc9Packages = AgentImages.devBaselinePackages.filter { $0 != "tmux" }
+        rc9.steps[1] = BakeStep.script("install the developer baseline (\(rc9Packages.joined(separator: " ")))", "apt-get install -y \(rc9Packages.joined(separator: " "))\n")
+        XCTAssertEqual(AgentVersions.recipeChanges(rc9), ["tmux"])
         XCTAssertTrue(AgentVersions.prepared("claude-code", store: store, settings: latest).isEmpty, "not this build's image")
         XCTAssertEqual(AgentVersions.usable("claude-code", store: store, settings: latest), [old])
         XCTAssertEqual(try AgentVersions.spec("claude-code", purpose: .create, store: store, settings: latest), old, "a create uses it — no waiting, no rebuild")

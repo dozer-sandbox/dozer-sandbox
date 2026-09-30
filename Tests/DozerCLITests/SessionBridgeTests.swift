@@ -162,6 +162,24 @@ final class SessionBridgeTests: XCTestCase {
         XCTAssertTrue(GuestCommand.openShim.contains("\\033]6340;doz-open;%s\\007"), "the marker the scanner reads")
     }
 
+    // MARK: B3 — tmux
+
+    func testASessionInTmuxHasItsOwnServerAndKeepsDozsFeatures() throws {
+        XCTAssertEqual(GuestCommand.inTmux(session: "claude", argv: ["claude", "--x"]),
+                       ["tmux", "-L", "doz-claude", "-f", GuestCommand.tmuxConfPath, "new-session", "-A", "-s", "claude", "claude", "--x"])
+        XCTAssertEqual(GuestCommand.inTmux(session: "a.b", argv: ["sh"])[2], "doz-a_b", "tmux refuses a . in a name")
+        for line in ["set -g mouse on", "set -s set-clipboard on", "terminal-features ',*:clipboard'", "set -g set-titles on"] {
+            XCTAssertTrue(GuestCommand.tmuxConf.contains(line), line)
+        }
+        XCTAssertTrue(GuestCommand.tmuxPrepare.hasSuffix("then echo tmux=yes; else echo tmux=no; fi"))
+        XCTAssertTrue(AgentImages.devBaselinePackages.contains("tmux") && DozerImages.labPackages.contains("tmux"))
+        XCTAssertTrue(DozerSettings.perSandbox.contains(SettingKey.tmux))
+        XCTAssertEqual(DozerSettings.definition(SettingKey.tmux)?.defaultValue, .bool(false), "off by default")
+        let p = try DozerProject.parse("version: 1\nname: p\nimage: lab\ntmux: true\n")
+        XCTAssertEqual(p.settings[SettingKey.tmux], .bool(true))
+        XCTAssertTrue(GuestCommand.openShim.contains("[ -n \"${TMUX:-}\" ]"), "inside tmux the marker goes to the session's own terminal")
+    }
+
     // MARK: settings
 
     func testTheClipboardIsAPerSandboxSetting() throws {

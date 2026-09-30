@@ -360,7 +360,9 @@ public enum AgentImages {
     /// gets passwordless sudo at boot unless the sandbox's `agent_sudo` is off (the drop-in is written
     /// per boot, never baked: `GuestCommand.agentSudoScript`).
     public static let devBaselinePackages = ["procps", "git", "less", "jq", "unzip", "openssh-client",
-                                             "ca-certificates", "curl", "vim-tiny", "ripgrep", "fd-find", "python3", "sudo", "apt-utils"]
+                                             "ca-certificates", "curl", "vim-tiny", "ripgrep", "fd-find", "python3", "sudo", "apt-utils",
+                                             // 599 (594.B3): sessions.tmux runs a session inside tmux.
+                                             "tmux"]
 
     /// 594 W23: apt's package lists are KEPT in the image (they were deleted, so even root needed
     /// `apt-get update` before `apt-get install` worked). ~20–50 MB of the root disk, an APFS clone
@@ -383,7 +385,7 @@ public enum AgentImages {
     /// way 0.12.0-rc.1 did (no sudo, no apt-utils, package lists deleted), so a test can hold an image
     /// "prepared by an older doz" and check it is named as such — and never rebuilt without asking.
     static let olderRecipeForTests = ProcessInfo.processInfo.environment["DOZ_TEST_OLDER_RECIPE"] == "1"
-    static let olderDevBaselinePackages = devBaselinePackages.filter { $0 != "sudo" && $0 != "apt-utils" }
+    static let olderDevBaselinePackages = devBaselinePackages.filter { $0 != "sudo" && $0 != "apt-utils" && $0 != "tmux" }
     static let olderDevBaseline = BakeStep.script("install the developer baseline (\(olderDevBaselinePackages.joined(separator: " ")))", """
         export DEBIAN_FRONTEND=noninteractive
         apt-get update
@@ -417,7 +419,7 @@ public enum AgentImages {
     /// What the baseline must provide, checked after every agent bake. 594 W23: sudo, a sudoers
     /// drop-in `visudo -cf` accepts, and package lists apt can install from.
     static let devBaselineVerify: [VerifyCheck] = olderRecipeForTests ? olderDevBaselineVerify : [
-        VerifyCheck(["sh", "-c", "for t in ps top git less jq unzip ssh curl vi rg fd python3 sudo; do command -v $t >/dev/null || { echo missing $t; exit 1; }; done; echo baseline-ok"],
+        VerifyCheck(["sh", "-c", "for t in ps top git less jq unzip ssh curl vi rg fd python3 sudo tmux; do command -v $t >/dev/null || { echo missing $t; exit 1; }; done; echo baseline-ok"],
                     expect: "baseline-ok"),
         // The boot writes the rule only after /usr/sbin/visudo accepts it (as root: /etc/sudoers is 0440).
         VerifyCheck(["sh", "-c", "test -x /usr/bin/sudo && test -x /usr/sbin/visudo && test -d /etc/sudoers.d && echo sudoers-ok"],

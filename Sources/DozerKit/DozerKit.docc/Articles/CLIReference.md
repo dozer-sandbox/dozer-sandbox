@@ -61,7 +61,7 @@ doz uninstall [--keep-store] [--keep-config] [--yes]
   first if it never was). **`up` with no name**, in that folder, creates, starts or wakes exactly
   that sandbox, with the folder at `/workspace`, starts its `sessions` and attaches to the first.
   The file is YAML with a closed set of keys — `version`, `name`, `image`, `cpus`, `memory`,
-  `network`, `account`, `sessions`, `agent_prompt`, `agent_prompt_mode`, `agent_sudo`, `clipboard`, `browser_bridge`; an unknown key or a bad
+  `network`, `account`, `sessions`, `agent_prompt`, `agent_prompt_mode`, `agent_sudo`, `clipboard`, `browser_bridge`, `tmux`; an unknown key or a bad
   value is an error naming its line.
 
   ```yaml
@@ -157,7 +157,14 @@ attached.
   `localhost:PORT` forwarded into the sandbox's (each connection a guest `deckhold connect -p PORT`)
   until 3 s after the callback was answered, 10 min at most; one per sandbox. Refused: other
   schemes, the Mac's own loopback, > 3 per 10 s, > 2048 bytes. `sandbox.browser_bridge = on | off`,
-  per sandbox as the clipboard (`--browser-bridge`, `browser_bridge:`).
+  per sandbox as the clipboard (`--browser-bridge`, `browser_bridge:`). A login shell finds the shim
+  through `/etc/profile.d/doz-browser-bridge.sh`.
+- **tmux (599):** `sessions.tmux` (default off; `doz create --tmux`, `tmux: true`, per sandbox) runs each
+  new session as `tmux -L doz-SESSION -f /usr/local/lib/doz/tmux.conf new-session -A -s SESSION CMD…`
+  inside deckhold: attach/detach, sleep/wake, saved screens, browser terminals and both bridges keep
+  working (mouse on, set-clipboard on). Limits: Ctrl-b and the mouse are tmux's; the kitty keyboard
+  protocol and modifyOtherKeys do not fully pass through; the exit code is tmux's. No tmux in the
+  image (an older doz's): the session runs without it and `run`/`up` say so.
 
 ### Agents, keys and accounts
 
@@ -466,7 +473,8 @@ doz config unset KEY       # back to the default (commented out again)
 doz config init            # write the file: every setting listed, commented out at its default
 doz config path            # ${XDG_CONFIG_HOME:-~/.config}/dozer-sandbox/doz.toml
 doz config show|get|set|unset --sandbox NAME …   # 599: one sandbox's own value of a per-sandbox setting
-                                                  # (sandbox.clipboard, sandbox.browser_bridge, sandbox.agent_sudo) — it wins over the file
+                                                  # (sandbox.clipboard, sandbox.browser_bridge, sessions.tmux,
+                                                  #  sandbox.agent_sudo) — it wins over the file
 ```
 
 One settings file, `doz.toml`, lists every setting grouped in sections (`[ui]`, `[host]`,

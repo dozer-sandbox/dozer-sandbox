@@ -699,6 +699,10 @@ public struct SessionOpened: Codable, Equatable, Sendable {
     public var started: Bool? = nil
     public var woke: Bool? = nil
     public var bootMilliseconds: Double? = nil
+    /// 599 (594.B3): the session runs inside tmux (`sessions.tmux`).
+    public var tmux: Bool? = nil
+    /// 599: something the person should know about how it opened (tmux asked for but not in the image).
+    public var notice: String? = nil
 }
 
 /// `image ls`.

@@ -44,6 +44,9 @@ struct CreateArguments: ParsableArguments {
     @Option(name: .long, help: "on or off: xdg-open in this sandbox opens http(s) URLs in the Mac's browser, a sign-in's localhost callback forwarded (default: the setting sandbox.browser_bridge, on).")
     var browserBridge: String?
 
+    @Flag(inversion: .prefixedNo, help: "Run this sandbox's sessions inside tmux (its windows, panes, copy mode; Ctrl-b) — default: the setting sessions.tmux, off.")
+    var tmux: Bool?
+
     @Flag(name: .long, help: "When the image is out of date (an older doz's recipe, or a newer agent release): rebuild it first (~2 min, needs network; existing sandboxes are not affected).")
     var rebuild = false
 
@@ -77,6 +80,7 @@ struct CreateArguments: ParsableArguments {
         }
         try take(SettingKey.clipboard, clipboard, "--clipboard")
         try take(SettingKey.browserBridge, browserBridge, "--browser-bridge")
+        if let tmux { s[SettingKey.tmux] = .bool(tmux) }
         return s.isEmpty ? nil : s
     }
 
@@ -107,7 +111,7 @@ struct CreateArguments: ParsableArguments {
 
     var givenAny: Bool {
         image != nil || cpus != nil || memory != nil || workspace != nil || network != nil || subnet != nil || account != nil || agentPrompt != nil || isolated || agentSudo != nil
-            || clipboard != nil || browserBridge != nil
+            || clipboard != nil || browserBridge != nil || tmux != nil
     }
 }
 
@@ -367,7 +371,8 @@ struct Up: AsyncParsableCommand {
                 o.session = s.name
                 o.argv = s.command
                 let opened = try decode(try call(o, g), SessionOpened.self, g)
-                if !g.json && !g.quiet && opened.created { Out.stderr("[doz] started session \(s.name)\n") }
+                if !g.json && !g.quiet && opened.created { Out.stderr("[doz] started session \(s.name)\(opened.tmux == true ? " (in tmux)" : "")\n") }
+                if !g.json, let n = opened.notice { Out.stderr("[doz] \(n)\n") }
             }
             open.session = first.name
             open.argv = first.command
@@ -376,6 +381,7 @@ struct Up: AsyncParsableCommand {
         open.cols = size.cols
         open.rows = size.rows
         let opened = try decode(try call(open, g), SessionOpened.self, g)
+        if !g.json, let n = opened.notice { Out.stderr("[doz] \(n)\n") }
         if g.json || detach {
             if g.json { Out.json(["name": .string(name), "session": .string(opened.session), "phase": .string(started.phase),
                                   "created": .bool(!exists), "sessionCreated": .bool(opened.created),

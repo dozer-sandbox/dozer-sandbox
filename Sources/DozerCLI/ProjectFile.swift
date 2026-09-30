@@ -43,6 +43,8 @@ struct DozerProject: Equatable {
          "# clipboard: write           # a copy in the sandbox (OSC 52) reaches the Mac clipboard, with a notice; off: never. Applies now"),
         ("browser_bridge", SettingKey.browserBridge,
          "# browser_bridge: on         # xdg-open in the sandbox opens http(s) URLs in the Mac's browser (a sign-in's callback forwarded); off: never. Applies now"),
+        ("tmux", SettingKey.tmux,
+         "# tmux: false                # true: sessions run inside tmux (windows, panes, Ctrl-b). From the next session"),
     ]
 
     /// The keys, in the order the file lists them, with what each says.

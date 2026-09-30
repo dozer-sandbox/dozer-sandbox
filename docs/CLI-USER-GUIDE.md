@@ -179,6 +179,7 @@ agent_prompt_mode: append   # or replace
 agent_sudo: true            # the agent's passwordless sudo (default: the setting sandbox.agent_sudo)
 clipboard: write            # a copy in the sandbox reaches the Mac clipboard, with a notice; off: never (applies at once)
 browser_bridge: on          # xdg-open opens http(s) URLs in the Mac's browser, a sign-in's callback forwarded; off: never
+tmux: false                 # true: sessions run inside tmux (from the next session)
 ```
 
 The schema is closed: an unknown key, a key given twice, a wrong type or a value out of range is an
@@ -354,6 +355,25 @@ sign-in cannot come back.
   the notice says so. A later "Sign in" permission (feature 597) can build on this switch.
 - The shim and the forward helper (`deckhold connect`) arrive with the sandbox's next start; a sandbox
   woken from before gets the shim at its next session.
+
+### tmux inside a session
+
+Off by default. With `sessions.tmux` on — for every sandbox (`doz config set sessions.tmux true`),
+or one (`doz create --tmux`, `tmux: true` in `doz_project.yaml`, `doz config set --sandbox NAME
+sessions.tmux true`) — each **new** session runs its program inside tmux: windows, panes, copy mode,
+its status bar and its prefix key, **Ctrl-b**. tmux runs *within* doz's own session holder, so
+everything else is unchanged: `doz attach` and **Ctrl-]**, sleep and wake (tmux and its programs
+are where they were), saved screens (tmux's screen, status bar included), browser terminals, and the
+clipboard and browser bridges (a copy and an `xdg-open` from inside tmux reach the Mac). Each session
+has a tmux server of its own (`tmux -L doz-SESSION`), and reopening a session finds a program tmux
+still holds.
+
+Limits: tmux takes Ctrl-b and the mouse (in `doz ui`, Shift+drag still selects text); the kitty
+keyboard protocol and xterm's modifyOtherKeys do not fully pass through tmux, so a program that relies
+on them (Claude Code's richer key handling) sees less; the session's exit code is tmux's (0), not the
+program's. tmux must be in the image: the built-in images this doz prepares have it; a sandbox on an
+image an older doz prepared runs the session without it and says how to get it (`doz image bake`,
+then `doz reset`).
 
 ## Agents and keys
 
@@ -945,11 +965,12 @@ the others say when they apply (the next sandbox created, the next session, or a
 | `[claude]` | `permissions` (`skip` · `ask`) — Claude Code's own prompts in a claude-code sandbox; `-e DOZ_CLAUDE_PERMISSIONS=…` on `run`/`exec` still wins |
 | `[defaults]` | `cpus` (2), `nat_subnet` (a free one; `$DOZ_SUBNET`) |
 | `[sandbox]` | `agent_sudo` (true — the agent's passwordless sudo inside claude-code and pi sandboxes; a sandbox's `--no-agent-sudo` / `agent_sudo` wins; from its next session and boot), `timezone` (`mac` — the Mac's zone, read again at every start and wake, so a sandbox that slept while you travelled wakes in your new zone — or a zone like `Australia/Sydney`; the agent's facts say it), `clipboard` (`write` · `off` — the clipboard bridge, see "Session bridges"; applies at once), `browser_bridge` (`on` · `off` — xdg-open to the Mac's browser and a sign-in's callback; applies at once) |
+| `[sessions]` | `tmux` (false — new sessions run inside tmux; see "tmux inside a session"; from the next session) |
 | `[images]` | `claude_code_version`, `pi_version` (`latest`, or an exact version like `2.1.227` — see "Agent versions" below) |
 | `[images.lab]` · `[images.claude-code]` · `[images.pi]` | `memory_mib` (1024 · 2048 · 2048), `network` (`bake` · `agent` · `agent`) — a custom image follows the image it was saved from |
 | `[kernel]` | `path` (`$DOZ_KERNEL`), `cache` (`$DOZ_KERNEL_CACHE`) |
 
-- **Per sandbox:** `sandbox.clipboard`, `sandbox.browser_bridge` and `sandbox.agent_sudo` can also be one sandbox's own
+- **Per sandbox:** `sandbox.clipboard`, `sandbox.browser_bridge`, `sessions.tmux` and `sandbox.agent_sudo` can also be one sandbox's own
   (`doz config set|get|unset|show --sandbox NAME …`, `doz create` flags, `doz_project.yaml`); its
   value wins over the file's.
 - **Precedence:** a command-line flag, then its environment variable, then the file, then the
