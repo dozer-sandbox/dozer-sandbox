@@ -374,7 +374,7 @@ public struct DozerSettings: Sendable {
                   applies: .nextStartOrWake),
         ]
         s.append(.init("images", "claude_code_version", .version, .string("latest"),
-                       "The Claude Code the claude-code image is prepared with: latest (asked of the npm registry when the image is prepared, then installed at that exact version, integrity-checked; a newer one is prepared in the background, and the next new sandbox gets it) or an exact version like 2.1.227. A sandbox keeps the version it was created with; doz reset NAME moves it to the image's current one.",
+                       "The Claude Code the claude-code image is prepared with: latest (asked of the npm registry when the image is prepared, then installed at that exact version, integrity-checked; a newer one is only said — doz image bake claude-code rebuilds when you choose) or an exact version like 2.1.227. A sandbox keeps the version it was created with; doz reset NAME moves it to the image's current one.",
                        applies: .nextCreate))
         s.append(.init("images", "pi_version", .version, .string("latest"),
                        "The pi coding agent the pi image is prepared with: latest or an exact version, as images.claude_code_version.",

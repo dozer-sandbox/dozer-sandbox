@@ -301,8 +301,11 @@ bytes it shares with its parent (APFS clones) and its own (what removing it free
 or an exact version. `latest` is resolved when the image is PREPARED — one npm registry lookup
 (remembered for an hour, `<store>/agent-versions.json`) for the version and its sha512 integrity;
 the bake installs that exact version, integrity-checked, and the version is in the image spec and
-its bake key. A create or a first start uses the image already prepared; when the registry has a
-newer one, it is prepared in the background (Operations shows it) for the next sandbox. Offline, the
+its bake key. A create or a first start uses the image already prepared. 594 W28 (owner ruling): an
+image is never rebuilt by itself — a newer release, or an image an older doz made ("prepared by an
+older doz — this doz's image adds: sudo, package lists"), is said by `image ls` (STATUS), the Images
+page, `doctor` and `create` (`--rebuild` / `--use-current`; a terminal asks); `doz image bake NAME`
+rebuilds (existing sandboxes keep their disks; new ones and `doz reset` use it). Offline, the
 prepared image is used; `latest` with no image and no network fails, naming an exact version to set.
 A sandbox keeps its root disk: `doz reset NAME` moves it to the image's current version. Claude Code
 never updates itself inside a sandbox (`DISABLE_AUTOUPDATER`, `DISABLE_UPDATES`).

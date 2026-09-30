@@ -289,11 +289,14 @@ public struct WebSandboxRow: Codable, Equatable, Sendable {
     /// 594: the agent it runs (claude-code, pi) and what is wrong with its account for it (the page's banner).
     public var agent: String?
     public var credentialProblem: String?
+    /// 594 W28: made from an image an older doz's recipe made — the notice (with what reset keeps).
+    public var olderImage: String?
 
     public init(_ i: SandboxInfo) {
         accountApplies = ["agent", "open", "custom"].contains(i.network)
         agent = i.agent
         credentialProblem = i.credentialProblem
+        olderImage = i.olderImageLine
         name = i.name
         image = i.image
         phase = i.phase
@@ -766,9 +769,17 @@ public struct WebImage: Codable, Equatable, Sendable {
     public var versionLine: String?
     /// 594: the agent a sandbox of this image runs (a template's: the image it was saved from).
     public var agent: String?
+    /// 594 W28: `up to date` · `older recipe` · `update available` · `not prepared` · `preparing`, what
+    /// an older doz's image lacks, and the line that says it (with the rebuild command).
+    public var status: String?
+    public var olderRecipe: [String]?
+    public var standing: String?
 
     public init(_ r: ImageRow) {
         agent = r.agent
+        status = r.status
+        olderRecipe = r.olderRecipe
+        standing = r.standing
         name = r.name
         kind = r.kind
         baked = r.baked

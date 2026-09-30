@@ -28,6 +28,8 @@ struct List: AsyncParsableCommand {
                       r.sessions.map(String.init) ?? "—", net, account, ws])
         }
         Out.stdout(Out.table(t, rightAligned: [3, 4, 5]))
+        // 594 W28: a sandbox whose system disk came from an image an older doz made.
+        for r in rows { if let line = r.olderImageLine { Out.stdout("\(r.name): \(line)\n") } }
     }
 }
 
