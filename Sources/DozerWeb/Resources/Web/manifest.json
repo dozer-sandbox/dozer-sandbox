@@ -6,7 +6,7 @@
       "mimeType" : "text/html; charset=utf-8",
       "publicPath" : "/",
       "resourcePath" : "index.html",
-      "sha256" : "bf1dd76de5935cda9770189b65d3dc6523c57dd393dd9c406a7fcad25833d611"
+      "sha256" : "e8b903ece4857dfb6e0836ca7bba86e94411d931e9277b5437354ca6277dcd93"
     },
     {
       "cachePolicy" : "public, max-age=31536000, immutable",
@@ -20,17 +20,9 @@
       "cachePolicy" : "public, max-age=31536000, immutable",
       "class" : "page",
       "mimeType" : "application/javascript; charset=utf-8",
-      "publicPath" : "/assets/app-ab74968d584f6b59.js",
-      "resourcePath" : "assets/app-ab74968d584f6b59.js",
-      "sha256" : "ab74968d584f6b59125ad1ad797bcbfc541c3f349cbc889da712ddd9e3dd855e"
-    },
-    {
-      "cachePolicy" : "public, max-age=31536000, immutable",
-      "class" : "page",
-      "mimeType" : "application/javascript; charset=utf-8",
-      "publicPath" : "/assets/frame-0cfc83b215bb79e7.js",
-      "resourcePath" : "assets/frame-0cfc83b215bb79e7.js",
-      "sha256" : "0cfc83b215bb79e7a79dd64e6d062d6ea950e3445e44ae9ea47699c8f2a7f472"
+      "publicPath" : "/assets/app-a3a9ff32d008c818.js",
+      "resourcePath" : "assets/app-a3a9ff32d008c818.js",
+      "sha256" : "a3a9ff32d008c8184577eaf8ce03f09709f5a766fdf5eb46c03b65380f7ccac1"
     },
     {
       "cachePolicy" : "public, max-age=31536000, immutable",
@@ -39,6 +31,14 @@
       "publicPath" : "/assets/frame-94140d7445706e1a.css",
       "resourcePath" : "assets/frame-94140d7445706e1a.css",
       "sha256" : "94140d7445706e1adf88aa304acd3b040e5582909db2446364a04d9996ced326"
+    },
+    {
+      "cachePolicy" : "public, max-age=31536000, immutable",
+      "class" : "page",
+      "mimeType" : "application/javascript; charset=utf-8",
+      "publicPath" : "/assets/frame-d823f1d0d7d2226e.js",
+      "resourcePath" : "assets/frame-d823f1d0d7d2226e.js",
+      "sha256" : "d823f1d0d7d2226e602c2e665d79e635da20d58201bcce4845bc62a2c97c3d72"
     },
     {
       "cachePolicy" : "public, max-age=31536000, immutable",
@@ -70,7 +70,7 @@
       "mimeType" : "text/html; charset=utf-8",
       "publicPath" : "/terminal-frame",
       "resourcePath" : "terminal.html",
-      "sha256" : "56e42f52dcded76c0e9e1eb553ea91962da06cc690445a1f858623515398150e"
+      "sha256" : "22fb2e2c7bf82cb655b7e5461cced4bf7327653050d33dc212b3997803642628"
     }
   ],
   "version" : 1

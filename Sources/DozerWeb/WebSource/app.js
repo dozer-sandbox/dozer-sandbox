@@ -2955,7 +2955,9 @@ function tabElement(t, pane) {
   const shared = twins.length ? h('span', { class: 'tag shared', title: 'Two views of ONE session: what is typed in either shows in both' },
     'shared with tab ' + twins.map((o) => order.indexOf(o.id) + 1).join(', ')) : null;
   const select = h('button', { type: 'button', role: 'tab', class: 'tab' + (t.id === v.selected[pane] ? ' active' : ''),
-                               title: t.title ? t.title + ' — ' + label : label, 'data-term': String(t.id),
+                               // 594 (W14): the one hint a mouse-using program needs.
+                               title: (t.title ? t.title + ' — ' + label : label) + '\nShift+drag selects text while the program uses the mouse',
+                               'data-term': String(t.id),
                                on: { click: () => { v.selected[pane] = t.id; v.focusedPane = pane; renderTerminals(); focusTerm(t); } } },
     h('span', { class: 'tab-dot ph-' + phase, 'aria-hidden': 'true' }), icon(t.mode === 'watch' ? 'eye' : 'terminal'), label,
     t.mode === 'watch' ? h('span', { class: 'tag' }, 'watch') : null,
