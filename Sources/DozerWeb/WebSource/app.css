@@ -624,3 +624,30 @@ dialog.dlg.dlg-wide { width: min(720px, calc(100vw - 32px)); }
   .res-notes, .res-group th:nth-child(7), .res-group td:nth-child(7) { display: none; }
   .res-child .res-name { padding-left: 18px; }
 }
+/* 596: New Sandbox — Agent × Base. */
+dialog.dlg:has(.image-picker) { width: min(780px, calc(100vw - 32px)); }
+.image-picker { gap: 6px; }
+.image-picker .segmented { align-self: flex-start; }
+.image-picker .seg[disabled] { opacity: .45; cursor: not-allowed; }
+.base-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); gap: 8px; margin-top: 4px; }
+.base-card { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; text-align: left; font: inherit; font-size: 12.5px;
+             padding: 9px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--ink); cursor: pointer; }
+.base-card:hover { border-color: var(--muted); }
+.base-card.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; background: color-mix(in srgb, var(--accent) 8%, var(--bg)); }
+.base-card .base-title { font-weight: 600; font-size: 13px; }
+.base-card .base-use { color: var(--muted); }
+.base-card .base-ref { font-family: var(--mono); font-size: 11px; background: var(--code); padding: 1px 4px; border-radius: 4px; }
+.base-card .base-meta { color: var(--muted); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.base-card .base-prepared { color: var(--run); font-size: 11.5px; font-weight: 600; }
+.base-card .base-prepared:empty { display: none; }
+.base-card.soon { cursor: not-allowed; opacity: .6; margin-top: 4px; }
+.df-panel, .tpl-panel { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
+.df-policy { border: 1px solid var(--line); border-left: 4px solid var(--pause); border-radius: 8px; padding: 8px 10px; font-size: 12.5px;
+             background: color-mix(in srgb, var(--pause) 8%, var(--panel)); }
+.df-policy .icon, .df-state .icon { width: 14px; height: 14px; vertical-align: -2px; }
+.df-builder { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; }
+.df-builder p { margin: 0; }
+.df-state[data-builder-state="ready"] { color: var(--run); }
+.image-summary { margin-top: 2px; }
+.dlg-why { color: var(--muted); font-size: 12px; text-align: right; }
+.dlg-why:empty { display: none; }

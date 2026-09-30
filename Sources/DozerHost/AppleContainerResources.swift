@@ -68,11 +68,12 @@ extension Resources {
             }
             let dataTotal = parts.values.reduce(0, +)
             total += dataTotal
-            dataRows.append(ResourceItem(id: "outside:apple-container/data", group: "outside", parent: "outside:apple-container", name: "its data folder",
+            dataRows.append(ResourceItem(id: "outside:apple-container/data", group: "outside", parent: "outside:apple-container", name: "its data folder (all of it)",
                                          detail: root.path, sizeBytes: dataTotal, refusal: appleContainerRefusal, path: root.path))
-            for (key, label) in [("snapshots", "snapshots (unpacked images, containers)"), ("content", "content (the image cache)"),
-                                 ("kernels", "kernels"), ("other", "other (builder, networks, state)")] {
-                dataRows.append(ResourceItem(id: "outside:apple-container/data/\(key)", group: "outside", parent: "outside:apple-container/data",
+            // One level under the tool's row (the page shows a row's parts, not their parts).
+            for (key, label) in [("snapshots", "its data — snapshots (unpacked images, containers)"), ("content", "its data — content (the image cache)"),
+                                 ("kernels", "its data — kernels"), ("other", "its data — other (builder, networks, state)")] {
+                dataRows.append(ResourceItem(id: "outside:apple-container/data/\(key)", group: "outside", parent: "outside:apple-container",
                                              name: label, sizeBytes: parts[key] ?? 0, refusal: appleContainerRefusal))
             }
             if let dozer = dozerShare(root) {

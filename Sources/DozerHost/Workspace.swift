@@ -118,6 +118,11 @@ public enum Workspace {
         case "claude-code": return "claude-sandbox"
         case "pi": return "pi-sandbox"
         case "lab": return "lab-sandbox"
+        // 596: base × agent — python-claude-sandbox, go-pi-sandbox, debian-sandbox, dockerfile-claude-sandbox.
+        case let n where ImageChoice.parse(n)?.name == n:
+            let c = ImageChoice.parse(n)!
+            let agent = switch c.agent { case .claudeCode: "-claude"; case .pi: "-pi"; case .none: "" }
+            return (c.isDockerfile ? "dockerfile" : c.base) + agent + "-sandbox"
         default:
             let n = image.hasPrefix("custom:") ? String(image.dropFirst(7)) : image
             let base = String(n.prefix(32)) + "-sandbox"

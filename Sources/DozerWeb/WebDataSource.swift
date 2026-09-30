@@ -68,9 +68,13 @@ public protocol DozerWebData: Sendable {
     func hostAnswers() -> Bool
     /// 594 W20: stop an OLDER host and start this UI's build (refused otherwise).
     func restartHost(onEvent: @escaping @Sendable (HostEvent) -> Void) async throws -> JSONValue
+    /// 596: the recommended bases and Apple's container tool (the host's `bases` and `builder-status`,
+    /// in-process when no host runs — looking never starts anything).
+    func bases() async throws -> WebBases
 }
 
 extension DozerWebData {
+    public func bases() async throws -> WebBases { throw HostError(.notImplemented, "bases") }
     public func restartHost(onEvent: @escaping @Sendable (HostEvent) -> Void) async throws -> JSONValue {
         throw HostError(.notImplemented, "host restart")
     }

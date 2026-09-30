@@ -191,6 +191,11 @@ final class WebOperations: @unchecked Sendable {
             var s = who + (hib.isEmpty ? " — nothing was running" : " — hibernated \(hib.joined(separator: ", ")); they wake when used")
             if !other.isEmpty { s += " (" + other.joined(separator: "; ") + ")" }
             return s
+        case .builderStart:
+            let s = try? v.decode(ContainerToolStatus.self)
+            return s?.state == "ready" ? "Apple's container services are running — Dockerfiles can be built" : (s?.note ?? "Apple's container services started")
+        case .builderInstall:
+            return "Apple's installer package was opened in macOS Installer — approve it there, then start its services"
         case .prepareCancel:
             let ps = (try? v.decode([PreparationInfo].self)) ?? []
             return ps.isEmpty ? "nothing was being prepared" : "cancelling the preparation of \(ps.map(\.image).joined(separator: ", "))"

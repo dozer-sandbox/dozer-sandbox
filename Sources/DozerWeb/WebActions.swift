@@ -57,6 +57,12 @@ public enum WebAction: Equatable, Sendable {
     /// and ONLY while the running host is an OLDER build than the UI (`HostWebData.restartHost`
     /// refuses anything else). The one way `host-stop` is reachable from the browser.
     case hostRestart
+    /// 596 (B7): start Apple's container services (`builder-start`) — the page has said what it does
+    /// (launchd services, its kernel) and the person pressed the button; that is the consent.
+    case builderStart
+    /// 596 (B7): install Apple's container tool on demand (`builder-install`: its signed package,
+    /// pinned and sha256-checked, opened in macOS Installer — the person approves it there; never sudo).
+    case builderInstall
 
     public static let lifecycleOps: [String: HostOp] = [
         "start": .start, "wake": .wake, "pause": .pause, "resume": .resume, "sleep": .sleep, "hibernate": .hibernate,
@@ -74,7 +80,7 @@ public enum WebAction: Equatable, Sendable {
              .keyRemove(let n, _), .accountUse(let n, _), .templateCreate(let n, _, _, _), .duplicate(let n, _, _, _):
             return n
         case .imageBake, .imageRemove, .accountDefault, .accountKeepalive, .accountVerify, .accountRemove, .onboard, .prepareCancel,
-             .resourcesRemove, .resourcesClean, .resourcesKernel, .hostStart, .hostRestart:
+             .resourcesRemove, .resourcesClean, .resourcesKernel, .hostStart, .hostRestart, .builderStart, .builderInstall:
             return nil
         }
     }
@@ -108,6 +114,8 @@ public enum WebAction: Equatable, Sendable {
         case .resourcesKernel(let k): return "use \(k) for new sandboxes"
         case .hostStart: return "host-start"
         case .hostRestart: return "host-restart"
+        case .builderStart: return "start Apple's container services"
+        case .builderInstall: return "install Apple's container tool"
         default: break
         }
         let r = hostRequest
@@ -227,6 +235,14 @@ public enum WebAction: Equatable, Sendable {
             return HostRequest(.ping)
         case .hostRestart:
             return HostRequest(.hostStop)
+        case .builderStart:
+            var r = HostRequest(.builderStart)
+            r.requestedBy = "doz ui"
+            return r
+        case .builderInstall:
+            var r = HostRequest(.builderInstall)
+            r.requestedBy = "doz ui"
+            return r
         }
     }
 
@@ -240,7 +256,7 @@ public enum WebAction: Equatable, Sendable {
     /// Fields each action may carry (besides `action`).
     static let fields: [String: Set<String>] = {
         var f: [String: Set<String>] = [
-            "create": ["sandbox", "image", "cpus", "memoryMiB", "workspace", "isolated", "network", "subnet", "account", "rebuild"],
+            "create": ["sandbox", "image", "cpus", "memoryMiB", "workspace", "isolated", "network", "subnet", "account", "rebuild", "dockerfile"],
             "open-session": ["sandbox", "session", "argv"],
             "point-take": ["sandbox", "point", "note"],
             "point-revert": ["sandbox", "point", "confirm"],
@@ -266,6 +282,8 @@ public enum WebAction: Equatable, Sendable {
             "resources-kernel": ["kernel"],
             "host-start": [],
             "host-restart": [],
+            "builder-start": [],
+            "builder-install": [],
         ]
         for (verb, op) in lifecycleOps { f[verb] = [.reset, .rm].contains(op) ? ["sandbox", "confirm"] : ["sandbox"] }
         return f
@@ -291,6 +309,12 @@ public enum WebAction: Equatable, Sendable {
             o.isolated = try f.flag("isolated")
             // 594 W28: the New Sandbox form's "Rebuild first" (an out-of-date image is otherwise used as it is).
             o.rebuild = try f.flag("rebuild")
+            // 596 (B6): a Dockerfile base — an absolute path (the host checks the file); the image then
+            // only carries the agent (claude-code, pi or lab = none).
+            if let df = try f.dockerfile("dockerfile") {
+                guard ["claude-code", "pi", "lab"].contains(o.image) else { throw Invalid("dockerfile: goes with image claude-code, pi or lab (the agent)") }
+                o.dockerfile = df
+            }
             guard !(o.isolated == true && o.workspace != nil) else { throw Invalid("isolated: or a workspace, not both") }
             a = .create(name: try f.sandbox("sandbox"), options: o)
         case "open-session":
@@ -325,7 +349,12 @@ public enum WebAction: Equatable, Sendable {
             guard name != new else { throw Invalid("newName: a different name") }
             a = .duplicate(name: name, newName: new, point: try f.pointRef("point"), options: o)
         case "image-bake":
-            a = .imageBake(try f.required(f.oneOf("image", ["lab", "claude-code", "pi"]), "image"))
+            // 596: any base × agent image (python-claude-code, go, df-…-pi) — by its canonical name.
+            let i = try f.image("image")
+            guard ["lab", "claude-code", "pi"].contains(i) || ImageChoice.parse(i)?.name == i else {
+                throw Invalid("image: lab, claude-code, pi or a base × agent image")
+            }
+            a = .imageBake(i)
         case "image-rm":
             a = .imageRemove(try f.image("image"))
         case "net-policy":
@@ -365,6 +394,10 @@ public enum WebAction: Equatable, Sendable {
             a = .hostStart
         case "host-restart":
             a = .hostRestart
+        case "builder-start":
+            a = .builderStart
+        case "builder-install":
+            a = .builderInstall
         default:
             guard let op = lifecycleOps[verb] else { throw Invalid("unknown action") }
             a = .lifecycle(op, name: try f.sandbox("sandbox"))
@@ -490,6 +523,13 @@ public enum WebAction: Equatable, Sendable {
             guard !s.unicodeScalars.contains(where: { $0.value < 0x20 || $0.value == 0x7f }) else { throw Invalid("\(key): one line, no control characters") }
             guard s.hasPrefix("/") || s.hasPrefix("~/") else { throw Invalid("\(key): an absolute path (or ~/…)") }
             do { return try Workspace.normalize(s) } catch { throw Invalid("\(key): an absolute path (or ~/…)") }
+        }
+
+        /// 596: a Dockerfile — an absolute path (or ~/…) of one line, not a folder's trailing slash.
+        func dockerfile(_ key: String) throws -> String? {
+            guard let p = try workspace(key) else { return nil }
+            guard !p.hasSuffix("/") else { throw Invalid("\(key): a file, not a folder") }
+            return p
         }
 
         /// 594: true, or absent.

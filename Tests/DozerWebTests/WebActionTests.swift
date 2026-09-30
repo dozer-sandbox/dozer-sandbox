@@ -46,6 +46,9 @@ final class WebActionTests: XCTestCase {
         "resources-kernel": #"{"action":"resources-kernel","kernel":"kernel:6.12.1-1"}"#,
         "host-start": #"{"action":"host-start"}"#,
         "host-restart": #"{"action":"host-restart"}"#,
+        // 596 (B7): Apple's container tool — start its services, install it (the page said what each does).
+        "builder-start": #"{"action":"builder-start"}"#,
+        "builder-install": #"{"action":"builder-install"}"#,
     ]
 
     /// Everything the web layer may send to the host — and, as important, what it may never.
@@ -54,6 +57,8 @@ final class WebActionTests: XCTestCase {
         .pointTake, .pointRevert, .pointFork, .pointRm, .pointSaveImage, .imageBake, .imageRm, .netPolicy,
         .keyPolicy, .keyRm, .accountUse, .accountDefault, .accountKeepalive, .accountVerify, .accountRemove,
         .templateCreate, .duplicate, .onboard, .prepareCancel, .resourcesRemove, .resourcesClean, .resourcesKernel, .ping,
+        // 596 (B7): consented by the person's click on a button that said what it does.
+        .builderStart, .builderInstall,
         // 594 W20: only as Restart host, which the data source refuses unless the host is OLDER.
         .hostStop,
     ]
@@ -238,7 +243,7 @@ final class WebActionTests: XCTestCase {
         XCTAssertNil(try decode(Self.samples["image-bake"]!).sandbox)
     }
 
-    func testDecodingIsStrict() {
+    func testDecodingIsStrict() throws {
         invalid("[]")
         invalid("not json")
         invalid(#"{"sandbox":"a"}"#)                                   // no action
@@ -251,6 +256,17 @@ final class WebActionTests: XCTestCase {
         invalid(#"{"action":"start","sandbox":"../x"}"#)
         invalid(#"{"action":"start","sandbox":5}"#)
         invalid(#"{"action":"start"}"#)
+        // 596 (B1, B6): a base × agent image; a Dockerfile (absolute, a file) carried with the agent's image.
+        XCTAssertEqual(try decode(#"{"action":"create","sandbox":"a","image":"python-claude-code"}"#).hostRequest.create?.image, "python-claude-code")
+        let df = try decode(#"{"action":"create","sandbox":"a","image":"pi","dockerfile":"/private/tmp/app/Dockerfile"}"#)
+        XCTAssertEqual(df.hostRequest.create?.dockerfile, "/private/tmp/app/Dockerfile")
+        invalid(#"{"action":"create","sandbox":"a","image":"python-pi","dockerfile":"/private/tmp/app/Dockerfile"}"#)   // the base is the Dockerfile's
+        invalid(#"{"action":"create","sandbox":"a","image":"pi","dockerfile":"Dockerfile"}"#)                          // relative
+        invalid(#"{"action":"create","sandbox":"a","image":"pi","dockerfile":"/a\nb"}"#)
+        XCTAssertEqual(try decode(#"{"action":"image-bake","image":"go-claude-code"}"#).hostRequest.image, "go-claude-code")
+        invalid(#"{"action":"image-bake","image":"cobol-pi"}"#)
+        invalid(#"{"action":"builder-start","yes":true}"#)
+        XCTAssertEqual(try decode(Self.samples["builder-start"]!).hostRequest.requestedBy, "doz ui")
         invalid(#"{"action":"create","sandbox":"a","image":"lab","cpus":"2"}"#)
         invalid(#"{"action":"create","sandbox":"a","image":"lab","cpus":2.5}"#)
         invalid(#"{"action":"create","sandbox":"a","image":"lab","cpus":true}"#)

@@ -31,6 +31,8 @@ public final class DozerWebServer: @unchecked Sendable {
     public let settings: WebSettingsStore
     /// 594: the Mac's folder picker (one at a time; DOZ_TEST_FOLDER_PICKER in tests).
     public let folderPicker: WebFolderPicker
+    /// 596: the Mac's file picker for a Dockerfile (one at a time; DOZ_TEST_FILE_PICKER in tests).
+    public let dockerfilePicker: WebDockerfilePicker
     private let gate: UpgradeGate
     private let capability: WebBootstrapCapability
     private let listener: NIOAsyncChannel<Accepted, Never>
@@ -91,6 +93,7 @@ public final class DozerWebServer: @unchecked Sendable {
         self.origin = origin
         self.settings = settings
         folderPicker = WebFolderPicker(environment: settings.environment)
+        dockerfilePicker = WebDockerfilePicker(environment: settings.environment)
         self.version = version
         self.limits = limits
         self.assets = assets
@@ -613,6 +616,19 @@ public final class DozerWebServer: @unchecked Sendable {
             let start = try WebFolderPicker.decodeStart(body)
             let projects = (Workspace.defaultPath(name: "x", settings: settings.current) as NSString).deletingLastPathComponent
             return json(try await folderPicker.choose(start: WebFolderPicker.startFolder(start, projectsDir: projects)))
+        case .bases:
+            return json(try await data.bases())
+        case .dockerfileChoose:
+            // The MAC's file picker (CSRF above); opened at the field's folder, else the projects folder.
+            try Self.requireJSONBody(md)
+            let start = try WebFolderPicker.decodeStart(body)
+            let projects = (Workspace.defaultPath(name: "x", settings: settings.current) as NSString).deletingLastPathComponent
+            let from = start.map { s -> String in
+                let e = (s as NSString).expandingTildeInPath
+                var isDir: ObjCBool = false
+                return FileManager.default.fileExists(atPath: e, isDirectory: &isDir) && !isDir.boolValue ? (e as NSString).deletingLastPathComponent : s
+            }
+            return json(try await dockerfilePicker.choose(start: WebFolderPicker.startFolder(from, projectsDir: projects)))
         case .resources:
             return json(try await data.resources())
         case .resourcesPreview:

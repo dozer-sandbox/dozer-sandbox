@@ -291,10 +291,21 @@ public struct WebSandboxRow: Codable, Equatable, Sendable {
     public var credentialProblem: String?
     /// 594 W28: made from an image an older doz's recipe made — the notice (with what reset keeps).
     public var olderImage: String?
+    /// 596: its base (catalogue id or `df-…`), "Python · Claude Code", the Dockerfile it was built
+    /// from, and — a Dockerfile's sandbox — "Dockerfile changed — rebuild available".
+    public var base: String?
+    public var imageTitle: String?
+    public var dockerfile: String?
+    public var rebuildAvailable: String?
 
     public init(_ i: SandboxInfo) {
         accountApplies = ["agent", "open", "custom"].contains(i.network)
-        agent = i.agent
+        // 596: the AGENT (python-claude-code runs claude-code) — the page's account choice follows it.
+        agent = i.agent.map { a in ImageChoice.parse(a).map { $0.agent == .none ? a : $0.agent.rawValue } ?? a }
+        base = i.base
+        imageTitle = i.imageTitle
+        dockerfile = i.dockerfile
+        rebuildAvailable = i.rebuildAvailable
         credentialProblem = i.credentialProblem
         olderImage = i.olderImageLine
         name = i.name
@@ -774,9 +785,18 @@ public struct WebImage: Codable, Equatable, Sendable {
     public var status: String?
     public var olderRecipe: [String]?
     public var standing: String?
+    /// 596: base × agent ("Python · Claude Code"), the Dockerfile, a newer base than it was made from.
+    public var base: String?
+    public var title: String?
+    public var dockerfile: String?
+    public var baseUpdate: String?
 
     public init(_ r: ImageRow) {
         agent = r.agent
+        base = r.base
+        title = r.title
+        dockerfile = r.dockerfile
+        baseUpdate = r.baseUpdate
         status = r.status
         olderRecipe = r.olderRecipe
         standing = r.standing

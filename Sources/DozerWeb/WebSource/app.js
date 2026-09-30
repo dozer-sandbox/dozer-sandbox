@@ -472,6 +472,8 @@ function dialog(title, intro, fields, submitLabel, onSubmit, opts = {}) {
 const ISOLATED_NOTE = 'Nothing on your Mac is shared. /workspace exists only inside the sandbox.';
 function workspaceChooser({ nameInput = null, image = () => null, name = null, initialPath = '', initialIsolated = false }) {
   let mode = initialIsolated ? 'isolated' : 'shared', nameEdited = false, pathEdited = !!initialPath, seq = 0, lastError = null, timer = null;
+  // 596 (B6): a folder the page chose (a Dockerfile's) — replaced by the next one, never over a typed or picked folder.
+  let autoPath = null;
   const path = h('input', { type: 'text', name: 'workspace', 'data-ws-path': '', placeholder: '~/Developer/dozer-sandbox-projects/NAME',
                             autocomplete: 'off', spellcheck: 'false', 'aria-label': 'Workspace folder' });
   path.value = initialPath;
@@ -519,12 +521,12 @@ function workspaceChooser({ nameInput = null, image = () => null, name = null, i
   }
   const later = (f) => { clearTimeout(timer); timer = setTimeout(f, 250); };
   if (nameInput) nameInput.addEventListener('input', () => { nameEdited = true; if (!pathEdited) later(() => check()); });
-  path.addEventListener('input', () => { pathEdited = true; later(() => check({ path: path.value.trim() })); });
+  path.addEventListener('input', () => { pathEdited = true; autoPath = null; later(() => check({ path: path.value.trim() })); });
   choose.addEventListener('click', async () => {
     choose.disabled = true;
     try {
       const r = await api('workspace/choose', { method: 'POST', json: path.value.trim() ? { start: path.value.trim() } : {} });
-      if (r && r.path) { path.value = r.path; pathEdited = true; await check({ path: r.path }); }
+      if (r && r.path) { path.value = r.path; pathEdited = true; autoPath = null; await check({ path: r.path }); }
     } catch (e) { toast(e.message || String(e), true); } finally { choose.disabled = false; }
   });
   setMode(mode);
@@ -533,6 +535,16 @@ function workspaceChooser({ nameInput = null, image = () => null, name = null, i
     el,
     /// The image changed: a name not typed in follows it (and the folder, the name).
     imageChanged() { if (!nameEdited || !pathEdited) check(); },
+    /// 596 (B6): a Dockerfile was chosen — its folder becomes the workspace unless the person set one.
+    suggest(p) {
+      if (!p || (pathEdited && path.value.trim() !== autoPath)) return false;
+      autoPath = p;
+      pathEdited = true;
+      path.value = p;
+      check({ path: p });
+      return true;
+    },
+    get path() { return path.value.trim(); },
     /// {isolated: true} or {workspace} — or an Error with why not.
     get() {
       if (mode === 'isolated') return { isolated: true };
@@ -543,6 +555,178 @@ function workspaceChooser({ nameInput = null, image = () => null, name = null, i
     },
   };
 }
+// ── 596: the image of a new sandbox — Agent × Base ────────────────────────────
+// Owner (2026-09-30): "more options in New Sandbox ui page for the base image … recommended base images
+// … Dockerfile (requires `container build` which should be installed on-demand) … [COMING SOON] Deck
+// Stack Recipes". Two choices (B1): the AGENT (Claude Code · pi · none) and the BASE — Recommended (a
+// card per catalogue base), Dockerfile (Choose Dockerfile… is the Mac's own file picker; its folder
+// becomes the workspace unless one was set; built with Apple's container build, OUTSIDE Dozer's network
+// policy — said on the card), DeckStack recipe (disabled, coming soon) — or a Template (a saved disk).
+// The image a pair makes is named as the host names it: claude-code / pi / lab keep their names.
+const AGENTS = [['claude-code', 'Claude Code'], ['pi', 'pi'], ['none', 'none']];
+/// B9, the same words as the server's (`Dockerfiles.outsidePolicyNote`).
+const DOCKERFILE_POLICY_NOTE = 'Dockerfile builds run in Apple’s builder (container build), OUTSIDE Dozer’s network policy: its RUN steps reach the internet directly, without Dozer’s proxy or allow list. The sandbox made from the image is under the policy as usual.';
+function imageNameOf(base, agent) {
+  if (base === 'node' && agent === 'claude-code') return 'claude-code';
+  if (base === 'node' && agent === 'pi') return 'pi';
+  if (base === 'alpine' && agent === 'none') return 'lab';
+  return agent === 'none' ? base : base + '-' + agent;
+}
+function parseImageName(name, baseIDs) {
+  if (name === 'claude-code') return { base: 'node', agent: 'claude-code' };
+  if (name === 'pi') return { base: 'node', agent: 'pi' };
+  if (name === 'lab') return { base: 'alpine', agent: 'none' };
+  for (const a of ['claude-code', 'pi']) if (name.endsWith('-' + a) && baseIDs.includes(name.slice(0, -a.length - 1))) return { base: name.slice(0, -a.length - 1), agent: a };
+  return baseIDs.includes(name) ? { base: name, agent: 'none' } : null;
+}
+function imagePicker({ images = [], bases = null, value = 'claude-code', dockerfile = '', onChange = () => {}, onDockerfile = () => {} }) {
+  const catalogue = bases ? bases.bases : [];
+  const ids = catalogue.map((b) => b.id);
+  const templates = images.filter((i) => i.kind === 'custom');
+  const parsed = parseImageName(value, ids);
+  let agent = parsed ? parsed.agent : 'claude-code', base = parsed ? parsed.base : 'node';
+  let kind = dockerfile ? 'dockerfile' : parsed || !templates.some((t) => t.name === value) ? 'recommended' : 'template';
+  let template = templates.some((t) => t.name === value) ? value : (templates[0] ? templates[0].name : '');
+  let builder = bases ? bases.builder : { state: 'missing', note: '', startNote: '', installNote: '' };
+  let notNow = false;
+  const changed = () => { paint(); onChange(); };
+  // Agent.
+  const agentSegs = {};
+  const agentCtl = h('div', { class: 'segmented', role: 'group', 'aria-label': 'Agent', 'data-agent-choice': '' },
+    AGENTS.map(([a, label]) => (agentSegs[a] = h('button', { type: 'button', class: 'seg', 'data-agent': a, on: { click: () => { agent = a; changed(); } } },
+      withIcon(a === 'none' ? 'terminal' : 'rocket', label)))));
+  // Base kind.
+  const kindSegs = {};
+  const kindSeg = (k, label, ic, extra = {}) => (kindSegs[k] = h('button', { type: 'button', class: 'seg', 'data-base-kind': k, ...extra,
+    on: { click: () => { if (!extra.disabled) { kind = k; changed(); } } } }, withIcon(ic, label)));
+  const kindCtl = h('div', { class: 'segmented', role: 'group', 'aria-label': 'Base' },
+    kindSeg('recommended', 'Recommended', 'star'), kindSeg('dockerfile', 'Dockerfile', 'box'),
+    kindSeg('deckstack', 'DeckStack recipe', 'layers', { disabled: true, 'aria-disabled': 'true', title: 'Coming soon' }),
+    templates.length ? kindSeg('template', 'Template', 'layout-template') : null);
+  // Recommended: a card per base.
+  const cards = {};
+  const grid = h('div', { class: 'base-grid', role: 'radiogroup', 'aria-label': 'Recommended bases', 'data-base-grid': '' },
+    catalogue.map((b) => (cards[b.id] = h('button', { type: 'button', class: 'base-card', role: 'radio', 'data-base': b.id,
+      on: { click: () => { base = b.id; changed(); } } },
+      h('span', { class: 'base-title' }, b.title),
+      h('span', { class: 'base-use' }, b.useCase),
+      h('code', { class: 'base-ref' }, b.reference),
+      h('span', { class: 'base-meta', 'data-base-meta': '' }, '↓ ' + bytes(b.downloadBytes) + ' · first prepare ~' + Math.max(1, Math.round(b.prepareSeconds / 60)) + ' min'),
+      h('span', { class: 'base-prepared', 'data-base-prepared': '' }),
+      b.updateAvailable ? h('span', { class: 'tag ver-available' }, 'update available') : null))));
+  // Dockerfile.
+  const dfPath = h('input', { type: 'text', name: 'dockerfile', 'data-dockerfile-path': '', placeholder: '~/code/app/Dockerfile', autocomplete: 'off',
+                              spellcheck: 'false', 'aria-label': 'Dockerfile' });
+  dfPath.value = dockerfile;
+  const dfChoose = h('button', { type: 'button', class: 'btn small', 'data-dockerfile-choose': '', title: 'Opens the Mac’s file picker' },
+    withIcon('folder', 'Choose Dockerfile…'));
+  const policyNote = h('div', { class: 'df-policy', role: 'note', 'data-dockerfile-policy': '' }, icon('shield'), ' ', bases ? bases.outsidePolicy : '');
+  const builderBox = h('div', { class: 'df-builder', 'data-builder': '' });
+  const dfPanel = h('div', { class: 'df-panel' },
+    h('div', { class: 'ws-row' }, dfPath, dfChoose),
+    h('small', { class: 'muted' }, 'Dozer builds it with Apple’s container build, then adds the developer baseline and the agent — your Dockerfile need not install Claude Code. Its folder is the build context, and the workspace unless you set one.'),
+    policyNote, builderBox);
+  const dfTell = () => { onDockerfile(dfPath.value.trim() ? dfPath.value.trim().replace(/\/[^/]*$/, '') || '/' : ''); };
+  dfPath.addEventListener('input', () => { onChange(); });
+  dfPath.addEventListener('change', dfTell);
+  dfChoose.addEventListener('click', async () => {
+    dfChoose.disabled = true;
+    try {
+      const r = await api('dockerfile/choose', { method: 'POST', json: dfPath.value.trim() ? { start: dfPath.value.trim() } : {} });
+      if (r && r.path) { dfPath.value = r.path; onDockerfile(r.folder); onChange(); }
+    } catch (e) { toast(e.message || String(e), true); } finally { dfChoose.disabled = false; }
+  });
+  async function refreshBuilder() {
+    try { const b = await api('bases'); builder = b.builder; } catch (_) { /* keep */ }
+    paint(); onChange();
+  }
+  function paintBuilder() {
+    const s = builder.state;
+    const kids = [h('p', { class: 'df-state', 'data-builder-state': s }, icon(s === 'ready' ? 'check' : 'box'), ' ', builder.note)];
+    if (notNow && s !== 'ready') {
+      kids.push(h('p', { class: 'muted', 'data-builder-notnow': '' }, 'Dockerfile images are unavailable until Apple’s container tool is ' + (s === 'stopped' ? 'running' : 'installed') + ' — or choose a recommended base.'),
+        btn('Set it up now…', () => { notNow = false; paint(); onChange(); }, { small: true, icon: 'settings' }));
+    } else if (s === 'stopped') {
+      kids.push(h('p', { class: 'muted' }, builder.startNote),
+        h('div', { class: 'actions' },
+          btn('Start its services', async () => { try { await actOrThrow({ action: 'builder-start' }); await waitOps(); } catch (e) { toast(e.message || String(e), true); } refreshBuilder(); },
+            { small: true, primary: true, icon: 'play' }),
+          btn('Not now', () => { notNow = true; paint(); onChange(); }, { small: true, icon: 'x' })));
+    } else if (s !== 'ready') {
+      kids.push(h('p', { class: 'muted' }, builder.installNote),
+        h('div', { class: 'actions' },
+          btn('Install Apple’s container tool…', async () => { try { await actOrThrow({ action: 'builder-install' }); } catch (e) { toast(e.message || String(e), true); } setTimeout(refreshBuilder, 1500); },
+            { small: true, primary: true, icon: 'download' }),
+          btn('Not now', () => { notNow = true; paint(); onChange(); }, { small: true, icon: 'x' })));
+    }
+    builderBox.replaceChildren(...kids);
+  }
+  // DeckStack (B11) and templates.
+  const deckPanel = h('div', { class: 'base-card soon', 'aria-disabled': 'true', 'data-deckstack': '' },
+    h('span', { class: 'base-title' }, 'DeckStack recipes'), h('span', { class: 'base-use' }, bases ? bases.deckstack : 'Coming soon.'));
+  const tplSelect = h('select', { name: 'template', 'aria-label': 'Template' }, templates.map((t) => h('option', { value: t.name }, t.name + (t.fromSandbox ? ' (from ' + t.fromSandbox + ')' : ''))));
+  tplSelect.value = template;
+  tplSelect.addEventListener('change', () => { template = tplSelect.value; onChange(); });
+  const tplPanel = h('div', { class: 'tpl-panel' }, tplSelect, h('small', { class: 'muted' }, 'A template is a saved root disk: its base and agent are the ones it was saved from.'));
+  const summary = h('small', { class: 'muted image-summary', 'data-image-summary': '' });
+  function paint() {
+    for (const [a, b] of Object.entries(agentSegs)) { b.classList.toggle('active', a === agent); b.setAttribute('aria-pressed', a === agent ? 'true' : 'false'); b.disabled = kind === 'template'; }
+    for (const [k, b] of Object.entries(kindSegs)) { b.classList.toggle('active', k === kind); b.setAttribute('aria-pressed', k === kind ? 'true' : 'false'); }
+    for (const [id, c] of Object.entries(cards)) {
+      c.classList.toggle('active', id === base);
+      c.setAttribute('aria-checked', id === base ? 'true' : 'false');
+      const b = catalogue.find((x) => x.id === id);
+      c.querySelector('[data-base-prepared]').textContent = b && b.prepared.includes(agent) ? 'prepared' : '';
+    }
+    grid.hidden = kind !== 'recommended';
+    dfPanel.hidden = kind !== 'dockerfile';
+    deckPanel.hidden = kind !== 'deckstack';
+    tplPanel.hidden = kind !== 'template';
+    paintBuilder();
+    const b = catalogue.find((x) => x.id === base);
+    summary.textContent = kind === 'template' ? 'Template ' + template
+      : kind === 'dockerfile' ? 'Your Dockerfile · ' + (AGENTS.find((x) => x[0] === agent) || [0, agent])[1]
+      : (b ? b.title : base) + ' · ' + (AGENTS.find((x) => x[0] === agent) || [0, agent])[1] + ' — image ' + imageNameOf(base, agent);
+  }
+  paint();
+  const el = h('div', { class: 'field image-picker' },
+    h('span', null, 'Agent'), agentCtl,
+    h('span', null, 'Base'), kindCtl, grid, dfPanel, deckPanel, tplPanel, summary);
+  return {
+    el,
+    /// The image name the host is sent (a Dockerfile's: the agent's carrier — the host names it by its file).
+    image() { return kind === 'template' ? template : kind === 'dockerfile' ? (agent === 'none' ? 'lab' : agent) : imageNameOf(base, agent); },
+    /// The agent a sandbox of it runs (for the account's choice).
+    agent() {
+      if (kind === 'template') { const t = templates.find((x) => x.name === template); return t ? AGENT_NAMES[t.agent] ? t.agent : (parseImageName(t.agent || '', ids) || {}).agent : null; }
+      return agent === 'none' ? null : agent;
+    },
+    dockerfile() { return kind === 'dockerfile' ? dfPath.value.trim() : null; },
+    /// Why Create cannot go ahead now (null: it can).
+    blocked() {
+      if (kind === 'deckstack') return 'DeckStack recipes are coming soon.';
+      if (kind === 'template' && !template) return 'No template to start from.';
+      if (kind !== 'dockerfile') return null;
+      if (!dfPath.value.trim()) return 'Choose the Dockerfile (Choose Dockerfile…), or type its path.';
+      if (notNow && builder.state !== 'ready') return 'Dockerfile images are unavailable until Apple’s container tool is ' + (builder.state === 'stopped' ? 'running.' : 'installed.');
+      return null;
+    },
+  };
+}
+/// What a new sandbox's suggested name follows: the image, or for a Dockerfile "dockerfile-claude" (→ dockerfile-claude-sandbox).
+function pickerNameHint(picker) {
+  if (picker.dockerfile() === null) return picker.image();
+  const a = picker.agent();
+  return 'dockerfile' + (a === 'claude-code' ? '-claude' : a ? '-' + a : '');
+}
+/// Wait (briefly) for the operations this page started to end.
+async function waitOps(max = 60000) {
+  const t0 = Date.now();
+  while (Date.now() - t0 < max && [...state.ops.values()].some((o) => o.state === 'running' && o.action && o.action.startsWith('builder-'))) {
+    await new Promise((r) => setTimeout(r, 400));
+  }
+}
+
 /// A destructive action: the person types the name; the request carries it as `confirm`.
 function confirmAction(title, text, name, body) {
   dialog(title, text, [], title, async () => {
@@ -1304,9 +1488,10 @@ async function viewOverview() {
 }
 
 async function createDialog() {
-  let images = [], accounts = { accounts: [] };
+  let images = [], accounts = { accounts: [] }, bases = null;
   try { [images, accounts] = await Promise.all([api('images'), api('accounts')]); } catch (_) { /* defaults */ }
-  const slot = h('div'), acctSlot = h('div');
+  try { bases = await api('bases'); } catch (_) { /* no catalogue: the picker shows what it can */ }
+  const slot = h('div'), acctSlot = h('div'), imgSlot = h('div');
   // 594 W28 (owner: "i dont think we should rebuild images without the user agreeing … better to warn"):
   // an out-of-date image is said here, with the choice — use it as it is (the default), or rebuild first.
   const imgNote = h('div', { class: 'img-choice', 'data-image-choice': '', hidden: true });
@@ -1330,8 +1515,13 @@ async function createDialog() {
   };
   const dlg = dialog('New sandbox','It is created off; Start boots it (the first start of an image not yet prepared prepares it — minutes, needs network).', [
     { name: 'sandbox', label: 'Name', placeholder: 'a-z 0-9 -', required: true },
-    { name: 'image', label: 'Image', type: 'select', value: setting('defaults.image', 'lab'),
-      options: images.length ? images.map((i) => [i.name, i.name + (i.kind === 'custom' ? ' (template)' : '') + (i.standing ? ' — out of date' : '')]) : ['lab', 'claude-code', 'pi'] },
+    // 596 (B1): Agent × Base.
+    { name: 'image', type: 'custom', el: imgSlot, get: () => {
+      const why = picker.blocked();
+      if (why) throw new Error(why);
+      return picker.image();
+    } },
+    { name: 'dockerfile', type: 'custom', el: h('span', { hidden: true }), get: () => picker.dockerfile() },
     { name: 'imageChoice', type: 'custom', el: imgNote, get: () => imgChoice },
     { name: 'network', label: 'Network', type: 'select', value: '',
       options: [['', 'default (per image, Settings)'],['agent', 'agent — proxied, Anthropic, Claude Code, GitHub + registries'], ['bake', 'bake — proxied, package registries'],
@@ -1347,6 +1537,7 @@ async function createDialog() {
     { name: 'ws', type: 'custom', el: slot, get: () => chooser.get() },
   ], 'Create', async (v) => {
     const body = { action: 'create', sandbox: v.sandbox, image: v.image, ...v.ws };
+    if (v.dockerfile) body.dockerfile = v.dockerfile;
     if (v.imageChoice === 'rebuild') body.rebuild = true;
     if (v.network) body.network = v.network;
     if (v.account) body.account = v.account;
@@ -1354,16 +1545,26 @@ async function createDialog() {
     if (v.memoryMiB) body.memoryMiB = Number(v.memoryMiB);
     await actOrThrow(body);
   });
-  const chooser = workspaceChooser({ nameInput: dlg.inputs.sandbox, image: () => dlg.inputs.image.value });
-  slot.replaceWith(chooser.el);
+  let chooser = null, acct = null;
   const submit = dlg.querySelector('button[type="submit"]');
-  const agentOf = () => { const i = images.find((x) => x.name === dlg.inputs.image.value); return i ? i.agent : (AGENT_NAMES[dlg.inputs.image.value] ? dlg.inputs.image.value : null); };
+  const why = h('small', { class: 'dlg-why', 'data-create-why': '', 'aria-live': 'polite' });
+  submit.parentElement.before(why);
+  const gate = () => {
+    const w = picker.blocked();
+    why.textContent = w || '';
+    submit.disabled = !!w || (acct ? !acct.ok() : false);
+  };
+  const picker = imagePicker({ images, bases, value: setting('defaults.image', 'claude-code'),
+    onChange: () => { if (chooser) chooser.imageChanged(); if (acct) acct.agentChanged(); renderImgNote(picker.image()); gate(); },
+    onDockerfile: (folder) => { if (chooser) chooser.suggest(folder); } });
+  imgSlot.replaceWith(picker.el);
+  chooser = workspaceChooser({ nameInput: dlg.inputs.sandbox, image: () => pickerNameHint(picker) });
+  slot.replaceWith(chooser.el);
   const netProxied = () => !['nat', 'none'].includes(dlg.inputs.network.value);
-  const acct = accountChooser({ accounts, agent: () => (netProxied() ? agentOf() : null), onChange: () => { submit.disabled = !acct.ok(); } });
+  acct = accountChooser({ accounts, agent: () => (netProxied() ? picker.agent() : null), onChange: gate });
   acctSlot.replaceWith(acct.el);
-  submit.disabled = !acct.ok();
-  dlg.inputs.image.addEventListener('change', () => { chooser.imageChanged(); acct.agentChanged(); renderImgNote(dlg.inputs.image.value); });
-  renderImgNote(dlg.inputs.image.value);
+  renderImgNote(picker.image());
+  gate();
   dlg.inputs.network.addEventListener('change', () => acct.agentChanged());
 }
 
@@ -1630,7 +1831,7 @@ function sandboxParts(name, d, net, accounts) {
     h('div', { class: 'sbx-title' },
       h('h1', null, name), sandboxPill(i),
       h('span', { class: 'sbx-meta' },
-        h('span', null, i.image),
+        h('span', { title: i.image + (i.dockerfile ? ' — Dockerfile ' + i.dockerfile : ''), 'data-image-title': '' }, i.imageTitle || i.image),
         h('span', null, (i.ramHeldMiB ? mib(i.ramHeldMiB) : '—') + ' of ' + mib(i.memoryMiB)),
         h('span', { class: i.deniedConnections ? 'st-warn' : null }, netText),
         i.accountApplies ? h('span', null, 'account ' + (i.account || '—')) : null,
@@ -1658,7 +1859,13 @@ function sandboxParts(name, d, net, accounts) {
     i.credentialProblem ? credentialBanner(name, i, accounts) : null,
     // 594 W28: its system disk came from an image an older doz made.
     i.olderImage ? h('div', { class: 'cred-banner img-banner', role: 'status', 'data-older-image': name },
-      h('div', { class: 'cred-banner-text' }, icon('flame'), ' ' + name + ' was ' + i.olderImage + '.')) : null);
+      h('div', { class: 'cred-banner-text' }, icon('flame'), ' ' + name + ' was ' + i.olderImage + '.')) : null,
+    // 596 (B8): its Dockerfile changed (or was built again) — offered, never rebuilt by itself.
+    i.rebuildAvailable ? h('div', { class: 'cred-banner img-banner', role: 'status', 'data-rebuild-available': name },
+      h('div', { class: 'cred-banner-text' }, icon('flame'), ' ' + i.rebuildAvailable + '.'),
+      h('div', { class: 'actions' }, btn('Rebuild the image', () => dialog('Rebuild ' + i.image + '?',
+        'Runs container build again (seconds when nothing changed: its cache), then bakes only if the built image changed. ' + DOCKERFILE_POLICY_NOTE + ' This sandbox keeps its disk until you reset it.',
+        [], 'Rebuild', async () => { await actOrThrow({ action: 'image-bake', image: i.image }); }, { icon: 'flame' }), { small: true, icon: 'flame' }))) : null);
   const details = h('div', { class: 'sbx-details-inner' },
     h('div', { class: 'cards small-cards' },
       card('RAM held', mib(i.ramHeldMiB), 'of ' + mib(i.memoryMiB) + (i.memoryReturnedMiB ? ' · balloon returned ' + mib(i.memoryReturnedMiB) : '')),
@@ -1752,6 +1959,9 @@ function duplicateDialog(name, d, accounts, pointID) {
   const dlg = dialog('Duplicate ' + name,
     'A new sandbox from ' + name + '’s root disk (an instant APFS clone). It is created off; Start boots it. Keys are not copied.', [
       { name: 'newName', label: 'New sandbox name', placeholder: 'a-z 0-9 -', required: true },
+      // 596 (B1): the base and agent are the source's — shown, not changeable (the disk is a clone of its).
+      { name: 'baseShown', type: 'custom', get: () => null, el: h('div', { class: 'field', 'data-duplicate-image': '' }, h('span', null, 'Image'),
+        h('div', null, h('strong', null, i.imageTitle || i.image), ' ', h('span', { class: 'muted' }, '— ' + i.image + (i.dockerfile ? ', Dockerfile ' + i.dockerfile : '') + ' (the source’s; not changeable)'))) },
       { name: 'source', label: 'From', type: 'select', options: sources, value: pointID || '' },
       // 594: Shared folder (<projects_dir>/<new name> by default, made when missing) | Isolated.
       { name: 'ws', type: 'custom', el: slot, get: () => chooser.get() },
@@ -1907,7 +2117,8 @@ async function viewImages() {
       // 594 W28: out of date — a badge, and the line that says why (never rebuilt by itself).
       r.status === 'older recipe' || r.status === 'update available' ? h('span', { class: 'tag img-status st-' + r.status.replace(/ /g, '-'), 'data-image-badge': r.status }, r.status) : null,
       r.standing ? h('div', { class: 'muted img-standing', 'data-image-standing': '' }, r.standing) : null),
-    h('td', null, r.kind === 'custom' ? 'template' : r.kind),
+    // 596 (B1): base × agent ("Python · Claude Code").
+    h('td', { 'data-image-base': r.base || '' }, r.kind === 'custom' ? 'template' : (r.title || r.kind)),
     h('td', null, r.baked ? (r.bakedAt ? full(r.bakedAt) : 'yes') : h('span', { class: 'muted' }, 'no — bakes on first start')),
     h('td', { class: 'num' }, r.allocatedBytes ? bytes(r.allocatedBytes) : '—'),
     h('td', { class: 'num', 'data-own-cell': '' }, n ? sizePart(own, size) : '—'),
@@ -1924,7 +2135,8 @@ async function viewImages() {
         h('div', { class: 'muted' }, r.versionSetting === 'latest'
           ? 'latest' + (r.latest ? ' (npm: ' + r.latest + ')' : '') : 'pinned: ' + r.versionSetting),
       ] : '—'),
-    h('td', null, [r.versionSetting ? null : r.note, r.fromSandbox ? 'from ' + r.fromSandbox : null].filter(Boolean).join(' · ') || '—'),
+    h('td', null, [r.versionSetting ? null : r.note, r.fromSandbox ? 'from ' + r.fromSandbox : null, r.dockerfile ? 'Dockerfile ' + r.dockerfile : null,
+      r.baseUpdate].filter(Boolean).join(' · ') || '—'),
     h('td', { class: 'mono muted' }, r.key ? r.key.slice(0, 16) : ''),
     h('td', null, h('div', { class: 'actions' },
       // 594 W28: rebuilding is one explained step.
@@ -1942,7 +2154,7 @@ async function viewImages() {
       h('div', { class: 'actions' }, btn('Refresh', () => { remeasure(); refresh(false); }, { small: true, title: 'Measure again' }), imagesToggle())),
     h('p', { class: 'sub' }, 'Built-in images, and templates saved from sandboxes (a sandbox’s root disk — never its state disk). Own is what only this image holds (what removing it frees); shared is what it reuses from the disk it was made from. Progress of a bake shows under Operations. Everything Dozer uses: ',
       h('a', { href: '#/resources' }, 'Resources'), '.'),
-    panel(table(['Image', 'Kind', 'Baked', 'Size', 'Own', 'Shared', barLegend(), 'Version', 'Note', 'Key', ''], rows, [3, 4, 5])));
+    panel(table(['Image', 'Base · Agent', 'Baked', 'Size', 'Own', 'Shared', barLegend(), 'Version', 'Note', 'Key', ''], rows, [3, 4, 5])));
 }
 async function viewLineage() {
   const t = await measured('tree', 'images/tree');
@@ -2033,8 +2245,10 @@ function resRow(it, kids) {
   if (it.later && !it.refusal) notes.push(h('div', null, h('span', { class: 'muted' }, 'Later: '), it.later));
   if (it.warning) notes.push(h('div', { class: 'res-warn' }, '⚠ ' + it.warning));
   if (it.id === 'unattributed') notes.push(h('div', { class: bad ? 'res-refusal' : 'muted' }, it.detail));
+  // 596: Apple's container storage is shown, never deleted by Dozer — no checkbox at all (its own commands are named).
+  const foreign = it.id.startsWith('outside:apple-container');
   return h('tr', { class: 'res-row' + (it.parent ? ' res-child' : '') + (bad ? ' res-bad' : ''), 'data-res': it.id, 'data-group': it.group },
-    h('td', { class: 'res-check' }, cb),
+    h('td', { class: 'res-check' }, foreign ? null : cb),
     h('td', { class: 'res-name' }, h('div', { class: 'res-name-line' }, toggle, h('span', null, it.name),
         it.current ? h('span', { class: 'tag res-current' }, 'current') : null,
         it.cleanable && resSelectable(it) ? h('span', { class: 'tag res-clean', title: 'Clean up removes it: re-creatable and unused' }, 'clean-up') : null),
@@ -2765,11 +2979,16 @@ function wizStep5(d, w) {
   const imgs = [...new Set([...chosen, ...d.images.filter((i) => i.prepared).map((i) => i.name)])];
   const name = h('input', { type: 'text', name: 'wiz-name', placeholder: 'a-z 0-9 -', autocomplete: 'off', spellcheck: 'false' });
   name.value = w.firstName || '';
-  const image = h('select', { name: 'wiz-image' }, (imgs.length ? imgs : ['claude-code', 'pi', 'lab']).map((n) => h('option', { value: n }, n)));
-  if (w.firstImage) image.value = w.firstImage;
+  // 596 (B1): the same Agent × Base choice as New Sandbox (the catalogue read once for the wizard).
+  if (!w.bases) api('bases').then((b) => { w.bases = b; if (w.step === 5) renderWizard(true); }).catch(() => { w.bases = null; });
+  let chooser = null;
+  const picker = imagePicker({ images: [], bases: w.bases || null, value: w.firstImage || imgs[0] || 'claude-code', dockerfile: w.firstDockerfile || '',
+    onChange: () => { w.firstImage = picker.image(); w.firstDockerfile = picker.dockerfile() || ''; if (chooser) chooser.imageChanged(); if (acct) acct.agentChanged(); },
+    onDockerfile: (folder) => { if (chooser) chooser.suggest(folder); } });
+  const image = { get value() { return picker.image(); } };
   // 594: the name from the image (claude-sandbox, -2 when taken), its folder under the projects folder
   // (made when missing) — both follow until typed in; Choose… is the Mac's own folder picker; or Isolated.
-  const chooser = workspaceChooser({ nameInput: name, image: () => image.value, initialPath: w.firstWorkspace || '', initialIsolated: !!w.firstIsolated });
+  chooser = workspaceChooser({ nameInput: name, image: () => pickerNameHint(picker), initialPath: w.firstWorkspace || '', initialIsolated: !!w.firstIsolated });
   if (w.firstName) name.dispatchEvent(new Event('input'));
   const error = h('div', { class: 'dlg-error', role: 'alert' });
   // 594: the agent's credential prerequisite — only accounts it can use; pi with none: the key here.
@@ -2783,28 +3002,30 @@ function wizStep5(d, w) {
     if (!/^[a-z0-9][a-z0-9-]{0,39}$/.test(n)) { error.textContent = 'The name: 1–40 of a-z 0-9 - (not starting with -).'; return; }
     let ws;
     try { ws = chooser.get(); } catch (e) { error.textContent = e.message; return; }
-    if (acct && !acct.ok()) { error.textContent = (AGENT_NAMES[image.value] || 'This agent') + ' needs an Anthropic API key — add one above.'; return; }
+    if (acct && !acct.ok()) { error.textContent = (AGENT_NAMES[picker.agent()] || 'This agent') + ' needs an Anthropic API key — add one above.'; return; }
+    const blocked = picker.blocked();
+    if (blocked) { error.textContent = blocked; return; }
     w.firstWorkspace = ws.workspace || '';
     w.firstIsolated = !!ws.isolated;
     b.disabled = true;
     try {
       const account = acct ? acct.get() : undefined;
-      await actOrThrow({ action: 'create', sandbox: n, image: image.value, ...ws, ...(account ? { account } : {}) });
+      const df = picker.dockerfile();
+      await actOrThrow({ action: 'create', sandbox: n, image: image.value, ...ws, ...(account ? { account } : {}), ...(df ? { dockerfile: df } : {}) });
       w.created = n;
       wizGo(6);
     } catch (e) { error.textContent = e.message || String(e); b.disabled = false; }
   }, { primary: true });
   if (w.accounts) {
-    acct = accountChooser({ accounts: w.accounts, agent: () => (AGENT_NAMES[image.value] ? image.value : null),
+    acct = accountChooser({ accounts: w.accounts, agent: () => picker.agent(),
       onChange: () => { create.disabled = !acct.ok(); api('accounts').then((a) => { w.accounts = a; }).catch(() => {}); } });
     create.disabled = !acct.ok();
   } else create.disabled = true;
-  image.addEventListener('change', () => { w.firstImage = image.value; chooser.imageChanged(); if (acct) acct.agentChanged(); });
   return [
     h('h2', null, 'First sandbox (optional)'),
     h('p', { class: 'sub' }, 'A sandbox for one project. Its workspace is a folder on this Mac, shared live at /workspace — Dozer makes it when it does not exist yet. Or Isolated: nothing is shared. It is created off; Start boots it.'),
     h('label', { class: 'field' }, h('span', null, 'Name'), name),
-    h('label', { class: 'field' }, h('span', null, 'Image'), image),
+    picker.el,
     acct ? acct.el : null,
     chooser.el,
     error,

@@ -78,6 +78,10 @@ public enum WebRoute: Equatable, Sendable {
     // `resources-rm` / `resources-clean`; choosing the kernel is `resources-kernel`.
     case resources                 // GET  /api/v1/resources
     case resourcesPreview          // POST /api/v1/resources/preview  ({ids} | {clean: true})
+    // 596 — base images (WebBases.swift): the catalogue + Apple's container tool (read); the Mac's
+    // file picker for a Dockerfile (one at a time; the answer is a path and its folder).
+    case bases                     // GET  /api/v1/bases
+    case dockerfileChoose          // POST /api/v1/dockerfile/choose  ({start?})
 
     public var isStatic: Bool {
         switch self { case .index, .asset, .terminalFrame: true; default: false }
@@ -113,6 +117,7 @@ public enum WebRoute: Equatable, Sendable {
         case (.post, 2) where rest == ["workspace", "check"]: return .workspaceCheck
         case (.post, 2) where rest == ["workspace", "choose"]: return .workspaceChoose
         case (.post, 2) where rest == ["resources", "preview"]: return .resourcesPreview
+        case (.post, 2) where rest == ["dockerfile", "choose"]: return .dockerfileChoose
         case (.post, 4) where rest[0] == "sandboxes" && isSandboxName(rest[1]) && rest[2] == "network" && rest[3] == "preview":
             return .policyPreview(rest[1])
         case (.post, 3) where rest[0] == "sandboxes" && isSandboxName(rest[1]) && rest[2] == "terminal":
@@ -142,6 +147,7 @@ public enum WebRoute: Equatable, Sendable {
             case "onboarding": return .onboarding
             case "preparations": return .preparations
             case "resources": return .resources
+            case "bases": return .bases
             default: return nil
             }
         case 2 where rest == ["images", "tree"]:
