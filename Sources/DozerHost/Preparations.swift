@@ -443,6 +443,16 @@ extension HostCore {
     /// the key this build makes (the kernel cached and hashed — an older build's bake does not count).
     /// The lab: its prepared disk for the default lab spec.
     @Sendable nonisolated static func isPrepared(_ image: String, _ store: DozerStore) -> Bool {
+        isUsable(image, store, currentRecipeOnly: true)
+    }
+
+    /// 594 W28: a start can use `image` without preparing anything — also an image an older doz's
+    /// recipe made (it is used, and said to be stale; never rebuilt without asking).
+    @Sendable nonisolated static func isUsable(_ image: String, _ store: DozerStore) -> Bool {
+        isUsable(image, store, currentRecipeOnly: false)
+    }
+
+    nonisolated static func isUsable(_ image: String, _ store: DozerStore, currentRecipeOnly: Bool) -> Bool {
         guard FileManager.default.fileExists(atPath: store.layout("_").initfs.path),
               let spec = try? DozerImages.spec(name: "doz-prepare-\(image)", options: CreateOptions(image: image), store: store).0 else { return false }
         guard let imageSpec = spec.imageSpec else {
@@ -452,7 +462,9 @@ extension HostCore {
             ?? KernelProvider(cacheDirectory: spec.kernelCacheDirectory ?? StoreLayout(spec: spec).kernels).cachedKernel
         guard FileManager.default.fileExists(atPath: kernel.path), let deckhold = DeckholdBinary.locate(),
               let k = FileDigests.shared.sha256(kernel), let d = FileDigests.shared.sha256(deckhold) else { return false }
-        return ImageBaker(storeRoot: store.root).cached(imageSpec, key: imageSpec.bakeKey(kernelSHA256: k, deckholdSHA256: d)) != nil
+        guard ImageBaker(storeRoot: store.root).cached(imageSpec, key: imageSpec.bakeKey(kernelSHA256: k, deckholdSHA256: d)) != nil else { return false }
+        // 596: any base × agent image has a recipe to compare (no agent too); anything else does not.
+        return !currentRecipeOnly || AgentVersions.currentRecipe(for: imageSpec) == nil || AgentVersions.isCurrentRecipe(imageSpec)
     }
 
     /// What a start of `m` has to wait for: the image whose preparation it should join — one running
@@ -476,17 +488,17 @@ extension HostCore {
         await freshen(image, update: false)
         let s = store
         let check = preparedCheck
-        let ready = await Task.detached { check(image, s) }.value
-        // 594: prepared (maybe an older version): this start does not wait; a newer one is prepared
-        // in the background for the next sandbox.
-        if ready { await freshen(image, update: true) }
+        // 594 W28: an image an older doz (or an older agent release) made is USED — said, never rebuilt
+        // without the user asking (owner ruling). Only an image never prepared is prepared now.
+        let ready = await Task.detached { check(image, s) || HostCore.isUsable(image, s) }.value
         return ready ? nil : image
     }
 
     /// 594: an agent image's freshness — ask the registry for `latest` (at most hourly, never failing:
-    /// offline means the image already prepared is used, noted in the log) and, when `update` and the
-    /// prepared image is behind, start a background preparation of the new version (single-flight;
-    /// Operations shows it) — the sandbox being made now does not wait for it.
+    /// offline means the image already prepared is used, noted in the log). 594 W28 (owner ruling: "i
+    /// dont think we should rebuild images without the user agreeing … better to warn"): a newer release
+    /// is only SAID (`image ls`, doctor, create, the Images page) — never prepared by itself; `update` is
+    /// kept for its callers and does nothing more.
     @discardableResult
     func freshen(_ image: String, update: Bool) async -> AgentVersions.Freshness? {
         // 596: any base × agent image — the base's tag (hourly: its digest, for the next preparation and
@@ -506,13 +518,6 @@ extension HostCore {
             HostLog.line("\(agent): latest is \(v) (npm registry)")
         }
         if let e = f.nativeError { HostLog.line("claude-code: its native build's manifest could not be read (\(e))") }
-        guard update, !readOnly, runningPreparation(image) == nil else { return f }
-        let s = store
-        let behind = await Task.detached { AgentVersions.behind(image, store: s, settings: settings) }.value
-        if let b = behind {
-            note(nil, "\(image) \(b.current) is prepared; \(b.target) is available — preparing it in the background (the next new sandbox gets it)")
-            _ = try? preparation(for: image, requestedBy: "update to \(b.target)")
-        }
         return f
     }
 
@@ -778,8 +783,9 @@ extension HostCore {
             let s = store
             let check = preparedCheck
             for i in images {
-                // 594: latest resolved first (a prepared image that is behind is brought up to date in
-                // the background — onboarding does not wait for it).
+                // 594: latest resolved first. (594 W28: an image already prepared by THIS doz is not
+                // prepared again, even when a newer agent release is out — that is said, not done; one an
+                // older doz made IS prepared here: preparing is what the user asked for.)
                 await freshen(i, update: false)
                 if runningPreparation(i) != nil { todo.append(i); continue }
                 let ready = await Task.detached { check(i, s) }.value

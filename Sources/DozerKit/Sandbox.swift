@@ -60,6 +60,7 @@ public actor Sandbox {
             let proxy = try EgressProxy(policy: policy, ca: nil)
             proxy.vault.set(.anthropic, secret: nil)
             proxy.vault.set(.claudeOAuth, secret: nil)   // so a real token passed in the environment is vaulted too
+            proxy.ownName = spec.name                     // 594 W29: its hostname, answered locally
             egress = proxy
         } else {
             egress = nil
@@ -1520,9 +1521,21 @@ public actor Sandbox {
         guard let r = imageSpec else { return (environment, workingDirectory ?? "/root", user) }
         let runAs = user ?? r.user
         var env = r.sessionEnvironment
+        if let p = env["PATH"] { env["PATH"] = withGames(p) }
         if runAs == r.user { env["HOME"] = r.home; env["USER"] = r.user }
         env.merge(environment) { _, caller in caller }
         return (env, workingDirectory ?? r.workdir, runAs == "root" ? nil : runAs)
+    }
+
+    /// 594 W30: apt puts some programs in /usr/games (cowsay, fortune): a session's PATH has it, after
+    /// /usr/bin — added at session time, so no image is rebuilt for it. Idempotent.
+    public static func withGames(_ path: String) -> String {
+        let parts = path.split(separator: ":").map(String.init)
+        guard !parts.contains("/usr/games") else { return path }
+        var out = parts
+        let at = (out.firstIndex(of: "/bin") ?? out.firstIndex(of: "/usr/bin")).map { $0 + 1 } ?? out.count
+        out.insert("/usr/games", at: at)
+        return out.joined(separator: ":")
     }
 
     /// Attach a viewer to session `name` at `size`. The first output is the session's current

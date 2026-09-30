@@ -25,19 +25,19 @@ struct ImageList: AsyncParsableCommand {
         }
         let rows = try decode(try await query(HostRequest(.imageList), g), [ImageRow].self, g)
         if g.json { Out.json(rows); return }
-        // 596 (B10): base × agent — "Python · Claude Code" (a template: "template").
-        var t = [["IMAGE", "BASE · AGENT", "BAKED", "SIZE", "NOTE"]]
+        // 594 W28: a STATUS column; a stale image is named precisely, below the table — and never rebuilt
+        // without being asked (doz image bake NAME). 596 (B10): base × agent — "Python · Claude Code".
+        var t = [["IMAGE", "BASE · AGENT", "STATUS", "BAKED", "SIZE", "NOTE"]]
         for r in rows {
-            // 594: a bake of an older build's key is not this build's image (the next start bakes again).
-            let baked = r.baked && r.current == false ? "an older build's — prepared again when next needed"
-                : r.baked ? (r.bakedAt.map { $0.formatted(date: .abbreviated, time: .shortened) } ?? "yes") : "no (prepared on first start, or doz onboard)"
-            // 594: an agent image says its version, and a newer one available (and being prepared).
-            t.append([r.name, r.kind == "custom" ? "template" : (r.title ?? r.kind), baked,
+            let baked = r.baked ? (r.bakedAt.map { $0.formatted(date: .abbreviated, time: .shortened) } ?? "yes") : "no (prepared on first start, or doz onboard)"
+            // 594: an agent image says its version, and a newer one available.
+            t.append([r.name, r.kind == "custom" ? "template" : (r.title ?? r.kind), r.status ?? "—", baked,
                       r.allocatedBytes.map(DozerImages.formatBytes) ?? "—",
                       [r.versionLine ?? r.note, r.fromSandbox.map { "from \($0)" }, r.dockerfile.map { "Dockerfile \(tildePath($0))" }, r.baseUpdate]
                         .compactMap { $0 }.joined(separator: " · ")])
         }
         Out.stdout(Out.table(t))
+        for r in rows { if let s = r.standing { Out.stdout("\(r.name): \(s)\n") } }
     }
 }
 
@@ -66,10 +66,23 @@ func renderImageTree(_ tree: ImageTree) -> String {
 }
 
 struct ImageBake: AsyncParsableCommand {
-    static let configuration = CommandConfiguration(commandName: "bake", abstract: "Bake a built-in image now (otherwise the first start does it; minutes, needs network).")
+    static let configuration = CommandConfiguration(commandName: "bake", abstract: "Bake (or rebuild) a built-in image now (otherwise the first start does it; minutes, needs network). Existing sandboxes keep their disks; new sandboxes and doz reset use the new image.")
     @OptionGroup var g: GlobalOptions
     @Argument(help: "lab, claude-code or pi.") var image: String
+    @Flag(name: [.short, .long], help: "Do not ask.") var yes = false
     func run() async throws {
+        // 594 W28: rebuilding is one explained step — what it does to existing and new sandboxes.
+        let rows = (try? decode(try await query(HostRequest(.imageList), g), [ImageRow].self, g)) ?? []
+        if let row = rows.first(where: { $0.name == image }), row.baked {
+            let what = "Rebuild the \(image) image (~2 min, needs network)? Existing sandboxes keep their disks — nothing in them changes; "
+                + "new sandboxes, and `doz reset NAME`, use the new image (a reset keeps the agent's own state and /workspace, and drops other system changes)."
+            let asker = Asker(yes: yes, json: g.json)
+            if asker.interactive {
+                guard asker.yesNo(what, default: true) else { throw fail(HostError(.failed, "not rebuilt — nothing done"), g, code: DozerExit.declined) }
+            } else if !g.json && !g.quiet {
+                Out.stderr("[doz] rebuilding the \(image) image: existing sandboxes keep their disks; new sandboxes and `doz reset NAME` use the new one\n")
+            }
+        }
         var r = HostRequest(.imageBake)
         r.image = image
         let row = try decode(try call(r, g), ImageRow.self, g)
@@ -629,6 +642,8 @@ struct HostUpgradeCheck: AsyncParsableCommand {
         var thisExecutable: String
         var sameBuild: Bool?
         var note: String?
+        /// 594 W28: agent images an older doz prepared ("claude-code: prepared by an older doz — …").
+        var olderImages: [String]?
     }
 
     func run() async throws {
@@ -651,10 +666,25 @@ struct HostUpgradeCheck: AsyncParsableCommand {
                     + "working; `doz host stop` switches to doz \(DozerCommand.version) (running sandboxes hibernate, and wake on the new build)"
             }
         }
+        // 594 W28: an upgrade can change what this doz's agent images contain; name the images an older
+        // doz prepared — never rebuilt here (owner: "better to warn / nag the user about out-of-date images").
+        if store.root.path.isEmpty == false, FileManager.default.fileExists(atPath: store.root.path) {
+            let settings = DozerSettings.load()
+            let older = ["claude-code", "pi"].compactMap { image in
+                AgentVersions.standing(image, store: store, settings: settings).olderRecipeLine.map { "\(image): \($0)" }
+            }
+            if !older.isEmpty { a.olderImages = older }
+        }
         if g.json { Out.json(a); return }
         // 594 W4 (owner's walkthrough): Homebrew's post-install runs this on EVERY install, first ones
-        // included — speak only when an older host is running; otherwise there is nothing to say.
+        // included — speak only when an older host is running or an image is out of date; otherwise
+        // there is nothing to say.
         if let note = a.note { Out.stdout("note: \(note)\n") }
+        if let older = a.olderImages {
+            Out.stdout("note: images prepared by an older doz — " + older.joined(separator: "; ")
+                + ". Rebuild when ready: " + older.map { "doz image bake \($0.prefix { $0 != ":" })" }.joined(separator: ", ")
+                + " (existing sandboxes keep their disks; new sandboxes and doz reset use the new image)\n")
+        }
     }
 
     /// A process's executable path (the kernel's record — `proc_pidpath`), or nil.

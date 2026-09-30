@@ -173,7 +173,8 @@ public enum AgentPrompt {
     public static func values(name: String, image: String, cpus: Int, memoryMiB: UInt64, workspace: String?,
                               network: NetworkMode, account: String?, version: String,
                               hostname: String = macHostname(), credentialProblem: String? = nil, agentSudo: Bool = true,
-                              timeZone: String? = nil, base: String? = nil, apk: Bool = false) -> [String: String] {
+                              timeZone: String? = nil, sudoMissingFromImage: String? = nil,
+                              base: String? = nil, apk: Bool = false) -> [String: String] {
         var v: [String: String] = [:]
         // 594 W10: the VM follows the Mac's time zone (or the setting's).
         v["sandbox.timezone"] = timeZone ?? "UTC"
@@ -186,6 +187,10 @@ public enum AgentPrompt {
         v["sudo.description"] = agentSudo
             ? "you have passwordless sudo in this sandbox (\(install)). The network policy and the credential rules still apply to root, and the user can undo system changes with `doz reset \(name)` or a restore point."
             : "no sudo: you run as an unprivileged user and cannot install system packages. If you need one, ask the user — they can turn sudo on for this sandbox (`agent_sudo: true` in doz_project.yaml, or `doz config set sandbox.agent_sudo true`); it applies from the next session."
+        // 594 W28: on, but this sandbox's system disk came from an older image that has no sudo.
+        if let image = sudoMissingFromImage {
+            v["sudo.description"] = "no sudo: this sandbox's system disk was made from an older \(image) image that has no sudo. If you need to install a system package, ask the user to rebuild the image (`doz image bake \(image)`) and reset this sandbox (`doz reset \(name)` — it keeps your own state and /workspace)."
+        }
         v["sandbox.name"] = name
         v["sandbox.image"] = image.hasPrefix("custom:") ? String(image.dropFirst(7)) + " (a template)" : image
         v["sandbox.cpus"] = String(cpus)
@@ -300,14 +305,18 @@ public enum AgentPrompt {
     /// The prompt and skill a sandbox gets at its next session. nil: its image runs no agent.
     public static func report(config: SandboxConfig, policy: NetworkPolicy?, account: String?, version: String,
                               settings: DozerSettings = .load(), hostname: String = macHostname(),
-                              credentialProblem: String? = nil) -> AgentPromptReport? {
+                              credentialProblem: String? = nil, sudoInstalled: Bool? = nil) -> AgentPromptReport? {
         guard let agent = agent(of: config.spec), let imageSpec = config.spec.imageSpec else { return nil }
         let network: NetworkMode = policy.map { .proxied($0) } ?? config.spec.network
+        // 594 W28: sudo only when it is on AND the guest has it (a disk from an older image may not).
+        let wanted = HostCore.agentSudo(config, settings: settings)
+        // 596: the base the image was made from, and its package manager.
         let base = baseDescription(config)
         let vals = values(name: config.name, image: config.image, cpus: config.spec.cpus, memoryMiB: config.spec.memoryMiB,
                           workspace: config.workspace, network: network, account: account, version: version, hostname: hostname,
-                          credentialProblem: credentialProblem, agentSudo: HostCore.agentSudo(config, settings: settings),
+                          credentialProblem: credentialProblem, agentSudo: wanted && sudoInstalled != false,
                           timeZone: HostCore.guestTimeZone(settings: settings, environment: settings.environment)?.name,
+                          sudoMissingFromImage: wanted && sudoInstalled == false ? config.spec.imageSpec?.name ?? config.image : nil,
                           base: base.text, apk: base.apk)
         var r = AgentPromptReport(enabled: settings.bool(SettingKey.agentPrompt), agent: agent, text: nil, error: nil, layers: [],
                                   skill: nil, promptPath: guestPromptPath,
@@ -369,10 +378,12 @@ public enum AgentPrompt {
 
 extension HostCore {
     /// The prompt a sandbox's next session gets (nil: its image runs no agent).
-    func agentPromptReport(_ m: Managed) -> AgentPromptReport? {
+    /// `sudoInstalled`: 594 W28 — whether the guest HAS sudo (checked at session start); the facts never
+    /// claim sudo a system disk from an older image does not have. nil: not checked (`inspect --prompt`).
+    func agentPromptReport(_ m: Managed, sudoInstalled: Bool? = nil) -> AgentPromptReport? {
         AgentPrompt.report(config: m.config, policy: m.sandbox.egress?.policy,
                            account: m.sandbox.egress == nil ? nil : accountName(m), version: version,
-                           credentialProblem: credentialProblem(m))
+                           credentialProblem: credentialProblem(m), sudoInstalled: sudoInstalled)
     }
 
     /// Write (or, when off, remove) the facts file and the skill in the guest — a utility exec as

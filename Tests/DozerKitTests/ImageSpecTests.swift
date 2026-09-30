@@ -157,6 +157,17 @@ final class ImageSpecTests: XCTestCase {
         XCTAssertFalse(GuestCommand.prepareGuest(imageSpec: nil).contains("localtime"), "none given: the image's own")
     }
 
+    /// 594 W30: /usr/games on a session's PATH (after /usr/bin, /bin), without a rebuild; W29: the guest's
+    /// own name in /etc/hosts at boot.
+    func test_gamesOnThePathAndTheOwnHostname() {
+        XCTAssertEqual(Sandbox.withGames("/home/agent/.local/bin:/usr/local/bin:/usr/bin:/bin"),
+                       "/home/agent/.local/bin:/usr/local/bin:/usr/bin:/bin:/usr/games")
+        XCTAssertEqual(Sandbox.withGames("/usr/bin:/usr/games:/bin"), "/usr/bin:/usr/games:/bin", "idempotent")
+        let ctx = Sandbox.sessionContext(imageSpec: AgentImages.pi, environment: [:], workingDirectory: nil, user: nil)
+        XCTAssertTrue(ctx.environment["PATH"]!.hasSuffix(":/usr/bin:/bin:/usr/games"))
+        XCTAssertTrue(GuestCommand.prepareGuest(imageSpec: nil).contains("printf '127.0.1.1\\t%s\\n' \"$h\" >> /etc/hosts"))
+    }
+
     func test_stateDiskLayoutScript() {
         XCTAssertEqual(GuestCommand.stateKey("/home/agent/.pi/agent"), "home_agent_.pi_agent")
         let s = GuestCommand.prepareGuest(imageSpec: AgentImages.pi)
@@ -165,7 +176,8 @@ final class ImageSpecTests: XCTestCase {
         XCTAssertTrue(s.contains("mount --bind '/state/home_agent_.pi_agent' '/home/agent/.pi/agent'"))
         XCTAssertTrue(s.contains("mountpoint -q '/home/agent/.pi/agent' ||"), "idempotent")
         XCTAssertTrue(s.contains("chown agent:agent '/state/home_agent_.pi_agent'"))
-        XCTAssertEqual(GuestCommand.prepareGuest(imageSpec: nil), "set -e; rm -rf /run/deckhold; mkdir -p /run/deckhold; chmod 1777 /run/deckhold",
+        XCTAssertEqual(GuestCommand.prepareGuest(imageSpec: nil), "set -e; rm -rf /run/deckhold; mkdir -p /run/deckhold; chmod 1777 /run/deckhold; "
+                       + GuestCommand.ownHostnameScript,
                        "a kept root disk must not carry the last boot's sessions")
         let layout = StoreLayout(root: URL(fileURLWithPath: "/tmp/s"), name: "lab")
         XCTAssertEqual(layout.stateDisk.path, "/tmp/s/sandboxes/lab/state.ext4")

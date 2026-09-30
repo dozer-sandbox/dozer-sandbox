@@ -379,6 +379,12 @@ public actor HostCore {
                            foreignCredentials: egress.map { $0.vault.foreignSightings.count }.flatMap { $0 == 0 ? nil : $0 })
         i.agent = m.sandbox.spec.imageSpec?.name
         i.credentialProblem = credentialProblem(m)
+        // 594 W28: an image an older doz's recipe made (its disk lacks what this doz's has). 596: any
+        // base × agent image.
+        if let s = m.sandbox.spec.imageSpec, m.sandbox.spec.customImage == nil, ImageChoice.parse(s.name)?.name == s.name,
+           !AgentVersions.isCurrentRecipe(s) {
+            i.olderImage = AgentVersions.recipeChanges(s)
+        }
         // 596: the base × agent, and a Dockerfile's rebuild state.
         if let c = m.config.imageChoice {
             i.base = c.base
@@ -544,7 +550,7 @@ public actor HostCore {
         case .ping:
             return try JSONValue(encoding: await status())
         case .create:
-            return try JSONValue(encoding: try await create(r))
+            return try JSONValue(encoding: try await create(r, emit: emit))
         case .start, .wake, .pause, .resume, .sleep, .hibernate, .shutdown, .reset, .rm:
             return try JSONValue(encoding: try await lifecycle(r.op, name: r.name, emit: emit))
         case .ls:
@@ -700,7 +706,7 @@ public actor HostCore {
 
     // MARK: create
 
-    private func create(_ r: HostRequest) async throws -> SandboxInfo {
+    private func create(_ r: HostRequest, emit: @escaping @Sendable (HostEvent) -> Void = { _ in }) async throws -> SandboxInfo {
         guard let name = r.name else { throw HostError(.invalid, "which sandbox? (a name is required)") }
         guard var o = r.create else { throw HostError(.invalid, "create needs --image") }
         guard managed[name] == nil, !creating.contains(name) else { throw HostError(.exists, "sandbox \(name) already exists") }
@@ -730,8 +736,15 @@ public actor HostCore {
             throw HostError(.notFound, "no Dockerfile is known for \(c.base) — create with --dockerfile PATH")
         }
         // 594: an agent image — latest asked of the registry (hourly, offline-tolerant); this sandbox
-        // gets the image already prepared, and a newer one is prepared in the background.
-        await freshen(o.image, update: true)
+        // gets the image already prepared. 594 W28: an out-of-date one is used as it is (the CLI and
+        // the page say so) unless the user chose `rebuild` — then this doz's image is prepared first.
+        await freshen(o.image, update: false)
+        if o.rebuild == true, DozerImages.builtIn.contains(DozerImages.canonicalName(o.image))
+            || DozerImages.isPreparable(DozerImages.canonicalName(o.image), store: store) {
+            let img = DozerImages.canonicalName(o.image)
+            emit(HostEvent(kind: .note, sandbox: name, text: "rebuilding the \(img) image first (as asked) — existing sandboxes keep theirs"))
+            try await follow(try preparation(for: img, requestedBy: "create \(name) --rebuild"), emit: emit)
+        }
         let (spec, image) = try DozerImages.spec(name: name, options: o, store: store)
         // 594: the agent's credential prerequisite, before anything is made (pi: an API-key account).
         if spec.network.policy != nil {
@@ -831,7 +844,7 @@ public actor HostCore {
             let after = await effectivePhase(m)
             return LifecycleResult(name: m.name, operation: op.rawValue, phaseBefore: before.rawValue, phase: after.rawValue,
                                    changed: changed, milliseconds: ms(since: t0),
-                                   info: op == .rm ? nil : await info(m, sessions: false))
+                                   info: op == .rm ? nil : await info(managed[m.name] ?? m, sessions: false))   // (W28: a reset may have moved it to a new image)
         }
         func invalid(_ hint: String = "") -> HostError {
             HostError(.invalidPhase, "\(op.rawValue) is not possible while \(m.name) is \(PhaseName.label(before))" + hint)
@@ -931,6 +944,9 @@ public actor HostCore {
         // 593 §9: a reset's or a shutdown's sessions are gone — so are its panes (owner, 2026-09-30; the
         // saved screens went with the library's step).
         if op == .reset || op == .shutdown { try? TerminalLayout.write(nil, store, m.name) }
+        // 594 W28: a reset takes the image a NEW sandbox gets now (after a rebuild: this doz's) — the
+        // state disk (the agent's own state) and the workspace are kept; the next start clones it.
+        if op == .reset { moveToCurrentImage(m) }
         if [.start, .shutdown, .reset].contains(op), m.config.diedWithHostAt != nil {
             m.config.diedWithHostAt = nil
             try? m.config.write(store.configFile(m.name))
@@ -944,6 +960,24 @@ public actor HostCore {
             note(m.name, "removed")
         }
         return await result(true)
+    }
+
+    /// 594 W28: after a reset (the root disk is gone), point the sandbox at the agent image a create
+    /// would take now; its next start clones that. Nothing changes for a template's sandbox, a lab, or
+    /// when the image a create takes is the one it has.
+    private func moveToCurrentImage(_ m: Managed) {
+        guard let old = m.config.spec.imageSpec, ImageChoice.parse(old.name)?.name == old.name, m.config.spec.customImage == nil,
+              let now = (try? AgentVersions.spec(old.name, purpose: .create, store: store, settings: .load())) ?? nil,
+              now != old, AgentVersions.usable(old.name, store: store, settings: .load()).contains(now) else { return }
+        var cfg = m.config
+        cfg.spec.imageSpec = now
+        do { try cfg.write(store.configFile(m.name)) } catch { note(m.name, "could not record the new image: \(error.localizedDescription)"); return }
+        detachWatcher(m)
+        m.eventTask?.cancel()
+        m.networkTask?.cancel()
+        managed[m.name] = nil
+        do { try adopt(cfg) } catch { note(m.name, "could not take the new image: \(error.localizedDescription)"); return }
+        note(m.name, "reset to the \(old.name) image \(now.agent?.version ?? "")\(AgentVersions.isCurrentRecipe(now) ? " (this doz's)" : "") — the next start boots it")
     }
 
     /// How long hibernating waits for a program started `since` ago (the rest of 3 s).
@@ -1169,6 +1203,7 @@ public actor HostCore {
         }
         let runAs = user ?? r.user
         var env = r.sessionEnvironment
+        if let p = env["PATH"] { env["PATH"] = Sandbox.withGames(p) }     // 594 W30: /usr/games too
         if runAs == r.user { env["HOME"] = r.home; env["USER"] = r.user }
         env.merge(environment) { _, caller in caller }
         return (env, workdir ?? r.workdir, runAs == "root" ? nil : runAs)
@@ -1239,7 +1274,10 @@ public actor HostCore {
         // 594 (D15): the environment prompt and the dozer skill, rendered from the sandbox's current
         // facts and written into the guest before the program starts. pi's own session names the
         // facts file (pi reads a file given to --append-system-prompt); Claude Code's launcher reads it.
-        if let report = agentPromptReport(m) {
+        // 594 W28: never claim sudo the guest does not have (a disk from an older image).
+        let sudoInstalled: Bool? = m.config.spec.imageSpec == nil ? nil
+            : ((try? await m.sandbox.exec(["test", "-x", "/usr/bin/sudo"], timeoutSeconds: 10))?.exitCode).map { $0 == 0 }
+        if let report = agentPromptReport(m, sudoInstalled: sudoInstalled) {
             if report.enabled, let error = report.error {
                 throw HostError(.invalid, "the agent prompt does not render — \(error). Fix it, or turn the prompt off: doz config set agent.prompt false")
             }
@@ -1593,8 +1631,10 @@ public actor HostCore {
             guard let choice = ImageChoice.parse(name) else { continue }
             let agent = choice.agent == .none ? nil : choice.agent.rawValue
             let proto = ImageSpec(name: name, base: "", steps: [], verify: [], user: "", home: "", persistDirs: [])
-            // 594: the one a new sandbox gets — the newest prepared for this build, else the newest bake.
+            // 594: the one a new sandbox gets — the newest prepared for this build, else (W28) the newest an
+            // older doz made, else the newest bake.
             let prepared = AgentVersions.prepared(name, store: store, settings: settings).first
+                ?? AgentVersions.usable(name, store: store, settings: settings).first
             let all = ImageBaker(storeRoot: store.root).all(proto)
             let baked = prepared.flatMap { p in all.first { $0.manifest.imageSpec == p } } ?? all.first
             let version = baked?.manifest.imageSpec.agent?.version
@@ -1629,10 +1669,17 @@ public actor HostCore {
                 row.dockerfile = Dockerfiles.record(choice.base, store)?.dockerfile
             }
             row.preparing = runningPreparation(name) != nil ? true : nil
+            // 594 W28: named precisely — never rebuilt by itself.
+            if let b = baked, !AgentVersions.isCurrentRecipe(b.manifest.imageSpec) {
+                row.olderRecipe = AgentVersions.recipeChanges(b.manifest.imageSpec)
+            }
             rows.append(row)
         }
         // 594: prepared for this build (the key it bakes now, the kernel, the guest init disk).
-        for i in rows.indices { rows[i].current = preparedCheck(rows[i].name, store) }
+        for i in rows.indices {
+            rows[i].current = preparedCheck(rows[i].name, store)
+            rows[i].fillStanding()
+        }
         for c in store.layout("_").customImages() {
             var row = ImageRow(name: c.name, kind: "custom", baked: true, key: c.key, bakedAt: c.createdAt, allocatedBytes: c.allocatedBytes,
                                note: c.note.isEmpty ? nil : c.note, fromSandbox: c.fromSandbox)

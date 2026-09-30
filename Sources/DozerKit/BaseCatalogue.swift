@@ -395,6 +395,67 @@ public enum ImageComposer {
         return s
     }
 
+    // MARK: this build's recipe for an image (594 W28)
+
+    /// The keys `spec(…)` itself adds to a session's environment (the rest come from the base).
+    static let composerKeys: Set<String> = ["PATH", "CLAUDE_CONFIG_DIR", "DISABLE_AUTOUPDATER", "DISABLE_UPDATES", "PI_CODING_AGENT_DIR", "USE_BUILTIN_RIPGREP"]
+
+    /// 594 W28 × 596: what THIS build bakes for what `spec` installs — the same base (its digest, or a
+    /// Dockerfile's build as the spec describes it), the same agent release (its npm integrity or its
+    /// native checksums, read from the spec's own steps) — composed again. Equal to `spec` when this
+    /// build's recipe made it. nil: not a base × agent image, or its release cannot be read.
+    public static func recompose(_ spec: ImageSpec) -> ImageSpec? {
+        guard let choice = ImageChoice.parse(spec.name), choice.name == spec.name, spec.name != "lab" else { return nil }
+        var release: AgentRelease?
+        var native: NativeClaudeBuild?
+        if choice.agent != .none {
+            guard let v = spec.agent?.version else { return nil }
+            let npm = npmIntegrity(in: spec)
+            native = nativeBuild(in: spec, version: v)
+            guard npm != nil || native != nil else { return nil }
+            release = AgentRelease(version: v, integrity: npm ?? "sha512-A")
+        }
+        let src: BaseSource
+        if let c = BaseCatalogue.base(choice.base) {
+            guard let at = spec.base.firstIndex(of: "@") else { return nil }
+            src = c.source(digest: String(spec.base[spec.base.index(after: at)...]))
+        } else {
+            let path = (spec.sessionEnvironment["PATH"] ?? "").split(separator: ":").map(String.init)
+            let extra = path.dropFirst().prefix { $0 != "/usr/local/bin" }
+            src = BaseSource(reference: spec.base, packageManager: .auto, hasNode: false, musl: nil, rootfsMiB: spec.rootfsMiB,
+                             environment: spec.sessionEnvironment.filter { !composerKeys.contains($0.key) }, path: Array(extra))
+        }
+        return try? Self.spec(name: spec.name, base: src, agent: choice.agent, release: release, native: native)
+    }
+
+    /// The sha512 integrity an npm install step checks.
+    public static func npmIntegrity(in spec: ImageSpec) -> String? {
+        for s in spec.steps {
+            guard let script = s.argv.last, let r = script.range(of: #"\[ "\$got" = '(sha512-[A-Za-z0-9+/=]+)' \]"#, options: .regularExpression) else { continue }
+            let m = String(script[r])
+            guard let a = m.range(of: "sha512-") else { continue }
+            return String(m[a.lowerBound...].prefix { $0 != "'" })
+        }
+        return nil
+    }
+
+    /// The native build's checksums its install step checks (one platform's may be absent — the
+    /// other is then used for it: a step for a known libc names only its own).
+    static func nativeBuild(in spec: ImageSpec, version: String) -> NativeClaudeBuild? {
+        var sums: [String: String] = [:]
+        for s in spec.steps where s.name.hasPrefix("install Claude Code \(version) (native build") {
+            let script = s.argv.last ?? ""
+            for p in NativeClaudeBuild.platforms {
+                if let r = script.range(of: "platform=\(p); want='[0-9a-f]{64}'", options: .regularExpression) {
+                    sums[p] = String(script[r].suffix(65).dropLast())
+                }
+            }
+        }
+        guard let any = sums.values.first else { return nil }
+        for p in NativeClaudeBuild.platforms where sums[p] == nil { sums[p] = any }
+        return NativeClaudeBuild(version: version, sha256: sums)
+    }
+
     // MARK: the parts
 
     /// The `agent` account (uid 1001) and /workspace — `useradd` (Debian, Ubuntu) or BusyBox's

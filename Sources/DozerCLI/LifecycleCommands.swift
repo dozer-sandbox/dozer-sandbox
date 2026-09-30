@@ -47,6 +47,12 @@ struct CreateArguments: ParsableArguments {
     @Flag(inversion: .prefixedNo, help: "The agent (claude-code, pi) has passwordless sudo inside the sandbox (default: the setting sandbox.agent_sudo, on). Applied at every boot and session start.")
     var agentSudo: Bool?
 
+    @Flag(name: .long, help: "When the image is out of date (an older doz's recipe, or a newer agent release): rebuild it first (~2 min, needs network; existing sandboxes are not affected).")
+    var rebuild = false
+
+    @Flag(name: .long, help: "When the image is out of date: use it as it is (the default off a terminal; said as a warning).")
+    var useCurrent = false
+
     /// 596 (B10): the image `--agent`/`--base`/`--dockerfile` name (nil: none of them given).
     /// `--image claude-code` stays the shorthand for `--agent claude-code --base node`.
     func chosenImage() throws -> String? {
@@ -90,6 +96,7 @@ struct CreateArguments: ParsableArguments {
         }
         if let c = cpus, c < 1 { throw ValidationError("--cpus must be at least 1") }
         if isolated && workspace != nil { throw ValidationError("--isolated or --workspace, not both") }
+        if rebuild && useCurrent { throw ValidationError("--rebuild or --use-current, not both") }
         var o = CreateOptions(image: img, cpus: cpus, memoryMiB: mem, workspace: absoluteWorkspace, network: network, subnet: subnet, account: account)
         o.isolated = isolated ? true : nil
         o.agentSudo = agentSudo
@@ -134,6 +141,31 @@ struct CreateArguments: ParsableArguments {
     }
 }
 
+/// 594 W28 (owner ruling: "i dont think we should rebuild images without the user agreeing (and
+/// understanding the consequences) … better to warn"): before a create, an out-of-date image is said —
+/// and the user chooses: `--rebuild` (the image is rebuilt first; existing sandboxes are not affected)
+/// or `--use-current`; on a terminal the question is asked (default: use the current image); off one,
+/// or with --json, the current image is used with a warning. Returns the notice when the current
+/// (out-of-date) image is used.
+func chooseImage(_ o: inout CreateOptions, rebuild: Bool, useCurrent: Bool, _ g: GlobalOptions) async throws -> String? {
+    // 596: any base × agent image (a Dockerfile's is rebuilt when its Dockerfile changes — said on its page).
+    guard DozerImages.builtIn.contains(o.image) || ImageChoice.parse(o.image) != nil, o.dockerfile == nil else { return nil }
+    if rebuild { o.rebuild = true; return nil }
+    let rows = (try? decode(try await query(HostRequest(.imageList), g), [ImageRow].self, g)) ?? []
+    guard let row = rows.first(where: { $0.name == o.image }), row.baked, let standing = row.standing else { return nil }
+    let missing = row.olderRecipe.map { $0 == ["its recipe changed"] ? "" : " (missing: \($0.joined(separator: ", ")))" } ?? ""
+    let asker = Asker(yes: false, json: g.json)
+    if !useCurrent, asker.interactive {
+        Out.stderr("[doz] the \(o.image) image is out of date: \(standing)\n")
+        let yes = asker.yesNo("Rebuild it first (~2 min, needs network; existing sandboxes are NOT affected)? No: use the current image\(missing)",
+                                default: false)
+        if yes { o.rebuild = true; return nil }
+    }
+    let notice = "used the current \(o.image) image\(missing): \(standing)"
+    if !g.json && !g.quiet { Out.stderr("[doz] warning: \(notice)\n") }
+    return notice
+}
+
 /// 594: a workspace made by this create is said; an isolated sandbox is said — unless asked for with
 /// --isolated (D17; owner: one word, "isolated").
 func noteWorkspace(_ info: SandboxInfo, isolatedAsked: Bool, _ g: GlobalOptions) {
@@ -161,9 +193,11 @@ struct Create: AsyncParsableCommand {
         try preflightAgentAccount(&o, g)          // 594: pi needs an API-key account — before anything is made
         // 596 (B7, B9): a Dockerfile base — where it is built, and Apple's tool ready before a start builds it.
         if o.dockerfile != nil { try await builderPreflight(g, required: start) }
+        let notice = try await chooseImage(&o, rebuild: create.rebuild, useCurrent: create.useCurrent, g)
         r.create = o
         let v = try call(r, g)
         var info = try decode(v, SandboxInfo.self, g)
+        info.imageNotice = notice
         if !g.json {
             Out.stdout("created \(info.name): \(info.image), \(info.cpus) CPUs, \(Out.mib(info.memoryMiB)), network \(info.network)"
                        + (info.workspace.map { ", /workspace = \($0)" } ?? ", isolated") + "\n")
@@ -336,10 +370,13 @@ struct Up: AsyncParsableCommand {
                 try create.applyPrompt(to: &o)
                 // 594: doz_project.yaml's image and account are checked like any create.
                 try preflightAgentAccount(&o, g)
+                if create.rebuild && create.useCurrent { throw ValidationError("--rebuild or --use-current, not both") }
+                _ = try await chooseImage(&o, rebuild: create.rebuild, useCurrent: create.useCurrent, g)
                 r.create = o
             } else {
                 var o = try create.options(defaultImage: DozerSettings.load().string(SettingKey.defaultImage) ?? "lab")
                 try preflightAgentAccount(&o, g)
+                _ = try await chooseImage(&o, rebuild: create.rebuild, useCurrent: create.useCurrent, g)
                 r.create = o
             }
             // 596 (B7, B9): `up` starts it at once — a Dockerfile base needs Apple's tool ready first.

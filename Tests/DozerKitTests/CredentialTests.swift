@@ -178,6 +178,16 @@ final class CredentialTests: XCTestCase {
         let denied = proxy.answer(q)
         XCTAssertFalse(denied.allowed)
         XCTAssertEqual(denied.bytes[3] & 0x0f, 3, "a denied name does not resolve")
+        // 594 W29: the sandbox's own name — answered 127.0.1.1 even under `locked`, and not logged (no name).
+        var own: [UInt8] = [0x00, 0x07, 0x01, 0x00, 0, 1, 0, 0, 0, 0, 0, 0]
+        own.append(16); own += Array("claude-sandbox-3".utf8)
+        own += [0, 0, 1, 0, 1]
+        proxy.ownName = "Claude-Sandbox-3"
+        let mine = proxy.answer(own)
+        XCTAssertNil(mine.name, "never logged")
+        XCTAssertEqual(mine.bytes[3] & 0x0f, 0)
+        XCTAssertEqual(Array(mine.bytes.suffix(4)), [127, 0, 1, 1])
+        XCTAssertFalse(proxy.answer(q).allowed, "any other name: still the policy")
         proxy.policy = NetworkPolicy(rules: [EgressRule(host: "example.com")])
         var aaaa = q; aaaa[aaaa.count - 3] = 28
         let v6 = proxy.answer(aaaa)

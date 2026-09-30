@@ -412,11 +412,17 @@ struct Init: AsyncParsableCommand {
         do { try Data(text.utf8).write(to: file, options: .atomic) } catch {
             throw fail(HostError(.failed, "could not write \(file.path): \(error.localizedDescription)"), g)
         }
+        // 594 W28: the image the project names is out of date — said now; `doz up` asks (or --rebuild).
+        let rows = (try? decode(try await query(HostRequest(.imageList), g), [ImageRow].self, g)) ?? []
+        let standing = rows.first(where: { $0.name == img && $0.baked })?.standing
         if g.json {
-            Out.json(["project": .string(file.path), "name": .string(sandbox), "image": .string(img), "workspace": .string(folder.path),
-                      "onboarded": .bool(onboarded != nil || OnboardingRecord.read(g.dozerStore) != nil)] as [String: JSONValue])
+            var j: [String: JSONValue] = ["project": .string(file.path), "name": .string(sandbox), "image": .string(img), "workspace": .string(folder.path),
+                                          "onboarded": .bool(onboarded != nil || OnboardingRecord.read(g.dozerStore) != nil)]
+            if let s = standing { j["imageNotice"] = .string(s) }
+            Out.json(j)
         } else {
             Out.stdout("wrote \(file.path) — sandbox \(sandbox), image \(img), /workspace = \(folder.path)\n")
+            if let s = standing { Out.stdout("note: the \(img) image is out of date: \(s)\n  doz up asks whether to rebuild it first (doz up --rebuild, or --use-current)\n") }
             Out.stdout("next: \(folder.path == cwd.path ? "" : "cd \(shellQuoted(folder.path)) && ")doz up\n")
         }
     }

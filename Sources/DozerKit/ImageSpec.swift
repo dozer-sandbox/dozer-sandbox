@@ -424,7 +424,7 @@ public enum AgentImages {
     /// `apt-get update` before `apt-get install` worked). ~20–50 MB of the root disk, an APFS clone
     /// shared by every sandbox of the image — cheaper than every sandbox fetching them on first boot,
     /// and an install then works offline-first. They age with the image; `apt-get update` refreshes them.
-    static let devBaseline = BakeStep.script("install the developer baseline (\(devBaselinePackages.joined(separator: " ")))", """
+    static let devBaseline = olderRecipeForTests ? olderDevBaseline : BakeStep.script("install the developer baseline (\(devBaselinePackages.joined(separator: " ")))", """
         export DEBIAN_FRONTEND=noninteractive
         # 594 (owner: "more progress detail"): apt's own lines (Get:, Unpacking, Setting up) are the
         # live tail the preparation card and the CLI show while this step runs — not silenced.
@@ -437,9 +437,44 @@ public enum AgentImages {
         apt-get clean
         """)
 
+    /// 594 W28: a TEST seam — `DOZ_TEST_OLDER_RECIPE=1` makes this process bake the agent images the
+    /// way 0.12.0-rc.1 did (no sudo, no apt-utils, package lists deleted), so a test can hold an image
+    /// "prepared by an older doz" and check it is named as such — and never rebuilt without asking.
+    static let olderRecipeForTests = ProcessInfo.processInfo.environment["DOZ_TEST_OLDER_RECIPE"] == "1"
+    static let olderDevBaselinePackages = devBaselinePackages.filter { $0 != "sudo" && $0 != "apt-utils" }
+    static let olderDevBaseline = BakeStep.script("install the developer baseline (\(olderDevBaselinePackages.joined(separator: " ")))", """
+        export DEBIAN_FRONTEND=noninteractive
+        apt-get update
+        apt-get install -y --no-install-recommends -o Dpkg::Use-Pty=0 \(olderDevBaselinePackages.joined(separator: " "))
+        ln -sf /usr/bin/fdfind /usr/local/bin/fd
+        rm -rf /var/lib/apt/lists/*
+        """)
+
+    /// 594 W28: what THIS doz's recipe (`new`) has that an image baked by an older one (`old`) lacks,
+    /// in people's words — "sudo", "package lists", a step's name — or ["its recipe changed"] when the
+    /// difference is elsewhere; [] when they are the same recipe.
+    public static func recipeChanges(from old: ImageSpec, to new: ImageSpec) -> [String] {
+        guard old != new else { return [] }
+        func baseline(_ s: ImageSpec) -> (packages: [String], deletesLists: Bool)? {
+            guard let step = s.steps.first(where: { $0.name.hasPrefix("install the developer baseline (") }) else { return nil }
+            let inside = step.name.dropFirst("install the developer baseline (".count).dropLast()
+            return (inside.split(separator: " ").map(String.init), (step.argv.last ?? "").contains("rm -rf /var/lib/apt/lists"))
+        }
+        var out: [String] = []
+        if let o = baseline(old), let n = baseline(new) {
+            out += n.packages.filter { !o.packages.contains($0) }
+            if o.deletesLists && !n.deletesLists { out.append("package lists") }
+        }
+        let oldSteps = Set(old.steps.map(\.name))
+        for s in new.steps where !oldSteps.contains(s.name) && !s.name.hasPrefix("install the developer baseline (") && !s.name.hasPrefix("npm install ") {
+            out.append(s.name)
+        }
+        return out.isEmpty ? ["its recipe changed"] : out
+    }
+
     /// What the baseline must provide, checked after every agent bake. 594 W23: sudo, a sudoers
     /// drop-in `visudo -cf` accepts, and package lists apt can install from.
-    static let devBaselineVerify: [VerifyCheck] = [
+    static let devBaselineVerify: [VerifyCheck] = olderRecipeForTests ? olderDevBaselineVerify : [
         VerifyCheck(["sh", "-c", "for t in ps top git less jq unzip ssh curl vi rg fd python3 sudo; do command -v $t >/dev/null || { echo missing $t; exit 1; }; done; echo baseline-ok"],
                     expect: "baseline-ok"),
         // The boot writes the rule only after /usr/sbin/visudo accepts it (as root: /etc/sudoers is 0440).
@@ -447,6 +482,10 @@ public enum AgentImages {
                     expect: "sudoers-ok"),
         VerifyCheck(["sh", "-c", "apt-cache policy cowsay | grep -q Candidate: && ! apt-cache policy cowsay | grep -q 'Candidate: (none)' && echo apt-lists-ok"],
                     expect: "apt-lists-ok"),
+    ]
+    static let olderDevBaselineVerify: [VerifyCheck] = [
+        VerifyCheck(["sh", "-c", "for t in ps top git less jq unzip ssh curl vi rg fd python3; do command -v $t >/dev/null || { echo missing $t; exit 1; }; done; echo baseline-ok"],
+                    expect: "baseline-ok"),
     ]
 
     static func npmInstall(_ package: String, version: String, integrity: String, extraArgs: [String] = []) -> BakeStep {

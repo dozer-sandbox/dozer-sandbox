@@ -139,6 +139,8 @@ public struct CreateOptions: Codable, Equatable, Sendable {
     /// 596 (B6): the Dockerfile the image's base is built from (absolute; `image` is then its
     /// `df-<12 hex>[-agent]`). The host registers it; its first start builds it.
     public var dockerfile: String?
+    /// 594 W28: rebuild the image first (the user chose it: an out-of-date image is otherwise used as it is).
+    public var rebuild: Bool?
 
     public init(image: String, cpus: Int? = nil, memoryMiB: UInt64? = nil, workspace: String? = nil,
                 network: String? = nil, subnet: String? = nil, account: String? = nil) {
@@ -464,6 +466,19 @@ public struct SandboxInfo: Codable, Equatable, Sendable {
     public var imageTitle: String?
     public var dockerfile: String?
     public var rebuildAvailable: String?
+    /// 594 W28: its root disk comes from an image an older doz's recipe made — what that image lacks
+    /// ("sudo", "package lists", …), for the notice. nil: this doz's image (or no agent image).
+    public var olderImage: [String]? = nil
+    /// 594 W28: a create that used an out-of-date image says so (the CLI fills it for --json).
+    public var imageNotice: String? = nil
+
+    /// 594 W28: the notice for `olderImage` (`doz ls`, the sandbox's page, create).
+    public var olderImageLine: String? {
+        guard let o = olderImage else { return nil }
+        let lacks = o == ["its recipe changed"] ? "" : " (it lacks: \(o.joined(separator: ", ")))"
+        return "made from an older \(agent ?? image) image\(lacks) — after a rebuild (doz image bake \(agent ?? image)), doz reset \(name) takes the new one: "
+            + "it keeps the agent's own state (~/.claude, ~/.pi) and /workspace, and drops everything else installed or changed on its system disk"
+    }
 
     /// 594: "isolated" — no folder of the Mac is shared (`workspace` is null).
     public var isolated: Bool { workspace == nil }
@@ -472,6 +487,7 @@ public struct SandboxInfo: Codable, Equatable, Sendable {
         case name, image, phase, busy, cpus, memoryMiB, ramHeldMiB, memoryReturnedMiB, diskBytes, sessions, network, deniedConnections
         case workspace, createdAt, diedWithHost, account, credentialState, credentialPolicy, foreignCredentials, workspaceCreated, isolated
         case agent, credentialProblem, base, imageTitle, dockerfile, rebuildAvailable
+        case olderImage, olderImageLine, imageNotice      // 594 W28
     }
 
     public init(from decoder: Decoder) throws {
@@ -502,6 +518,8 @@ public struct SandboxInfo: Codable, Equatable, Sendable {
         imageTitle = try c.decodeIfPresent(String.self, forKey: .imageTitle)
         dockerfile = try c.decodeIfPresent(String.self, forKey: .dockerfile)
         rebuildAvailable = try c.decodeIfPresent(String.self, forKey: .rebuildAvailable)
+        olderImage = try c.decodeIfPresent([String].self, forKey: .olderImage)
+        imageNotice = try c.decodeIfPresent(String.self, forKey: .imageNotice)
     }
 
     /// `workspace` is written even when null (with `isolated: true`), so a reader never has to guess.
@@ -534,6 +552,9 @@ public struct SandboxInfo: Codable, Equatable, Sendable {
         try c.encodeIfPresent(imageTitle, forKey: .imageTitle)
         try c.encodeIfPresent(dockerfile, forKey: .dockerfile)
         try c.encodeIfPresent(rebuildAvailable, forKey: .rebuildAvailable)
+        try c.encodeIfPresent(olderImage, forKey: .olderImage)
+        try c.encodeIfPresent(olderImageLine, forKey: .olderImageLine)
+        try c.encodeIfPresent(imageNotice, forKey: .imageNotice)
     }
 
     public init(name: String, image: String, phase: String, busy: Bool, cpus: Int, memoryMiB: UInt64, ramHeldMiB: UInt64,
@@ -732,6 +753,43 @@ public struct ImageRow: Codable, Equatable, Sendable {
     public var title: String?
     public var dockerfile: String?
     public var baseUpdate: String?
+    /// 594 W28: baked by an OLDER doz's recipe — what this doz's adds ("sudo", "package lists", or
+    /// "its recipe changed"). nil: this doz's recipe (or not baked). It is used as it is until the user
+    /// rebuilds (`doz image bake NAME`) — never rebuilt by itself.
+    public var olderRecipe: [String]?
+
+    /// 594 W28: `status` and `standing` filled in (they travel in --json and to the web UI).
+    public var status: String?
+    public var standing: String?
+    public mutating func fillStanding() {
+        status = computedStatus
+        standing = standingLine
+    }
+
+    /// 594 W28: the image's standing in one word — `up to date`, `older recipe`, `update available`,
+    /// `not prepared`, `preparing` (nil for a template).
+    public var computedStatus: String? {
+        guard kind == "builtin" else { return nil }
+        if preparing == true { return "preparing" }
+        if !baked { return "not prepared" }
+        if olderRecipe != nil { return "older recipe" }
+        if available != nil { return "update available" }
+        return "up to date"
+    }
+
+    /// 594 W28: what to say about it — nil when up to date.
+    public var standingLine: String? {
+        var parts: [String] = []
+        if let o = olderRecipe {
+            parts.append(o == ["its recipe changed"] ? "prepared by an older doz — its recipe changed"
+                                                     : "prepared by an older doz — this doz's image adds: \(o.joined(separator: ", "))")
+        }
+        if let a = available, let v = version {
+            parts.append("\(AgentImages.agentName(name) ?? name) \(a) is available (image has \(v))")
+        }
+        guard !parts.isEmpty else { return nil }
+        return parts.joined(separator: "; ") + " — rebuild when ready: doz image bake \(name) (existing sandboxes keep their disks)"
+    }
 
     /// 594: "claude-code 2.1.227 (2.1.230 available — preparing)", "claude-code 2.1.285 (latest)",
     /// "pi 0.84.1 (pinned: images.pi_version)" — nil for an image with no agent.

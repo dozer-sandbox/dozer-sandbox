@@ -64,7 +64,7 @@ DOCC_OUT         ?= .docc-build
 DOCC_BASE_PATH   ?= /DozerKit/
 DOCC_PREVIEW_PORT ?= 8000
 
-.PHONY: help build test audit web-assets web-assets-check test-cli-onboarding test-cli-terminal test-cli-hoststop test-cli-agentsudo test-cli-points test-cli-timezone pullbench test-vm test-vm-agents test-vm-network test-vm-hardening test-vm-lineage prev-cli test-vm-upgrade vmtest-host kernel deckhold deckhold-verify doznet doznet-verify cli install-cli test-cli test-vm-claude test-vm-templates docs docs-preview docs-drift-check release
+.PHONY: help build test audit web-assets web-assets-check test-cli-onboarding test-cli-terminal test-cli-hoststop test-cli-agentsudo test-cli-points test-cli-timezone test-cli-images pullbench test-vm test-vm-agents test-vm-network test-vm-hardening test-vm-lineage prev-cli test-vm-upgrade vmtest-host kernel deckhold deckhold-verify doznet doznet-verify cli install-cli test-cli test-vm-claude test-vm-templates docs docs-preview docs-drift-check release
 
 help: ## Show this help
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) | sed 's/:.*## /\t/' | expand -t 22
@@ -208,6 +208,9 @@ test-cli-points: cli vmtest-host ## 594 W25–W27: restore point names never cut
 
 test-cli-timezone: cli vmtest-host ## 594 W10: the sandbox follows the Mac's (stubbed) time zone at boot and every wake, or sandbox.timezone
 	perl -e 'alarm shift; exec @ARGV' 900 $(VMTEST_BIN) cli-timezone --doz $(CLI_BIN)
+
+test-cli-images: cli vmtest-host ## 594 W28–W30: an older doz's pi image said (image ls, doctor, create, ls), never rebuilt by itself (a newer release neither); --rebuild; reset; own hostname; /usr/games (network)
+	perl -e 'alarm shift; exec @ARGV' 3000 $(VMTEST_BIN) cli-images --doz $(CLI_BIN)
 
 pullbench: vmtest-host ## 594 D12: pull the node base with 3 vs 6 concurrent layer downloads into fresh stores (network; ROUNDS=3)
 	$(VMTEST_BIN) pullbench --rounds $(or $(ROUNDS),3)

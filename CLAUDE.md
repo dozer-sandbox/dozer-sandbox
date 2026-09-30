@@ -234,14 +234,29 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   (`NpmRegistry`: `<registry>/<package>/latest` → version + sha512 integrity, both validated —
   they go into a bake script) and installed at that exact version by `AgentImages.claudeCode(_:)` /
   `pi(_:)`; `ImageSpec.agent` records it, so it is in the bake key. `AgentVersions.spec(purpose:)`
-  is synchronous and uses only the store: `.create` → the newest image PREPARED for this build (no
-  waiting), `.prepare` → the version the setting names (cached latest, a known exact, else the pin
-  when the registry was never asked, else a clear error). `HostCore.freshen` is the only thing that
-  asks the registry (hourly cache in `<store>/agent-versions.json`, 5-min back-off after a failure)
-  and, when the prepared image is behind, starts a background preparation ("update to X"). Only the
+  is synchronous and uses only the store: `.create` → the newest image PREPARED for this build, else
+  (W28) the newest `usable` one an older doz's recipe made (no waiting), `.prepare` → the version the
+  setting names (cached latest, a known exact, else the pin when the registry was never asked, else a
+  clear error). `HostCore.freshen` is the only thing that asks the registry (hourly cache in
+  `<store>/agent-versions.json`, 5-min back-off after a failure). Only the
   real host asks (`HostServer` passes `.fromEnvironment()`; `DOZ_TEST_NPM_REGISTRY=offline|URL` for
   tests); in-process hosts and unit tests have `.disabled` and resolve to the pin. Claude Code's own
   updater is off in sessions (`DISABLE_AUTOUPDATER`, `DISABLE_UPDATES` — both honoured by 2.1.227).
+- **An image is NEVER rebuilt without the user** (594 W28, owner ruling: "i dont think we should
+  rebuild images without the user agreeing (and understanding the consequences) … better to warn").
+  W28's bug: "prepared for this build" compared a bake with ITS OWN recorded recipe, so an image rc.1
+  baked (no sudo, no lists) still counted after the recipe changed. Now `prepared` = baked by THIS doz's
+  recipe for that agent release (`AgentVersions.isCurrentRecipe`: `AgentImages.spec(name, release) ==
+  the bake's spec`); `usable` = any bake this build can start. A stale image is USED and SAID:
+  `ImageRow.olderRecipe` ("this doz's image adds: sudo, package lists" — `AgentImages.recipeChanges`),
+  `available` (a newer release, no background preparation any more), `status`/`standing`; `image ls`
+  STATUS, the Images page (badge, Rebuild with the consequences), `doctor` (warn), `SandboxInfo.olderImage`
+  (`doz ls`, the sandbox page), create/up/init (`--rebuild` → `CreateOptions.rebuild`: the host
+  prepares first; `--use-current`; a TTY asks, default use-current; `--json`: `imageNotice`), the New
+  Sandbox form's choice. `doz reset` moves a sandbox to the image a create takes now
+  (`moveToCurrentImage`). The facts never claim sudo the guest lacks (checked at session start).
+  `DOZ_TEST_OLDER_RECIPE=1` (a TEST seam) bakes rc.1's recipe. Only an image NEVER prepared is
+  prepared on first use. `make test-cli-images` checks it.
 - **The `doz` host (585) is the ONE owner of a store's VMs.** It holds `<store>/host.lock` for its
   whole life and loads nothing before it has it (a new host waits for an exiting one — otherwise it
   would read a record still saying `running` and report a live sandbox as died). The launcher is a
