@@ -282,6 +282,14 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   carries `parentPid`, `sessionID`, `launchedDetached`; `doctor` warns when a launched host's parent
   isn't 1. `make test-cli` (`cliHostDetachChecks`) kills a client's group and every descendant (TERM,
   then KILL) and checks the host, a running sandbox and its session survive.
+- **A host stop shows its progress** (594 W22, `HostStop.swift`): `host-stop` streams, per sandbox, a
+  `started` "hibernating X" and a `step` "hibernated X (snapshot …)" / `failed` (why + "shut down
+  instead") — `HostEvent.startedAs` ties an end to its differently-worded start — then the host's own
+  last step, and answers `HostStopResult` (rows; an older host answers the string "stopped", still
+  read). `Sandbox.prepareForExit` returns its `ExitOutcome`. Every stopping client uses
+  `stopHostShowingProgress` (the CLI's progress view: animated on a tty, plain lines else) or, in the
+  UI, Restart host's operation (`WebOperation.lines`). A host that dies mid-stop: the client reports
+  what it saw (`HostStopView.seen`), never hangs. `make test-cli-hoststop` (in `test-cli` too).
 - **Looking never starts the host.** Read-only commands answer from the store in-process
   (`HostCore(readOnly: true)`) unless a host runs — or a record says a VM was live when its host went
   away, which only a host can recover. A short request does not reset the idle clock; an open
@@ -710,6 +718,7 @@ make test-vm-claude  # 588: Claude credentials through the proxy with a FAKE key
 make test-vm-upgrade # 591: the previous release sleeps sandboxes, this build wakes them; the in-place overwrite incident (scratch store $TMPDIR/doz-upgrade-store)
 make test-vm-templates # 593: templates and duplicates on pi — no state disk in a template; duplicate's workspace and fresh/copied state disk
 make test-cli-onboarding # 594: test-cli's onboarding part alone (onboard, a joining start, detach/cancel, init/up, the agent prompt, uninstall)
+make test-cli-hoststop # 594 W22: test-cli's host-stop part alone (per-sandbox progress plain/animated, --json, nothing running, a host killed mid-stop)
 make pullbench       # 594 D12: the node base pulled with 3 vs 6 concurrent layer downloads, fresh stores (network)
 ```
 

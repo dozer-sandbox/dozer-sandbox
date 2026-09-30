@@ -189,9 +189,21 @@ public final class HostServer: @unchecked Sendable {
         let fd = lock.withLock { () -> Int32 in let f = listenFD; listenFD = -1; return f }
         if fd >= 0 { Darwin.shutdown(fd, SHUT_RDWR); close(fd) }
         unlink(store.socket.path)
-        if prepare { await core.prepareAllForExit() }
+        // 594 W22: the caller of `host stop` sees each sandbox hibernate (and the host's last step) as
+        // it happens, then what was done — the progress every stopping client shows.
+        let t0 = ContinuousClock.now
+        var rows: [HostStopRow] = []
+        if prepare {
+            rows = await core.prepareAllForExit { e in
+                if let reply { reply.send(HostMessage(event: e)) }
+                HostLog.line(e.line)
+            }
+        }
         if let reply {
-            reply.send(.success(.string("stopped")))
+            let d = ContinuousClock.now - t0
+            let result = HostStopResult(sandboxes: rows, milliseconds: Double(d.components.seconds) * 1000 + Double(d.components.attoseconds) / 1e15,
+                                        version: version)
+            reply.send((try? JSONValue(encoding: result)).map { HostMessage.success($0) } ?? .success(.string("stopped")))
             reply.close()
         }
         try? FileManager.default.removeItem(at: store.pidFile)

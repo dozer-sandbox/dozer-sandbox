@@ -907,6 +907,10 @@ Task {
             // 594 (W13): only the terminal-restore part of `cli` (a store of its own).
             let binary = args.firstIndex(of: "--doz").flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil } ?? ".build/debug/doz"
             await cliTerminalRestoreSuite(binary: URL(fileURLWithPath: binary).standardizedFileURL.path)
+        case "cli-hoststop":
+            // 594 W22: only `doz host stop`'s progress part of `cli` (a store of its own).
+            let binary = args.firstIndex(of: "--doz").flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil } ?? ".build/debug/doz"
+            await cliHostStopSuite(binary: URL(fileURLWithPath: binary).standardizedFileURL.path)
         case "cli-onboarding":
             // 594: only the onboarding part of `cli` (its stores are its own).
             let binary = args.firstIndex(of: "--doz").flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil } ?? ".build/debug/doz"

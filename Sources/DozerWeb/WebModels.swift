@@ -52,6 +52,13 @@ public struct WebVersionNote: Codable, Equatable, Sendable {
     }
 }
 
+/// 594 W22: what Restart host did — the stop (each sandbox) and the host that runs now. Internal: the
+/// page only sees the operation's summary and lines.
+struct WebHostRestart: Codable {
+    var stop: HostStopResult?
+    var host: HostStatus?
+}
+
 /// 594 W20: semantic-version order (semver.org §11): X.Y.Z numerically; a pre-release sorts BEFORE its
 /// release (0.12.0-rc.3 < 0.12.0-rc.5 < 0.12.0); pre-release identifiers dot by dot — numbers
 /// numerically, below alphanumerics, which compare as ASCII; a shorter list first when all else is

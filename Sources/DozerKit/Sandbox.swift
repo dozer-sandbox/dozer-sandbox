@@ -641,7 +641,23 @@ public actor Sandbox {
     /// 583: a program a session started less than `settle` ago is given the rest of that time before
     /// it hibernates (580: Claude Code hibernated within ~1 s of launching exited after the wake in
     /// 2 of ~7 runs). Pass `.zero` not to wait.
-    public func prepareForExit(settle: Duration = .seconds(3)) async {
+    ///
+    /// 594 W22: what it did, for a caller that reports it (`doz host stop`'s progress).
+    public enum ExitOutcome: Equatable, Sendable {
+        /// Snapshotted and stopped: the next launch wakes it.
+        case hibernated
+        /// Hibernating failed (why): it was shut down instead (its disk kept).
+        case hibernateFailed(String)
+        /// A failed wake's snapshot was kept for the next launch to try again.
+        case keptFailedWake
+        /// Booting or failed: shut down.
+        case shutDown
+        /// Nothing to do (off, or already hibernated).
+        case unchanged
+    }
+
+    @discardableResult
+    public func prepareForExit(settle: Duration = .seconds(3)) async -> ExitOutcome {
         await acquire(); defer { release() }
         if phase == .running {
             let wait = Self.exitSettleDelay(sinceLastSessionStart: lastSessionStart.map { ContinuousClock.now - $0 }, settle: settle)
@@ -659,14 +675,17 @@ public actor Sandbox {
                 for step in LifecyclePlanner.plan(.hibernate, from: from) ?? [] { try await run(step, target: .hibernated) }
                 setPhase(.hibernated)
                 note("hibernated for the quit — the next launch wakes it, sessions and all")
+                return .hibernated
             } catch {
                 note("hibernate at quit FAILED (\(error.localizedDescription)) — shutting down instead")
                 await runStopSteps(from: phase)
                 setPhase(.off)
+                return .hibernateFailed(error.localizedDescription)
             }
         case .hibernated:
             for c in connections.values { c.detach(.sandboxSleeping) }
             connections.removeAll()
+            return .unchanged
         case .failed where Self.restorableState(for: spec) != nil:
             // A wake that FAILED keeps its snapshot ("Shut Down discards it"), and a quit is not a
             // Shut Down: leave the snapshot and the record alone so the next process tries the wake
@@ -676,11 +695,13 @@ public actor Sandbox {
             for c in connections.values { c.detach(.sandboxSleeping) }
             connections.removeAll()
             note("quit after a failed wake: the snapshot is kept — the next launch tries the wake again (Shut Down discards it)")
+            return .keptFailedWake
         case .booting, .failed:
             await runStopSteps(from: phase)
             setPhase(.off)
+            return .shutDown
         case .off:
-            break
+            return .unchanged
         }
     }
 

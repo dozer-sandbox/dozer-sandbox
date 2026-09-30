@@ -896,22 +896,75 @@ public actor HostCore {
 
     /// Hibernate everything with a VM (quit = Hibernate, owner ruling 2026-09-25) — `host stop`
     /// and a SIGTERM. The next wake restores each with its sessions and pids.
-    public func prepareAllForExit() async {
+    /// 594 W22: `onEvent` gets each sandbox's line as it starts and ends (`HostStopView`) and the host's
+    /// own last step; the rows are the stop's answer.
+    @discardableResult
+    public func prepareAllForExit(onEvent: @escaping @Sendable (HostEvent) -> Void = { _ in }) async -> [HostStopRow] {
         // 594: a preparation ends with the host (a bake caches nothing until it is complete).
         await cancelAllPreparations()
-        var rows: [(Managed, Int64?)] = []
-        for m in managed.values {
+        var rows: [(name: String, m: Managed, row: Int64?, before: Phase)] = []
+        for (name, m) in managed {
             let before = await m.sandbox.phase
             guard [.running, .paused, .asleep, .booting, .failed].contains(before) else { continue }
-            rows.append((m, beginAction(m, "quit (hibernate)", phaseBefore: before.rawValue)))
+            rows.append((name, m, beginAction(m, "quit (hibernate)", phaseBefore: before.rawValue), before))
         }
+        rows.sort { (a, b) in a.name < b.name }
         let t0 = ContinuousClock.now
-        let sandboxes = rows.map { $0.0.sandbox }
-        await withTaskGroup(of: Void.self) { group in
-            for sb in sandboxes { group.addTask { await sb.prepareForExit() } }
+        let work: [(Sandbox, String)] = rows.map { ($0.m.sandbox, $0.name) }
+        let befores = Dictionary(uniqueKeysWithValues: rows.map { ($0.name, $0.before) })
+        // Each in parallel, as before; each one's line starts and ends as it does.
+        let outcomes: [String: (Sandbox.ExitOutcome, Double)] = await withTaskGroup(of: (String, Sandbox.ExitOutcome, Double).self) { group in
+            for (sb, name) in work {
+                onEvent(HostStopView.started(name))
+                group.addTask {
+                    let s = ContinuousClock.now
+                    let o = await sb.prepareForExit()
+                    let d = ContinuousClock.now - s
+                    return (name, o, Double(d.components.seconds) * 1000 + Double(d.components.attoseconds) / 1e15)
+                }
+            }
+            var out: [String: (Sandbox.ExitOutcome, Double)] = [:]
+            for await (name, o, ms) in group {
+                out[name] = (o, ms)
+                if let m = managed[name] {
+                    onEvent(HostStopView.finished(await stopRow(name, m, before: befores[name] ?? .running, o, ms)))
+                }
+            }
+            return out
         }
-        for (m, row) in rows { finishAction(m, row, t0, ok: true, phaseAfter: (await effectivePhase(m)).rawValue) }
+        var result: [HostStopRow] = []
+        for r in rows {
+            let after = await effectivePhase(r.m)
+            let (o, ms) = outcomes[r.name] ?? (Sandbox.ExitOutcome.unchanged, 0)
+            if case .hibernateFailed = o {
+                finishAction(r.m, r.row, t0, ok: false, phaseAfter: after.rawValue)
+            } else {
+                finishAction(r.m, r.row, t0, ok: true, phaseAfter: after.rawValue)
+            }
+            result.append(await stopRow(r.name, r.m, before: r.before, o, ms))
+        }
+        let s = ContinuousClock.now
+        onEvent(HostEvent(kind: .started, sandbox: nil, text: "saving the host's state"))
         for name in managed.keys { recordNetwork(name) }
+        let d = ContinuousClock.now - s
+        onEvent(HostEvent(kind: .step, sandbox: nil, text: "saving the host's state",
+                          milliseconds: Double(d.components.seconds) * 1000 + Double(d.components.attoseconds) / 1e15))
+        return result
+    }
+
+    private func stopRow(_ name: String, _ m: Managed, before: Phase, _ o: Sandbox.ExitOutcome, _ ms: Double) async -> HostStopRow {
+        let after = await effectivePhase(m).rawValue
+        switch o {
+        case .hibernated:
+            let size = (try? FileManager.default.attributesOfItem(atPath: store.layout(name).snapshot.path)[.size] as? NSNumber)?.int64Value
+            return HostStopRow(name: name, phaseBefore: before.rawValue, phase: after, outcome: "hibernated", milliseconds: ms, snapshotBytes: size)
+        case .hibernateFailed(let why):
+            return HostStopRow(name: name, phaseBefore: before.rawValue, phase: after, outcome: "failed", milliseconds: ms, error: why)
+        case .keptFailedWake:
+            return HostStopRow(name: name, phaseBefore: before.rawValue, phase: after, outcome: "kept", milliseconds: ms)
+        case .shutDown, .unchanged:
+            return HostStopRow(name: name, phaseBefore: before.rawValue, phase: after, outcome: "shut-down", milliseconds: ms)
+        }
     }
 
     // MARK: sessions

@@ -97,7 +97,23 @@ final class WebOperations: @unchecked Sendable {
             guard due || (e.completedBytes ?? 0) == (e.totalBytes ?? -1) else { return }
         }
         let text = WebActivity(seq: 0, e).text
-        if let o = update(id, { o in if o.state == "running" { o.text = text } }), o.state == "running" { hub.broadcast("op", o) }
+        let finished = Self.finishedLine(e)
+        if let o = update(id, { o in
+            guard o.state == "running" else { return }
+            o.text = text
+            // 594 W22: Restart host keeps each sandbox's line (they hibernate in parallel).
+            if o.action == "host-restart", let finished { o.lines = (o.lines ?? []) + [finished] }
+        }), o.state == "running" { hub.broadcast("op", o) }
+    }
+
+    /// 594 W22: a finished step as the progress view writes it (no colour): "✓ hibernated w1 — 0.4 s",
+    /// "✗ hibernating w2 — why".
+    static func finishedLine(_ e: HostEvent) -> String? {
+        switch e.kind {
+        case .step: return ProgressTerminal(mode: .animated, color: false).format(.stepDone(e.text ?? "", seconds: (e.milliseconds ?? 0) / 1000))
+        case .failed: return ProgressTerminal(mode: .animated, color: false).format(.stepFailed(e.text ?? "", seconds: (e.milliseconds ?? 0) / 1000, error: e.error))
+        default: return nil
+        }
     }
 
     private func update(_ id: String, _ change: (inout WebOperation) -> Void) -> WebOperation? {
@@ -167,9 +183,14 @@ final class WebOperations: @unchecked Sendable {
             let s = try? v.decode(HostStatus.self)
             return s.map { "the host is running (pid \($0.pid), doz \($0.version))" } ?? "the host is running"
         case .hostRestart:
-            let s = try? v.decode(HostStatus.self)
-            return s.map { "the host restarted as doz \($0.version) (pid \($0.pid)) — its sandboxes hibernated; they wake when used" }
-                ?? "the host restarted — its sandboxes hibernated; they wake when used"
+            let r = try? v.decode(WebHostRestart.self)
+            let who = r?.host.map { "the host restarted as doz \($0.version) (pid \($0.pid))" } ?? "the host restarted"
+            guard let stop = r?.stop else { return who + " — its sandboxes hibernated; they wake when used" }
+            let hib = stop.sandboxes.filter { $0.outcome == "hibernated" }.map(\.name)
+            let other = stop.sandboxes.filter { $0.outcome != "hibernated" }.map { "\($0.name): \($0.outcome == "failed" ? "could not hibernate — shut down" : $0.outcome)" }
+            var s = who + (hib.isEmpty ? " — nothing was running" : " — hibernated \(hib.joined(separator: ", ")); they wake when used")
+            if !other.isEmpty { s += " (" + other.joined(separator: "; ") + ")" }
+            return s
         case .prepareCancel:
             let ps = (try? v.decode([PreparationInfo].self)) ?? []
             return ps.isEmpty ? "nothing was being prepared" : "cancelling the preparation of \(ps.map(\.image).joined(separator: ", "))"
