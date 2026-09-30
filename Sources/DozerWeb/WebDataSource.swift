@@ -56,9 +56,17 @@ public protocol DozerWebData: Sendable {
     /// `doz key set NAME --anthropic` sends (`HostRequest.keySet`, source `browser`), no progress
     /// callback. Returns the sandbox's keys (never a secret).
     func setKey(_ k: WebKeySet) async throws -> [WebCredential]
+    /// 594 W18: the host's state without starting one (read before each overview); nil when the
+    /// source cannot tell (the overview's `host` is then all there is).
+    func hostProbe() -> WebHostProbe?
+    /// 594 W18: a host answers its socket now (a terminal's REattach waits for one rather than start
+    /// one: an open page must never undo a `doz host stop`).
+    func hostAnswers() -> Bool
 }
 
 extension DozerWebData {
+    public func hostProbe() -> WebHostProbe? { nil }
+    public func hostAnswers() -> Bool { true }
     public func onboarding() async throws -> WebOnboarding { throw HostError(.notImplemented, "onboarding") }
     public func preparations() async throws -> [WebPreparation] { [] }
     public func addAccount(_ a: WebAccountAdd) async throws -> WebAccounts { throw HostError(.notImplemented, "accounts") }
@@ -198,7 +206,23 @@ public final class HostWebData: DozerWebData, @unchecked Sendable {
     /// One read: through the host when one runs (or one must recover), else from the store.
     func query(_ r: HostRequest) async throws -> (JSONValue, fromHost: Bool) {
         let store = self.store
-        if store.hostIsRunning() || !store.needsRecovery().isEmpty {
+        if store.hostIsRunning() {
+            // 594 W18: never autostart here. A host that is stopping (`doz host stop`, SIGTERM) closes
+            // its socket first and holds its lock while it hibernates everything: a client that
+            // autostarts in that window starts the NEXT host at once — an open UI polling every 3 s
+            // brought every stopped host straight back. Then read the store, as with no host.
+            let reply: HostMessage?
+            do {
+                reply = try await blocking { try HostClient.request(r, store: store, autostart: false) }
+            } catch where !FileManager.default.fileExists(atPath: store.socket.path) || !store.hostIsRunning() {
+                reply = nil
+            }
+            if let m = reply {
+                if m.ok == true { return (m.result ?? .null, true) }
+                throw m.error ?? HostError(.failed, "the host gave no reason")
+            }
+        } else if !store.needsRecovery().isEmpty {
+            // A crashed host left a sandbox only a host can recover: start one (the CLI's rule).
             let m = try await blocking { try HostClient.request(r, store: store, autostart: true) }
             if m.ok == true { return (m.result ?? .null, true) }
             throw m.error ?? HostError(.failed, "the host gave no reason")
@@ -208,6 +232,26 @@ public final class HostWebData: DozerWebData, @unchecked Sendable {
         let m = await core.handle(r)
         if m.ok == true { return (m.result ?? .null, false) }
         throw m.error ?? HostError(.failed, "no reason")
+    }
+
+    public func hostAnswers() -> Bool {
+        guard let fd = UnixSocket.connect(store.socket.path) else { return false }
+        close(fd)
+        return true
+    }
+
+    public func hostProbe() -> WebHostProbe? {
+        let store = self.store
+        if store.hostIsRunning() { return WebHostProbe(running: true) }
+        let stale = store.hostPID().map { kill($0, 0) != 0 && errno == ESRCH } ?? false
+        let recovering = store.needsRecovery()
+        let lost = recovering.filter { name in
+            let layout = store.layout(name)
+            guard let p = PersistedSandbox.read(from: layout.persistedState) else { return false }
+            return !(p.phase == .asleep && p.isRestorable(layout: layout))
+        }
+        return WebHostProbe(running: false, stalePID: stale, lost: lost, recovering: recovering,
+                            exitReason: HostExitReason.read(store.logFile))
     }
 
     func hostStatus() async -> HostStatus? {
@@ -237,7 +281,8 @@ public final class HostWebData: DozerWebData, @unchecked Sendable {
                            idleTimeoutMinutes: st?.idleTimeoutMinutes, idleSeconds: st?.idleSeconds,
                            liveSandboxes: st?.liveSandboxes ?? [], connections: st?.connections,
                            // A live record is only "pending recovery" when no host holds it.
-                           recoveryPending: fromHost ? [] : store.needsRecovery(), store: store.root.path, uiVersion: version)
+                           // (Nor while a stopping host still holds the lock: it is hibernating them.)
+                           recoveryPending: fromHost || store.hostIsRunning() ? [] : store.needsRecovery(), store: store.root.path, uiVersion: version)
         var o = WebOverview(host: host, sandboxes: rows, source: fromHost ? "host" : "store")
         o.onboarded = OnboardingRecord.read(store) != nil
         return o

@@ -54,7 +54,7 @@ struct Uninstall: AsyncParsableCommand {
         let names = (try? FileManager.default.contentsOfDirectory(atPath: root.path)) ?? []
         if names.isEmpty { return true }
         let known: Set<String> = ["sandboxes", "images", "kernels", "golden", "content", "initfs.ext4", "host.log", "host.lock", "metrics.sqlite",
-                                  "accounts.json", "onboarded.json", "ui.lock", "state.json", "containers"]
+                                  "accounts.json", "onboarded.json", "ui.lock", "ui.port", "ui.sessions", "state.json", "containers"]
         return names.contains(where: known.contains)
     }
 

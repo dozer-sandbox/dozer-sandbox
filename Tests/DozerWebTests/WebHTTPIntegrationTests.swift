@@ -165,6 +165,40 @@ final class WebHTTPIntegrationTests: XCTestCase {
         XCTAssertEqual(st.st_mode & 0o077, 0)
     }
 
+    /// 594 W19: the already-running path — `doz ui` asks the running UI (`status`: its origin and open
+    /// pages, no key) before it would start a second; `rotate` ends every page's session for a new link;
+    /// an unknown command gets nothing.
+    func testTheControlSocketSaysWhereTheUIRunsAndRotates() async throws {
+        try await start()
+        let dir = URL(fileURLWithPath: "/tmp/doz-\(getpid())-\(UInt32.random(in: 0...UInt32.max))")
+        let store = DozerStore(root: dir)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        XCTAssertNil(WebControl.requestStatus(store), "no UI: nothing answers")
+        let lock = try XCTUnwrap(try WebControl.takeLock(store))
+        let lfd = try WebControl.serve(store, server: server)
+        defer { WebControl.cleanUp(store, listenFD: lfd, lockFD: lock) }
+        var st = try XCTUnwrap(WebControl.requestStatus(store))
+        XCTAssertEqual(st.origin, origin)
+        XCTAssertEqual(st.pages, 0, "no page open")
+        let (cookie, _) = try signIn()
+        let s = try RawStream(port: server.origin.port, path: "/api/v1/stream", headers: ["Host": host, "Cookie": cookie])
+        defer { s.close() }
+        _ = try s.read(until: "event: hello", seconds: 5)
+        st = try XCTUnwrap(WebControl.requestStatus(store))
+        XCTAssertEqual(st.pages, 1, "one page open")
+        let url = try XCTUnwrap(WebControl.requestRotate(store))
+        XCTAssertEqual(url.port, server.origin.port)
+        XCTAssertTrue(try s.read(until: "rotated", seconds: 5).contains("event: end"), "the open page is told")
+        XCTAssertEqual(try get("/api/v1/overview", ["Cookie": cookie]).status, 401, "its session ended")
+        let cap = try XCTUnwrap(url.fragment?.dropFirst("cap=".count)).description
+        _ = try signIn(cap)
+        // Anything else on the socket: no answer.
+        let fd = try XCTUnwrap(UnixSocket.connect(WebControl.socket(store).path))
+        defer { close(fd) }
+        XCTAssertTrue(UnixSocket.writeAll(fd, Data("exec\n".utf8)))
+        XCTAssertNil(LineReader(fd: fd).readLine(limit: 1024))
+    }
+
     // MARK: limits + routes
 
     func testBodiesOverTheCapAre413() async throws {
@@ -330,6 +364,35 @@ final class WebHTTPIntegrationTests: XCTestCase {
         XCTAssertTrue(try s.read(until: ": ping", seconds: 5).contains(": ping"), "heartbeats")
     }
 
+    /// 594 W18: the host's transitions reach the page as `host` events (and the Activity feed).
+    func testTheStreamTellsTheHostsDeathAndItsReturnAsAnotherBuild() async throws {
+        func runningHost(_ pid: Int32, _ version: String) -> WebHost {
+            WebHost(running: true, version: version, pid: pid, startedAt: nil, idleTimeoutMinutes: 5, idleSeconds: nil,
+                    liveSandboxes: ["demo"], connections: 1, recoveryPending: [], store: fake.storePath, uiVersion: "test")
+        }
+        fake.phase = "running"
+        fake.scriptedHost = runningHost(41, "0.12.0-rc.3")
+        fake.probe = WebHostProbe(running: true)
+        try await start()
+        let (cookie, _) = try signIn()
+        let s = try RawStream(port: server.origin.port, path: "/api/v1/stream", headers: ["Host": host, "Cookie": cookie])
+        defer { s.close() }
+        _ = try s.read(until: "event: hello", seconds: 5)
+        try await Task.sleep(for: .milliseconds(600))                  // the first look (it tells nothing)
+        fake.probe = WebHostProbe(running: false, stalePID: true, lost: ["demo"], recovering: ["demo"])
+        fake.scriptedHost = nil
+        let died = try s.read(until: "\"state\":\"died\"", seconds: 5)
+        XCTAssertTrue(died.contains("event: host"))
+        XCTAssertTrue(died.contains("\"sandboxes\":[\"demo\"]"))
+        fake.probe = WebHostProbe(running: true)
+        fake.scriptedHost = runningHost(42, "0.12.0-rc.4")
+        let back = try s.read(until: "\"previousVersion\":\"0.12.0-rc.3\"", seconds: 5)
+        XCTAssertTrue(back.contains("\"state\":\"running\""))
+        let recent = try get("/api/v1/events", ["Cookie": cookie]).text
+        XCTAssertTrue(recent.contains("host died — 1 sandbox was running, now shut down: demo"), recent)
+        XCTAssertTrue(recent.contains("host started (pid 42, doz 0.12.0-rc.4) — was doz 0.12.0-rc.3"), recent)
+    }
+
     func testAStreamThatFallsBehindGetsResyncAndCloses() async throws {
         try await start(try WebLimits(maximumBufferedSSEEvents: 4))
         let (cookie, _) = try signIn()
@@ -431,10 +494,23 @@ final class FakeData: DozerWebData, @unchecked Sendable {
         let info = SandboxInfo(name: "demo", image: "lab", phase: p ?? (g == 0 ? "running" : "paused"), busy: false, cpus: 2, memoryMiB: 1024,
                                ramHeldMiB: 900, memoryReturnedMiB: 124, diskBytes: 1 << 30, sessions: 1, network: "bake",
                                deniedConnections: 0, workspace: nil, createdAt: Date(timeIntervalSince1970: 0), diedWithHost: nil)
-        return WebOverview(host: WebHost(running: false, version: nil, pid: nil, startedAt: nil, idleTimeoutMinutes: nil, idleSeconds: nil,
-                                         liveSandboxes: [], connections: nil, recoveryPending: [], store: storePath, uiVersion: "test"),
-                           sandboxes: [WebSandboxRow(info)], source: "store")
+        let host = lock.withLock { _host } ?? WebHost(running: false, version: nil, pid: nil, startedAt: nil, idleTimeoutMinutes: nil, idleSeconds: nil,
+                                                      liveSandboxes: [], connections: nil, recoveryPending: [], store: storePath, uiVersion: "test")
+        return WebOverview(host: host, sandboxes: [WebSandboxRow(info)], source: "store")
     }
+
+    /// 594 W18: a scripted host (nil: none) and what the non-starting probe says.
+    var scriptedHost: WebHost? {
+        get { lock.withLock { _host } }
+        set { lock.withLock { _host = newValue } }
+    }
+    private var _host: WebHost?
+    var probe: WebHostProbe? {
+        get { lock.withLock { _probe } }
+        set { lock.withLock { _probe = newValue } }
+    }
+    private var _probe: WebHostProbe?
+    func hostProbe() -> WebHostProbe? { probe }
 
     func sandbox(_ name: String) async throws -> WebSandboxDetail {
         guard name == "demo" else { throw HostError(.notFound, "no sandbox \(name)") }

@@ -22,6 +22,8 @@ struct SSEFrame: Sendable {
 /// Why a stream ended, for its last frame.
 enum SSEEnd: Sendable, Equatable {
     case overflow, sessionEnded, shutdown, replaced, clientGone
+    /// 594 W19: every session ended for a new link (`doz ui link --rotate`).
+    case rotated
 }
 
 /// One live-update client with a BOUNDED queue. When the client cannot keep up the queue is not
@@ -141,7 +143,9 @@ actor WebMonitor {
     private var events: Task<Void, Never>?
     private var lastOverview: Data?
     private var lastSlow: Data?
-    private var hostWasRunning: Bool?
+    private var watch = WebHostWatch()
+    /// 594 W18: the last host change told (a page that connects later gets it with `hello`).
+    private(set) var lastHostChange: WebHostChange?
     private var lastPhases: [String: String]?
     private var lastPreparations: Data?
     private var activity: [WebActivity] = []
@@ -199,13 +203,24 @@ actor WebMonitor {
         hub.broadcast("activity", a)
     }
 
+    /// 594 W18: one host change — to every page (`host`), and to the Activity feed.
+    private func tell(_ c: WebHostChange) {
+        lastHostChange = c
+        hub.broadcast("host", c)
+        record(WebActivity(seq: hub.nextSeq(), time: c.time, kind: "host", text: c.text))
+    }
+
     private func poll(slow: Bool) async {
+        // 594 W18: the host's state BEFORE the overview — which starts a host to recover a crash, so
+        // only this look sees the gap that tells a kill from a clean stop.
+        let probe = data.hostProbe()
+        if let p = probe, let c = watch.probed(p) { tell(c) }
         guard let o = try? await data.overview() else { return }
-        if let was = hostWasRunning, was != o.host.running {
-            record(WebActivity(seq: hub.nextSeq(), kind: "host",
-                               text: o.host.running ? "host started (pid \(o.host.pid.map(String.init) ?? "?"))" : "host exited"))
+        // A host that holds the lock but no longer answers is stopping (it hibernates everything
+        // first): its end is told by the next look, with its reason.
+        if !(probe?.running == true && !o.host.running) {
+            for c in watch.saw(o) { tell(c) }
         }
-        hostWasRunning = o.host.running
         terminals?.updatePhases(o.sandboxes.map { ($0.name, $0.phase) })
         // A phase change the host's stream did not report (the UI follows it only while something is
         // live, so a wake from hibernation happens before it re-subscribes): note it from the poll.
@@ -270,5 +285,9 @@ actor WebMonitor {
         if e.kind == .phase || e.kind == .host { poke() }
     }
 
-    private func eventsEnded() { events = nil }
+    /// The host's stream ended — the host went away, most likely: look now, not at the next tick.
+    private func eventsEnded() {
+        events = nil
+        poke()
+    }
 }

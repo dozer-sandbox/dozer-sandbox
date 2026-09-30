@@ -14,6 +14,25 @@ import DozerHost
 public enum WebControl {
     public static func lockFile(_ store: DozerStore) -> URL { store.root.appendingPathComponent("ui.lock") }
     public static func socket(_ store: DozerStore) -> URL { store.root.appendingPathComponent("ui.sock") }
+    /// 594 W18: the port the store's last UI listened on (0600) — the next `doz ui` asks for it again,
+    /// so a page left open reconnects to the same origin. Not a secret; a page there still needs a
+    /// new link to sign in.
+    public static func portFile(_ store: DozerStore) -> URL { store.root.appendingPathComponent("ui.port") }
+
+    /// The address a new UI binds: the last port when nothing listens there, else the OS's pick.
+    public static func address(_ store: DozerStore) -> WebLoopbackAddress {
+        guard let s = try? String(contentsOf: portFile(store), encoding: .utf8),
+              let port = Int(s.trimmingCharacters(in: .whitespacesAndNewlines)),
+              let a = WebLoopbackAddress(reusing: port) else { return WebLoopbackAddress() }
+        return a
+    }
+
+    /// Remember the port this UI listens on.
+    public static func rememberPort(_ store: DozerStore, _ port: Int) {
+        let url = portFile(store)
+        guard (try? "\(port)\n".write(to: url, atomically: true, encoding: .utf8)) != nil else { return }
+        chmod(url.path, 0o600)
+    }
 
     /// Take the store's UI lock for the life of the process; nil when another UI holds it.
     public static func takeLock(_ store: DozerStore) throws -> Int32? {
@@ -53,11 +72,18 @@ public enum WebControl {
         guard getpeereid(fd, &uid, &gid) == 0, uid == getuid() else { return }
         var tv = timeval(tv_sec: 5, tv_usec: 0)
         setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
-        guard let line = LineReader(fd: fd).readLine(limit: 64), String(decoding: line, as: UTF8.self) == "link" else { return }
+        guard let line = LineReader(fd: fd).readLine(limit: 64) else { return }
+        let command = String(decoding: line, as: UTF8.self)
+        guard ["link", "rotate", "status"].contains(command) else { return }
+        if command == "status" {
+            // 594 W19: the origin and how many pages are open (no key in it).
+            _ = UnixSocket.writeAll(fd, Data("\(server.origin.value) \(server.openPages)\n".utf8))
+            return
+        }
         let box = Box()
         let done = DispatchSemaphore(value: 0)
         Task {
-            box.url = await server.newLink()
+            box.url = command == "rotate" ? await server.rotate() : await server.newLink()
             done.signal()
         }
         done.wait()
@@ -65,15 +91,35 @@ public enum WebControl {
         _ = UnixSocket.writeAll(fd, Data((url.absoluteString + "\n").utf8))
     }
 
-    /// Ask the store's running UI for a new link; nil when no UI runs for this store.
-    public static func requestLink(_ store: DozerStore) -> URL? {
+    private static func ask(_ store: DozerStore, _ command: String) -> String? {
         guard let fd = UnixSocket.connect(socket(store).path) else { return nil }
         defer { close(fd) }
-        guard UnixSocket.writeAll(fd, Data("link\n".utf8)), let line = LineReader(fd: fd).readLine(limit: 1024) else { return nil }
-        guard let url = URL(string: String(decoding: line, as: UTF8.self)), url.scheme == "http", url.host == WebLoopbackAddress.host,
+        guard UnixSocket.writeAll(fd, Data((command + "\n").utf8)), let line = LineReader(fd: fd).readLine(limit: 1024) else { return nil }
+        return String(decoding: line, as: UTF8.self)
+    }
+
+    private static func launchURL(_ s: String?) -> URL? {
+        guard let s, let url = URL(string: s), url.scheme == "http", url.host == WebLoopbackAddress.host,
               url.fragment?.hasPrefix("cap=") == true else { return nil }
         return url
     }
+
+    /// Ask the store's running UI for a new link; nil when no UI runs for this store.
+    public static func requestLink(_ store: DozerStore) -> URL? { launchURL(ask(store, "link")) }
+
+    /// 594 W19: end every session of the running UI (each open page is told to use a new link) and
+    /// get that new link; nil when no UI runs.
+    public static func requestRotate(_ store: DozerStore) -> URL? { launchURL(ask(store, "rotate")) }
+
+    /// 594 W19: the running UI's origin and its open pages; nil when no UI runs for this store.
+    public static func requestStatus(_ store: DozerStore) -> (origin: String, pages: Int)? {
+        guard let parts = ask(store, "status")?.split(separator: " "), parts.count == 2, let n = Int(parts[1]),
+              parts[0].hasPrefix("http://\(WebLoopbackAddress.host):") else { return nil }
+        return (String(parts[0]), n)
+    }
+
+    /// 594 W19: the sessions a restarted UI keeps (`WebSessionStore`: cookie digests, 0600).
+    public static func sessionsFile(_ store: DozerStore) -> URL { store.root.appendingPathComponent("ui.sessions") }
 
     /// Remove the socket when the UI stops.
     public static func cleanUp(_ store: DozerStore, listenFD: Int32, lockFD: Int32) {
