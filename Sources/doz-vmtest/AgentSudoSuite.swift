@@ -28,6 +28,12 @@ func cliAgentSudoSuite(binary: String) async {
     r = t.run(["exec", "su", "--", "sh", "-c", "sudo -n apt-get install -y cowsay >/tmp/apt.log 2>&1 || { tail -5 /tmp/apt.log; exit 1; }; grep -q 'delaying package configuration' /tmp/apt.log && echo DEBCONF-NOISE; /usr/games/cowsay hi"], timeout: 300)
     check(r.code == 0 && r.out.contains("< hi >"), "sudo -n apt-get install -y cowsay && cowsay hi — as the agent (\(r.code)): \(r.out.suffix(200))")
     check(!r.out.contains("DEBCONF-NOISE"), "W24: no \"debconf: delaying package configuration\" (apt-utils is in the image)")
+    // W31: a package that asks debconf questions (keyboard-configuration → console-setup: the owner's
+    // install stopped at "Keyboard layout:") installs without asking. stdin is /dev/null, so a question
+    // would fail the install rather than hang the test; the frontend check proves it was never asked.
+    r = t.run(["exec", "su", "--", "sh", "-c", "sudo -n debconf-show debconf 2>/dev/null | grep -i 'frontend' ; sudo -n apt-get install -y keyboard-configuration </dev/null >/tmp/kb.log 2>&1 && echo KB-OK || tail -5 /tmp/kb.log; grep -c 'Keyboard layout:\\|Character set to support:' /tmp/kb.log"], timeout: 600)
+    check(r.out.contains("Noninteractive"), "W31: debconf's frontend is Noninteractive in the guest (\(r.out.split(separator: "\n").first ?? ""))")
+    check(r.out.contains("KB-OK") && r.out.hasSuffix("0\n"), "W31: sudo apt-get install keyboard-configuration (+ console-setup) completes without a question: \(r.out.suffix(200))")
     r = t.run(["exec", "su", "--", "sh", "-c", "stat -c '%a %U' /etc/sudoers.d/dozer-agent; du -sk /var/lib/apt/lists | cut -f1"])
     let lines = r.out.split(separator: "\n")
     check(lines.first == "440 root", "the drop-in: 0440, root (\(lines.first ?? ""))")
