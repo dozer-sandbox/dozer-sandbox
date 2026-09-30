@@ -32,6 +32,22 @@ public enum SettingType: Sendable, Equatable {
     case version
     /// 594 W10: `mac` (follow this Mac's zone) or an IANA zone name (`Australia/Sydney`).
     case timeZone
+    /// 597: a preset (`standard`, `locked`, `open`), or permission ids separated by commas, each
+    /// optionally `+`/`-` on the Standard set (`+web`, `-error-reports`, `install:python`).
+    case permissions
+
+    /// 597: a permissions setting's words, checked (nil: not a valid value).
+    public static func permissionWords(_ s: String) -> [String]? {
+        let t = s.trimmingCharacters(in: .whitespaces)
+        if ["standard", "locked", "open"].contains(t) { return [t] }
+        let words = t.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        guard !words.isEmpty, words.count <= 32 else { return nil }
+        for w in words {
+            let id = (w.hasPrefix("+") || w.hasPrefix("-")) ? String(w.dropFirst()) : w
+            guard AgentPermissions.isValid(id) else { return nil }
+        }
+        return words
+    }
 
     /// An IANA zone name this Mac knows (plain characters only — it becomes a guest file's content).
     public static func isTimeZoneName(_ s: String) -> Bool {
@@ -48,6 +64,7 @@ public enum SettingType: Sendable, Equatable {
         case .subnet: "IPv4 subnet, a.b.c.d/nn (\"\" = a free one)"
         case .version: "latest, or an exact version like 2.1.227"
         case .timeZone: "mac, or a time zone like Australia/Sydney"
+        case .permissions: "standard | locked | open, or permissions like +web,-error-reports (doz net permissions)"
         }
     }
 
@@ -144,6 +161,9 @@ public struct SettingDefinition: Sendable {
         case (.timeZone, .string(let s)):
             guard s == "mac" || SettingType.isTimeZoneName(s) else { throw SettingsError("\(key) is mac, or a time zone like Australia/Sydney") }
             return v
+        case (.permissions, .string(let s)):
+            guard SettingType.permissionWords(s) != nil else { throw SettingsError("\(key) is standard, locked, open, or permissions like +web,-error-reports (doz net permissions)") }
+            return v
         default:
             throw SettingsError("\(key) is a \(type.name), not a \(v.typeName)")
         }
@@ -162,7 +182,7 @@ public struct SettingDefinition: Sendable {
         case .int:
             guard let i = Int(t) else { throw SettingsError("\(key) is a whole number") }
             return try validate(.int(i))
-        case .choice, .path, .subnet, .version, .timeZone:
+        case .choice, .path, .subnet, .version, .timeZone, .permissions:
             return try validate(.string(t))
         }
     }
@@ -259,6 +279,8 @@ public enum SettingKey {
     public static let agentSudo = "sandbox.agent_sudo"
     /// 594 W10: the sandboxes' time zone (`mac` or an IANA name).
     public static let timeZone = "sandbox.timezone"
+    /// 597: the permissions of a new proxied sandbox.
+    public static let permissions = "defaults.permissions"
     /// 594 (owner ruling): the web UI may take an API key or a setup token (a masked field).
     public static let allowSecretEntry = "ui.allow_secret_entry"
     /// 594 W19 (owner: "a new web page opening up every time i run doz ui"): when `doz ui` opens a tab.
@@ -373,6 +395,10 @@ public struct DozerSettings: Sendable {
             .init("sandbox", "timezone", .timeZone, .string("mac"),
                   "The sandboxes' time zone: mac (this Mac's, read again at every boot and wake — a laptop that travels while a sandbox sleeps is followed) or a zone like Australia/Sydney. Written to the guest's /etc/localtime; the agent's facts say it.",
                   applies: .nextStartOrWake),
+            // 597 (P4): what a new proxied sandbox's agent may do.
+            .init("defaults", "permissions", .permissions, .string("standard"),
+                  "What a new sandbox's agent may do (its network, as permissions — doz net permissions): standard (talk to its AI model, update itself, install system packages and its base's language packages, use GitHub, send error reports), locked (its AI model only), open (everything, the web included), or standard with changes like +web,-error-reports. Stored by name: a Dozer update that adds a host to a permission reaches every sandbox that has it.",
+                  flag: "doz create --allow / --network", applies: .nextCreate),
         ]
         s.append(.init("images", "claude_code_version", .version, .string("latest"),
                        "The Claude Code the claude-code image is prepared with: latest (asked of the npm registry when the image is prepared, then installed at that exact version, integrity-checked; a newer one is only said — doz image bake claude-code rebuilds when you choose) or an exact version like 2.1.227. A sandbox keeps the version it was created with; doz reset NAME moves it to the image's current one.",
@@ -570,6 +596,7 @@ public struct DozerSettings: Sendable {
             case .subnet: kind = "subnet"
             case .version: kind = "version"
             case .timeZone: kind = "timezone"
+            case .permissions: kind = "permissions"
             }
             var note: String?
             switch r.source {

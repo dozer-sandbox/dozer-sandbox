@@ -239,9 +239,37 @@ public enum DozerImages {
         }
         let section = DozerSettings.imageSection(imageSpecName: imageSpec?.name)
         var network = try networkMode(o.network ?? settings.string(SettingKey.network(section)) ?? defaultNetwork(image, imageSpec: imageSpec))
-        // 596 (B4): the base's language registries join a proxied policy (a template: its image's base).
-        if let base = imageSpec.flatMap({ ImageChoice.parse($0.name) }).flatMap({ BaseCatalogue.base($0.base) }), !base.registries.isEmpty,
-           case .proxied(let p) = network {
+        let catalogueBase = imageSpec.flatMap({ ImageChoice.parse($0.name) }).flatMap({ BaseCatalogue.base($0.base) })
+        if case .proxied(let p) = network, let preset = p.preset, ["locked", "agent", "open"].contains(preset) {
+            // 597 (P1, P4, P5): a proxied sandbox's agent gets PERMISSIONS, stored by name — the preset
+            // named (--network), else the setting defaults.permissions (Standard: its base's ecosystems),
+            // or exactly the ones given (the web form); `--allow` adds words on top.
+            let baseID = catalogueBase?.id
+            var names: [String]
+            if let exact = o.permissions {
+                for w in exact where !AgentPermissions.isValid(w) { throw HostError(.invalid, "no permission \(w) — doz net permissions") }
+                names = AgentPermissions.normalized(exact)
+            } else if o.network != nil || settings.resolve(SettingKey.network(section)).source != .default {
+                // A network named (the flag, or the image's own setting): exactly that preset.
+                names = AgentPermissions.preset(preset, base: baseID) ?? []
+            } else {
+                names = PermissionPolicy.names(from: SettingType.permissionWords(settings.string(SettingKey.permissions) ?? "standard") ?? ["standard"], base: baseID)
+            }
+            var sites: [String] = []
+            for w in o.allow ?? [] {
+                if w.hasPrefix("site:") { sites.append(try PermissionPolicy.site(w)) } else {
+                    let id = (w.hasPrefix("+") || w.hasPrefix("-")) ? String(w.dropFirst()) : w
+                    guard AgentPermissions.isValid(id) || w == "standard" || w == "locked" || w == "open" else {
+                        throw HostError(.invalid, "--allow: no permission \(id) — doz net permissions (or site:HOST)")
+                    }
+                    names = PermissionPolicy.names(from: [w], base: baseID, start: names)
+                }
+            }
+            var q = NetworkPolicy.permissions(names, preset: sites.isEmpty ? AgentPermissions.presetName(names, base: baseID) : nil)
+            for s in sites { q.rules.append(EgressRule(host: s, note: "site you allowed")) }
+            network = .proxied(q)
+        } else if let base = catalogueBase, !base.registries.isEmpty, case .proxied(let p) = network {
+            // 596 (B4): a policy of rules (bake, custom) — the base's language registries join it.
             network = .proxied(p.adding(registries: base.registries))
         }
         let subnet = o.subnet ?? settings.string(SettingKey.natSubnet)

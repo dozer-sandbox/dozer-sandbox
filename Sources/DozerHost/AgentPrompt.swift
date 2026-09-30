@@ -63,6 +63,7 @@ public enum AgentPrompt {
         ("network.mode", "agent, bake, locked, open, custom (proxied), nat or none"),
         ("network.allowed_hosts", "the hosts the policy allows (proxied), comma-separated"),
         ("network.description", "a sentence: how the sandbox reaches the network and what to do when refused"),
+        ("network.permissions", "597: what the agent may and may not do, in plain words, and the permission to ask for"),
         ("account.name", "the Anthropic account the proxy injects, or none"),
         ("credentials.description", "a sentence: how credentials reach the agent"),
         ("sandbox.sudo", "yes or no: the agent has passwordless sudo (sandbox.agent_sudo)"),
@@ -114,7 +115,7 @@ public enum AgentPrompt {
 
     Allowed hosts: {{network.allowed_hosts}}.
 
-    If a connection is refused, tell the user which host you needed and why; they decide (`doz net policy {{sandbox.name}} --allow HOST`, or the policy editor in `doz ui`). Do not try to get around the policy (other hosts, IP addresses, tunnels) — it is the user's boundary.
+    If a connection is refused, tell the user what you were doing, which host, and the permission that would allow it (by its name — "Install software: Python (PyPI)", "Browse the web", …); they decide (`doz net allow {{sandbox.name}} PERMISSION` or `site:HOST`, or the switches in `doz ui`). Do not try to get around it (other hosts, IP addresses, tunnels) — it is the user's boundary.
 
     ## Credentials
 
@@ -204,18 +205,22 @@ public enum AgentPrompt {
         v["network.mode"] = DozerImages.networkName(network)
         switch network {
         case .proxied(let p):
-            let allowed = p.rules.filter { $0.action == .allow }.map(\.host)
+            // 597 (P7): what the agent may do, in plain words — and the permission to ask for.
+            v["network.permissions"] = PermissionPolicy.facts(p, sandbox: name)
+            let allowed = p.effectiveRules.filter { $0.action == .allow }.map(\.host)
             var unique: [String] = []
             for h in allowed where !unique.contains(h) { unique.append(h) }
             let shown = unique.prefix(40).joined(separator: ", ") + (unique.count > 40 ? ", …" : "")
-            v["network.allowed_hosts"] = p.defaultAction == .allow ? "every host (the open policy — still proxied and logged)" : (unique.isEmpty ? "none" : shown)
-            v["network.description"] = "this VM has no network interface; every connection goes through the Mac's proxy under the \(p.preset ?? "custom") policy"
-                + (p.defaultAction == .allow ? " (everything allowed, every connection logged)." : " — deny by default: only the policy's hosts are reachable, and every connection is logged.")
-                + " A refused connection needs the user to add a rule (`doz net policy \(name) --allow HOST`); do not retry around it."
+            v["network.allowed_hosts"] = p.effectiveDefault == .allow ? "every host (the web is allowed — still proxied and logged)" : (unique.isEmpty ? "none" : shown)
+            v["network.description"] = "this VM has no network interface; every connection goes through the Mac's proxy, which allows what the user permits and logs every connection"
+                + (p.effectiveDefault == .allow ? " (the web is allowed). " : " — deny by default. ")
+                + v["network.permissions"]!
         case .nat:
+            v["network.permissions"] = "You may reach any host (a NAT network: nothing is filtered)."
             v["network.allowed_hosts"] = "every host (not filtered)"
             v["network.description"] = "a NAT network interface (vmnet) on the Mac; outbound connections are not filtered or logged by Dozer."
         case .none:
+            v["network.permissions"] = "You may reach nothing (no network)."
             v["network.allowed_hosts"] = "none"
             v["network.description"] = "none — this VM has no network at all."
         }

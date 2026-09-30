@@ -32,6 +32,9 @@ public enum HostOp: String, Codable, Sendable, CaseIterable {
     case pointRm = "point-rm", pointSaveImage = "point-save-image"
     case imageList = "image-ls", imageBake = "image-bake", imageRm = "image-rm"
     case netPolicy = "net-policy", netLog = "net-log"
+    /// 597: a sandbox's permissions as a checklist, its preset, its sites and suggestions from the
+    /// connections it was refused (`PermissionReport`). Read-only.
+    case netPermissions = "net-permissions"
     case keySet = "key-set", keyRm = "key-rm", keyList = "key-ls"
     /// 588: what the proxy does with a credential the guest supplied itself (allow | strict).
     case keyPolicy = "key-policy"
@@ -105,7 +108,7 @@ public enum HostOp: String, Codable, Sendable, CaseIterable {
     public var isReadOnly: Bool {
         switch self {
         case .ping, .ls, .inspect, .pointList, .imageList, .keyList, .accountList, .imageTree, .prepareStatus, .sessionScreen, .terminalLayout, .bootLog, .resources,
-             .bases, .builderStatus: true
+             .bases, .builderStatus, .netPermissions: true
         case .netPolicy: false        // decided per request (a change needs the host)
         default: false
         }
@@ -141,6 +144,10 @@ public struct CreateOptions: Codable, Equatable, Sendable {
     public var dockerfile: String?
     /// 594 W28: rebuild the image first (the user chose it: an out-of-date image is otherwise used as it is).
     public var rebuild: Bool?
+    /// 597 (P4): a proxied sandbox's permissions — exactly these ids (the web form's switches), and/or
+    /// words on top of the default (`doz create --allow web,site:api.example.com`, `-error-reports`).
+    public var permissions: [String]?
+    public var allow: [String]?
 
     public init(image: String, cpus: Int? = nil, memoryMiB: UInt64? = nil, workspace: String? = nil,
                 network: String? = nil, subnet: String? = nil, account: String? = nil) {
@@ -212,6 +219,9 @@ public struct HostRequest: Codable, Equatable, Sendable {
     public var allow: [String]?
     public var deny: [String]?
     public var removeHosts: [String]?
+    /// 597 (P6): net-policy by permission — ids to switch on / off, or `site:HOST`.
+    public var grant: [String]?
+    public var revoke: [String]?
     /// net-log.
     public var deniedOnly: Bool?
     public var follow: Bool?

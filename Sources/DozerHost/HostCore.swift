@@ -514,6 +514,7 @@ public actor HostCore {
 
     func isPolicyQuery(_ r: HostRequest) -> Bool {
         r.preset == nil && (r.allow ?? []).isEmpty && (r.deny ?? []).isEmpty && (r.removeHosts ?? []).isEmpty
+            && (r.grant ?? []).isEmpty && (r.revoke ?? []).isEmpty
     }
 
     /// 594 W23: the agent's passwordless sudo for a sandbox — its own choice, else the setting
@@ -631,6 +632,14 @@ public actor HostCore {
             return try JSONValue(encoding: try removeImage(r.image))
         case .netPolicy:
             return try JSONValue(encoding: try netPolicy(r))
+        case .netPermissions:
+            // 597: the checklist, and suggestions from what this host saw refused.
+            let m = try get(r.name)
+            guard let egress = m.sandbox.egress else {
+                throw HostError(.invalid, "\(m.name) is not proxied (network \(m.config.networkName)) — it has no permissions")
+            }
+            return try JSONValue(encoding: PermissionPolicy.report(name: m.name, policy: Self.withoutSignInBlock(egress.policy),
+                                                                   base: PermissionPolicy.base(of: m.config), log: egress.log.records))
         case .netLog:
             let m = try get(r.name)
             guard let log = m.sandbox.egress?.log else { throw HostError(.invalid, "\(m.name) is not proxied (network \(m.config.networkName)) — it has no connection log") }
@@ -1543,7 +1552,11 @@ public actor HostCore {
             spec.shares = spec.shares.filter { $0.guestPath != DozerImages.workspaceGuestPath }
         }
         if let net = o.network {
-            let mode = try DozerImages.networkMode(net)
+            var mode = try DozerImages.networkMode(net)
+            // 597: locked / agent / open are permissions (for the source's base); nothing given = copied.
+            if case .proxied(let p) = mode, let preset = p.preset, let names = AgentPermissions.preset(preset, base: PermissionPolicy.base(of: m.config)) {
+                mode = .proxied(.permissions(names, preset: preset))
+            }
             let wasNAT = spec.network == .nat
             spec.network = mode
             if mode != .nat || !wasNAT { spec.subnet = nil }
@@ -1726,11 +1739,21 @@ public actor HostCore {
     /// What a `net-policy` change makes of `current` (the live policy): the preset, removals, denies,
     /// allows, in that order — the policy that is kept (without the strict sign-in block, which is
     /// re-derived). Pure, so `doz ui`'s preview (590) shows exactly what the change will do.
-    public static func editedPolicy(_ current: NetworkPolicy, _ r: HostRequest) throws -> NetworkPolicy {
+    public static func editedPolicy(_ current: NetworkPolicy, _ r: HostRequest, base: String? = nil) throws -> NetworkPolicy {
         var p = withoutSignInBlock(current)
         if let preset = r.preset {
-            guard let np = NetworkPolicy.presets[preset] else { throw HostError(.invalid, "unknown preset \(preset) — locked, bake, agent or open") }
-            p = np
+            // 597 (P2): locked / agent (Standard) / open are sets of permissions (for the sandbox's base);
+            // bake stays a preset of rules (image preparation).
+            if let names = AgentPermissions.preset(preset == "standard" ? "agent" : preset, base: base) {
+                p = .permissions(names, preset: preset == "standard" ? "agent" : preset)
+            } else {
+                guard let np = NetworkPolicy.presets[preset] else { throw HostError(.invalid, "unknown preset \(preset) — locked, standard (agent), open or bake") }
+                p = np
+            }
+        }
+        // 597 (P6): by permission, or site:HOST.
+        if !(r.grant ?? []).isEmpty || !(r.revoke ?? []).isEmpty {
+            p = try PermissionPolicy.edited(p, grant: r.grant ?? [], revoke: r.revoke ?? [], base: base)
         }
         for h in r.removeHosts ?? [] {
             let host = h.lowercased()
@@ -1752,7 +1775,7 @@ public actor HostCore {
             throw HostError(.invalid, "\(m.name) is not proxied (network \(m.config.networkName)) — it has no policy")
         }
         if isPolicyQuery(r) { return egress.policy }
-        let p = try Self.editedPolicy(egress.policy, r)
+        let p = try Self.editedPolicy(egress.policy, r, base: PermissionPolicy.base(of: m.config))
         m.sandbox.setNetworkPolicy(Self.withSignInBlock(p, strict: egress.vault.foreignPolicy == .strict))
         m.config.spec.network = .proxied(p)
         try m.config.write(store.configFile(m.name))

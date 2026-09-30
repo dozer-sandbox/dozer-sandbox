@@ -251,8 +251,9 @@ struct PointSaveImage: AsyncParsableCommand {
 // MARK: net
 
 struct NetCommand: AsyncParsableCommand {
-    static let configuration = CommandConfiguration(commandName: "net", abstract: "A proxied sandbox's network: its policy and its connection log.",
-                                                    subcommands: [NetPolicyCommand.self, NetLog.self])
+    static let configuration = CommandConfiguration(commandName: "net", abstract: "What a sandbox's agent may do (597: permissions), its raw policy and its connection log.",
+                                                    subcommands: [NetShow.self, NetAllow.self, NetDeny.self, NetPermissionsList.self, NetPolicyCommand.self, NetLog.self],
+                                                    defaultSubcommand: NetShow.self)
 }
 
 struct NetPolicyCommand: AsyncParsableCommand {
@@ -275,10 +276,12 @@ struct NetPolicyCommand: AsyncParsableCommand {
         let v = changing ? try call(r, g) : try await query(r, g)
         let p = try decode(v, NetworkPolicy.self, g)
         if g.json { Out.json(p); return }
-        Out.stdout("\(name): \(p.preset.map { "\($0) preset" } ?? "custom policy"), default \(p.defaultAction.rawValue)\n")
+        Out.stdout("\(name): \(p.preset.map { "\($0) preset" } ?? "custom policy"), default \(p.effectiveDefault.rawValue)\n")
+        // 597: a policy of permissions — its names, then every rule evaluated (the user's own first).
+        if let names = p.permissions { Out.stdout("permissions: \(names.joined(separator: ", ")) (doz net \(name) shows them in words)\n") }
         var t = [["#", "RULE", "NOTE"]]
-        for (i, rule) in p.rules.enumerated() { t.append(["\(i + 1)", rule.label, rule.note]) }
-        if p.rules.isEmpty { Out.stdout("(no rules)\n") } else { Out.stdout(Out.table(t)) }
+        for (i, rule) in p.effectiveRules.enumerated() { t.append(["\(i + 1)", rule.label, rule.note]) }
+        if p.effectiveRules.isEmpty { Out.stdout("(no rules)\n") } else { Out.stdout(Out.table(t)) }
     }
 }
 

@@ -219,7 +219,7 @@ final class SettingsTests: XCTestCase {
         XCTAssertEqual(lab.subnet, "192.168.77.0/24")
         XCTAssertEqual(lab.kernelCacheDirectory?.path, "/kernels")
         let (pi, _) = try DozerImages.spec(name: "b", options: CreateOptions(image: "pi"), store: store, environment: env)
-        XCTAssertEqual(pi.network, .proxied(.locked))
+        XCTAssertEqual(pi.network, .proxied(.permissions(["model"], preset: "locked")), "597: Locked = the model only, by name")
         XCTAssertEqual(pi.memoryMiB, 2048, "unset: the default")
         let (flags, _) = try DozerImages.spec(name: "c", options: CreateOptions(image: "lab", cpus: 1, memoryMiB: 512, network: "bake"),
                                                store: store, environment: env.merging(["DOZ_SUBNET": "10.9.0.0/24", "DOZ_KERNEL_CACHE": "/env-k"]) { a, _ in a })

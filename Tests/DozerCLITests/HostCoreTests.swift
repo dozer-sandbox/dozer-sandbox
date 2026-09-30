@@ -68,7 +68,9 @@ final class HostCoreTests: XCTestCase {
         let (cc, _) = try DozerImages.spec(name: "cc", options: CreateOptions(image: "claude-code", memoryMiB: 4096), store: store,
                                             environment: ["DOZ_KERNEL_CACHE": "/k"])
         XCTAssertEqual(cc.imageSpec?.name, "claude-code")
-        XCTAssertEqual(cc.network, .proxied(.agent))
+        // 597 (P5): Standard is stored as its permissions (by name), the hosts coming from this build.
+        XCTAssertEqual(cc.network, .proxied(.permissions(AgentPermissions.preset("agent", base: "node")!, preset: "agent")))
+        XCTAssertEqual(AgentPermissions.preset("agent", base: "node"), ["model", "update", "install:system", "install:node", "github", "error-reports"])
         XCTAssertEqual(cc.memoryMiB, 4096)
         XCTAssertEqual(cc.kernelCacheDirectory?.path, "/k")
         let (nat, _) = try DozerImages.spec(name: "n", options: CreateOptions(image: "pi", network: "nat"), store: store,

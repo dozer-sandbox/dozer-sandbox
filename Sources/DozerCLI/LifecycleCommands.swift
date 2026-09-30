@@ -50,6 +50,10 @@ struct CreateArguments: ParsableArguments {
     @Flag(name: .long, help: "When the image is out of date (an older doz's recipe, or a newer agent release): rebuild it first (~2 min, needs network; existing sandboxes are not affected).")
     var rebuild = false
 
+    // `--allow -error-reports`: the value may start with a dash.
+    @Option(name: .long, parsing: .unconditionalSingleValue, help: "597: what the agent may do, on top of the default (defaults.permissions): permissions (doz net permissions), -PERMISSION to remove, site:HOST, or standard/locked/open. Comma-separated or repeated.")
+    var allow: [String] = []
+
     @Flag(name: .long, help: "When the image is out of date: use it as it is (the default off a terminal; said as a warning).")
     var useCurrent = false
 
@@ -100,6 +104,9 @@ struct CreateArguments: ParsableArguments {
         var o = CreateOptions(image: img, cpus: cpus, memoryMiB: mem, workspace: absoluteWorkspace, network: network, subnet: subnet, account: account)
         o.isolated = isolated ? true : nil
         o.agentSudo = agentSudo
+        // 597 (P6): --allow web,site:api.example.com,-error-reports
+        let words = allow.flatMap { $0.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) } }.filter { !$0.isEmpty }
+        if !words.isEmpty { o.allow = words }
         if let df = absoluteDockerfile {
             guard FileManager.default.fileExists(atPath: df) else { throw ValidationError("--dockerfile: no file at \(df)") }
             o.dockerfile = df
@@ -137,7 +144,7 @@ struct CreateArguments: ParsableArguments {
 
     var givenAny: Bool {
         image != nil || cpus != nil || memory != nil || workspace != nil || network != nil || subnet != nil || account != nil || agentPrompt != nil || isolated || agentSudo != nil
-            || agent != nil || base != nil || dockerfile != nil
+            || agent != nil || base != nil || dockerfile != nil || !allow.isEmpty
     }
 }
 
@@ -367,6 +374,8 @@ struct Up: AsyncParsableCommand {
                 if let w = create.absoluteWorkspace { o.workspace = w }
                 if create.isolated { o.workspace = nil; o.isolated = true }
                 if let s = create.agentSudo { o.agentSudo = s }
+                let allowWords = create.allow.flatMap { $0.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) } }.filter { !$0.isEmpty }
+                if !allowWords.isEmpty { o.allow = allowWords }       // 597
                 try create.applyPrompt(to: &o)
                 // 594: doz_project.yaml's image and account are checked like any create.
                 try preflightAgentAccount(&o, g)

@@ -465,11 +465,19 @@ final class AccountTests: XCTestCase {
         m = await c.handle(p)
         XCTAssertNil(m.error)
         XCTAssertEqual(v.foreignPolicy, .allow)
-        let pol = try await XCTUnwrapAsync(await c.effectiveNetworkPolicy(of: "a"))
+        var pol = try await XCTUnwrapAsync(await c.effectiveNetworkPolicy(of: "a"))
+        XCTAssertEqual(pol.evaluate(host: "claude.ai", port: 443).action, .deny, "597: Sign in is off in Standard")
+        var g = HostRequest(.netPolicy, name: "a")
+        g.grant = ["sign-in"]
+        m = await c.handle(g)
+        XCTAssertNil(m.error)
+        pol = try await XCTUnwrapAsync(await c.effectiveNetworkPolicy(of: "a"))
         XCTAssertEqual(pol.evaluate(host: "claude.ai", port: 443).action, .allow, "the sign-in block goes with strict")
         p.policy = "auto"
         _ = await c.handle(p)
         XCTAssertEqual(v.foreignPolicy, .strict)
+        pol = try await XCTUnwrapAsync(await c.effectiveNetworkPolicy(of: "a"))
+        XCTAssertEqual(pol.evaluate(host: "claude.ai", port: 443).action, .deny, "strict blocks sign-in even when its permission is on")
         d.account = "none"
         _ = await c.handle(d)
         XCTAssertFalse(v.hasSecret("anthropic"))
