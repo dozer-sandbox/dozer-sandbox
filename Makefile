@@ -64,7 +64,7 @@ DOCC_OUT         ?= .docc-build
 DOCC_BASE_PATH   ?= /DozerKit/
 DOCC_PREVIEW_PORT ?= 8000
 
-.PHONY: help build test audit web-assets web-assets-check test-cli-onboarding pullbench test-vm test-vm-agents test-vm-network test-vm-hardening test-vm-lineage prev-cli test-vm-upgrade vmtest-host kernel deckhold deckhold-verify doznet doznet-verify cli install-cli test-cli test-vm-claude test-vm-templates docs docs-preview docs-drift-check release
+.PHONY: help build test audit web-assets web-assets-check test-cli-onboarding test-cli-terminal pullbench test-vm test-vm-agents test-vm-network test-vm-hardening test-vm-lineage prev-cli test-vm-upgrade vmtest-host kernel deckhold deckhold-verify doznet doznet-verify cli install-cli test-cli test-vm-claude test-vm-templates docs docs-preview docs-drift-check release
 
 help: ## Show this help
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) | sed 's/:.*## /\t/' | expand -t 22
@@ -193,6 +193,9 @@ test-cli: cli vmtest-host ## 585 CLI suite: the signed doz from separate process
 
 test-cli-onboarding: cli vmtest-host ## 594: only test-cli's onboarding part (onboard, a joining start, detach/cancel, init/up, the agent prompt in pi + claude-code, uninstall)
 	perl -e 'alarm shift; exec @ARGV' 3000 $(VMTEST_BIN) cli-onboarding --doz $(CLI_BIN)
+
+test-cli-terminal: cli vmtest-host ## 594 W13: only test-cli's terminal part — on a pty, a detach / a session's end / SIGHUP put the outer terminal's modes and termios back
+	perl -e 'alarm shift; exec @ARGV' 900 $(VMTEST_BIN) cli-terminal --doz $(CLI_BIN)
 
 pullbench: vmtest-host ## 594 D12: pull the node base with 3 vs 6 concurrent layer downloads into fresh stores (network; ROUNDS=3)
 	$(VMTEST_BIN) pullbench --rounds $(or $(ROUNDS),3)
