@@ -247,6 +247,11 @@ public enum GuestCommand {
     }
 
     /// A persist dir's directory on the state disk: its absolute path, flattened.
+    /// 594 W29: the guest's own host name resolves locally — `127.0.1.1 <hostname>` in /etc/hosts (once;
+    /// idempotent). Without it every `sudo` asked DNS for the sandbox's name 4 times, and a proxied
+    /// sandbox's policy denied and logged each. Never fails the caller.
+    public static let ownHostnameScript = #"{ h=$(hostname 2>/dev/null) && [ -n "$h" ] && { awk -v h="$h" '{ for (i = 2; i <= NF; i++) if ($i == h) f = 1 } END { exit !f }' /etc/hosts 2>/dev/null || printf '127.0.1.1\t%s\n' "$h" >> /etc/hosts; }; } || true"#
+
     /// 594 W23 (owner ruling 2026-09-30: "yes, passwordless sudo by default"): where the agent's sudo
     /// rule lives. sudo reads every file in /etc/sudoers.d whose name has no dot and no trailing `~`.
     public static let agentSudoersPath = "/etc/sudoers.d/dozer-agent"
@@ -282,6 +287,7 @@ public enum GuestCommand {
     /// 594 W10: `timeZone` — the guest's /etc/localtime (every image, the lab too).
     public static func prepareGuest(imageSpec: ImageSpec?, agentSudo: Bool = true, timeZone: GuestTimeZone? = nil) -> String {
         var s = "set -e; rm -rf /run/deckhold; mkdir -p /run/deckhold; chmod 1777 /run/deckhold"
+        s += "; " + ownHostnameScript
         if let tz = timeZone { s += "; " + tz.script }
         guard let r = imageSpec else { return s }
         s += "; " + agentSudoScript(user: r.user, on: agentSudo)

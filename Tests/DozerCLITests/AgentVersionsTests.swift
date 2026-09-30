@@ -186,7 +186,8 @@ final class AgentVersionsTests: XCTestCase {
         XCTAssertEqual(try AgentVersions.spec("claude-code", purpose: .create, store: store, settings: latest)?.agent?.version, "2.1.227", "a create uses the prepared one")
         XCTAssertEqual(try AgentVersions.spec("claude-code", purpose: .prepare, store: store, settings: latest)?.agent?.version, "2.1.230")
 
-        // The host: a create starts the background preparation of 2.1.230 and does not wait for it.
+        // The host: a create uses 2.1.227 and — 594 W28 (owner ruling) — starts NO preparation of
+        // 2.1.230: a newer release is said (image ls, doctor, create), never built by itself.
         let core = HostCore(store: store, readOnly: false, version: "test", agentRegistry: stub.registry)
         let ran = Stub()
         await core.setPreparationRunner({ image, _, _ in
@@ -199,15 +200,18 @@ final class AgentVersionsTests: XCTestCase {
         let info = try XCTUnwrap(m.result, "\(String(describing: m.error))").decode(SandboxInfo.self)
         XCTAssertEqual(info.name, "cc1")
         XCTAssertEqual(SandboxConfig.read(store.configFile("cc1"))?.spec.imageSpec?.agent?.version, "2.1.227", "the sandbox made now: the prepared image")
+        try await Task.sleep(for: .milliseconds(200))
         let preps = await core.preparationInfos()
-        XCTAssertEqual(preps.first?.image, "claude-code")
-        XCTAssertEqual(preps.first?.requestedBy, ["update to 2.1.230"])
+        XCTAssertTrue(preps.isEmpty, "nothing is prepared by itself: \(preps.map(\.requestedBy))")
+        XCTAssertTrue(ran.lock.withLock { ran.calls.isEmpty })
         let rows = try await core.handle(HostRequest(.imageList)).result!.decode([ImageRow].self)
         let cc = try XCTUnwrap(rows.first { $0.name == "claude-code" })
         XCTAssertEqual(cc.version, "2.1.227")
         XCTAssertEqual(cc.available, "2.1.230")
-        XCTAssertEqual(cc.preparing, true)
-        XCTAssertEqual(cc.versionLine, "claude-code 2.1.227 (2.1.230 available — preparing)")
+        XCTAssertNil(cc.preparing)
+        XCTAssertEqual(cc.versionLine, "claude-code 2.1.227 (2.1.230 available)")
+        XCTAssertEqual(cc.status, "update available")
+        XCTAssertEqual(cc.standing, "Claude Code 2.1.230 is available (image has 2.1.227) — rebuild when ready: doz image bake claude-code (existing sandboxes keep their disks)")
         await core.cancelAllPreparations(wait: 2)
 
         // Up to date: 2.1.230 prepared too — nothing available, the newest is what a create gets.
@@ -220,6 +224,71 @@ final class AgentVersionsTests: XCTestCase {
         let other = AgentImages.claudeCode(newest)
         try write(other, key: other.bakeKey(kernelSHA256: "old-kernel", deckholdSHA256: build.1))
         XCTAssertEqual(AgentVersions.prepared("claude-code", store: store, settings: latest).first?.agent?.version, "2.1.230")
+    }
+
+    /// 594 W28: an image an OLDER doz's recipe baked (rc.1: no sudo, package lists deleted) is not "this
+    /// build's image": named precisely, used as it is by a create (never rebuilt by itself), a create with
+    /// `rebuild` prepares first, and a reset after the rebuild moves the sandbox to the new image.
+    func testAnOlderDozsImageIsNamedUsedAndNeverRebuiltByItself() async throws {
+        guard let build = fakeBuild() else { throw XCTSkip("no deckhold binary in this build") }
+        var old = AgentImages.claudeCode
+        let oldPackages = AgentImages.devBaselinePackages.filter { $0 != "sudo" && $0 != "apt-utils" }
+        old.steps[1] = BakeStep.script("install the developer baseline (\(oldPackages.joined(separator: " ")))",
+                                       "apt-get update\napt-get install -y \(oldPackages.joined(separator: " "))\nrm -rf /var/lib/apt/lists/*\n")
+        try bake(old, build)
+        XCTAssertFalse(AgentVersions.isCurrentRecipe(old))
+        XCTAssertTrue(AgentVersions.isCurrentRecipe(AgentImages.claudeCode))
+        XCTAssertEqual(AgentVersions.recipeChanges(old), ["sudo", "apt-utils", "package lists"])
+        XCTAssertTrue(AgentVersions.prepared("claude-code", store: store, settings: latest).isEmpty, "not this build's image")
+        XCTAssertEqual(AgentVersions.usable("claude-code", store: store, settings: latest), [old])
+        XCTAssertEqual(try AgentVersions.spec("claude-code", purpose: .create, store: store, settings: latest), old, "a create uses it — no waiting, no rebuild")
+        XCTAssertFalse(HostCore.isPrepared("claude-code", store))
+
+        let core = HostCore(store: store, readOnly: false, version: "test")
+        let ran = Stub()
+        await core.setPreparationRunner({ image, _, _ in ran.lock.withLock { ran.calls.append(image) } }, prepared: { _, _ in false })
+        let rows = try await core.handle(HostRequest(.imageList)).result!.decode([ImageRow].self)
+        let cc = try XCTUnwrap(rows.first { $0.name == "claude-code" })
+        XCTAssertEqual(cc.status, "older recipe")
+        XCTAssertEqual(cc.olderRecipe, ["sudo", "apt-utils", "package lists"])
+        XCTAssertEqual(cc.standing, "prepared by an older doz — this doz's image adds: sudo, apt-utils, package lists — rebuild when ready: doz image bake claude-code (existing sandboxes keep their disks)")
+        let s = AgentVersions.standing("claude-code", store: store, settings: latest)
+        XCTAssertEqual(s.olderRecipeLine, "prepared by an older doz — this doz's image adds: sudo, apt-utils, package lists")
+
+        // A create: the older image, said; nothing prepared.
+        var r = HostRequest(.create, name: "cc2")
+        r.create = CreateOptions(image: "claude-code", account: "none")
+        let made = await core.handle(r)
+        let info = try XCTUnwrap(made.result, "\(String(describing: made.error))").decode(SandboxInfo.self)
+        XCTAssertEqual(info.olderImage, ["sudo", "apt-utils", "package lists"],
+                       "spec used: \(String(describing: SandboxConfig.read(store.configFile("cc2"))?.spec.imageSpec?.steps.map(\.name)))")
+        XCTAssertTrue((info.olderImageLine ?? "").hasPrefix("made from an older claude-code image (it lacks: sudo, apt-utils, package lists) — after a rebuild (doz image bake claude-code), doz reset cc2 takes the new one"))
+        try await Task.sleep(for: .milliseconds(200))
+        XCTAssertTrue(ran.lock.withLock { ran.calls.isEmpty }, "nothing rebuilt by itself")
+
+        // A create that asks for the rebuild: the preparation runs first (here: it "bakes" this doz's recipe).
+        let rootURL: URL = root
+        let current = AgentImages.claudeCode
+        let key = current.bakeKey(kernelSHA256: build.0, deckholdSHA256: build.1)
+        await core.setPreparationRunner({ image, _, _ in
+            ran.lock.withLock { ran.calls.append(image) }
+            try AgentVersionsTests.write(current, key: key, root: rootURL)
+        }, prepared: { _, _ in false })
+        var rb = HostRequest(.create, name: "cc3")
+        var o = CreateOptions(image: "claude-code", account: "none")
+        o.rebuild = true
+        rb.create = o
+        let rebuilt = await core.handle(rb)
+        let fresh = try XCTUnwrap(rebuilt.result, "\(String(describing: rebuilt.error))").decode(SandboxInfo.self)
+        XCTAssertEqual(ran.lock.withLock { ran.calls }, ["claude-code"])
+        XCTAssertNil(fresh.olderImage, "made from this doz's image")
+        // The older sandbox, reset: it takes the image a create takes now.
+        let reset = await core.handle(HostRequest(.reset, name: "cc2"))
+        XCTAssertNil(reset.error)
+        XCTAssertEqual(SandboxConfig.read(store.configFile("cc2"))?.spec.imageSpec, AgentImages.claudeCode)
+        let inspected = await core.handle(HostRequest(.inspect, name: "cc2"))
+        let after = try XCTUnwrap(inspected.result).decode(SandboxDetail.self)
+        XCTAssertNil(after.info.olderImage)
     }
 
     func testTheVersionLine() {
@@ -253,7 +322,9 @@ final class AgentVersionsTests: XCTestCase {
         try write(spec, key: spec.bakeKey(kernelSHA256: build.0, deckholdSHA256: build.1))
     }
 
-    func write(_ spec: ImageSpec, key: String) throws {
+    func write(_ spec: ImageSpec, key: String) throws { try Self.write(spec, key: key, root: root) }
+
+    static func write(_ spec: ImageSpec, key: String, root: URL) throws {
         let dir = ImageBaker(storeRoot: root).imageDirectory(spec).appendingPathComponent(String(key.prefix(12)))
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         try Data().write(to: dir.appendingPathComponent("root.ext4"))

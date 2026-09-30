@@ -462,6 +462,7 @@ func cliSuite() async throws {
     await cliAgentSudoSuite(binary: h.binary)
     await cliPointsSuite(binary: h.binary)
     await cliTimeZoneSuite(binary: h.binary)
+    await cliImagesSuite(binary: h.binary)
 }
 
 /// 593: how `doz image bake lab -v` shows its progress — plain (no escape, no \r, no spinner) when

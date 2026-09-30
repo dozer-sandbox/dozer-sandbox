@@ -1307,10 +1307,32 @@ async function createDialog() {
   let images = [], accounts = { accounts: [] };
   try { [images, accounts] = await Promise.all([api('images'), api('accounts')]); } catch (_) { /* defaults */ }
   const slot = h('div'), acctSlot = h('div');
+  // 594 W28 (owner: "i dont think we should rebuild images without the user agreeing … better to warn"):
+  // an out-of-date image is said here, with the choice — use it as it is (the default), or rebuild first.
+  const imgNote = h('div', { class: 'img-choice', 'data-image-choice': '', hidden: true });
+  let imgChoice = 'current';
+  const renderImgNote = (name) => {
+    const i = images.find((x) => x.name === name);
+    imgChoice = 'current';
+    if (!i || !i.baked || !i.standing) { imgNote.hidden = true; imgNote.replaceChildren(); return; }
+    const missing = i.olderRecipe && !(i.olderRecipe.length === 1 && i.olderRecipe[0] === 'its recipe changed') ? ' (missing: ' + i.olderRecipe.join(', ') + ')' : '';
+    const radio = (value, label, checked) => {
+      const r = h('input', { type: 'radio', name: 'img-choice', value });
+      r.checked = checked;
+      r.addEventListener('change', () => { if (r.checked) imgChoice = value; });
+      return h('label', { class: 'check' }, r, ' ', label);
+    };
+    imgNote.replaceChildren(
+      h('p', { class: 'img-choice-note' }, icon('flame'), ' The ' + name + ' image is out of date: ' + i.standing.replace(/ — rebuild when ready: .*$/, '') + '.'),
+      radio('current', 'Use the current image' + missing, true),
+      radio('rebuild', 'Rebuild it first (~2 min, needs network; existing sandboxes are NOT affected)', false));
+    imgNote.hidden = false;
+  };
   const dlg = dialog('New sandbox','It is created off; Start boots it (the first start of an image not yet prepared prepares it — minutes, needs network).', [
     { name: 'sandbox', label: 'Name', placeholder: 'a-z 0-9 -', required: true },
     { name: 'image', label: 'Image', type: 'select', value: setting('defaults.image', 'lab'),
-      options: images.length ? images.map((i) => [i.name, i.name + (i.kind === 'custom' ? ' (template)' : '')]) : ['lab', 'claude-code', 'pi'] },
+      options: images.length ? images.map((i) => [i.name, i.name + (i.kind === 'custom' ? ' (template)' : '') + (i.standing ? ' — out of date' : '')]) : ['lab', 'claude-code', 'pi'] },
+    { name: 'imageChoice', type: 'custom', el: imgNote, get: () => imgChoice },
     { name: 'network', label: 'Network', type: 'select', value: '',
       options: [['', 'default (per image, Settings)'],['agent', 'agent — proxied, Anthropic, Claude Code, GitHub + registries'], ['bake', 'bake — proxied, package registries'],
         ['locked', 'locked — proxied, nothing'], ['open', 'open — proxied, everything (logged)'], ['nat', 'nat — a real interface (vmnet)'], ['none', 'none']] },
@@ -1325,6 +1347,7 @@ async function createDialog() {
     { name: 'ws', type: 'custom', el: slot, get: () => chooser.get() },
   ], 'Create', async (v) => {
     const body = { action: 'create', sandbox: v.sandbox, image: v.image, ...v.ws };
+    if (v.imageChoice === 'rebuild') body.rebuild = true;
     if (v.network) body.network = v.network;
     if (v.account) body.account = v.account;
     if (v.cpus) body.cpus = Number(v.cpus);
@@ -1339,7 +1362,8 @@ async function createDialog() {
   const acct = accountChooser({ accounts, agent: () => (netProxied() ? agentOf() : null), onChange: () => { submit.disabled = !acct.ok(); } });
   acctSlot.replaceWith(acct.el);
   submit.disabled = !acct.ok();
-  dlg.inputs.image.addEventListener('change', () => { chooser.imageChanged(); acct.agentChanged(); });
+  dlg.inputs.image.addEventListener('change', () => { chooser.imageChanged(); acct.agentChanged(); renderImgNote(dlg.inputs.image.value); });
+  renderImgNote(dlg.inputs.image.value);
   dlg.inputs.network.addEventListener('change', () => acct.agentChanged());
 }
 
@@ -1631,7 +1655,10 @@ function sandboxParts(name, d, net, accounts) {
         saveSetting('ui.details_open', open).then(() => refreshSandbox()).catch((e) => toast('The setting was not saved: ' + (e.message || e), true));
       }, { small: true, title: 'The sessions, restore points, network and keys panel (remembered: ui.details_open)' })),
     h('div', { 'data-op-for': name, 'data-banner': '1', role: 'status' }),
-    i.credentialProblem ? credentialBanner(name, i, accounts) : null);
+    i.credentialProblem ? credentialBanner(name, i, accounts) : null,
+    // 594 W28: its system disk came from an image an older doz made.
+    i.olderImage ? h('div', { class: 'cred-banner img-banner', role: 'status', 'data-older-image': name },
+      h('div', { class: 'cred-banner-text' }, icon('flame'), ' ' + name + ' was ' + i.olderImage + '.')) : null);
   const details = h('div', { class: 'sbx-details-inner' },
     h('div', { class: 'cards small-cards' },
       card('RAM held', mib(i.ramHeldMiB), 'of ' + mib(i.memoryMiB) + (i.memoryReturnedMiB ? ' · balloon returned ' + mib(i.memoryReturnedMiB) : '')),
@@ -1875,21 +1902,24 @@ async function viewImages() {
     const size = n ? n.allocatedBytes : r.allocatedBytes;
     // Shared: with the disk it was made from (none for a disk with no parent — the lab's prepared disk).
     const own = n ? n.uniqueBytes : null, shared = n ? n.sharedWithParentBytes ?? null : null;
-    return h('tr', { 'data-image': r.name },
-    h('td', null, r.name, r.kind === 'custom' ? h('span', { class: 'tag tpl' }, 'template') : null),
+    return h('tr', { 'data-image': r.name, 'data-status': r.status || '' },
+    h('td', null, r.name, r.kind === 'custom' ? h('span', { class: 'tag tpl' }, 'template') : null,
+      // 594 W28: out of date — a badge, and the line that says why (never rebuilt by itself).
+      r.status === 'older recipe' || r.status === 'update available' ? h('span', { class: 'tag img-status st-' + r.status.replace(/ /g, '-'), 'data-image-badge': r.status }, r.status) : null,
+      r.standing ? h('div', { class: 'muted img-standing', 'data-image-standing': '' }, r.standing) : null),
     h('td', null, r.kind === 'custom' ? 'template' : r.kind),
     h('td', null, r.baked ? (r.bakedAt ? full(r.bakedAt) : 'yes') : h('span', { class: 'muted' }, 'no — bakes on first start')),
     h('td', { class: 'num' }, r.allocatedBytes ? bytes(r.allocatedBytes) : '—'),
     h('td', { class: 'num', 'data-own-cell': '' }, n ? sizePart(own, size) : '—'),
     h('td', { class: 'num', 'data-shared-cell': '' }, n ? sizePart(shared, size) : '—'),
     h('td', { class: 'bar-cell' }, n ? sizeBar(size, own, shared) : null),
-    // 594: an agent image's version — the one a new sandbox gets, and a newer one available (and
-    // being prepared in the background: the next new sandbox gets it).
+    // 594: an agent image's version — the one a new sandbox gets, and a newer one available (594 W28:
+    // said, never prepared by itself — Rebuild).
     h('td', { 'data-version': r.version || '', 'data-available': r.available || '' },
       r.versionSetting ? [
         r.version ? h('span', { class: 'mono' }, r.version)
           : h('span', { class: 'muted' }, (r.available ? r.available + ' ' : '') + 'when prepared' + (r.preparing ? ' — preparing' : '')),
-        r.version && r.available ? h('span', { class: 'tag ver-available', title: 'a new sandbox gets ' + (r.version || 'it') + ' now; the next one gets ' + r.available + ' once it is prepared' },
+        r.version && r.available ? h('span', { class: 'tag ver-available', title: 'a new sandbox gets ' + (r.version || 'it') + ' until you rebuild the image' },
           r.available + ' available' + (r.preparing ? ' — preparing' : '')) : null,
         h('div', { class: 'muted' }, r.versionSetting === 'latest'
           ? 'latest' + (r.latest ? ' (npm: ' + r.latest + ')' : '') : 'pinned: ' + r.versionSetting),
@@ -1897,7 +1927,13 @@ async function viewImages() {
     h('td', null, [r.versionSetting ? null : r.note, r.fromSandbox ? 'from ' + r.fromSandbox : null].filter(Boolean).join(' · ') || '—'),
     h('td', { class: 'mono muted' }, r.key ? r.key.slice(0, 16) : ''),
     h('td', null, h('div', { class: 'actions' },
-      r.kind === 'builtin' ? btn(r.baked ? 'Re-bake' : 'Bake', () => act({ action: 'image-bake', image: r.name }), { small: true, title: 'Minutes, needs network' }) : null,
+      // 594 W28: rebuilding is one explained step.
+      r.kind === 'builtin' ? (r.baked
+        ? btn('Rebuild', () => dialog('Rebuild the ' + r.name + ' image?',
+            'About 2 minutes, needs network. Existing sandboxes keep their disks — nothing in them changes. New sandboxes, and Reset, use the new image (a reset keeps the agent’s own state and /workspace, and drops other system changes).',
+            [], 'Rebuild', async () => { await actOrThrow({ action: 'image-bake', image: r.name }); }, { icon: 'flame' }),
+          { small: true, primary: !!r.standing, icon: 'flame', title: 'Minutes, needs network' })
+        : btn('Bake', () => act({ action: 'image-bake', image: r.name }), { small: true, title: 'Minutes, needs network' })) : null,
       r.baked || r.kind === 'custom' ? btn('Remove', () => confirmAction('Remove ' + (r.kind === 'custom' ? 'template ' : 'image ') + r.name,
         r.kind === 'custom' ? 'The template is deleted; sandboxes created from it keep working.' : 'Its baked disk is deleted (it is baked again when next needed); sandboxes cloned from it keep working.',
         r.name, { action: 'image-rm', image: r.name }), { small: true, danger: true }) : null)));

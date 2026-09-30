@@ -44,6 +44,12 @@ public final class EgressProxy: @unchecked Sendable {
     private var listener: VsockListener?
     private var acceptTask: Task<Void, Never>?
     private var names: [UInt32: String] = [:]
+    private var _ownName: String?
+    /// 594 W29: the sandbox's own host name (lower-cased), answered locally as 127.0.1.1.
+    public var ownName: String? {
+        get { lock.withLock { _ownName } }
+        set { lock.withLock { _ownName = newValue?.lowercased() } }
+    }
     private var serverContexts: [String: NIOSSLContext] = [:]
     private let clientContext: NIOSSLContext
 
@@ -175,6 +181,13 @@ public final class EgressProxy: @unchecked Sendable {
                             name: nil, allowed: false, rule: "", summary: "malformed")
         }
         let (name, qtype, qEnd) = question
+        // 594 W29: the sandbox's OWN name (its hostname — sudo looks it up) is answered here: 127.0.1.1,
+        // never judged by the policy, never logged (the guest's /etc/hosts says the same; this is the
+        // belt to that brace, for anything that asks DNS anyway).
+        if let own = ownName, name.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: ".")) == own {
+            return DNSReply(bytes: DNSMessage.response(to: q, questionEnd: qEnd, rcode: 0, answers: qtype == 1 ? [0x7F00_0101] : []),
+                            name: nil, allowed: true, rule: "", summary: "the sandbox's own name")
+        }
         let pol = policy
         guard pol.allowsName(name) else {
             return DNSReply(bytes: DNSMessage.response(to: q, questionEnd: qEnd, rcode: 3, answers: []), name: name,

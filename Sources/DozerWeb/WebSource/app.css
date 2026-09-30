@@ -552,6 +552,15 @@ ul.prep-steps .prep-done-transfer { color: var(--muted); }
   padding: 8px 12px; border-radius: 8px; border: 1px solid color-mix(in srgb, var(--fail) 45%, transparent);
   background: color-mix(in srgb, var(--fail) 8%, transparent); }
 .cred-banner-text { display: flex; align-items: center; gap: 6px; font-weight: 550; }
+/* 594 W28: out-of-date images — never rebuilt by themselves; said here. */
+.cred-banner.img-banner { border-color: color-mix(in srgb, var(--pause) 45%, transparent); background: color-mix(in srgb, var(--pause) 8%, transparent); }
+.img-banner .cred-banner-text { font-weight: 450; }
+.tag.img-status { margin-left: 6px; background: color-mix(in srgb, var(--pause) 18%, transparent); color: var(--ink); }
+.img-standing { font-size: 12px; margin-top: 3px; max-width: 46ch; }
+.img-choice { border: 1px solid color-mix(in srgb, var(--pause) 45%, transparent); background: color-mix(in srgb, var(--pause) 8%, transparent);
+  border-radius: 8px; padding: 8px 12px; margin: 6px 0 10px; display: flex; flex-direction: column; gap: 6px; }
+.img-choice[hidden] { display: none; }
+.img-choice-note { margin: 0; }
 .tag.ver-available { margin-left: 6px; background: color-mix(in srgb, var(--run) 16%, transparent); color: var(--run); }
 /* 594: the workspace chooser — Shared folder | Isolated; the path, Choose…, what the host says. */
 .ws-field .segmented { align-self: flex-start; }

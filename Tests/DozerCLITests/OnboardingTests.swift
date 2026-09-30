@@ -543,6 +543,23 @@ final class OnboardingTests: XCTestCase {
         XCTAssertTrue(Uninstall.looksLikeStore(s))
     }
 
+    /// 594 W28: the facts never claim sudo the guest lacks (a system disk from an older image).
+    func testTheFactsFollowTheSudoBinary() throws {
+        var spec = SandboxSpec(name: "s", storeRoot: root)
+        spec.imageSpec = AgentImages.claudeCode
+        let cfg = SandboxConfig(name: "s", image: "claude-code", spec: spec, workspace: nil)
+        let on = DozerSettings(text: nil)
+        let has = try XCTUnwrap(AgentPrompt.report(config: cfg, policy: nil, account: nil, version: "1", settings: on, hostname: "h", sudoInstalled: true)?.text)
+        XCTAssertTrue(has.contains("- System: you have passwordless sudo"))
+        let lacks = try XCTUnwrap(AgentPrompt.report(config: cfg, policy: nil, account: nil, version: "1", settings: on, hostname: "h", sudoInstalled: false)?.text)
+        XCTAssertTrue(lacks.contains("- System: no sudo: this sandbox's system disk was made from an older claude-code image that has no sudo"), lacks)
+        XCTAssertTrue(lacks.contains("doz image bake claude-code") && lacks.contains("doz reset s"))
+        XCTAssertFalse(lacks.contains("passwordless sudo in this sandbox"))
+        let off = DozerSettings(text: "[sandbox]\nagent_sudo = false\n")
+        let no = try XCTUnwrap(AgentPrompt.report(config: cfg, policy: nil, account: nil, version: "1", settings: off, hostname: "h", sudoInstalled: true)?.text)
+        XCTAssertTrue(no.contains("- System: no sudo: you run as an unprivileged user"))
+    }
+
     /// 594 W12: doz_project.yaml says when each key applies and what each network means, and still parses.
     func testTheProjectFileSaysWhenEachKeyApplies() throws {
         let p = DozerProject(name: "web", image: "claude-code", cpus: 4, memoryMiB: 4096, network: "agent")

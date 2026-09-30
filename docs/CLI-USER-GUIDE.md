@@ -90,12 +90,21 @@ exact version. Which one is the setting `images.claude_code_version` (and `image
   THAT version, integrity-checked. The preparation's step says so — `npm install
   @anthropic-ai/claude-code@2.1.285 (latest, resolved now)` — and the version is part of the image
   (and of its bake key): an image is always one exact version.
-- **Nobody waits for a newer version.** `doz onboard`, the wizard, `doz image bake`, `doz create`
-  and a first start ask the registry (one small request, remembered for an hour in
-  `<store>/agent-versions.json`). When the prepared image is behind, a **new preparation starts in
-  the background** (Operations shows it); the sandbox being created now uses the image already
-  prepared, and the next one gets the new version. `doz image ls` and the Images page say
-  `claude-code 2.1.227 (2.1.285 available — preparing)`, then `claude-code 2.1.285 (latest)`.
+- **Images are never rebuilt without you** (owner ruling, 594). `doz onboard`, the wizard, `doz
+  image bake`, `doz create` and a first start ask the registry (one small request, remembered for an
+  hour in `<store>/agent-versions.json`). A newer release is only **said** — `doz image ls` (a STATUS
+  column: `update available`), the Images page (a badge), `doz doctor` and `doz create`: "Claude Code
+  2.1.290 is available (image has 2.1.285)". So is an image **an older doz made** ("prepared by an
+  older doz — this doz's image adds: sudo, package lists"). The image you have keeps being used until
+  you rebuild it: `doz image bake claude-code` (or Rebuild on the Images page) — existing sandboxes
+  keep their disks; new sandboxes and `doz reset NAME` use the new image.
+- **Creating with an out-of-date image** says so and lets you choose: on a terminal `doz create` /
+  `doz up` ask "Rebuild it first (~2 min, needs network; existing sandboxes are NOT affected)?"
+  (Enter: use the current image); `--rebuild` or `--use-current` decide up front; off a terminal or
+  with `--json` the current image is used, with a warning (`imageNotice` in the JSON). The New
+  Sandbox form shows the same choice. `doz ls` and a sandbox's page name a sandbox made from an older
+  doz's image; `doz reset NAME` (after a rebuild) moves it to the new one — it keeps the agent's own
+  state (`~/.claude`, `~/.pi`) and `/workspace`, and drops everything else installed on its system disk.
 - **Offline:** the registry not answering is noted in `host.log` and the image already prepared is
   used. `latest` with no network and **no image yet** fails, saying so — set an exact version
   (`doz config set images.claude_code_version 2.1.227`). An exact version this store knows (the

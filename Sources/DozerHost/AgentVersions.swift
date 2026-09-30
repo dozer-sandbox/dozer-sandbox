@@ -175,15 +175,70 @@ public enum AgentVersions {
         return (k, d)
     }
 
-    /// The images of `image` prepared for THIS build (their key is the one this build makes of their
-    /// own spec), newest version first.
+    /// The images of `image` prepared for THIS build — baked by THIS doz's recipe for their agent
+    /// version (594 W28: an image baked by an older doz's recipe is not; it is `usable`), with this
+    /// build's kernel and deckhold — newest version first.
     public static func prepared(_ image: String, store: DozerStore, settings: DozerSettings) -> [ImageSpec] {
+        usable(image, store: store, settings: settings).filter(isCurrentRecipe)
+    }
+
+    /// 594 W28: every bake of `image` a sandbox can start from (its key is its own recipe's with this
+    /// build's kernel and deckhold) — whichever doz's recipe made it — newest version first, then newest bake.
+    public static func usable(_ image: String, store: DozerStore, settings: DozerSettings) -> [ImageSpec] {
         guard let pin = AgentImages.pinned(image), let proto = AgentImages.spec(image, release: pin),
               let (k, d) = buildHashes(store, settings) else { return [] }
         return ImageBaker(storeRoot: store.root).all(proto)
             .filter { $0.manifest.key == $0.manifest.imageSpec.bakeKey(kernelSHA256: k, deckholdSHA256: d) && $0.manifest.imageSpec.agent != nil }
+            .sorted { a, b in
+                let (x, y) = (a.manifest.imageSpec.agent!.version, b.manifest.imageSpec.agent!.version)
+                return x != y ? AgentRelease.isNewer(x, than: y) : a.manifest.bakedAt > b.manifest.bakedAt
+            }
             .map(\.manifest.imageSpec)
-            .sorted { AgentRelease.isNewer($0.agent!.version, than: $1.agent!.version) }
+    }
+
+    /// 594 W28: this doz's recipe for the agent release `spec` installs.
+    public static func currentRecipe(for spec: ImageSpec) -> ImageSpec? {
+        guard let v = spec.agent?.version, let i = integrity(in: spec) else { return nil }
+        return AgentImages.spec(spec.name, release: AgentRelease(version: v, integrity: i))
+    }
+
+    /// 594 W28: `spec` is exactly what THIS doz bakes for its agent release (not an older doz's recipe).
+    public static func isCurrentRecipe(_ spec: ImageSpec) -> Bool { currentRecipe(for: spec) == spec }
+
+    /// 594 W28: what THIS doz's recipe adds over `spec`'s ([] when it is this doz's).
+    public static func recipeChanges(_ spec: ImageSpec) -> [String] {
+        guard let now = currentRecipe(for: spec) else { return [] }
+        return AgentImages.recipeChanges(from: spec, to: now)
+    }
+
+    /// 594 W28: an image's standing, for people — never a reason to rebuild by itself (owner ruling:
+    /// "i dont think we should rebuild images without the user agreeing … better to warn").
+    public struct Standing: Codable, Equatable, Sendable {
+        /// The version a new sandbox gets now (nil: nothing baked).
+        public var version: String?
+        /// Baked by an older doz's recipe: what this doz's adds ("sudo", "package lists", …).
+        public var olderRecipe: [String]?
+        /// A newer agent release the settings want (latest from the hourly lookup, or an exact setting).
+        public var available: String?
+
+        /// "prepared by an older doz — this doz's image adds: sudo, package lists"
+        public var olderRecipeLine: String? {
+            olderRecipe.map { $0 == ["its recipe changed"] ? "prepared by an older doz — its recipe changed" : "prepared by an older doz — this doz's image adds: \($0.joined(separator: ", "))" }
+        }
+    }
+
+    public static func standing(_ image: String, store: DozerStore, settings: DozerSettings) -> Standing {
+        guard AgentImages.package(image) != nil else { return Standing() }
+        let chosen = (try? spec(image, purpose: .create, store: store, settings: settings)) ?? nil
+        let baked = chosen.flatMap { c in usable(image, store: store, settings: settings).first { $0 == c } }
+        var s = Standing(version: baked?.agent?.version)
+        if let b = baked, !isCurrentRecipe(b) { s.olderRecipe = recipeChanges(b) }
+        if let v = s.version {
+            let want = setting(image, settings)
+            if want == "latest", let l = all(store)[image]?.latest?.version, AgentRelease.isNewer(l, than: v) { s.available = l }
+            if want != "latest", want != v { s.available = want }
+        }
+        return s
     }
 
     public enum Purpose: Sendable { case create, prepare }
@@ -197,6 +252,8 @@ public enum AgentVersions {
         let key = SettingKey.agentVersion(image)!
         if want != "latest" {
             if purpose == .create, let p = prepared(image, store: store, settings: settings).first(where: { $0.agent?.version == want }) { return p }
+            // 594 W28: an older doz's image of that version is USED (never rebuilt without asking) — said as stale.
+            if purpose == .create, let p = usable(image, store: store, settings: settings).first(where: { $0.agent?.version == want }) { return p }
             guard let r = known(image, version: want, store: store) else {
                 throw HostError(.unavailable, "\(image) \(want) (\(key)) is not known here yet and the npm registry could not be asked — "
                                 + "try again online, or set \(key) to a version this store has (\(pin.version) is built in)")
@@ -204,6 +261,7 @@ public enum AgentVersions {
             return AgentImages.spec(image, release: r)
         }
         if purpose == .create, let p = prepared(image, store: store, settings: settings).first { return p }
+        if purpose == .create, let p = usable(image, store: store, settings: settings).first { return p }
         let rec = all(store)[image]
         if let latest = rec?.latest { return AgentImages.spec(image, release: latest) }
         if let e = rec?.lastError {
@@ -275,7 +333,7 @@ public enum AgentVersions {
     /// The prepared version that a create uses now, and the version a preparation would make — the
     /// image is BEHIND when both are known and differ (a preparation brings it up to date).
     public static func behind(_ image: String, store: DozerStore, settings: DozerSettings) -> (current: String, target: String)? {
-        guard let current = prepared(image, store: store, settings: settings).first?.agent?.version,
+        guard let current = (prepared(image, store: store, settings: settings).first ?? usable(image, store: store, settings: settings).first)?.agent?.version,
               let target = (try? spec(image, purpose: .prepare, store: store, settings: settings))??.agent?.version,
               target != current else { return nil }
         // An exact setting that is not the prepared one, or a newer latest.
