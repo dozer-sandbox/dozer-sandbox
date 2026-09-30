@@ -25,14 +25,17 @@ struct ImageList: AsyncParsableCommand {
         }
         let rows = try decode(try await query(HostRequest(.imageList), g), [ImageRow].self, g)
         if g.json { Out.json(rows); return }
-        var t = [["IMAGE", "KIND", "BAKED", "SIZE", "NOTE"]]
+        // 596 (B10): base × agent — "Python · Claude Code" (a template: "template").
+        var t = [["IMAGE", "BASE · AGENT", "BAKED", "SIZE", "NOTE"]]
         for r in rows {
             // 594: a bake of an older build's key is not this build's image (the next start bakes again).
             let baked = r.baked && r.current == false ? "an older build's — prepared again when next needed"
                 : r.baked ? (r.bakedAt.map { $0.formatted(date: .abbreviated, time: .shortened) } ?? "yes") : "no (prepared on first start, or doz onboard)"
             // 594: an agent image says its version, and a newer one available (and being prepared).
-            t.append([r.name, r.kind, baked,
-                      r.allocatedBytes.map(DozerImages.formatBytes) ?? "—", [r.versionLine ?? r.note, r.fromSandbox.map { "from \($0)" }].compactMap { $0 }.joined(separator: " · ")])
+            t.append([r.name, r.kind == "custom" ? "template" : (r.title ?? r.kind), baked,
+                      r.allocatedBytes.map(DozerImages.formatBytes) ?? "—",
+                      [r.versionLine ?? r.note, r.fromSandbox.map { "from \($0)" }, r.dockerfile.map { "Dockerfile \(tildePath($0))" }, r.baseUpdate]
+                        .compactMap { $0 }.joined(separator: " · ")])
         }
         Out.stdout(Out.table(t))
     }

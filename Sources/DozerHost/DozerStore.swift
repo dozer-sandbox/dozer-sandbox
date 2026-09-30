@@ -89,7 +89,8 @@ public struct DozerStore: Sendable, Equatable {
 /// its credentials come from (never the secret), and what happened to it.
 public struct SandboxConfig: Codable, Equatable, Sendable {
     public var name: String
-    /// `lab`, `claude-code`, `pi`, or `custom:<name>`.
+    /// `lab`, `claude-code`, `pi`, a base × agent image (596: `python-claude-code`, `go`,
+    /// `df-<12 hex>-pi`), or `custom:<name>`.
     public var image: String
     public var spec: SandboxSpec
     public var workspace: String?
@@ -115,6 +116,8 @@ public struct SandboxConfig: Codable, Equatable, Sendable {
     /// 594 W23: the agent's passwordless sudo — true/false chosen for this sandbox, nil: follow the
     /// setting `sandbox.agent_sudo` (default on). Applied at every boot and agent session start.
     public var agentSudo: Bool?
+    /// 596: the Dockerfile its image's base was built from (absolute), when it has one.
+    public var dockerfile: String?
 
     public init(name: String, image: String, spec: SandboxSpec, workspace: String?, createdAt: Date = Date(),
                 credentialSources: [String: String] = [:], diedWithHostAt: Date? = nil) {
@@ -142,12 +145,16 @@ public struct SandboxConfig: Codable, Equatable, Sendable {
 
     /// The session `up` and `attach` use when none is named, and what it runs.
     public var defaultSession: (name: String, argv: [String]) {
-        switch spec.imageSpec?.name {
-        case "claude-code": ("claude", ["claude"])
-        case "pi": ("pi", ["pi"])
+        // 596: by the image's AGENT, whatever its base (`python-claude-code` runs claude).
+        switch spec.imageSpec.flatMap({ ImageChoice.parse($0.name) })?.agent {
+        case .claudeCode?: ("claude", ["claude"])
+        case .pi?: ("pi", ["pi"])
         default: ("shell", ["bash", "-l"])
         }
     }
+
+    /// 596: the image's base × agent (nil: a template of an older image, or the lab's own path).
+    public var imageChoice: ImageChoice? { spec.imageSpec.flatMap { ImageChoice.parse($0.name) } ?? ImageChoice.parse(image) }
 
     /// The network, as the CLI names it.
     public var networkName: String { DozerImages.networkName(spec.network) }
@@ -216,10 +223,12 @@ public enum DozerImages {
             }
             shares.append(Share(hostPath: path, guestPath: workspaceGuestPath))
         }
-        var imageSpec = try AgentVersions.spec(o.image, purpose: purpose, store: store, settings: settings) ?? imageSpec(o.image)
+        // 596: a base × agent pair by any of its names (`node-claude-code` is `claude-code`).
+        let image = canonicalName(o.image)
+        var imageSpec = try AgentVersions.spec(image, purpose: purpose, store: store, settings: settings) ?? imageSpec(image)
         var customKey: String?
-        var imageName = o.image
-        if imageSpec == nil, o.image != "lab" {
+        var imageName = image
+        if imageSpec == nil, image != "lab" {
             let customName = o.image.hasPrefix("custom:") ? String(o.image.dropFirst(7)) : o.image
             guard let c = store.layout("_").customImages().first(where: { $0.name == customName || $0.key == customName }) else {
                 throw HostError(.notFound, "no image \(o.image) — lab, claude-code, pi, or a custom image (doz image ls)")
@@ -229,7 +238,12 @@ public enum DozerImages {
             imageName = "custom:\(c.name)"
         }
         let section = DozerSettings.imageSection(imageSpecName: imageSpec?.name)
-        let network = try networkMode(o.network ?? settings.string(SettingKey.network(section)) ?? defaultNetwork(o.image, imageSpec: imageSpec))
+        var network = try networkMode(o.network ?? settings.string(SettingKey.network(section)) ?? defaultNetwork(image, imageSpec: imageSpec))
+        // 596 (B4): the base's language registries join a proxied policy (a template: its image's base).
+        if let base = imageSpec.flatMap({ ImageChoice.parse($0.name) }).flatMap({ BaseCatalogue.base($0.base) }), !base.registries.isEmpty,
+           case .proxied(let p) = network {
+            network = .proxied(p.adding(registries: base.registries))
+        }
         let subnet = o.subnet ?? settings.string(SettingKey.natSubnet)
         var spec = SandboxSpec(name: name, storeRoot: store.root, kernelPath: kernelPath, kernelCacheDirectory: kernelCache,
                                cpus: o.cpus ?? settings.int(SettingKey.cpus),

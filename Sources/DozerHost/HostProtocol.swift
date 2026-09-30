@@ -88,11 +88,24 @@ public enum HostOp: String, Codable, Sendable, CaseIterable {
     case resourcesClean = "resources-clean"
     /// 595 (R5): which kernel NEW sandboxes boot — `kernel` = a kernel id (`kernel:<version>`) or `pinned`.
     case resourcesKernel = "resources-kernel"
+    /// 596 (B3): the recommended bases (`BaseRow`: the catalogue, each tag's digest as resolved, which
+    /// agents' images are prepared). Read-only.
+    case bases
+    /// 596 (B7): Apple's `container` tool as Dozer sees it (`ContainerToolStatus`) — read-only, never
+    /// starts anything.
+    case builderStatus = "builder-status"
+    /// 596 (B7): start Apple's container services (`container system start --enable-kernel-install`)
+    /// — sent only because a person asked (the CLI's question, the UI's button).
+    case builderStart = "builder-start"
+    /// 596 (B7): install Apple's container tool on demand: its signed package (pinned, sha256-checked)
+    /// downloaded and opened in macOS Installer — the person approves it there. Never sudo.
+    case builderInstall = "builder-install"
 
     /// Operations that only read — answered from the store in-process when no host is running.
     public var isReadOnly: Bool {
         switch self {
-        case .ping, .ls, .inspect, .pointList, .imageList, .keyList, .accountList, .imageTree, .prepareStatus, .sessionScreen, .terminalLayout, .bootLog, .resources: true
+        case .ping, .ls, .inspect, .pointList, .imageList, .keyList, .accountList, .imageTree, .prepareStatus, .sessionScreen, .terminalLayout, .bootLog, .resources,
+             .bases, .builderStatus: true
         case .netPolicy: false        // decided per request (a change needs the host)
         default: false
         }
@@ -123,6 +136,9 @@ public struct CreateOptions: Codable, Equatable, Sendable {
     public var isolated: Bool?
     /// 594 W23: the agent's passwordless sudo for this sandbox (nil: follow `sandbox.agent_sudo`).
     public var agentSudo: Bool?
+    /// 596 (B6): the Dockerfile the image's base is built from (absolute; `image` is then its
+    /// `df-<12 hex>[-agent]`). The host registers it; its first start builds it.
+    public var dockerfile: String?
 
     public init(image: String, cpus: Int? = nil, memoryMiB: UInt64? = nil, workspace: String? = nil,
                 network: String? = nil, subnet: String? = nil, account: String? = nil) {
@@ -441,6 +457,13 @@ public struct SandboxInfo: Codable, Equatable, Sendable {
     /// API-key account"); nil: it fits.
     public var agent: String?
     public var credentialProblem: String?
+    /// 596: the image's base (a catalogue id, or `df-<12 hex>`), the image as a person reads it
+    /// ("Python · Claude Code"), the Dockerfile it was built from, and — a Dockerfile sandbox — why a
+    /// rebuild is available ("the Dockerfile changed", "a newer build is prepared — reset to take it").
+    public var base: String?
+    public var imageTitle: String?
+    public var dockerfile: String?
+    public var rebuildAvailable: String?
 
     /// 594: "isolated" — no folder of the Mac is shared (`workspace` is null).
     public var isolated: Bool { workspace == nil }
@@ -448,7 +471,7 @@ public struct SandboxInfo: Codable, Equatable, Sendable {
     enum CodingKeys: String, CodingKey {
         case name, image, phase, busy, cpus, memoryMiB, ramHeldMiB, memoryReturnedMiB, diskBytes, sessions, network, deniedConnections
         case workspace, createdAt, diedWithHost, account, credentialState, credentialPolicy, foreignCredentials, workspaceCreated, isolated
-        case agent, credentialProblem
+        case agent, credentialProblem, base, imageTitle, dockerfile, rebuildAvailable
     }
 
     public init(from decoder: Decoder) throws {
@@ -475,6 +498,10 @@ public struct SandboxInfo: Codable, Equatable, Sendable {
         workspaceCreated = try c.decodeIfPresent(Bool.self, forKey: .workspaceCreated)
         agent = try c.decodeIfPresent(String.self, forKey: .agent)
         credentialProblem = try c.decodeIfPresent(String.self, forKey: .credentialProblem)
+        base = try c.decodeIfPresent(String.self, forKey: .base)
+        imageTitle = try c.decodeIfPresent(String.self, forKey: .imageTitle)
+        dockerfile = try c.decodeIfPresent(String.self, forKey: .dockerfile)
+        rebuildAvailable = try c.decodeIfPresent(String.self, forKey: .rebuildAvailable)
     }
 
     /// `workspace` is written even when null (with `isolated: true`), so a reader never has to guess.
@@ -503,6 +530,10 @@ public struct SandboxInfo: Codable, Equatable, Sendable {
         try c.encodeIfPresent(workspaceCreated, forKey: .workspaceCreated)
         try c.encodeIfPresent(agent, forKey: .agent)
         try c.encodeIfPresent(credentialProblem, forKey: .credentialProblem)
+        try c.encodeIfPresent(base, forKey: .base)
+        try c.encodeIfPresent(imageTitle, forKey: .imageTitle)
+        try c.encodeIfPresent(dockerfile, forKey: .dockerfile)
+        try c.encodeIfPresent(rebuildAvailable, forKey: .rebuildAvailable)
     }
 
     public init(name: String, image: String, phase: String, busy: Bool, cpus: Int, memoryMiB: UInt64, ramHeldMiB: UInt64,
@@ -695,6 +726,12 @@ public struct ImageRow: Codable, Equatable, Sendable {
     public var preparing: Bool?
     /// 594: the agent a sandbox of this image runs (claude-code, pi; a template's: its image's); nil: none.
     public var agent: String?
+    /// 596: the image's base (catalogue id or `df-<12 hex>`), "Python · Claude Code", its Dockerfile,
+    /// and a newer base than it was made from (offered — never rebuilt by itself).
+    public var base: String?
+    public var title: String?
+    public var dockerfile: String?
+    public var baseUpdate: String?
 
     /// 594: "claude-code 2.1.227 (2.1.230 available — preparing)", "claude-code 2.1.285 (latest)",
     /// "pi 0.84.1 (pinned: images.pi_version)" — nil for an image with no agent.

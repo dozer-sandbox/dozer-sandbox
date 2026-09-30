@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import DozerKit
 
 // 591 settings (owner request): ONE closed, typed schema of every user-facing setting, a TOML file
 // generated from it (`${XDG_CONFIG_HOME:-~/.config}/dozer-sandbox/doz.toml` — the product is
@@ -542,12 +543,14 @@ public struct DozerSettings: Sendable {
 
     /// The images section a sandbox's defaults come from: its imageSpec's (a custom image follows the
     /// image it was saved from), `lab` without one.
+    /// 596: a base × agent image follows its AGENT's section (`python-pi` → `pi`; no agent → `claude-code`'s
+    /// memory and network — a toolchain wants more than the lab's 1 GiB).
     public static func imageSection(imageSpecName: String?) -> String {
         switch imageSpecName {
         case nil: "lab"
         case "claude-code": "claude-code"
         case "pi": "pi"
-        default: "claude-code"
+        case let n?: ImageChoice.parse(n)?.agent == .pi ? "pi" : "claude-code"
         }
     }
 

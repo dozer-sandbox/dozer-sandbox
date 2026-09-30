@@ -5,8 +5,17 @@ import DozerHost
 
 /// What `create` and `up` take to make a sandbox.
 struct CreateArguments: ParsableArguments {
-    @Option(name: .long, help: "lab (Alpine + bash), claude-code, pi, or a custom image (doz image ls).")
+    @Option(name: .long, help: "lab (Alpine + bash), claude-code, pi, a base × agent image (python-claude-code, go, …), or a template (doz image ls). Shorthand for --agent/--base.")
     var image: String?
+
+    @Option(name: .long, help: "596: the agent — claude-code, pi or none (a shell only). Default claude-code.")
+    var agent: String?
+
+    @Option(name: .long, help: "596: a recommended base (doz base ls): node, python, go, rust, java, ruby, dotnet, debian, ubuntu, alpine. Default node.")
+    var base: String?
+
+    @Option(name: .long, help: "596: your own Dockerfile as the base, built with Apple's container build (installed on demand; its RUN steps run OUTSIDE Dozer's network policy). The workspace defaults to its folder.")
+    var dockerfile: String?
 
     @Option(name: .long, help: "Virtual CPUs (default 2).")
     var cpus: Int?
@@ -38,8 +47,42 @@ struct CreateArguments: ParsableArguments {
     @Flag(inversion: .prefixedNo, help: "The agent (claude-code, pi) has passwordless sudo inside the sandbox (default: the setting sandbox.agent_sudo, on). Applied at every boot and session start.")
     var agentSudo: Bool?
 
+    /// 596 (B10): the image `--agent`/`--base`/`--dockerfile` name (nil: none of them given).
+    /// `--image claude-code` stays the shorthand for `--agent claude-code --base node`.
+    func chosenImage() throws -> String? {
+        guard agent != nil || base != nil || dockerfile != nil else { return nil }
+        guard image == nil else { throw ValidationError("--image, or --agent/--base/--dockerfile — not both") }
+        let a: AgentKind
+        switch agent ?? "claude-code" {
+        case "claude-code", "claude": a = .claudeCode
+        case "pi": a = .pi
+        case "none", "shell": a = .none
+        case let x: throw ValidationError("--agent: claude-code, pi or none — not \(x)")
+        }
+        if dockerfile != nil {
+            guard base == nil else { throw ValidationError("--base or --dockerfile — not both") }
+            // The host names the image by the Dockerfile's own base id; this carries the agent.
+            return ImageChoice(base: a == .none ? "alpine" : "node", agent: a).name
+        }
+        let b = base ?? "node"
+        guard BaseCatalogue.base(b) != nil else {
+            throw ValidationError("--base: \(BaseCatalogue.ids.joined(separator: ", ")) (doz base ls) — or --dockerfile PATH — not \(b)")
+        }
+        return ImageChoice(base: b, agent: a).name
+    }
+
+    /// 596: `--dockerfile` as an absolute path (a relative one is this command's working folder's).
+    var absoluteDockerfile: String? {
+        guard let d = dockerfile else { return nil }
+        let expanded = (d as NSString).expandingTildeInPath
+        if expanded.hasPrefix("/") { return URL(fileURLWithPath: expanded).standardizedFileURL.path }
+        return URL(fileURLWithPath: expanded, relativeTo: URL(fileURLWithPath: FileManager.default.currentDirectoryPath)).standardizedFileURL.path
+    }
+
     func options(defaultImage: String? = nil) throws -> CreateOptions {
-        guard let img = image ?? defaultImage else { throw ValidationError("--image is required: lab, claude-code, pi or a custom image") }
+        guard let img = try chosenImage() ?? image ?? defaultImage else {
+            throw ValidationError("--image (or --agent/--base/--dockerfile) is required: lab, claude-code, pi, a base × agent image or a template")
+        }
         var mem: UInt64?
         if let m = memory {
             guard let v = DozerImages.parseMemory(m) else { throw ValidationError("--memory: \(m) is not a size (2G, 512M, 2048)") }
@@ -50,6 +93,12 @@ struct CreateArguments: ParsableArguments {
         var o = CreateOptions(image: img, cpus: cpus, memoryMiB: mem, workspace: absoluteWorkspace, network: network, subnet: subnet, account: account)
         o.isolated = isolated ? true : nil
         o.agentSudo = agentSudo
+        if let df = absoluteDockerfile {
+            guard FileManager.default.fileExists(atPath: df) else { throw ValidationError("--dockerfile: no file at \(df)") }
+            o.dockerfile = df
+            // B6: the Dockerfile's folder is the build context — and the workspace, unless one is given.
+            if o.workspace == nil, !isolated { o.workspace = (df as NSString).deletingLastPathComponent }
+        }
         try applyPrompt(to: &o)
         return o
     }
@@ -81,6 +130,7 @@ struct CreateArguments: ParsableArguments {
 
     var givenAny: Bool {
         image != nil || cpus != nil || memory != nil || workspace != nil || network != nil || subnet != nil || account != nil || agentPrompt != nil || isolated || agentSudo != nil
+            || agent != nil || base != nil || dockerfile != nil
     }
 }
 
@@ -109,6 +159,8 @@ struct Create: AsyncParsableCommand {
         var r = HostRequest(.create, name: name)
         var o = try create.options()
         try preflightAgentAccount(&o, g)          // 594: pi needs an API-key account — before anything is made
+        // 596 (B7, B9): a Dockerfile base — where it is built, and Apple's tool ready before a start builds it.
+        if o.dockerfile != nil { try await builderPreflight(g, required: start) }
         r.create = o
         let v = try call(r, g)
         var info = try decode(v, SandboxInfo.self, g)
@@ -266,7 +318,9 @@ struct Up: AsyncParsableCommand {
             if let project, let projectFile {
                 var o = project.createOptions(folder: folder, file: projectFile)
                 // Options given here win over the file's.
-                if let i = create.image { o.image = i }
+                if let i = create.image { o.image = i; o.dockerfile = nil }
+                // 596: --agent/--base/--dockerfile win over the file's image too.
+                if let i = try create.chosenImage() { o.image = i; o.dockerfile = create.absoluteDockerfile }
                 if let c = create.cpus { o.cpus = c }
                 if let m = create.memory {
                     guard let v = DozerImages.parseMemory(m) else { throw ValidationError("--memory: \(m) is not a size (2G, 512M, 2048)") }
@@ -288,6 +342,8 @@ struct Up: AsyncParsableCommand {
                 try preflightAgentAccount(&o, g)
                 r.create = o
             }
+            // 596 (B7, B9): `up` starts it at once — a Dockerfile base needs Apple's tool ready first.
+            if r.create?.dockerfile != nil { try await builderPreflight(g, required: true) }
             let info = try decode(try call(r, g), SandboxInfo.self, g)
             if !g.json && !g.quiet {
                 Out.stderr("[doz] created \(name)" + (projectFile.map { " from \($0.path)" } ?? "") + (info.workspace.map { " — /workspace = \($0)" } ?? "") + "\n")

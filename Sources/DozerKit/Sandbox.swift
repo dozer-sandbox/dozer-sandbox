@@ -1261,7 +1261,8 @@ public actor Sandbox {
                                            deckholdSHA256: try KernelProvider.sha256(of: deckhold),
                                            initfsReference: spec.initfsReference, dnsServers: spec.dnsServers,
                                            // A proxied sandbox's image is baked through the proxy too — registries only.
-                                           egress: spec.isProxied ? .bake : nil, egressLog: egress?.log)
+                                           // 596: plus the spec's own bake hosts (Claude Code's native build, pi's Node).
+                                           egress: spec.isProxied ? NetworkPolicy.bake(adding: imageSpec.bakeHosts) : nil, egressLog: egress?.log)
         let broadcaster = self.broadcaster
         return try await ImageBaker(storeRoot: spec.storeRoot).ensure(imageSpec, inputs: inputs) { broadcaster.yield($0) }
     }

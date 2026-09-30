@@ -52,7 +52,8 @@ public enum AgentPrompt {
     /// The CLOSED list of variables, with what each says.
     public static let variables: [(name: String, summary: String)] = [
         ("sandbox.name", "the sandbox's name"),
-        ("sandbox.image", "its image (claude-code, pi, or a template's name)"),
+        ("sandbox.image", "its image (claude-code, pi, python-claude-code, …, or a template's name)"),
+        ("sandbox.base", "its base: a recommended one (Python — python:3.13-bookworm) or the user's Dockerfile (596)"),
         ("sandbox.cpus", "its virtual CPUs"),
         ("sandbox.memory", "its memory, e.g. 2 GiB"),
         ("workspace.shared", "yes or no"),
@@ -75,7 +76,7 @@ public enum AgentPrompt {
     /// before it knows to ask. ~10 lines.
     public static let builtInTemplate = """
     # Where you are running: a Dozer Sandbox
-    - You are in `{{sandbox.name}}`, a Dozer Sandbox: a Linux virtual machine (not a container) on the user's Mac ({{mac.hostname}}), run by Apple's Virtualization framework — image {{sandbox.image}}, {{sandbox.cpus}} CPUs, {{sandbox.memory}}.
+    - You are in `{{sandbox.name}}`, a Dozer Sandbox: a Linux virtual machine (not a container) on the user's Mac ({{mac.hostname}}), run by Apple's Virtualization framework — image {{sandbox.image}} (base: {{sandbox.base}}), {{sandbox.cpus}} CPUs, {{sandbox.memory}}.
     - {{workspace.description}}
     - Network: {{network.description}}
     - Credentials: {{credentials.description}}
@@ -94,7 +95,7 @@ public enum AgentPrompt {
 
     # Dozer Sandbox — the machine you run in
 
-    You run in **{{sandbox.name}}**, a Dozer Sandbox: a small Linux virtual machine on the user's Mac ({{mac.hostname}}), made and run by the user's `doz` tool (Dozer Sandbox {{dozer.version}}) on Apple's Virtualization framework. It is a real VM with its own kernel — not a container and not a cloud machine. Image: {{sandbox.image}}; {{sandbox.cpus}} CPUs, {{sandbox.memory}}.
+    You run in **{{sandbox.name}}**, a Dozer Sandbox: a small Linux virtual machine on the user's Mac ({{mac.hostname}}), made and run by the user's `doz` tool (Dozer Sandbox {{dozer.version}}) on Apple's Virtualization framework. It is a real VM with its own kernel — not a container and not a cloud machine. Image: {{sandbox.image}} (base: {{sandbox.base}}); {{sandbox.cpus}} CPUs, {{sandbox.memory}}.
 
     ## Your files and the user's Mac
 
@@ -172,14 +173,18 @@ public enum AgentPrompt {
     public static func values(name: String, image: String, cpus: Int, memoryMiB: UInt64, workspace: String?,
                               network: NetworkMode, account: String?, version: String,
                               hostname: String = macHostname(), credentialProblem: String? = nil, agentSudo: Bool = true,
-                              timeZone: String? = nil) -> [String: String] {
+                              timeZone: String? = nil, base: String? = nil, apk: Bool = false) -> [String: String] {
         var v: [String: String] = [:]
         // 594 W10: the VM follows the Mac's time zone (or the setting's).
         v["sandbox.timezone"] = timeZone ?? "UTC"
+        // 596: the base the image was made from.
+        v["sandbox.base"] = base ?? "Node.js (node:22-bookworm)"
         // 594 W23: the agent's passwordless sudo, and what it does not change.
         v["sandbox.sudo"] = agentSudo ? "yes" : "no"
+        let install = apk ? "`sudo apk add PACKAGE`; the package index is in the image — `sudo apk update` refreshes it"
+            : "`sudo apt-get install -y PACKAGE`; the package lists are in the image — `sudo apt-get update` refreshes them"
         v["sudo.description"] = agentSudo
-            ? "you have passwordless sudo in this sandbox (`sudo apt-get install -y PACKAGE`; the package lists are in the image — `sudo apt-get update` refreshes them). The network policy and the credential rules still apply to root, and the user can undo system changes with `doz reset \(name)` or a restore point."
+            ? "you have passwordless sudo in this sandbox (\(install)). The network policy and the credential rules still apply to root, and the user can undo system changes with `doz reset \(name)` or a restore point."
             : "no sudo: you run as an unprivileged user and cannot install system packages. If you need one, ask the user — they can turn sudo on for this sandbox (`agent_sudo: true` in doz_project.yaml, or `doz config set sandbox.agent_sudo true`); it applies from the next session."
         v["sandbox.name"] = name
         v["sandbox.image"] = image.hasPrefix("custom:") ? String(image.dropFirst(7)) + " (a template)" : image
@@ -270,12 +275,21 @@ public enum AgentPrompt {
     }
 
     /// The agent a sandbox runs, by its image spec (a template follows the image it was saved from).
+    /// 596: whatever its base (`python-claude-code` runs claude-code).
     public static func agent(of spec: SandboxSpec) -> String? {
-        switch spec.imageSpec?.name {
-        case "claude-code": "claude-code"
-        case "pi": "pi"
+        switch spec.imageSpec.flatMap({ ImageChoice.parse($0.name) })?.agent {
+        case .claudeCode?: "claude-code"
+        case .pi?: "pi"
         default: nil
         }
+    }
+
+    /// 596: the base as the facts say it — "Python (python:3.13-bookworm)", "the user's Dockerfile
+    /// /Users/…/Dockerfile (built with Apple's container build)".
+    public static func baseDescription(_ config: SandboxConfig) -> (text: String, apk: Bool) {
+        guard let c = config.imageChoice else { return ("Alpine (alpine:3.20)", true) }
+        if let b = BaseCatalogue.base(c.base) { return ("\(b.title) (\(b.shortReference))", b.packageManager == .apk) }
+        return ("the user's Dockerfile \(config.dockerfile ?? "(unknown path)") (built with Apple's container build; its own package manager)", false)
     }
 
     /// Where the skill goes in the guest.
@@ -289,10 +303,12 @@ public enum AgentPrompt {
                               credentialProblem: String? = nil) -> AgentPromptReport? {
         guard let agent = agent(of: config.spec), let imageSpec = config.spec.imageSpec else { return nil }
         let network: NetworkMode = policy.map { .proxied($0) } ?? config.spec.network
+        let base = baseDescription(config)
         let vals = values(name: config.name, image: config.image, cpus: config.spec.cpus, memoryMiB: config.spec.memoryMiB,
                           workspace: config.workspace, network: network, account: account, version: version, hostname: hostname,
                           credentialProblem: credentialProblem, agentSudo: HostCore.agentSudo(config, settings: settings),
-                          timeZone: HostCore.guestTimeZone(settings: settings, environment: settings.environment)?.name)
+                          timeZone: HostCore.guestTimeZone(settings: settings, environment: settings.environment)?.name,
+                          base: base.text, apk: base.apk)
         var r = AgentPromptReport(enabled: settings.bool(SettingKey.agentPrompt), agent: agent, text: nil, error: nil, layers: [],
                                   skill: nil, promptPath: guestPromptPath,
                                   skillPath: skillDirectory(agent: agent, home: imageSpec.home) + "/SKILL.md")

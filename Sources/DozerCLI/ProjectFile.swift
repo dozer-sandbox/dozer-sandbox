@@ -33,12 +33,20 @@ struct DozerProject: Equatable {
     var agentPromptMode: String?
     /// 594 W23: the agent's passwordless sudo (nil: the setting sandbox.agent_sudo decides).
     var agentSudo: Bool?
+    /// 596 (B10): the agent and the base instead of `image` — a recommended base, or a Dockerfile
+    /// (a path relative to this folder, or absolute).
+    var agent: String?
+    var base: String?
+    var dockerfile: String?
 
     /// The keys, in the order the file lists them, with what each says.
     static let keys: [(key: String, summary: String)] = [
         ("version", "the file's format: 1"),
         ("name", "the sandbox: 1–40 of a-z 0-9 -"),
-        ("image", "claude-code, pi, lab, or a template (doz image ls)"),
+        ("image", "claude-code, pi, lab, a base × agent image (python-claude-code, …), or a template (doz image ls) — or agent + base/dockerfile"),
+        ("agent", "claude-code, pi or none (596; default claude-code)"),
+        ("base", "a recommended base: node, python, go, rust, java, ruby, dotnet, debian, ubuntu, alpine (doz base ls)"),
+        ("dockerfile", "your Dockerfile (./Dockerfile): built with Apple's container build — its RUN steps run OUTSIDE Dozer's network policy"),
         ("cpus", "virtual CPUs, 1–64 (default: the settings' defaults.cpus)"),
         ("memory", "guest RAM: 2G, 512M or MiB (default: per image, in the settings)"),
         ("network", "agent, bake, locked, open (proxied), nat or none (default: per image)"),
@@ -133,9 +141,21 @@ struct DozerProject: Equatable {
             case "image":
                 let s = try scalarString(v, key)
                 guard s.range(of: "^(custom:)?[a-z0-9][a-z0-9-]{0,39}$", options: .regularExpression) != nil else {
-                    throw bad(v, "image: claude-code, pi, lab or a template's name (an image from a Dockerfile is not supported yet)")
+                    throw bad(v, "image: claude-code, pi, lab, a base × agent image or a template's name (a Dockerfile: dockerfile: ./Dockerfile)")
                 }
                 image = s
+            case "agent":
+                let s = try scalarString(v, key)
+                guard ["claude-code", "pi", "none"].contains(s) else { throw bad(v, "agent: claude-code, pi or none") }
+                p.agent = s
+            case "base":
+                let s = try scalarString(v, key)
+                guard BaseCatalogue.base(s) != nil else { throw bad(v, "base: \(BaseCatalogue.ids.joined(separator: ", ")) (doz base ls)") }
+                p.base = s
+            case "dockerfile":
+                let s = try scalarString(v, key)
+                guard !s.isEmpty, s.count <= 1024, !s.contains("\0") else { throw bad(v, "dockerfile: a path (./Dockerfile)") }
+                p.dockerfile = s
             case "cpus":
                 guard let n = v.int, (1...64).contains(n) else { throw bad(v, "cpus: a whole number 1–64") }
                 p.cpus = n
@@ -201,10 +221,23 @@ struct DozerProject: Equatable {
             }
         }
         guard let name else { throw bad(root, "name is required (the sandbox's name)") }
-        guard let image else { throw bad(root, "image is required (claude-code, pi, lab or a template)") }
+        // 596: image, or agent + base/dockerfile (base and dockerfile are one choice).
+        let chosen = p.agent != nil || p.base != nil || p.dockerfile != nil
+        if image != nil, chosen { throw bad(root, "image, or agent/base/dockerfile — not both") }
+        if p.base != nil, p.dockerfile != nil { throw bad(root, "base or dockerfile — not both") }
+        guard let image = image ?? (chosen ? p.chosenImage : nil) else {
+            throw bad(root, "image is required (claude-code, pi, lab or a template) — or agent with base or dockerfile")
+        }
         p.name = name
         p.image = image
         return p
+    }
+
+    /// 596: the image agent + base name (a Dockerfile's: the agent's, the host swaps in its base).
+    var chosenImage: String {
+        let a: AgentKind = switch agent ?? "claude-code" { case "pi": .pi; case "none": .none; default: .claudeCode }
+        if dockerfile != nil { return ImageChoice(base: a == .none ? "alpine" : "node", agent: a).name }
+        return ImageChoice(base: base ?? "node", agent: a).name
     }
 
     /// The file `doz init` writes: every key listed; the ones not set are commented (their defaults).
@@ -216,19 +249,28 @@ struct DozerProject: Equatable {
         # doz_project.yaml — a Dozer Sandbox project (written by doz init).
         # `doz up` in this folder creates, starts or wakes the sandbox below and attaches to its first
         # session. This folder is shared at /workspace. Unknown keys are errors; a commented key takes
-        # its default (doz config show). An image from a Dockerfile is not supported yet.
+        # its default (doz config show).
         #
         # When a change applies (594 W12) — `doz up` says what differs and what it did:
-        #   image, cpus, memory, network nat/none: when the sandbox is MADE — doz rm NAME && doz up
-        #     recreates it (this folder is kept);
+        #   image (agent, base, dockerfile), cpus, memory, network nat/none: when the sandbox is MADE —
+        #     doz rm NAME && doz up recreates it (this folder is kept);
         #   network agent/bake/locked/open: at the next doz up, live (unless you edited the policy);
         #   account: doz account use NAME ACCOUNT (from the next session);
         #   sessions: every doz up; agent_prompt, agent_sudo: from the next session.
         version: 1
         name: \(name)
-        image: \(image)                  # when made
 
         """
+        // 596 (B10): the image as agent + base/dockerfile when the file said so, else by name.
+        if agent != nil || base != nil || dockerfile != nil {
+            out += "agent: \(agent ?? "claude-code")               # claude-code, pi or none — when made\n"
+            out += base.map { "base: \($0)                   # doz base ls — when made\n" } ?? "# base: node                 # doz base ls — or dockerfile — when made\n"
+            out += dockerfile.map { "dockerfile: \(quoted($0))     # built with Apple's container build, OUTSIDE Dozer's network policy — when made\n" } ?? ""
+        } else {
+            out += "image: \(image)                  # when made\n"
+            out += "# (or: agent: claude-code|pi|none with base: python … or dockerfile: ./Dockerfile — doz base ls)\n"
+        }
+        out += "\n"
         out += cpus.map { "cpus: \($0)                     # when made\n" } ?? "# cpus: 2                    # when made\n"
         out += memoryMiB.map { "memory: \($0 % 1024 == 0 ? "\($0 / 1024)G" : "\($0)M")                 # when made\n" } ?? "# memory: 2G                 # when made\n"
         out += network.map { "network: \($0)\n" } ?? "# network: agent\n"
@@ -280,6 +322,11 @@ struct DozerProject: Equatable {
         o.agentPromptMode = agentPromptMode
         o.agentSudo = agentSudo
         o.project = file.path
+        // 596 (B6): a Dockerfile relative to this folder (its folder is the build context).
+        if let d = dockerfile {
+            let expanded = (d as NSString).expandingTildeInPath
+            o.dockerfile = (expanded.hasPrefix("/") ? URL(fileURLWithPath: expanded) : URL(fileURLWithPath: expanded, relativeTo: folder)).standardizedFileURL.path
+        }
         return o
     }
 

@@ -37,6 +37,12 @@ public struct ImageSpec: Sendable, Codable, Equatable {
     /// 594: the agent this image installs, at the exact version (the npm package and version; its
     /// integrity is in the install step). nil for an image with no agent. Part of the bake key.
     public var agent: AgentPackage?
+    /// 596: hosts a bake of this spec reaches beyond the bake preset's package registries (HTTPS):
+    /// `downloads.claude.ai` for Claude Code's native build, `nodejs.org` for pi's Node. nil (every
+    /// spec before 596, and the two Node agent images): none — and then absent from the canonical
+    /// JSON, so their bake keys are unchanged. Part of the bake key (a different reach is a
+    /// different recipe).
+    public var bakeHosts: [String]?
 
     public init(name: String, base: String, steps: [BakeStep], verify: [VerifyCheck], user: String, home: String,
                 persistDirs: [String], sessionEnvironment: [String: String] = [:], workdir: String = "/workspace",
@@ -79,6 +85,9 @@ public struct ImageSpec: Sendable, Codable, Equatable {
                   a.package.range(of: #"^(@[a-z0-9-]+/)?[a-z0-9._-]+$"#, options: .regularExpression) != nil else {
                 throw SandboxError.invalidSpec("agent package/version: \(a.package)@\(a.version)")
             }
+        }
+        for h in bakeHosts ?? [] where h.range(of: #"^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$"#, options: .regularExpression) == nil {
+            throw SandboxError.invalidSpec("bake host must be an exact host name: \(h)")
         }
         for k in (steps.flatMap { $0.environment.keys }) + Array(sessionEnvironment.keys) where BakeEnvironment.isCredential(k) {
             throw SandboxError.invalidSpec("credential \(k) must never be part of an image spec — pass it to openSession")
@@ -255,17 +264,18 @@ public enum AgentImages {
     /// Claude login, `setup-token`, `api-key`). Claude Code: any Anthropic account. pi: an Anthropic
     /// API key only (it reads ANTHROPIC_API_KEY — the proxy's placeholder); a Claude subscription is
     /// never given to it. Other providers can be added per agent later. nil: no agent (the lab).
+    /// 596: by the image's AGENT, whatever its base (`python-pi` is pi's).
     public static func credentials(_ image: String) -> [AgentCredentialSupport]? {
-        switch image {
-        case "claude-code": [AgentCredentialSupport(provider: "anthropic", accountKinds: ["mac", "setup-token", "api-key"])]
-        case "pi": [AgentCredentialSupport(provider: "anthropic", accountKinds: ["api-key"])]
+        switch ImageChoice.parse(image)?.agent {
+        case .claudeCode?: [AgentCredentialSupport(provider: "anthropic", accountKinds: ["mac", "setup-token", "api-key"])]
+        case .pi?: [AgentCredentialSupport(provider: "anthropic", accountKinds: ["api-key"])]
         default: nil
         }
     }
 
-    /// The agent's name as a person reads it.
+    /// The agent's name as a person reads it (596: any image of that agent).
     public static func agentName(_ image: String) -> String? {
-        switch image { case "claude-code": "Claude Code"; case "pi": "pi"; default: nil }
+        switch ImageChoice.parse(image)?.agent { case .claudeCode?: "Claude Code"; case .pi?: "pi"; default: nil }
     }
 
     /// The npm package of an agent image (nil: not an agent image).
@@ -298,9 +308,83 @@ public enum AgentImages {
     /// `--dangerously-skip-permissions`: the VM, the proxy and the vault are the boundary, so its
     /// own prompts only get in the way. `DOZ_CLAUDE_PERMISSIONS=ask` keeps them; root always
     /// keeps them (Claude Code refuses the flag as root). Only the keys named below are written.
-    static let claudeLauncher = BakeStep.script("install the doz claude launcher", """
+    static let claudeLauncher = BakeStep.script("install the doz claude launcher", launcherScript(.node), needsNetworkFalse: ())
+
+    /// 596: the same launcher for Claude Code's NATIVE build on a base without Node — its first-run
+    /// setup in python3 (every base's baseline has it), writing exactly the keys the Node one writes.
+    static let claudeLauncherNative = BakeStep.script("install the doz claude launcher", launcherScript(.python), needsNetworkFalse: ())
+
+    enum LauncherSetup { case node, python }
+
+    /// The launcher step's script. `.node` is byte-for-byte the 585/594 script (the Node images' bake
+    /// keys depend on it — `BaseImagesTests.test_nodeImagesAreByteIdentical`).
+    static func launcherScript(_ setup: LauncherSetup) -> String {
+        let (file, marker, source, run): (String, String, String, String) = switch setup {
+        case .node: ("claude-setup.js", "JS", claudeSetupJS, "node")
+        case .python: ("claude-setup.py", "PY", claudeSetupPython, "python3")
+        }
+        return """
         mkdir -p /usr/local/lib/dozer /home/agent/.local/bin
-        cat > /usr/local/lib/dozer/claude-setup.js <<'JS'
+        cat > /usr/local/lib/dozer/\(file) <<'\(marker)'
+        \(source)
+        \(marker)
+        cat > /home/agent/.local/bin/claude <<'SH'
+        #!/bin/sh
+        # doz: Claude Code with its first-run setup done and, by default, its permission prompts off.
+        mode=skip
+        [ "${DOZ_CLAUDE_PERMISSIONS:-skip}" = ask ] && mode=ask
+        [ "$(id -u)" = 0 ] && mode=ask
+        \(run) /usr/local/lib/dozer/\(file) "$mode" || echo "doz: could not pre-seed Claude Code's setup" >&2
+        # 594: the sandbox's facts, which the host writes at every session start, are appended to
+        # Claude Code's system prompt — not for a subcommand, nor when the caller gives a prompt.
+        p=/run/dozer/agent-prompt.md
+        if [ -s "$p" ]; then
+          case "$1" in
+            mcp|plugin|plugins|setup-token|doctor|update|upgrade|install|config|migrate-installer|auth|agents) ;;
+            *) case " $* " in
+                 *" --append-system-prompt"*|*" --system-prompt"*) ;;
+                 *) set -- --append-system-prompt "$(cat "$p")" "$@" ;;
+               esac ;;
+          esac
+        fi
+        [ "$mode" = skip ] && exec /usr/local/bin/claude --dangerously-skip-permissions "$@"
+        exec /usr/local/bin/claude "$@"
+        SH
+        chmod 0755 /home/agent/.local/bin/claude /usr/local/lib/dozer
+        chmod 0644 /usr/local/lib/dozer/\(file)
+        chown -R agent:agent /home/agent/.local
+        """
+    }
+
+    /// 596: `claude-setup.js`, in python3 — the same keys, the same atomic 0600 writes.
+    static let claudeSetupPython = """
+        import json, os, sys
+        d = os.environ.get('CLAUDE_CONFIG_DIR') or os.path.join(os.environ['HOME'], '.claude')
+        def read(f):
+            try:
+                with open(f) as h: return json.load(h)
+            except Exception: return {}
+        def put(f, obj):
+            t = f + '.doz-tmp'
+            with os.fdopen(os.open(t, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), 'w') as h: json.dump(obj, h, indent=2)
+            os.replace(t, f)
+        os.makedirs(d, exist_ok=True)
+        f = os.path.join(d, '.claude.json'); c = read(f)
+        c['hasCompletedOnboarding'] = True
+        key = os.environ.get('ANTHROPIC' + '_API_KEY')   # spelled apart: no image spec names a credential (ImageSpecTests)
+        if key:
+            r = c.setdefault('customApiKeyResponses', {'approved': [], 'rejected': []}); tail = key[-20:]
+            r['approved'] = ([x for x in (r.get('approved') or []) if x != tail] + [tail])[-50:]
+            r['rejected'] = [x for x in (r.get('rejected') or []) if x != tail]
+        c.setdefault('projects', {}).setdefault(os.getcwd(), {})['hasTrustDialogAccepted'] = True
+        put(f, c)
+        if len(sys.argv) > 1 and sys.argv[1] == 'skip':
+            sf = os.path.join(d, 'settings.json'); s = read(sf)
+            if s.get('skipDangerousModePermissionPrompt') is not True:
+                s['skipDangerousModePermissionPrompt'] = True; put(sf, s)
+        """
+
+    static let claudeSetupJS = """
         const fs = require('fs'), path = require('path');
         const dir = process.env.CLAUDE_CONFIG_DIR || path.join(process.env.HOME, '.claude');
         const put = (f, obj) => { fs.writeFileSync(f + '.doz-tmp', JSON.stringify(obj, null, 2), { mode: 0o600 }); fs.renameSync(f + '.doz-tmp', f); };
@@ -320,33 +404,7 @@ public enum AgentImages {
           const sf = path.join(dir, 'settings.json'), s = read(sf);
           if (s.skipDangerousModePermissionPrompt !== true) { s.skipDangerousModePermissionPrompt = true; put(sf, s); }
         }
-        JS
-        cat > /home/agent/.local/bin/claude <<'SH'
-        #!/bin/sh
-        # doz: Claude Code with its first-run setup done and, by default, its permission prompts off.
-        mode=skip
-        [ "${DOZ_CLAUDE_PERMISSIONS:-skip}" = ask ] && mode=ask
-        [ "$(id -u)" = 0 ] && mode=ask
-        node /usr/local/lib/dozer/claude-setup.js "$mode" || echo "doz: could not pre-seed Claude Code's setup" >&2
-        # 594: the sandbox's facts, which the host writes at every session start, are appended to
-        # Claude Code's system prompt — not for a subcommand, nor when the caller gives a prompt.
-        p=/run/dozer/agent-prompt.md
-        if [ -s "$p" ]; then
-          case "$1" in
-            mcp|plugin|plugins|setup-token|doctor|update|upgrade|install|config|migrate-installer|auth|agents) ;;
-            *) case " $* " in
-                 *" --append-system-prompt"*|*" --system-prompt"*) ;;
-                 *) set -- --append-system-prompt "$(cat "$p")" "$@" ;;
-               esac ;;
-          esac
-        fi
-        [ "$mode" = skip ] && exec /usr/local/bin/claude --dangerously-skip-permissions "$@"
-        exec /usr/local/bin/claude "$@"
-        SH
-        chmod 0755 /home/agent/.local/bin/claude /usr/local/lib/dozer
-        chmod 0644 /usr/local/lib/dozer/claude-setup.js
-        chown -R agent:agent /home/agent/.local
-        """, needsNetworkFalse: ())
+        """
 
     /// The tools an interactive developer shell (and an agent) expects, which Debian's `-slim`
     /// base leaves out (owner, 591: "top/ps: command not found"; git was missing too). Installed
@@ -407,10 +465,12 @@ public enum AgentImages {
     /// The claude-code image at the pinned version.
     public static let claudeCode = claudeCode(claudeCodePinned)
 
-    public static func claudeCode(_ r: AgentRelease) -> ImageSpec {
+    /// 596: `base` — the Node base as resolved at preparation (the tag `node:22-bookworm` followed);
+    /// the built-in pin by default, which keeps this spec, and its bake key, exactly as before 596.
+    public static func claudeCode(_ r: AgentRelease, base: String = nodeBase) -> ImageSpec {
         var s = ImageSpec(
             name: "claude-code",
-            base: nodeBase,
+            base: base,
             steps: [createAgent, devBaseline,
                     npmInstall(claudeCodePackage, version: r.version, integrity: r.integrity),
                     claudeLauncher],
@@ -434,10 +494,10 @@ public enum AgentImages {
     /// The pi image at the pinned version.
     public static let pi = pi(piPinned)
 
-    public static func pi(_ r: AgentRelease) -> ImageSpec {
+    public static func pi(_ r: AgentRelease, base: String = nodeBase) -> ImageSpec {
         var s = ImageSpec(
             name: "pi",
-            base: nodeBase,
+            base: base,
             steps: [createAgent, devBaseline,
                     npmInstall(piPackage, version: r.version, integrity: r.integrity, extraArgs: ["--ignore-scripts"])],
             verify: [VerifyCheck(["pi", "--version"], expect: r.version)] + devBaselineVerify,

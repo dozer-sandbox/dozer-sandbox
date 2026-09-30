@@ -379,6 +379,22 @@ public actor HostCore {
                            foreignCredentials: egress.map { $0.vault.foreignSightings.count }.flatMap { $0 == 0 ? nil : $0 })
         i.agent = m.sandbox.spec.imageSpec?.name
         i.credentialProblem = credentialProblem(m)
+        // 596: the base × agent, and a Dockerfile's rebuild state.
+        if let c = m.config.imageChoice {
+            i.base = c.base
+            i.imageTitle = c.title
+            if c.isDockerfile, let rec = Dockerfiles.record(c.base, store) {
+                i.dockerfile = rec.dockerfile
+                let own = m.sandbox.spec.imageSpec?.base
+                if rec.reference == nil || own.map(Dockerfiles.isPlaceholder) == true {
+                    i.rebuildAvailable = nil     // never built: its first start builds it
+                } else if rec.changedSinceBuild {
+                    i.rebuildAvailable = "Dockerfile changed — rebuild available (prepare the image, then reset the sandbox to take it)"
+                } else if let r = rec.reference, own != r {
+                    i.rebuildAvailable = "a newer build of its Dockerfile is prepared — reset the sandbox to take it"
+                }
+            }
+        }
         return i
     }
 
@@ -579,6 +595,22 @@ public actor HostCore {
             return try await point(r, emit: emit)
         case .imageList:
             return try JSONValue(encoding: images())
+        case .bases:
+            let s = store
+            let check = preparedCheck
+            return try JSONValue(encoding: BaseRow.rows(s) { check($0, s) })
+        case .builderStatus:
+            return try JSONValue(encoding: ContainerTool.status())
+        case .builderStart:
+            note(nil, "starting Apple's container services (asked by \(r.requestedBy ?? "a client")): container system start --enable-kernel-install")
+            let out = try await Task.detached { try ContainerTool.startServices { line in emit(HostEvent(kind: .output, sandbox: nil, text: ProgressFormat.inert(line, limit: 400))) } }.value
+            HostLog.line("container system start: " + out.split(separator: "\n").suffix(3).joined(separator: " | "))
+            return try JSONValue(encoding: ContainerTool.status())
+        case .builderInstall:
+            note(nil, "installing Apple's container tool on demand (asked by \(r.requestedBy ?? "a client")): container \(ContainerTool.package.version), Apple's signed package")
+            let said = try await ContainerTool.install { line in emit(HostEvent(kind: .note, sandbox: nil, text: line)) }
+            note(nil, said)
+            return try JSONValue(encoding: ContainerTool.status())
         case .imageTree:
             // Every disk's extent map is read: off the actor, so nothing else waits on it.
             let s = store
@@ -687,6 +719,16 @@ public actor HostCore {
         }
         var made = false
         defer { if !made, let p = prepared { Workspace.undo(p) } }
+        // 596 (B6): a Dockerfile is registered (its base id is the image's); its first start builds it.
+        var dockerfile: DockerfileRecord?
+        if let df = o.dockerfile {
+            let rec = try Dockerfiles.register(df, store: store)
+            let agent = ImageChoice.parse(o.image).map(\.agent) ?? .none
+            o.image = ImageChoice(base: rec.base, agent: agent).name
+            dockerfile = rec
+        } else if let c = ImageChoice.parse(o.image), c.isDockerfile, Dockerfiles.record(c.base, store) == nil {
+            throw HostError(.notFound, "no Dockerfile is known for \(c.base) — create with --dockerfile PATH")
+        }
         // 594: an agent image — latest asked of the registry (hourly, offline-tolerant); this sandbox
         // gets the image already prepared, and a newer one is prepared in the background.
         await freshen(o.image, update: true)
@@ -724,6 +766,8 @@ public actor HostCore {
         }
         cfg.project = o.project
         cfg.agentSudo = o.agentSudo
+        cfg.dockerfile = dockerfile?.dockerfile
+            ?? cfg.imageChoice.flatMap { $0.isDockerfile ? Dockerfiles.record($0.base, store)?.dockerfile : nil }
         try cfg.write(store.configFile(name))
         let m = try adopt(cfg)
         metrics?.record(run: metricsRun, action: "create", sandbox: name, image: image, phaseAfter: "off", startedAt: Date(), durationMs: 0,
@@ -736,15 +780,53 @@ public actor HostCore {
         return i
     }
 
+    /// 596 (B8): a Dockerfile sandbox with no root disk (never started, or reset) takes the image its
+    /// Dockerfile's last build made — the one a new sandbox would get. A sandbox created before the
+    /// first build holds a placeholder base until then. A sandbox WITH a root disk keeps it ("rebuild
+    /// available" until `doz reset`). The sandbox's other settings are kept; its record is rewritten
+    /// and it is adopted again (it is off: no VM, no session).
+    private func rebindDockerfileImage(_ m: Managed, emit: @escaping @Sendable (HostEvent) -> Void) throws -> Managed {
+        guard let current = m.config.spec.imageSpec, let c = ImageChoice.parse(current.name), c.isDockerfile,
+              m.config.spec.customImage == nil, !m.sandbox.hasRootDisk,
+              let fresh = try? DozerImages.spec(name: m.name, options: CreateOptions(image: c.name), store: store).0.imageSpec,
+              !Dockerfiles.isPlaceholder(fresh.base), fresh != current else { return m }
+        var cfg = m.config
+        cfg.spec.imageSpec = fresh
+        try cfg.write(store.configFile(m.name))
+        detachWatcher(m)
+        m.eventTask?.cancel()
+        m.networkTask?.cancel()
+        managed[m.name] = nil
+        let nm = try adopt(cfg)
+        let short = fresh.base.split(separator: "@").last.map { String($0.prefix(19)) } ?? ""
+        emit(HostEvent(kind: .note, sandbox: m.name, text: "\(m.name) takes its Dockerfile's image as built now (\(short))"))
+        note(m.name, "takes its Dockerfile's image as built now (\(short))")
+        return nm
+    }
+
     // MARK: lifecycle
 
     /// Start-or-wake, and every other lifecycle operation, in the owner's vocabulary. An operation
     /// that finds the sandbox already where it leads does nothing (`changed: false`).
     private func lifecycle(_ op: HostOp, name: String?, emit: @escaping @Sendable (HostEvent) -> Void) async throws -> LifecycleResult {
-        let m = try get(name)
+        var m = try get(name)
+        // 594 (D4): a cold start that needs an image being prepared — or never prepared — joins that
+        // preparation (one download, one bake, whoever asks), its progress on this caller's stream.
+        // (596: before anything else, so a Dockerfile sandbox can take the image its build made.)
+        let t0 = ContinuousClock.now
+        if op == .start, [.off, .failed].contains(await effectivePhase(m)) {
+            if let image = await imageToPrepare(m) {
+                let p = try preparation(for: image, requestedBy: "start \(m.name)")
+                let first = p.info.requestedBy.first ?? ""
+                emit(HostEvent(kind: .note, sandbox: m.name, text: first == "start \(m.name)"
+                               ? "\(image) is not prepared in this store yet — preparing it first (once: the kernel, the base image, the bake)"
+                               : "\(image) is being prepared (\(first) started it) — joining it: one download, one bake"))
+                try await follow(p, emit: emit)
+            }
+            m = try rebindDockerfileImage(m, emit: emit)
+        }
         let sb = m.sandbox
         let before = await effectivePhase(m)
-        let t0 = ContinuousClock.now
         func result(_ changed: Bool) async -> LifecycleResult {
             let after = await effectivePhase(m)
             return LifecycleResult(name: m.name, operation: op.rawValue, phaseBefore: before.rawValue, phase: after.rawValue,
@@ -824,17 +906,6 @@ public actor HostCore {
             throw HostError(.invalid, "not a lifecycle operation: \(op.rawValue)")
         }
         guard let action else { return await result(false) }
-
-        // 594 (D4): a cold start that needs an image being prepared — or never prepared — joins that
-        // preparation (one download, one bake, whoever asks), its progress on this caller's stream.
-        if op == .start, before == .off || before == .failed, let image = await imageToPrepare(m) {
-            let p = try preparation(for: image, requestedBy: "start \(m.name)")
-            let first = p.info.requestedBy.first ?? ""
-            emit(HostEvent(kind: .note, sandbox: m.name, text: first == "start \(m.name)"
-                           ? "\(image) is not prepared in this store yet — preparing it first (once: the kernel, the base image, the bake)"
-                           : "\(image) is being prepared (\(first) started it) — joining it: one download, one bake"))
-            try await follow(p, emit: emit)
-        }
 
         // Forward this sandbox's progress to the caller while the operation runs.
         let stream = sb.events()
@@ -1108,7 +1179,7 @@ public actor HostCore {
     /// (`skip`), and never over the caller's own `-e DOZ_CLAUDE_PERMISSIONS=…`.
     static func withClaudePermissions(_ env: [String: String], imageSpec: String?,
                                       settings: @autoclosure () -> DozerSettings = .load()) -> [String: String] {
-        guard imageSpec == "claude-code", env["DOZ_CLAUDE_PERMISSIONS"] == nil else { return env }
+        guard imageSpec.flatMap({ ImageChoice.parse($0) })?.agent == .claudeCode, env["DOZ_CLAUDE_PERMISSIONS"] == nil else { return env }
         guard let mode = settings().string(SettingKey.claudePermissions), mode != "skip" else { return env }
         var e = env
         e["DOZ_CLAUDE_PERMISSIONS"] = mode
@@ -1374,7 +1445,7 @@ public actor HostCore {
         guard (1...40).contains(name.count), name.allSatisfy({ ("a"..."z").contains($0) || ("0"..."9").contains($0) || $0 == "-" }), name.first != "-" else {
             throw HostError(.invalid, "a template's name is 1–40 characters of [a-z0-9-]")
         }
-        guard !DozerImages.builtIn.contains(name) else { throw HostError(.invalid, "\(name) is a built-in image's name") }
+        guard !DozerImages.builtIn.contains(name), ImageChoice.parse(name) == nil else { throw HostError(.invalid, "\(name) is a built-in image's name") }
         guard !store.layout("_").customImages().contains(where: { $0.name == name }) else {
             throw HostError(.exists, "a template named \(name) already exists (doz template ls)")
         }
@@ -1515,28 +1586,49 @@ public actor HostCore {
                              allocatedBytes: labBaked ? allocatedBytes(golden) : nil, note: "Alpine 3.20 + " + DozerImages.labPackages.joined(separator: ", "), fromSandbox: nil))
         let settings = DozerSettings.load()
         let versions = AgentVersions.all(store)
-        for name in ["claude-code", "pi"] {
-            let imageSpec = DozerImages.imageSpec(name)!
+        rows[0].base = "alpine"
+        rows[0].title = ImageChoice(base: "alpine", agent: .none).title
+        // 596: every base × agent image the store has anything of (the two Node agent images always).
+        for name in DozerImages.composedImagesInStore(store) {
+            guard let choice = ImageChoice.parse(name) else { continue }
+            let agent = choice.agent == .none ? nil : choice.agent.rawValue
+            let proto = ImageSpec(name: name, base: "", steps: [], verify: [], user: "", home: "", persistDirs: [])
             // 594: the one a new sandbox gets — the newest prepared for this build, else the newest bake.
             let prepared = AgentVersions.prepared(name, store: store, settings: settings).first
-            let all = ImageBaker(storeRoot: store.root).all(imageSpec)
+            let all = ImageBaker(storeRoot: store.root).all(proto)
             let baked = prepared.flatMap { p in all.first { $0.manifest.imageSpec == p } } ?? all.first
             let version = baked?.manifest.imageSpec.agent?.version
             var row = ImageRow(name: name, kind: "builtin", baked: baked != nil, key: baked.map { String($0.key.prefix(12)) },
                                bakedAt: baked?.manifest.bakedAt, allocatedBytes: baked?.manifest.allocatedBytes,
-                               note: version.map { "\(name) \($0)" } ?? imageSpec.verify.first?.expect.map { "\(name) \($0)" }, fromSandbox: nil)
-            row.version = version
-            row.versionSetting = AgentVersions.setting(name, settings)
-            row.latest = versions[name]?.latest?.version
-            row.latestCheckedAt = versions[name]?.checkedAt
-            if let b = AgentVersions.behind(name, store: store, settings: settings) {
-                row.available = b.target
-            } else if prepared == nil, row.versionSetting != "latest" || versions[name]?.latest != nil,
-                      let t = (try? AgentVersions.spec(name, purpose: .prepare, store: store, settings: settings))??.agent?.version, t != version {
-                row.available = t
+                               note: version.map { "\(agent ?? name) \($0)" } ?? (agent == nil ? choice.title : nil), fromSandbox: nil)
+            row.base = choice.base
+            row.title = choice.title
+            if let agent {
+                row.version = version
+                row.versionSetting = AgentVersions.setting(agent, settings)
+                row.latest = versions[agent]?.latest?.version
+                row.latestCheckedAt = versions[agent]?.checkedAt
+                if let b = AgentVersions.behind(name, store: store, settings: settings) {
+                    row.available = b.target
+                } else if prepared == nil, row.versionSetting != "latest" || versions[agent]?.latest != nil,
+                          let t = (try? AgentVersions.spec(name, purpose: .prepare, store: store, settings: settings))??.agent?.version, t != version {
+                    row.available = t
+                }
+                row.agent = agent
+            }
+            // 596: the base moved on since this image was made (a catalogue tag's new digest, a
+            // Dockerfile changed or built again) — offered, never rebuilt by itself (W28).
+            if let b = baked?.manifest.imageSpec.base {
+                if let c = BaseCatalogue.base(choice.base), let d = BaseDigests.all(store)[c.id]?.digest, !b.hasSuffix(d) {
+                    row.baseUpdate = "\(c.shortReference) has a newer digest (\(d.dropFirst(7).prefix(12))) — doz image bake \(name) prepares it"
+                } else if choice.isDockerfile, let rec = Dockerfiles.record(choice.base, store) {
+                    row.dockerfile = rec.dockerfile
+                    if rec.changedSinceBuild { row.baseUpdate = "the Dockerfile changed — doz image bake \(name) rebuilds it" }
+                }
+            } else if choice.isDockerfile {
+                row.dockerfile = Dockerfiles.record(choice.base, store)?.dockerfile
             }
             row.preparing = runningPreparation(name) != nil ? true : nil
-            row.agent = name
             rows.append(row)
         }
         // 594: prepared for this build (the key it bakes now, the kernel, the guest init disk).
@@ -1551,10 +1643,11 @@ public actor HostCore {
     }
 
     /// `image bake` (594: a preparation — the one running for this image is joined, not repeated).
-    private func bake(_ image: String?, emit: @escaping @Sendable (HostEvent) -> Void) async throws -> ImageRow {
-        guard let image else { throw HostError(.invalid, "which image? lab, claude-code or pi") }
-        guard DozerImages.builtIn.contains(image) else {
-            throw HostError(.invalid, "only the built-in images bake (lab, claude-code, pi); a custom image is saved from a restore point")
+    private func bake(_ raw: String?, emit: @escaping @Sendable (HostEvent) -> Void) async throws -> ImageRow {
+        guard let raw else { throw HostError(.invalid, "which image? lab, claude-code, pi, or a base × agent image (doz base ls)") }
+        let image = DozerImages.canonicalName(raw)
+        guard DozerImages.builtIn.contains(image) || DozerImages.isPreparable(image, store: store) else {
+            throw HostError(.invalid, "only a base × agent image bakes (lab, claude-code, pi, python-claude-code, … — doz base ls); a template is saved from a restore point")
         }
         // 594: latest asked of the registry first — the bake makes the version the settings name.
         if runningPreparation(image) == nil { await freshen(image, update: false) }
@@ -1570,8 +1663,9 @@ public actor HostCore {
         if image == "lab" {
             let lab = try labSpec()
             try? fm.removeItem(at: StoreLayout(spec: lab).golden(for: lab))
-        } else if let imageSpec = DozerImages.imageSpec(image) {
-            try? fm.removeItem(at: ImageBaker(storeRoot: store.root).imageDirectory(imageSpec))
+        } else if let c = ImageChoice.parse(image), c.name == image {
+            // 596: any base × agent image (its bakes; a sandbox made from one keeps its own disk).
+            try? fm.removeItem(at: store.root.appendingPathComponent("images/\(image)"))
         } else {
             let customs = store.layout("_").customImages().filter { $0.name == image || $0.key == image }
             guard !customs.isEmpty else { throw HostError(.notFound, "no image \(image)") }

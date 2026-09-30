@@ -21,12 +21,41 @@ public struct NpmRegistry: Sendable {
     /// `package` at `tagOrVersion` (`latest`, or an exact version) → its version and integrity.
     public typealias Lookup = @Sendable (_ package: String, _ tagOrVersion: String) async throws -> AgentRelease
     public let lookup: Lookup?
+    /// 596 (B2): Claude Code's native build at an exact version → its linux-arm64 checksums
+    /// (downloads.claude.ai's manifest). nil: never asked.
+    public typealias NativeLookup = @Sendable (_ version: String) async throws -> NativeClaudeBuild
+    public let native: NativeLookup?
+    /// 596 (B3): a catalogue base's tag → its current digest (the image's registry). nil: never asked
+    /// (the catalogue's pin, or what the store resolved before).
+    public typealias DigestLookup = @Sendable (_ reference: String) async throws -> String
+    public let digest: DigestLookup?
 
-    public init(lookup: Lookup?) { self.lookup = lookup }
+    public init(lookup: Lookup?, native: NativeLookup? = nil, digest: DigestLookup? = nil) {
+        self.lookup = lookup
+        self.native = native
+        self.digest = digest
+    }
 
     /// No lookups at all (in-process hosts and tests): resolution uses only what the store has, then
     /// the built-in pin.
     public static let disabled = NpmRegistry(lookup: nil)
+
+    /// 596: `<base>/<version>/manifest.json` over HTTPS (or a test server over http on loopback).
+    public static func claudeDownloads(_ base: URL, timeout: TimeInterval = 10) -> NativeLookup {
+        { version in
+            guard AgentRelease(version: version, integrity: "sha512-A").isWellFormed,
+                  let url = URL(string: base.absoluteString.hasSuffix("/") ? "\(base.absoluteString)\(version)/manifest.json" : "\(base.absoluteString)/\(version)/manifest.json") else {
+                throw HostError(.invalid, "no Claude Code manifest URL for \(version)")
+            }
+            var req = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: timeout)
+            req.setValue("application/json", forHTTPHeaderField: "Accept")
+            let (data, response) = try await URLSession.shared.data(for: req)
+            guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+                throw HostError(.failed, "downloads.claude.ai answered \((response as? HTTPURLResponse)?.statusCode ?? 0) for Claude Code \(version)'s manifest")
+            }
+            do { return try NativeClaudeBuild.parse(data, version: version) } catch { throw HostError(.failed, HostError.from(error).message) }
+        }
+    }
     public static let npmjs = URL(string: "https://registry.npmjs.org")!
 
     /// The registry over HTTPS (or a test server over http on loopback).
@@ -64,14 +93,34 @@ public struct NpmRegistry: Sendable {
     /// The real host's registry: `DOZ_TEST_NPM_REGISTRY` = `offline` (every lookup fails) or a URL
     /// (a stub server) — tests only; otherwise registry.npmjs.org.
     public static func fromEnvironment(_ env: [String: String] = ProcessInfo.processInfo.environment) -> NpmRegistry {
+        // 596: Claude Code's native manifests — `DOZ_TEST_CLAUDE_DOWNLOADS` = offline or a URL (tests only).
+        let native: NativeLookup
+        switch env["DOZ_TEST_CLAUDE_DOWNLOADS"] {
+        case "offline": native = { v in throw HostError(.unavailable, "offline (DOZ_TEST_CLAUDE_DOWNLOADS): Claude Code \(v)'s manifest not looked up") }
+        case let s? where !s.isEmpty && ["http", "https"].contains(URL(string: s)?.scheme ?? ""): native = claudeDownloads(URL(string: s)!)
+        default: native = claudeDownloads(URL(string: NativeClaudeBuild.downloadBase)!)
+        }
+        // 596: base digests — `DOZ_TEST_BASE_REGISTRY` = offline (every lookup fails) or pinned (the
+        // catalogue's pin is the answer — no network; tests only); otherwise the image's registry.
+        let digest: DigestLookup
+        switch env["DOZ_TEST_BASE_REGISTRY"] {
+        case "offline": digest = { r in throw HostError(.unavailable, "offline (DOZ_TEST_BASE_REGISTRY): \(r) not resolved") }
+        case "pinned":
+            digest = { r in
+                guard let b = BaseCatalogue.all.first(where: { $0.reference == r }) else { throw HostError(.notFound, "\(r) is not in the catalogue") }
+                return b.pinnedDigest
+            }
+        default: digest = { r in try await RegistryDigest.resolve(r) }
+        }
         switch env["DOZ_TEST_NPM_REGISTRY"] {
         case "offline":
-            return NpmRegistry { p, t in throw HostError(.unavailable, "offline (DOZ_TEST_NPM_REGISTRY): \(p)@\(t) not looked up") }
+            return NpmRegistry(lookup: { p, t in throw HostError(.unavailable, "offline (DOZ_TEST_NPM_REGISTRY): \(p)@\(t) not looked up") },
+                               native: native, digest: digest)
         case let s? where !s.isEmpty:
-            guard let u = URL(string: s), ["http", "https"].contains(u.scheme ?? "") else { return http(npmjs) }
-            return http(u)
+            guard let u = URL(string: s), ["http", "https"].contains(u.scheme ?? "") else { return NpmRegistry(lookup: http(npmjs).lookup, native: native, digest: digest) }
+            return NpmRegistry(lookup: http(u).lookup, native: native, digest: digest)
         default:
-            return http(npmjs)
+            return NpmRegistry(lookup: http(npmjs).lookup, native: native, digest: digest)
         }
     }
 }
@@ -85,6 +134,8 @@ public struct AgentVersionRecord: Codable, Equatable, Sendable {
     public var failedAt: Date?
     public var lastError: String?
     public var known: [AgentRelease]
+    /// 596 (Claude Code): the native builds' checksums resolved before (the newest 20).
+    public var native: [NativeClaudeBuild]?
 
     public init(latest: AgentRelease? = nil, checkedAt: Date? = nil, failedAt: Date? = nil, lastError: String? = nil, known: [AgentRelease] = []) {
         self.latest = latest
@@ -98,6 +149,14 @@ public struct AgentVersionRecord: Codable, Equatable, Sendable {
         known.removeAll { $0.version == r.version }
         known.append(r)
         if known.count > 20 { known.removeFirst(known.count - 20) }
+    }
+
+    mutating func remember(_ b: NativeClaudeBuild) {
+        var n = native ?? []
+        n.removeAll { $0.version == b.version }
+        n.append(b)
+        if n.count > 20 { n.removeFirst(n.count - 20) }
+        native = n
     }
 }
 
@@ -178,12 +237,19 @@ public enum AgentVersions {
     /// The images of `image` prepared for THIS build (their key is the one this build makes of their
     /// own spec), newest version first.
     public static func prepared(_ image: String, store: DozerStore, settings: DozerSettings) -> [ImageSpec] {
-        guard let pin = AgentImages.pinned(image), let proto = AgentImages.spec(image, release: pin),
+        // 596: any base × agent image (its bakes live in images/<name>/).
+        guard let choice = ImageChoice.parse(image), choice.name == image, image != "lab",
               let (k, d) = buildHashes(store, settings) else { return [] }
-        return ImageBaker(storeRoot: store.root).all(proto)
-            .filter { $0.manifest.key == $0.manifest.imageSpec.bakeKey(kernelSHA256: k, deckholdSHA256: d) && $0.manifest.imageSpec.agent != nil }
+        let proto = ImageSpec(name: image, base: "", steps: [], verify: [], user: "", home: "", persistDirs: [])
+        let current = ImageBaker(storeRoot: store.root).all(proto)
+            .filter { $0.manifest.key == $0.manifest.imageSpec.bakeKey(kernelSHA256: k, deckholdSHA256: d)
+                && ($0.manifest.imageSpec.agent != nil) == (choice.agent != .none) }
             .map(\.manifest.imageSpec)
-            .sorted { AgentRelease.isNewer($0.agent!.version, than: $1.agent!.version) }
+        guard choice.agent != .none else { return current }                                   // newest bake first
+        return current.enumerated().sorted { a, b in
+            let (x, y) = (a.element.agent!.version, b.element.agent!.version)
+            return x == y ? a.offset < b.offset : AgentRelease.isNewer(x, than: y)
+        }.map(\.element)
     }
 
     public enum Purpose: Sendable { case create, prepare }
@@ -191,27 +257,43 @@ public enum AgentVersions {
     /// The spec of `image` a create gets (the image ALREADY prepared — the newest for this build — so
     /// nobody waits) or a preparation makes (the version the setting names: latest as resolved, or the
     /// exact one). Only what the store has; `refresh` (async) is what asks the registry.
+    /// 596: any base × agent image — the agent's version as before (the settings are per AGENT), the
+    /// base as resolved (`BaseDigests`, else the catalogue's pin; a Dockerfile: its last build).
     public static func spec(_ image: String, purpose: Purpose, store: DozerStore, settings: DozerSettings) throws -> ImageSpec? {
-        guard AgentImages.package(image) != nil, let pin = AgentImages.pinned(image) else { return nil }
-        let want = setting(image, settings)
-        let key = SettingKey.agentVersion(image)!
+        guard let choice = ImageChoice.parse(image), choice.name == image, image != "lab" else { return nil }
+        guard choice.agent != .none else {
+            if purpose == .create, let p = prepared(image, store: store, settings: settings).first { return p }
+            return try DozerImages.compose(choice, release: nil, store: store, purpose: purpose)
+        }
+        let agent = choice.agent.rawValue
+        let pin = AgentImages.pinned(agent)!
+        let want = setting(agent, settings)
+        let key = SettingKey.agentVersion(agent)!
+        func make(_ r: AgentRelease) throws -> ImageSpec { try DozerImages.compose(choice, release: r, store: store, purpose: purpose) }
         if want != "latest" {
             if purpose == .create, let p = prepared(image, store: store, settings: settings).first(where: { $0.agent?.version == want }) { return p }
-            guard let r = known(image, version: want, store: store) else {
-                throw HostError(.unavailable, "\(image) \(want) (\(key)) is not known here yet and the npm registry could not be asked — "
+            guard let r = known(agent, version: want, store: store) else {
+                throw HostError(.unavailable, "\(agent) \(want) (\(key)) is not known here yet and the npm registry could not be asked — "
                                 + "try again online, or set \(key) to a version this store has (\(pin.version) is built in)")
             }
-            return AgentImages.spec(image, release: r)
+            return try make(r)
         }
         if purpose == .create, let p = prepared(image, store: store, settings: settings).first { return p }
-        let rec = all(store)[image]
-        if let latest = rec?.latest { return AgentImages.spec(image, release: latest) }
+        let rec = all(store)[agent]
+        if let latest = rec?.latest { return try make(latest) }
         if let e = rec?.lastError {
-            throw HostError(.unavailable, "\(image): \(key) is latest, but the npm registry could not be reached (\(e)) and no \(image) image is prepared — "
+            throw HostError(.unavailable, "\(agent): \(key) is latest, but the npm registry could not be reached (\(e)) and no \(image) image is prepared — "
                             + "try again online, or set an exact version: doz config set \(key) \(pin.version)")
         }
         // Never asked (an in-process host, a test): the built-in pin.
-        return AgentImages.spec(image, release: pin)
+        return try make(pin)
+    }
+
+    /// 596: Claude Code's native build at `version`, as far as this store knows it (the pin, or one
+    /// resolved before).
+    public static func knownNative(_ version: String, store: DozerStore) -> NativeClaudeBuild? {
+        if NativeClaudeBuild.pinned.version == version { return NativeClaudeBuild.pinned }
+        return all(store)["claude-code"]?.native?.last { $0.version == version }
     }
 
     // MARK: freshness (asynchronous — the registry, at most once an hour)
@@ -227,6 +309,8 @@ public enum AgentVersions {
         public var error: String?
         /// The registry was asked just now (not the hour-long cache).
         public var looked: Bool
+        /// 596: Claude Code's native manifest could not be read (the Node images do not need it).
+        public var nativeError: String? = nil
     }
 
     /// Ask the registry for `image`'s latest when the setting is `latest` and the last answer is older
@@ -235,6 +319,26 @@ public enum AgentVersions {
     @discardableResult
     public static func refresh(_ image: String, store: DozerStore, settings: DozerSettings, registry: NpmRegistry,
                                now: Date = Date(), force: Bool = false) async -> Freshness {
+        var f = await refreshPackage(image, store: store, settings: settings, registry: registry, now: now, force: force)
+        // 596 (B2): Claude Code's native build at the version a preparation would make — its checksums,
+        // once per version (a base without Node installs it; the Node images never ask).
+        if image == "claude-code", let lookup = registry.native {
+            let want = setting(image, settings)
+            let target = want == "latest" ? all(store)[image]?.latest?.version : want
+            if let v = target, knownNative(v, store: store) == nil {
+                do {
+                    let b = try await lookup(v)
+                    update(image, store) { $0.remember(b) }
+                } catch {
+                    f.nativeError = HostError.from(error).message
+                }
+            }
+        }
+        return f
+    }
+
+    static func refreshPackage(_ image: String, store: DozerStore, settings: DozerSettings, registry: NpmRegistry,
+                               now: Date, force: Bool) async -> Freshness {
         let want = setting(image, settings)
         let rec = all(store)[image]
         var f = Freshness(image: image, setting: want, latest: rec?.latest?.version, checkedAt: rec?.checkedAt, error: nil, looked: false)
@@ -279,6 +383,11 @@ public enum AgentVersions {
               let target = (try? spec(image, purpose: .prepare, store: store, settings: settings))??.agent?.version,
               target != current else { return nil }
         // An exact setting that is not the prepared one, or a newer latest.
-        return setting(image, settings) == "latest" && !AgentRelease.isNewer(target, than: current) ? nil : (current, target)
+        return setting(agentOf(image), settings) == "latest" && !AgentRelease.isNewer(target, than: current) ? nil : (current, target)
+    }
+
+    /// 596: the agent whose version settings an image follows (`python-claude-code` → `claude-code`).
+    public static func agentOf(_ image: String) -> String {
+        ImageChoice.parse(image).map(\.agent.rawValue) ?? image
     }
 }

@@ -212,6 +212,8 @@ public struct ResourceFacts: Sendable {
     public var accounts: [String]
     public var executable: String?
     public var now: Date
+    /// 596: Apple's container tool (Dockerfile builds) — shown outside the store; nil: not looked at.
+    public var appleContainer: AppleContainerFacts?
 
     public init(sandboxes: [SandboxFact] = [], currentImageKeys: [String: String] = [:], preparing: Set<String> = [],
                 kernelCache: URL, currentKernel: URL, unusedDays: Int = 30, preparationSeconds: [String: Double] = [:],
@@ -227,8 +229,12 @@ public struct ResourceFacts: Sendable {
 public enum Resources {
     /// Store-root files that are Dozer's own records (never deleted here).
     static let storeRecords: Set<String> = ["accounts.json", "onboarded.json", "preparations.json", "agent-versions.json",
-                                            "host.lock", "host.pid", "host.sock", "ui.lock", "ui.sock"]
+                                            "host.lock", "host.pid", "host.sock", "ui.lock", "ui.sock",
+                                            // 596: the bases' resolved digests, the Dockerfiles and their builds.
+                                            "base-digests.json", "dockerfiles.json"]
     static let builtInImages = ["lab", "claude-code", "pi"]
+    /// 596: an image a preparation makes again (any base × agent — a template is not).
+    static func isPreparedImage(_ name: String) -> Bool { builtInImages.contains(name) || ImageChoice.parse(name)?.name == name }
     /// The ids a person may name (`doz resources rm`, the page): a word, then `:` and a name.
     public static func isValidID(_ s: String) -> Bool {
         guard (1...240).contains(s.utf8.count) else { return false }
@@ -316,6 +322,8 @@ public enum Resources {
         default:
             if c.count == 1, first.hasSuffix(".log") { return "logs" }
             if storeRecords.contains(first) { return "store" }
+            // 596: a Dockerfile build's archive or import folder (removed when the build ends).
+            if first.hasPrefix(".dockerfile-build-") || first.hasPrefix(".dockerfile-import-") { return "leftover:\(first)" }
             return "stray:\(first)"
         }
     }
@@ -429,7 +437,7 @@ public enum Resources {
             var leaves = keys
             if byLeaf["image:\(name)"] != nil { leaves.append("image:\(name)") }
             let preparing = f.preparing.contains(name)
-            let later = Self.builtInImages.contains(name) ? "re-prepared when next needed (\(minutes(name)), needs network)" : nil
+            let later = Self.isPreparedImage(name) ? "re-prepared when next needed (\(minutes(name)), needs network)" : nil
             var children: [ResourceItem] = []
             var allClean = !keys.isEmpty
             for id in keys {
@@ -593,6 +601,8 @@ public enum Resources {
             add(ResourceItem(id: "outside:cli", group: "outside", name: "the doz program", detail: exe, sizeBytes: nil,
                              refusal: "doz uninstall removes it", path: exe))
         }
+        // 596: Apple's container tool (Dockerfile builds) — outside, never in the total, never deleted.
+        if let a = f.appleContainer { for it in appleContainerItems(a) { add(it) } }
         for s in f.sandboxes where s.workspace != nil {
             add(ResourceItem(id: "outside:project:\(s.name)", group: "outside", name: "project folder of \(s.name)", detail: s.workspace, sizeBytes: nil,
                              usedBy: [s.name], link: "sandbox:\(s.name)", refusal: "your files — never deleted here", path: s.workspace))

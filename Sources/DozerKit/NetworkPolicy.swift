@@ -56,6 +56,27 @@ public struct NetworkPolicy: Sendable, Codable, Equatable {
 
     public static let presets: [String: NetworkPolicy] = ["locked": locked, "bake": bake, "agent": agent, "open": open]
 
+    /// 596: the bake preset plus an image spec's own bake hosts (HTTPS only) — still "bake".
+    public static func bake(adding hosts: [String]?) -> NetworkPolicy {
+        var p = bake
+        for h in hosts ?? [] where !p.rules.contains(where: { $0.host == h.lowercased() }) {
+            p.rules.append(EgressRule(host: h, ports: [443], note: "this image's bake"))
+        }
+        return p
+    }
+
+    /// 596 (B4): a sandbox's policy with its base's language registries allowed (HTTPS) — appended
+    /// after the preset's rules, keeping the preset's name (the preset, for that base). `locked`
+    /// and `open` are left as they are (nothing, and everything).
+    public func adding(registries: [RegistryHost]) -> NetworkPolicy {
+        guard defaultAction == .deny, preset != "locked" else { return self }
+        var p = self
+        for r in registries where !p.rules.contains(where: { $0.host == r.host.lowercased() }) {
+            p.rules.append(EgressRule(host: r.host, ports: [443], note: r.note))
+        }
+        return p
+    }
+
     /// Anthropic's API and the sign-in hosts Claude Code uses.
     public static let agentAPIRules: [EgressRule] = [
         EgressRule(host: "api.anthropic.com", note: "Claude API"),

@@ -38,13 +38,16 @@ extension HostCore {
         let network: [ResourceNetwork] = metrics?.networkTotals(sinceMinute: sinceMinute)
             ?? (FileManager.default.fileExists(atPath: store.metrics.path) ? (try? MetricsStore(url: store.metrics))?.networkTotals(sinceMinute: sinceMinute) : nil)
             ?? []
-        return ResourceFacts(sandboxes: sbx.sorted { $0.name < $1.name }, currentImageKeys: keys, preparing: Set(runningPreparations()),
-                             kernelCache: cache, currentKernel: current,
-                             unusedDays: settings.int(SettingKey.resourcesUnusedDays),
-                             preparationSeconds: PreparationRecord.all(store).mapValues(\.seconds),
-                             hostFootprintBytes: readOnly ? nil : Resources.footprint(), network: network,
-                             settingsFile: DozerSettings.fileURL(), accounts: accountStore.load().accounts.map(\.name).sorted(),
-                             executable: HostLauncher.executablePath)
+        var facts = ResourceFacts(sandboxes: sbx.sorted { $0.name < $1.name }, currentImageKeys: keys, preparing: Set(runningPreparations()),
+                                  kernelCache: cache, currentKernel: current,
+                                  unusedDays: settings.int(SettingKey.resourcesUnusedDays),
+                                  preparationSeconds: PreparationRecord.all(store).mapValues(\.seconds),
+                                  hostFootprintBytes: readOnly ? nil : Resources.footprint(), network: network,
+                                  settingsFile: DozerSettings.fileURL(), accounts: accountStore.load().accounts.map(\.name).sorted(),
+                                  executable: HostLauncher.executablePath)
+        // 596: Apple's container tool, measured off the actor (its data folder can be gigabytes).
+        facts.appleContainer = await Task.detached { AppleContainerFacts.current() }.value
+        return facts
     }
 
     /// The inventory (every disk's extent map is read: off the actor).

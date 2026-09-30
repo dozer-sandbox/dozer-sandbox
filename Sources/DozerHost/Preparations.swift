@@ -463,7 +463,8 @@ extension HostCore {
         guard spec.customImage == nil, !m.sandbox.hasRootDisk else { return nil }
         let image: String
         if let imageSpec = spec.imageSpec {
-            guard DozerImages.builtIn.contains(imageSpec.name) else { return nil }
+            // 596: any base × agent image (a Dockerfile's: its build, then its bake).
+            guard DozerImages.isPreparable(imageSpec.name, store: store) else { return nil }
             image = imageSpec.name
         } else {
             // The lab: only when this sandbox's prepared disk is the one a lab preparation makes.
@@ -488,14 +489,23 @@ extension HostCore {
     /// Operations shows it) — the sandbox being made now does not wait for it.
     @discardableResult
     func freshen(_ image: String, update: Bool) async -> AgentVersions.Freshness? {
-        guard AgentImages.package(image) != nil else { return nil }
-        let settings = DozerSettings.load()
-        let f = await AgentVersions.refresh(image, store: store, settings: settings, registry: agentRegistry)
-        if let e = f.error, f.looked {
-            HostLog.line("\(image): the npm registry could not be asked (\(e)) — the image already prepared is used")
-        } else if f.looked, let v = f.latest {
-            HostLog.line("\(image): latest is \(v) (npm registry)")
+        // 596: any base × agent image — the base's tag (hourly: its digest, for the next preparation and
+        // "update available"; never a rebuild by itself), then the agent's version as before.
+        guard let choice = ImageChoice.parse(image) else { return nil }
+        if choice.name != "lab", BaseCatalogue.base(choice.base) != nil,
+           let e = await BaseDigests.refresh(choice.base, store: store, registry: agentRegistry) {
+            HostLog.line("\(choice.base): its tag could not be resolved (\(e)) — the digest resolved before (or the built-in pin) is used")
         }
+        guard choice.agent != .none else { return nil }
+        let agent = choice.agent.rawValue
+        let settings = DozerSettings.load()
+        let f = await AgentVersions.refresh(agent, store: store, settings: settings, registry: agentRegistry)
+        if let e = f.error, f.looked {
+            HostLog.line("\(agent): the npm registry could not be asked (\(e)) — the image already prepared is used")
+        } else if f.looked, let v = f.latest {
+            HostLog.line("\(agent): latest is \(v) (npm registry)")
+        }
+        if let e = f.nativeError { HostLog.line("claude-code: its native build's manifest could not be read (\(e))") }
         guard update, !readOnly, runningPreparation(image) == nil else { return f }
         let s = store
         let behind = await Task.detached { AgentVersions.behind(image, store: s, settings: settings) }.value
@@ -512,15 +522,15 @@ extension HostCore {
 
     /// The preparation of `image`: the one running (joined), or a new one.
     func preparation(for image: String, requestedBy who: String) throws -> Preparation {
-        guard DozerImages.builtIn.contains(image) else {
-            throw HostError(.invalid, "only the built-in images are prepared (lab, claude-code, pi) — not \(image)")
+        guard DozerImages.builtIn.contains(image) || DozerImages.isPreparable(image, store: store) else {
+            throw HostError(.invalid, "only a base × agent image is prepared (lab, claude-code, pi, python-claude-code, … — doz base ls) — not \(image)")
         }
         if let p = runningPreparation(image) {
             p.joined(by: who)
             return p
         }
         guard !readOnly else { throw HostError(.unavailable, "preparing an image needs the host") }
-        let p = Preparation(image: image, requestedBy: who, planned: Self.plannedSteps(image),
+        let p = Preparation(image: image, requestedBy: who, planned: Self.plannedSteps(image, store: store),
                             previous: PreparationRecord.all(store)[image])
         preparations[image] = p
         let store = self.store
@@ -570,9 +580,15 @@ extension HostCore {
     /// kernel + guest init, then — an image spec — base image, base disk, clone, bake VM boot, bake
     /// network, each of its steps and verify checks, trim and stop; the lab — its first boot
     /// (measured: 594.02-RESULTS.md).
-    static func plannedSteps(_ image: String) -> Int? {
-        guard let spec = DozerImages.imageSpec(image) else { return image == "lab" ? 2 + labBootSteps : nil }
-        return 2 + 7 + spec.steps.count + spec.verify.count
+    static func plannedSteps(_ image: String, store: DozerStore? = nil) -> Int? {
+        if image == "lab" { return 2 + labBootSteps }
+        // 596: any base × agent image, at the version a preparation would make (the pins without a store);
+        // a Dockerfile's adds its build and its import.
+        let spec = DozerImages.imageSpec(image)
+            ?? store.flatMap { try? AgentVersions.spec(image, purpose: .prepare, store: $0, settings: DozerSettings.load()) }
+        guard let spec else { return nil }
+        let build = ImageChoice.parse(image)?.isDockerfile == true ? 2 : 0
+        return 2 + build + 7 + spec.steps.count + spec.verify.count
     }
 
     /// The lab's first boot, counted on a real run (2026-09-29): guest init (again), alpine ready,
@@ -586,6 +602,11 @@ extension HostCore {
         // A throwaway sandbox a crashed preparation left behind would cold-boot its kept disk
         // instead of baking: it goes first.
         try? FileManager.default.removeItem(at: store.layout(tmpName).sandboxDirectory)
+        // 596 (B7, B8): a Dockerfile's image — its build first (every preparation: the builder's cache
+        // makes an unchanged one take seconds, and unchanged layers keep the base — nothing re-baked).
+        if let c = ImageChoice.parse(image), c.isDockerfile {
+            try await buildDockerfile(c.base, image: image, store: store, emit: emit)
+        }
         // 594: the version the settings name — latest as resolved (the host asked the registry first),
         // or the exact one.
         let spec = try DozerImages.spec(name: tmpName, options: CreateOptions(image: image), store: store, purpose: .prepare).0
@@ -617,17 +638,85 @@ extension HostCore {
     }
 
     /// 594: an agent's install step says which version and why — "npm install @anthropic-ai/claude-code@2.1.285
-    /// (latest, resolved now)" when the setting is latest; the pinned label otherwise.
+    /// (latest, resolved now)" when the setting is latest; the pinned label otherwise. 596: the native
+    /// build's step too ("install Claude Code 2.1.285 (native build, latest, resolved now)").
     static func installLabel(_ image: String, spec: SandboxSpec) -> @Sendable (HostEvent) -> HostEvent {
-        guard let a = spec.imageSpec?.agent, AgentVersions.setting(image, DozerSettings.load()) == "latest" else { return { $0 } }
-        let from = "npm install \(a.package)@\(a.version) (integrity-pinned)"
-        let to = "npm install \(a.package)@\(a.version) (latest, resolved now)"
+        guard let a = spec.imageSpec?.agent, AgentVersions.setting(AgentVersions.agentOf(image), DozerSettings.load()) == "latest" else { return { $0 } }
+        let pairs = [("npm install \(a.package)@\(a.version) (integrity-pinned)", "npm install \(a.package)@\(a.version) (latest, resolved now)"),
+                     ("install Claude Code \(a.version) (native build, checksum-verified)", "install Claude Code \(a.version) (native build, latest, resolved now)")]
         return { e in
-            guard let t = e.text, t.contains(from) else { return e }
+            guard let t = e.text, let (from, to) = pairs.first(where: { t.contains($0.0) }) else { return e }
             var e = e
             e.text = t.replacingOccurrences(of: from, with: to)
             return e
         }
+    }
+
+    /// 596 (B7–B9): build a Dockerfile's base with Apple's `container build` and import it — two timed
+    /// steps, the build's output as the live tail, the network-policy note said first.
+    static func buildDockerfile(_ base: String, image: String, store: DozerStore, emit: @escaping @Sendable (HostEvent) -> Void) async throws {
+        guard var rec = Dockerfiles.record(base, store) else { throw HostError(.notFound, "no Dockerfile is known for \(base)") }
+        let env = ProcessInfo.processInfo.environment
+        let status = ContainerTool.status(env)
+        if let p = ContainerTool.problem(status) { throw HostError(.unavailable, p) }
+        emit(HostEvent(kind: .note, sandbox: image, text: Dockerfiles.outsidePolicyNote))
+        let before = Dockerfiles.sha256(of: URL(fileURLWithPath: rec.dockerfile))
+        guard before != nil else { throw HostError(.notFound, "the Dockerfile \(rec.dockerfile) cannot be read") }
+        func timed<T: Sendable>(_ label: String, _ body: @escaping @Sendable () async throws -> T) async throws -> T {
+            let t0 = ContinuousClock.now
+            emit(HostEvent(kind: .started, sandbox: image, text: label))
+            do {
+                let v = try await body()
+                emit(HostEvent(kind: .step, sandbox: image, text: label, milliseconds: Self.buildMilliseconds(since: t0)))
+                return v
+            } catch {
+                var e = HostEvent(kind: .failed, sandbox: image, text: label, milliseconds: Self.buildMilliseconds(since: t0))
+                e.error = HostError.from(error).message
+                emit(e)
+                throw error
+            }
+        }
+        let archive = store.root.appendingPathComponent(".dockerfile-build-\(UUID().uuidString.prefix(8)).tar")
+        defer { try? FileManager.default.removeItem(at: archive) }
+        let (dockerfile, context) = (rec.dockerfile, rec.context)
+        try await timed("built the Dockerfile with Apple's container build (\((dockerfile as NSString).abbreviatingWithTildeInPath))") {
+            let cancelled = CancelFlag()
+            try await withTaskCancellationHandler {
+                try await withCheckedThrowingContinuation { (c: CheckedContinuation<Void, Error>) in
+                    DispatchQueue.global().async {
+                        do {
+                            try ContainerTool.build(dockerfile: dockerfile, context: context, tag: "dozer/\(base):latest", output: archive, env: env,
+                                                    isCancelled: { cancelled.value }) { line in
+                                emit(HostEvent(kind: .output, sandbox: image, text: ProgressFormat.inert(line, limit: 400)))
+                            }
+                            c.resume()
+                        } catch { c.resume(throwing: error) }
+                    }
+                }
+            } onCancel: { cancelled.set() }
+            try Task.checkCancellation()
+        }
+        let previous = rec
+        let r = try await timed("imported the built image into Dozer's store") {
+            try await DockerfileImport.importArchive(archive, base: base, store: store, previous: previous)
+        }
+        emit(HostEvent(kind: .note, sandbox: image, text: r.unchanged
+                       ? "the Dockerfile's image is unchanged (same layers) — the prepared image is reused, nothing is re-baked"
+                       : "the Dockerfile's image is \(r.reference.split(separator: "@").last.map { String($0.prefix(19)) } ?? "") — a new base"))
+        rec.reference = r.reference
+        rec.layers = r.layers
+        rec.environment = r.environment
+        rec.path = r.path
+        rec.builtAt = Date()
+        rec.dockerfileSHA256 = before
+        rec.builds = (rec.builds ?? 0) + 1
+        rec.builtWith = status.version.map { "container \($0)" }
+        try Dockerfiles.save(rec, store)
+    }
+
+    static func buildMilliseconds(since t0: ContinuousClock.Instant) -> Double {
+        let d = ContinuousClock.now - t0
+        return Double(d.components.seconds) * 1000 + Double(d.components.attoseconds) / 1e15
     }
 
     /// Follow `p` until it ends: its events so far and as they come go to `emit`.
@@ -660,10 +749,14 @@ extension HostCore {
     }
 
     /// Validated image names, in the order given, without repeats.
-    static func preparableImages(_ names: [String]) throws -> [String] {
+    static func preparableImages(_ names: [String], store: DozerStore? = nil) throws -> [String] {
         var out: [String] = []
-        for n in names {
-            guard DozerImages.builtIn.contains(n) else { throw HostError(.invalid, "unknown image \(n) — lab, claude-code or pi") }
+        for raw in names {
+            // 596: any base × agent image, by any of its names.
+            let n = DozerImages.canonicalName(raw)
+            guard DozerImages.builtIn.contains(n) || store.map({ DozerImages.isPreparable(n, store: $0) }) == true else {
+                throw HostError(.invalid, "unknown image \(raw) — lab, claude-code, pi, or a base × agent image (doz base ls)")
+            }
             if !out.contains(n) { out.append(n) }
         }
         return out
@@ -673,7 +766,7 @@ extension HostCore {
     /// them, their progress on `emit`. No images and `follow`: join whatever is running (`doz onboard
     /// --status`).
     func prepare(_ r: HostRequest, emit: @escaping @Sendable (HostEvent) -> Void, onboarding: Bool) async throws -> PrepareResult {
-        let images = try Self.preparableImages(r.images ?? [])
+        let images = try Self.preparableImages(r.images ?? [], store: store)
         let who = r.requestedBy.map { String($0.prefix(60)) } ?? (onboarding ? "onboard" : "prepare")
         let preps: [Preparation]
         if images.isEmpty && !onboarding {
@@ -725,7 +818,7 @@ extension HostCore {
 
     /// `prepare-cancel`: the named images' preparations (all running ones with none named).
     func cancelPreparations(_ r: HostRequest) throws -> [PreparationInfo] {
-        let names = try Self.preparableImages(r.images ?? [])
+        let names = try Self.preparableImages(r.images ?? [], store: store)
         let targets = preparations.values.filter { $0.isRunning && (names.isEmpty || names.contains($0.image)) }
         guard !targets.isEmpty else {
             throw HostError(.notFound, names.isEmpty ? "no image is being prepared" : "\(names.joined(separator: ", ")) \(names.count == 1 ? "is" : "are") not being prepared")
