@@ -49,6 +49,10 @@ public enum WebAction: Equatable, Sendable {
     case resourcesClean
     /// 595 (R5): the kernel NEW sandboxes boot (`kernel:<version>` or `pinned`).
     case resourcesKernel(String)
+    /// 594 W18: "Start host" — the host's `ping`, sent with autostart as every action is: a host
+    /// starts the normal detached way (`HostLauncher`), exactly as the CLI's first command starts one.
+    /// Starting is all it does (`host stop` stays out of the browser).
+    case hostStart
 
     public static let lifecycleOps: [String: HostOp] = [
         "start": .start, "wake": .wake, "pause": .pause, "resume": .resume, "sleep": .sleep, "hibernate": .hibernate,
@@ -66,7 +70,7 @@ public enum WebAction: Equatable, Sendable {
              .keyRemove(let n, _), .accountUse(let n, _), .templateCreate(let n, _, _, _), .duplicate(let n, _, _, _):
             return n
         case .imageBake, .imageRemove, .accountDefault, .accountKeepalive, .accountVerify, .accountRemove, .onboard, .prepareCancel,
-             .resourcesRemove, .resourcesClean, .resourcesKernel:
+             .resourcesRemove, .resourcesClean, .resourcesKernel, .hostStart:
             return nil
         }
     }
@@ -98,6 +102,7 @@ public enum WebAction: Equatable, Sendable {
         case .resourcesRemove(let ids): return ids.count == 1 ? "delete \(ids[0])" : "delete \(ids.count) resources"
         case .resourcesClean: return "clean up"
         case .resourcesKernel(let k): return "use \(k) for new sandboxes"
+        case .hostStart: return "host-start"
         default: break
         }
         let r = hostRequest
@@ -213,6 +218,8 @@ public enum WebAction: Equatable, Sendable {
             var r = HostRequest(.resourcesKernel)
             r.kernel = k
             return r
+        case .hostStart:
+            return HostRequest(.ping)
         }
     }
 
@@ -250,6 +257,7 @@ public enum WebAction: Equatable, Sendable {
             "resources-rm": ["ids"],
             "resources-clean": [],
             "resources-kernel": ["kernel"],
+            "host-start": [],
         ]
         for (verb, op) in lifecycleOps { f[verb] = [.reset, .rm].contains(op) ? ["sandbox", "confirm"] : ["sandbox"] }
         return f
@@ -343,6 +351,8 @@ public enum WebAction: Equatable, Sendable {
             let k = try f.required(f.string("kernel", max: 120), "kernel")
             guard k == "pinned" || (k.hasPrefix("kernel:") && Resources.isValidID(k)) else { throw Invalid("kernel: kernel:<version> or pinned") }
             a = .resourcesKernel(k)
+        case "host-start":
+            a = .hostStart
         default:
             guard let op = lifecycleOps[verb] else { throw Invalid("unknown action") }
             a = .lifecycle(op, name: try f.sandbox("sandbox"))

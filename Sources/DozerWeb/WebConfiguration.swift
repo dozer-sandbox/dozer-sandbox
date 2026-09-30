@@ -4,8 +4,9 @@ import Foundation
 // feature 503 (`DeckStackWebGatewayConfiguration`): every invariant that matters is a type that
 // cannot represent the unsafe case, so no flag, environment variable or caller can widen it.
 
-/// The only address the UI may bind: IPv4 loopback on a port the OS picks. IPv6, a hostname, a
-/// wildcard and a fixed port are deliberately not representable.
+/// The only address the UI may bind: IPv4 loopback on a port the OS picks — or (594 W18/W19) the port
+/// the OS gave this store's last UI, read from the store, never from a flag, variable or setting. IPv6,
+/// a hostname, a wildcard and a chosen fixed port are deliberately not representable.
 public struct WebLoopbackAddress: Equatable, Sendable {
     public static let host = "127.0.0.1"
     public let host: String
@@ -14,6 +15,33 @@ public struct WebLoopbackAddress: Equatable, Sendable {
     public init() {
         host = Self.host
         port = 0
+    }
+
+    /// 594 W18: the port the OS gave the store's LAST `doz ui` (`<store>/ui.port`), asked for again
+    /// so an open page reconnects by itself after a restart. Still loopback only; an unprivileged
+    /// port only; nil when nothing may be listening there (then the OS picks, as before). The port is
+    /// no secret and grants nothing: a page on it must still be signed in by a new one-use link.
+    public init?(reusing port: Int) {
+        guard (1024...65_535).contains(port), !Self.inUse(port) else { return nil }
+        host = Self.host
+        self.port = port
+    }
+
+    /// Something accepts connections on 127.0.0.1:`port` (also a wildcard listener — which a
+    /// SO_REUSEADDR bind to loopback would otherwise shadow on BSD).
+    static func inUse(_ port: Int) -> Bool {
+        let fd = socket(AF_INET, SOCK_STREAM, 0)
+        guard fd >= 0 else { return true }
+        defer { close(fd) }
+        var a = sockaddr_in()
+        a.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+        a.sin_family = sa_family_t(AF_INET)
+        a.sin_port = in_port_t(UInt16(port).bigEndian)
+        a.sin_addr.s_addr = inet_addr(host)
+        let r = withUnsafePointer(to: &a) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { connect(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) }
+        }
+        return r == 0 || errno != ECONNREFUSED
     }
 }
 

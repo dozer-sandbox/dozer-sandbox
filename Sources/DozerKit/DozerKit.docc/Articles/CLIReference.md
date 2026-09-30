@@ -377,9 +377,18 @@ ones are reported as died with their disk checked at the next start.
 ### The web UI
 
 ```bash
-doz ui [serve] [--open | --print-url] [--store DIR]   # a local dashboard for everything above; Ctrl-C stops it
-doz ui link [--store DIR]                             # a fresh one-use sign-in link for the running UI
+doz ui [serve] [--open | --no-open | --print-url] [--new-link] [--store DIR]   # a local dashboard for everything above; Ctrl-C stops it
+doz ui link [--rotate] [--store DIR]                  # a fresh one-use sign-in link for the running UI
 ```
+
+One UI per store, one tab (594 W19): `doz ui` while one runs reuses it, opening a tab only when none
+of its pages is open; a restarted `doz ui` takes the store's last port and keeps its pages' sessions
+(`<store>/ui.sessions`, 0600; the cookies' digests, never the cookies), so an open page reconnects by itself and no tab
+opens. `ui.open_browser` = `auto` (default) | `always` | `never`; `--open` / `--no-open` override it.
+`--new-link` (or `doz ui link --rotate`) signs every page out for a new link. The page watches the host
+(594 W18): its footer shows the link to `doz ui` and the host's state and build, and a banner says when
+the host stopped (hibernated; Start host), died (the sandboxes that were running are shut down) or
+came back as another build.
 
 A browser dashboard for sandboxes, images, accounts, metrics, activity and doctor, with the
 lifecycle and every other action. Each sandbox has its own page (a child of Sandboxes in the

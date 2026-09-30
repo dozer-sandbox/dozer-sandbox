@@ -25,6 +25,167 @@ public struct WebHost: Codable, Equatable, Sendable {
     public var uiVersion: String
 }
 
+/// 594 W18: what the UI's poll can learn about the host WITHOUT starting one — read before the
+/// overview, because the overview starts a host to recover a crash (the CLI's rule), and the gap
+/// between the old host and that new one is what tells a crash from a clean stop.
+public struct WebHostProbe: Equatable, Sendable {
+    /// A host holds the store's lock.
+    public var running: Bool
+    /// `host.pid` names a host that is gone: a clean exit removes it, a kill -9 or a crash does not.
+    public var stalePID: Bool
+    /// Sandboxes whose VM ran when the host went (they are shut down by the next host; an asleep
+    /// one is restored asleep, so it is not among them).
+    public var lost: [String]
+    /// Anything a gone host left live (`lost` plus the asleep ones): a crash when not empty.
+    public var recovering: [String]
+    /// Why the last host said it exited (its log): `stop`, `signal`, `idle`, `program changed`.
+    public var exitReason: String?
+
+    public init(running: Bool, stalePID: Bool = false, lost: [String] = [], recovering: [String] = [], exitReason: String? = nil) {
+        self.running = running
+        self.stalePID = stalePID
+        self.lost = lost
+        self.recovering = recovering
+        self.exitReason = exitReason
+    }
+}
+
+/// 594 W18: why the last host exited, from the end of `host.log` — the line its exit path wrote
+/// before `host exiting` (`HostServer`). nil when the last host did not say (it was killed).
+enum HostExitReason {
+    static func read(_ log: URL, tail: Int = 16_384) -> String? {
+        guard let h = try? FileHandle(forReadingFrom: log) else { return nil }
+        defer { try? h.close() }
+        let end = (try? h.seekToEnd()) ?? 0
+        try? h.seek(toOffset: end > UInt64(tail) ? end - UInt64(tail) : 0)
+        guard let d = try? h.readToEnd() else { return nil }
+        return parse(String(decoding: d, as: UTF8.self))
+    }
+
+    static func parse(_ text: String) -> String? {
+        let lines = text.split(separator: "\n").map(String.init)
+        guard let exit = lines.lastIndex(where: { $0.hasSuffix(" host exiting") }) else { return nil }
+        // A host started after that exit (and did not say it exited): it was killed.
+        if lines[(exit + 1)...].contains(where: { $0.contains(" doz host ") && $0.contains("(pid ") }) { return nil }
+        let start = lines[..<exit].lastIndex(where: { $0.contains(" doz host ") && $0.contains("(pid ") }) ?? 0
+        for l in lines[start..<exit].reversed() {
+            if l.contains("host stop requested") { return "doz host stop" }
+            if l.contains(" signal ") && l.contains("hibernating every sandbox") {
+                return l.contains("signal 15:") ? "SIGTERM" : l.contains("signal 2:") ? "SIGINT" : "a signal"
+            }
+            if l.contains("my program changed") { return "its program changed" }
+            if l.contains(" idle for ") { return "idle" }
+        }
+        return nil
+    }
+}
+
+/// 594 W18: a change of the host, told to every page as the SSE `host` event.
+///   · `running` — a host (re)started: `version`, and `previousVersion` when the build differs from
+///     the host before it;
+///   · `stopped` — it exited cleanly (`doz host stop`, SIGTERM, idle): `sandboxes` were hibernated;
+///   · `died` — it was killed or crashed: `sandboxes` were running and are shut down.
+public struct WebHostChange: Codable, Equatable, Sendable {
+    public var state: String
+    public var version: String?
+    public var previousVersion: String?
+    public var pid: Int32?
+    public var sandboxes: [String]
+    public var reason: String?
+    public var time: Date
+
+    public init(state: String, version: String?, previousVersion: String? = nil, pid: Int32?, sandboxes: [String] = [],
+                reason: String? = nil, time: Date = Date()) {
+        self.state = state
+        self.version = version
+        self.previousVersion = previousVersion
+        self.pid = pid
+        self.sandboxes = sandboxes
+        self.reason = reason
+        self.time = time
+    }
+
+    /// The Activity line.
+    public var text: String {
+        let n = sandboxes.count
+        let list = n == 0 ? "" : ": " + sandboxes.joined(separator: ", ")
+        switch state {
+        case "running":
+            let was = previousVersion.map { " — was doz \($0)" } ?? ""
+            return "host started (pid \(pid.map(String.init) ?? "?"), doz \(version ?? "?"))\(was)"
+        case "stopped":
+            let why = reason.map { " (\($0))" } ?? ""
+            return "host stopped\(why)" + (n == 0 ? "" : " — \(n) sandbox\(n == 1 ? "" : "es") hibernated\(list)")
+        default:
+            return "host died" + (n == 0 ? " — no sandbox was running" : " — \(n) sandbox\(n == 1 ? " was" : "es were") running, now shut down\(list)")
+        }
+    }
+}
+
+/// 594 W18: the host's transitions, from the UI's poll (pure: the monitor feeds it, the tests too).
+/// The first look sets the state and tells nothing; after it, every start, clean stop, crash and
+/// change of build is told once.
+struct WebHostWatch {
+    private(set) var running: Bool?
+    private var pid: Int32?
+    /// The version of the last host seen running (kept across a stop, for "was rc.3").
+    private(set) var version: String?
+    private var live: [String] = []
+    /// Sandboxes shown "died with host" at the last look.
+    private var died: Set<String>?
+    /// Sandboxes a `died` change already named (so their mark, seen later, is not told again).
+    private var told: Set<String> = []
+
+    /// Before the overview: the host is gone. Tells `stopped` or `died` once.
+    mutating func probed(_ p: WebHostProbe, now: Date = Date()) -> WebHostChange? {
+        guard running == true, !p.running else { return nil }
+        running = false
+        let crashed = p.stalePID || !p.recovering.isEmpty
+        if crashed { told.formUnion(p.lost) }
+        return WebHostChange(state: crashed ? "died" : "stopped", version: version, pid: pid,
+                             sandboxes: crashed ? p.lost : live, reason: crashed ? nil : p.exitReason, time: now)
+    }
+
+    /// After the overview: a start (or a new host between two looks), and crashes whose gap was
+    /// missed (a sandbox newly "died with host" that no change named).
+    mutating func saw(_ o: WebOverview, now: Date = Date()) -> [WebHostChange] {
+        var out: [WebHostChange] = []
+        let h = o.host
+        let diedNow = Set(o.sandboxes.filter { $0.diedWithHost == true }.map(\.name))
+        if let before = died {
+            let fresh = diedNow.subtracting(before).subtracting(told)
+            if !fresh.isEmpty {
+                out.append(WebHostChange(state: "died", version: version, pid: pid, sandboxes: fresh.sorted(), time: now))
+            }
+        }
+        told.subtract(diedNow)
+        died = diedNow
+        if h.running {
+            if let was = running, !was || pid != h.pid {
+                // A new host between two looks was a stop the poll never saw: say so first.
+                if was && out.isEmpty {
+                    out.append(WebHostChange(state: "stopped", version: version, pid: pid, sandboxes: live, time: now))
+                }
+                let changed = version != nil && h.version != nil && version != h.version
+                out.append(WebHostChange(state: "running", version: h.version, previousVersion: changed ? version : nil, pid: h.pid, time: now))
+            }
+            running = true
+            pid = h.pid
+            version = h.version ?? version
+            live = h.liveSandboxes
+        } else {
+            if running == true {
+                // No probe saw the gap (a source without one): what the overview says.
+                let crashed = !h.recoveryPending.isEmpty
+                out.append(WebHostChange(state: crashed ? "died" : "stopped", version: version, pid: pid,
+                                         sandboxes: crashed ? h.recoveryPending : live, time: now))
+            }
+            running = false
+        }
+        return out
+    }
+}
+
 public struct WebSandboxRow: Codable, Equatable, Sendable {
     public var name: String
     public var image: String

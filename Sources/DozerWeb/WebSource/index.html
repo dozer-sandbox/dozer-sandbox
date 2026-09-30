@@ -36,12 +36,14 @@
         <a href="#/settings" data-view="settings">Settings</a>
       </nav>
       <div class="side-foot">
-        <div class="live" id="live"><span class="dot" aria-hidden="true"></span><span id="live-text">connecting…</span></div>
+        <div class="live" id="live" title="This page's link to the doz ui server"><span class="dot" aria-hidden="true"></span><span class="foot-k">doz ui</span><span id="live-text">connecting…</span></div>
+        <div class="live" id="host-live" title="The store's host"><span class="dot" aria-hidden="true"></span><span class="foot-k">host</span><span id="host-text">—</span></div>
         <div class="version" id="version"></div>
         <button type="button" class="link-button" id="sign-out" hidden>Sign out</button>
       </div>
     </aside>
     <main id="main" tabindex="-1">
+      <div class="banners" id="banners" aria-live="polite"></div>
       <div class="notice" id="notice" hidden></div>
       <section id="view"></section>
       <section id="sbx" class="sbx" hidden>

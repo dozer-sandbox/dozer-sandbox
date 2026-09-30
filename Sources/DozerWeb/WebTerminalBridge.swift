@@ -199,6 +199,14 @@ final class WebTerminalBridge: @unchecked Sendable {
         while !isEnded {
             let watch = grant.mode == .watch
             let want: (String?, TermSize) = lock.withLock { (session, watch ? TermSize(cols: 0, rows: 0) : size) }
+            // 594 W18: a REattach (the host hibernated everything and went: `doz host stop`, SIGTERM,
+            // idle) waits for a host — started by a wake, a CLI command or Start host — rather than
+            // start one itself, which undid every host stop while a terminal was open. (Opening a
+            // terminal is an explicit attach and starts one, as `doz attach` does — 591 T3.)
+            if !first && !data.hostAnswers() {
+                try? await Task.sleep(for: .seconds(1))
+                continue
+            }
             let att: any WebTerminalAttachment
             do {
                 att = try await data.attachTerminal(grant.sandbox, session: want.0, size: want.1)

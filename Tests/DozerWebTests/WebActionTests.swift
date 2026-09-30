@@ -44,6 +44,7 @@ final class WebActionTests: XCTestCase {
         "resources-rm": #"{"action":"resources-rm","ids":["cache:downloads","kernel:6.12.1-1","point:web/rp-1"]}"#,
         "resources-clean": #"{"action":"resources-clean"}"#,
         "resources-kernel": #"{"action":"resources-kernel","kernel":"kernel:6.12.1-1"}"#,
+        "host-start": #"{"action":"host-start"}"#,
     ]
 
     /// Everything the web layer may send to the host — and, as important, what it may never.
@@ -51,7 +52,7 @@ final class WebActionTests: XCTestCase {
         .create, .start, .wake, .pause, .resume, .sleep, .hibernate, .shutdown, .reset, .rm, .openSession,
         .pointTake, .pointRevert, .pointFork, .pointRm, .pointSaveImage, .imageBake, .imageRm, .netPolicy,
         .keyPolicy, .keyRm, .accountUse, .accountDefault, .accountKeepalive, .accountVerify, .accountRemove,
-        .templateCreate, .duplicate, .onboard, .prepareCancel, .resourcesRemove, .resourcesClean, .resourcesKernel,
+        .templateCreate, .duplicate, .onboard, .prepareCancel, .resourcesRemove, .resourcesClean, .resourcesKernel, .ping,
     ]
 
     /// 595: resources — ids by their rule, each once; no typed name (a plain confirmation: owner);
@@ -98,6 +99,19 @@ final class WebActionTests: XCTestCase {
                     #"{"ids":["logs"],"dryRun":false}"#, #"{"ids":["../x"]}"#] {
             XCTAssertThrowsError(try WebResourcePreview.decode(Data(bad.utf8)), bad)
         }
+    }
+
+    /// 594 W18: "Start host" — the host's `ping` (sent with autostart like every action), nothing more.
+    func testStartHostIsAPingWithNoFields() throws {
+        let a = try decode(Self.samples["host-start"]!)
+        XCTAssertEqual(a, .hostStart)
+        XCTAssertEqual(a.hostRequest.op, .ping)
+        XCTAssertNil(a.sandbox)
+        XCTAssertNil(a.confirmationTarget)
+        XCTAssertEqual(a.label, "host-start")
+        invalid(#"{"action":"host-start","sandbox":"a"}"#)
+        invalid(#"{"action":"host-stop"}"#)
+        XCTAssertEqual(WebOperations.summary(.hostStart, .null), "the host is running")
     }
 
     /// 594: onboard and prepare-cancel — built-in images only, each once; onboard never waits.
@@ -162,7 +176,9 @@ final class WebActionTests: XCTestCase {
             ops.append(a.hostOp)
         }
         XCTAssertEqual(ops.count, Set(ops).count, "one action per HostOp")
-        for forbidden: HostOp in [.exec, .attach, .keySet, .accountAdd, .hostStop, .events, .ping] {
+        // 594 W18: `ping` is reachable — as "Start host" (a status read that starts a host the way
+        // every action does); `host stop` never is.
+        for forbidden: HostOp in [.exec, .attach, .keySet, .accountAdd, .hostStop, .events] {
             XCTAssertFalse(ops.contains(forbidden), "\(forbidden) must never be reachable from the browser")
         }
         XCTAssertEqual(WebAction.lifecycleOps["hibernate"], .hibernate)

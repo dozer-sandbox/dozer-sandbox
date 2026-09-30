@@ -87,7 +87,7 @@ public final class DozerWebServer: @unchecked Sendable {
 
     private init(origin: WebOrigin, version: String, limits: WebLimits, assets: WebAssets, data: DozerWebData,
                  capability: WebBootstrapCapability, pollInterval: Duration, gate: UpgradeGate,
-                 listener: NIOAsyncChannel<Accepted, Never>, settings: WebSettingsStore) {
+                 listener: NIOAsyncChannel<Accepted, Never>, settings: WebSettingsStore, sessionsFile: URL?) {
         self.origin = origin
         self.settings = settings
         folderPicker = WebFolderPicker(environment: settings.environment)
@@ -98,7 +98,7 @@ public final class DozerWebServer: @unchecked Sendable {
         self.capability = capability
         self.listener = listener
         self.gate = gate
-        sessions = WebSessionStore(bootstrap: capability, limits: limits)
+        sessions = WebSessionStore(bootstrap: capability, limits: limits, persist: sessionsFile, port: origin.port)
         hub = SSEHub(maxClients: limits.maximumSSEClients, capacity: limits.maximumBufferedSSEEvents)
         tickets = WebTerminalTicketStore()
         terminals = WebTerminalHub()
@@ -110,16 +110,36 @@ public final class DozerWebServer: @unchecked Sendable {
         operations.onChange = { ops in terminals.operationsChanged(ops) }
     }
 
-    /// Bind the listener (loopback, ephemeral). `run()` then serves. `settings`: the settings file this
+    /// Bind the listener (loopback; the OS's port, or `address`'s reused one — 594 W18 — falling
+    /// back to the OS's when it is taken). `run()` then serves. `settings`: the settings file this
     /// UI reads and writes (591) — `doz ui` passes its own environment; the default reads no file
     /// (every setting at its default: tests that do not test settings never see a real one).
     public static func bind(data: DozerWebData, assets: WebAssets, version: String, limits: WebLimits = .standard,
                             settings: WebSettingsStore = WebSettingsStore(environment: [:]),
                             capability: WebBootstrapCapability = .make(), pollInterval: Duration = .seconds(3),
+                            address: WebLoopbackAddress = WebLoopbackAddress(), sessionsFile: URL? = nil,
                             group: EventLoopGroup = MultiThreadedEventLoopGroup.singleton) async throws -> DozerWebServer {
-        let address = WebLoopbackAddress()
         let gate = UpgradeGate()
-        let listener = try await ServerBootstrap(group: group)
+        let listener: NIOAsyncChannel<Accepted, Never>
+        do {
+            listener = try await listen(address, gate: gate, group: group)
+        } catch where address.port != 0 {
+            // 594 W18: the last port is taken after all (a race with its check): the OS picks.
+            listener = try await listen(WebLoopbackAddress(), gate: gate, group: group)
+        }
+        guard let port = listener.channel.localAddress?.port else {
+            try? await listener.channel.close()
+            throw WebConfigurationError.invalidOrigin
+        }
+        let server = DozerWebServer(origin: try WebOrigin(port: port), version: version, limits: limits, assets: assets, data: data,
+                                     capability: capability, pollInterval: pollInterval, gate: gate, listener: listener,
+                                     settings: settings, sessionsFile: sessionsFile)
+        gate.server = server
+        return server
+    }
+
+    private static func listen(_ address: WebLoopbackAddress, gate: UpgradeGate, group: EventLoopGroup) async throws -> NIOAsyncChannel<Accepted, Never> {
+        try await ServerBootstrap(group: group)
             .serverChannelOption(ChannelOptions.backlog, value: 64)
             .serverChannelOption(ChannelOptions.socketOption(.so_reuseaddr), value: 1)
             .childChannelOption(ChannelOptions.allowRemoteHalfClosure, value: false)
@@ -146,15 +166,6 @@ public final class DozerWebServer: @unchecked Sendable {
                     return Accepted(channel: child, upgrade: result)
                 }
             }
-        guard let port = listener.channel.localAddress?.port else {
-            try? await listener.channel.close()
-            throw WebConfigurationError.invalidOrigin
-        }
-        let server = DozerWebServer(origin: try WebOrigin(port: port), version: version, limits: limits, assets: assets, data: data,
-                                     capability: capability, pollInterval: pollInterval, gate: gate, listener: listener,
-                                     settings: settings)
-        gate.server = server
-        return server
     }
 
     /// 591 — the terminal socket's upgrade, in order (591.01-DESIGN.md §4.2): exact Host, Origin
@@ -179,6 +190,34 @@ public final class DozerWebServer: @unchecked Sendable {
 
     /// A fresh one-use link for this running server (`doz ui link`).
     public func newLink() async -> URL { await sessions.issue().launchURL(origin: origin) }
+
+    /// 594 W19: pages connected now (their event streams).
+    public var openPages: Int { hub.count }
+
+    /// 594 W19: a live session was kept from the last UI (a page of it may be open, retrying).
+    public func hasSessions() async -> Bool { await sessions.liveSessionCount > 0 }
+
+    /// 594 W19: wait up to `seconds` for a page to (re)connect its event stream; whether one did.
+    public func waitForPage(seconds: Double) async -> Bool {
+        let end = ContinuousClock.now + .milliseconds(Int(seconds * 1000))
+        while ContinuousClock.now < end {
+            if hub.count > 0 { return true }
+            try? await Task.sleep(for: .milliseconds(100))
+        }
+        return hub.count > 0
+    }
+
+    /// 594 W19: a line every open page shows as a toast ("doz ui restarted — 0.12.0-rc.4").
+    public func tellPages(_ text: String) { hub.broadcast("notice", ["text": text]) }
+
+    /// 594 W19: `doz ui link --rotate` / `doz ui --new-link` on a running UI — every session ends (each
+    /// open page is told to use the new link), then a fresh one-use link.
+    public func rotate() async -> URL {
+        await sessions.revokeAll()
+        for c in hub.all { c.finish(.rotated) }
+        await terminals.closeAll()
+        return await newLink()
+    }
 
     /// Serve until `close()`.
     public func run() async throws {
@@ -205,7 +244,8 @@ public final class DozerWebServer: @unchecked Sendable {
     }
 
     /// Stop: no new connections, every stream told `shutdown`, every terminal closed (1001), every
-    /// connection closed. Sessions and links die with the process.
+    /// connection closed. Links die with the process; sessions too, unless kept for the next UI on
+    /// the same port (594 W19, `WebSessionStore`'s `persist`).
     public func close() async {
         let open: [Channel] = lock.withLock {
             closing = true
@@ -628,6 +668,7 @@ public final class DozerWebServer: @unchecked Sendable {
         case .overflow: "resync"
         case .sessionEnded: "session-ended"
         case .shutdown: "shutdown"
+        case .rotated: "rotated"
         case .replaced: "replaced"
         case .clientGone, nil: nil
         }

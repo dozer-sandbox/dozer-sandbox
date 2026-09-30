@@ -251,6 +251,8 @@ public final class HostServer: @unchecked Sendable {
         case .console where req.follow == true:
             consoleFollow(conn, reader: reader, request: req)
         case .hostStop:
+            // 594 W18: the web UI reads why the last host exited from this log (`HostExitReason`).
+            HostLog.line("host stop requested: hibernating every sandbox, then exiting")
             Task.detached { [self] in await self.shutdown(prepare: true, reply: conn) }
         case .ping:
             Task.detached { [self] in

@@ -241,6 +241,8 @@ public enum SettingKey {
     public static let agentPrompt = "agent.prompt"
     /// 594 (owner ruling): the web UI may take an API key or a setup token (a masked field).
     public static let allowSecretEntry = "ui.allow_secret_entry"
+    /// 594 W19 (owner: "a new web page opening up every time i run doz ui"): when `doz ui` opens a tab.
+    public static let openBrowser = "ui.open_browser"
     /// 594: where the UI's new sandboxes get their workspace by default (`<projects_dir>/<name>`).
     public static let projectsDir = "defaults.projects_dir"
     public static let kernelPath = "kernel.path"
@@ -294,6 +296,9 @@ public struct DozerSettings: Sendable {
             .init("ui", "allow_secret_entry", .bool, .bool(true),
                   "The web UI takes an Anthropic API key or a Claude setup token in a masked field — an account (the setup wizard, Accounts & keys: stored exactly as doz account add stores it, the login keychain) or a sandbox's own key (its page: exactly as doz key set does, held by the host) — sent once, in a request body. false: the pages show the command instead. The UI can turn this off, never on.",
                   applies: .now),
+            .init("ui", "open_browser", .choice(["auto", "always", "never"]), .string("auto"),
+                  "When doz ui opens a browser tab: auto (only when no page of this store's UI is open — an open page reconnects by itself instead), always (every start), never (it prints the address; doz ui link opens a page). --open and --no-open override it.",
+                  applies: .nextCommand),
             .init("ui", "grid_live_tiles", .int(1...12), .int(8),
                   "All sessions: at most this many tiles show their session live at once (each is a terminal engine and a socket); the rest say so.",
                   applies: .now),

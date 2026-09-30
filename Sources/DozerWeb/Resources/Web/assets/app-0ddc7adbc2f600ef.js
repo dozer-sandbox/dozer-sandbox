@@ -754,12 +754,157 @@ function setLive(kind, text) {
   el.className = 'live' + (kind ? ' ' + kind : '');
   $('live-text').textContent = text;
 }
+// ── 594 W18: the host and the doz ui server, watched ─────────────────────────
+// The footer holds two facts: this page's link to the `doz ui` server (#live) and the host's state and
+// build (#host-live). A banner says each transition once: the host stopped (hibernated), died (its
+// sandboxes shut down), came back as another build; doz ui stopped (the page retries on its own).
+function banner(key, kind, parts, actions = []) {
+  const box = $('banners');
+  const el = h('div', { class: 'banner' + (kind ? ' ' + kind : ''), 'data-banner': key, role: kind === 'bad' ? 'alert' : 'status' },
+    h('div', { class: 'b-text' }, parts),
+    h('div', { class: 'b-acts' }, ...actions,
+      h('button', { type: 'button', class: 'b-x', title: 'Dismiss', 'aria-label': 'Dismiss', on: { click: () => el.remove() } }, '×')));
+  const old = box.querySelector('[data-banner="' + key + '"]');
+  if (old) old.replaceWith(el); else box.append(el);
+  return el;
+}
+function dropBanner(key) {
+  const el = $('banners').querySelector('[data-banner="' + key + '"]');
+  if (el) el.remove();
+}
+function plural(n, one, many) { return n + ' ' + (n === 1 ? one : many); }
+function sandboxLinks(names) {
+  return names.map((n) => h('a', { href: '#/sandbox/' + n, 'data-sandbox-link': n }, n));
+}
+/// The host's fact in the footer: from the last overview, or — while doz ui is away — what the page last
+/// knew, said as such.
+function renderHostFoot() {
+  const el = $('host-live');
+  if (!el) return;
+  const host = state.overview && state.overview.host;
+  let kind = '', text = '—';
+  if (host) {
+    const died = state.hostChange && state.hostChange.state === 'died' && !host.running;
+    if (host.running) { kind = 'on'; text = 'running · doz ' + (host.version || '?'); }
+    else if (died) { kind = 'bad'; text = 'died'; }
+    else { kind = 'warn'; text = 'stopped'; }
+  }
+  if (state.uiDown) { text = host ? 'last seen ' + text : 'unknown'; kind += ' stale'; }
+  el.className = 'live' + (kind ? ' ' + kind : '');
+  el.dataset.host = host ? (host.running ? 'running' : (state.hostChange && state.hostChange.state === 'died' ? 'died' : 'stopped')) : '';
+  $('host-text').textContent = text;
+  // One note, once per pair of builds: this UI and the host it talks to differ.
+  if (host && host.running && host.version && host.uiVersion && host.version !== host.uiVersion && !state.uiDown) {
+    const pair = host.uiVersion + '|' + host.version;
+    let seen = state.versionNoted === pair;
+    try { seen = seen || localStorage.getItem('doz.versionNoted') === pair; } catch (_) { /* no storage: once per page */ }
+    if (!seen) {
+      state.versionNoted = pair;
+      try { localStorage.setItem('doz.versionNoted', pair); } catch (_) { /* */ }
+      banner('version', 'warn', ['doz ui is ', h('code', null, host.uiVersion), ', the host is ', h('code', null, host.version),
+        ' — restart doz ui (Ctrl-C it, then ', h('code', null, 'doz ui'), ') so the page and the host are the same build.']);
+    }
+  }
+}
+function startHostButton() {
+  return btn('Start host', async (ev) => {
+    ev.currentTarget.disabled = true;
+    await act({ action: 'host-start' });
+  }, { small: true, primary: true, icon: 'play', title: 'Starts the store’s host the normal way (detached, as the CLI does)' });
+}
+/// SSE `host`: one transition of the host.
+function hostChanged(c) {
+  state.hostChange = c;
+  const n = c.sandboxes.length;
+  if (c.state === 'running') {
+    dropBanner('host-stopped');
+    if (c.previousVersion) {
+      banner('host-build', '', ['The host is now ', h('code', null, 'doz ' + c.version), ' (was ', h('code', null, c.previousVersion), ').']);
+    }
+  } else if (c.state === 'stopped') {
+    const why = c.reason ? ' (' + c.reason + ')' : '';
+    banner('host-stopped', 'warn', n
+      ? ['The doz host stopped' + why + ' — your sandboxes were hibernated: ', ...sandboxLinks(c.sandboxes),
+         h('span', { class: 'muted' }, ' Waking one starts a host again, as the CLI does.')]
+      : ['The doz host stopped' + why + '. Nothing was running. ', h('span', { class: 'muted' }, 'Any action starts a host again, as the CLI does.')],
+      [startHostButton()]);
+  } else {
+    banner('host-died', 'bad', n
+      ? ['The doz host died — ' + plural(n, 'sandbox was', 'sandboxes were') + ' running; ' + (n === 1 ? 'it is' : 'they are') +
+         ' shut down (restart ' + (n === 1 ? 'it' : 'them') + '): ', ...sandboxLinks(c.sandboxes)]
+      : ['The doz host died (killed or crashed). No sandbox was running.'],
+      state.overview && state.overview.host.running ? [] : [startHostButton()]);
+  }
+  // Every page's phases follow at once (the grid and the sandbox pages too).
+  refreshNav();
+  liveRefresh();
+}
+/// What a live change re-renders: not Settings (a half-typed value), Operations (its own events) or the
+/// onboarding wizard (its own), nor a page whose masked key field is being filled in.
+function liveRefresh() {
+  const typing = [...document.querySelectorAll('[data-secret]')].some((e) => e.value);
+  if (state.view !== 'settings' && state.view !== 'operations' && state.view !== 'onboarding' && !typing) refresh(false);
+}
+/// The doz ui server went away (it said so, or the stream broke): keep what the page shows, say so, and
+/// retry — the next doz ui listens on the same port when it can and keeps its pages' sessions (594 W19:
+/// `<store>/ui.sessions`), so the page finds it by itself, still signed in. When the session did not carry
+/// over (another port, `--new-link`, expired) the page asks for a new link.
+function uiLost(said) {
+  if (state.signedOut) return;
+  if (state.es) { state.es.close(); state.es = null; }
+  state.uiDown = true;
+  setLive('bad', said ? 'stopped — retrying' : 'reconnecting…');
+  renderHostFoot();
+  const host = state.overview && state.overview.host;
+  const last = !host ? 'The page never heard from the host.'
+    : host.running ? 'The host was running (doz ' + (host.version || '?') + (host.liveSandboxes.length ? ', ' + plural(host.liveSandboxes.length, 'sandbox', 'sandboxes') + ' live' : '') + ') when this page last heard — doz ui stopping does not stop it.'
+    : 'The host was not running when this page last heard.';
+  if (said || state.uiDownSince) {
+    banner('ui-stopped', 'bad', ['The doz ui process stopped. This page retries every second and reconnects by itself, still signed in, when ',
+      h('code', null, 'doz ui'), ' runs again. ', h('span', { class: 'muted', 'data-host-last': '' }, last)]);
+  }
+  state.uiDownSince = state.uiDownSince || Date.now();
+  if (state.uiRetry) return;
+  const tick = async () => {
+    state.uiRetry = null;
+    if (state.signedOut) return;
+    let r = null;
+    try { r = await fetch('/api/v1/session', { credentials: 'same-origin', cache: 'no-store' }); } catch (_) { /* not listening */ }
+    if (r && r.ok) {
+      // doz ui is back and this page is still signed in (594 W19: a restarted doz ui keeps its pages'
+      // sessions on the same port) — or the stream only broke: carry on, silently.
+      try { adopt(await r.json()); } catch (_) { /* the session stands; its details next time */ }
+      state.uiDown = false;
+      state.uiDownSince = null;
+      dropBanner('ui-stopped');
+      connect();
+      return;
+    }
+    if (r && r.status === 401) {
+      // doz ui is back, but this page's session did not carry over (a new link was made, the port
+      // changed, or the session expired).
+      state.uiDown = false;
+      state.uiDownSince = null;
+      dropBanner('ui-stopped');
+      signedOut('doz ui restarted, and this page’s sign-in did not carry over (a new link was made, or it listens on another port). Open the new link: run doz ui link.');
+      return;
+    }
+    // Still away. After a while, show the banner even for a broken stream that was never announced.
+    if (!$('banners').querySelector('[data-banner="ui-stopped"]') && Date.now() - state.uiDownSince > 4000) { uiLost(true); return; }
+    state.uiRetry = setTimeout(tick, 1000);
+  };
+  state.uiRetry = setTimeout(tick, said ? 700 : 500);
+}
+
 function connect() {
   if (state.signedOut) return;
   const es = new EventSource('/api/v1/stream');
   state.es = es;
   es.addEventListener('hello', async () => {
     setLive('on', 'live');
+    state.uiDown = false;
+    state.uiDownSince = null;
+    dropBanner('ui-stopped');
     try { for (const o of await api('operations')) state.ops.set(o.id, o); renderOps(); } catch (_) { /* */ }
     loadPreparations();
     refreshNav();
@@ -769,10 +914,11 @@ function connect() {
   // value; nor is Operations (its own events keep it current), nor the onboarding wizard (its own).
   es.addEventListener('changed', () => {
     refreshNav();
-    // (Nor a page whose masked key field is being filled in: a re-render would drop it.)
-    const typing = [...document.querySelectorAll('[data-secret]')].some((e) => e.value);
-    if (state.view !== 'settings' && state.view !== 'operations' && state.view !== 'onboarding' && !typing) refresh(false);
+    liveRefresh();
   });
+  // 594 W19: a line from doz ui itself ("doz ui restarted — 0.12.0-rc.4").
+  es.addEventListener('notice', (ev) => { try { toast(JSON.parse(ev.data).text, false); } catch (_) { /* */ } });
+  es.addEventListener('host', (ev) => { try { hostChanged(JSON.parse(ev.data)); } catch (_) { /* ignore a malformed line */ } });
   // 594: the host's image preparations, while any runs (and once when the last ends).
   es.addEventListener('preparations', (ev) => {
     try { state.preps = JSON.parse(ev.data); } catch (_) { return; }
@@ -794,15 +940,16 @@ function connect() {
     let reason = '';
     try { reason = JSON.parse(ev.data).reason; } catch (_) { /* */ }
     if (reason === 'session-ended') { signedOut('The session ended.'); return; }
-    if (reason === 'shutdown') { setLive('bad', 'the UI stopped'); notice('The doz ui process stopped. Start it again with doz ui.', true); return; }
+    if (reason === 'shutdown') { uiLost(true); return; }
+    // 594 W19: `doz ui --new-link` / `doz ui link --rotate` ended every session.
+    if (reason === 'rotated') { signedOut('A new link was made for this UI (doz ui --new-link, or doz ui link --rotate): every page signed out. Open the new link — or run doz ui link.'); return; }
     setTimeout(connect, 500);
   });
+  // A broken stream (doz ui killed, the Mac asleep): the page's own retry, never the browser's
+  // (which would hammer a new doz ui with a session it does not know).
   es.onerror = () => {
-    if (state.signedOut) return;
-    setLive('bad', 'reconnecting…');
-    if (es.readyState === EventSource.CLOSED) {
-      setTimeout(async () => { try { await api('session'); connect(); } catch (_) { /* signedOut() */ } }, 3000);
-    }
+    if (state.signedOut || state.es !== es) return;
+    uiLost(false);
   };
 }
 function notice(text, bad) {
@@ -826,6 +973,7 @@ function refreshNav() {
 function renderNavSandboxes() {
   // 594 (owner: "add a link to Onboarding in the left nav"): a dot until this store is onboarded.
   if (state.overview) $('onb-dot').hidden = state.overview.onboarded !== false;
+  renderHostFoot();
   const list = state.overview ? state.overview.sandboxes.slice().sort((a, b) => a.name.localeCompare(b.name)) : [];
   $('nav-sandboxes').replaceChildren(...list.map((s) => h('a', {
     href: '#/sandbox/' + s.name, class: 'nav-child' + (state.view === 'sandbox' && state.param === s.name ? ' active' : ''),
@@ -1010,7 +1158,10 @@ function hostCard(host) {
     return card('Host', 'running', 'pid ' + host.pid + ' · ' + (host.version || '') + ' · since ' + when(host.startedAt) +
       (host.idleSeconds ? ' · idle ' + Math.round(host.idleSeconds) + ' s' : ''));
   }
-  return card('Host', 'not running', host.recoveryPending.length ? 'recovery pending: ' + host.recoveryPending.join(', ') : 'nothing is running — shown from the store');
+  // 594 W18: every action starts a host on demand (as the CLI does); this starts one on its own.
+  const c = card('Host', 'not running', host.recoveryPending.length ? 'recovery pending: ' + host.recoveryPending.join(', ') : 'nothing is running — shown from the store');
+  c.append(h('div', { class: 'n' }, startHostButton()));
+  return c;
 }
 
 // ── views ───────────────────────────────────────────────────────────────────

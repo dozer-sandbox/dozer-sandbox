@@ -314,7 +314,9 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
 ### The web layer (`doz ui`, 590) — its security design is workspace `changes/590-*/590.01-DESIGN.md`
 
 - **Loopback only, an OS-picked port, nothing else representable** (`WebLoopbackAddress`). No flag,
-  environment variable or config may bind another address or a fixed port.
+  environment variable or config may bind another address or a fixed port. The one exception (594
+  W18/W19): the port the OS gave this store's LAST UI (`<store>/ui.port`), asked for again when
+  nothing listens there (`WebLoopbackAddress(reusing:)`: ≥ 1024, else the OS picks).
 - **Every request: exact `Host` first** (`127.0.0.1:<port>`, the DNS-rebinding defence), then the
   closed route table, then the session. `Origin`, when present, must be exact (required on every
   unsafe method); `Sec-Fetch-Site` other than `same-origin`/`none` is refused. No response carries
@@ -373,6 +375,23 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
 - **Edit `WebSource/`, then `make web-assets`, and commit `Resources/Web`.** `make web-assets-check`
   (run by `make test` and `Scripts/audit.sh`) fails on drift; `WebAssets` refuses to start on a
   digest mismatch. `make install-cli` copies `DozerKit_DozerWeb.bundle` beside the binary.
+- **The UI watches the host** (594 W18, `WebHostWatch` — pure, unit-tested): before each overview the
+  monitor PROBES without starting anything (`hostProbe`: the lock, a stale `host.pid` = killed, records
+  left live, the last host's own exit line in `host.log` — `HostExitReason`), because the overview
+  starts a host to recover a crash and that gap is the only thing that tells a kill from a clean stop.
+  Each transition — running (with `previousVersion` on another build), stopped (hibernated), died
+  (the sandboxes that ran) — is told ONCE as SSE `host` (also to Activity). The poll never autostarts
+  a host that holds its lock (it may be stopping: an open page must never undo `doz host stop`), and a
+  terminal's REattach waits for a host rather than start one. "Start host" is the `host-start` action
+  = the CLI's `ping` with autostart (HostLauncher, detached); `host stop` stays out of the browser.
+- **One UI per store, one tab** (594 W19): `ui.sock` answers `link`, `rotate` and `status` (origin +
+  open pages — no key). `doz ui` while one runs opens a tab only per `ui.open_browser` (auto: when no
+  page is open) / `--open` / `--no-open`. A restarted UI binds the last port and loads
+  `<store>/ui.sessions` (0600: SHA-256 of each cookie + its CSRF token, for that port only) so an open
+  page reconnects silently; it then waits ≤ 2.5 s for a page before opening a tab, and tells it
+  (`notice`). `--new-link` / `ui link --rotate` revoke every session (`end: rotated`). The reasoning is
+  on `WebSessionStore` — keep it with any change. `DOZ_TEST_BROWSER_LOG` (records the origin a tab
+  would open, never the link) and `DOZ_TEST_VERSION` (stamps a build) are the probes' seams.
 - **SSE is bounded**: ≤ `maximumSSEClients` streams (a same-session reconnect replaces its oldest),
   a bounded queue per stream that ends in `resync` (never a silent drop), heartbeats that re-check
   the session.
