@@ -99,6 +99,23 @@ nav a.active { background: var(--ink); color: var(--bg); }
 .banner .b-acts { display: flex; gap: 8px; align-items: center; flex: none; }
 .banner .b-x { background: none; border: 0; color: var(--muted); cursor: pointer; font-size: 16px; line-height: 1; padding: 2px 4px; }
 .banner .b-x:hover { color: var(--ink); }
+/* 594 W21: doz ui is gone — the page is paused under an overlay; the banner strip stays IN FRONT of it
+   (and outside the inert parts), pinned to the top of the viewport. */
+.ui-overlay { position: fixed; inset: 0; z-index: 50; background: rgba(8, 10, 14, 0.55); display: flex;
+              align-items: center; justify-content: center; padding: 16px; }
+.ui-overlay[hidden] { display: none; }
+.ui-overlay:focus { outline: none; }
+body.ui-paused #banners { position: sticky; top: 12px; z-index: 60; }
+body.ui-paused .toasts { z-index: 70; }
+.ui-ov-card { background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: 12px; padding: 22px 24px;
+              max-width: 520px; width: 100%; box-shadow: 0 16px 48px rgba(0, 0, 0, 0.35); }
+.ui-ov-head { display: flex; align-items: center; gap: 12px; }
+.ui-ov-head h2 { margin: 0; font-size: 17px; }
+.ui-ov-card p { margin: 10px 0 0; }
+.ui-ov-acts { margin-top: 18px; display: flex; justify-content: flex-end; }
+.ui-ov-spin { width: 18px; height: 18px; flex: none; border-radius: 50%; border: 2.5px solid var(--accent); border-top-color: transparent;
+              animation: tc-spin 0.9s linear infinite; }
+@media (prefers-reduced-motion: reduce) { .ui-ov-spin { animation-duration: 3s; } }
 .version { font-variant-numeric: tabular-nums; }
 .link-button { background: none; border: 0; color: var(--accent); padding: 0; cursor: pointer; font: inherit; text-align: left; }
 

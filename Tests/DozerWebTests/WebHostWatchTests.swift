@@ -107,6 +107,40 @@ final class WebHostWatchTests: XCTestCase {
         XCTAssertNil(HostExitReason.parse(""))
     }
 
+    // MARK: W20 — which side is older
+
+    func testVersionsCompareAsSemverWithPreReleases() {
+        let ordered = ["0.9.9", "0.10.0-alpha", "0.10.0-alpha.1", "0.10.0-alpha.beta", "0.10.0-beta.2", "0.10.0-beta.11",
+                       "0.10.0-rc.1", "0.10.0", "0.12.0-rc.3", "0.12.0-rc.5", "0.12.0", "0.12.1", "1.0.0"]
+        for (i, a) in ordered.enumerated() {
+            for (j, b) in ordered.enumerated() {
+                let want: ComparisonResult = i < j ? .orderedAscending : i > j ? .orderedDescending : .orderedSame
+                XCTAssertEqual(WebVersion.compare(a, b), want, "\(a) vs \(b)")
+            }
+        }
+        XCTAssertEqual(WebVersion.compare("0.12.0+abc", "0.12.0"), .orderedSame, "build metadata is ignored")
+        for bad in ["", "0.12", "v0.12.0", "0.12.0-", "0.12.0-rc..1", "0.12.x", "dev"] {
+            XCTAssertNil(WebVersion.compare(bad, "0.12.0"), bad)
+        }
+    }
+
+    func testTheMismatchNoteAdvisesTheOlderSide() {
+        // The owner's case: the UI is rc.5, the host still rc.3 → stop the HOST.
+        let host = WebVersionNote.make(ui: "0.12.0-rc.5", host: "0.12.0-rc.3")
+        XCTAssertEqual(host?.older, "host")
+        XCTAssertEqual(host?.text, "The host is still 0.12.0-rc.3 — doz host stop (sandboxes hibernate) and the next action runs 0.12.0-rc.5.")
+        // The UI older → restart doz ui.
+        let ui = WebVersionNote.make(ui: "0.12.0-rc.5", host: "0.12.0")
+        XCTAssertEqual(ui?.older, "ui")
+        XCTAssertEqual(ui?.text, "doz ui is 0.12.0-rc.5, the host is 0.12.0 — restart doz ui (Ctrl-C it, then doz ui) so the page and the host are the same build.")
+        XCTAssertNil(WebVersionNote.make(ui: "0.12.0", host: "0.12.0"))
+        XCTAssertNil(WebVersionNote.make(ui: "0.12.0", host: nil))
+        XCTAssertNil(WebVersionNote.make(ui: "0.12.0+a", host: "0.12.0+b"), "the same release")
+        let odd = WebVersionNote.make(ui: "0.12.0", host: "dev")
+        XCTAssertNil(odd?.older)
+        XCTAssertEqual(odd?.text, "doz ui is 0.12.0, the host is dev — different builds.")
+    }
+
     // MARK: the real probe, on a scratch store
 
     func testTheProbeNeverStartsAHostAndSeesAStalePID() throws {

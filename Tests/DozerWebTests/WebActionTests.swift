@@ -42,6 +42,7 @@ final class WebActionTests: XCTestCase {
         "onboard": #"{"action":"onboard","images":["claude-code","lab"]}"#,
         "prepare-cancel": #"{"action":"prepare-cancel","images":["pi"]}"#,
         "host-start": #"{"action":"host-start"}"#,
+        "host-restart": #"{"action":"host-restart"}"#,
     ]
 
     /// Everything the web layer may send to the host — and, as important, what it may never.
@@ -50,7 +51,32 @@ final class WebActionTests: XCTestCase {
         .pointTake, .pointRevert, .pointFork, .pointRm, .pointSaveImage, .imageBake, .imageRm, .netPolicy,
         .keyPolicy, .keyRm, .accountUse, .accountDefault, .accountKeepalive, .accountVerify, .accountRemove,
         .templateCreate, .duplicate, .onboard, .prepareCancel, .ping,
+        // 594 W20: only as Restart host, which the data source refuses unless the host is OLDER.
+        .hostStop,
     ]
+
+    /// 594 W20: "Restart host" — no fields; `host stop` + a start of this UI's build, refused by the
+    /// data source unless the running host is an older build (and by the fake, which has no host).
+    func testRestartHostIsTheOnlyHostStopAndItIsGuarded() async throws {
+        let a = try decode(Self.samples["host-restart"]!)
+        XCTAssertEqual(a, .hostRestart)
+        XCTAssertEqual(a.hostOp, .hostStop)
+        XCTAssertNil(a.sandbox)
+        XCTAssertEqual(a.label, "host-restart")
+        invalid(#"{"action":"host-restart","sandbox":"a"}"#)
+        invalid(#"{"action":"host-stop"}"#)
+        XCTAssertTrue(WebOperations.summary(.hostRestart, .null).contains("hibernated"))
+        // A store with no host: nothing to restart (and nothing is started).
+        let dir = URL(fileURLWithPath: "/tmp/doz-hr-\(getpid())-\(UInt32.random(in: 0...UInt32.max))")
+        let store = DozerStore(root: dir)
+        try store.ensureDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let data = HostWebData(store: store, version: "0.12.0") { [] }
+        do { _ = try await data.restartHost { _ in }; XCTFail("no host") } catch {
+            XCTAssertTrue(HostError.from(error).message.contains("no host is running"))
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: store.socket.path), "nothing started")
+    }
 
     /// 594 W18: "Start host" — the host's `ping` (sent with autostart like every action), nothing more.
     func testStartHostIsAPingWithNoFields() throws {
@@ -128,8 +154,9 @@ final class WebActionTests: XCTestCase {
         }
         XCTAssertEqual(ops.count, Set(ops).count, "one action per HostOp")
         // 594 W18: `ping` is reachable — as "Start host" (a status read that starts a host the way
-        // every action does); `host stop` never is.
-        for forbidden: HostOp in [.exec, .attach, .keySet, .accountAdd, .hostStop, .events] {
+        // every action does); `host stop` only as W20's guarded Restart host.
+        XCTAssertEqual(Self.samples.filter { (try? decode($0.value).hostOp) == .hostStop }.map(\.key), ["host-restart"])
+        for forbidden: HostOp in [.exec, .attach, .keySet, .accountAdd, .events] {
             XCTAssertFalse(ops.contains(forbidden), "\(forbidden) must never be reachable from the browser")
         }
         XCTAssertEqual(WebAction.lifecycleOps["hibernate"], .hibernate)

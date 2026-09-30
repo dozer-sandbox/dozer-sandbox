@@ -46,6 +46,10 @@ public enum WebAction: Equatable, Sendable {
     /// starts the normal detached way (`HostLauncher`), exactly as the CLI's first command starts one.
     /// Starting is all it does (`host stop` stays out of the browser).
     case hostStart
+    /// 594 W20: "Restart host" — the CLI's `host stop`, then a host of this UI's build (`HostLauncher`),
+    /// and ONLY while the running host is an OLDER build than the UI (`HostWebData.restartHost`
+    /// refuses anything else). The one way `host-stop` is reachable from the browser.
+    case hostRestart
 
     public static let lifecycleOps: [String: HostOp] = [
         "start": .start, "wake": .wake, "pause": .pause, "resume": .resume, "sleep": .sleep, "hibernate": .hibernate,
@@ -62,7 +66,7 @@ public enum WebAction: Equatable, Sendable {
              .pointFork(let n, _, _), .pointRemove(let n, _), .pointSaveImage(let n, _, _, _), .netPolicy(let n, _), .keyPolicy(let n, _),
              .keyRemove(let n, _), .accountUse(let n, _), .templateCreate(let n, _, _, _), .duplicate(let n, _, _, _):
             return n
-        case .imageBake, .imageRemove, .accountDefault, .accountKeepalive, .accountVerify, .accountRemove, .onboard, .prepareCancel, .hostStart:
+        case .imageBake, .imageRemove, .accountDefault, .accountKeepalive, .accountVerify, .accountRemove, .onboard, .prepareCancel, .hostStart, .hostRestart:
             return nil
         }
     }
@@ -90,6 +94,7 @@ public enum WebAction: Equatable, Sendable {
     /// A short label for the progress line ("hibernate lab1").
     public var label: String {
         if self == .hostStart { return "host-start" }
+        if self == .hostRestart { return "host-restart" }
         let r = hostRequest
         return [r.op.rawValue, r.name ?? r.image ?? r.account].compactMap { $0 }.joined(separator: " ")
     }
@@ -195,6 +200,8 @@ public enum WebAction: Equatable, Sendable {
             return r
         case .hostStart:
             return HostRequest(.ping)
+        case .hostRestart:
+            return HostRequest(.hostStop)
         }
     }
 
@@ -230,6 +237,7 @@ public enum WebAction: Equatable, Sendable {
             "onboard": ["images"],
             "prepare-cancel": ["images"],
             "host-start": [],
+            "host-restart": [],
         ]
         for (verb, op) in lifecycleOps { f[verb] = [.reset, .rm].contains(op) ? ["sandbox", "confirm"] : ["sandbox"] }
         return f
@@ -317,6 +325,8 @@ public enum WebAction: Equatable, Sendable {
             a = .prepareCancel(try f.builtInImages("images"))
         case "host-start":
             a = .hostStart
+        case "host-restart":
+            a = .hostRestart
         default:
             guard let op = lifecycleOps[verb] else { throw Invalid("unknown action") }
             a = .lifecycle(op, name: try f.sandbox("sandbox"))
