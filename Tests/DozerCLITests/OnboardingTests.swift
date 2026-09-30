@@ -543,6 +543,22 @@ final class OnboardingTests: XCTestCase {
         XCTAssertTrue(Uninstall.looksLikeStore(s))
     }
 
+    /// 594 W12: doz_project.yaml says when each key applies and what each network means, and still parses.
+    func testTheProjectFileSaysWhenEachKeyApplies() throws {
+        let p = DozerProject(name: "web", image: "claude-code", cpus: 4, memoryMiB: 4096, network: "agent")
+        let text = p.render()
+        for s in ["image, cpus, memory, network nat/none: when the sandbox is MADE", "network agent/bake/locked/open: at the next doz up, live",
+                  "account: doz account use NAME ACCOUNT", "sessions: every doz up", "#   locked — proxied: nothing leaves the sandbox",
+                  "#   nat    — a real network interface", "cpus: 4                     # when made"] {
+            XCTAssertTrue(text.contains(s), s)
+        }
+        let back = try DozerProject.parse(text)
+        XCTAssertEqual(back.cpus, 4)
+        XCTAssertEqual(back.memoryMiB, 4096)
+        XCTAssertEqual(back.image, "claude-code")
+        XCTAssertEqual(try DozerProject.parse(DozerProject(name: "a", image: "lab").render()).image, "lab")
+    }
+
     /// 594 W10: the sandboxes' time zone — the Mac's (read now) or the setting's; the facts say it.
     func testTheTimeZoneFollowsTheMacOrTheSetting() throws {
         let none = DozerSettings(text: nil)

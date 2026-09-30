@@ -335,10 +335,49 @@ struct Up: AsyncParsableCommand {
 
     /// An existing project sandbox: its project's own prompt is kept in step with the file (it applies
     /// from the next session); one made from another folder is said.
+    /// 594 W12: each key of doz_project.yaml that differs from the existing sandbox, with when it
+    /// applies. cpus, memory and image are the VM's make-up: only a new sandbox gets them. A proxied
+    /// network's preset is applied now (live) unless the policy was edited since; nat/none are the VM's
+    /// network device (a new sandbox). The account applies from the next session (`doz account use`).
+    func projectDifferences(_ project: DozerProject, cfg: SandboxConfig, name: String) throws -> [String] {
+        var out: [String] = []
+        let remake = "applies only when the sandbox is made — doz rm \(name) && doz up recreates it (this folder, its /workspace, is kept)"
+        if let c = project.cpus, c != cfg.spec.cpus { out.append("cpus \(cfg.spec.cpus) → \(c) in \(DozerProject.fileName): \(remake)") }
+        if let m = project.memoryMiB, m != cfg.spec.memoryMiB {
+            out.append("memory \(Out.mib(cfg.spec.memoryMiB)) → \(Out.mib(m)) in \(DozerProject.fileName): \(remake)")
+        }
+        if project.image != cfg.image { out.append("image \(cfg.image) → \(project.image) in \(DozerProject.fileName): \(remake)") }
+        if let want = project.network, want != cfg.networkName {
+            let presets = ["agent", "bake", "locked", "open"]
+            if presets.contains(want), cfg.spec.network.policy != nil {
+                var q = HostRequest(.netPolicy, name: name)
+                let live = try? decode(try call(q, g), NetworkPolicy.self, g)
+                if let now = live?.preset, now != want {
+                    q.preset = want
+                    _ = try call(q, g)
+                    out.append("network \(now) → \(want) in \(DozerProject.fileName): applied now (live — the next connection is judged by it)")
+                } else if live?.preset == nil {
+                    out.append("network: \(DozerProject.fileName) says \(want), but \(name)'s policy was edited — kept; doz net policy \(name) --preset \(want) replaces it")
+                }
+            } else {
+                out.append("network \(cfg.networkName) → \(want) in \(DozerProject.fileName): nat and none are the VM's network device — \(remake)")
+            }
+        }
+        if let a = project.account, a != (cfg.account ?? "none") {
+            out.append("account \(cfg.account ?? "none") → \(a) in \(DozerProject.fileName): doz account use \(name) \(a) applies it (from the next session)")
+        }
+        return out
+    }
+
     func syncProject(_ project: DozerProject, file: URL, name: String) throws {
         guard let cfg = SandboxConfig.read(g.dozerStore.configFile(name)) else { return }
         if let made = cfg.project, made != file.path, !g.quiet {
             Out.stderr("[doz] \(name) was made from \(made), not this folder's \(DozerProject.fileName) — using it anyway\n")
+        }
+        // 594 W12: what the file says differently from the sandbox, and WHEN that applies — said, and
+        // applied where it can be now (a proxied network's preset, live).
+        for line in try projectDifferences(project, cfg: cfg, name: name) where !g.quiet && !g.json {
+            Out.stderr("[doz] \(line)\n")
         }
         // 594 W23: agent_sudo changed in the file → the sandbox's own choice follows it.
         if cfg.agentSudo != project.agentSudo {

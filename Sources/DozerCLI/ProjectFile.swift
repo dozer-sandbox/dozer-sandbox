@@ -217,14 +217,31 @@ struct DozerProject: Equatable {
         # `doz up` in this folder creates, starts or wakes the sandbox below and attaches to its first
         # session. This folder is shared at /workspace. Unknown keys are errors; a commented key takes
         # its default (doz config show). An image from a Dockerfile is not supported yet.
+        #
+        # When a change applies (594 W12) — `doz up` says what differs and what it did:
+        #   image, cpus, memory, network nat/none: when the sandbox is MADE — doz rm NAME && doz up
+        #     recreates it (this folder is kept);
+        #   network agent/bake/locked/open: at the next doz up, live (unless you edited the policy);
+        #   account: doz account use NAME ACCOUNT (from the next session);
+        #   sessions: every doz up; agent_prompt, agent_sudo: from the next session.
         version: 1
         name: \(name)
-        image: \(image)
+        image: \(image)                  # when made
 
         """
-        out += cpus.map { "cpus: \($0)\n" } ?? "# cpus: 2\n"
-        out += memoryMiB.map { "memory: \($0 % 1024 == 0 ? "\($0 / 1024)G" : "\($0)M")\n" } ?? "# memory: 2G\n"
-        out += network.map { "network: \($0)\n" } ?? "# network: agent            # agent, bake, locked, open (proxied), nat or none\n"
+        out += cpus.map { "cpus: \($0)                     # when made\n" } ?? "# cpus: 2                    # when made\n"
+        out += memoryMiB.map { "memory: \($0 % 1024 == 0 ? "\($0 / 1024)G" : "\($0)M")                 # when made\n" } ?? "# memory: 2G                 # when made\n"
+        out += network.map { "network: \($0)\n" } ?? "# network: agent\n"
+        out += """
+        #   agent  — proxied: Anthropic's API and sign-in, Claude Code's own hosts, GitHub, package registries
+        #   bake   — proxied: package registries only (what an image bake needs)
+        #   locked — proxied: nothing leaves the sandbox (DNS included)
+        #   open   — proxied: every host allowed, every connection still logged
+        #   nat    — a real network interface (vmnet), unfiltered and unlogged
+        #   none   — no network at all
+        #   (proxied: no network interface; every connection judged by the policy on the Mac and logged)
+
+        """
         out += account.map { "account: \(quoted($0))\n" } ?? "# account: default          # default (the store's), none, or an account name\n"
         if sessions.isEmpty {
             out += """

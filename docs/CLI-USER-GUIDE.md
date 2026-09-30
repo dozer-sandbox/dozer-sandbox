@@ -118,6 +118,14 @@ that sandbox — the folder is its `/workspace` — starts its `sessions` (the f
 others detached) and keeps the sandbox's own agent prompt in step with the file (it applies from the
 next session). Options given to `up` win over the file's, for a new sandbox.
 
+**When a change to the file applies** (the file's comments say it too): `image`, `cpus`, `memory`,
+and a `network` of `nat` or `none` are the VM's make-up — only a new sandbox gets them (`doz rm NAME
+&& doz up` recreates it; the folder is kept); a proxied `network` preset (`agent`, `bake`, `locked`,
+`open`) is applied by the next `doz up`, live — unless you edited the policy since; `account`: `doz
+account use NAME ACCOUNT`; `sessions` at every `doz up`; `agent_prompt` and `agent_sudo` from the next
+session. `doz up` says each difference and what it did ("cpus 2 → 4 in doz_project.yaml: applies only
+when the sandbox is made — …", "network agent → locked …: applied now (live …)").
+
 ```yaml
 # doz_project.yaml
 version: 1

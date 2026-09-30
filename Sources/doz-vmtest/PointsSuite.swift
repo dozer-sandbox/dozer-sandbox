@@ -81,4 +81,37 @@ func cliPointsSuite(binary: String) async {
     check(t.run(["shutdown", "pq", "--yes"], timeout: 120).code == 0, "shutdown pq")
     r = t.run(["run", "pq", "--detach", "--no-start", "--", "sleep", "1"])
     check(r.code != 0 && r.err.contains("`doz start pq` boots it"), "run --no-start on an off sandbox: refused")
+
+    // W12: doz up in a project folder says what differs from the sandbox, and when it applies —
+    // and applies a proxied preset now (live).
+    let folder = URL(fileURLWithPath: "/tmp/dzo-\(getpid())-pw")
+    try? FileManager.default.removeItem(at: folder)
+    try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: folder) }
+    let yaml = folder.appendingPathComponent("doz_project.yaml")
+    try? "version: 1\nname: pw\nimage: lab\ncpus: 1\nmemory: 512M\nnetwork: bake\n".write(to: yaml, atomically: true, encoding: .utf8)
+    func up() -> CLIRun {
+        let p = t.process(["up", "--detach"])
+        p.currentDirectoryURL = folder
+        let o = Pipe(), e = Pipe()
+        p.standardOutput = o
+        p.standardError = e
+        p.standardInput = FileHandle.nullDevice
+        let oc = PipeCollector(o.fileHandleForReading), ec = PipeCollector(e.fileHandleForReading)
+        try? p.run()
+        p.waitUntilExit()
+        oc.wait(5); ec.wait(5)
+        return CLIRun(code: p.terminationStatus, out: oc.text, err: ec.text, outData: oc.bytes)
+    }
+    r = up()
+    check(r.code == 0, "doz up in a project folder makes pw (\(r.code)): \(r.err.suffix(200))")
+    try? "version: 1\nname: pw\nimage: lab\ncpus: 2\nmemory: 1G\nnetwork: locked\n".write(to: yaml, atomically: true, encoding: .utf8)
+    r = up()
+    check(r.code == 0 && r.err.contains("cpus 1 → 2 in doz_project.yaml: applies only when the sandbox is made — doz rm pw && doz up recreates it"),
+          "doz up says cpus changed and when it applies")
+    check(r.err.contains("memory 512 MiB → 1 GiB in doz_project.yaml: applies only when the sandbox is made"), "…and memory")
+    check(r.err.contains("network bake → locked in doz_project.yaml: applied now (live"), "…and applies the network preset now")
+    check(t.run(["net", "policy", "pw"]).out.hasPrefix("pw: locked preset"), "pw's policy is locked")
+    r = up()
+    check(!r.err.contains("network bake → locked"), "the next doz up has nothing more to say about the network")
 }
