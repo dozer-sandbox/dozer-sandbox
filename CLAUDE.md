@@ -766,6 +766,17 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   feature: tmux passes OSC 52 out; the shim sends its marker to `$DOZ_TTY` when `$TMUX` is set, because
   tmux drops a sequence it does not know). The "already running" check compares the wrapped argv too.
   tmux is in `devBaselinePackages` and `labPackages` — a recipe change: W28's "older recipe" names it.
+- **The title and the Ctrl-] menu (B4)**: no reserved rows (owner ruling). The attach client pushes the
+  terminal's title (CSI 22;0 t) the first time it sets one, re-renders `TerminalTitle` each minute and
+  on every attach answer (a switch, a hold: the host's attach answer now carries `image`), and pops it
+  (CSI 23;0 t) with W13's restore; `TitleFilter` keeps the session's OSC 0/1/2 out while it does. The
+  menu: the FIRST detach-key press (any W16 encoding — `DetachKeyScanner` now returns what followed it
+  in the read) opens it when stdin AND stdout are terminals; while it shows, `writeSession` drops the
+  session's bytes (a notice waits in `pendingNotices`); closing it asks for a REPAINT. A second press
+  within 0.5 s or at the menu detaches. n/p/s set `switchTarget` and shut the socket: the main loop
+  reattaches THAT session in the same client. `MenuKey.decode` reads keys in plain, kitty CSI-u (a
+  release is not a press) and modifyOtherKeys form. The web pane's tab renders the same template
+  (`terminalTitle(t)` in app.js).
 - **Tests never touch the Mac**: `DOZ_TEST_PASTEBOARD=<file>` replaces pbcopy; `DOZ_TEST_OPEN_URL=<file>`
   replaces `/usr/bin/open` and plays the browser's last step (GET the callback on the Mac's port).
   A fake OAuth server must READ before it answers (busybox `nc -e`), as a real one does.

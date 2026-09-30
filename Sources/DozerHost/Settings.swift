@@ -31,6 +31,28 @@ public enum SettingType: Sendable, Equatable {
     case version
     /// 594 W10: `mac` (follow this Mac's zone) or an IANA zone name (`Australia/Sydney`).
     case timeZone
+    /// 599 (594.B4): a terminal title — text with `{sandbox}` `{session}` `{image}` `{time}` `{phase}`
+    /// (a closed set), ≤ 120 characters, no control character; `""` = leave the title alone.
+    case titleTemplate
+
+    /// The variables a title may use.
+    public static let titleVariables = ["sandbox", "session", "image", "time", "phase"]
+
+    /// Why `s` is not a title template, or nil.
+    public static func titleTemplateProblem(_ s: String) -> String? {
+        guard s.count <= 120 else { return "at most 120 characters" }
+        guard !s.unicodeScalars.contains(where: { $0.value < 0x20 || $0.value == 0x7F || (0x80...0x9F).contains($0.value) }) else {
+            return "no control characters"
+        }
+        var rest = Substring(s)
+        while let open = rest.firstIndex(of: "{") {
+            guard let close = rest[open...].firstIndex(of: "}") else { return "a { without its }" }
+            let name = String(rest[rest.index(after: open)..<close])
+            guard titleVariables.contains(name) else { return "{\(name)} is not a variable (they are {\(titleVariables.joined(separator: "} {"))})" }
+            rest = rest[rest.index(after: close)...]
+        }
+        return rest.contains("}") ? "a } without its {" : nil
+    }
 
     /// An IANA zone name this Mac knows (plain characters only — it becomes a guest file's content).
     public static func isTimeZoneName(_ s: String) -> Bool {
@@ -47,6 +69,7 @@ public enum SettingType: Sendable, Equatable {
         case .subnet: "IPv4 subnet, a.b.c.d/nn (\"\" = a free one)"
         case .version: "latest, or an exact version like 2.1.227"
         case .timeZone: "mac, or a time zone like Australia/Sydney"
+        case .titleTemplate: "a title with {sandbox} {session} {image} {time} {phase} (\"\" = leave the title alone)"
         }
     }
 
@@ -143,6 +166,9 @@ public struct SettingDefinition: Sendable {
         case (.timeZone, .string(let s)):
             guard s == "mac" || SettingType.isTimeZoneName(s) else { throw SettingsError("\(key) is mac, or a time zone like Australia/Sydney") }
             return v
+        case (.titleTemplate, .string(let s)):
+            if let why = SettingType.titleTemplateProblem(s) { throw SettingsError("\(key): \(why)") }
+            return v
         default:
             throw SettingsError("\(key) is a \(type.name), not a \(v.typeName)")
         }
@@ -163,6 +189,8 @@ public struct SettingDefinition: Sendable {
             return try validate(.int(i))
         case .choice, .path, .subnet, .version, .timeZone:
             return try validate(.string(t))
+        case .titleTemplate:
+            return try validate(.string(text))          // its spaces are its own
         }
     }
 
@@ -234,6 +262,8 @@ public enum SettingKey {
     public static let confirmShutdown = "ui.confirm_shutdown"
     public static let splitDefault = "ui.split_default"
     public static let terminals = "ui.terminals"
+    /// 599 (594.B4): the terminal title template.
+    public static let terminalTitle = "ui.terminal_title"
     public static let terminalFontSize = "ui.terminal_font_size"
     public static let theme = "ui.theme"
     public static let detailsOpen = "ui.details_open"
@@ -308,6 +338,9 @@ public struct DozerSettings: Sendable {
                   applies: .now),
             .init("ui", "terminals", .bool, .bool(true),
                   "Terminals in the browser. false: the UI opens none and refuses a terminal ticket (Terminal.app still works).",
+                  applies: .now),
+            .init("ui", "terminal_title", .titleTemplate, .string("{sandbox} · {session} · {time}"),
+                  "The title doz attach gives your terminal (window or tab) while attached, and a doz ui terminal's tab: {sandbox} {session} {image} {time} (this Mac's, HH:MM, refreshed each minute) {phase}. The terminal's own title comes back when you detach (where the terminal keeps a title stack: iTerm2, Ghostty, kitty, xterm). While doz sets it, a session's own title is not shown; \"\" leaves the title to the session.",
                   applies: .now),
             .init("ui", "terminal_font_size", .int(9...32), .int(13),
                   "The browser terminal's font size, in points (a terminal opened from now on).",
@@ -586,6 +619,7 @@ public struct DozerSettings: Sendable {
             case .subnet: kind = "subnet"
             case .version: kind = "version"
             case .timeZone: kind = "timezone"
+            case .titleTemplate: kind = "template"
             }
             var note: String?
             switch r.source {

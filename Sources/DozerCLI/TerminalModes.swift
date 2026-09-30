@@ -31,7 +31,11 @@ struct DetachKeyScanner: Sendable {
         codepoint = Int((0x41...0x5A).contains(c) ? c + 0x20 : c)
     }
 
-    enum Result: Equatable { case forward([UInt8]), detach(forwardFirst: [UInt8]) }
+    enum Result: Equatable {
+        case forward([UInt8])
+        /// 599: `after` — what the same read held after the key (B4's menu reads it as menu keys).
+        case detach(forwardFirst: [UInt8], after: [UInt8] = [])
+    }
 
     /// The bytes read from the terminal: what to forward, or the detach (with what came before it).
     mutating func scan(_ input: [UInt8]) -> Result {
@@ -41,7 +45,7 @@ struct DetachKeyScanner: Sendable {
         var i = 0
         while i < bytes.count {
             let b = bytes[i]
-            if b == key { return .detach(forwardFirst: out) }
+            if b == key { return .detach(forwardFirst: out, after: Array(bytes[(i + 1)...])) }
             guard b == 0x1B else { out.append(b); i += 1; continue }
             // ESC [ params final — params only digits ; :
             var j = i + 1
@@ -61,7 +65,7 @@ struct DetachKeyScanner: Sendable {
             let final = bytes[j]
             let params = String(decoding: bytes[start..<j], as: UTF8.self)
             switch classify(params, final: final) {
-            case .press: return .detach(forwardFirst: out)
+            case .press: return .detach(forwardFirst: out, after: Array(bytes[(j + 1)...]))
             case .release: i = j + 1                                                       // swallowed
             case .other: out += bytes[i...j]; i = j + 1
             }
@@ -87,6 +91,73 @@ struct DetachKeyScanner: Sendable {
         if final == UInt8(ascii: "~"), fields.count == 3, fields[0] == "27", Int(fields[2]) == codepoint, ctrlOnly(fields[1]) {
             return .press
         }
+        return .other
+    }
+}
+
+/// 599 (594.B4): while `doz attach` owns the terminal's title (`ui.terminal_title`), a session's own
+/// title sequences (OSC 0, 1, 2 — Claude Code sets one; tmux too) are taken out of what reaches the
+/// terminal. Everything else passes byte for byte; a sequence cut by a read is held until the next.
+struct TitleFilter: Sendable {
+    private enum State: Sendable { case ground, esc, oscNumber, title, titleEsc }
+    private var state: State = .ground
+    private var held: [UInt8] = []
+
+    mutating func feed<S: Sequence>(_ bytes: S) -> [UInt8] where S.Element == UInt8 {
+        var out: [UInt8] = []
+        for b in bytes {
+            switch state {
+            case .ground:
+                if b == 0x1B { held = [b]; state = .esc } else { out.append(b) }
+            case .esc:
+                if b == UInt8(ascii: "]") { held.append(b); state = .oscNumber }
+                else if b == 0x1B { out += held; held = [b] }
+                else { out += held + [b]; held = []; state = .ground }
+            case .oscNumber:
+                held.append(b)
+                if held.count == 3, [UInt8(ascii: "0"), UInt8(ascii: "1"), UInt8(ascii: "2")].contains(b) { continue }
+                if held.count == 4, b == UInt8(ascii: ";") { held = []; state = .title; continue }     // ESC ] 0|1|2 ;
+                out += held; held = []; state = .ground
+            case .title:
+                if b == 0x07 { state = .ground }
+                else if b == 0x1B { state = .titleEsc }
+                else if b == 0x18 || b == 0x1A { state = .ground }
+            case .titleEsc:
+                if b == UInt8(ascii: "\\") { state = .ground }
+                else { state = .ground; out += feed([0x1B, b]) }                                         // aborted: a new sequence
+            }
+        }
+        return out
+    }
+}
+
+/// 599 (594.B4): a key pressed at the Ctrl-] menu, in whatever encoding the session put the terminal in
+/// (plain, kitty CSI-u — a release is not a press —, modifyOtherKeys).
+enum MenuKey: Equatable, Sendable {
+    case char(Character)
+    case escape
+    case release
+    case other
+
+    static func decode(_ bytes: [UInt8]) -> MenuKey {
+        guard let first = bytes.first else { return .other }
+        if bytes == [0x1B] { return .escape }
+        if first == 0x1B, bytes.count >= 3, bytes[1] == UInt8(ascii: "["), let final = bytes.last {
+            let fields = String(decoding: bytes[2..<(bytes.count - 1)], as: UTF8.self).split(separator: ";", omittingEmptySubsequences: false).map(String.init)
+            var code: Int?, mods = "1"
+            if final == UInt8(ascii: "u") {
+                code = Int(fields.first?.split(separator: ":").first ?? "")
+                if fields.count > 1 { mods = fields[1] }
+            } else if final == UInt8(ascii: "~"), fields.count == 3, fields[0] == "27" {
+                code = Int(fields[2]); mods = fields[1]
+            }
+            guard let code else { return .other }
+            if mods.split(separator: ":").dropFirst().first == "3" { return .release }
+            if code == 27 { return .escape }
+            guard let s = UnicodeScalar(code), s.isASCII, code >= 0x20 else { return .other }
+            return .char(Character(s))
+        }
+        if first >= 0x20 && first < 0x7F { return .char(Character(UnicodeScalar(first))) }
         return .other
     }
 }

@@ -133,7 +133,7 @@ struct Sessions: AsyncParsableCommand {
 struct Attach: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         abstract: "Attach this terminal to a session (a paused or sleeping sandbox is woken).",
-        discussion: "Ctrl-] detaches (the session keeps running). Hibernating disconnects you; the client waits and reattaches when the sandbox runs again.")
+        discussion: "Ctrl-] opens a one-line menu (d detach · n next · p prev · s sessions · Esc back); Ctrl-] twice detaches (the session keeps running). The terminal's title is ui.terminal_title while attached. Hibernating disconnects you; the client waits and reattaches when the sandbox runs again.")
     @OptionGroup var g: GlobalOptions
     @Argument var name: String
     @Argument(help: "The session (default: the image's own — claude, pi or shell).") var session: String?

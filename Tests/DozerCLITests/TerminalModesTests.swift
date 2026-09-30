@@ -57,7 +57,7 @@ final class TerminalModesTests: XCTestCase {
     }
 
     func testCtrlBracketDetachesInEveryEncodingOnTheFirstPress() {
-        XCTAssertEqual(scan("ab\u{1D}cd"), .detach(forwardFirst: Array("ab".utf8)), "legacy 0x1D")
+        XCTAssertEqual(scan("ab\u{1D}cd"), .detach(forwardFirst: Array("ab".utf8), after: Array("cd".utf8)), "legacy 0x1D (599: what follows is kept for the menu)")
         for enc in ["\(esc)[93;5u",           // kitty, flags 1 (disambiguate) — Claude Code's
                     "\(esc)[93;5:1u",         // flags 3: event type press
                     "\(esc)[93;5:2u",         // a repeat
@@ -65,7 +65,7 @@ final class TerminalModesTests: XCTestCase {
                     "\(esc)[93;5;29u",        // flags 16: associated text
                     "\(esc)[93;69u",          // caps lock on (64 + ctrl 4 + 1)
                     "\(esc)[27;5;93~"] {      // xterm modifyOtherKeys 2
-            XCTAssertEqual(scan("x" + enc + "y"), .detach(forwardFirst: Array("x".utf8)), enc.debugDescription)
+            XCTAssertEqual(scan("x" + enc + "y"), .detach(forwardFirst: Array("x".utf8), after: Array("y".utf8)), enc.debugDescription)
         }
     }
 

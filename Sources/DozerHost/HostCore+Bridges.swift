@@ -182,6 +182,12 @@ extension HostCore {
 
     func sandboxObject(named name: String) -> Sandbox? { managed[name]?.sandbox }
 
+    /// 599 (594.B4): the image a sandbox was made from, as a title shows it (`claude-code`, a template's name).
+    func imageName(of name: String) -> String? {
+        guard let i = managed[name]?.config.image else { return nil }
+        return i.hasPrefix("custom:") ? String(i.dropFirst(7)) : i
+    }
+
     static func chars(_ data: Data) -> String {
         let n = String(decoding: data, as: UTF8.self).count
         return n == 1 ? "1 char" : "\(n) chars"

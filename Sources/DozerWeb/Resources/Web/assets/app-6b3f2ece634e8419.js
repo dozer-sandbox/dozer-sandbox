@@ -3248,6 +3248,25 @@ function coverAction(t) {
 // A key pressed on it wakes (or resumes) the sandbox — the frame only says that a key was pressed —
 // and once the sandbox runs, each pane becomes its live session IN PLACE (`goLive`).
 /// The sandbox's phase as this page last read it (its own page's detail, else the overview).
+/// 599 (594.B4): a terminal's tab says what `doz attach` puts in the terminal's title — ui.terminal_title
+/// ({sandbox} {session} {image} {time} {phase}; "" = the session's name, as before). {time} is this Mac's
+/// (the page runs on it), refreshed each minute.
+const TITLE_PHASES = { asleep: 'asleep', hibernated: 'hibernated', paused: 'paused', booting: 'starting', off: 'shut down' };
+function sandboxImage(name) {
+  if (state.sbx && state.sbx.name === name && state.sbx.d) return state.sbx.d.info.image || '';
+  const row = state.overview && state.overview.sandboxes.find((s) => s.name === name);
+  return row ? row.image || '' : '';
+}
+function terminalTitle(t) {
+  const tpl = String(setting('ui.terminal_title', '{sandbox} · {session} · {time}'));
+  if (!tpl) return t.session || '…';
+  const d = new Date();
+  const time = String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+  const phase = (t.state && t.state.phase) || sandboxPhase(t.sandbox) || '';
+  const vars = { sandbox: t.sandbox, session: t.session || '…', image: String(sandboxImage(t.sandbox)).replace(/^custom:/, ''),
+                 time, phase: TITLE_PHASES[phase] || phase };
+  return tpl.replace(/\{([a-z]+)\}/g, (m, k) => (k in vars ? vars[k] : m)).replace(/[\u0000-\u001f\u007f-\u009f]/g, '').slice(0, 200);
+}
 function sandboxPhase(name) {
   if (state.sbx && state.sbx.name === name && state.sbx.d) return state.sbx.d.info.phase;
   const row = state.overview && state.overview.sandboxes.find((s) => s.name === name);
@@ -3542,7 +3561,7 @@ function tabElement(t, pane) {
   // Tabs are numbered (1, 2, …) per sandbox, so a shared session can say which tab it is shared with.
   const order = pageTerminals(t.sandbox).map((x) => x.id);
   const num = order.indexOf(t.id) + 1;
-  const label = num + ' · ' + (t.session || '…');
+  const label = num + ' · ' + terminalTitle(t);
   const twins = t.session && !t.ended ? pageTerminals(t.sandbox).filter((o) => o.id !== t.id && !o.ended && o.session === t.session) : [];
   const shared = twins.length ? h('span', { class: 'tag shared', title: 'Two views of ONE session: what is typed in either shows in both' },
     'shared with tab ' + twins.map((o) => order.indexOf(o.id) + 1).join(', ')) : null;
@@ -3912,5 +3931,7 @@ setButton($('sign-out'), 'Sign out');
     }, 1000);
     setInterval(paintRowOps, 15000);
     setInterval(() => { for (const t of terminals.values()) paintCover(t); }, 30000);   // "asleep 7 min"
+    // 599 (594.B4): the tabs' {time}, at each minute.
+    setTimeout(() => { paintTabs(); setInterval(paintTabs, 60000); }, 60000 - (Date.now() % 60000) + 50);
   }
 })();

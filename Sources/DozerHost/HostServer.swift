@@ -383,6 +383,8 @@ public final class HostServer: @unchecked Sendable {
             let name = sandbox.spec.name
             // 594 (W17): the client's detach line names the shortest command that reattaches.
             let defaultSession: JSONValue = (await core.defaultSessionName(name)).map { .string($0) } ?? .null
+            // 599 (594.B4): the terminal title's {image}.
+            let imageName: JSONValue = (await core.imageName(of: name)).map { .string($0) } ?? .null
             var announced = false
             while !state.gone {
                 guard let phase = await core.phase(of: name) else {
@@ -413,7 +415,7 @@ public final class HostServer: @unchecked Sendable {
                         guard state.adopt(c) else { c.close(); return }
                         if !announced {
                             conn.send(.success(.object(["state": .string("attached"), "session": .string(session), "sandbox": .string(name),
-                                                        "defaultSession": defaultSession])))
+                                                        "defaultSession": defaultSession, "image": imageName])))
                             announced = true
                         }
                         await core.sessionAttached(name, session: session, ms: ms(since: t0))
@@ -439,7 +441,7 @@ public final class HostServer: @unchecked Sendable {
                 default:
                     if !announced {
                         conn.send(.success(.object(["state": .string("held"), "session": .string(session), "sandbox": .string(name),
-                                                    "defaultSession": defaultSession,
+                                                    "defaultSession": defaultSession, "image": imageName,
                                                     "phase": .string(phase.rawValue)])))
                         announced = true
                     }

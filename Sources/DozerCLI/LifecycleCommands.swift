@@ -287,8 +287,8 @@ struct Up: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         abstract: "Create the sandbox if it is missing, start or wake it, then attach (vagrant up / compose up).",
         discussion: """
-        Attaches to the image's session (claude, pi, or a bash shell), opening it when it is not running. Ctrl-] detaches; \
-        the session keeps running. With no NAME, in a folder with doz_project.yaml (doz init): that project's sandbox — \
+        Attaches to the image's session (claude, pi, or a bash shell), opening it when it is not running. Ctrl-] opens a menu \
+        (detach · next · prev · sessions), Ctrl-] twice detaches; the session keeps running. With no NAME, in a folder with doz_project.yaml (doz init): that project's sandbox — \
         the folder is its /workspace, and its sessions start (the first is attached).
         """)
 
@@ -391,7 +391,7 @@ struct Up: AsyncParsableCommand {
         }
         if !g.quiet {
             let how = started.changed ? String(format: "%@ in %.0f ms", started.phaseBefore == "off" ? "started" : "woke", started.milliseconds) : "running"
-            Out.stderr("[doz] \(name) \(how) — attaching to \(opened.session)\(key.map { " (\(describeKey($0)) detaches)" } ?? "")\n")
+            Out.stderr("[doz] \(name) \(how) — attaching to \(opened.session)\(key.map { " (\(describeKey($0)): the menu · twice: detach)" } ?? "")\n")
         }
         AttachClient.run(store: g.dozerStore, sandbox: name, session: opened.session, wake: true, detachKey: key, quiet: g.quiet)
     }

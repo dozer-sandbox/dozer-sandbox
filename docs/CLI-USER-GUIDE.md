@@ -281,7 +281,7 @@ preparation after 594 rebuilds the agent images once: they gained `sudo` and kee
 
 | | |
 |---|---|
-| `doz attach NAME [SESSION]` | Your terminal becomes that session (without SESSION: the sandbox's own — `claude`, `pi` or `shell`). **Ctrl-]** detaches on the first press, however the program has set up your terminal's keyboard (plain, the kitty keyboard protocol, xterm's modifyOtherKeys); `--detach-key ctrl-x` or `none` choose another. On the way out your terminal is put back as it was (mouse, paste and keyboard modes), and the line names the shortest command that comes back: `doz up` in the sandbox's project folder, `doz attach NAME` for its own session, else `doz attach NAME SESSION`. A paused or sleeping sandbox is woken first (`--no-wake` waits instead). If the sandbox hibernates while you are attached, the client waits and reattaches by itself when it wakes. |
+| `doz attach NAME [SESSION]` | Your terminal becomes that session (without SESSION: the sandbox's own — `claude`, `pi` or `shell`). **Ctrl-]** opens a one-line menu over the bottom row — `d detach · n next · p prev · s sessions · Esc back` — and **a second Ctrl-]** (or `d`) detaches, however the program has set up your terminal's keyboard (plain, the kitty keyboard protocol, xterm's modifyOtherKeys); `--detach-key ctrl-x` or `none` choose another (see "The title and the Ctrl-] menu"). On the way out your terminal is put back as it was (mouse, paste and keyboard modes), and the line names the shortest command that comes back: `doz up` in the sandbox's project folder, `doz attach NAME` for its own session, else `doz attach NAME SESSION`. A paused or sleeping sandbox is woken first (`--no-wake` waits instead). If the sandbox hibernates while you are attached, the client waits and reattaches by itself when it wakes. |
 | `doz run NAME [--session S] [-d] -- CMD …` | Open a **new** session running CMD and attach. It exits with CMD's exit code. There is no shell in front, so write `bash -lc '…'` if you want one. A sandbox that is off is started first (`--no-start` refuses instead). |
 | `doz exec NAME [--user U] [--workdir D] [-e K=V] [--timeout S] -- CMD …` | One-shot, no terminal: stdout, stderr and the exit code pass straight through (default timeout 120 s). On agent images it runs as the agent's user in `/workspace`; `--user root` for root. A paused or sleeping sandbox is woken and one that is off is **started** first (its progress on stderr; `--no-wake`, `--no-start` refuse instead); `--json` says so: `"started"`, `"woke"`, `"bootMilliseconds"`. So `doz create NAME … && doz exec NAME -- CMD` just works (or `doz create --start`). |
 | `doz sessions NAME [--screen SESSION [--vt]]` | The sandbox's sessions. While it is paused, asleep or hibernated they are listed from their **saved screens**, and nothing is woken. A shut-down sandbox has none ("no sessions — NAME is shut down"): Start boots it fresh, with new sessions. `--screen SESSION` prints that session's last saved screen as text; `--vt` writes its terminal bytes instead — to a file or a pipe (`> s.vt`, then `cat s.vt` in a terminal redraws it), never straight to a terminal. |
@@ -300,6 +300,24 @@ Saved screens exist only while you can wake the sandbox back: **shut down, reset
 that died with the VM — delete them**, and a shut-down sandbox shows no session screens anywhere (its
 sessions ended with the VM; Start boots it fresh). A session whose program exited has none either.
 Duplicate, fork and templates never copy them.
+
+### The title and the Ctrl-] menu
+
+doz keeps no rows of your terminal for itself. Instead:
+
+- **The title.** While attached, `doz attach` sets your terminal's own title (the window or tab) from
+  `ui.terminal_title` — by default `{sandbox} · {session} · {time}`, e.g. `webapp · claude · 14:05`;
+  the variables are `{sandbox}` `{session}` `{image}` `{time}` (this Mac's, refreshed each minute)
+  `{phase}`. When you detach, the terminal's previous title comes back (iTerm2, Ghostty, kitty and
+  xterm keep a title stack; Terminal.app keeps doz's until something sets another). While doz sets
+  it, the session's own title (Claude Code sets one) is not shown; `doz config set ui.terminal_title
+  ""` leaves the title to the session. A terminal's tab in `doz ui` shows the same text.
+- **The menu.** **Ctrl-]** draws one line over the bottom row: `d detach · n next · p prev · s
+  sessions · Esc back`. `n` / `p` move this same terminal to the sandbox's next / previous session;
+  `s` lists them (`1 shell* · 2 claude · …`) and a number switches; `Esc` (or any other key) goes back.
+  The screen is held while the menu shows and then redrawn cleanly from the session's own screen, so
+  nothing of the menu is left behind. A second **Ctrl-]** — quickly, or at the menu — detaches. With
+  a pipe for input (not a terminal), Ctrl-] detaches at once, as before.
 
 ## Session bridges
 
@@ -959,7 +977,7 @@ the others say when they apply (the next sandbox created, the next session, or a
 
 | Section | Settings |
 |---|---|
-| `[ui]` | `boot_view_on_start` (true), `confirm_shutdown` (true), `split_default` (`shell` · `watch` · `attach` · `dialog`), `terminals` (true), `terminal_font_size` (13), `theme` (`auto` · `light` · `dark`), `details_open` (true), `grid_live_tiles` (8, 1–12), `grid_tile_size` (`small` · `medium` · `large`), `progress` (`animated` · `plain`; `$DOZ_PROGRESS`, `--progress auto\|plain`), `open_browser` (`auto` · `always` · `never`; `doz ui --open\|--no-open` — when `doz ui` opens a tab; applies to the next `doz ui`) |
+| `[ui]` | `terminal_title` (`{sandbox} · {session} · {time}` — see "The title and the Ctrl-] menu"; `""` leaves the title to the session), `boot_view_on_start` (true), `confirm_shutdown` (true), `split_default` (`shell` · `watch` · `attach` · `dialog`), `terminals` (true), `terminal_font_size` (13), `theme` (`auto` · `light` · `dark`), `details_open` (true), `grid_live_tiles` (8, 1–12), `grid_tile_size` (`small` · `medium` · `large`), `progress` (`animated` · `plain`; `$DOZ_PROGRESS`, `--progress auto\|plain`), `open_browser` (`auto` · `always` · `never`; `doz ui --open\|--no-open` — when `doz ui` opens a tab; applies to the next `doz ui`) |
 | `[host]` | `idle_timeout_minutes` (5; `$DOZ_HOST_IDLE`), `boot_logs_kept` (5, 1–50; `$DOZ_BOOT_LOGS` — boots kept per sandbox for `doz console --boot N` and the Boot log), `screen_capture_minutes` (5, 0–1440; `$DOZ_SCREEN_CAPTURE` — how often a running sandbox's changed session screens are saved; 0 = only at pause, sleep and hibernate), `keepalive` (false — for a store that has not chosen with `doz account keepalive`) |
 | `[store]` | `path` (`--store`, `$DOZ_STORE`) |
 | `[claude]` | `permissions` (`skip` · `ask`) — Claude Code's own prompts in a claude-code sandbox; `-e DOZ_CLAUDE_PERMISSIONS=…` on `run`/`exec` still wins |
