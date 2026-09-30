@@ -133,6 +133,8 @@ public actor HostCore {
         let sb = try Sandbox(spec: cfg.spec)
         let m = Managed(sandbox: sb, config: cfg)
         managed[cfg.name] = m
+        sb.setAgentSudo(Self.agentSudo(cfg))
+        if !readOnly { sb.setTimeZone(Self.guestTimeZone()) }
         if !readOnly {
             let name = cfg.name
             let events = sb.events()
@@ -391,7 +393,7 @@ public actor HostCore {
         // state beside doz.json (never a VM, never a secret — like the UI's doz.toml), and a host is not
         // started to write it. With a host running, the host writes it (serialised with `rm`).
         if readOnly && !(r.op.isReadOnly || (r.op == .netPolicy && isPolicyQuery(r)) || r.op == .sessions || (r.op == .netLog && r.follow != true)
-                         || (r.op == .console && r.follow != true) || (r.op == .agentPrompt && r.prompt == nil && r.clearPrompt != true)
+                         || (r.op == .console && r.follow != true) || (r.op == .agentPrompt && r.prompt == nil && r.clearPrompt != true && r.agentSudo == nil && r.clearAgentSudo != true)
                          || r.op == .terminalLayoutSet || ([.resourcesRemove, .resourcesClean].contains(r.op) && r.dryRun == true)) {
             return .failure(HostError(.unavailable, "\(r.op.rawValue) needs the host"))
         }
@@ -469,7 +471,36 @@ public actor HostCore {
         r.preset == nil && (r.allow ?? []).isEmpty && (r.deny ?? []).isEmpty && (r.removeHosts ?? []).isEmpty
     }
 
+    /// 594 W23: the agent's passwordless sudo for a sandbox — its own choice, else the setting
+    /// `sandbox.agent_sudo` (read now: a changed setting applies at the next boot or session).
+    static func agentSudo(_ cfg: SandboxConfig, settings: @autoclosure () -> DozerSettings = .load()) -> Bool {
+        cfg.agentSudo ?? settings().bool(SettingKey.agentSudo)
+    }
+
+    /// 594 W10: the guest's time zone — `sandbox.timezone`: `mac` (this Mac's zone, read NOW, so a
+    /// wake after the Mac changed zone follows it) or a zone name. `DOZ_TEST_MAC_TIMEZONE` (a TEST
+    /// seam: a zone name, or a file holding one) stands in for the Mac's.
+    static func guestTimeZone(settings: DozerSettings = .load(),
+                              environment: [String: String] = ProcessInfo.processInfo.environment) -> GuestTimeZone? {
+        let v = settings.string(SettingKey.timeZone) ?? "mac"
+        guard v == "mac" else { return GuestTimeZone(named: v) }
+        return GuestTimeZone(named: macTimeZoneName(environment: environment))
+    }
+
+    static func macTimeZoneName(environment: [String: String] = ProcessInfo.processInfo.environment) -> String {
+        if let t = environment["DOZ_TEST_MAC_TIMEZONE"], !t.isEmpty {
+            if t.hasPrefix("/") { return (try? String(contentsOfFile: t, encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "UTC" }
+            return t
+        }
+        NSTimeZone.resetSystemTimeZone()        // a long-lived host: the Mac may have changed zone since
+        return NSTimeZone.system.identifier
+    }
+
     private func perform(_ r: HostRequest, emit: @escaping @Sendable (HostEvent) -> Void) async throws -> JSONValue {
+        if let n = r.name, let m = managed[n] {
+            m.sandbox.setAgentSudo(Self.agentSudo(m.config))
+            m.sandbox.setTimeZone(Self.guestTimeZone())
+        }
         switch r.op {
         case .ping:
             return try JSONValue(encoding: await status())
@@ -516,11 +547,11 @@ public actor HostCore {
             guard let l = TerminalLayout.read(store, m.name) else { return .null }
             return try JSONValue(encoding: l)
         case .openSession:
-            var opened = try await openSession(r)
+            var opened = try await openSession(r, emit: emit)
             opened.defaultSession = defaultSessionName(r.name)      // 594 (W17): the shortest reattach hint
             return try JSONValue(encoding: opened)
         case .exec:
-            return try JSONValue(encoding: try await exec(r))
+            return try JSONValue(encoding: try await exec(r, emit: emit))
         case .pointTake, .pointList, .pointRevert, .pointFork, .pointRm, .pointSaveImage:
             return try await point(r, emit: emit)
         case .imageList:
@@ -665,6 +696,7 @@ public actor HostCore {
             cfg.agentPromptMode = mode
         }
         cfg.project = o.project
+        cfg.agentSudo = o.agentSudo
         try cfg.write(store.configFile(name))
         let m = try adopt(cfg)
         metrics?.record(run: metricsRun, action: "create", sandbox: name, image: image, phaseAfter: "off", startedAt: Date(), durationMs: 0,
@@ -822,16 +854,34 @@ public actor HostCore {
         return settle - since
     }
 
-    /// Make sure `m` runs, waking a paused or sleeping sandbox when `wake` (never cold-booting one
-    /// that is off — that is `start`'s job, and it asks for nothing).
-    func ensureRunning(_ m: Managed, wake: Bool) async throws {
+    /// What `ensureRunning` had to do first (594 W27).
+    struct EnsureOutcome {
+        var started = false
+        var woke = false
+        var milliseconds: Double?
+    }
+
+    /// Make sure `m` runs, waking a paused or sleeping sandbox when `wake`, and — 594 W27, when `start`
+    /// (`doz exec`/`doz run` say so unless --no-start) — cold-starting one that is off or failed, exactly
+    /// as `start` does (the boot view, the kept boot log, the metrics row).
+    @discardableResult
+    func ensureRunning(_ m: Managed, wake: Bool, start: Bool = false,
+                       emit: @escaping @Sendable (HostEvent) -> Void = { _ in }) async throws -> EnsureOutcome {
+        // 594 W10: a wake by use (an attach, a terminal) follows the Mac's zone as it is now.
+        m.sandbox.setTimeZone(Self.guestTimeZone())
         let deadline = ContinuousClock.now + .seconds(300)
         while true {
             let p = await effectivePhase(m)
             let busy = await m.sandbox.status.busy
             switch p {
-            case .running where !busy: return
-            case .paused where wake && !busy: try await m.sandbox.resume(); return
+            case .running where !busy: return EnsureOutcome()
+            case .off where start && !busy, .failed where start && !busy:
+                let r = try await lifecycle(.start, name: m.name, emit: emit)
+                return EnsureOutcome(started: true, milliseconds: r.milliseconds)
+            case .paused where wake && !busy:
+                let t0 = ContinuousClock.now
+                try await m.sandbox.resume()
+                return EnsureOutcome(woke: true, milliseconds: ms(since: t0))
             case .asleep where wake && !busy, .hibernated where wake && !busy:
                 // 595: a wake by use reads the kernel and the guest init — a resource deletion waits for it.
                 diskOpsInFlight += 1
@@ -846,7 +896,7 @@ public actor HostCore {
                 }
                 await endBoot(m, error: nil)
                 finishAction(m, row, t0, ok: true, phaseAfter: "running", detail: ["trigger": "use"])
-                return
+                return EnsureOutcome(woke: true, milliseconds: ms(since: t0))
             case .off, .failed:
                 throw HostError(.invalidPhase, "\(m.name) is \(PhaseName.label(p)) — `doz start \(m.name)` boots it")
             case .paused, .asleep, .hibernated:
@@ -1041,11 +1091,18 @@ public actor HostCore {
     /// ui` session; or two quick `doz run`) both saw "not running", both started `deckhold
     /// serve`, and one failed "Address in use". Serialized, the second sees the first's session and
     /// answers "already running".
-    private func openSession(_ r: HostRequest) async throws -> SessionOpened {
-        let key = try get(r.name).name
+    private func openSession(_ r: HostRequest, emit: @escaping @Sendable (HostEvent) -> Void = { _ in }) async throws -> SessionOpened {
+        let m = try get(r.name)
+        let key = m.name
         await sessionGate.lock(key)
         defer { sessionGate.unlock(key) }
-        return try await openSessionLocked(r)
+        // 594 W27: an off sandbox is cold-started first when the caller asks (`doz run` does).
+        let first = try await ensureRunning(m, wake: r.wake ?? true, start: r.start ?? false, emit: emit)
+        var opened = try await openSessionLocked(r)
+        if first.started { opened.started = true }
+        if first.woke { opened.woke = true }
+        opened.bootMilliseconds = first.milliseconds
+        return opened
     }
 
     private func openSessionLocked(_ r: HostRequest) async throws -> SessionOpened {
@@ -1122,16 +1179,21 @@ public actor HostCore {
         return SessionOpened(name: m.name, session: session, created: true)
     }
 
-    private func exec(_ r: HostRequest) async throws -> ExecOutput {
+    private func exec(_ r: HostRequest, emit: @escaping @Sendable (HostEvent) -> Void = { _ in }) async throws -> ExecOutput {
         let m = try get(r.name)
         guard let argv = r.argv, !argv.isEmpty else { throw HostError(.invalid, "exec needs a command (doz exec NAME -- CMD…)") }
-        try await ensureRunning(m, wake: r.wake ?? true)
+        // 594 W27: an off sandbox is cold-started first when the caller asks (`doz exec` does).
+        let first = try await ensureRunning(m, wake: r.wake ?? true, start: r.start ?? false, emit: emit)
         let ctx = Self.execContext(config: m.config, environment: Self.withClaudePermissions(r.environment ?? [:], imageSpec: m.config.spec.imageSpec?.name),
                                    workdir: r.workdir, user: r.user)
         let t0 = ContinuousClock.now
         let res = try await m.sandbox.exec(argv, environment: ctx.environment, workingDirectory: ctx.workdir, user: ctx.user,
                                            timeoutSeconds: r.timeoutSeconds ?? 120)
-        return ExecOutput(exitCode: res.exitCode, stdout: res.stdout, stderr: res.stderr, milliseconds: ms(since: t0))
+        var out = ExecOutput(exitCode: res.exitCode, stdout: res.stdout, stderr: res.stderr, milliseconds: ms(since: t0))
+        if first.started { out.started = true }
+        if first.woke { out.woke = true }
+        out.bootMilliseconds = first.milliseconds
+        return out
     }
 
     // MARK: inspect
@@ -1185,11 +1247,21 @@ public actor HostCore {
     // MARK: restore points
 
     private func resolvePoint(_ m: Managed, _ ref: String?) throws -> RestorePoint {
-        guard let ref, !ref.isEmpty else { throw HostError(.invalid, "which restore point? (an id or a name — doz point ls \(m.name))") }
-        let all = m.sandbox.restorePoints()
-        if let p = all.first(where: { $0.id == ref }) { return p }
-        if let p = all.last(where: { $0.name == ref }) { return p }
-        throw HostError(.notFound, "no restore point \(ref) in \(m.name)")
+        try Self.resolvePoint(ref, in: m.sandbox.restorePoints(), sandbox: m.name)
+    }
+
+    /// 594 W25: a point by its id, its name, or an unambiguous prefix of either — the host's rule, which
+    /// the CLI applies too before it asks to confirm (W26).
+    public static func resolvePoint(_ ref: String?, in points: [RestorePoint], sandbox: String) throws -> RestorePoint {
+        guard let ref, !ref.isEmpty else { throw HostError(.invalid, "which restore point? (an id or a name — doz point ls \(sandbox))") }
+        do {
+            return try RestorePoint.resolve(ref, in: points)
+        } catch .notFound {
+            throw HostError(.notFound, "no restore point \(ref) in \(sandbox) (doz point ls \(sandbox))")
+        } catch .ambiguous(let hits) {
+            throw HostError(.invalid, "\(ref) could be \(hits.count) restore points of \(sandbox): "
+                            + hits.map { "\($0.name) (\($0.id))" }.joined(separator: ", ") + " — type more of the name, or the id")
+        }
     }
 
     private func point(_ r: HostRequest, emit: @escaping @Sendable (HostEvent) -> Void) async throws -> JSONValue {
@@ -1201,6 +1273,7 @@ public actor HostCore {
             return try JSONValue(encoding: sb.restorePoints())
         case .pointTake:
             let name = r.pointName ?? "point-\(sb.restorePoints().filter { !$0.automatic }.count + 1)"
+            if let problem = RestorePoint.nameProblem(name) { throw HostError(.invalid, problem) }
             let row = beginAction(m, "take restore point", phaseBefore: (await effectivePhase(m)).rawValue)
             do {
                 let p = try await sb.takeRestorePoint(name: name, note: r.note ?? "")

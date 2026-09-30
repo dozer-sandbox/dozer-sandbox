@@ -293,6 +293,8 @@ public actor Sandbox {
     /// `takenWhile: running`, and the first boot from it runs e2fsck. Paused / asleep: cloned as
     /// they are, also recorded as running.
     public func takeRestorePoint(name: String, note: String = "") async throws -> RestorePoint {
+        // 594 W25: a name that cannot be stored as given is refused — never cut.
+        if let problem = RestorePoint.nameProblem(name) { throw SandboxError.invalidSpec(problem) }
         await acquire(); defer { release() }
         return try await takeRestorePointLocked(name: name, note: note, automatic: false)
     }
@@ -849,6 +851,13 @@ public actor Sandbox {
                     await closeKeepingOnFailure(agent)
                 }
             }
+            // 594 W10: the zone too — the Mac may have changed zone while this sandbox slept. Best
+            // effort: a wake never fails for it.
+            if let tz = timeZone {
+                _ = try? await retryingFirstGuestCall("set the guest's time zone") {
+                    try await execInContainer(["sh", "-c", tz.script], privileged: true, timeout: 15)
+                }
+            }
         case .remountShares:
             let tags = (identity?.shareTags ?? [:]).map { (tag: $0.value, guestPath: $0.key) }.sorted { $0.guestPath < $1.guestPath }
             guard !tags.isEmpty else { return }
@@ -1158,7 +1167,7 @@ public actor Sandbox {
                 try await c.copyIn(from: deckhold, to: URL(fileURLWithPath: GuestCommand.deckholdPath), mode: 0o755)
             }
             try await timed(spec.imageSpec == nil ? "prepared the guest" : "prepared the guest (persist dirs bound from the state disk)") {
-                let r = try await Self.exec(on: c, ["sh", "-c", GuestCommand.prepareGuest(imageSpec: spec.imageSpec)], environment: [:],
+                let r = try await Self.exec(on: c, ["sh", "-c", GuestCommand.prepareGuest(imageSpec: spec.imageSpec, agentSudo: agentSudo, timeZone: timeZone)], environment: [:],
                                             workingDirectory: "/", privileged: true, timeout: 30)
                 if r.exitCode != 0 { throw SandboxError.commandFailed(command: "prepare guest", exitCode: r.exitCode, output: r.output + r.errorOutput) }
             }
@@ -1217,7 +1226,10 @@ public actor Sandbox {
         // inside (cached and verified, copied from a seed, downloaded and extracted) is said as notes,
         // and a download's progress passes through.
         let cachedKernel = FileManager.default.fileExists(atPath: kernelProvider.cachedKernel.path)
-        let kernelURL = try await timed("kernel ready (\(KernelArtifact.recommended.fileName)\(spec.kernelPath != nil ? ", explicit" : cachedKernel ? ", cached" : ": downloaded"))") {
+        // 594 W7: say where it came from — a copy of Apple's container kernel is not a download.
+        let how = spec.kernelPath != nil ? ", explicit" : cachedKernel ? ", cached"
+            : kernelProvider.localSeed() != nil ? ": copied from Apple's container kernels (byte-identical to the pin)" : ": downloaded"
+        let kernelURL = try await timed("kernel ready (\(KernelArtifact.recommended.fileName)\(how))") {
             try await kernelProvider.resolve(override: spec.kernelPath) { e in
                 switch e {
                 case .step(let s, let ms): broadcaster.yield(.note(String(format: "%@ — %.0f ms", s, ms)))
@@ -1351,6 +1363,37 @@ public actor Sandbox {
         let r = try await exec(on: c, ["sh", "-c", EgressProxy.guestSetupScript(withCA: caFile != nil)], environment: [:],
                                workingDirectory: "/", privileged: true, timeout: 30)
         if r.exitCode != 0 { throw SandboxError.commandFailed(command: "start doznet", exitCode: r.exitCode, output: r.output + r.errorOutput) }
+    }
+
+    /// 594 W23: whether an image sandbox's user gets passwordless sudo — applied at every fresh boot
+    /// (`GuestCommand.prepareGuest`). Default true (owner ruling 2026-09-30). A caller that wants it
+    /// applied to a RUNNING guest runs `GuestCommand.agentSudoScript` itself (the host does, at each
+    /// agent session start).
+    public nonisolated var agentSudo: Bool { agentSudoFlag.value }
+    public nonisolated func setAgentSudo(_ on: Bool) { agentSudoFlag.value = on }
+    private nonisolated let agentSudoFlag = LockedFlag(true)
+
+    /// 594 W10: the guest's time zone, written at every fresh boot and every wake (nil: left as the
+    /// image has it — UTC). The host sets it from the Mac's zone or the setting.
+    public nonisolated var timeZone: GuestTimeZone? { timeZoneBox.withLock { $0 } }
+    public nonisolated func setTimeZone(_ tz: GuestTimeZone?) { timeZoneBox.withLock { $0 = tz } }
+    private nonisolated let timeZoneBox = LockedBox<GuestTimeZone?>(nil)
+
+    final class LockedBox<T: Sendable>: @unchecked Sendable {
+        private let lock = NSLock()
+        private var v: T
+        init(_ v: T) { self.v = v }
+        func withLock<R>(_ f: (inout T) -> R) -> R { lock.withLock { f(&v) } }
+    }
+
+    final class LockedFlag: @unchecked Sendable {
+        private let lock = NSLock()
+        private var v: Bool
+        init(_ v: Bool) { self.v = v }
+        var value: Bool {
+            get { lock.withLock { v } }
+            set { lock.withLock { v = newValue } }
+        }
     }
 
     /// Change the running (or next) policy of a proxied sandbox.

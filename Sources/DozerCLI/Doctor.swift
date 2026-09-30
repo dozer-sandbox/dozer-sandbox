@@ -76,10 +76,17 @@ struct Doctor: AsyncParsableCommand {
         }
         let kernelDir = DozerSettings.load().string(SettingKey.kernelCache).map { URL(fileURLWithPath: ($0 as NSString).expandingTildeInPath) }
             ?? store.layout("_").kernels
-        let kernel = KernelProvider(cacheDirectory: kernelDir).cachedKernel
-        out.append(DoctorCheck(check: "kernel", status: fm.fileExists(atPath: kernel.path) ? .ok : .warn,
-                               detail: fm.fileExists(atPath: kernel.path) ? "\(KernelArtifact.recommended.fileName) cached (\(kernelDir.path))"
-                                                                         : "not cached yet — the first start downloads it (~570 MiB, once)"))
+        let provider = KernelProvider(cacheDirectory: kernelDir)
+        let kernel = provider.cachedKernel
+        if fm.fileExists(atPath: kernel.path) {
+            out.append(DoctorCheck(check: "kernel", status: .ok, detail: "\(KernelArtifact.recommended.fileName) cached (\(kernelDir.path))"))
+        } else if provider.localSeed() != nil {
+            // 594 W5: Apple's container kernels hold a byte-identical copy: it is copied, not downloaded.
+            out.append(DoctorCheck(check: "kernel", status: .ok,
+                                   detail: "found locally (Apple's container kernels, byte-identical to the pin) — no download needed"))
+        } else {
+            out.append(DoctorCheck(check: "kernel", status: .warn, detail: "not cached yet — the first start downloads it (~570 MiB, once)"))
+        }
         out.append(DoctorCheck(check: "vmnet", status: .ok,
                                detail: "needed only for --network nat (a free 192.168.100–199.0/24 subnet is picked); proxied sandboxes have no interface"))
         // The host.

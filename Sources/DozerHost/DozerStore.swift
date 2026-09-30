@@ -112,6 +112,9 @@ public struct SandboxConfig: Codable, Equatable, Sendable {
     public var agentPromptMode: String?
     /// 594 (D9): the `doz_project.yaml` it was made from.
     public var project: String?
+    /// 594 W23: the agent's passwordless sudo — true/false chosen for this sandbox, nil: follow the
+    /// setting `sandbox.agent_sudo` (default on). Applied at every boot and agent session start.
+    public var agentSudo: Bool?
 
     public init(name: String, image: String, spec: SandboxSpec, workspace: String?, createdAt: Date = Date(),
                 credentialSources: [String: String] = [:], diedWithHostAt: Date? = nil) {

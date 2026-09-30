@@ -52,6 +52,41 @@ final class RestorePointTests: XCTestCase {
         XCTAssertEqual(sb.restorePoints().map(\.name), ["one", "two", "before revert to one"])
     }
 
+    /// 594 W25: a name is stored exactly as given, up to 64 characters — never cut; a longer one is
+    /// refused with the limit; a point is found by its id, its name, or an unambiguous prefix of either.
+    func test_namesAreNeverCutAndPointsAreFoundByNameIdOrPrefix() async throws {
+        let sb = try Sandbox(spec: spec)
+        let long = "before-experiment-with-a-long-name"
+        let a = try await sb.takeRestorePoint(name: long)
+        XCTAssertEqual(sb.restorePoints().first?.name, long, "stored as typed")
+        let max = String(repeating: "x", count: RestorePoint.maximumNameLength)
+        let b = try await sb.takeRestorePoint(name: max)
+        XCTAssertEqual(b.name.count, 64)
+        do { _ = try await sb.takeRestorePoint(name: max + "y"); XCTFail("65 characters") } catch {
+            XCTAssertTrue("\(error)".contains("at most 64 characters (this one has 65)"), "\(error)")
+        }
+        XCTAssertNotNil(RestorePoint.nameProblem(""))
+        XCTAssertNotNil(RestorePoint.nameProblem("a\u{1B}[31m"))
+        XCTAssertNil(RestorePoint.nameProblem("before experiment (1)"))
+        let c = try await sb.takeRestorePoint(name: "before-deploy")
+        let all = sb.restorePoints()
+        // (Compared by id: a point read back from meta.json has its date rounded by the encoding.)
+        XCTAssertEqual(try RestorePoint.resolve(long, in: all).id, a.id, "the exact name")
+        XCTAssertEqual(try RestorePoint.resolve(c.id, in: all).id, c.id, "the id")
+        XCTAssertEqual(try RestorePoint.resolve("before-exp", in: all).id, a.id, "a unique prefix of a name")
+        XCTAssertEqual(try RestorePoint.resolve(String(c.id.dropLast(2)), in: all).id, c.id, "a unique prefix of an id")
+        XCTAssertThrowsError(try RestorePoint.resolve("before-", in: all)) { e in
+            guard case .ambiguous(let hits)? = e as? RestorePoint.LookupError else { return XCTFail("\(e)") }
+            XCTAssertEqual(hits.map(\.id), [a.id, c.id])
+        }
+        XCTAssertThrowsError(try RestorePoint.resolve("nothing", in: all)) { XCTAssertEqual($0 as? RestorePoint.LookupError, .notFound) }
+        // A point stored with a cut name (before 594 W25) is found by that stored name.
+        var old = a
+        old.id = "rp-old"
+        old.name = "before-experimen"
+        XCTAssertEqual(try RestorePoint.resolve("before-experimen", in: all + [old]).id, "rp-old", "an exact name wins over a prefix")
+    }
+
     /// A restore point taken from a running VM marks the disk it is reverted to for e2fsck.
     func test_runningPointsMarkTheNextBootForFsck() async throws {
         let sb = try Sandbox(spec: spec)

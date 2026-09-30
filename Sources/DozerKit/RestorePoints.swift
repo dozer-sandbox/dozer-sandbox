@@ -46,6 +46,43 @@ public struct RestorePoint: Sendable, Codable, Equatable, Identifiable {
         self.automatic = automatic
     }
 
+    // MARK: 594 W25 — names, and finding a point by what a person types
+
+    /// A point's name is at most this many characters. Names live only in `meta.json` (a point's
+    /// directory is its id), so no file-system limit applies; 64 keeps a listing readable. A longer name
+    /// is REFUSED — never cut (the owner's `before-experiment` became `before-experimen` and could then
+    /// not be found by what he typed).
+    public static let maximumNameLength = 64
+
+    /// Why a name cannot be a point's name (nil: it can).
+    public static func nameProblem(_ name: String) -> String? {
+        if name.isEmpty { return "a restore point's name cannot be empty" }
+        if name.count > maximumNameLength {
+            return "a restore point's name is at most \(maximumNameLength) characters (this one has \(name.count))"
+        }
+        if name.unicodeScalars.contains(where: { $0.value < 0x20 || (0x7F...0x9F).contains($0.value) }) {
+            return "a restore point's name cannot contain control characters"
+        }
+        return nil
+    }
+
+    public enum LookupError: Error, Equatable {
+        case notFound
+        /// More than one point starts with what was typed (none matched it exactly).
+        case ambiguous([RestorePoint])
+    }
+
+    /// The point `ref` names: an exact id; else an exact name (the newest point of that name); else the
+    /// ONE point whose id or name starts with `ref`. Several → `ambiguous` (never a guess).
+    public static func resolve(_ ref: String, in points: [RestorePoint]) throws(LookupError) -> RestorePoint {
+        if let p = points.first(where: { $0.id == ref }) { return p }
+        if let p = points.last(where: { $0.name == ref }) { return p }
+        let hits = points.filter { $0.id.hasPrefix(ref) || $0.name.hasPrefix(ref) }
+        if hits.count == 1 { return hits[0] }
+        if hits.isEmpty { throw .notFound }
+        throw .ambiguous(hits)
+    }
+
     /// Sortable, unique: `rp-20260925-171103-482-a3f9` (UTC, to the millisecond).
     public static func newID(at date: Date = Date()) -> String {
         let f = DateFormatter()

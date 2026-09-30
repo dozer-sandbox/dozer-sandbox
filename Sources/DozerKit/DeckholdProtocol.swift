@@ -247,6 +247,27 @@ public enum GuestCommand {
     }
 
     /// A persist dir's directory on the state disk: its absolute path, flattened.
+    /// 594 W23 (owner ruling 2026-09-30: "yes, passwordless sudo by default"): where the agent's sudo
+    /// rule lives. sudo reads every file in /etc/sudoers.d whose name has no dot and no trailing `~`.
+    public static let agentSudoersPath = "/etc/sudoers.d/dozer-agent"
+
+    /// Root shell (idempotent, never fails the caller): `on` → `/etc/sudoers.d/dozer-agent` (0440, root)
+    /// giving `user` passwordless sudo, written only when the image has sudo and only after `visudo -cf`
+    /// accepts it — a broken drop-in would break sudo for everyone; `off` → the drop-in removed. A root
+    /// user, or a user name that is not a plain name, gets nothing.
+    public static func agentSudoScript(user: String, on: Bool) -> String {
+        let plain = !user.isEmpty && user.count <= 32 && user != "root"
+            && user.unicodeScalars.allSatisfy { ("a"..."z").contains($0) || ("0"..."9").contains($0) || $0 == "_" || $0 == "-" }
+            && !(user.first.map { $0.isNumber || $0 == "-" } ?? true)
+        guard plain, on else { return "rm -f '\(agentSudoersPath)'" }
+        let tmp = "/run/dozer-agent-sudoers"
+        // Absolute paths: a utility exec's PATH may lack /usr/sbin. No visudo, no rule (never unchecked).
+        return "if [ -x /usr/bin/sudo ] && [ -x /usr/sbin/visudo ]; then mkdir -p /etc/sudoers.d"
+            + " && printf '%s ALL=(ALL) NOPASSWD:ALL\\n' '\(user)' > \(tmp) && chmod 0440 \(tmp) && chown 0:0 \(tmp)"
+            + " && /usr/sbin/visudo -cf \(tmp) >/dev/null"
+            + " && mv -f \(tmp) '\(agentSudoersPath)' || rm -f \(tmp); fi"
+    }
+
     public static func stateKey(_ dir: String) -> String {
         String(dir.drop(while: { $0 == "/" })).replacingOccurrences(of: "/", with: "_")
     }
@@ -256,9 +277,14 @@ public enum GuestCommand {
     /// would otherwise linger — sticky, world-writable deckhold socket directory, so sessions can run as a non-root user; and, for
     /// an image sandbox, each persist dir bind-mounted from the state disk and owned by the user.
     /// Idempotent.
-    public static func prepareGuest(imageSpec: ImageSpec?) -> String {
+    /// 594 W23: `agentSudo` — the image's user gets passwordless sudo (a sudoers drop-in) or not (the
+    /// drop-in removed); applied at every fresh boot, so it follows the sandbox's setting without a rebake.
+    /// 594 W10: `timeZone` — the guest's /etc/localtime (every image, the lab too).
+    public static func prepareGuest(imageSpec: ImageSpec?, agentSudo: Bool = true, timeZone: GuestTimeZone? = nil) -> String {
         var s = "set -e; rm -rf /run/deckhold; mkdir -p /run/deckhold; chmod 1777 /run/deckhold"
+        if let tz = timeZone { s += "; " + tz.script }
         guard let r = imageSpec else { return s }
+        s += "; " + agentSudoScript(user: r.user, on: agentSudo)
         for d in r.resolvedPersistDirs {
             let src = "\(stateMount)/\(stateKey(d))"
             s += "; mkdir -p '\(src)' '\(d)'; chown \(r.user):\(r.user) '\(src)'"

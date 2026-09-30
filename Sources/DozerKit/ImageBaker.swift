@@ -355,17 +355,30 @@ public struct ImageBaker: Sendable {
                 }
             }
             for check in imageSpec.verify {
-                let r = try await timed("verify: \(check.argv.joined(separator: " "))") {
-                    try await Sandbox.exec(on: c, check.argv,
-                                           environment: BakeEnvironment.scrubbed(imageSpec.sessionEnvironment.merging(Self.userEnv(imageSpec.user, imageSpec)) { a, _ in a }),
-                                           workingDirectory: imageSpec.home, privileged: false, timeout: 120, user: imageSpec.user)
+                // 594 W8: ONE line per check — "✓ verify: claude --version → 2.1.285 (169 ms)" — the step
+                // ends with its output (a view ends "verify: X" by "verify: X → …"), no second line.
+                let label = "verify: \(check.argv.joined(separator: " "))"
+                let t0 = ContinuousClock.now
+                events(.stepStarted(label))
+                let r: ExecResult
+                do {
+                    r = try await Sandbox.exec(on: c, check.argv,
+                                               environment: BakeEnvironment.scrubbed(imageSpec.sessionEnvironment.merging(Self.userEnv(imageSpec.user, imageSpec)) { a, _ in a }),
+                                               workingDirectory: imageSpec.home, privileged: false, timeout: 120, user: imageSpec.user)
+                } catch {
+                    events(.stepFailed(label, milliseconds: milliseconds(since: t0), error: error.localizedDescription))
+                    throw error
                 }
+                let ms = milliseconds(since: t0)
                 let out = (r.output + r.errorOutput).trimmingCharacters(in: .whitespacesAndNewlines)
                 guard r.exitCode == 0, check.expect.map({ out.contains($0) }) ?? true else {
+                    events(.stepFailed(label, milliseconds: ms, error: "exit \(r.exitCode): \(out.prefix(200))"))
                     throw SandboxError.commandFailed(command: "verify \(check.argv.joined(separator: " "))", exitCode: r.exitCode, output: out)
                 }
+                timings.append(.init(step: label, milliseconds: ms))
                 verifyOutput.append(out)
-                events(.note("verify: \(check.argv.joined(separator: " ")) → \(out.prefix(120))"))
+                let shown = out.split(whereSeparator: \.isNewline).joined(separator: " ").prefix(120)
+                events(.step("\(label) → \(shown)", milliseconds: ms))
             }
             // 587: trim as the last step (586: −11 % for 56 ms) — the install's own deleted files
             // (npm's tarball and cache) would otherwise stay in the image, and in every clone of it.
