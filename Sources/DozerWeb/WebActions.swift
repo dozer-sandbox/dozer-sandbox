@@ -53,6 +53,10 @@ public enum WebAction: Equatable, Sendable {
     /// starts the normal detached way (`HostLauncher`), exactly as the CLI's first command starts one.
     /// Starting is all it does (`host stop` stays out of the browser).
     case hostStart
+    /// 594 W20: "Restart host" — the CLI's `host stop`, then a host of this UI's build (`HostLauncher`),
+    /// and ONLY while the running host is an OLDER build than the UI (`HostWebData.restartHost`
+    /// refuses anything else). The one way `host-stop` is reachable from the browser.
+    case hostRestart
 
     public static let lifecycleOps: [String: HostOp] = [
         "start": .start, "wake": .wake, "pause": .pause, "resume": .resume, "sleep": .sleep, "hibernate": .hibernate,
@@ -70,7 +74,7 @@ public enum WebAction: Equatable, Sendable {
              .keyRemove(let n, _), .accountUse(let n, _), .templateCreate(let n, _, _, _), .duplicate(let n, _, _, _):
             return n
         case .imageBake, .imageRemove, .accountDefault, .accountKeepalive, .accountVerify, .accountRemove, .onboard, .prepareCancel,
-             .resourcesRemove, .resourcesClean, .resourcesKernel, .hostStart:
+             .resourcesRemove, .resourcesClean, .resourcesKernel, .hostStart, .hostRestart:
             return nil
         }
     }
@@ -103,6 +107,7 @@ public enum WebAction: Equatable, Sendable {
         case .resourcesClean: return "clean up"
         case .resourcesKernel(let k): return "use \(k) for new sandboxes"
         case .hostStart: return "host-start"
+        case .hostRestart: return "host-restart"
         default: break
         }
         let r = hostRequest
@@ -220,6 +225,8 @@ public enum WebAction: Equatable, Sendable {
             return r
         case .hostStart:
             return HostRequest(.ping)
+        case .hostRestart:
+            return HostRequest(.hostStop)
         }
     }
 
@@ -258,6 +265,7 @@ public enum WebAction: Equatable, Sendable {
             "resources-clean": [],
             "resources-kernel": ["kernel"],
             "host-start": [],
+            "host-restart": [],
         ]
         for (verb, op) in lifecycleOps { f[verb] = [.reset, .rm].contains(op) ? ["sandbox", "confirm"] : ["sandbox"] }
         return f
@@ -353,6 +361,8 @@ public enum WebAction: Equatable, Sendable {
             a = .resourcesKernel(k)
         case "host-start":
             a = .hostStart
+        case "host-restart":
+            a = .hostRestart
         default:
             guard let op = lifecycleOps[verb] else { throw Invalid("unknown action") }
             a = .lifecycle(op, name: try f.sandbox("sandbox"))

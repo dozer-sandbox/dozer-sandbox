@@ -672,6 +672,12 @@ final class FakeData: DozerWebData, @unchecked Sendable {
     private var _hold = false
     var failWith: HostError?
 
+    /// 594 W20: Restart host goes through its own guarded method; the fake records it as its `host stop`.
+    func restartHost(onEvent: @escaping @Sendable (HostEvent) -> Void) async throws -> JSONValue {
+        lock.withLock { performed.append(HostRequest(.hostStop)) }
+        return .null
+    }
+
     func perform(_ r: HostRequest, onEvent: @escaping @Sendable (HostEvent) -> Void) async throws -> JSONValue {
         lock.withLock { performed.append(r) }
         onEvent(HostEvent(kind: .step, sandbox: r.name, text: "fake step one", milliseconds: 5))

@@ -335,7 +335,8 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   **exactly one `HostOp`** the CLI also sends — the web layer adds no host operation.
   `WebActionTests.testEveryActionIsExactlyOneAllowedHostOp` pins the set; `exec`, `attach`, `key-set`,
   `account-add` and `host-stop` are never reachable AS AN ACTION (591: `attach` is reachable only
-  through the ticketed terminal socket below). Destructive ones (reset, rm,
+  through the ticketed terminal socket below; 594 W20: `host-stop` only inside `host-restart`, which
+  `HostWebData.restartHost` refuses unless the running host is an OLDER build than the UI). Destructive ones (reset, rm,
   point revert/rm, image rm, account rm) carry `confirm` equal to the name. Shutdown keeps the disk,
   so it carries no `confirm` (owner, 591): the page asks with a plain dialog that can stop asking
   (the setting `ui.confirm_shutdown`, doz.toml — no longer localStorage). **No secret is ever an
@@ -383,7 +384,15 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   (the sandboxes that ran) — is told ONCE as SSE `host` (also to Activity). The poll never autostarts
   a host that holds its lock (it may be stopping: an open page must never undo `doz host stop`), and a
   terminal's REattach waits for a host rather than start one. "Start host" is the `host-start` action
-  = the CLI's `ping` with autostart (HostLauncher, detached); `host stop` stays out of the browser.
+  = the CLI's `ping` with autostart (HostLauncher, detached); `host stop` stays out of the browser
+  except W20's guarded Restart host. The mismatch note (`WebVersionNote`, semver with pre-release
+  order — `WebVersion`) advises the OLDER side.
+- **`doz ui` gone = the page paused** (594 W21): after 1.5 s of failed reconnects (never on a blip)
+  everything but `#banners` is `inert` under `#ui-overlay` (alertdialog, focus inside, Try now — the
+  one retry control); the banner strip stays in front (z-order) and live — the banner says what
+  happened, the overlay that the page is paused. The overlay is BUILT on `hello`: its icon is a
+  `<use>` of the served sprite, which a page without its server cannot fetch. A rotated link turns
+  it into "This page was signed out". The HOST stopping stays a banner (the page still works).
 - **One UI per store, one tab** (594 W19): `ui.sock` answers `link`, `rotate` and `status` (origin +
   open pages — no key). `doz ui` while one runs opens a tab only per `ui.open_browser` (auto: when no
   page is open) / `--open` / `--no-open`. A restarted UI binds the last port and loads

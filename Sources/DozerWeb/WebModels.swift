@@ -23,6 +23,74 @@ public struct WebHost: Codable, Equatable, Sendable {
     public var store: String
     /// This UI's own version (the CLI's).
     public var uiVersion: String
+    /// 594 W20: set when the host and this UI are different builds — advice for the OLDER side.
+    public var versionNote: WebVersionNote? = nil
+}
+
+/// 594 W20: the host and `doz ui` are different builds. The advice is for the OLDER side (the owner saw
+/// "restart doz ui" when the UI was the newer one — restarting it changed nothing).
+///   · `older == "host"`: stop the host (its sandboxes hibernate); the next action starts this UI's build
+///     — the page offers Restart host;
+///   · `older == "ui"`: restart doz ui;
+///   · `older == nil`: not comparable (a build that is not semver): only that they differ.
+public struct WebVersionNote: Codable, Equatable, Sendable {
+    public var older: String?
+    public var text: String
+
+    public static func make(ui: String, host: String?) -> WebVersionNote? {
+        guard let host, host != ui else { return nil }
+        switch WebVersion.compare(host, ui) {
+        case .orderedAscending?:
+            return WebVersionNote(older: "host", text: "The host is still \(host) — doz host stop (sandboxes hibernate) and the next action runs \(ui).")
+        case .orderedDescending?:
+            return WebVersionNote(older: "ui", text: "doz ui is \(ui), the host is \(host) — restart doz ui (Ctrl-C it, then doz ui) so the page and the host are the same build.")
+        case .orderedSame?:
+            return nil   // the same release (build metadata differs)
+        case nil:
+            return WebVersionNote(older: nil, text: "doz ui is \(ui), the host is \(host) — different builds.")
+        }
+    }
+}
+
+/// 594 W20: semantic-version order (semver.org §11): X.Y.Z numerically; a pre-release sorts BEFORE its
+/// release (0.12.0-rc.3 < 0.12.0-rc.5 < 0.12.0); pre-release identifiers dot by dot — numbers
+/// numerically, below alphanumerics, which compare as ASCII; a shorter list first when all else is
+/// equal. Build metadata (`+…`) is ignored. nil when either is not a version.
+public enum WebVersion {
+    struct Parsed { var core: [Int]; var pre: [String] }
+
+    static func parse(_ s: String) -> Parsed? {
+        let noBuild = s.split(separator: "+", maxSplits: 1, omittingEmptySubsequences: false).first.map(String.init) ?? s
+        let parts = noBuild.split(separator: "-", maxSplits: 1, omittingEmptySubsequences: false)
+        let core = parts[0].split(separator: ".", omittingEmptySubsequences: false).map { Int($0) }
+        guard core.count == 3, core.allSatisfy({ $0 != nil && $0! >= 0 }) else { return nil }
+        var pre: [String] = []
+        if parts.count == 2 {
+            pre = parts[1].split(separator: ".", omittingEmptySubsequences: false).map(String.init)
+            guard !pre.isEmpty, pre.allSatisfy({ !$0.isEmpty && $0.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-") } }) else { return nil }
+        }
+        return Parsed(core: core.map { $0! }, pre: pre)
+    }
+
+    public static func compare(_ a: String, _ b: String) -> ComparisonResult? {
+        guard let x = parse(a), let y = parse(b) else { return nil }
+        for (p, q) in zip(x.core, y.core) where p != q { return p < q ? .orderedAscending : .orderedDescending }
+        switch (x.pre.isEmpty, y.pre.isEmpty) {
+        case (true, true): return .orderedSame
+        case (true, false): return .orderedDescending
+        case (false, true): return .orderedAscending
+        case (false, false): break
+        }
+        for (p, q) in zip(x.pre, y.pre) where p != q {
+            switch (Int(p), Int(q)) {
+            case let (i?, j?): return i < j ? .orderedAscending : .orderedDescending
+            case (_?, nil): return .orderedAscending
+            case (nil, _?): return .orderedDescending
+            case (nil, nil): return p < q ? .orderedAscending : .orderedDescending
+            }
+        }
+        return x.pre.count == y.pre.count ? .orderedSame : x.pre.count < y.pre.count ? .orderedAscending : .orderedDescending
+    }
 }
 
 /// 594 W18: what the UI's poll can learn about the host WITHOUT starting one — read before the

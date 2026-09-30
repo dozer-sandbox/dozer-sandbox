@@ -66,9 +66,14 @@ public protocol DozerWebData: Sendable {
     /// 594 W18: a host answers its socket now (a terminal's REattach waits for one rather than start
     /// one: an open page must never undo a `doz host stop`).
     func hostAnswers() -> Bool
+    /// 594 W20: stop an OLDER host and start this UI's build (refused otherwise).
+    func restartHost(onEvent: @escaping @Sendable (HostEvent) -> Void) async throws -> JSONValue
 }
 
 extension DozerWebData {
+    public func restartHost(onEvent: @escaping @Sendable (HostEvent) -> Void) async throws -> JSONValue {
+        throw HostError(.notImplemented, "host restart")
+    }
     public func hostProbe() -> WebHostProbe? { nil }
     public func hostAnswers() -> Bool { true }
     public func onboarding() async throws -> WebOnboarding { throw HostError(.notImplemented, "onboarding") }
@@ -240,6 +245,27 @@ public final class HostWebData: DozerWebData, @unchecked Sendable {
         throw m.error ?? HostError(.failed, "no reason")
     }
 
+    /// 594 W20: Restart host — ONLY when the running host is an OLDER build than this UI (the one
+    /// case the page offers it): `host stop` (its sandboxes hibernate), then a host of this UI's own
+    /// build, started the normal detached way (HostLauncher). Anything else is refused: `host stop`
+    /// on its own stays out of the browser.
+    public func restartHost(onEvent: @escaping @Sendable (HostEvent) -> Void) async throws -> JSONValue {
+        let store = self.store, ui = version
+        guard store.hostIsRunning(), let st = await hostStatus() else {
+            throw HostError(.invalid, "no host is running — Start host starts one")
+        }
+        guard WebVersion.compare(st.version, ui) == .orderedAscending else {
+            throw HostError(.invalid, "the host (\(st.version)) is not older than doz ui (\(ui)) — nothing to restart")
+        }
+        let stopped = try await blocking { try HostClient.request(HostRequest(.hostStop), store: store, autostart: false, onEvent: onEvent) }
+        if stopped.ok != true { throw stopped.error ?? HostError(.failed, "the host did not stop") }
+        // It exits once it has hibernated everything; a new host would wait for its lock anyway.
+        for _ in 0..<600 where store.hostIsRunning() { try await Task.sleep(for: .milliseconds(100)) }
+        let m = try await blocking { try HostClient.request(HostRequest(.ping), store: store, autostart: true) }
+        if m.ok == true { return m.result ?? .null }
+        throw m.error ?? HostError(.failed, "the host gave no reason")
+    }
+
     public func hostAnswers() -> Bool {
         guard let fd = UnixSocket.connect(store.socket.path) else { return false }
         close(fd)
@@ -283,12 +309,13 @@ public final class HostWebData: DozerWebData, @unchecked Sendable {
             }
         }
         let st = fromHost ? await hostStatus() : nil
-        let host = WebHost(running: st != nil, version: st?.version, pid: st?.pid, startedAt: st?.startedAt,
+        var host = WebHost(running: st != nil, version: st?.version, pid: st?.pid, startedAt: st?.startedAt,
                            idleTimeoutMinutes: st?.idleTimeoutMinutes, idleSeconds: st?.idleSeconds,
                            liveSandboxes: st?.liveSandboxes ?? [], connections: st?.connections,
                            // A live record is only "pending recovery" when no host holds it.
                            // (Nor while a stopping host still holds the lock: it is hibernating them.)
                            recoveryPending: fromHost || store.hostIsRunning() ? [] : store.needsRecovery(), store: store.root.path, uiVersion: version)
+        if host.running { host.versionNote = WebVersionNote.make(ui: version, host: host.version) }
         var o = WebOverview(host: host, sandboxes: rows, source: fromHost ? "host" : "store")
         o.onboarded = OnboardingRecord.read(store) != nil
         return o
