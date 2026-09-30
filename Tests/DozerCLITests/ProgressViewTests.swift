@@ -131,6 +131,17 @@ final class ProgressViewTests: XCTestCase {
         XCTAssertThrowsError(try DozerSettings.definition("ui.progress")!.parse("fancy"))
     }
 
+    /// 594 W8: a verify step is ONE line — started as "verify: X", ended as "verify: X → result".
+    func testAVerifyStepEndsWithItsResultOnOneLine() {
+        let v = ProgressTerminal(mode: .animated, color: false)
+        _ = v.apply(ev(.started, "verify: claude --version"), now: t0)
+        let out = v.apply(ev(.step, "verify: claude --version → 2.1.285 (Claude Code)", ms: 169), now: t0)
+        XCTAssertTrue(out.contains("✓ verify: claude --version → 2.1.285 (Claude Code) — 169 ms"), out)
+        XCTAssertFalse(v.board.isLive, "the started line ended — no spinner left")
+        XCTAssertEqual(PreparationRecord.key("verify: claude --version → 2.1.285"), PreparationRecord.key("verify: claude --version"),
+                       "the same step across versions (estimates)")
+    }
+
     // MARK: 594 W22 — `doz host stop`'s progress
 
     func testHostStopShowsEachSandboxThenTheSummary() {

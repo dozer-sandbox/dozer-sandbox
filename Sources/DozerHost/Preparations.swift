@@ -119,7 +119,9 @@ public struct PreparationRecord: Codable, Equatable, Sendable {
 
     /// A step's identity across runs: the label without what varies (cached or downloaded, sizes,
     /// durations in parentheses) — "base image node (cached)" and "pulled the base image node" are one.
-    public static func key(_ label: String) -> String {
+    public static func key(_ fullLabel: String) -> String {
+        // 594 W8: "verify: X → 2.1.285" is the step "verify: X" (its result varies).
+        let label = fullLabel.range(of: " → ").map { String(fullLabel[..<$0.lowerBound]) } ?? fullLabel
         if label.hasPrefix("kernel ready") { return "kernel" }
         if label.hasPrefix("guest init image ready") { return "guest init" }
         // A bake's base image and base disk (the metrics' key folds both into "image …").
@@ -320,7 +322,9 @@ final class Preparation: @unchecked Sendable {
                 lastOutput = []
             case .output:
                 if !text.isEmpty { lastOutput.append(text); if lastOutput.count > Self.tailLines { lastOutput.removeFirst() } }
-            case .step where open.removeValue(forKey: text) != nil:
+            // (594 W8: "verify: X" may end as "verify: X → 2.1.285" — its result on the same line.)
+            case .step where open.removeValue(forKey: text) != nil
+                || open.keys.first(where: { text.hasPrefix($0 + " → ") }).map({ open.removeValue(forKey: $0) }) != nil:
                 steps.append(PreparationStep(label: text, kind: "step", seconds: (e.milliseconds ?? 0) / 1000,
                                              usualSeconds: previous?.usual(text)))
             case .failed:

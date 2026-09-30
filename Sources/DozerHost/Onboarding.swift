@@ -47,9 +47,10 @@ public enum Onboarding {
 
     /// The images onboarding offers, in order.
     public static let images: [(name: String, summary: String, download: String, estimate: String, bytes: Int64)] = [
-        ("claude-code", "Claude Code 2.1.227 on Debian (node), with git, ripgrep, python3 and the usual tools",
+        // 594 W6: {version} is what WILL be installed (`agentVersionText`), never a stale pin.
+        ("claude-code", "Claude Code — {version} — on Debian (node), with git, ripgrep, python3 and the usual tools",
          "~80 MB base image + Claude Code + Debian packages", "~4–6 min the first time", 900 << 20),
-        ("pi", "the pi coding agent 0.84.1 on the same Debian base (shared with claude-code)",
+        ("pi", "the pi coding agent — {version} — on the same Debian base (shared with claude-code)",
          "~80 MB base image (shared) + npm packages", "~10–15 min the first time", 700 << 20),
         ("lab", "Alpine 3.20 with bash — a plain Linux shell, no agent",
          "~4 MB", "~1 min", 100 << 20),
@@ -64,9 +65,21 @@ public enum Onboarding {
     /// Room left over after the images, so a first sandbox still fits.
     public static let headroomBytes: Int64 = 2 << 30
 
-    public static func imageOptions(_ rows: [ImageRow]) -> [OnboardingImage] {
+    /// 594 W6: the agent version a preparation of `image` installs, for people: an exact setting as
+    /// it is; `latest` with the registry's answer from the hourly cache ("latest (2.1.285)"); plain
+    /// "latest" when it was never asked or is unreachable. nil: not an agent image.
+    public static func agentVersionText(_ image: String, store: DozerStore, settings: DozerSettings) -> String? {
+        guard AgentImages.package(image) != nil else { return nil }
+        let want = AgentVersions.setting(image, settings)
+        guard want == "latest" else { return want }
+        return AgentVersions.all(store)[image]?.latest.map { "latest (\($0.version))" } ?? "latest"
+    }
+
+    /// `versions`: image → what `agentVersionText` says (missing: "latest").
+    public static func imageOptions(_ rows: [ImageRow], versions: [String: String] = [:]) -> [OnboardingImage] {
         images.map { i in
-            OnboardingImage(name: i.name, summary: i.summary, download: i.download, estimate: i.estimate, diskBytes: i.bytes,
+            OnboardingImage(name: i.name, summary: i.summary.replacingOccurrences(of: "{version}", with: versions[i.name] ?? "latest"),
+                            download: i.download, estimate: i.estimate, diskBytes: i.bytes,
                             prepared: rows.first { $0.name == i.name }.map { $0.current ?? $0.baked } ?? false, recommended: i.name == "claude-code")
         }
     }

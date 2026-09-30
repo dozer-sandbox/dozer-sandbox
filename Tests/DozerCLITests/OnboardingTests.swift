@@ -543,6 +543,23 @@ final class OnboardingTests: XCTestCase {
         XCTAssertTrue(Uninstall.looksLikeStore(s))
     }
 
+    /// 594 W6: the Images list says what WILL be installed — never a stale pin.
+    func testTheImagesListSaysWhatWillBeInstalled() throws {
+        let store = DozerStore(root: root)
+        try store.ensureDirectory()
+        let none = DozerSettings(text: nil)
+        XCTAssertEqual(Onboarding.agentVersionText("claude-code", store: store, settings: none), "latest", "never asked: latest")
+        XCTAssertNil(Onboarding.agentVersionText("lab", store: store, settings: none))
+        AgentVersions.update("claude-code", store) { $0.latest = AgentRelease(version: "2.1.285", integrity: "sha512-x") }
+        XCTAssertEqual(Onboarding.agentVersionText("claude-code", store: store, settings: none), "latest (2.1.285)")
+        let exact = DozerSettings(text: "[images]\nclaude_code_version = \"2.1.227\"\n")
+        XCTAssertEqual(Onboarding.agentVersionText("claude-code", store: store, settings: exact), "2.1.227")
+        let opts = Onboarding.imageOptions([], versions: ["claude-code": "latest (2.1.285)"])
+        XCTAssertEqual(opts.first?.summary, "Claude Code — latest (2.1.285) — on Debian (node), with git, ripgrep, python3 and the usual tools")
+        XCTAssertTrue(opts[1].summary.hasPrefix("the pi coding agent — latest — "))
+        XCTAssertFalse(opts.map(\.summary).joined().contains("{version}"))
+    }
+
     /// 594 W23: the agent's passwordless sudo — the setting (default on), a sandbox's own choice over
     /// it, the facts text both ways, doz_project.yaml's agent_sudo, and create's flags.
     func testAgentSudoSettingFactsProjectAndFlags() throws {

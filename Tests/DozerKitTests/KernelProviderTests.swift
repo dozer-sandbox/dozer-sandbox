@@ -113,6 +113,9 @@ final class KernelProviderTests: XCTestCase {
 
         let f1 = FakeFetcher(serving: archive)
         let p1 = provider(try artifact(), seeds: [wrong], fetcher: f1)
+        // 594 W5/W7: what doctor and the step's label ask — is there a local, byte-identical copy?
+        XCTAssertNil(p1.localSeed(), "a different kernel is no seed")
+        XCTAssertEqual(provider(try artifact(), seeds: [wrong, right], fetcher: f1).localSeed(), right)
         _ = try await p1.resolve()
         XCTAssertEqual(f1.calls, 1, "a mismatching seed falls through to the pinned download")
 

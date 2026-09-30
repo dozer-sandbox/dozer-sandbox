@@ -174,8 +174,12 @@ public final class HostWebData: DozerWebData, @unchecked Sendable {
             lock.withLock { macLoginCache = (Date(), signedIn) }
         }
         let file = AccountStore(store: store, settings: .load()).load()
+        // 594 W6: what each agent image WILL install (the hourly cache; "latest" when never asked).
+        let settings = DozerSettings.load()
+        let versions = Dictionary(uniqueKeysWithValues: ["claude-code", "pi"].compactMap { i in
+            Onboarding.agentVersionText(i, store: store, settings: settings).map { (i, $0) } })
         return WebOnboarding(status: status, checks: checks, freeBytes: Onboarding.volume(of: store)?.free, macSignedIn: signedIn,
-                             defaultAccount: file.defaultAccount)
+                             defaultAccount: file.defaultAccount, versions: versions)
     }
 
     public func addAccount(_ a: WebAccountAdd) async throws -> WebAccounts {

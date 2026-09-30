@@ -97,6 +97,12 @@ public struct KernelProvider: Sendable {
 
     public var cachedKernel: URL { cacheDirectory.appendingPathComponent(artifact.fileName) }
 
+    /// 594 W5/W7: a byte-identical copy of the pinned kernel already on this Mac (Apple's `container`
+    /// kernels) — `resolve` copies it instead of downloading. nil: none (a download it is).
+    public func localSeed() -> URL? {
+        seedCandidates.first { FileManager.default.fileExists(atPath: $0.path) && (try? Self.sha256(of: $0)) == artifact.kernelSHA256 }
+    }
+
     /// The kernel to boot. `override` is `SandboxSpec.kernelPath`.
     public func resolve(override: String? = nil, events: @escaping @Sendable (KernelEvent) -> Void = { _ in }) async throws -> URL {
         let fm = FileManager.default

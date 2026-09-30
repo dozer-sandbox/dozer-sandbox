@@ -657,7 +657,8 @@ public struct WebOnboarding: Codable, Equatable, Sendable {
     /// The settings' defaults.image.
     public var defaultImage: String
 
-    public init(status: PrepareStatus, checks: [OnboardingCheck], freeBytes: Int64?, macSignedIn: Bool, defaultAccount: String) {
+    public init(status: PrepareStatus, checks: [OnboardingCheck], freeBytes: Int64?, macSignedIn: Bool, defaultAccount: String,
+                versions: [String: String] = [:]) {
         onboarded = status.onboarded.map { Record(dozVersion: $0.dozVersion, date: $0.date, images: $0.images) }
         hostRunning = status.hostRunning
         self.checks = checks.map { Check(check: $0.check, status: $0.status, detail: $0.detail, hard: $0.hard) }
@@ -671,7 +672,7 @@ public struct WebOnboarding: Codable, Equatable, Sendable {
         accountOptions = options.map { AccountOption(value: $0.rawValue, label: $0.label, commands: Onboarding.accountCommands($0)) }
         preferredAccount = preferred.rawValue
         self.defaultAccount = defaultAccount
-        images = Onboarding.imageOptions(status.images).map {
+        images = Onboarding.imageOptions(status.images, versions: versions).map {
             Image(name: $0.name, summary: $0.summary, download: $0.download, estimate: $0.estimate, diskBytes: $0.diskBytes,
                   prepared: $0.prepared, recommended: $0.recommended)
         }
