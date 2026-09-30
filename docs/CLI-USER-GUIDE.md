@@ -178,6 +178,7 @@ agent_prompt: |             # this project's own lines for the agent
 agent_prompt_mode: append   # or replace
 agent_sudo: true            # the agent's passwordless sudo (default: the setting sandbox.agent_sudo)
 clipboard: write            # a copy in the sandbox reaches the Mac clipboard, with a notice; off: never (applies at once)
+browser_bridge: on          # xdg-open opens http(s) URLs in the Mac's browser, a sign-in's callback forwarded; off: never
 ```
 
 The schema is closed: an unknown key, a key given twice, a wrong type or a value out of range is an
@@ -328,6 +329,31 @@ doz create NAME --clipboard off …                     # from the start; or `cl
 doz config show --sandbox NAME                        # its per-sandbox settings, and whose value each is
 doz config unset --sandbox NAME sandbox.clipboard     # follow the setting again
 ```
+
+### The browser, and sign-ins
+
+A sandbox has no browser. Its `xdg-open` (and `$BROWSER`, `open`, `sensible-browser` — every session's
+PATH leads with doz's own, installed at each boot) hands an **http or https** URL to your Mac, which
+opens it in your default browser, and says so: `SANDBOX opened https://… in your browser`. The session
+shows the URL in plain text too.
+
+**Sign-ins that come back to the sandbox.** An agent's browser sign-in (Claude Code's `/login`, most
+OAuth CLIs) listens on the SANDBOX's `localhost:PORT` and asks the provider to send the browser back
+there (`redirect_uri=http://localhost:PORT/…`). When the URL says so, doz forwards your Mac's
+`localhost:PORT` into the sandbox before opening it — the notice says `sign-in callback localhost:PORT
+forwarded (10 min)` — so the browser's last redirect reaches the agent and the login completes. The
+forward is loopback only, one per sandbox (a new sign-in replaces it), and closes 3 s after the callback
+was answered or after 10 minutes. If that port is already in use on your Mac, the notice says the
+sign-in cannot come back.
+
+- **Refused, and said:** anything but http and https (`file:`, `javascript:` …), a URL naming the Mac's
+  own loopback (`http://localhost:3000` from inside is the sandbox's own server — tell the user the
+  address instead), more than 3 URLs in 10 seconds, anything over 2048 bytes.
+- **Off:** `doz config set --sandbox NAME sandbox.browser_bridge off` (or for all, or
+  `doz create --browser-bridge off`, `browser_bridge: off` in `doz_project.yaml`): nothing opens, and
+  the notice says so. A later "Sign in" permission (feature 597) can build on this switch.
+- The shim and the forward helper (`deckhold connect`) arrive with the sandbox's next start; a sandbox
+  woken from before gets the shim at its next session.
 
 ## Agents and keys
 
@@ -918,12 +944,12 @@ the others say when they apply (the next sandbox created, the next session, or a
 | `[store]` | `path` (`--store`, `$DOZ_STORE`) |
 | `[claude]` | `permissions` (`skip` · `ask`) — Claude Code's own prompts in a claude-code sandbox; `-e DOZ_CLAUDE_PERMISSIONS=…` on `run`/`exec` still wins |
 | `[defaults]` | `cpus` (2), `nat_subnet` (a free one; `$DOZ_SUBNET`) |
-| `[sandbox]` | `agent_sudo` (true — the agent's passwordless sudo inside claude-code and pi sandboxes; a sandbox's `--no-agent-sudo` / `agent_sudo` wins; from its next session and boot), `timezone` (`mac` — the Mac's zone, read again at every start and wake, so a sandbox that slept while you travelled wakes in your new zone — or a zone like `Australia/Sydney`; the agent's facts say it), `clipboard` (`write` · `off` — the clipboard bridge, see "Session bridges"; applies at once) |
+| `[sandbox]` | `agent_sudo` (true — the agent's passwordless sudo inside claude-code and pi sandboxes; a sandbox's `--no-agent-sudo` / `agent_sudo` wins; from its next session and boot), `timezone` (`mac` — the Mac's zone, read again at every start and wake, so a sandbox that slept while you travelled wakes in your new zone — or a zone like `Australia/Sydney`; the agent's facts say it), `clipboard` (`write` · `off` — the clipboard bridge, see "Session bridges"; applies at once), `browser_bridge` (`on` · `off` — xdg-open to the Mac's browser and a sign-in's callback; applies at once) |
 | `[images]` | `claude_code_version`, `pi_version` (`latest`, or an exact version like `2.1.227` — see "Agent versions" below) |
 | `[images.lab]` · `[images.claude-code]` · `[images.pi]` | `memory_mib` (1024 · 2048 · 2048), `network` (`bake` · `agent` · `agent`) — a custom image follows the image it was saved from |
 | `[kernel]` | `path` (`$DOZ_KERNEL`), `cache` (`$DOZ_KERNEL_CACHE`) |
 
-- **Per sandbox:** `sandbox.clipboard` and `sandbox.agent_sudo` can also be one sandbox's own
+- **Per sandbox:** `sandbox.clipboard`, `sandbox.browser_bridge` and `sandbox.agent_sudo` can also be one sandbox's own
   (`doz config set|get|unset|show --sandbox NAME …`, `doz create` flags, `doz_project.yaml`); its
   value wins over the file's.
 - **Precedence:** a command-line flag, then its environment variable, then the file, then the

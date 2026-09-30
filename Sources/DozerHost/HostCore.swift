@@ -1207,6 +1207,9 @@ public actor HostCore {
         // facts and written into the guest before the program starts. pi's own session names the
         // facts file (pi reads a file given to --append-system-prompt); Claude Code's launcher reads it.
         // 594 W28: never claim sudo the guest does not have (a disk from an older image).
+        // 599 (594.B2): the browser bridge's xdg-open — written at every fresh boot; here too, for a
+        // sandbox that has run since before this doz (a wake keeps its old disk state). Idempotent, ~20 ms.
+        _ = try? await m.sandbox.exec(["sh", "-c", GuestCommand.openShimInstall], timeoutSeconds: 10)
         let sudoInstalled: Bool? = m.config.spec.imageSpec == nil ? nil
             : ((try? await m.sandbox.exec(["test", "-x", "/usr/bin/sudo"], timeoutSeconds: 10))?.exitCode).map { $0 == 0 }
         if let report = agentPromptReport(m, sudoInstalled: sudoInstalled) {

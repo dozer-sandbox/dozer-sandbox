@@ -64,7 +64,7 @@ DOCC_OUT         ?= .docc-build
 DOCC_BASE_PATH   ?= /DozerKit/
 DOCC_PREVIEW_PORT ?= 8000
 
-.PHONY: help build test audit web-assets web-assets-check test-cli-onboarding test-cli-terminal test-cli-hoststop test-cli-agentsudo test-cli-points test-cli-timezone test-cli-images test-cli-clipboard pullbench test-vm test-vm-agents test-vm-network test-vm-hardening test-vm-lineage prev-cli test-vm-upgrade vmtest-host kernel deckhold deckhold-verify doznet doznet-verify cli install-cli test-cli test-vm-claude test-vm-templates docs docs-preview docs-drift-check release
+.PHONY: help build test audit web-assets web-assets-check test-cli-onboarding test-cli-terminal test-cli-hoststop test-cli-agentsudo test-cli-points test-cli-timezone test-cli-images test-cli-clipboard test-cli-browser pullbench test-vm test-vm-agents test-vm-network test-vm-hardening test-vm-lineage prev-cli test-vm-upgrade vmtest-host kernel deckhold deckhold-verify doznet doznet-verify cli install-cli test-cli test-vm-claude test-vm-templates docs docs-preview docs-drift-check release
 
 help: ## Show this help
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) | sed 's/:.*## /\t/' | expand -t 22
@@ -214,6 +214,9 @@ test-cli-images: cli vmtest-host ## 594 W28–W30: an older doz's pi image said 
 
 test-cli-clipboard: cli vmtest-host ## 599 (594.B1): OSC 52 → the Mac clipboard (a file, DOZ_TEST_PASTEBOARD) with a notice each time; a read never answered; 1 MiB + rate limits; sandbox.clipboard off (per sandbox, for all)
 	perl -e 'alarm shift; exec @ARGV' 900 $(VMTEST_BIN) cli-clipboard --doz $(CLI_BIN)
+
+test-cli-browser: cli vmtest-host ## 599 (594.B2): xdg-open/$BROWSER → the Mac's browser (a file, DOZ_TEST_OPEN_URL), a fake OAuth sign-in's localhost callback forwarded into the sandbox; refusals, rate, sandbox.browser_bridge off
+	perl -e 'alarm shift; exec @ARGV' 900 $(VMTEST_BIN) cli-browser --doz $(CLI_BIN)
 
 pullbench: vmtest-host ## 594 D12: pull the node base with 3 vs 6 concurrent layer downloads into fresh stores (network; ROUNDS=3)
 	$(VMTEST_BIN) pullbench --rounds $(or $(ROUNDS),3)

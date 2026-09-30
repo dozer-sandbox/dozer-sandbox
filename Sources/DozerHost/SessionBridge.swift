@@ -241,4 +241,13 @@ final class BridgeState: @unchecked Sendable {
 
     /// True the first time for this sandbox+session.
     func firstRead(_ key: String) -> Bool { lock.withLock { readLogged.insert(key).inserted } }
+
+    /// 599 (B2): each sandbox's sign-in callback forward (one at a time: a new one replaces it).
+    private var forwards: [String: LoopbackForward] = [:]
+    /// Keep `f` as `sandbox`'s forward; the one it replaces is returned (to be stopped).
+    func setForward(_ f: LoopbackForward, for sandbox: String) -> LoopbackForward? {
+        lock.withLock { let old = forwards[sandbox]; forwards[sandbox] = f; return old }
+    }
+    func forwardEnded(_ f: LoopbackForward) { lock.withLock { if forwards[f.sandbox] === f { forwards[f.sandbox] = nil } } }
+    func forward(of sandbox: String) -> LoopbackForward? { lock.withLock { forwards[sandbox] } }
 }

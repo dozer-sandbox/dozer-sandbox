@@ -260,6 +260,8 @@ public enum SettingKey {
     public static let timeZone = "sandbox.timezone"
     /// 599 (594.B1): the clipboard bridge — `write` or `off`.
     public static let clipboard = "sandbox.clipboard"
+    /// 599 (594.B2): the browser bridge (open a URL on the Mac; a sign-in's callback) — `on` or `off`.
+    public static let browserBridge = "sandbox.browser_bridge"
     /// 594 (owner ruling): the web UI may take an API key or a setup token (a masked field).
     public static let allowSecretEntry = "ui.allow_secret_entry"
     /// 594 W19 (owner: "a new web page opening up every time i run doz ui"): when `doz ui` opens a tab.
@@ -377,6 +379,9 @@ public struct DozerSettings: Sendable {
             .init("sandbox", "clipboard", .choice(["write", "off"]), .string("write"),
                   "The clipboard bridge: a program in a sandbox that copies (OSC 52 — Claude Code, vim, tmux) puts the text on this Mac's clipboard, and every copy shows a notice (SANDBOX copied N chars) in doz attach and doz ui. At most 1 MiB a copy and 10 copies in 10 s. A sandbox can never READ the Mac clipboard. The risk: an agent could put a command there for you to paste — off turns the bridge off (copies are dropped, and said). A sandbox's own choice (doz config set --sandbox NAME, clipboard in doz_project.yaml) wins over this.",
                   flag: "doz create --clipboard write|off", applies: .now),
+            .init("sandbox", "browser_bridge", .choice(["on", "off"]), .string("on"),
+                  "The browser bridge: xdg-open (and $BROWSER, open, sensible-browser) in a sandbox opens an http or https URL in this Mac's default browser, with a notice every time (at most 3 in 10 s). A sign-in whose redirect is the sandbox's localhost (Claude Code's /login) gets that port forwarded from the Mac into the sandbox for up to 10 minutes, so the login completes. Never file: or other schemes, never the Mac's own localhost. off: nothing opens (said). A sandbox's own choice (doz config set --sandbox NAME, browser_bridge in doz_project.yaml) wins over this.",
+                  flag: "doz create --browser-bridge on|off", applies: .now),
         ]
         s.append(.init("images", "claude_code_version", .version, .string("latest"),
                        "The Claude Code the claude-code image is prepared with: latest (asked of the npm registry when the image is prepared, then installed at that exact version, integrity-checked; a newer one is only said — doz image bake claude-code rebuilds when you choose) or an exact version like 2.1.227. A sandbox keeps the version it was created with; doz reset NAME moves it to the image's current one.",
@@ -405,7 +410,7 @@ public struct DozerSettings: Sendable {
 
     /// 599: the settings a sandbox can also have its own value of (`doz config set --sandbox NAME KEY V`,
     /// `doz create`, `doz_project.yaml`) — the sandbox's value wins over the file's.
-    public static let perSandbox: [String] = [SettingKey.clipboard, SettingKey.agentSudo]
+    public static let perSandbox: [String] = [SettingKey.clipboard, SettingKey.browserBridge, SettingKey.agentSudo]
 
     /// What cannot be set here, by design, and why — printed in the file and the docs.
     public static let notSettable: [String] = [

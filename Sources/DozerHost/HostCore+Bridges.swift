@@ -1,4 +1,5 @@
 import Foundation
+import DozerKit
 
 // 599 — the session bridges' decisions (the scanner is `SessionBridge.swift`; the relay calls `bridge`),
 // and the per-sandbox settings that steer them (`sandbox-settings`, `doz config set --sandbox NAME`).
@@ -122,10 +123,64 @@ extension HostCore {
             }
             if fresh, n.kind == "clipboard" { await note(sandbox, "the \(session) session copied \(Self.chars(data)) to the Mac clipboard") }
             return n
-        case .openURL, .openTooLong:
-            return nil
+        case .openTooLong:
+            return BridgeNotice("open-refused", "\(sandbox) asked to open a URL longer than 2048 bytes — not opened")
+        case .openURL(let raw):
+            return await openURL(raw, sandbox: sandbox, session: session)
         }
     }
+
+    /// 599 (594.B2): the guest's xdg-open → the Mac's default browser, and a sign-in's localhost callback
+    /// forwarded into the sandbox.
+    nonisolated func openURL(_ raw: String, sandbox: String, session: String) async -> BridgeNotice {
+        let url: URL
+        switch BrowserBridge.check(raw) {
+        case .refused(let why): return BridgeNotice("open-refused", "\(sandbox) asked to open a URL — refused: \(why)")
+        case .open(let u): url = u
+        }
+        let shown = BrowserBridge.shown(url)
+        if await sandboxValue(named: sandbox, SettingKey.browserBridge) == .string("off") {
+            return BridgeNotice("open-off", "\(sandbox) asked to open \(shown) — its browser bridge is off (sandbox.browser_bridge)")
+        }
+        let target = await sandboxObject(named: sandbox)
+        let state = bridgeState
+        let (n, fresh) = state.once("open/\(sandbox)/\(url.absoluteString)", within: 10) {
+            guard state.opens.allow(sandbox) else {
+                return BridgeNotice("open-refused", "\(sandbox) asked to open too many URLs — \(shown) not opened (at most 3 in 10 s)")
+            }
+            // A sign-in whose redirect is this sandbox's localhost: forward the Mac's port there first.
+            var kind = "open", tail = "", follow: (host: String, port: Int, path: String)?
+            let cb = BrowserBridge.callback(in: url)
+            if let cb, let target {
+                state.forward(of: sandbox)?.stop("replaced by a new sign-in")
+                do {
+                    let f = try LoopbackForward(sandbox: sandbox, port: cb.port,
+                                                openStream: { try await target.openGuestStream([GuestCommand.deckholdPath, "connect", "-p", String(cb.port)]) },
+                                                onEnd: { [weak self] f, why in
+                                                    state.forwardEnded(f)
+                                                    Task { await self?.note(sandbox, "the sign-in callback forward localhost:\(f.port) ended (\(why))") }
+                                                })
+                    _ = state.setForward(f, for: sandbox)
+                    f.start()
+                    kind = "oauth"
+                    follow = cb
+                    tail = " · sign-in callback localhost:\(cb.port) forwarded (\(Int(BrowserBridge.forwardSeconds / 60)) min)"
+                } catch {
+                    kind = "oauth-refused"
+                    tail = " · localhost:\(cb.port) is in use on this Mac — the sign-in cannot return to the sandbox"
+                }
+            }
+            guard BrowserBridge.open(url, callback: follow) else {
+                return BridgeNotice("open-refused", "\(sandbox) asked to open \(shown), but this Mac could not open it")
+            }
+            return BridgeNotice(kind, "\(sandbox) opened \(shown)" + (tail.isEmpty ? " in your browser" : tail))
+        }
+        // The log names the page, never the query (a sign-in's state and challenge).
+        if fresh { await note(sandbox, "the \(session) session asked for \(shown): \(n.text)") }
+        return n
+    }
+
+    func sandboxObject(named name: String) -> Sandbox? { managed[name]?.sandbox }
 
     static func chars(_ data: Data) -> String {
         let n = String(decoding: data, as: UTF8.self).count

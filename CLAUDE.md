@@ -745,7 +745,19 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   file (`HostCore.sandboxValue`); `sandbox-settings` reads (in-process when no host) and sets;
   `doz config … --sandbox`, `doz create` flags, `doz_project.yaml` keys (`DozerProject.settingKeys`,
   synced by `doz up`). `sandbox.agent_sudo` keeps its own field.
-- **Tests never touch the Mac**: `DOZ_TEST_PASTEBOARD=<file>` replaces pbcopy.
+- **The browser bridge (B2)** is DeckStack's technique, re-done (never a DeckStack dependency): the
+  guest shim (`GuestCommand.openShim`, `/usr/local/lib/doz/bin`, written by `prepareGuest` AND at each
+  session open — a woken sandbox predates it) prints a human line + `ESC]6340;doz-open;URL BEL` to
+  `/dev/tty`, else `$DOZ_TTY` (deckhold exports the session's pty: a `setsid` opener has no ctty),
+  else stdout — `2>/dev/null` BEFORE `>` on each rung. `BrowserBridge.check` = http/https only, never
+  the Mac's loopback; `callback(in:)` reads ONLY `redirect_uri` (http, `localhost`/`127.0.0.1` exactly,
+  explicit port ≥ 1024). `LoopbackForward` binds the Mac's 127.0.0.1 (+ [::1]) BEFORE the URL opens,
+  relays each connection through `Sandbox.openGuestStream([deckhold, connect, -p, PORT])` (no NIC
+  needed), ends 3 s after the first answered callback or at 10 min; one per sandbox. Notices and the
+  host log show `BrowserBridge.shown` (scheme, host, path) — never the query (a sign-in's state).
+- **Tests never touch the Mac**: `DOZ_TEST_PASTEBOARD=<file>` replaces pbcopy; `DOZ_TEST_OPEN_URL=<file>`
+  replaces `/usr/bin/open` and plays the browser's last step (GET the callback on the Mac's port).
+  A fake OAuth server must READ before it answers (busybox `nc -e`), as a real one does.
 
 ### Browser terminals (591, on by default — owner ruling) — design: workspace `changes/591-*/591.01-DESIGN.md`
 

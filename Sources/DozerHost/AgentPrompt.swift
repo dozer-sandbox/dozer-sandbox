@@ -68,6 +68,7 @@ public enum AgentPrompt {
         ("sandbox.timezone", "the VM's time zone, e.g. Australia/Sydney (the Mac's, by default)"),
         ("sudo.description", "a sentence: sudo, and that the network policy still applies to root"),
         ("clipboard.description", "a sentence: a copy reaches the Mac clipboard with a notice (or the bridge is off); the clipboard is never readable"),
+        ("browser.description", "a sentence: xdg-open opens http(s) URLs in the Mac's browser and a sign-in's localhost callback is forwarded (or the bridge is off)"),
         ("mac.hostname", "the Mac's name"),
         ("dozer.version", "the doz that rendered it"),
     ]
@@ -83,6 +84,7 @@ public enum AgentPrompt {
     - System: {{sudo.description}}
     - Time zone: {{sandbox.timezone}} (the Mac's — `date` shows the user's local time).
     - Clipboard: {{clipboard.description}}
+    - Browser: {{browser.description}}
     - The user may pause, sleep or hibernate this VM between your turns; your processes, files and sessions survive it.
     - More — what persists (root disk, state disk, restore points), the network policy, what you cannot do from inside — is in the `dozer` skill.
     """
@@ -127,9 +129,11 @@ public enum AgentPrompt {
 
     Root inside this VM does not widen what you can reach: the VM is the boundary, every connection still goes through the user's network policy, and no credential is in the VM to find. Packages you install live on the root disk (kept across restarts, discarded by a reset).
 
-    ## The user's Mac: clipboard
+    ## The user's Mac: clipboard and browser
 
     {{clipboard.description}}
+
+    {{browser.description}}
 
     ## Sleep and hibernation
 
@@ -178,8 +182,13 @@ public enum AgentPrompt {
     public static func values(name: String, image: String, cpus: Int, memoryMiB: UInt64, workspace: String?,
                               network: NetworkMode, account: String?, version: String,
                               hostname: String = macHostname(), credentialProblem: String? = nil, agentSudo: Bool = true,
-                              timeZone: String? = nil, sudoMissingFromImage: String? = nil, clipboard: Bool = true) -> [String: String] {
+                              timeZone: String? = nil, sudoMissingFromImage: String? = nil, clipboard: Bool = true,
+                              browser: Bool = true) -> [String: String] {
         var v: [String: String] = [:]
+        // 599 (594.B2): the browser bridge.
+        v["browser.description"] = browser
+            ? "this VM has no browser, but `xdg-open URL` (also $BROWSER, `open`) opens an http or https URL in the user's Mac browser, and the user sees a notice. A sign-in that redirects to this VM's localhost (e.g. Claude Code's /login) completes: that port is forwarded from the Mac for up to 10 minutes. `http://localhost:PORT` of a server you run here does NOT open on the Mac — tell the user the address instead."
+            : "this VM has no browser and its browser bridge is off: xdg-open does not reach the user's Mac. Print URLs for the user to open; a sign-in that redirects to this VM's localhost cannot complete — they can turn the bridge on (`doz config set --sandbox \(name) sandbox.browser_bridge on`)."
         // 599 (594.B1): the clipboard bridge — and its risk, said to the agent as to the user.
         v["clipboard.description"] = clipboard
             ? "when you copy (OSC 52 — e.g. Claude Code's copy command, or tmux/vim yanks), the text is put on the user's Mac clipboard and the user sees a notice (\"\(name) copied N chars\") every time. Copy only what the user asked for. You can never read the Mac clipboard: ask the user to paste instead."
@@ -310,7 +319,8 @@ public enum AgentPrompt {
                           credentialProblem: credentialProblem, agentSudo: wanted && sudoInstalled != false,
                           timeZone: HostCore.guestTimeZone(settings: settings, environment: settings.environment)?.name,
                           sudoMissingFromImage: wanted && sudoInstalled == false ? config.spec.imageSpec?.name ?? config.image : nil,
-                          clipboard: HostCore.sandboxValue(config, SettingKey.clipboard, settings: settings) != .string("off"))
+                          clipboard: HostCore.sandboxValue(config, SettingKey.clipboard, settings: settings) != .string("off"),
+                          browser: HostCore.sandboxValue(config, SettingKey.browserBridge, settings: settings) != .string("off"))
         var r = AgentPromptReport(enabled: settings.bool(SettingKey.agentPrompt), agent: agent, text: nil, error: nil, layers: [],
                                   skill: nil, promptPath: guestPromptPath,
                                   skillPath: skillDirectory(agent: agent, home: imageSpec.home) + "/SKILL.md")

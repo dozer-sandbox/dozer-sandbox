@@ -41,6 +41,9 @@ struct CreateArguments: ParsableArguments {
     @Option(name: .long, help: "write or off: a copy in this sandbox (OSC 52) reaches the Mac clipboard, with a notice every time (default: the setting sandbox.clipboard, write).")
     var clipboard: String?
 
+    @Option(name: .long, help: "on or off: xdg-open in this sandbox opens http(s) URLs in the Mac's browser, a sign-in's localhost callback forwarded (default: the setting sandbox.browser_bridge, on).")
+    var browserBridge: String?
+
     @Flag(name: .long, help: "When the image is out of date (an older doz's recipe, or a newer agent release): rebuild it first (~2 min, needs network; existing sandboxes are not affected).")
     var rebuild = false
 
@@ -73,6 +76,7 @@ struct CreateArguments: ParsableArguments {
             do { s[key] = try d.parse(text) } catch let e as SettingsError { throw ValidationError("\(flag): \(e.message)") }
         }
         try take(SettingKey.clipboard, clipboard, "--clipboard")
+        try take(SettingKey.browserBridge, browserBridge, "--browser-bridge")
         return s.isEmpty ? nil : s
     }
 
@@ -103,7 +107,7 @@ struct CreateArguments: ParsableArguments {
 
     var givenAny: Bool {
         image != nil || cpus != nil || memory != nil || workspace != nil || network != nil || subnet != nil || account != nil || agentPrompt != nil || isolated || agentSudo != nil
-            || clipboard != nil
+            || clipboard != nil || browserBridge != nil
     }
 }
 

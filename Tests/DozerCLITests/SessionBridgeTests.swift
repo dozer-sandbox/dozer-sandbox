@@ -1,6 +1,6 @@
 import Foundation
 import XCTest
-import DozerKit
+@testable import DozerKit
 @testable import DozerHost
 @testable import DozerCLI
 
@@ -114,6 +114,52 @@ final class SessionBridgeTests: XCTestCase {
     func testTheRepaintFrameIsParsed() {
         var p = ClientWire.Parser()
         XCTAssertEqual(p.feed(bytes("ab") + ClientWire.repaint + bytes("c")), [.input(Data("ab".utf8)), .repaint, .input(Data("c".utf8))])
+    }
+
+    // MARK: B2 — the browser bridge
+
+    func testOnlyHttpAndHttpsOpenAndNeverTheMacsLoopback() {
+        for ok in ["https://example.com/a?b=c", "http://example.com", "HTTPS://Claude.ai/oauth/authorize?x=1"] {
+            guard case .open = BrowserBridge.check(ok) else { return XCTFail(ok) }
+        }
+        for bad in ["file:///etc/passwd", "javascript:alert(1)", "ftp://x/y", "data:text/html,hi", "https://", "not a url",
+                    "http://localhost:3000/", "http://127.0.0.1:8080", "http://[::1]:80/", "http://app.localhost/", "http://0.0.0.0/",
+                    "https://example.com/\u{07}"] {
+            guard case .refused = BrowserBridge.check(bad) else { return XCTFail(bad) }
+        }
+    }
+
+    func testTheCallbackIsReadOnlyFromRedirectURIFailClosed() throws {
+        func cb(_ s: String) -> Int? { BrowserBridge.callback(in: URL(string: s)!)?.port }
+        XCTAssertEqual(cb("https://a/x?redirect_uri=http%3A%2F%2Flocalhost%3A54545%2Fcallback&state=s"), 54545)
+        XCTAssertEqual(cb("https://a/x?redirect_uri=http://127.0.0.1:1024/cb"), 1024)
+        XCTAssertEqual(BrowserBridge.callback(in: URL(string: "https://a/x?redirect_uri=http%3A%2F%2Flocalhost%3A54545%2Fcallback")!)?.path, "/callback")
+        XCTAssertNil(cb("https://a/x?redirect_uri=https://localhost:54545/cb"), "a loopback callback is http")
+        XCTAssertNil(cb("https://a/x?redirect_uri=http://localhost/cb"), "no implicit port")
+        XCTAssertNil(cb("https://a/x?redirect_uri=http://localhost:80/cb"), "not a privileged port")
+        XCTAssertNil(cb("https://a/x?redirect_uri=http://127.0.0.2:5000/cb"), "only localhost and 127.0.0.1")
+        XCTAssertNil(cb("https://a/x?redirect_uri=http://localhost.evil.test:5000/cb"), "never by suffix")
+        XCTAssertNil(cb("https://a/x?callback=http://localhost:5000/cb"), "only redirect_uri counts")
+        XCTAssertNil(cb("http://localhost:5000/x"), "not the URL's own port")
+    }
+
+    func testANoticeShowsThePageNeverTheQuery() {
+        XCTAssertEqual(BrowserBridge.shown(URL(string: "https://claude.ai/oauth/authorize?code=true&state=secret")!), "https://claude.ai/oauth/authorize")
+        XCTAssertEqual(BrowserBridge.shown(URL(string: "http://example.com:8080/")!), "http://example.com:8080")
+    }
+
+    func testTheShimLeadsEverySessionsPathAndIsBrowser() {
+        let lab = Sandbox.sessionContext(imageSpec: nil, environment: [:], workingDirectory: nil, user: nil).environment
+        XCTAssertEqual(lab["PATH"], GuestCommand.openShimDirectory + ":" + GuestCommand.path)
+        XCTAssertEqual(lab["BROWSER"], GuestCommand.openShimPath)
+        let own = Sandbox.sessionContext(imageSpec: nil, environment: ["PATH": "/x", "BROWSER": "/y"], workingDirectory: nil, user: nil).environment
+        XCTAssertEqual(own["PATH"], "/x", "the caller's own PATH is kept")
+        XCTAssertEqual(own["BROWSER"], "/y")
+        let agent = Sandbox.sessionContext(imageSpec: AgentImages.claudeCode, environment: [:], workingDirectory: nil, user: nil).environment
+        XCTAssertTrue(agent["PATH"]?.hasPrefix(GuestCommand.openShimDirectory + ":") == true, agent["PATH"] ?? "")
+        XCTAssertEqual(GuestCommand.withOpenShim(GuestCommand.withOpenShim("/a:/b")), GuestCommand.openShimDirectory + ":/a:/b", "once")
+        XCTAssertTrue(GuestCommand.prepareGuest(imageSpec: nil).contains(GuestCommand.openShimPath), "installed at every boot, the lab too")
+        XCTAssertTrue(GuestCommand.openShim.contains("\\033]6340;doz-open;%s\\007"), "the marker the scanner reads")
     }
 
     // MARK: settings

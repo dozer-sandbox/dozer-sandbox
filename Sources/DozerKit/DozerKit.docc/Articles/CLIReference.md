@@ -61,7 +61,7 @@ doz uninstall [--keep-store] [--keep-config] [--yes]
   first if it never was). **`up` with no name**, in that folder, creates, starts or wakes exactly
   that sandbox, with the folder at `/workspace`, starts its `sessions` and attaches to the first.
   The file is YAML with a closed set of keys — `version`, `name`, `image`, `cpus`, `memory`,
-  `network`, `account`, `sessions`, `agent_prompt`, `agent_prompt_mode`, `agent_sudo`, `clipboard`; an unknown key or a bad
+  `network`, `account`, `sessions`, `agent_prompt`, `agent_prompt_mode`, `agent_sudo`, `clipboard`, `browser_bridge`; an unknown key or a bad
   value is an error naming its line.
 
   ```yaml
@@ -150,6 +150,14 @@ attached.
   `doz config set --sandbox NAME sandbox.clipboard off`, `doz create --clipboard off`, or
   `clipboard: off` in `doz_project.yaml`. The risk — an agent can put a command on the clipboard — is
   why every copy is shown, and why the agent's facts say so.
+- **Browser and sign-ins (599):** the guest's `xdg-open` (`$BROWSER`, `open`, `sensible-browser`;
+  `/usr/local/lib/doz/bin`, first on every session's PATH, written at each boot) hands an http(s)
+  URL to the Mac's default browser — `SANDBOX opened https://… in your browser`. A URL whose
+  `redirect_uri` is `http://localhost:PORT` or `127.0.0.1:PORT` (1024–65535) gets the Mac's
+  `localhost:PORT` forwarded into the sandbox's (each connection a guest `deckhold connect -p PORT`)
+  until 3 s after the callback was answered, 10 min at most; one per sandbox. Refused: other
+  schemes, the Mac's own loopback, > 3 per 10 s, > 2048 bytes. `sandbox.browser_bridge = on | off`,
+  per sandbox as the clipboard (`--browser-bridge`, `browser_bridge:`).
 
 ### Agents, keys and accounts
 
@@ -458,7 +466,7 @@ doz config unset KEY       # back to the default (commented out again)
 doz config init            # write the file: every setting listed, commented out at its default
 doz config path            # ${XDG_CONFIG_HOME:-~/.config}/dozer-sandbox/doz.toml
 doz config show|get|set|unset --sandbox NAME …   # 599: one sandbox's own value of a per-sandbox setting
-                                                  # (sandbox.clipboard, sandbox.agent_sudo) — it wins over the file
+                                                  # (sandbox.clipboard, sandbox.browser_bridge, sandbox.agent_sudo) — it wins over the file
 ```
 
 One settings file, `doz.toml`, lists every setting grouped in sections (`[ui]`, `[host]`,
