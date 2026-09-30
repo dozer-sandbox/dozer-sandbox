@@ -115,6 +115,16 @@ final class WebActionTests: XCTestCase {
         invalid(#"{"action":"host-restart","sandbox":"a"}"#)
         invalid(#"{"action":"host-stop"}"#)
         XCTAssertTrue(WebOperations.summary(.hostRestart, .null).contains("hibernated"))
+        // 594 W22: the stop's rows in the outcome, and each sandbox's line on the operation.
+        let rows = [HostStopRow(name: "w1", phaseBefore: "running", phase: "hibernated", outcome: "hibernated", milliseconds: 400),
+                    HostStopRow(name: "w2", phaseBefore: "running", phase: "off", outcome: "failed", milliseconds: 90, error: "boom")]
+        let v = try JSONValue(encoding: WebHostRestart(stop: HostStopResult(sandboxes: rows, milliseconds: 500, version: "a"), host: nil))
+        XCTAssertEqual(WebOperations.summary(.hostRestart, v),
+                       "the host restarted — hibernated w1; they wake when used (w2: could not hibernate — shut down)")
+        XCTAssertEqual(WebOperations.finishedLine(HostStopView.finished(rows[0])), "✓ hibernated w1 — 400 ms")
+        XCTAssertEqual(WebOperations.finishedLine(HostStopView.finished(rows[1])),
+                       "✗ hibernating w2 — boom — it was shut down instead (its disk is kept; start it again) (90 ms)")
+        XCTAssertNil(WebOperations.finishedLine(HostStopView.started("w1")))
         // A store with no host: nothing to restart (and nothing is started).
         let dir = URL(fileURLWithPath: "/tmp/doz-hr-\(getpid())-\(UInt32.random(in: 0...UInt32.max))")
         let store = DozerStore(root: dir)

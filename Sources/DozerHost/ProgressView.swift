@@ -123,7 +123,7 @@ public final class ProgressBoard: @unchecked Sendable {
                 steps.append((text, now))
                 return []
             case .step:
-                let started = removeStep(text)
+                let started = removeStep(e.startedAs.map { ProgressFormat.trimDigests(ProgressFormat.inert($0, limit: 400)) } ?? text)
                 var out: [ProgressFinal] = []
                 if let t = transfer, t.label.isEmpty == false, started != nil || steps.isEmpty {
                     out.append(.transferDone(t.label, bytes: t.done, seconds: now.timeIntervalSince(t.started)))
@@ -133,7 +133,7 @@ public final class ProgressBoard: @unchecked Sendable {
                 out.append(.stepDone(text, seconds: (e.milliseconds ?? 0) / 1000))
                 return out
             case .failed:
-                _ = removeStep(text)
+                _ = removeStep(e.startedAs.map { ProgressFormat.trimDigests(ProgressFormat.inert($0, limit: 400)) } ?? text)
                 transfer = nil
                 tail = []
                 return [.stepFailed(text, seconds: (e.milliseconds ?? 0) / 1000, error: e.error.map { ProgressFormat.trimDigests(ProgressFormat.inert($0)) })]

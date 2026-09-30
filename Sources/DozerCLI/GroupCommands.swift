@@ -514,12 +514,59 @@ struct HostStop: AsyncParsableCommand {
             if g.json { Out.json(["stopped": false]) } else { Out.stdout("no host is running\n") }
             return
         }
-        _ = try call(HostRequest(.hostStop), g, autostart: false)
-        // It answers before it exits: wait for the lock to go.
-        let deadline = Date().addingTimeInterval(30)
-        while store.hostIsRunning() && Date() < deadline { usleep(50_000) }
-        if g.json { Out.json(["stopped": true]) } else { Out.stdout("host stopped — every sandbox that was running is hibernated\n") }
+        switch try stopHostShowingProgress(store, g) {
+        case .done(let r):
+            if g.json { Out.json(r) } else { Out.stdout(HostStopView.summary(r) + "\n") }
+        case .older:
+            if g.json { Out.json(["stopped": true]) } else { Out.stdout("host stopped — every sandbox that was running is hibernated\n") }
+        case .exited(let seen):
+            throw fail(HostError(.failed, HostStopView.seen(seen)), g)
+        }
     }
+}
+
+enum HostStopOutcome {
+    /// What the host did (594 W22).
+    case done(HostStopResult)
+    /// An older host answered only "stopped".
+    case older
+    /// The host went away before it answered: the events it sent.
+    case exited([HostEvent])
+}
+
+/// 594 W22: `host stop` with its progress — each sandbox's line as it hibernates (the CLI's progress
+/// view: animated on a terminal, plain lines elsewhere), then the host's answer. Waits for the host
+/// to let go of its lock (it answers just before it exits). Never hangs on a host that dies mid-stop:
+/// the connection ends, and what it said so far is returned.
+func stopHostShowingProgress(_ store: DozerStore, _ g: GlobalOptions) throws -> HostStopOutcome {
+    let progress = Progress(g, immediate: true)
+    let seen = LockedEvents()
+    let m: HostMessage
+    do {
+        m = try HostClient.request(HostRequest(.hostStop), store: store, autostart: false) { e in
+            seen.append(e)
+            progress.handle(e)
+        }
+    } catch {
+        progress.finish()
+        guard !store.hostIsRunning() || !seen.all.isEmpty else {
+            throw fail(HostError.from(error), g)
+        }
+        return .exited(seen.all)
+    }
+    progress.finish()
+    guard m.ok == true else { throw fail(m.error ?? HostError(.failed, "the host gave no reason"), g) }
+    let deadline = Date().addingTimeInterval(30)
+    while store.hostIsRunning() && Date() < deadline { usleep(50_000) }
+    if let v = m.result, let r = try? v.decode(HostStopResult.self) { return .done(r) }
+    return .older
+}
+
+final class LockedEvents: @unchecked Sendable {
+    private let lock = NSLock()
+    private var events: [HostEvent] = []
+    func append(_ e: HostEvent) { lock.withLock { events.append(e) } }
+    var all: [HostEvent] { lock.withLock { events } }
 }
 
 struct HostStatusCommand: AsyncParsableCommand {

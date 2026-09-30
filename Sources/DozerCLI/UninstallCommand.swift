@@ -134,7 +134,12 @@ struct Uninstall: AsyncParsableCommand {
         // The host goes first (it owns every VM); it shuts them down as it stops.
         if !keepStore, store.hostIsRunning() {
             if !g.json { Out.stdout("stopping the host …\n") }
-            _ = try? HostClient.request(HostRequest(.hostStop), store: store, autostart: false)
+            // 594 W22: the same progress as `doz host stop` (each sandbox as it hibernates, then the summary).
+            switch try? stopHostShowingProgress(store, g) {
+            case .done(let r)?: if !g.json { Out.stdout(HostStopView.summary(r) + "\n") }
+            case .exited(let seen)?: if !g.json { Out.stdout(HostStopView.seen(seen) + "\n") }
+            default: break
+            }
             let deadline = Date().addingTimeInterval(120)
             while store.hostIsRunning(), Date() < deadline { usleep(200_000) }
             if store.hostIsRunning() { throw fail(HostError(.failed, "the host did not stop within 2 minutes — nothing was removed"), g) }

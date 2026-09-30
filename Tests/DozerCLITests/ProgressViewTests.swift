@@ -130,4 +130,61 @@ final class ProgressViewTests: XCTestCase {
         XCTAssertEqual(DozerSettings.definition("ui.progress")?.environment, "DOZ_PROGRESS")
         XCTAssertThrowsError(try DozerSettings.definition("ui.progress")!.parse("fancy"))
     }
+
+    // MARK: 594 W22 — `doz host stop`'s progress
+
+    func testHostStopShowsEachSandboxThenTheSummary() {
+        let a = HostStopRow(name: "hello-dozer", phaseBefore: "running", phase: "hibernated", outcome: "hibernated", milliseconds: 412, snapshotBytes: 40_000_000)
+        let b = HostStopRow(name: "lab1", phaseBefore: "paused", phase: "hibernated", outcome: "hibernated", milliseconds: 650)
+        // Plain (off a terminal, --progress plain): one finished line per sandbox, from the board.
+        let plain = ProgressTerminal(mode: .plain, color: false, plainPrefix: "  · ")
+        XCTAssertEqual(plain.apply(HostStopView.started("hello-dozer"), now: t0), "", "a start says nothing in plain mode")
+        XCTAssertEqual(plain.apply(HostStopView.finished(a), now: t0), "  · hibernated hello-dozer (snapshot 40 MB) — 412 ms\r\n")
+        XCTAssertFalse(plain.board.isLive)
+        // Animated: the line under way ("hibernating …") until it ends as "✓ hibernated …".
+        let anim = ProgressTerminal(mode: .animated, color: false)
+        _ = anim.apply(HostStopView.started("hello-dozer"), now: t0)
+        _ = anim.apply(HostStopView.started("lab1"), now: t0)
+        func liveSteps() -> [String] { anim.board.live(now: t0).compactMap { if case .step(let l, _) = $0 { return l } else { return nil } } }
+        XCTAssertEqual(liveSteps(), ["hibernating lab1"])
+        let out = anim.apply(HostStopView.finished(b), now: t0.addingTimeInterval(0.7))
+        XCTAssertTrue(out.contains("✓ hibernated lab1 — 650 ms"), out)
+        XCTAssertEqual(liveSteps(), ["hibernating hello-dozer"], "the other one is still under way")
+        _ = anim.apply(HostStopView.finished(a), now: t0.addingTimeInterval(0.9))
+        XCTAssertFalse(anim.board.isLive, "every line ended — no spinner left")
+        // The summary.
+        let r = HostStopResult(sandboxes: [a, b], milliseconds: 1_200, version: "0.12.0")
+        XCTAssertEqual(HostStopView.summary(r), "host stopped — 2 sandboxes hibernated (hello-dozer, lab1) in 1.2 s; the next command starts a new host")
+        XCTAssertEqual(HostStopView.summary(HostStopResult(sandboxes: [], milliseconds: 30, version: nil)), "host stopped (nothing was running)")
+    }
+
+    func testAFailedHibernationSaysWhyAndWhatHappensToIt() {
+        let f = HostStopRow(name: "lab2", phaseBefore: "running", phase: "off", outcome: "failed", milliseconds: 300, error: "VZ refused the snapshot")
+        let plain = ProgressTerminal(mode: .plain, color: false, plainPrefix: "  · ")
+        _ = plain.apply(HostStopView.started("lab2"), now: t0)
+        XCTAssertEqual(plain.apply(HostStopView.finished(f), now: t0),
+                       "  · FAILED: hibernating lab2 — VZ refused the snapshot — it was shut down instead (its disk is kept; start it again) (300 ms)\r\n")
+        let anim = ProgressTerminal(mode: .animated, color: false)
+        _ = anim.apply(HostStopView.started("lab2"), now: t0)
+        XCTAssertTrue(anim.apply(HostStopView.finished(f), now: t0).contains("✗ hibernating lab2 — VZ refused the snapshot — it was shut down instead"))
+        XCTAssertFalse(anim.board.isLive)
+        let ok = HostStopRow(name: "a", phaseBefore: "running", phase: "hibernated", outcome: "hibernated", milliseconds: 100)
+        XCTAssertEqual(HostStopView.summary(HostStopResult(sandboxes: [ok, f], milliseconds: 500, version: nil)),
+                       "host stopped — 1 sandbox hibernated (a); 1 sandbox could not be hibernated and was shut down (lab2) in 500 ms; the next command starts a new host")
+    }
+
+    func testAStopTheHostDidNotFinishSaysWhatItSaw() {
+        let a = HostStopRow(name: "a", phaseBefore: "running", phase: "hibernated", outcome: "hibernated", milliseconds: 100)
+        let seen = [HostStopView.started("a"), HostStopView.started("b"), HostStopView.finished(a)]
+        XCTAssertEqual(HostStopView.seen(seen), "the host exited before it answered — done: a; unknown (it went away while handling them): b — doz ls says where they are")
+        XCTAssertEqual(HostStopView.seen([]), "the host exited before it answered")
+    }
+
+    func testTheStopsAnswerRoundTrips() throws {
+        let r = HostStopResult(sandboxes: [HostStopRow(name: "a", phaseBefore: "asleep", phase: "hibernated", outcome: "hibernated", milliseconds: 5)],
+                               milliseconds: 9, version: "v")
+        let d = try JSONEncoder().encode(r)
+        XCTAssertEqual(try JSONDecoder().decode(HostStopResult.self, from: d), r)
+        XCTAssertNil(try? JSONValue.string("stopped").decode(HostStopResult.self), "an older host's answer is not a result")
+    }
 }

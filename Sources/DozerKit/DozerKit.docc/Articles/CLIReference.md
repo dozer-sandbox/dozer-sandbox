@@ -355,7 +355,7 @@ sandboxes created from now on; existing ones keep theirs, and a wake keeps its s
 
 ```bash
 doz host [--foreground] [--idle-timeout MIN]   # run it by hand
-doz host stop                                    # hibernates everything running, then exits
+doz host stop                                    # hibernates everything running (a line each, then a summary), then exits
 doz host status                                  # is one running, and what does it hold? never starts one
 doz host upgrade-check                           # after an upgrade: is a host of an older build still running?
 ```
