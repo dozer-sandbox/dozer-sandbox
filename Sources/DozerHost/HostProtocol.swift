@@ -167,6 +167,9 @@ public struct HostRequest: Codable, Equatable, Sendable {
     public var rows: UInt16?
     /// attach / exec / run: wake a paused or sleeping sandbox first (default true).
     public var wake: Bool?
+    /// 594 W27: exec / open-session: cold-start an OFF (or failed) sandbox first (default false — an
+    /// older client keeps "`doz start` boots it"; this CLI sends true unless --no-start).
+    public var start: Bool?
     public var environment: [String: String]?
     public var user: String?
     public var workdir: String?
@@ -633,6 +636,11 @@ public struct ExecOutput: Codable, Equatable, Sendable {
     public var stdout: Data
     public var stderr: Data
     public var milliseconds: Double
+    /// 594 W27: what had to happen first — a cold start (the sandbox was off) or a wake/resume — and
+    /// how long it took (nil: it was already running).
+    public var started: Bool? = nil
+    public var woke: Bool? = nil
+    public var bootMilliseconds: Double? = nil
 }
 
 /// `open-session`.
@@ -642,6 +650,10 @@ public struct SessionOpened: Codable, Equatable, Sendable {
     public var created: Bool
     /// 594 (W17): the sandbox's default session (what `doz attach NAME` attaches to).
     public var defaultSession: String? = nil
+    /// 594 W27: as `ExecOutput` — a cold start or a wake before the session opened.
+    public var started: Bool? = nil
+    public var woke: Bool? = nil
+    public var bootMilliseconds: Double? = nil
 }
 
 /// `image ls`.

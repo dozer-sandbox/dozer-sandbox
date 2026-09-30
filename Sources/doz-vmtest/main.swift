@@ -911,6 +911,10 @@ Task {
             // 594 W22: only `doz host stop`'s progress part of `cli` (a store of its own).
             let binary = args.firstIndex(of: "--doz").flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil } ?? ".build/debug/doz"
             await cliHostStopSuite(binary: URL(fileURLWithPath: binary).standardizedFileURL.path)
+        case "cli-points":
+            // 594 W25–W27: point names and lookups, check-before-asking, exec starts an off sandbox.
+            let binary = args.firstIndex(of: "--doz").flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil } ?? ".build/debug/doz"
+            await cliPointsSuite(binary: URL(fileURLWithPath: binary).standardizedFileURL.path)
         case "cli-agentsudo":
             // 594 W23: only the agent-sudo part of `cli` (a store of its own; prepares claude-code).
             let binary = args.firstIndex(of: "--doz").flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil } ?? ".build/debug/doz"

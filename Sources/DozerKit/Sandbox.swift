@@ -293,6 +293,8 @@ public actor Sandbox {
     /// `takenWhile: running`, and the first boot from it runs e2fsck. Paused / asleep: cloned as
     /// they are, also recorded as running.
     public func takeRestorePoint(name: String, note: String = "") async throws -> RestorePoint {
+        // 594 W25: a name that cannot be stored as given is refused — never cut.
+        if let problem = RestorePoint.nameProblem(name) { throw SandboxError.invalidSpec(problem) }
         await acquire(); defer { release() }
         return try await takeRestorePointLocked(name: name, note: note, automatic: false)
     }

@@ -103,6 +103,7 @@ struct Create: AsyncParsableCommand {
     @OptionGroup var g: GlobalOptions
     @Argument(help: "The sandbox's name: 1–40 characters of a-z 0-9 -.") var name: String
     @OptionGroup var create: CreateArguments
+    @Flag(name: .long, help: "Start it too (594 W27).") var start = false
 
     func run() async throws {
         var r = HostRequest(.create, name: name)
@@ -110,12 +111,18 @@ struct Create: AsyncParsableCommand {
         try preflightAgentAccount(&o, g)          // 594: pi needs an API-key account — before anything is made
         r.create = o
         let v = try call(r, g)
-        let info = try decode(v, SandboxInfo.self, g)
-        if g.json { Out.json(info) } else {
+        var info = try decode(v, SandboxInfo.self, g)
+        if !g.json {
             Out.stdout("created \(info.name): \(info.image), \(info.cpus) CPUs, \(Out.mib(info.memoryMiB)), network \(info.network)"
                        + (info.workspace.map { ", /workspace = \($0)" } ?? ", isolated") + "\n")
         }
         noteWorkspace(info, isolatedAsked: create.isolated, g)
+        if start {
+            let s = try decode(try call(HostRequest(.start, name: name), g), LifecycleResult.self, g)
+            if let i = s.info { info = i }
+            if !g.json { Out.stdout("started \(name) in \(String(format: "%.1f", s.milliseconds / 1000)) s\n") }
+        }
+        if g.json { Out.json(info) }
     }
 }
 
@@ -189,6 +196,7 @@ struct Shutdown: AsyncParsableCommand {
     @Argument var name: String
     @Flag(name: [.short, .long], help: "Do not ask.") var yes = false
     func run() async throws {
+        try await requireSandbox(name, g)   // 594 W26: never a question about a sandbox that is not there
         try confirm("Shut down \(name)? Its running programs end (the disk is kept).", yes: yes, g)
         _ = try lifecycle(.shutdown, name, g)
     }
@@ -200,6 +208,7 @@ struct Reset: AsyncParsableCommand {
     @Argument var name: String
     @Flag(name: [.short, .long], help: "Do not ask.") var yes = false
     func run() async throws {
+        try await requireSandbox(name, g)
         try confirm("Reset \(name) to its image? Everything installed or written on its disk is discarded.", yes: yes, g)
         _ = try lifecycle(.reset, name, g)
     }
@@ -211,6 +220,7 @@ struct Remove: AsyncParsableCommand {
     @Argument var name: String
     @Flag(name: [.short, .long], help: "Do not ask.") var yes = false
     func run() async throws {
+        try await requireSandbox(name, g)
         try confirm("Remove \(name) and everything it has on disk (disks, restore points, state)?", yes: yes, g)
         _ = try lifecycle(.rm, name, g)
     }

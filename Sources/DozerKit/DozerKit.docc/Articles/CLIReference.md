@@ -121,7 +121,7 @@ doz up NAME [same options] [--session S] [-d] [-- CMD …]
 |---|---|
 | `attach NAME [SESSION] [--no-wake]` | Your terminal becomes that session. **Ctrl-]** detaches (`--detach-key ctrl-x\|none`). A paused or sleeping sandbox wakes first unless `--no-wake`. Hibernated while attached: the client waits and reattaches by itself on wake. |
 | `run NAME [--session S] [-d] -- CMD …` | A **new** session running `CMD`, attached; exits with `CMD`'s exit code. No shell in front — write `bash -lc '…'` for one. |
-| `exec NAME [--user U] [--workdir D] [-e K=V] [--timeout S] -- CMD …` | One-shot, no terminal: stdout, stderr and the exit code pass straight through (default timeout 120 s). Agent images run as the agent's user in `/workspace`; `--user root` for root. |
+| `exec NAME [--user U] [--workdir D] [-e K=V] [--timeout S] -- CMD …` | One-shot, no terminal: stdout, stderr and the exit code pass straight through (default timeout 120 s). Agent images run as the agent's user in `/workspace`; `--user root` for root. A sleeping sandbox is woken and an off one started first (594; `--no-wake`, `--no-start`; `--json` has `started`, `woke`, `bootMilliseconds`) — `run` starts one too. |
 | `sessions NAME` | The sandbox's terminal sessions. |
 | `ls` · `inspect NAME` | Every sandbox: image, phase, RAM held, disk, sessions, network · everything as JSON. |
 
@@ -275,6 +275,8 @@ doz point fork NAME POINT NEWNAME           # a new sandbox from that point (col
 doz point rm NAME POINT
 doz point save-image NAME [POINT] --as myimage [--note …]    # a custom image (a template)
 doz up other --image myimage
+# 594: a POINT is its name (≤ 64 characters, stored as typed — longer is refused), its id, or the start
+# of either when only one point matches; revert / rm check the point exists BEFORE asking.
 
 doz image ls                   # built-in images and templates, whether each is baked here (for this build),
                                # and an agent image's version: claude-code 2.1.227 (2.1.285 available — preparing)
