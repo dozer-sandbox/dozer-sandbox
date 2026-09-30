@@ -97,6 +97,7 @@ func renderResourcePlan(_ p: ResourcePlan) -> String {
         s += "frees \(DozerImages.formatBytes(p.freedBytes)) in all (blocks shared between them counted once)\(p.dryRun ? " — a dry run: nothing was deleted" : "")\n"
     }
     for x in p.refused { s += "refused \(x.id): \(x.reason)\n" }
+    if p.clean { s += "logs and metrics are kept — name them to clear (doz resources rm logs metrics)\n" }
     return s
 }
 

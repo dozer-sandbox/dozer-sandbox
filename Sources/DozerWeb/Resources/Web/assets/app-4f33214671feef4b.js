@@ -1768,25 +1768,30 @@ function resGroupPanel(r, group, title) {
     h('div', { class: 'head' }, h('h2', null, title), h('span', { class: 'muted' }, group === 'outside' ? 'shown, never deleted here' : bytes(total))),
     panel(table(['', 'Item', 'Size', 'Freed if deleted', 'Used by', 'Notes', 'Managed in'], rows, [2, 3])));
 }
+/// The top bar is Dozer's own split only (owner, 595): what stays, what Clean up frees, and what `du`
+/// counts again for blocks APFS clones share — the whole is Dozer's total. The volume's free space is
+/// text beside it, never part of the bar.
 function resTotalBar(r) {
-  const free = r.volumeFreeBytes || 0;
   const clean = Math.min(r.cleanableBytes, r.occupiedBytes);
   const keep = Math.max(0, r.occupiedBytes - clean);
-  const whole = Math.max(1, keep + clean + free);
-  // A part that is not zero stays visible however large the volume (min-width), so Dozer never vanishes.
+  const shared = Math.max(0, r.totalBytes - r.occupiedBytes);
+  const whole = Math.max(1, keep + clean + shared);
   const seg = (cls, n, label) => {
-    const s = h('span', { class: cls, title: label + ': ' + bytes(n) });
+    const s = h('span', { class: cls, 'data-seg': cls, title: label + ': ' + bytes(n) });
     s.style.width = ((n / whole) * 100).toFixed(2) + '%';
-    if (n > 0 && cls !== 'res-seg-free') s.style.minWidth = '4px';
+    if (n > 0) s.style.minWidth = '4px';
     return s;
   };
   return h('div', { class: 'res-total' },
-    h('div', { class: 'res-bar', 'data-res-bar': '' }, seg('res-seg-used', keep, 'Dozer keeps'), seg('res-seg-clean', clean, 'Clean up frees'), seg('res-seg-free', free, 'Free on the volume')),
+    h('div', { class: 'res-total-line' },
+      h('div', { class: 'res-bar', 'data-res-bar': '' }, seg('res-seg-used', keep, 'Kept'), seg('res-seg-clean', clean, 'Clean up frees'),
+        seg('res-seg-shared', shared, 'Shared blocks du counts again')),
+      h('span', { class: 'res-free', 'data-res-free': '' }, r.volumeFreeBytes != null ? bytes(r.volumeFreeBytes) + ' free on the volume' : '')),
     h('div', { class: 'res-legend' },
-      h('span', null, h('span', { class: 'sw res-sw-used', 'aria-hidden': 'true' }), 'Dozer ', h('strong', { 'data-total': '' }, bytes(r.totalBytes)),
-        h('span', { class: 'muted' }, ' as du counts it · ' + bytes(r.occupiedBytes) + ' on the volume (shared blocks once)')),
+      h('span', null, 'Dozer ', h('strong', { 'data-total': '' }, bytes(r.totalBytes)), h('span', { class: 'muted' }, ' as du counts it')),
+      h('span', null, h('span', { class: 'sw res-sw-used', 'aria-hidden': 'true' }), 'Kept ', h('strong', null, bytes(keep))),
       h('span', null, h('span', { class: 'sw res-sw-clean', 'aria-hidden': 'true' }), 'Clean up frees ', h('strong', { 'data-cleanable': '' }, bytes(r.cleanableBytes))),
-      h('span', null, h('span', { class: 'sw res-sw-free', 'aria-hidden': 'true' }), 'Free on the volume ', h('strong', null, bytes(r.volumeFreeBytes)))));
+      h('span', null, h('span', { class: 'sw res-sw-shared', 'aria-hidden': 'true' }), 'Shared (APFS clones, counted again by du) ', h('strong', null, bytes(shared)))));
 }
 function resMemoryPanel(r) {
   const held = r.memory.reduce((a, m) => a + m.heldBytes, 0);
@@ -1890,7 +1895,7 @@ async function resDelete(ids, clean) {
       plan.refused.map((x) => h('div', { 'data-plan-refused': x.id }, x.id + ' — ' + x.reason))) : null,
     h('p', { class: 'res-plan-total' }, 'Frees ', h('strong', { 'data-plan-freed': '' }, bytes(plan.freedBytes)), ' in all (blocks shared between them counted once).'));
   const title = clean ? 'Clean up' : 'Delete ' + n + ' item' + (n === 1 ? '' : 's');
-  const d = dialog(title, (clean ? 'Re-creatable and unused — never templates, sandboxes, restore points, settings or keys. ' : '') +
+  const d = dialog(title, (clean ? 'Re-creatable and unused — never templates, sandboxes, restore points, settings or keys. Logs and metrics are kept — select them to clear. ' : '') +
     'One operation: the host waits until nothing that uses the disks is under way.', [],
     clean ? 'Clean up' : 'Delete', async () => {
       const op = await actOrThrow({ action: 'resources-rm', ids: plan.items.map((e) => e.id) });

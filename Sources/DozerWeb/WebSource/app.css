@@ -539,15 +539,17 @@ nav a.active .nav-size { color: inherit; opacity: .8; }
 .nav-size.bad { color: var(--fail); }
 .nav-size[hidden] { display: none; }
 .res-total { margin: 0 0 14px; }
-.res-bar { display: flex; height: 12px; border-radius: 6px; overflow: hidden; background: var(--free); }
+.res-total-line { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.res-bar { flex: 1 1 320px; display: flex; height: 12px; border-radius: 6px; overflow: hidden; background: var(--free); }
+.res-free { color: var(--muted); font-size: 13px; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .res-seg-used { background: var(--own); }
 .res-seg-clean { background: var(--shared); }
-.res-seg-free { background: var(--free); }
+.res-seg-shared { background: var(--free); }
 .res-legend { display: flex; flex-wrap: wrap; gap: 6px 18px; margin-top: 8px; font-size: 13px; align-items: center; }
 .res-legend > span { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .res-sw-used { background: var(--own); }
 .res-sw-clean { background: var(--shared); }
-.res-sw-free { background: var(--free); border: 1px solid var(--line); }
+.res-sw-shared { background: var(--free); border: 1px solid var(--line); }
 .res-toolbar { display: flex; gap: 8px; flex-wrap: wrap; margin: 6px 0 0; }
 .res-group .panel { overflow-x: auto; }
 .res-check { width: 28px; }

@@ -672,8 +672,9 @@ deleted here). Each row has its size on disk, what deleting it would free (a clo
 it does not share) and what uses it, and links to where it is managed: an image to **Images**, a
 sandbox's parts to **its page**, accounts to **Accounts & keys**. The rows add up to the total
 (what `du` counts); a last row, **unattributed**, is what no row explains — it should be 0 and is
-red when it is not. The bar on top shows what Dozer keeps, what **Clean up** would free and the
-volume's free space. Below: the memory each sandbox with a VM holds, the host's and this UI's, the
+red when it is not. The bar on top is Dozer's own total split into what it keeps, what **Clean up**
+would free and the blocks APFS clones share (which `du` counts again); the volume's free space is
+written beside it. Below: the memory each sandbox with a VM holds, the host's and this UI's, the
 CPUs given to sandboxes, each sandbox's proxy traffic (today and in all) and the kernels — with
 **Use this kernel** for the one new sandboxes boot (existing ones keep theirs).
 
@@ -683,7 +684,8 @@ confirmation lists each item, what it frees, what it costs later ("re-prepared w
 (Operations shows it) — the host waits until nothing that uses the disks is under way. **Clean up…**
 is the safe set: what is re-creatable AND unused (the download cache, base disks, kernels nothing
 needs, images no sandbox was created from in `resources.clean_unused_days` days, leftovers) — never
-templates, sandboxes, restore points, settings or keys. The page is measured when you open it, on
+templates, sandboxes, restore points, settings or keys; logs and metrics are kept (select them to
+clear them). The page is measured when you open it, on
 Refresh and when an operation ends.
 
 **Save as template…** saves the sandbox's root disk (now — a running sandbox pauses for
