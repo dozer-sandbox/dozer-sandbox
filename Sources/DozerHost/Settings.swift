@@ -239,6 +239,8 @@ public enum SettingKey {
     public static let defaultAccount = "defaults.account"
     /// 594 (D16): the environment prompt (the facts block and the dozer skill) — on, or off.
     public static let agentPrompt = "agent.prompt"
+    /// 594 W23: the agent's passwordless sudo inside its sandbox (default on).
+    public static let agentSudo = "sandbox.agent_sudo"
     /// 594 (owner ruling): the web UI may take an API key or a setup token (a masked field).
     public static let allowSecretEntry = "ui.allow_secret_entry"
     /// 594 W19 (owner: "a new web page opening up every time i run doz ui"): when `doz ui` opens a tab.
@@ -342,6 +344,9 @@ public struct DozerSettings: Sendable {
             .init("agent", "prompt", .bool, .bool(true),
                   "Tell the agent where it runs: a short facts block appended to its system prompt (the sandbox, its /workspace share, the network, credentials) and the dozer skill, written at every session start. Your own template: agent-prompt.md beside this file.",
                   applies: .nextSession),
+            .init("sandbox", "agent_sudo", .bool, .bool(true),
+                  "The agent (the image's user in claude-code and pi sandboxes) has passwordless sudo inside its sandbox, so it can install system packages (sudo apt-get install …). The VM, the network policy and the absent credentials are the boundary — root inside reaches no more than the agent does. Applied at every boot and every agent session start (no image is rebuilt); a sandbox's own choice (doz create --no-agent-sudo, agent_sudo in doz_project.yaml) wins over this.",
+                  flag: "doz create --no-agent-sudo / --agent-sudo", applies: .nextSession),
         ]
         s.append(.init("images", "claude_code_version", .version, .string("latest"),
                        "The Claude Code the claude-code image is prepared with: latest (asked of the npm registry when the image is prepared, then installed at that exact version, integrity-checked; a newer one is prepared in the background, and the next new sandbox gets it) or an exact version like 2.1.227. A sandbox keeps the version it was created with; doz reset NAME moves it to the image's current one.",

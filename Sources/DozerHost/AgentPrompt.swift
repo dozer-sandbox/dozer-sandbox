@@ -64,6 +64,8 @@ public enum AgentPrompt {
         ("network.description", "a sentence: how the sandbox reaches the network and what to do when refused"),
         ("account.name", "the Anthropic account the proxy injects, or none"),
         ("credentials.description", "a sentence: how credentials reach the agent"),
+        ("sandbox.sudo", "yes or no: the agent has passwordless sudo (sandbox.agent_sudo)"),
+        ("sudo.description", "a sentence: sudo, and that the network policy still applies to root"),
         ("mac.hostname", "the Mac's name"),
         ("dozer.version", "the doz that rendered it"),
     ]
@@ -76,6 +78,7 @@ public enum AgentPrompt {
     - {{workspace.description}}
     - Network: {{network.description}}
     - Credentials: {{credentials.description}}
+    - System: {{sudo.description}}
     - The user may pause, sleep or hibernate this VM between your turns; your processes, files and sessions survive it.
     - More — what persists (root disk, state disk, restore points), the network policy, what you cannot do from inside — is in the `dozer` skill.
     """
@@ -113,6 +116,12 @@ public enum AgentPrompt {
     ## Credentials
 
     {{credentials.description}}
+
+    ## Installing software (root)
+
+    Sudo: {{sandbox.sudo}} — {{sudo.description}}
+
+    Root inside this VM does not widen what you can reach: the VM is the boundary, every connection still goes through the user's network policy, and no credential is in the VM to find. Packages you install live on the root disk (kept across restarts, discarded by a reset).
 
     ## Sleep and hibernation
 
@@ -160,8 +169,13 @@ public enum AgentPrompt {
     /// The values of every variable for a sandbox, from its current record.
     public static func values(name: String, image: String, cpus: Int, memoryMiB: UInt64, workspace: String?,
                               network: NetworkMode, account: String?, version: String,
-                              hostname: String = macHostname(), credentialProblem: String? = nil) -> [String: String] {
+                              hostname: String = macHostname(), credentialProblem: String? = nil, agentSudo: Bool = true) -> [String: String] {
         var v: [String: String] = [:]
+        // 594 W23: the agent's passwordless sudo, and what it does not change.
+        v["sandbox.sudo"] = agentSudo ? "yes" : "no"
+        v["sudo.description"] = agentSudo
+            ? "you have passwordless sudo in this sandbox (`sudo apt-get install -y PACKAGE`; the package lists are in the image — `sudo apt-get update` refreshes them). The network policy and the credential rules still apply to root, and the user can undo system changes with `doz reset \(name)` or a restore point."
+            : "no sudo: you run as an unprivileged user and cannot install system packages. If you need one, ask the user — they can turn sudo on for this sandbox (`agent_sudo: true` in doz_project.yaml, or `doz config set sandbox.agent_sudo true`); it applies from the next session."
         v["sandbox.name"] = name
         v["sandbox.image"] = image.hasPrefix("custom:") ? String(image.dropFirst(7)) + " (a template)" : image
         v["sandbox.cpus"] = String(cpus)
@@ -272,7 +286,7 @@ public enum AgentPrompt {
         let network: NetworkMode = policy.map { .proxied($0) } ?? config.spec.network
         let vals = values(name: config.name, image: config.image, cpus: config.spec.cpus, memoryMiB: config.spec.memoryMiB,
                           workspace: config.workspace, network: network, account: account, version: version, hostname: hostname,
-                          credentialProblem: credentialProblem)
+                          credentialProblem: credentialProblem, agentSudo: HostCore.agentSudo(config, settings: settings))
         var r = AgentPromptReport(enabled: settings.bool(SettingKey.agentPrompt), agent: agent, text: nil, error: nil, layers: [],
                                   skill: nil, promptPath: guestPromptPath,
                                   skillPath: skillDirectory(agent: agent, home: imageSpec.home) + "/SKILL.md")
@@ -344,7 +358,9 @@ extension HostCore {
     func deliverAgentPrompt(_ m: Managed, _ r: AgentPromptReport) async {
         guard let imageSpec = m.config.spec.imageSpec else { return }
         do {
-            let res = try await m.sandbox.exec(["sh", "-c", AgentPrompt.deliveryScript(r, user: imageSpec.user)], timeoutSeconds: 30)
+            // 594 W23: the agent's sudo follows the sandbox's setting from this session on (the boot applies it too).
+            let sudo = GuestCommand.agentSudoScript(user: imageSpec.user, on: Self.agentSudo(m.config))
+            let res = try await m.sandbox.exec(["sh", "-c", sudo + "\n" + AgentPrompt.deliveryScript(r, user: imageSpec.user)], timeoutSeconds: 30)
             if res.exitCode != 0 {
                 note(m.name, "could not write the agent prompt (exit \(res.exitCode)): \(String(decoding: res.stderr.prefix(200), as: UTF8.self))")
             }
@@ -371,6 +387,13 @@ extension HostCore {
             }
             try m.config.write(store.configFile(m.name))
             note(m.name, m.config.agentPrompt == nil ? "its own agent prompt cleared" : "its own agent prompt set (\(m.config.agentPromptMode ?? "append")) — from the next session")
+        }
+        // 594 W23: the sandbox's own choice of the agent's sudo (doz_project.yaml agent_sudo).
+        if r.clearAgentSudo == true || r.agentSudo != nil {
+            m.config.agentSudo = r.clearAgentSudo == true ? nil : r.agentSudo
+            try m.config.write(store.configFile(m.name))
+            m.sandbox.setAgentSudo(Self.agentSudo(m.config))
+            note(m.name, "the agent's sudo: \(m.config.agentSudo.map { $0 ? "on" : "off" } ?? "follows sandbox.agent_sudo") — from the next session")
         }
         guard let report = agentPromptReport(m) else {
             throw HostError(.invalid, "\(m.name) runs no agent (image \(m.config.image)) — the environment prompt is for claude-code and pi sandboxes")

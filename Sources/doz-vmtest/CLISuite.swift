@@ -455,6 +455,7 @@ func cliSuite() async throws {
     await cliOnboardingSuite(binary: h.binary)
     await cliTerminalRestoreSuite(binary: h.binary)
     await cliHostStopSuite(binary: h.binary)
+    await cliAgentSudoSuite(binary: h.binary)
 }
 
 /// 593: how `doz image bake lab -v` shows its progress — plain (no escape, no \r, no spinner) when

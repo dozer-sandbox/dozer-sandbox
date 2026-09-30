@@ -134,6 +134,7 @@ sessions:                   # what `doz up` starts; the first is attached
 agent_prompt: |             # this project's own lines for the agent
   The tests run with `make test`.
 agent_prompt_mode: append   # or replace
+agent_sudo: true            # the agent's passwordless sudo (default: the setting sandbox.agent_sudo)
 ```
 
 The schema is closed: an unknown key, a key given twice, a wrong type or a value out of range is an
@@ -216,6 +217,19 @@ doz up NAME [same options] [--session S] [-d] [-- CMD …]
   click away; `doz create` has no default folder, and `doz init` uses the folder it runs in.
 - `--agent-prompt FILE [--agent-prompt-mode append|replace]` gives the sandbox its own part of the
   agent's environment prompt (below).
+- `--no-agent-sudo` (or `--agent-sudo`) decides the agent's sudo for this sandbox (below); without
+  it, the setting `sandbox.agent_sudo` decides.
+
+**The agent has passwordless sudo** (owner ruling, 594): in a claude-code or pi sandbox the agent
+(the `agent` user) can `sudo apt-get install -y PACKAGE` — the image keeps apt's package lists
+(~18 MiB, shared by every sandbox of the image; `sudo apt-get update` refreshes them) and the
+`agent` network preset allows Debian's archive. Root inside the VM reaches no more than the agent:
+the VM has no network interface (every connection still goes through your policy), no credential
+is inside it, and nothing of your Mac but the `/workspace` share. `doz reset` or a restore point
+undoes what it installed. Turn it off for every sandbox with `doz config set sandbox.agent_sudo
+false`, or for one with `doz create --no-agent-sudo` / `agent_sudo: false` in `doz_project.yaml`;
+it applies at the sandbox's next session and every boot — no image is rebuilt. (The first
+preparation after 594 rebuilds the agent images once: they gained `sudo` and keep apt's lists.)
 
 ## Working inside
 
@@ -274,8 +288,8 @@ new workspace) and writes into the guest:
   Linux VM on the user's Mac, not a container) — name, image, CPUs, memory; `/workspace` shared from
   the Mac folder *X* (live) or **isolated** (no folder is shared with the Mac); the network (no interface; deny by default through
   the Mac's proxy; a refused host needs the user's rule — do not retry around it); credentials
-  (injected by the proxy; the placeholders are expected; never log in or ask for keys); sleep and
-  hibernation between turns. Claude Code gets it through its launcher (`/run/dozer/agent-prompt.md`
+  (injected by the proxy; the placeholders are expected; never log in or ask for keys); whether it
+  has passwordless sudo (and that the policy still applies to root); sleep and hibernation between turns. Claude Code gets it through its launcher (`/run/dozer/agent-prompt.md`
   → `--append-system-prompt`); pi's session is `pi --append-system-prompt /run/dozer/agent-prompt.md`.
 - the **`dozer` skill** — `~/.claude/skills/dozer/SKILL.md` (pi: `~/.pi/agent/skills/dozer/SKILL.md`),
   rewritten every start: what persists (root disk, state disk, restore points), the network policy
@@ -298,6 +312,7 @@ replacing (`agent_prompt_mode: replace`). Text may use `{{variables}}` from a cl
 `sandbox.name`, `sandbox.image`, `sandbox.cpus`, `sandbox.memory`, `workspace.shared`,
 `workspace.host_path`, `workspace.guest_path`, `workspace.description`, `network.mode`,
 `network.allowed_hosts`, `network.description`, `account.name`, `credentials.description`,
+`sandbox.sudo`, `sudo.description`,
 `mac.hostname`, `dozer.version`. An unknown variable is an **error**: the agent's sessions do not
 start (the message names the variable and the file) until it is fixed or the prompt is turned off —
 never silently blank.
@@ -788,6 +803,7 @@ the others say when they apply (the next sandbox created, the next session, or a
 | `[store]` | `path` (`--store`, `$DOZ_STORE`) |
 | `[claude]` | `permissions` (`skip` · `ask`) — Claude Code's own prompts in a claude-code sandbox; `-e DOZ_CLAUDE_PERMISSIONS=…` on `run`/`exec` still wins |
 | `[defaults]` | `cpus` (2), `nat_subnet` (a free one; `$DOZ_SUBNET`) |
+| `[sandbox]` | `agent_sudo` (true — the agent's passwordless sudo inside claude-code and pi sandboxes; a sandbox's `--no-agent-sudo` / `agent_sudo` wins; from its next session and boot) |
 | `[images]` | `claude_code_version`, `pi_version` (`latest`, or an exact version like `2.1.227` — see "Agent versions" below) |
 | `[images.lab]` · `[images.claude-code]` · `[images.pi]` | `memory_mib` (1024 · 2048 · 2048), `network` (`bake` · `agent` · `agent`) — a custom image follows the image it was saved from |
 | `[kernel]` | `path` (`$DOZ_KERNEL`), `cache` (`$DOZ_KERNEL_CACHE`) |

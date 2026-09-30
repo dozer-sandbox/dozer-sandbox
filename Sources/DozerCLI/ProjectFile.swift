@@ -31,6 +31,8 @@ struct DozerProject: Equatable {
     var sessions: [Session] = []
     var agentPrompt: String?
     var agentPromptMode: String?
+    /// 594 W23: the agent's passwordless sudo (nil: the setting sandbox.agent_sudo decides).
+    var agentSudo: Bool?
 
     /// The keys, in the order the file lists them, with what each says.
     static let keys: [(key: String, summary: String)] = [
@@ -44,6 +46,7 @@ struct DozerProject: Equatable {
         ("sessions", "what `doz up` starts; the first is attached (default: the image's own)"),
         ("agent_prompt", "this project's own lines for the agent's environment prompt"),
         ("agent_prompt_mode", "append (to the template, the default) or replace"),
+        ("agent_sudo", "true or false: the agent's passwordless sudo in the sandbox (default: the setting sandbox.agent_sudo, true)"),
     ]
 
     struct Invalid: Error, LocalizedError, Equatable {
@@ -190,6 +193,9 @@ struct DozerProject: Equatable {
                 let s = try scalarString(v, key)
                 guard ["append", "replace"].contains(s) else { throw bad(v, "agent_prompt_mode: append or replace") }
                 p.agentPromptMode = s
+            case "agent_sudo":
+                guard let b = v.bool else { throw bad(v, "agent_sudo: true or false") }
+                p.agentSudo = b
             default:
                 break
             }
@@ -245,6 +251,8 @@ struct DozerProject: Equatable {
             """
         }
         out += agentPromptMode.map { "agent_prompt_mode: \($0)\n" } ?? "# agent_prompt_mode: append  # or replace\n"
+        out += agentSudo.map { "agent_sudo: \($0)\n" }
+            ?? "# agent_sudo: true           # the agent's passwordless sudo (apt-get install …); false: none. From the next session\n"
         return out
     }
 
@@ -253,6 +261,7 @@ struct DozerProject: Equatable {
         var o = CreateOptions(image: image, cpus: cpus, memoryMiB: memoryMiB, workspace: folder.path, network: network, account: account)
         o.agentPrompt = agentPrompt
         o.agentPromptMode = agentPromptMode
+        o.agentSudo = agentSudo
         o.project = file.path
         return o
     }

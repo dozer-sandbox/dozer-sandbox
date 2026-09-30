@@ -112,6 +112,8 @@ public struct CreateOptions: Codable, Equatable, Sendable {
     public var project: String?
     /// 594: asked for explicitly — no workspace ("isolated"); an error together with `workspace`.
     public var isolated: Bool?
+    /// 594 W23: the agent's passwordless sudo for this sandbox (nil: follow `sandbox.agent_sudo`).
+    public var agentSudo: Bool?
 
     public init(image: String, cpus: Int? = nil, memoryMiB: UInt64? = nil, workspace: String? = nil,
                 network: String? = nil, subnet: String? = nil, account: String? = nil) {
@@ -213,6 +215,10 @@ public struct HostRequest: Codable, Equatable, Sendable {
     public var prompt: String?
     public var promptMode: String?
     public var clearPrompt: Bool?
+    /// 594 W23 `agent-prompt`: the sandbox's own choice of the agent's passwordless sudo, or (clear)
+    /// follow the setting again. From the next session (and every boot).
+    public var agentSudo: Bool?
+    public var clearAgentSudo: Bool?
     /// 593 `terminal-layout-set`: the layout (nil clears it).
     public var layout: TerminalLayout?
     /// 593 `boot-log`: which kept boot (1 = the latest), or the list of them.

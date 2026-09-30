@@ -204,6 +204,26 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   `useAccount` refuses an incompatible account. `SandboxInfo.credentialProblem` is the page's
   banner and switches the facts block to "no credential you can use is attached". Room for other
   providers: `AgentCredentialSupport(provider:accountKinds:)`.
+- **The agent has passwordless sudo by default** (594 W23, owner ruling 2026-09-30). The dev baseline
+  installs `sudo` and KEEPS apt's package lists (~18 MiB, shared by APFS clones; `apt-get clean` only),
+  and `apt-utils` FIRST (W24: otherwise every install says "debconf: delaying package configuration");
+  the rule itself is never baked: `GuestCommand.agentSudoScript` writes `/etc/sudoers.d/dozer-agent`
+  (0440, root, `user ALL=(ALL) NOPASSWD:ALL`, put in place only after `/usr/sbin/visudo -cf` accepts it;
+  absolute paths — a utility exec's PATH may lack sbin) or removes it — at every fresh boot
+  (`prepareGuest`, from `Sandbox.agentSudo`) and every agent session start (`deliverAgentPrompt`), so a
+  toggle needs no rebake. The value: `SandboxConfig.agentSudo` (`--[no-]agent-sudo`, `agent_sudo` in
+  doz_project.yaml, synced by `doz up` through `agent-prompt`'s `agentSudo`/`clearAgentSudo`) else the
+  setting `sandbox.agent_sudo` (read per request — `HostCore.agentSudo`). The facts block and skill say
+  it (`sandbox.sudo`, `sudo.description`). **Security: root inside the VM must reach nothing the agent
+  cannot** — the boundary is the VM (no NIC; the only way out is the proxy's vsock listener, where the
+  policy is judged), the proxy/allow list and the absent credentials (the vault stays on the Mac).
+  Root must never reach: the host's socket or the store (never shared; `Workspace` refuses the store as
+  a workspace), another sandbox (separate VMs, no network between them), the Mac's keychain or login
+  (read only by the host), any other vsock listener on the Mac. `make test-cli-agentsudo` checks:
+  sudo apt-get install as the agent, `--no-agent-sudo`, the setting at the next boot, and as root: only
+  `lo`, a denied host still denied, no vsock listener but the proxy (5800, the positive control), no
+  store or host socket in the guest. Keep any new host-side vsock listener, share or credential path
+  out of the guest's reach, and extend that check when one is added.
 - **Agent tools:** the dev baseline bakes `fd-find` (+ `/usr/local/bin/fd`) and `ripgrep`, the lab
   `fd` — agents (pi) download them from GitHub otherwise; `api.github.com` stays out of the agent
   preset, `pi.dev` is in it.
@@ -679,6 +699,7 @@ make test-vm-claude  # 588: Claude credentials through the proxy with a FAKE key
 make test-vm-upgrade # 591: the previous release sleeps sandboxes, this build wakes them; the in-place overwrite incident (scratch store $TMPDIR/doz-upgrade-store)
 make test-vm-templates # 593: templates and duplicates on pi — no state disk in a template; duplicate's workspace and fresh/copied state disk
 make test-cli-onboarding # 594: test-cli's onboarding part alone (onboard, a joining start, detach/cancel, init/up, the agent prompt, uninstall)
+make test-cli-agentsudo # 594 W23: the agent's sudo in a fresh claude-code sandbox (prepares it; network), --no-agent-sudo, the setting at the next boot, root reaches no more
 make test-cli-hoststop # 594 W22: test-cli's host-stop part alone (per-sandbox progress plain/animated, --json, nothing running, a host killed mid-stop)
 make pullbench       # 594 D12: the node base pulled with 3 vs 6 concurrent layer downloads, fresh stores (network)
 ```

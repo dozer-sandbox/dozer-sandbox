@@ -630,7 +630,7 @@ async function saveSetting(key, value) { adoptSettings(await api('settings', { m
 async function resetSetting(key) { adoptSettings(await api('settings', { method: 'POST', json: { key, reset: true } })); }
 
 const SETTING_SECTIONS = {
-  ui: 'This UI', host: 'The host', store: 'The store', claude: 'Claude Code', defaults: 'New sandboxes',
+  ui: 'This UI', host: 'The host', store: 'The store', claude: 'Claude Code', defaults: 'New sandboxes', agent: 'The agent', sandbox: 'Inside every sandbox',
   'images.lab': 'New lab sandboxes', 'images.claude-code': 'New claude-code sandboxes', 'images.pi': 'New pi sandboxes', kernel: 'The kernel',
 };
 function shownValue(v) { return typeof v === 'string' ? (v === '' ? '""  (automatic)' : v) : String(v); }

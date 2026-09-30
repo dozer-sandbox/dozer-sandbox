@@ -131,6 +131,7 @@ public actor HostCore {
         let sb = try Sandbox(spec: cfg.spec)
         let m = Managed(sandbox: sb, config: cfg)
         managed[cfg.name] = m
+        sb.setAgentSudo(Self.agentSudo(cfg))
         if !readOnly {
             let name = cfg.name
             let events = sb.events()
@@ -389,7 +390,7 @@ public actor HostCore {
         // state beside doz.json (never a VM, never a secret — like the UI's doz.toml), and a host is not
         // started to write it. With a host running, the host writes it (serialised with `rm`).
         if readOnly && !(r.op.isReadOnly || (r.op == .netPolicy && isPolicyQuery(r)) || r.op == .sessions || (r.op == .netLog && r.follow != true)
-                         || (r.op == .console && r.follow != true) || (r.op == .agentPrompt && r.prompt == nil && r.clearPrompt != true)
+                         || (r.op == .console && r.follow != true) || (r.op == .agentPrompt && r.prompt == nil && r.clearPrompt != true && r.agentSudo == nil && r.clearAgentSudo != true)
                          || r.op == .terminalLayoutSet) {
             return .failure(HostError(.unavailable, "\(r.op.rawValue) needs the host"))
         }
@@ -463,7 +464,14 @@ public actor HostCore {
         r.preset == nil && (r.allow ?? []).isEmpty && (r.deny ?? []).isEmpty && (r.removeHosts ?? []).isEmpty
     }
 
+    /// 594 W23: the agent's passwordless sudo for a sandbox — its own choice, else the setting
+    /// `sandbox.agent_sudo` (read now: a changed setting applies at the next boot or session).
+    static func agentSudo(_ cfg: SandboxConfig, settings: @autoclosure () -> DozerSettings = .load()) -> Bool {
+        cfg.agentSudo ?? settings().bool(SettingKey.agentSudo)
+    }
+
     private func perform(_ r: HostRequest, emit: @escaping @Sendable (HostEvent) -> Void) async throws -> JSONValue {
+        if let n = r.name, let m = managed[n] { m.sandbox.setAgentSudo(Self.agentSudo(m.config)) }
         switch r.op {
         case .ping:
             return try JSONValue(encoding: await status())
@@ -653,6 +661,7 @@ public actor HostCore {
             cfg.agentPromptMode = mode
         }
         cfg.project = o.project
+        cfg.agentSudo = o.agentSudo
         try cfg.write(store.configFile(name))
         let m = try adopt(cfg)
         metrics?.record(run: metricsRun, action: "create", sandbox: name, image: image, phaseAfter: "off", startedAt: Date(), durationMs: 0,

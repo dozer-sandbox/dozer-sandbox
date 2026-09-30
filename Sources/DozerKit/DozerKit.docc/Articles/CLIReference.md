@@ -52,7 +52,7 @@ doz uninstall [--keep-store] [--keep-config] [--yes]
   first if it never was). **`up` with no name**, in that folder, creates, starts or wakes exactly
   that sandbox, with the folder at `/workspace`, starts its `sessions` and attaches to the first.
   The file is YAML with a closed set of keys — `version`, `name`, `image`, `cpus`, `memory`,
-  `network`, `account`, `sessions`, `agent_prompt`, `agent_prompt_mode`; an unknown key or a bad
+  `network`, `account`, `sessions`, `agent_prompt`, `agent_prompt_mode`, `agent_sudo`; an unknown key or a bad
   value is an error naming its line.
 
   ```yaml
@@ -157,7 +157,16 @@ inside. Dozer writes only those; the agent's own `CLAUDE.md` / `AGENTS.md` are n
 doz inspect NAME --prompt                           # what the next session gets (or why it does not render)
 doz create NAME … --agent-prompt FILE [--agent-prompt-mode append|replace]
 doz config set agent.prompt false                   # off: no facts block, no skill (removed at the next session)
+doz create NAME … --no-agent-sudo                   # 594: no passwordless sudo for this sandbox's agent
+doz config set sandbox.agent_sudo false             # …or for every sandbox without its own choice (next session / boot)
 ```
+
+The agent has **passwordless sudo** by default (594, owner ruling): `sudo apt-get install -y PKG`
+works in a fresh claude-code or pi sandbox (the images keep apt's package lists; the `agent` preset
+allows Debian's archive). The rule is written at every boot and agent session start from the
+sandbox's choice (`--no-agent-sudo`, `agent_sudo` in `doz_project.yaml`) or the setting — no image
+is rebuilt to change it. Root inside the VM reaches no more than the agent: no network interface,
+the same proxy and policy, no credential inside. (594 rebuilds the agent images once.)
 
 Three layers: the built-in template, then **your own** — `agent-prompt.md` beside `doz.toml`
 (`doz onboard` writes it all commented out; text outside a comment replaces the built-in one) — then
@@ -376,7 +385,7 @@ doz config path            # ${XDG_CONFIG_HOME:-~/.config}/dozer-sandbox/doz.tom
 ```
 
 One settings file, `doz.toml`, lists every setting grouped in sections (`[ui]`, `[host]`,
-`[store]`, `[claude]`, `[defaults]`, `[agent]`, `[images.lab]`, `[images.claude-code]`, `[images.pi]`,
+`[store]`, `[claude]`, `[defaults]`, `[agent]`, `[sandbox]`, `[images.lab]`, `[images.claude-code]`, `[images.pi]`,
 `[kernel]`), each with a description and `# key = default` commented out; only what you set is
 uncommented. Precedence: a command-line flag, then its environment variable, then the file, then
 the default. `ui.boot_view_on_start` (default `true`) makes Start in the web UI open a terminal on

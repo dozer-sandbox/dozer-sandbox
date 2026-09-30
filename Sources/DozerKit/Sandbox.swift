@@ -1158,7 +1158,7 @@ public actor Sandbox {
                 try await c.copyIn(from: deckhold, to: URL(fileURLWithPath: GuestCommand.deckholdPath), mode: 0o755)
             }
             try await timed(spec.imageSpec == nil ? "prepared the guest" : "prepared the guest (persist dirs bound from the state disk)") {
-                let r = try await Self.exec(on: c, ["sh", "-c", GuestCommand.prepareGuest(imageSpec: spec.imageSpec)], environment: [:],
+                let r = try await Self.exec(on: c, ["sh", "-c", GuestCommand.prepareGuest(imageSpec: spec.imageSpec, agentSudo: agentSudo)], environment: [:],
                                             workingDirectory: "/", privileged: true, timeout: 30)
                 if r.exitCode != 0 { throw SandboxError.commandFailed(command: "prepare guest", exitCode: r.exitCode, output: r.output + r.errorOutput) }
             }
@@ -1351,6 +1351,24 @@ public actor Sandbox {
         let r = try await exec(on: c, ["sh", "-c", EgressProxy.guestSetupScript(withCA: caFile != nil)], environment: [:],
                                workingDirectory: "/", privileged: true, timeout: 30)
         if r.exitCode != 0 { throw SandboxError.commandFailed(command: "start doznet", exitCode: r.exitCode, output: r.output + r.errorOutput) }
+    }
+
+    /// 594 W23: whether an image sandbox's user gets passwordless sudo — applied at every fresh boot
+    /// (`GuestCommand.prepareGuest`). Default true (owner ruling 2026-09-30). A caller that wants it
+    /// applied to a RUNNING guest runs `GuestCommand.agentSudoScript` itself (the host does, at each
+    /// agent session start).
+    public nonisolated var agentSudo: Bool { agentSudoFlag.value }
+    public nonisolated func setAgentSudo(_ on: Bool) { agentSudoFlag.value = on }
+    private nonisolated let agentSudoFlag = LockedFlag(true)
+
+    final class LockedFlag: @unchecked Sendable {
+        private let lock = NSLock()
+        private var v: Bool
+        init(_ v: Bool) { self.v = v }
+        var value: Bool {
+            get { lock.withLock { v } }
+            set { lock.withLock { v = newValue } }
+        }
     }
 
     /// Change the running (or next) policy of a proxied sandbox.

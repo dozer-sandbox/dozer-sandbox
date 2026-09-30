@@ -35,6 +35,9 @@ struct CreateArguments: ParsableArguments {
     @Option(name: .long, help: "With --agent-prompt: append (default) to the template, or replace it.")
     var agentPromptMode: String?
 
+    @Flag(inversion: .prefixedNo, help: "The agent (claude-code, pi) has passwordless sudo inside the sandbox (default: the setting sandbox.agent_sudo, on). Applied at every boot and session start.")
+    var agentSudo: Bool?
+
     func options(defaultImage: String? = nil) throws -> CreateOptions {
         guard let img = image ?? defaultImage else { throw ValidationError("--image is required: lab, claude-code, pi or a custom image") }
         var mem: UInt64?
@@ -46,6 +49,7 @@ struct CreateArguments: ParsableArguments {
         if isolated && workspace != nil { throw ValidationError("--isolated or --workspace, not both") }
         var o = CreateOptions(image: img, cpus: cpus, memoryMiB: mem, workspace: absoluteWorkspace, network: network, subnet: subnet, account: account)
         o.isolated = isolated ? true : nil
+        o.agentSudo = agentSudo
         try applyPrompt(to: &o)
         return o
     }
@@ -76,7 +80,7 @@ struct CreateArguments: ParsableArguments {
     }
 
     var givenAny: Bool {
-        image != nil || cpus != nil || memory != nil || workspace != nil || network != nil || subnet != nil || account != nil || agentPrompt != nil || isolated
+        image != nil || cpus != nil || memory != nil || workspace != nil || network != nil || subnet != nil || account != nil || agentPrompt != nil || isolated || agentSudo != nil
     }
 }
 
@@ -264,6 +268,7 @@ struct Up: AsyncParsableCommand {
                 if create.isolated && create.workspace != nil { throw ValidationError("--isolated or --workspace, not both") }
                 if let w = create.absoluteWorkspace { o.workspace = w }
                 if create.isolated { o.workspace = nil; o.isolated = true }
+                if let s = create.agentSudo { o.agentSudo = s }
                 try create.applyPrompt(to: &o)
                 // 594: doz_project.yaml's image and account are checked like any create.
                 try preflightAgentAccount(&o, g)
@@ -324,6 +329,15 @@ struct Up: AsyncParsableCommand {
         guard let cfg = SandboxConfig.read(g.dozerStore.configFile(name)) else { return }
         if let made = cfg.project, made != file.path, !g.quiet {
             Out.stderr("[doz] \(name) was made from \(made), not this folder's \(DozerProject.fileName) — using it anyway\n")
+        }
+        // 594 W23: agent_sudo changed in the file → the sandbox's own choice follows it.
+        if cfg.agentSudo != project.agentSudo {
+            var s = HostRequest(.agentPrompt, name: name)
+            if let v = project.agentSudo { s.agentSudo = v } else { s.clearAgentSudo = true }
+            _ = try call(s, g)
+            if !g.quiet && !g.json {
+                Out.stderr("[doz] agent_sudo \(project.agentSudo.map { $0 ? "true" : "false" } ?? "removed (the setting sandbox.agent_sudo decides)") in \(DozerProject.fileName) — it applies from the next session\n")
+            }
         }
         let mode = project.agentPrompt == nil ? nil : (project.agentPromptMode ?? "append")
         guard cfg.agentPrompt != project.agentPrompt || (cfg.agentPrompt != nil && (cfg.agentPromptMode ?? "append") != mode) else { return }

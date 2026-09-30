@@ -542,4 +542,46 @@ final class OnboardingTests: XCTestCase {
         try FileManager.default.createDirectory(at: s.appendingPathComponent("sandboxes"), withIntermediateDirectories: true)
         XCTAssertTrue(Uninstall.looksLikeStore(s))
     }
+
+    /// 594 W23: the agent's passwordless sudo — the setting (default on), a sandbox's own choice over
+    /// it, the facts text both ways, doz_project.yaml's agent_sudo, and create's flags.
+    func testAgentSudoSettingFactsProjectAndFlags() throws {
+        XCTAssertTrue(DozerSettings(text: nil).bool(SettingKey.agentSudo), "on by default (owner ruling)")
+        let off = DozerSettings(text: "[sandbox]\nagent_sudo = false\n")
+        XCTAssertFalse(off.bool(SettingKey.agentSudo))
+        var cfg = SandboxConfig(name: "a", image: "pi", spec: SandboxSpec(name: "a", storeRoot: root), workspace: nil)
+        XCTAssertTrue(HostCore.agentSudo(cfg, settings: DozerSettings(text: nil)))
+        XCTAssertFalse(HostCore.agentSudo(cfg, settings: off), "nil follows the setting")
+        cfg.agentSudo = true
+        XCTAssertTrue(HostCore.agentSudo(cfg, settings: off), "the sandbox's own choice wins")
+        cfg.agentSudo = false
+        XCTAssertFalse(HostCore.agentSudo(cfg, settings: DozerSettings(text: nil)))
+
+        let yes = AgentPrompt.values(name: "n", image: "pi", cpus: 1, memoryMiB: 1024, workspace: nil, network: .proxied(.agent), account: nil, version: "1", hostname: "h")
+        XCTAssertEqual(yes["sandbox.sudo"], "yes")
+        XCTAssertTrue(yes["sudo.description"]!.hasPrefix("you have passwordless sudo in this sandbox"))
+        XCTAssertTrue(yes["sudo.description"]!.contains("The network policy and the credential rules still apply to root"))
+        XCTAssertTrue(yes["sudo.description"]!.contains("`doz reset n` or a restore point"))
+        let facts = try AgentPrompt.render(AgentPrompt.builtInTemplate, yes, source: "b")
+        XCTAssertTrue(facts.contains("- System: you have passwordless sudo"))
+        let no = AgentPrompt.values(name: "n", image: "pi", cpus: 1, memoryMiB: 1024, workspace: nil, network: .none, account: nil, version: "1",
+                                    hostname: "h", agentSudo: false)
+        XCTAssertEqual(no["sandbox.sudo"], "no")
+        XCTAssertTrue(no["sudo.description"]!.hasPrefix("no sudo:"))
+        XCTAssertTrue(try AgentPrompt.render(AgentPrompt.skillTemplate, no, source: "s").contains("Sudo: no — no sudo:"))
+
+        let p = try DozerProject.parse("version: 1\nname: a\nimage: pi\nagent_sudo: false\n")
+        XCTAssertEqual(p.agentSudo, false)
+        XCTAssertEqual(p.createOptions(folder: root, file: root.appendingPathComponent("doz_project.yaml")).agentSudo, false)
+        XCTAssertNil(try DozerProject.parse("version: 1\nname: a\nimage: pi\n").agentSudo)
+        XCTAssertThrowsError(try DozerProject.parse("version: 1\nname: a\nimage: pi\nagent_sudo: maybe\n"))
+        XCTAssertTrue(p.render().contains("agent_sudo: false\n"))
+        XCTAssertTrue(DozerProject(name: "a", image: "pi").render().contains("# agent_sudo: true"))
+        XCTAssertEqual(try DozerProject.parse(p.render()).agentSudo, false, "render → parse round-trips")
+
+        let c = try XCTUnwrap(try DozerCommand.parseAsRoot(["create", "b", "--image", "pi", "--no-agent-sudo"]) as? Create)
+        XCTAssertEqual(try c.create.options().agentSudo, false)
+        let d = try XCTUnwrap(try DozerCommand.parseAsRoot(["create", "b", "--image", "pi"]) as? Create)
+        XCTAssertNil(try d.create.options().agentSudo, "no flag: the setting decides")
+    }
 }

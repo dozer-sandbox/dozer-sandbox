@@ -110,6 +110,37 @@ final class ImageSpecTests: XCTestCase {
 
     /// The state disk: mounted at /state, one directory per persist dir, bind-mounted over it,
     /// owned by the imageSpec user; the deckhold socket dir is sticky + world-writable.
+    /// 594 W23: passwordless sudo for the image's user — a validated drop-in at boot, removed when off;
+    /// the agent images carry sudo and keep apt's package lists.
+    func test_agentSudo() {
+        let on = GuestCommand.agentSudoScript(user: "agent", on: true)
+        XCTAssertTrue(on.contains("printf '%s ALL=(ALL) NOPASSWD:ALL\\n' 'agent'"))
+        XCTAssertTrue(on.contains("chmod 0440"))
+        XCTAssertTrue(on.contains("/usr/sbin/visudo -cf /run/dozer-agent-sudoers >/dev/null && mv -f"), "validated before it is put in place")
+        XCTAssertTrue(on.contains("mv -f /run/dozer-agent-sudoers '/etc/sudoers.d/dozer-agent'"))
+        XCTAssertTrue(on.hasPrefix("if [ -x /usr/bin/sudo ] && [ -x /usr/sbin/visudo ]"), "an image without sudo (or visudo) gets nothing")
+        XCTAssertEqual(GuestCommand.agentSudoScript(user: "agent", on: false), "rm -f '/etc/sudoers.d/dozer-agent'")
+        for odd in ["root", "", "a b", "x';rm -rf /;'", "1agent", "-agent", String(repeating: "a", count: 33)] {
+            XCTAssertEqual(GuestCommand.agentSudoScript(user: odd, on: true), "rm -f '/etc/sudoers.d/dozer-agent'", odd)
+        }
+        XCTAssertTrue(GuestCommand.prepareGuest(imageSpec: AgentImages.pi).contains(on), "on by default at boot")
+        XCTAssertTrue(GuestCommand.prepareGuest(imageSpec: AgentImages.pi, agentSudo: false).contains("rm -f '/etc/sudoers.d/dozer-agent'"))
+        XCTAssertFalse(GuestCommand.prepareGuest(imageSpec: nil).contains("sudoers"), "the lab (root) gets no rule")
+        XCTAssertTrue(AgentImages.devBaselinePackages.contains("sudo"))
+        // 594 W24: apt-utils, installed before the rest, so no install says "debconf: delaying …".
+        let base = "\(AgentImages.devBaseline)"
+        let utils = base.range(of: "--no-install-recommends -o Dpkg::Use-Pty=0 apt-utils")
+        let rest = base.range(of: "--no-install-recommends -o Dpkg::Use-Pty=0 procps")
+        XCTAssertNotNil(utils)
+        XCTAssertTrue(utils.flatMap { u in rest.map { u.lowerBound < $0.lowerBound } } == true, "apt-utils first")
+        XCTAssertTrue(base.contains("DEBIAN_FRONTEND=noninteractive"))
+        for spec in [AgentImages.claudeCode, AgentImages.pi] {
+            let scripts = spec.steps.map { "\($0)" }.joined()
+            XCTAssertFalse(scripts.contains("rm -rf /var/lib/apt/lists"), "\(spec.name): apt's lists are kept")
+            XCTAssertFalse(scripts.contains("sudoers"), "\(spec.name): the rule is applied at boot, never baked")
+        }
+    }
+
     func test_stateDiskLayoutScript() {
         XCTAssertEqual(GuestCommand.stateKey("/home/agent/.pi/agent"), "home_agent_.pi_agent")
         let s = GuestCommand.prepareGuest(imageSpec: AgentImages.pi)
