@@ -48,6 +48,17 @@ struct Uninstall: AsyncParsableCommand {
         return (libexec, target == exe.path ? link : nil)
     }
 
+    /// 598: this executable is a Homebrew keg's (`…/Cellar/doz/<version>/libexec/doz/doz`) — Homebrew
+    /// owns those files: `brew uninstall doz` removes them, never this command. Returns the keg.
+    static func homebrewKeg(executable: String = HostLauncher.executablePath) -> URL? {
+        let exe = URL(fileURLWithPath: executable).resolvingSymlinksInPath()
+        let keg = exe.deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()   // …/Cellar/doz/<version>
+        guard exe.pathComponents.suffix(3) == ["libexec", "doz", "doz"],
+              keg.deletingLastPathComponent().lastPathComponent == "doz",
+              keg.deletingLastPathComponent().deletingLastPathComponent().lastPathComponent == "Cellar" else { return nil }
+        return keg
+    }
+
     /// A store directory is removed only when it looks like one (or is empty): never a folder
     /// someone pointed --store at by mistake.
     static func looksLikeStore(_ root: URL) -> Bool {
@@ -83,8 +94,11 @@ struct Uninstall: AsyncParsableCommand {
             guard dir.lastPathComponent == DozerSettings.directoryName else { throw fail(HostError(.invalid, "refusing to remove \(dir.path)"), g) }
             items.append(Item(path: dir.path, what: "the settings: doz.toml, agent-prompt.md"))
         }
-        // The installed doz.
-        if let inst = Self.installation() {
+        // The installed doz — unless Homebrew installed it (then brew removes it, and says so below).
+        let keg = Self.homebrewKeg()
+        if let keg {
+            kept.append("the doz Homebrew installed (\(keg.path)) — `brew uninstall doz` removes it (and `brew untap johnoscott/dozer` the tap)")
+        } else if let inst = Self.installation() {
             items.append(Item(path: inst.libexec.path, what: "the installed doz and its resources"))
             if let link = inst.link { items.append(Item(path: link.path, what: "the doz command (a link to it)")) }
         } else {
@@ -139,7 +153,13 @@ struct Uninstall: AsyncParsableCommand {
             }
         }
         if g.json { Out.json(Report(removed: items, kept: kept, keychain: accounts)) }
-        else if !failed { Out.stdout("Dozer Sandbox is removed from this Mac. (To install again: make install-cli in a DozerKit checkout, then doz onboard.)\n") }
+        else if !failed {
+            if keg != nil {
+                Out.stdout("Dozer Sandbox's store and settings are removed. Finish with: brew uninstall doz   (then, if you like: brew untap johnoscott/dozer)\n")
+            } else {
+                Out.stdout("Dozer Sandbox is removed from this Mac. (To install again: brew install doz — or make install-cli in a DozerKit checkout — then doz onboard.)\n")
+            }
+        }
         if failed { throw ExitCode(DozerExit.failed) }
     }
 }

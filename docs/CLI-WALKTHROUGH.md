@@ -19,23 +19,28 @@ Claude Code signed in on this Mac (or an Anthropic API key) for part 4.
 ## 0. From a clean slate (optional)
 
 If Dozer Sandbox was on this Mac before, start from nothing: `doz uninstall` lists exactly what it
-removes — the store (every sandbox and image), the settings (`~/.config/dozer-sandbox`) and the
-installed `doz` — and asks once. It never touches the keychain or Claude Code's own files.
+removes — the store (every sandbox and image), the settings (`~/.config/dozer-sandbox`) and a
+`make install-cli` `doz` — and asks once. A `doz` Homebrew installed is Homebrew's: it tells you to
+finish with `brew uninstall doz`. It never touches the keychain or Claude Code's own files.
 
 ```bash
 doz uninstall                      # read the list, answer y
 ```
 
-## 1. Install and onboard (2–4 min to install; 5–8 min of preparation, once)
+## 1. Install and onboard (seconds to install; 5–8 min of preparation, once)
 
 ```bash
-cd ~/Developer/deck-factory/repo/lib/DozerKit
-make install-cli                  # release build, signed with the virtualization entitlement
+export HOMEBREW_GITHUB_API_TOKEN=$(gh auth token)      # while the repositories are private
+brew tap johnoscott/dozer git@github.com:johnoscott/homebrew-dozer-prelaunch.git
+brew install doz                  # the prebuilt release, signed with the virtualization entitlement
 doz onboard
 ```
 
-`make install-cli` installs `~/.local/bin/doz`, which must be on your `PATH`. Nothing is ever
-installed in `~/Library/LaunchAgents`. `doz onboard` sets up this Mac, once, and asks as it goes —
+Homebrew installs the prebuilt `doz` in seconds — no compiler, no clone (the tap is cloned over
+SSH, and the release is downloaded with that token while the repositories are private). `brew
+upgrade doz` later brings a new release. Nothing is ever installed in `~/Library/LaunchAgents`.
+(From a DozerKit checkout, `make install-cli` builds and installs `~/.local/bin/doz` instead — for
+contributors; don't have both on your `PATH`.) `doz onboard` sets up this Mac, once, and asks as it goes —
 Enter takes the recommended answer:
 
 1. **Checks** — the doctor's: macOS, Apple silicon, virtualization, the entitlement, the store's
@@ -262,8 +267,8 @@ The prepared images stay, so the next sandbox starts in under a second (`doz ima
 Start over once more, this time setting up in the browser:
 
 ```bash
-doz uninstall                      # the list, then y: the store, the settings and doz itself
-cd ~/Developer/deck-factory/repo/lib/DozerKit && make install-cli
+doz uninstall                      # the list, then y: the store and the settings (doz stays — Homebrew's)
+brew reinstall doz                 # (not needed — shown to prove it takes seconds)
 doz ui                             # opens the browser, signed in (one-use link)
 ```
 

@@ -8,10 +8,14 @@ import DozerHost
 /// host (`doz host`), which the first command that needs it starts and which exits when nothing
 /// has run for a while; read-only commands answer from the store when no host is running.
 public struct DozerCommand: AsyncParsableCommand {
-    /// The release this build ships as — the package's semver tag. Bump it with the tag (it was left
-    /// at 0.5.0 through v0.6.0 and v0.7.0; `doz ui`'s host card showed it, 590). The host and
-    /// `doctor` compare it to the running host's.
-    public static let version = "0.10.0"
+    /// The release this build ships as — the package's semver tag. 598: a release build (`make
+    /// release`, what Homebrew installs) carries it as `libexec/doz/VERSION` beside the executable,
+    /// written from the tag it is built for, so it can never drift from the tag again (this constant
+    /// was left behind at 0.5.0 through v0.7.0, and at 0.10.0 through v0.11.0). A build without that
+    /// file (`make cli`, `make install-cli`, the tests) reports `builtVersion`. The host and `doctor`
+    /// compare it to the running host's.
+    public static let builtVersion = "0.11.0"
+    public static let version: String = ReleaseStamp.read() ?? builtVersion
 
     public static let configuration = CommandConfiguration(
         commandName: "doz",
@@ -37,6 +41,25 @@ public struct DozerCommand: AsyncParsableCommand {
     )
 
     public init() {}
+}
+
+/// 598: the version a release build carries in `VERSION` beside its (resolved) executable.
+public enum ReleaseStamp {
+    public static let fileName = "VERSION"
+
+    /// The stamp beside `executable` (symlinks resolved — `bin/doz` is a link into the keg), or nil.
+    public static func read(executable: String = HostLauncher.executablePath) -> String? {
+        let dir = URL(fileURLWithPath: executable).resolvingSymlinksInPath().deletingLastPathComponent()
+        guard let text = try? String(contentsOf: dir.appendingPathComponent(fileName), encoding: .utf8) else { return nil }
+        return parse(text)
+    }
+
+    /// A stamp is one semver line (`0.12.0`, `0.12.0-rc.1`); anything else is ignored.
+    public static func parse(_ text: String) -> String? {
+        let v = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard v.count <= 40, v.range(of: #"^\d+\.\d+\.\d+([-+][0-9A-Za-z.-]+)?$"#, options: .regularExpression) != nil else { return nil }
+        return v
+    }
 }
 
 /// 593: `--progress auto|plain`.

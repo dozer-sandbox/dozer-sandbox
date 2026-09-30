@@ -1,0 +1,12 @@
+# Copy this file to Makefile.config (gitignored — never commit it) to sign releases with a
+# Developer ID and notarise them. Without it, `make release` signs ad hoc — enough for Homebrew
+# (a formula's download is never quarantined), not for a download outside it (598, H9).
+
+# Your "Developer ID Application: Name (TEAMID)" identity, as `security find-identity -v -p codesigning`
+# lists it. An "Apple Development: …" identity is NOT accepted: Apple notarises Developer ID only.
+# SIGN_IDENTITY = Developer ID Application: Your Name (XXXXXXXXXX)
+
+# A notarytool keychain profile (the password lives in the keychain, never here). Create it once:
+#   xcrun notarytool store-credentials "Dozer" --apple-id you@example.com --team-id XXXXXXXXXX
+#   (it asks for an app-specific password from account.apple.com — never your Apple ID password)
+# NOTARY_PROFILE = Dozer

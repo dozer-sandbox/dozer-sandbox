@@ -447,7 +447,7 @@ struct MetricsCommand: AsyncParsableCommand {
 struct HostCommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(commandName: "host",
         abstract: "The per-user host that owns every running sandbox (started for you; exits when idle).",
-        subcommands: [HostRun.self, HostStop.self, HostStatusCommand.self],
+        subcommands: [HostRun.self, HostStop.self, HostStatusCommand.self, HostUpgradeCheck.self],
         defaultSubcommand: HostRun.self)
 }
 
@@ -532,6 +532,61 @@ struct HostStatusCommand: AsyncParsableCommand {
         }
         let st = try decode(try call(HostRequest(.ping), g, autostart: false), HostStatus.self, g)
         if g.json { Out.json(st) } else { Out.stdout(describe(st)) }
+    }
+}
+
+/// 598 (H6) — after an upgrade (Homebrew's `post_install` runs it): is a host of ANOTHER build running
+/// for this store? It keeps working (it runs its own copy), but it is not the new build — say how to
+/// switch. Never starts a host, never stops one, and always exits 0 (an install must not fail on it).
+/// It asks the host itself when it can; otherwise (a sandboxed post-install may not reach the socket)
+/// it reads the host's pid and that process's executable path from the kernel.
+struct HostUpgradeCheck: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(commandName: "upgrade-check",
+        abstract: "After an upgrade: is a host of an older build still running? (Never starts or stops one; always exits 0.)")
+    @OptionGroup var g: GlobalOptions
+
+    struct Answer: Encodable {
+        var running: Bool
+        var hostVersion: String?
+        var hostExecutable: String?
+        var thisVersion: String
+        var thisExecutable: String
+        var sameBuild: Bool?
+        var note: String?
+    }
+
+    func run() async throws {
+        let store = g.dozerStore
+        let mine = HostLauncher.executablePath
+        var a = Answer(running: store.hostIsRunning(), thisVersion: DozerCommand.version, thisExecutable: mine)
+        if a.running {
+            if let m = try? HostClient.request(HostRequest(.ping), store: store, autostart: false), m.ok == true,
+               let st = try? (m.result ?? .null).decode(HostStatus.self) {
+                a.hostVersion = st.version
+                a.hostExecutable = st.executable
+            } else if let pid = store.hostPID() {
+                a.hostExecutable = Self.executablePath(of: pid)
+            }
+            let exe = a.hostExecutable.map { URL(fileURLWithPath: $0).resolvingSymlinksInPath().path }
+            let same = (exe == nil || exe == mine) && (a.hostVersion == nil || a.hostVersion == DozerCommand.version)
+            a.sameBuild = exe == nil && a.hostVersion == nil ? nil : same
+            if a.sameBuild == false {
+                a.note = "a doz host from \(a.hostVersion.map { "doz \($0)" } ?? "an older build") is running for \(store.root.path) — it keeps "
+                    + "working; `doz host stop` switches to doz \(DozerCommand.version) (running sandboxes hibernate, and wake on the new build)"
+            }
+        }
+        if g.json { Out.json(a); return }
+        if let note = a.note { Out.stdout("note: \(note)\n") }
+        else if a.running { Out.stdout("the running host is this build (doz \(DozerCommand.version))\n") }
+        else { Out.stdout("no host is running — the next command uses doz \(DozerCommand.version)\n") }
+    }
+
+    /// A process's executable path (the kernel's record — `proc_pidpath`), or nil.
+    static func executablePath(of pid: Int32) -> String? {
+        var buf = [CChar](repeating: 0, count: 4096)
+        let n = proc_pidpath(pid, &buf, UInt32(buf.count))
+        guard n > 0 else { return nil }
+        return String(decoding: buf.prefix(Int(n)).map { UInt8(bitPattern: $0) }, as: UTF8.self)
     }
 }
 

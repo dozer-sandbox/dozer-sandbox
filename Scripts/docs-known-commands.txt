@@ -59,6 +59,7 @@ account/keepalive
 host/start
 host/stop
 host/status
+host/upgrade-check
 ui
 ui/link
 ui/serve

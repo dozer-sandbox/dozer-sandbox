@@ -18,16 +18,41 @@ the command-line face of DozerKit. New to it? Start with the
 
 ## Install
 
+With Homebrew (Apple silicon, macOS 26 or later) — seconds, no compiler:
+
 ```bash
-cd repo/lib/DozerKit
-make install-cli                  # PREFIX=~/.local by default → ~/.local/bin/doz
+export HOMEBREW_GITHUB_API_TOKEN=$(gh auth token)      # while the repositories are private
+brew tap johnoscott/dozer git@github.com:johnoscott/homebrew-dozer-prelaunch.git
+brew install doz
 doz onboard                       # once: set up this Mac
 ```
 
-A VM can only be booted by a binary signed with Apple's virtualization entitlement, and
-`make install-cli` signs it. An unsigned build runs every command but cannot boot anything, and
-`doz doctor` (and `doz onboard`) say so. `make cli` builds a signed debug binary at
-`.build/debug/doz` for development.
+The tap is private until the unveil, so Homebrew clones it over SSH, and the prebuilt release is
+downloaded through the GitHub API with that token (it is never stored). Afterwards: `brew upgrade
+doz` for a new release — safe with a host running (below) — and `brew uninstall doz` to remove it.
+
+A VM can only be booted by a binary signed with Apple's virtualization entitlement; the release is
+signed with it (ad hoc today — enough for Homebrew, which never quarantines a formula's download;
+with a Developer ID and notarised once one is configured, see *Building from source*). An unsigned
+build runs every command but cannot boot anything, and `doz doctor` (and `doz onboard`) say so.
+
+### Building from source (contributors)
+
+```bash
+cd repo/lib/DozerKit
+make install-cli                  # PREFIX=~/.local by default → ~/.local/bin/doz (signed)
+make cli                          # a signed debug binary at .build/debug/doz, for development
+make release VERSION=X.Y.Z        # the Homebrew artefact: dist/doz-X.Y.Z-macos-arm64.tar.gz + .sha256
+```
+
+`make release` builds release, packs the install layout (`bin/doz` → `libexec/doz/{doz, VERSION,
+resource bundles}`) and signs it — with the Developer ID in a gitignored `Makefile.config`
+(`SIGN_IDENTITY`, and `NOTARY_PROFILE` to notarise with `xcrun notarytool`; see
+`Makefile.config.example`), else ad hoc, and says which. The hardened runtime is used with a
+Developer ID (the virtualization entitlement works under it). A bare command-line tool cannot be
+stapled: Gatekeeper checks a notarised `doz`'s ticket online the first time it runs.
+`make release … DRY_RUN=1` prints every command it would run. Do not mix a Homebrew `doz` and a
+`make install-cli` one on the same `PATH`.
 
 ## Setting up this Mac: `doz onboard`
 
@@ -148,7 +173,8 @@ doz uninstall [--keep-store] [--keep-config] [--yes]
 It lists exactly what goes — the store (every sandbox, image, kernel and restore point, the host's
 log and metrics), the settings directory (`doz.toml`, `agent-prompt.md`), and the installed `doz`
 (`<prefix>/libexec/doz/` and the `<prefix>/bin/doz` link, when this `doz` is one `make install-cli`
-installed) — and asks once; no terminal and no `--yes` refuses (exit 5). A running host is stopped
+installed; a `doz` Homebrew installed is Homebrew's — it says so, and ends with `brew uninstall
+doz`) — and asks once; no terminal and no `--yes` refuses (exit 5). A running host is stopped
 first; a running `doz ui` must be stopped by you. It never touches the keychain — it names any item
 `doz account add` made (`doz account rm NAME` removes one; do it before uninstalling) — nor Claude
 Code's own files or login. A store directory that does not look like a store is refused.
@@ -545,10 +571,17 @@ The host is started for you by the first command that needs it. It runs detached
 ### Updating doz
 
 ```bash
-make install-cli          # the new build goes in next to the running one — nothing running is touched
+brew upgrade doz       # (or make install-cli) — the new build goes in next to the running one
 doz host stop          # sandboxes that run hibernate; the host of the old build exits
 doz wake NAME          # (or attach / up / the web UI) — each wakes on the new build, sessions and all
 ```
+
+`brew upgrade` says when a host of the previous build is still running (`doz host upgrade-check`,
+which you can run yourself). Homebrew then removes the previous version (`brew cleanup`) — the
+program that host runs and its resources. The host keeps running, and so does every sandbox it
+runs, but it can no longer boot one: a start, a wake or a new sandbox is refused with "this host's
+program … is gone — an upgrade removed it — `doz host stop`, then retry", and `host status` and
+`doctor` say so. Once nothing runs and nobody is attached, it exits by itself.
 
 A sandbox that was asleep when you updated wakes on the new build with its programs and sessions
 where they were. Each snapshot records the exact virtual machine it was taken in (CPUs, memory,
@@ -876,12 +909,14 @@ is created, and become part of it.
 
 | symptom | try |
 |---|---|
-| "cannot boot a VM" / entitlement | `doz doctor`. Reinstall with `make install-cli` (it signs). |
+| "cannot boot a VM" / entitlement | `doz doctor`. Reinstall (`brew reinstall doz`, or `make install-cli` — both are signed). |
+| `brew install doz` says the repository is private | `export HOMEBREW_GITHUB_API_TOKEN=$(gh auth token)`, then again. |
+| "this host's program … is gone" | An upgrade removed the previous version under a running host: `doz host stop`, then retry. |
 | First start is slow | It is preparing the image, once per store. `doz onboard` (or `doz image bake …`) does it ahead of time; `-v` shows the steps. |
 | A start or wake failed, or the boot scrolled past too fast | `doz console NAME --list`, then `doz console NAME --steps [--boot N]` (or **Boot log** in the web UI): each kept boot's steps (the failing one marked ✗, with why) and its kernel console. |
 | An agent's sessions do not start: "the agent prompt does not render" | A `{{variable}}` not on the list, in `agent-prompt.md` or the sandbox's own prompt. `doz inspect NAME --prompt` names it; or `doz config set agent.prompt false`. |
 | The agent does not know where it runs | `doz inspect NAME --prompt`. A claude-code sandbox from an image baked before 594 lacks the launcher part: `doz reset NAME`. |
-| Start over from nothing | `doz uninstall` (it lists what goes), `make install-cli`, `doz onboard`. |
+| Start over from nothing | `doz uninstall` (it lists what goes), `brew uninstall doz`, then `brew install doz`, `doz onboard`. |
 | An agent says it has no key / 401 | `doz key ls NAME`. A stdin key is gone after the host stopped, so set it again or use `--keychain`. |
 | A package install fails | The policy: `doz net log NAME --denied`, then `doz net policy NAME --allow HOST`. |
 | A sandbox shows as died | The host crashed while it ran. `doz start NAME` checks the disk and cold-boots it. |
@@ -889,7 +924,7 @@ is created, and become part of it.
 | A browser terminal says "Disconnected" | The UI stopped, the browser signed out, or the tab was silent for a long time. Reconnect (or a new link: `doz ui link`). |
 | A browser terminal will not type Chinese/Japanese/Korean | Its engine's input-method support is incomplete; use Open in Terminal for now. |
 | Open in Terminal says no app opened it | Make a terminal app the handler for `.command` files (Finder › Get Info on any `.command` file › Open with › Change All…). |
-| `doz ui` says the resources are missing | `DozerKit_DozerWeb.bundle` must sit beside the executable. Reinstall with `make install-cli`. |
+| `doz ui` says the resources are missing | `DozerKit_DozerWeb.bundle` must sit beside the executable. Reinstall (`brew reinstall doz`, or `make install-cli`). |
 | Anything else | `<store>/host.log` and `doz events`. |
 
 ## Not yet

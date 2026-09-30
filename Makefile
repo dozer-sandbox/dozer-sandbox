@@ -64,7 +64,7 @@ DOCC_OUT         ?= .docc-build
 DOCC_BASE_PATH   ?= /DozerKit/
 DOCC_PREVIEW_PORT ?= 8000
 
-.PHONY: help build test audit web-assets web-assets-check test-cli-onboarding pullbench test-vm test-vm-agents test-vm-network test-vm-hardening test-vm-lineage prev-cli test-vm-upgrade vmtest-host kernel deckhold deckhold-verify doznet doznet-verify cli install-cli test-cli test-vm-claude test-vm-templates docs docs-preview docs-drift-check
+.PHONY: help build test audit web-assets web-assets-check test-cli-onboarding pullbench test-vm test-vm-agents test-vm-network test-vm-hardening test-vm-lineage prev-cli test-vm-upgrade vmtest-host kernel deckhold deckhold-verify doznet doznet-verify cli install-cli test-cli test-vm-claude test-vm-templates docs docs-preview docs-drift-check release
 
 help: ## Show this help
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) | sed 's/:.*## /\t/' | expand -t 22
@@ -172,6 +172,21 @@ install-cli: ## Build doz (release), sign it, install into PREFIX (default ~/.lo
 	@echo "installed $(PREFIX)/bin/doz — run: doz doctor"
 	@"$(PREFIX)/libexec/doz/doz" host status 2>/dev/null | grep -q '^host .* running' \
 	  && echo "note: a doz host is running the PREVIOUS build (it keeps working); \`doz host stop\` switches to this one — sandboxes hibernate and wake on it" || true
+
+# ── The release (598) ────────────────────────────────────────────────────────
+# `make release VERSION=X.Y.Z` builds release, packs the install layout above as
+# dist/doz-X.Y.Z-macos-arm64.tar.gz (+ .sha256) — what the GitHub Release carries and Homebrew
+# installs — signed with a Developer ID and notarised when Makefile.config says how (see
+# Makefile.config.example), ad hoc otherwise. DRY_RUN=1 prints every command and runs none.
+-include Makefile.config
+SIGN_IDENTITY  ?=
+NOTARY_PROFILE ?=
+DIST           ?= dist
+
+release: ## 598: build + sign (+ notarise when configured) + pack dist/doz-VERSION-macos-arm64.tar.gz and its SHA-256 (VERSION=X.Y.Z; DRY_RUN=1 prints the plan)
+	@VERSION="$(VERSION)" OUT="$(DIST)" JOBS="$(JOBS)" SWIFT_BUILD_SYSTEM="$(SWIFT_BUILD_SYSTEM)" \
+	  SIGN_IDENTITY="$(SIGN_IDENTITY)" NOTARY_PROFILE="$(NOTARY_PROFILE)" HARDENED="$(HARDENED)" \
+	  DRY_RUN="$(DRY_RUN)" SKIP_BUILD="$(SKIP_BUILD)" Scripts/release.sh
 
 test-cli: cli vmtest-host ## 585 CLI suite: the signed doz from separate processes (up/exec/run/attach, lifecycle, points, two sandboxes, kill -9 host, idle exit); 594: onboarding, init/up, the agent prompt, uninstall (stores /tmp/dzo-PID-*)
 	perl -e 'alarm shift; exec @ARGV' 3600 $(VMTEST_BIN) cli --doz $(CLI_BIN) --store "$(CLITEST_STORE)"

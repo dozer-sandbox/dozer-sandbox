@@ -76,6 +76,7 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
 | `Sources/DozerHost/Preparations.swift`, `Onboarding.swift`, `AgentPrompt.swift`; `Sources/DozerCLI/OnboardCommands.swift`, `ProjectFile.swift`, `Prompting.swift`, `UninstallCommand.swift`; `Sources/doz-vmtest/OnboardingSuite.swift`, `PullBench.swift` | 594: image preparation in the host (single-flight, joined, cancelled) + `onboarded.json`; onboarding's checks / account step / settings-only-when-missing; the agent's environment prompt + the `dozer` skill; `doz onboard`/`init`/`uninstall`, `doz_project.yaml` (Yams), TTY questions; `make test-cli`'s onboarding part (`make test-cli-onboarding`); `make pullbench` (D12) |
 | `Sources/DozerKit/SavedScreens.swift`; `Sources/DozerHost/TerminalLayout.swift`; `Sources/DozerWeb/WebSessionMemory.swift` | 593 §9: the sessions' saved screens (`<sandbox>/screens/NAME.{vt,txt,json}`; the capture is `Sandbox.captureScreensLocked`, the `.captureScreens` step); the web UI's terminal layout kept by the host (`terminal-layout.json`); their web projections and the layout's strict decoder |
 | `Sources/DozerHost/BootLogs.swift`; `Sources/DozerWeb/WebBootLogs.swift` | 593: each sandbox's kept boots (`<sandbox>/boots/`), the recorder, the one renderer; the web's Boot log projections |
+| `Scripts/release.sh` (`make release`), `Makefile.config.example`; `ReleaseStamp` in `Sources/DozerCLI/DozerCommand.swift`; `HostUpgradeCheck` in `GroupCommands.swift`; `HostCore.programGone`; `Tests/DozerCLITests/ReleaseTests.swift` | 598: the Homebrew artefact (signed; Developer ID + notarised when configured), the version stamp, `doz host upgrade-check`, the refusal when an upgrade removed a running host's keg |
 | `Sources/DozerHost/Resources.swift`, `HostCore+Resources.swift`; `Sources/DozerCLI/ResourcesCommands.swift`; `Sources/DozerWeb/WebResources.swift`; `Tests/DozerCLITests/ResourcesTests.swift` | 595: the account of everything Dozer uses (the walk, one leaf per entry, the three numbers from `DiskAccounting.exclusive`), refusals, the plan and the deletion; the host ops `resources` / `resources-rm` / `resources-clean` / `resources-kernel`; `doz resources`; the web projection + preview route |
 | `Tests/DozerWebTests/` | 590: the security rules one by one, and a real listener driven with raw HTTP |
 | `Tests/DozerKitTests/` | Unit tests — no VM |
@@ -559,6 +560,40 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   the web's Boot log (`GET …/boots`, `GET …/boots/N`, rendered on the server, drawn in the frame's saved
   mode — read-only, no socket, any phase) use it. `boot-log` is a read-only host op (in-process when no
   host runs; the host adds the boot under way as number 1).
+
+### The release and Homebrew (598) — design: workspace `changes/598-*/598.01-DESIGN.md`
+
+- **`make release VERSION=X.Y.Z`** (`Scripts/release.sh`) is the ONE way the artefact is made:
+  release build → `dist/stage/doz-X.Y.Z/{bin/doz → ../libexec/doz/doz, libexec/doz/{doz, VERSION,
+  DozerKit_*.bundle}}` → signed → `dist/doz-X.Y.Z-macos-arm64.tar.gz` + `.sha256`. It checks the
+  signature (`--verify --strict`), the virtualization entitlement, and that the packed `doz --version`
+  says X.Y.Z. `Scripts/ship` (the workspace) runs it after tagging DozerKit, attaches both files to the
+  tag's GitHub Release and moves the tap's formula (`RELEASES` in the ship).
+- **The version comes from the tag, never a hand-edited constant**: the tarball carries
+  `libexec/doz/VERSION`; `DozerCommand.version` reads it beside the resolved executable
+  (`ReleaseStamp`) and falls back to `builtVersion` for `make cli` / `install-cli` / tests.
+- **Signing**: a Developer ID (`SIGN_IDENTITY`, and `NOTARY_PROFILE` for `notarytool`) comes ONLY
+  from the gitignored `Makefile.config` (`Makefile.config.example`); then `--options runtime
+  --timestamp` (the entitlement works under the hardened runtime — measured, cold boot and wake), every
+  Mach-O in the bundles signed too (the guest binaries are Linux ELF: left alone), notarised, checked
+  with `spctl`. A bare CLI cannot be stapled. Without it: ad hoc, said. Never a password in a file,
+  never `notarytool` without a profile. `DRY_RUN=1` prints every command.
+- **Resources are found beside the RESOLVED executable** (`DeckholdBinary.candidateBundleDirectories`,
+  `WebAssets`, `HostLauncher.executablePath`): the Homebrew keg (`Cellar/doz/V/libexec/doz`, reached
+  through `bin/doz` links) works with no path hard-coded — keep it that way.
+- **An upgrade removes the previous keg under a running host** (`brew upgrade` runs `brew cleanup`):
+  the host keeps its open program and its VMs, but a boot would fail on a missing guest binary. So
+  `HostCore.programGone()` (the executable removed, or deckhold/doznet not found) refuses every
+  `bootOps` op and a wake-by-use with "this host's program … is gone — `doz host stop`, then retry";
+  `host status`/`doctor` say so; the idle loop exits it once nothing is live. `doz host upgrade-check`
+  (the formula's post-install) says when a host of another build runs — via the socket, else the pid
+  file + `proc_pidpath` (Homebrew's post-install sandbox) — never starts/stops one, always exits 0.
+- **`doz uninstall` never removes a Homebrew keg** (`Uninstall.homebrewKeg`): it removes the store and
+  settings and names `brew uninstall doz`.
+- **The tap** (`johnoscott/homebrew-dozer-prelaunch`, private until the unveil): `Formula/doz.rb`
+  (arm64, macOS 26+, `post_install_steps` → `host upgrade-check`, a `test do` that runs `--version`
+  and `doctor --json` in a scratch store) and `lib/github_private_release_download_strategy.rb`
+  (the asset through the API with `HOMEBREW_GITHUB_API_TOKEN` only — dropped at the unveil).
 
 ### Resources (595) — design: workspace `changes/595-*/595.01-DESIGN.md`
 

@@ -9,14 +9,23 @@ in about a third of a second, with the programs inside them still running where 
 the command-line face of `DozerKit`.
 
 ```bash
-cd repo/lib/DozerKit
-make install-cli                  # PREFIX=~/.local by default → ~/.local/bin/doz
+export HOMEBREW_GITHUB_API_TOKEN=$(gh auth token)      # while the repositories are private
+brew tap johnoscott/dozer git@github.com:johnoscott/homebrew-dozer-prelaunch.git
+brew install doz                  # the prebuilt, signed release: seconds, no compiler (Apple silicon, macOS 26+)
 doz onboard                       # once: checks, the Claude account, settings, images (in the background)
 ```
 
-A VM can only be booted by a binary signed with Apple's virtualization entitlement, and `make
-install-cli` signs it. An unsigned build runs every command but cannot boot anything, and `doz
-doctor` says so. `make cli` builds a signed debug binary at `.build/debug/doz` for development.
+A VM can only be booted by a binary signed with Apple's virtualization entitlement; the release
+carries it. An unsigned build runs every command but cannot boot anything, and `doz doctor` says
+so. `brew upgrade doz` installs a new release (safe with a host running — see *The host*);
+`brew uninstall doz` removes it.
+
+**From source (contributors):** in `repo/lib/DozerKit`, `make install-cli` (release, signed, into
+`~/.local`), `make cli` (a signed debug build at `.build/debug/doz`), and `make release
+VERSION=X.Y.Z` — the Homebrew artefact, `dist/doz-X.Y.Z-macos-arm64.tar.gz` and its SHA-256, signed
+with a Developer ID and notarised when `Makefile.config` configures one (`SIGN_IDENTITY`,
+`NOTARY_PROFILE`), ad hoc otherwise; `DRY_RUN=1` prints its commands. A bare command-line tool
+cannot be stapled: Gatekeeper checks a notarised `doz` online the first time it runs.
 
 > This article's command list is checked against the CLI's real subcommand tree by
 > `Scripts/docs-drift-check.sh` (`make docs-drift-check`) — see that script for how.
@@ -348,7 +357,15 @@ sandboxes created from now on; existing ones keep theirs, and a wake keeps its s
 doz host [--foreground] [--idle-timeout MIN]   # run it by hand
 doz host stop                                    # hibernates everything running, then exits
 doz host status                                  # is one running, and what does it hold? never starts one
+doz host upgrade-check                           # after an upgrade: is a host of an older build still running?
 ```
+
+**Upgrades.** `brew upgrade doz` (or `make install-cli`) puts the new build next to the running
+one; the host keeps running its own copy until `doz host stop`, and Homebrew's post-install runs
+`doz host upgrade-check` to say so. When Homebrew then removes the previous version (`brew
+cleanup`), the running host and its sandboxes keep running, but a start, a wake or a new sandbox is
+refused plainly ("this host's program … is gone — `doz host stop`, then retry"), and the host
+exits by itself once nothing runs.
 
 Started for you by the first command that needs it; runs detached (`<store>/host.log`,
 `<store>/host.sock`); exits after 5 minutes idle (`$DOZ_HOST_IDLE`, 0 = never). `ls`,
@@ -458,11 +475,12 @@ JSON documents only ever gain fields.
 
 | symptom | try |
 |---|---|
-| "cannot boot a VM" / entitlement | `doz doctor`; reinstall with `make install-cli` (it signs). |
+| "cannot boot a VM" / entitlement | `doz doctor`; reinstall (`brew reinstall doz`, or `make install-cli` — both are signed). |
+| "this host's program … is gone" | An upgrade removed the previous version under a running host: `doz host stop`, then retry. |
 | First start is slow | It is preparing the image, once per store — `doz onboard` (or `doz image bake …`) does it ahead of time; `-v` shows the steps. |
 | A start or wake failed, or its boot flew past | `doz console NAME --list`, then `doz console NAME --steps [--boot N]` — each kept boot's steps (✗ with why) and its kernel console; **Boot log** in the web UI. |
 | An agent's sessions do not start: "the agent prompt does not render" | A `{{variable}}` that is not on the list in `agent-prompt.md` or the sandbox's own prompt — `doz inspect NAME --prompt` names it. |
-| Start over from nothing | `doz uninstall` (it lists what goes), then `make install-cli` and `doz onboard`. |
+| Start over from nothing | `doz uninstall` (it lists what goes; a Homebrew `doz` is left to `brew uninstall doz`), then `brew install doz` and `doz onboard`. |
 | An agent says it has no key / 401 | `doz key ls NAME` — a stdin key is gone after the host stopped; set it again or use `--keychain`. |
 | A package install fails | Check the policy: `doz net log NAME --denied`, then `doz net policy NAME --allow HOST`. |
 | A sandbox shows as died | The host crashed while it ran — `doz start NAME` checks the disk and cold-boots it. |

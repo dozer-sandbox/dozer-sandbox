@@ -89,7 +89,8 @@ public struct ExecutableIdentity: Codable, Equatable, Sendable {
             "a newer doz is installed (\(path)); this host still runs the previous build — `doz host stop` switches "
                 + "(sandboxes hibernate and wake on the new one)"
         case .removed:
-            "this host's program (\(path)) is gone — `doz host stop`, then run the installed doz"
+            "this host's program (\(path)) is gone — an upgrade removed it (brew upgrade / brew cleanup) — `doz host stop`, "
+                + "then retry: the installed doz starts a new host (sandboxes asleep keep their snapshots and wake on it)"
         }
     }
 }

@@ -241,11 +241,19 @@ A byte-identical copy already on the Mac (the `container` CLI's) seeds the cache
 ## The `doz` CLI
 
 ```bash
-make install-cli PREFIX=~/.local       # release build, signed with the virtualization entitlement
+export HOMEBREW_GITHUB_API_TOKEN=$(gh auth token)      # while the repositories are private
+brew tap johnoscott/dozer git@github.com:johnoscott/homebrew-dozer-prelaunch.git
+brew install doz                    # the prebuilt release, signed with the virtualization entitlement — seconds
 doz onboard                         # once: checks, the Claude account, settings, images prepared in the background
 cd ~/code/myproj && doz init        # this folder is a project: doz_project.yaml
 doz up                              # create → boot → attach to Claude Code, the folder at /workspace
 ```
+
+Homebrew installs `libexec/doz/{doz, VERSION, its resource bundles}` in the keg and links `bin/doz`
+(Apple silicon, macOS 26+); `brew upgrade doz` is safe with a host running. The tap
+(`johnoscott/homebrew-dozer-prelaunch`) is private until the unveil, so it is tapped by URL and the
+release downloaded with `HOMEBREW_GITHUB_API_TOKEN`. From a checkout, contributors use `make
+install-cli` (below) — and `make release VERSION=X.Y.Z` builds the artefact the tap installs.
 
 New to it: the [walkthrough](docs/CLI-WALKTHROUGH.md) (~25 min, from nothing installed to
 uninstalling again) and the [user guide](docs/CLI-USER-GUIDE.md) (concepts, every command by task,
@@ -260,7 +268,7 @@ command but cannot boot a VM (`doz doctor` says so).
 |---|---|
 | `doz onboard [--images …\|--all-images\|--no-images] [--account mac\|api-key\|setup-token\|later] [--secret-stdin] [--yes]` · `--status` · `--cancel` | 594: set up this Mac, once — the doctor's checks (required ones stop it), the Claude account (the Mac's login; an API key or setup token pasted at a hidden prompt and stored exactly as `doz account add` stores it; or Decide later — never a login), `doz.toml` + `agent-prompt.md` (only when missing), and the images prepared **in the host** (kernel, guest init, base pull, bake) with the progress view: Ctrl-C detaches, `--status` re-attaches, `--cancel` cancels. A start of an image being prepared joins that preparation. Asks on a terminal; `--yes`/`--json`/no terminal never ask. |
 | `doz init [DIR]` · `doz up` (no name) | 594: `doz_project.yaml` (YAML, closed schema: name, image, cpus, memory, network, account, sessions, agent_prompt); `up` in that folder creates/starts/wakes that sandbox with the folder at `/workspace` and starts its sessions. |
-| `doz uninstall [--keep-store] [--keep-config] [--yes]` | 594: lists exactly what goes (the store, the settings, the installed doz) and asks once; never the keychain or Claude Code's files. |
+| `doz uninstall [--keep-store] [--keep-config] [--yes]` | 594: lists exactly what goes (the store, the settings, the installed doz) and asks once; never the keychain or Claude Code's files. 598: a Homebrew `doz` is left to `brew uninstall doz`, which it names. |
 | `doz create NAME --image lab\|claude-code\|pi\|<custom> [--cpus N] [--memory 2G] [--workspace DIR \| --isolated] [--network agent\|bake\|locked\|open\|nat\|none] [--subnet CIDR] [--agent-prompt FILE]` | Make a sandbox (off until started). `lab` is Alpine + bash (1 GiB); the agent images get 2 GiB. The workspace is shared at `/workspace`, made when it does not exist (594); without one the sandbox is **isolated** — `/workspace` is private to the VM, said by `create`, `ls` and the agent's prompt. The network defaults to **proxied** — no network interface, every connection judged by the Mac's policy and logged: `agent` for an agent image, `bake` (package registries only) for the lab. |
 | `doz up NAME [create options] [--session S] [-d] [-- CMD…]` | Create if missing → start or wake → attach to the image's session (`claude`, `pi`, or a `bash -l` shell), opening it if it is not running (`vagrant up` / `compose up`). |
 | `doz inspect NAME --prompt` | 594: the agent's environment prompt as its next session gets it — a short facts block (the VM, `/workspace` shared or not, the proxied network, injected credentials) appended to its system prompt, plus the `dozer` skill; rendered at every session start; your `agent-prompt.md` and the sandbox's own layer; `agent.prompt = false` turns it off. |
@@ -286,7 +294,7 @@ command but cannot boot a VM (`doz doctor` says so).
 | `doz doctor` · `doz events [NAME]` | Checks · follow the host's phases, steps and notes. |
 | `doz console NAME [--follow]` · `--list` · `--steps [--boot N]` | The boot console (kernel + init), or follow it as the sandbox boots · 593: the kept boots (the last `host.boot_logs_kept`, 5: each start, wake, restore) · a boot's steps as the boot view showed them, then its console (1 = the latest). The web UI's **Boot log** shows the same. |
 | `doz ui [--open\|--print-url]` · `doz ui link` | 590: a local web UI of the whole store — sandboxes, sessions, restore points, network policy and log, keys and accounts (fingerprints only), images, metrics (filters, CSV), doctor, live activity — and its actions: create and the whole lifecycle, sessions (open, run detached), Open in Terminal (Terminal.app), restore points (take, revert, fork, delete, save as image), policy edits with a preview, key policy, account use/default/verify/remove/keep-alive, image bake/remove. Destructive actions need the name typed; an action never carries a secret — an account's key or setup token, and a sandbox's own key, each have a masked field and a route of their own while `ui.allow_secret_entry` (594, default on; stored as `doz account add` / `doz key set` store them). Loopback only, on a port the OS picks; the browser signs in with a one-use, five-minute link (opened for you, or printed on the terminal with `--print-url`); `ui link` mints another for the running UI. A client of the host like every command; one UI per store; Ctrl-C stops it. |
-| `doz host [--foreground] [--idle-timeout MIN]` · `host stop` · `host status` | The host (normally started for you) · hibernate everything and stop it · is one running (never starts one). |
+| `doz host [--foreground] [--idle-timeout MIN]` · `host stop` · `host status` · `host upgrade-check` | The host (normally started for you) · hibernate everything and stop it · is one running (never starts one) · 598: after an upgrade, is a host of an older build still running (Homebrew's post-install runs it; never starts or stops one, always exits 0). |
 
 Every command takes `--json` (machine-readable output on stdout; errors as `{"error":{"code","message"}}`),
 `--store DIR` (default `$DOZ_STORE`, else the settings' `store.path`, else `~/Library/Application Support/dozer-sandbox`),
@@ -418,6 +426,8 @@ make doznet        # rebuild the doznet guest binary (pinned Zig; no ghostty) + 
 make doznet-verify # rebuild doznet and check the committed bytes match
 make cli              # 585: build .build/debug/doz and sign it with the virtualization entitlement
 make install-cli      # release build, signed, into PREFIX (default ~/.local): bin/doz → libexec/doz/
+make release VERSION=X.Y.Z  # 598: dist/doz-X.Y.Z-macos-arm64.tar.gz + .sha256 — what the GitHub Release carries and
+                      #      Homebrew installs; Developer ID + notarised via Makefile.config, else ad hoc; DRY_RUN=1
 make test-cli         # 585: the signed doz driven from separate processes against a scratch store
 make test-vm-claude   # 588: the credential proxy's classifier, strict, a placeholder across a host restart — a fake key (DOZ_TEST_CLAUDE_LOGIN=1: + this Mac's login)
                       #      (up/exec/run/attach, lifecycle, points, two sandboxes, kill -9 the host, idle exit)

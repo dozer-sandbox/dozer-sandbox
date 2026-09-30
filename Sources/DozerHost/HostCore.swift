@@ -395,6 +395,10 @@ public actor HostCore {
                          || r.op == .terminalLayoutSet || ([.resourcesRemove, .resourcesClean].contains(r.op) && r.dryRun == true)) {
             return .failure(HostError(.unavailable, "\(r.op.rawValue) needs the host"))
         }
+        // 598: an upgrade removed this host's installation — refuse a boot plainly, before it fails oddly.
+        if Self.bootOps.contains(r.op), let gone = programGone() {
+            return .failure(HostError(.unavailable, gone))
+        }
         // 595: a deletion waits until nothing that uses the store's disks is under way.
         let touchesDisks = Self.diskOps.contains(r.op)
         if touchesDisks { diskOpsInFlight += 1 }
@@ -418,6 +422,25 @@ public actor HostCore {
     public func executableChange() -> ExecutableIdentity.Change? {
         guard let executable else { return nil }
         return executable.change(now: ExecutableIdentity.of(path: executable.path), runningCodeValid: ExecutableIdentity.runningCodeIsValid())
+    }
+
+    /// 598: operations that boot a VM (or prepare an image in one) — they need this host's resource
+    /// bundle (the deckhold and doznet guest binaries) beside its program.
+    static let bootOps: Set<HostOp> = [.create, .start, .wake, .prepare, .imageBake, .onboard]
+
+    /// 598: why this host cannot boot anything now, or nil. A Homebrew upgrade installs the new build
+    /// in a new keg and `brew cleanup` (which `brew upgrade` runs) deletes the old one — the program
+    /// this host runs from and its resources. The running process keeps its code (the file stays open)
+    /// and every VM it runs keeps running, but a boot would fail oddly on a missing guest binary. So
+    /// before one, say what happened and what to do.
+    public func programGone() -> String? {
+        guard !readOnly, let executable else { return nil }
+        if executableChange() == .removed { return ExecutableIdentity.explain(.removed, path: executable.path) }
+        if DeckholdBinary.locate() == nil || DoznetBinary.locate() == nil {
+            return "this host's resources (the guest binaries beside \(executable.path)) are gone — an upgrade removed its "
+                + "installation — `doz host stop`, then retry: the installed doz starts a new host (sandboxes asleep keep their snapshots)"
+        }
+        return nil
     }
 
     /// An error as the client sees it. When this host's program was rewritten under it, macOS refuses
@@ -602,6 +625,10 @@ public actor HostCore {
         if let executable, let c = executableChange() {
             s.executableChange = c.rawValue
             s.executableNote = ExecutableIdentity.explain(c, path: executable.path)
+        } else if let gone = programGone() {
+            // 598: the program file is still there but its resources went (a keg half-removed).
+            s.executableChange = ExecutableIdentity.Change.removed.rawValue
+            s.executableNote = gone
         }
         return s
     }
@@ -831,6 +858,8 @@ public actor HostCore {
             case .running where !busy: return
             case .paused where wake && !busy: try await m.sandbox.resume(); return
             case .asleep where wake && !busy, .hibernated where wake && !busy:
+                // 598: a wake by use after an upgrade removed this host's installation: say so first.
+                if let gone = programGone() { throw HostError(.unavailable, gone) }
                 // 595: a wake by use reads the kernel and the guest init — a resource deletion waits for it.
                 diskOpsInFlight += 1
                 defer { diskOpsInFlight -= 1 }
