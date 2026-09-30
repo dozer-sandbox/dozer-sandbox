@@ -20,13 +20,14 @@ final class PTYClient: @unchecked Sendable {
     private var collected: [UInt8] = []
     private var reader: Thread?
 
-    init(_ h: CLIHarness, _ args: [String]) throws {
+    init(_ h: CLIHarness, _ args: [String], in folder: URL? = nil) throws {
         var m: Int32 = -1, s: Int32 = -1
         var ws = winsize(ws_row: 30, ws_col: 100, ws_xpixel: 0, ws_ypixel: 0)
         guard openpty(&m, &s, nil, nil, &ws) == 0 else { throw POSIXError(.EIO) }
         master = m
         slave = s
         process = h.process(args)
+        if let folder { process.currentDirectoryURL = folder }
         let handle = FileHandle(fileDescriptor: s, closeOnDealloc: false)
         process.standardInput = handle
         process.standardOutput = handle
@@ -167,6 +168,65 @@ func cliTerminalRestoreSuite(binary: String) async {
         checkRestored(c, marker: "MODES-HUP", lastLine: nil, "SIGHUP")
         check(sameTermios(c.termios, before), "SIGHUP: the termios is restored")
     } catch { check(false, "pty: \(error)") }
+
+    // 594 (W16): "detach seems to only happen now after twice sending CTRL-]" — Claude Code 2.1.285 pushes
+    // the kitty keyboard protocol and modifyOtherKeys, and the terminal then sends Ctrl-] encoded. One
+    // press, in each encoding, must detach — and nothing of it (or after it) reaches the session.
+    print("cli: one Ctrl-] detaches in every keyboard encoding (W16)")
+    let cases: [(String, String, String, [String])] = [
+        ("kitty flags 1", #"\033[>1u"#, "\u{1B}[93;5u", []),
+        ("kitty flags 3 (event types)", #"\033[>3u"#, "\u{1B}[93;5:1u", []),
+        ("kitty flags 31 (all keys, text)", #"\033[>31u"#, "\u{1B}[93;5:1u", []),
+        ("modifyOtherKeys 2", #"\033[>4;2m"#, "\u{1B}[27;5;93~", []),
+        ("Claude Code 2.1.285's own sequence", #"\033[?1049h\033[<u\033[>5u\033[>4;2m\033[?1004h\033[?2004h"#, "\u{1B}[93;5u", []),
+        ("--detach-key ctrl-q, kitty", #"\033[>1u"#, "\u{1B}[113;5u", ["--detach-key", "ctrl-q"]),
+    ]
+    for (i, (label, push, key, extra)) in cases.enumerated() {
+        do {
+            let log = "/tmp/keys-\(i).log"
+            let c = try PTYClient(t, ["run", "tr", "--session", "k\(i)"] + extra
+                                  + ["--", "sh", "-c", "sleep 1; printf '\(push)'; echo READY-K\(i); stty raw -echo; exec cat > \(log)"])
+            defer { c.close() }
+            check(c.wait(30) { $0.text.contains("READY-K\(i)") }, "\(label): the session pushed its keyboard mode")
+            usleep(300_000)
+            c.type("x")
+            usleep(300_000)
+            c.type(key)                                                         // ONE press
+            let code = c.exited(within: 8)
+            check(code == 0 && c.text.contains("[doz] detached"), "\(label): the first press detaches (exit \(code.map(String.init) ?? "still attached"))")
+            let got = t.run(["exec", "tr", "--", "cat", log]).out
+            check(got == "x", "\(label): the session got \"x\" and nothing of the detach key (\(got.debugDescription))")
+        } catch { check(false, "pty: \(error)") }
+    }
+
+    // 594 (W17): the detach line names the SHORTEST command that reattaches from here.
+    print("cli: the detach line names the shortest reattach command (W17)")
+    func detachLine(_ args: [String], in folder: URL? = nil) -> String {
+        guard let c = try? PTYClient(t, args, in: folder) else { return "" }
+        defer { c.close() }
+        _ = c.wait(30) { $0.text.contains("$") || $0.text.contains("#") || $0.text.contains("READY") }
+        usleep(500_000)
+        c.type(byte: 0x1D)
+        _ = c.exited(within: 8)
+        return c.text.components(separatedBy: "[doz] detached").last.map { String($0.prefix(120)) } ?? ""
+    }
+    let named = detachLine(["run", "tr", "--session", "server", "--", "sh", "-c", "echo READY; exec sleep 600"])
+    check(named.contains("(doz attach tr server)"), "a named session: (doz attach tr server) — \(named.debugDescription)")
+    let plain = detachLine(["attach", "tr"])
+    check(plain.contains("(doz attach tr)"), "the default session: (doz attach tr) — \(plain.debugDescription)")
+    let project = t.store.appendingPathComponent("proj-tr")
+    try? FileManager.default.createDirectory(at: project, withIntermediateDirectories: true)
+    try? "version: 1\nname: tr\nimage: lab\n".write(to: project.appendingPathComponent("doz_project.yaml"), atomically: true, encoding: .utf8)
+    let inProject = detachLine(["attach", "tr"], in: project)
+    check(inProject.contains("(doz up)"), "in its project folder: (doz up) — \(inProject.debugDescription)")
+    // Each form reaches that same session: `doz up` there and `doz attach tr` open nothing new.
+    let before = t.sessions("tr").map(\.name).sorted()
+    _ = detachLine(["up"], in: project)
+    check(t.sessions("tr").map(\.name).sorted() == before, "doz up (the hint) reattached the same session, opened none")
+    r = t.run(["run", "tr", "--session", "bg", "--detach", "--", "sleep", "600"])
+    check(r.out.contains("— doz attach tr bg"), "run --detach: the same hint (\(r.out.trimmingCharacters(in: .whitespacesAndNewlines)))")
+    r = t.run(["up", "tr", "--detach"])
+    check(r.out.contains("— doz attach tr\n") || r.out.hasSuffix("— doz attach tr"), "up --detach, the default session: doz attach tr (\(r.out.trimmingCharacters(in: .whitespacesAndNewlines)))")
 
     // A pipe is not a terminal: nothing is written to it.
     r = t.run(["run", "tr", "--session", "piped", "--", "sh", "-c", "sleep 2; printf '\(modesOn)'; echo PIPED; sleep 1"], timeout: 60)

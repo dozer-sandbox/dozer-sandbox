@@ -176,7 +176,7 @@ struct Run: AsyncParsableCommand {
         let opened = try decode(try call(r, g), SessionOpened.self, g)
         if detach || g.json {
             if g.json { Out.json(opened) } else {
-                Out.stdout("session \(opened.session) \(opened.created ? "started" : "is already running") in \(name) — doz attach \(name) \(opened.session)\n")
+                Out.stdout("session \(opened.session) \(opened.created ? "started" : "is already running") in \(name) — \(reattachCommand(sandbox: name, session: opened.session, defaultSession: opened.defaultSession))\n")
             }
             return
         }

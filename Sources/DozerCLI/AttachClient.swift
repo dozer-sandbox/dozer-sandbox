@@ -30,6 +30,11 @@ private func setSocket(_ fd: Int32) {
 }
 private func currentSocket() -> Int32 { socketLock.lock(); defer { socketLock.unlock() }; return socketFD }
 
+/// 594 (W17): the session attached and the sandbox's default session, as the host said.
+nonisolated(unsafe) private var _attached: (session: String, defaultSession: String?)?
+private func setAttached(_ s: String, _ d: String?) { socketLock.lock(); _attached = (s, d); socketLock.unlock() }
+private var attachedSession: (session: String, defaultSession: String?)? { socketLock.lock(); defer { socketLock.unlock() }; return _attached }
+
 /// Send keys, or keep them for the first connection (bounded).
 private func typeOrKeep(_ bytes: Data) {
     socketLock.lock()
@@ -137,6 +142,7 @@ enum AttachClient {
         // Keyboard → host, for the whole life of the client. Dropped while disconnected or held.
         Thread.detachNewThread {
             var buf = [UInt8](repeating: 0, count: 4096)
+            var scanner = detachKey.map(DetachKeyScanner.init(key:))
             while true {
                 let n = read(STDIN_FILENO, &buf, buf.count)
                 if n < 0 && errno == EINTR { continue }
@@ -147,14 +153,26 @@ enum AttachClient {
                     return
                 }
                 var bytes = Array(buf[0..<n])
-                if let k = detachKey, let i = bytes.firstIndex(of: k) {
-                    bytes = Array(bytes[..<i])
-                    let fd = currentSocket()
-                    if fd >= 0, !bytes.isEmpty { UnixSocket.writeAll(fd, Data(bytes)) }
-                    restoreTerminal()
-                    if !quiet { say("detached — the session keeps running (doz attach \(sandbox)\(session.map { " \($0)" } ?? ""))") }
-                    finish(0)
+                // 594 (W16): the detach key in every encoding the session may have put the terminal in
+                // (legacy byte, kitty CSI-u, modifyOtherKeys) — found on the FIRST press, never forwarded.
+                if scanner != nil {
+                    switch scanner!.scan(bytes) {
+                    case .forward(let b):
+                        bytes = b
+                    case .detach(let before):
+                        let fd = currentSocket()
+                        if fd >= 0, !before.isEmpty { UnixSocket.writeAll(fd, Data(before)) }
+                        restoreTerminal()
+                        if !quiet {
+                            // 594 (W17): the shortest command that reattaches from here.
+                            let again = attachedSession.map { reattachCommand(sandbox: sandbox, session: $0.session, defaultSession: $0.defaultSession) }
+                                ?? "doz attach \(sandbox)\(session.map { " \($0)" } ?? "")"
+                            say("detached — the session keeps running (\(again))")
+                        }
+                        finish(0)
+                    }
                 }
+                if bytes.isEmpty { continue }
                 typeOrKeep(Data(bytes))
             }
         }
@@ -194,6 +212,7 @@ enum AttachClient {
             }
             first = false
             resolvedSession = reply.result?["session"]?.stringValue ?? resolvedSession
+            if let s = resolvedSession { setAttached(s, reply.result?["defaultSession"]?.stringValue) }
             if reply.result?["state"]?.stringValue == "held" {
                 if !announcedHeld && !quiet {
                     let phase = reply.result?["phase"]?.stringValue.map { Out.phaseLabel($0) } ?? "not running"

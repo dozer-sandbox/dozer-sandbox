@@ -49,6 +49,86 @@ final class TerminalModesTests: XCTestCase {
         XCTAssertEqual(m, TerminalModes(), "RIS resets everything")
     }
 
+    // MARK: W16 — the detach key in every keyboard encoding
+
+    private func scan(_ s: String, key: UInt8 = 0x1D) -> DetachKeyScanner.Result {
+        var sc = DetachKeyScanner(key: key)
+        return sc.scan(Array(s.utf8))
+    }
+
+    func testCtrlBracketDetachesInEveryEncodingOnTheFirstPress() {
+        XCTAssertEqual(scan("ab\u{1D}cd"), .detach(forwardFirst: Array("ab".utf8)), "legacy 0x1D")
+        for enc in ["\(esc)[93;5u",           // kitty, flags 1 (disambiguate) — Claude Code's
+                    "\(esc)[93;5:1u",         // flags 3: event type press
+                    "\(esc)[93;5:2u",         // a repeat
+                    "\(esc)[93:125;5u",       // flags 4: alternate keys (shifted '}')
+                    "\(esc)[93;5;29u",        // flags 16: associated text
+                    "\(esc)[93;69u",          // caps lock on (64 + ctrl 4 + 1)
+                    "\(esc)[27;5;93~"] {      // xterm modifyOtherKeys 2
+            XCTAssertEqual(scan("x" + enc + "y"), .detach(forwardFirst: Array("x".utf8)), enc.debugDescription)
+        }
+    }
+
+    func testAReleaseIsSwallowedAndOtherKeysPassUntouched() {
+        XCTAssertEqual(scan("\(esc)[93;5:3u"), .forward([]), "a release: never a detach, never forwarded")
+        for other in ["\(esc)[93;6u",        // ctrl+shift
+                      "\(esc)[93;3u",        // alt
+                      "\(esc)[91;5u",        // ctrl+[
+                      "\(esc)[27;5;91~",
+                      "\(esc)[A", "\(esc)[1;5C", "\(esc)[<64;10;3M", "\(esc)[200~pasted\(esc)[201~", "\(esc)", "plain"] {
+            XCTAssertEqual(scan(other), .forward(Array(other.utf8)), other.debugDescription)
+        }
+    }
+
+    func testASequenceCutByTheReadIsHeldThenMatched() {
+        var sc = DetachKeyScanner(key: 0x1D)
+        XCTAssertEqual(sc.scan(Array("ok\(esc)[93;".utf8)), .forward(Array("ok".utf8)))
+        XCTAssertEqual(sc.scan(Array("5u".utf8)), .detach(forwardFirst: []))
+        var other = DetachKeyScanner(key: 0x1D)
+        XCTAssertEqual(other.scan(Array("\(esc)[1;".utf8)), .forward([]))
+        XCTAssertEqual(other.scan(Array("5A".utf8)), .forward(Array("\(esc)[1;5A".utf8)), "held, then forwarded whole")
+    }
+
+    func testTheOtherDetachKeys() {
+        let q = try! XCTUnwrap(parseDetachKey("ctrl-q"))
+        XCTAssertEqual(scan("\(esc)[113;5u", key: q), .detach(forwardFirst: []), "ctrl-q in kitty: code 113")
+        XCTAssertEqual(scan("\(esc)[27;5;113~", key: q), .detach(forwardFirst: []))
+        XCTAssertEqual(scan("\u{11}", key: q), .detach(forwardFirst: []))
+        XCTAssertEqual(scan("\(esc)[93;5u", key: q), .forward(Array("\(esc)[93;5u".utf8)), "Ctrl-] is just a key then")
+        let bs = try! XCTUnwrap(parseDetachKey("ctrl-\\"))
+        XCTAssertEqual(scan("\(esc)[92;5u", key: bs), .detach(forwardFirst: []))
+    }
+
+    func testModifyOtherKeysIsResetAndTheKittyStackPoppedBeforeTheScreenIsLeft() {
+        var m = TerminalModes()
+        // Claude Code 2.1.285's own sequence: alt screen, pop, push 5, modifyOtherKeys 2.
+        m.feed(Array("\(esc)[?1049h\(esc)[<u\(esc)[>5u\(esc)[>4;2m".utf8))
+        let s = m.restoreSequence
+        let pop = s.range(of: "\(esc)[<1u"), mok = s.range(of: "\(esc)[>4m"), leave = s.range(of: "\(esc)[?1049l")
+        XCTAssertNotNil(pop)
+        XCTAssertNotNil(mok)
+        XCTAssertTrue(pop!.lowerBound < leave!.lowerBound && mok!.lowerBound < leave!.lowerBound)
+        m.feed(Array("\(esc)[>4m".utf8))
+        XCTAssertFalse(m.restoreSequence.contains("\(esc)[>4m"))
+    }
+
+    // MARK: W17 — the shortest reattach command
+
+    func testTheShortestReattachCommand() throws {
+        let dir = URL(fileURLWithPath: "/private/tmp/dzre-\(UUID().uuidString.prefix(8))")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        XCTAssertEqual(reattachCommand(sandbox: "hello-dozer", session: "claude", defaultSession: "claude", folder: dir), "doz attach hello-dozer")
+        XCTAssertEqual(reattachCommand(sandbox: "hello-dozer", session: "server", defaultSession: "claude", folder: dir), "doz attach hello-dozer server")
+        try "version: 1\nname: hello-dozer\nimage: claude-code\n".write(to: dir.appendingPathComponent("doz_project.yaml"), atomically: true, encoding: .utf8)
+        XCTAssertEqual(reattachCommand(sandbox: "hello-dozer", session: "claude", defaultSession: "claude", folder: dir), "doz up")
+        XCTAssertEqual(reattachCommand(sandbox: "hello-dozer", session: "server", defaultSession: "claude", folder: dir), "doz attach hello-dozer server")
+        XCTAssertEqual(reattachCommand(sandbox: "other", session: "claude", defaultSession: "claude", folder: dir), "doz attach other", "another sandbox's folder")
+        try "version: 1\nname: hello-dozer\nimage: lab\nsessions:\n  - name: server\n    command: [sh]\n".write(to: dir.appendingPathComponent("doz_project.yaml"), atomically: true, encoding: .utf8)
+        XCTAssertEqual(reattachCommand(sandbox: "hello-dozer", session: "server", defaultSession: "shell", folder: dir), "doz up", "the project's first session")
+        XCTAssertEqual(reattachCommand(sandbox: "hello-dozer", session: "shell", defaultSession: "shell", folder: dir), "doz attach hello-dozer")
+    }
+
     func testOddBytesDoNotConfuseIt() {
         var m = TerminalModes()
         m.feed(Array("\(esc)[?\(String(repeating: "9", count: 200))h plain text \(esc)[31m red \(esc)[?1006h".utf8))
