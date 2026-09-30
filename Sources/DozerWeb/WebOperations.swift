@@ -36,7 +36,8 @@ final class WebOperations: @unchecked Sendable {
     /// `firstLine`: what the operation says until the host's first step (591: "a key typed in a
     /// terminal — waking" for a keystroke wake).
     func start(_ action: WebAction, firstLine: String = "requested — waiting for the host") throws -> WebOperation {
-        let verb = action.hostOp == .openSession ? "open-session" : action == .hostStart ? "host-start" : action.hostRequest.op.rawValue
+        let verb = action.hostOp == .openSession ? "open-session" : action == .hostStart ? "host-start"
+            : action == .hostRestart ? "host-restart" : action.hostRequest.op.rawValue
         let op = WebOperation(id: String(WebRandom.token().prefix(12)), action: verb, label: action.label, sandbox: action.sandbox,
                               state: "running", text: firstLine, startedAt: Date(), milliseconds: nil)
         let key = action.dedupeKey
@@ -56,7 +57,9 @@ final class WebOperations: @unchecked Sendable {
         Task {
             let outcome: (String, String)
             do {
-                let result = try await data.perform(request) { [weak self] e in self?.progress(op.id, e) }
+                let onEvent: @Sendable (HostEvent) -> Void = { [weak self] e in self?.progress(op.id, e) }
+                let result = action == .hostRestart ? try await data.restartHost(onEvent: onEvent)
+                                                    : try await data.perform(request, onEvent: onEvent)
                 outcome = ("done", Self.summary(action, result))
             } catch {
                 outcome = ("failed", HostError.from(error).message)
@@ -163,6 +166,10 @@ final class WebOperations: @unchecked Sendable {
         case .hostStart:
             let s = try? v.decode(HostStatus.self)
             return s.map { "the host is running (pid \($0.pid), doz \($0.version))" } ?? "the host is running"
+        case .hostRestart:
+            let s = try? v.decode(HostStatus.self)
+            return s.map { "the host restarted as doz \($0.version) (pid \($0.pid)) — its sandboxes hibernated; they wake when used" }
+                ?? "the host restarted — its sandboxes hibernated; they wake when used"
         case .prepareCancel:
             let ps = (try? v.decode([PreparationInfo].self)) ?? []
             return ps.isEmpty ? "nothing was being prepared" : "cancelling the preparation of \(ps.map(\.image).joined(separator: ", "))"

@@ -371,7 +371,10 @@ opens. `ui.open_browser` = `auto` (default) | `always` | `never`; `--open` / `--
 `--new-link` (or `doz ui link --rotate`) signs every page out for a new link. The page watches the host
 (594 W18): its footer shows the link to `doz ui` and the host's state and build, and a banner says when
 the host stopped (hibernated; Start host), died (the sandboxes that were running are shut down) or
-came back as another build.
+came back as another build — and, when the host and `doz ui` differ, which is the older (594 W20: an
+older host gets Restart host, which hibernates its sandboxes and starts `doz ui`'s build; an older
+`doz ui` is to be restarted). While `doz ui` itself is gone the page is paused under an overlay (594
+W21) and reconnects by itself; the banners stay in front of it.
 
 A browser dashboard for sandboxes, images, accounts, metrics, activity and doctor, with the
 lifecycle and every other action. Each sandbox has its own page (a child of Sandboxes in the

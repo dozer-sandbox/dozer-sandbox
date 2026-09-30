@@ -793,18 +793,35 @@ function renderHostFoot() {
   el.className = 'live' + (kind ? ' ' + kind : '');
   el.dataset.host = host ? (host.running ? 'running' : (state.hostChange && state.hostChange.state === 'died' ? 'died' : 'stopped')) : '';
   $('host-text').textContent = text;
-  // One note, once per pair of builds: this UI and the host it talks to differ.
-  if (host && host.running && host.version && host.uiVersion && host.version !== host.uiVersion && !state.uiDown) {
+  // One note, once per pair of builds: this UI and the host it talks to differ. 594 W20: the server
+  // compares them and advises the OLDER side (a host older than this UI: stop it — Restart host).
+  const note = host && host.running && host.versionNote;
+  if (note && !state.uiDown) {
     const pair = host.uiVersion + '|' + host.version;
     let seen = state.versionNoted === pair;
     try { seen = seen || localStorage.getItem('doz.versionNoted') === pair; } catch (_) { /* no storage: once per page */ }
     if (!seen) {
       state.versionNoted = pair;
       try { localStorage.setItem('doz.versionNoted', pair); } catch (_) { /* */ }
-      banner('version', 'warn', ['doz ui is ', h('code', null, host.uiVersion), ', the host is ', h('code', null, host.version),
-        ' — restart doz ui (Ctrl-C it, then ', h('code', null, 'doz ui'), ') so the page and the host are the same build.']);
+      banner('version', 'warn', [note.text], note.older === 'host' ? [restartHostButton(host)] : []);
     }
+  } else if (host && host.running && !host.versionNote) {
+    dropBanner('version');
   }
+}
+/// 594 W20: an OLDER host — stop it (its sandboxes hibernate, and wake when used) and start this UI's
+/// build. The server refuses it unless the host is older.
+function restartHostButton(host) {
+  return btn('Restart host', () => {
+    // What runs NOW (the banner may be older than the last overview).
+    host = (state.overview && state.overview.host) || host;
+    const live = host.liveSandboxes || [];
+    dialog('Restart the host?',
+      'The host (doz ' + host.version + ') stops and doz ' + host.uiVersion + ' starts in its place. ' +
+      (live.length ? 'Its running sandboxes (' + live.join(', ') + ') hibernate first — sessions kept — and wake when you use them.'
+                   : 'No sandbox is running.'),
+      [], 'Restart host', async () => { await actOrThrow({ action: 'host-restart' }); dropBanner('version'); }, { icon: 'rotate-ccw' });
+  }, { small: true, primary: true, icon: 'rotate-ccw', title: 'Stop the older host and start doz ' + host.uiVersion });
 }
 function startHostButton() {
   return btn('Start host', async (ev) => {
@@ -849,51 +866,140 @@ function liveRefresh() {
 /// retry — the next doz ui listens on the same port when it can and keeps its pages' sessions (594 W19:
 /// `<store>/ui.sessions`), so the page finds it by itself, still signed in. When the session did not carry
 /// over (another port, `--new-link`, expired) the page asks for a new link.
+///
+/// 594 W21 (owner: "show an overlay over the entire web ui when its disconnected because navigating
+/// anywhere or attempting to restart sandboxes wont work anyway"): after ~1.5 s of failed reconnects —
+/// never on a momentary blip — the page is PAUSED: everything but the banner strip is `inert` and dimmed
+/// under an overlay (role alertdialog, focus moved into it). The banner strip stays in front of it and
+/// live (owner: "i still like the info banners at the top"): the banner says WHAT happened (doz ui
+/// stopped); the overlay says the page is paused and reconnecting, what to do, and holds the one Try now.
+/// The HOST stopping is never this: the page still works then (a banner; Start host).
+const UI_OVERLAY_AFTER_MS = 1500;
 function uiLost(said) {
   if (state.signedOut) return;
   if (state.es) { state.es.close(); state.es = null; }
   state.uiDown = true;
+  state.uiSaid = state.uiSaid || said;
   setLive('bad', said ? 'stopped — retrying' : 'reconnecting…');
   renderHostFoot();
-  const host = state.overview && state.overview.host;
-  const last = !host ? 'The page never heard from the host.'
-    : host.running ? 'The host was running (doz ' + (host.version || '?') + (host.liveSandboxes.length ? ', ' + plural(host.liveSandboxes.length, 'sandbox', 'sandboxes') + ' live' : '') + ') when this page last heard — doz ui stopping does not stop it.'
-    : 'The host was not running when this page last heard.';
-  if (said || state.uiDownSince) {
-    banner('ui-stopped', 'bad', ['The doz ui process stopped. This page retries every second and reconnects by itself, still signed in, when ',
-      h('code', null, 'doz ui'), ' runs again. ', h('span', { class: 'muted', 'data-host-last': '' }, last)]);
+  if (!state.uiDownSince) {
+    state.uiDownSince = Date.now();
+    state.lastConnected = state.uiDownSince;   // connected until this moment
   }
-  state.uiDownSince = state.uiDownSince || Date.now();
   if (state.uiRetry) return;
-  const tick = async () => {
-    state.uiRetry = null;
-    if (state.signedOut) return;
-    let r = null;
-    try { r = await fetch('/api/v1/session', { credentials: 'same-origin', cache: 'no-store' }); } catch (_) { /* not listening */ }
-    if (r && r.ok) {
-      // doz ui is back and this page is still signed in (594 W19: a restarted doz ui keeps its pages'
-      // sessions on the same port) — or the stream only broke: carry on, silently.
-      try { adopt(await r.json()); } catch (_) { /* the session stands; its details next time */ }
-      state.uiDown = false;
-      state.uiDownSince = null;
-      dropBanner('ui-stopped');
-      connect();
-      return;
-    }
-    if (r && r.status === 401) {
-      // doz ui is back, but this page's session did not carry over (a new link was made, the port
-      // changed, or the session expired).
-      state.uiDown = false;
-      state.uiDownSince = null;
-      dropBanner('ui-stopped');
-      signedOut('doz ui restarted, and this page’s sign-in did not carry over (a new link was made, or it listens on another port). Open the new link: run doz ui link.');
-      return;
-    }
-    // Still away. After a while, show the banner even for a broken stream that was never announced.
-    if (!$('banners').querySelector('[data-banner="ui-stopped"]') && Date.now() - state.uiDownSince > 4000) { uiLost(true); return; }
-    state.uiRetry = setTimeout(tick, 1000);
-  };
-  state.uiRetry = setTimeout(tick, said ? 700 : 500);
+  state.uiRetry = setTimeout(uiRetryTick, said ? 400 : 250);
+}
+function hostLastKnown() {
+  const host = state.overview && state.overview.host;
+  if (!host) return 'The page never heard from the host.';
+  if (host.running) {
+    const n = host.liveSandboxes.length;
+    return 'The host was running (doz ' + (host.version || '?') + (n ? ', ' + plural(n, 'sandbox', 'sandboxes') + ' live' : '') +
+      ') as far as this page knows — doz ui stopping does not stop it.';
+  }
+  return 'The host was not running when this page last heard.';
+}
+function clock(t) { return t ? new Date(t).toLocaleTimeString() : '—'; }
+async function uiRetryTick() {
+  clearTimeout(state.uiRetry);
+  state.uiRetry = null;
+  if (state.signedOut) return;
+  let r = null;
+  try { r = await fetch('/api/v1/session', { credentials: 'same-origin', cache: 'no-store' }); } catch (_) { /* not listening */ }
+  if (state.signedOut || !state.uiDown) return;
+  if (r && r.ok) {
+    // doz ui is back and this page is still signed in (594 W19: a restarted doz ui keeps its pages'
+    // sessions on the same port) — or the stream only broke: carry on, silently.
+    try { adopt(await r.json()); } catch (_) { /* the session stands; its details next time */ }
+    uiBack();
+    connect();
+    return;
+  }
+  if (r && r.status === 401) {
+    // doz ui is back, but this page's session did not carry over (a new link was made, the port
+    // changed, or the session expired): say so — never hang on "reconnecting".
+    const msg = 'doz ui restarted, and this page’s sign-in did not carry over (a new link was made, or it listens on another port). Open the new link: run doz ui link.';
+    if (state.uiOverlay) uiOverlaySignedOut();
+    else uiBack();
+    signedOut(msg);
+    return;
+  }
+  // Still away.
+  if (Date.now() - state.uiDownSince >= UI_OVERLAY_AFTER_MS) showUiOverlay(); else updateUiOverlay();
+  state.uiRetry = setTimeout(uiRetryTick, state.uiOverlay ? 1000 : 400);
+}
+/// Everything but the banner strip: the sidebar and main's other children (an inert ancestor would
+/// take the banners with it).
+function pausedParts() {
+  return [document.querySelector('.side'), ...[...$('main').children].filter((e) => e.id !== 'banners')];
+}
+function showUiOverlay() {
+  if (state.uiOverlay) { updateUiOverlay(); return; }
+  state.uiOverlay = true;
+  banner('ui-stopped', 'bad', [(state.uiSaid ? 'The doz ui process stopped' : 'This page lost its doz ui server') +
+    ' (last connected ' + clock(state.lastConnected) + ').']);
+  for (const el of pausedParts()) el.inert = true;
+  document.body.classList.add('ui-paused');
+  const o = $('ui-overlay');
+  buildUiOverlay();
+  $('ui-ov-host').textContent = hostLastKnown();
+  o.setAttribute('role', 'alertdialog');
+  o.setAttribute('aria-modal', 'true');
+  o.setAttribute('aria-labelledby', 'ui-ov-title');
+  o.setAttribute('aria-describedby', 'ui-ov-desc');
+  o.hidden = false;
+  updateUiOverlay();
+  $('ui-try-now').focus();
+}
+/// Built while doz ui still answers (on `hello`): the button's icon is a `<use>` of the served sprite,
+/// which a page that has lost its server can no longer fetch.
+function buildUiOverlay() {
+  const o = $('ui-overlay');
+  if (o.querySelector('#ui-try-now')) return;
+  const tryNow = h('button', { type: 'button', class: 'btn primary', id: 'ui-try-now', on: { click: () => { updateUiOverlay('trying…'); uiRetryTick(); } } },
+    withIcon('refresh-cw', 'Try now'));
+  o.replaceChildren(h('div', { class: 'ui-ov-card' },
+    h('div', { class: 'ui-ov-head' }, h('span', { class: 'ui-ov-spin', 'aria-hidden': 'true' }),
+      h('h2', { id: 'ui-ov-title' }, 'Paused — reconnecting to doz ui…')),
+    h('div', { id: 'ui-ov-desc' },
+      h('p', null, 'Nothing on this page works until it reconnects. Run ', h('code', null, 'doz ui'),
+        ' in a terminal — this page reconnects by itself (same port), still signed in.'),
+      h('p', { class: 'muted', id: 'ui-ov-when' }),
+      h('p', { class: 'muted', id: 'ui-ov-host' })),
+    h('div', { class: 'ui-ov-acts' }, tryNow)));
+}
+function updateUiOverlay(status) {
+  const w = $('ui-ov-when');
+  if (!w) return;
+  const ago = state.lastConnected ? Math.round((Date.now() - state.lastConnected) / 1000) : null;
+  w.textContent = 'Last connected ' + clock(state.lastConnected) + (ago != null ? ' (' + ago + ' s ago)' : '') + '. ' + (status || 'Retrying every second.');
+}
+/// The server came back with this page signed out (`--new-link`, another port): the overlay says so.
+function uiOverlaySignedOut() {
+  const o = $('ui-overlay');
+  o.querySelector('.ui-ov-spin')?.remove();
+  $('ui-ov-title').textContent = 'This page was signed out';
+  $('ui-ov-desc').replaceChildren(
+    h('p', null, 'doz ui is back, but this page’s sign-in did not carry over (a new link was made, or it listens on another port).'),
+    h('p', null, 'Run ', h('code', null, 'doz ui link'), ' in a terminal — it opens a fresh one-use link.'));
+  o.querySelector('.ui-ov-acts')?.remove();
+  banner('ui-stopped', 'bad', ['doz ui restarted with a new link — this page is signed out.']);
+  o.focus();
+}
+/// Reconnected: the overlay goes by itself; the page refreshes (on `hello`).
+function uiBack() {
+  state.uiDown = false;
+  state.uiDownSince = null;
+  state.uiSaid = false;
+  clearTimeout(state.uiRetry);
+  state.uiRetry = null;
+  dropBanner('ui-stopped');
+  if (!state.uiOverlay) return;
+  state.uiOverlay = false;
+  for (const el of pausedParts()) el.inert = false;
+  document.body.classList.remove('ui-paused');
+  $('ui-overlay').hidden = true;
+  $('main').focus();
 }
 
 function connect() {
@@ -902,9 +1008,8 @@ function connect() {
   state.es = es;
   es.addEventListener('hello', async () => {
     setLive('on', 'live');
-    state.uiDown = false;
-    state.uiDownSince = null;
-    dropBanner('ui-stopped');
+    uiBack();
+    buildUiOverlay();
     try { for (const o of await api('operations')) state.ops.set(o.id, o); renderOps(); } catch (_) { /* */ }
     loadPreparations();
     refreshNav();
