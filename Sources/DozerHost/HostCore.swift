@@ -71,6 +71,8 @@ public actor HostCore {
     private var creating: Set<String> = []
     /// 590: `open-session` is serialized per sandbox.
     let sessionGate = KeyedGate()
+    /// 599: the session bridges' limits and recent actions (`HostCore+Bridges`).
+    nonisolated let bridgeState = BridgeState()
     /// 594: the image preparation running per image (single-flight), and the recent finished ones.
     var preparations: [String: Preparation] = [:]
     var recentPreparations: [Preparation] = []
@@ -398,7 +400,8 @@ public actor HostCore {
         // started to write it. With a host running, the host writes it (serialised with `rm`).
         if readOnly && !(r.op.isReadOnly || (r.op == .netPolicy && isPolicyQuery(r)) || r.op == .sessions || (r.op == .netLog && r.follow != true)
                          || (r.op == .console && r.follow != true) || (r.op == .agentPrompt && r.prompt == nil && r.clearPrompt != true && r.agentSudo == nil && r.clearAgentSudo != true)
-                         || r.op == .terminalLayoutSet || ([.resourcesRemove, .resourcesClean].contains(r.op) && r.dryRun == true)) {
+                         || r.op == .terminalLayoutSet || ([.resourcesRemove, .resourcesClean].contains(r.op) && r.dryRun == true)
+                         || (r.op == .sandboxSettings && r.setting == nil)) {
             return .failure(HostError(.unavailable, "\(r.op.rawValue) needs the host"))
         }
         // 598: an upgrade removed this host's installation — refuse a boot plainly, before it fails oddly.
@@ -637,6 +640,8 @@ public actor HostCore {
             return try JSONValue(encoding: try cancelPreparations(r))
         case .agentPrompt:
             return try JSONValue(encoding: try agentPrompt(r))
+        case .sandboxSettings:
+            return try JSONValue(encoding: try sandboxSettings(r))
         case .attach, .events, .hostStop:
             throw HostError(.invalid, "\(r.op.rawValue) is handled by the server")
         }
@@ -733,6 +738,8 @@ public actor HostCore {
         }
         cfg.project = o.project
         cfg.agentSudo = o.agentSudo
+        // 599: its own values of the per-sandbox settings (the clipboard and browser bridges, tmux).
+        if let s = o.settings, !s.isEmpty { cfg.settings = try Self.checkedSandboxSettings(s) }
         try cfg.write(store.configFile(name))
         let m = try adopt(cfg)
         metrics?.record(run: metricsRun, action: "create", sandbox: name, image: image, phaseAfter: "off", startedAt: Date(), durationMs: 0,

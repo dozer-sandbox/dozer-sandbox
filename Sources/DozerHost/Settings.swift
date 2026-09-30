@@ -258,6 +258,8 @@ public enum SettingKey {
     public static let agentSudo = "sandbox.agent_sudo"
     /// 594 W10: the sandboxes' time zone (`mac` or an IANA name).
     public static let timeZone = "sandbox.timezone"
+    /// 599 (594.B1): the clipboard bridge — `write` or `off`.
+    public static let clipboard = "sandbox.clipboard"
     /// 594 (owner ruling): the web UI may take an API key or a setup token (a masked field).
     public static let allowSecretEntry = "ui.allow_secret_entry"
     /// 594 W19 (owner: "a new web page opening up every time i run doz ui"): when `doz ui` opens a tab.
@@ -372,6 +374,9 @@ public struct DozerSettings: Sendable {
             .init("sandbox", "timezone", .timeZone, .string("mac"),
                   "The sandboxes' time zone: mac (this Mac's, read again at every boot and wake — a laptop that travels while a sandbox sleeps is followed) or a zone like Australia/Sydney. Written to the guest's /etc/localtime; the agent's facts say it.",
                   applies: .nextStartOrWake),
+            .init("sandbox", "clipboard", .choice(["write", "off"]), .string("write"),
+                  "The clipboard bridge: a program in a sandbox that copies (OSC 52 — Claude Code, vim, tmux) puts the text on this Mac's clipboard, and every copy shows a notice (SANDBOX copied N chars) in doz attach and doz ui. At most 1 MiB a copy and 10 copies in 10 s. A sandbox can never READ the Mac clipboard. The risk: an agent could put a command there for you to paste — off turns the bridge off (copies are dropped, and said). A sandbox's own choice (doz config set --sandbox NAME, clipboard in doz_project.yaml) wins over this.",
+                  flag: "doz create --clipboard write|off", applies: .now),
         ]
         s.append(.init("images", "claude_code_version", .version, .string("latest"),
                        "The Claude Code the claude-code image is prepared with: latest (asked of the npm registry when the image is prepared, then installed at that exact version, integrity-checked; a newer one is only said — doz image bake claude-code rebuilds when you choose) or an exact version like 2.1.227. A sandbox keeps the version it was created with; doz reset NAME moves it to the image's current one.",
@@ -397,6 +402,10 @@ public struct DozerSettings: Sendable {
     }()
 
     public static func definition(_ key: String) -> SettingDefinition? { schema.first { $0.key == key } }
+
+    /// 599: the settings a sandbox can also have its own value of (`doz config set --sandbox NAME KEY V`,
+    /// `doz create`, `doz_project.yaml`) — the sandbox's value wins over the file's.
+    public static let perSandbox: [String] = [SettingKey.clipboard, SettingKey.agentSudo]
 
     /// What cannot be set here, by design, and why — printed in the file and the docs.
     public static let notSettable: [String] = [

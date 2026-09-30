@@ -14,7 +14,9 @@ struct ConfigCommand: AsyncParsableCommand {
         Precedence: a command-line flag, then its environment variable (DOZ_STORE, DOZ_HOST_IDLE, \
         DOZ_SUBNET, DOZ_KERNEL, DOZ_KERNEL_CACHE), then the file, then the default. The file lists \
         every setting with its default commented out; set writes one value, unset puts the default back. \
-        The UI's Settings page edits the same file.
+        The UI's Settings page edits the same file. \
+        --sandbox NAME (show, get, set, unset): that sandbox's own value of a per-sandbox setting \
+        (\(DozerSettings.perSandbox.joined(separator: ", "))), which wins over the file's.
         """,
         subcommands: [ConfigShow.self, ConfigGet.self, ConfigSet.self, ConfigUnset.self, ConfigInit.self, ConfigPath.self],
         defaultSubcommand: ConfigShow.self)
@@ -37,11 +39,39 @@ func settingDefinition(_ key: String, _ g: GlobalOptions) throws -> SettingDefin
     return d
 }
 
+// MARK: 599 — a sandbox's own values (`--sandbox NAME`)
+
+/// The per-sandbox settings of `sandbox`, after `change` (a key and its value, or nil to clear it).
+func sandboxSettingsCall(_ sandbox: String, change: (key: String, value: String?)?, _ g: GlobalOptions) async throws -> SandboxSettingsReport {
+    var r = HostRequest(.sandboxSettings, name: sandbox)
+    if let change {
+        guard DozerSettings.perSandbox.contains(change.key) else {
+            throw fail(HostError(.invalid, "\(change.key) is not a per-sandbox setting — they are: \(DozerSettings.perSandbox.joined(separator: ", "))"), g)
+        }
+        r.setting = change.key
+        if let v = change.value { r.settingValue = .string(v) } else { r.clearSetting = true }
+        return try decode(try call(r, g), SandboxSettingsReport.self, g)
+    }
+    return try decode(try await query(r, g), SandboxSettingsReport.self, g)
+}
+
+func printSandboxSettings(_ rep: SandboxSettingsReport) {
+    var t = [["SETTING", "VALUE", "SOURCE"]]
+    for r in rep.settings { t.append([r.key, ConfigShow.shown(r.value), r.source == "sandbox" ? "\(rep.sandbox)'s own" : "the setting (\(r.source))"]) }
+    Out.stdout(Out.table(t))
+}
+
 struct ConfigShow: AsyncParsableCommand {
     static let configuration = CommandConfiguration(commandName: "show", abstract: "Every setting: its effective value and its source (the default).")
     @OptionGroup var g: GlobalOptions
+    @Option(name: .long, help: "A sandbox: its per-sandbox settings and whose value each is.") var sandbox: String?
 
     func run() async throws {
+        if let sandbox {
+            let rep = try await sandboxSettingsCall(sandbox, change: nil, g)
+            if g.json { Out.json(rep) } else { printSandboxSettings(rep) }
+            return
+        }
         let s = DozerSettings.load()
         let report = s.report(flags: configFlags(g))
         if g.json { Out.json(report); return }
@@ -65,9 +95,17 @@ struct ConfigGet: AsyncParsableCommand {
     static let configuration = CommandConfiguration(commandName: "get", abstract: "One setting's effective value (--json adds its source and default).")
     @OptionGroup var g: GlobalOptions
     @Argument(help: "section.name, e.g. ui.boot_view_on_start") var key: String
+    @Option(name: .long, help: "A sandbox: its value of a per-sandbox setting (its own, else the setting's).") var sandbox: String?
 
     func run() async throws {
         _ = try settingDefinition(key, g)
+        if let sandbox {
+            guard let row = try await sandboxSettingsCall(sandbox, change: nil, g).settings.first(where: { $0.key == key }) else {
+                throw fail(HostError(.invalid, "\(key) is not a per-sandbox setting — they are: \(DozerSettings.perSandbox.joined(separator: ", "))"), g)
+            }
+            if g.json { Out.json(row) } else { Out.stdout(row.value.plain + "\n") }
+            return
+        }
         let s = DozerSettings.load()
         let row = s.report(flags: configFlags(g)).settings.first { $0.key == key }!
         if g.json { Out.json(row); return }
@@ -81,11 +119,18 @@ struct ConfigSet: AsyncParsableCommand {
     @OptionGroup var g: GlobalOptions
     @Argument(help: "section.name, e.g. ui.boot_view_on_start") var key: String
     @Argument(help: "The value: true/false, a number, or one of the setting's choices.") var value: String
+    @Option(name: .long, help: "Set it for this sandbox only (a per-sandbox setting; it wins over the file's).") var sandbox: String?
 
     func run() async throws {
         let d = try settingDefinition(key, g)
         let v: TOMLValue
         do { v = try d.parse(value) } catch let e as SettingsError { throw fail(HostError(.invalid, e.message), g) }
+        if let sandbox {
+            let rep = try await sandboxSettingsCall(sandbox, change: (key, value), g)
+            if g.json { Out.json(rep); return }
+            Out.stdout("\(key) = \(v.plain) for \(rep.sandbox) — \(d.applies.note)\n")
+            return
+        }
         let now: DozerSettings
         do { now = try DozerSettings.load().writing(key, v) } catch let e as SettingsError { throw fail(HostError(.failed, e.message), g) }
         let r = now.resolve(key, flag: configFlags(g)[key])
@@ -101,9 +146,17 @@ struct ConfigUnset: AsyncParsableCommand {
     static let configuration = CommandConfiguration(commandName: "unset", abstract: "Put one setting back to its default (comment it out in the file).")
     @OptionGroup var g: GlobalOptions
     @Argument(help: "section.name") var key: String
+    @Option(name: .long, help: "Clear this sandbox's own value: it follows the setting again.") var sandbox: String?
 
     func run() async throws {
         let d = try settingDefinition(key, g)
+        if let sandbox {
+            let rep = try await sandboxSettingsCall(sandbox, change: (key, nil), g)
+            if g.json { Out.json(rep); return }
+            let now = rep.settings.first { $0.key == key }
+            Out.stdout("\(key) for \(rep.sandbox) follows the setting again (\(now?.value.plain ?? "?")) — \(d.applies.note)\n")
+            return
+        }
         let now: DozerSettings
         do { now = try DozerSettings.load().writing(key, nil) } catch let e as SettingsError { throw fail(HostError(.failed, e.message), g) }
         if g.json { Out.json(now.report(flags: configFlags(g)).settings.first { $0.key == key }!); return }

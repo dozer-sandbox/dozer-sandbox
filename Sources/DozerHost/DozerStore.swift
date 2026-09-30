@@ -115,6 +115,10 @@ public struct SandboxConfig: Codable, Equatable, Sendable {
     /// 594 W23: the agent's passwordless sudo — true/false chosen for this sandbox, nil: follow the
     /// setting `sandbox.agent_sudo` (default on). Applied at every boot and agent session start.
     public var agentSudo: Bool?
+    /// 599: this sandbox's own values of the per-sandbox settings (`DozerSettings.perSandbox`: the
+    /// clipboard and browser bridges, tmux) — a key absent follows the setting. (`sandbox.agent_sudo`
+    /// keeps its own field above.)
+    public var settings: [String: TOMLValue]?
 
     public init(name: String, image: String, spec: SandboxSpec, workspace: String?, createdAt: Date = Date(),
                 credentialSources: [String: String] = [:], diedWithHostAt: Date? = nil) {

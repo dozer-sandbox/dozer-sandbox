@@ -724,6 +724,29 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
 - **"Use this kernel"** writes `kernel.path` (nil = the pinned one): new sandboxes only (the kernel is
   baked into a sandbox's spec at create); refused when `DOZ_KERNEL` sets it.
 
+### Session bridges (599) — design: workspace `changes/599-*/599.01-DESIGN.md`
+
+- **One place: the host's attach relay.** Every terminal (`doz attach`/`run`/`up`, every `doz ui` pane)
+  reads a session through `HostServer.pump`, so the bridges live there: `SessionBridgeScanner` takes
+  OSC 52 and OSC 6340 (`doz-open`) out of DATA frames (never a SNAPSHOT — a replayed screen must not
+  re-copy; `reset()` on each), `HostCore.bridge` decides (nonisolated — pbcopy and `open` never run on
+  the actor), and each viewer is told with `ClientWire.notice` (`ESC]777;doz;notice;KIND;TEXT BEL`,
+  every control character stripped). Both clients take notices out BEFORE `findEnding`, and hold an
+  unfinished one (`ClientWire.unfinishedNotice`) — a notice split by a read must never reach a screen.
+- **Two viewers of one session see every sequence twice**: `BridgeState.once` acts once (the copy's
+  hash within 2 s — serialised, so two pumps cannot both act) and both get the notice.
+- **An OSC 52 READ is never answered and never forwarded** (the outer terminal would answer it with the
+  Mac's clipboard); logged once per session. Everything a scanner does not own passes through byte for
+  byte (`SessionBridgeTests` cuts at every offset).
+- **The CLI's drawn line** (a notice; B4's menu) is DECSC → bottom row → reverse video → DECRC, removed
+  by a REPAINT (`ClientWire.repaint`, `0xFF 'S'`): the host sends deckhold HELLO 0×0 on the live
+  connection (`SessionConnection.repaint`) — a fresh snapshot, no resize, no deckhold change.
+- **Per-sandbox settings** (`DozerSettings.perSandbox`): `SandboxConfig.settings[key]` wins over the
+  file (`HostCore.sandboxValue`); `sandbox-settings` reads (in-process when no host) and sets;
+  `doz config … --sandbox`, `doz create` flags, `doz_project.yaml` keys (`DozerProject.settingKeys`,
+  synced by `doz up`). `sandbox.agent_sudo` keeps its own field.
+- **Tests never touch the Mac**: `DOZ_TEST_PASTEBOARD=<file>` replaces pbcopy.
+
 ### Browser terminals (591, on by default — owner ruling) — design: workspace `changes/591-*/591.01-DESIGN.md`
 
 - **A terminal is two steps.** `POST …/terminal-ticket` (CSRF, strict body) mints a 256-bit ticket that

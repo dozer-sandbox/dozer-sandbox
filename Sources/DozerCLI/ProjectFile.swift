@@ -33,6 +33,15 @@ struct DozerProject: Equatable {
     var agentPromptMode: String?
     /// 594 W23: the agent's passwordless sudo (nil: the setting sandbox.agent_sudo decides).
     var agentSudo: Bool?
+    /// 599: the sandbox's own per-sandbox settings (`settingKeys`), by setting key.
+    var settings: [String: TOMLValue] = [:]
+
+    /// 599: the project keys that are a per-sandbox setting — the key, the setting, and the commented
+    /// line `doz init` writes when the file does not set it.
+    static let settingKeys: [(key: String, setting: String, comment: String)] = [
+        ("clipboard", SettingKey.clipboard,
+         "# clipboard: write           # a copy in the sandbox (OSC 52) reaches the Mac clipboard, with a notice; off: never. Applies now"),
+    ]
 
     /// The keys, in the order the file lists them, with what each says.
     static let keys: [(key: String, summary: String)] = [
@@ -47,7 +56,9 @@ struct DozerProject: Equatable {
         ("agent_prompt", "this project's own lines for the agent's environment prompt"),
         ("agent_prompt_mode", "append (to the template, the default) or replace"),
         ("agent_sudo", "true or false: the agent's passwordless sudo in the sandbox (default: the setting sandbox.agent_sudo, true)"),
-    ]
+    ] + settingKeys.map { k in
+        (k.key, "\(DozerSettings.definition(k.setting)?.type.name ?? "a value"): this sandbox's \(k.setting) (default: the setting)")
+    }
 
     struct Invalid: Error, LocalizedError, Equatable {
         let message: String
@@ -197,7 +208,15 @@ struct DozerProject: Equatable {
                 guard let b = v.bool else { throw bad(v, "agent_sudo: true or false") }
                 p.agentSudo = b
             default:
-                break
+                // 599: a per-sandbox setting, checked against the setting's own type.
+                if let sk = settingKeys.first(where: { $0.key == key }), let d = DozerSettings.definition(sk.setting) {
+                    let text: String
+                    // YAML reads `off` as a boolean: only a boolean setting takes it as one (`clipboard: off` is the choice).
+                    if d.type == .bool, let b = v.bool { text = b ? "true" : "false" } else { text = try scalarString(v, key) }
+                    do { p.settings[sk.setting] = try d.parse(text) } catch let e as SettingsError {
+                        throw bad(v, "\(key): \(e.message.replacingOccurrences(of: sk.setting, with: key))")
+                    }
+                }
             }
         }
         guard let name else { throw bad(root, "name is required (the sandbox's name)") }
@@ -270,6 +289,9 @@ struct DozerProject: Equatable {
         out += agentPromptMode.map { "agent_prompt_mode: \($0)\n" } ?? "# agent_prompt_mode: append  # or replace\n"
         out += agentSudo.map { "agent_sudo: \($0)\n" }
             ?? "# agent_sudo: true           # the agent's passwordless sudo (apt-get install …); false: none. From the next session\n"
+        for k in Self.settingKeys {
+            out += settings[k.setting].map { "\(k.key): \($0.plain)\n" } ?? k.comment + "\n"
+        }
         return out
     }
 
@@ -279,6 +301,7 @@ struct DozerProject: Equatable {
         o.agentPrompt = agentPrompt
         o.agentPromptMode = agentPromptMode
         o.agentSudo = agentSudo
+        o.settings = settings.isEmpty ? nil : settings
         o.project = file.path
         return o
     }

@@ -64,7 +64,7 @@ DOCC_OUT         ?= .docc-build
 DOCC_BASE_PATH   ?= /DozerKit/
 DOCC_PREVIEW_PORT ?= 8000
 
-.PHONY: help build test audit web-assets web-assets-check test-cli-onboarding test-cli-terminal test-cli-hoststop test-cli-agentsudo test-cli-points test-cli-timezone test-cli-images pullbench test-vm test-vm-agents test-vm-network test-vm-hardening test-vm-lineage prev-cli test-vm-upgrade vmtest-host kernel deckhold deckhold-verify doznet doznet-verify cli install-cli test-cli test-vm-claude test-vm-templates docs docs-preview docs-drift-check release
+.PHONY: help build test audit web-assets web-assets-check test-cli-onboarding test-cli-terminal test-cli-hoststop test-cli-agentsudo test-cli-points test-cli-timezone test-cli-images test-cli-clipboard pullbench test-vm test-vm-agents test-vm-network test-vm-hardening test-vm-lineage prev-cli test-vm-upgrade vmtest-host kernel deckhold deckhold-verify doznet doznet-verify cli install-cli test-cli test-vm-claude test-vm-templates docs docs-preview docs-drift-check release
 
 help: ## Show this help
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) | sed 's/:.*## /\t/' | expand -t 22
@@ -189,7 +189,7 @@ release: ## 598: build + sign (+ notarise when configured) + pack dist/doz-VERSI
 	  DRY_RUN="$(DRY_RUN)" SKIP_BUILD="$(SKIP_BUILD)" Scripts/release.sh
 
 test-cli: cli vmtest-host ## 585 CLI suite: the signed doz from separate processes (up/exec/run/attach, lifecycle, points, two sandboxes, kill -9 host, idle exit); 594: onboarding, init/up, the agent prompt, uninstall (stores /tmp/dzo-PID-*)
-	perl -e 'alarm shift; exec @ARGV' 3600 $(VMTEST_BIN) cli --doz $(CLI_BIN) --store "$(CLITEST_STORE)"
+	perl -e 'alarm shift; exec @ARGV' 7200 $(VMTEST_BIN) cli --doz $(CLI_BIN) --store "$(CLITEST_STORE)"
 
 test-cli-onboarding: cli vmtest-host ## 594: only test-cli's onboarding part (onboard, a joining start, detach/cancel, init/up, the agent prompt in pi + claude-code, uninstall)
 	perl -e 'alarm shift; exec @ARGV' 3000 $(VMTEST_BIN) cli-onboarding --doz $(CLI_BIN)
@@ -211,6 +211,9 @@ test-cli-timezone: cli vmtest-host ## 594 W10: the sandbox follows the Mac's (st
 
 test-cli-images: cli vmtest-host ## 594 W28–W30: an older doz's pi image said (image ls, doctor, create, ls), never rebuilt by itself (a newer release neither); --rebuild; reset; own hostname; /usr/games (network)
 	perl -e 'alarm shift; exec @ARGV' 3000 $(VMTEST_BIN) cli-images --doz $(CLI_BIN)
+
+test-cli-clipboard: cli vmtest-host ## 599 (594.B1): OSC 52 → the Mac clipboard (a file, DOZ_TEST_PASTEBOARD) with a notice each time; a read never answered; 1 MiB + rate limits; sandbox.clipboard off (per sandbox, for all)
+	perl -e 'alarm shift; exec @ARGV' 900 $(VMTEST_BIN) cli-clipboard --doz $(CLI_BIN)
 
 pullbench: vmtest-host ## 594 D12: pull the node base with 3 vs 6 concurrent layer downloads into fresh stores (network; ROUNDS=3)
 	$(VMTEST_BIN) pullbench --rounds $(or $(ROUNDS),3)

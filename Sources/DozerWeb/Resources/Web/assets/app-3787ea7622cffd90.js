@@ -282,6 +282,20 @@ function toast(text, bad) {
   const t = h('div', { class: 'toast' + (bad ? ' bad' : ''), role: 'status' }, text);
   $('toasts').append(t);
   setTimeout(() => t.remove(), bad ? 9000 : 4000);
+  return t;
+}
+// 599 (594.B1/B2): what a session bridge did — "hello copied 42 chars", "hello opened https://… in your
+// browser". Shown every time (a copy is the one thing an agent can hand the person unasked); two views of
+// one session (a pane and a tile) are told the same thing once. A refusal is shown as a failure.
+const recentBridgeNotices = new Map();
+function bridgeNotice(kind, text) {
+  const k = String(kind).slice(0, 32), s = String(text).slice(0, 400), now = Date.now();
+  for (const [key, at] of recentBridgeNotices) if (now - at > 2000) recentBridgeNotices.delete(key);
+  if (recentBridgeNotices.has(k + '\n' + s)) return;
+  recentBridgeNotices.set(k + '\n' + s, now);
+  const t = toast(s, /-(refused|off)$/.test(k));
+  t.classList.add('bridge');
+  t.dataset.bridge = k;
 }
 // 593 (owner): Operations is its own page, not a block on top of every page. What the nav shows: the
 // running count (with a spinner) and a red dot while a failure is unacknowledged — one that ended
@@ -3046,6 +3060,9 @@ function onTerminalMessage(t, ev) {
       clearTimeout(t.noticeTimer);
       t.noticeTimer = setTimeout(() => { n.hidden = true; }, 4000);
     }
+  } else if (m.t === 'notice') {
+    if (typeof m.kind === 'string' && typeof m.text === 'string') bridgeNotice(m.kind, m.text);
+    return;
   } else if (m.t === 'boot-done') {
     toFrame(t, { t: 'keep-scrollback' });           // the boot log's end scrolls into the scrollback
     return;

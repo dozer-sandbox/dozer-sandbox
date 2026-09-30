@@ -177,6 +177,7 @@ agent_prompt: |             # this project's own lines for the agent
   The tests run with `make test`.
 agent_prompt_mode: append   # or replace
 agent_sudo: true            # the agent's passwordless sudo (default: the setting sandbox.agent_sudo)
+clipboard: write            # a copy in the sandbox reaches the Mac clipboard, with a notice; off: never (applies at once)
 ```
 
 The schema is closed: an unknown key, a key given twice, a wrong type or a value out of range is an
@@ -297,6 +298,36 @@ Saved screens exist only while you can wake the sandbox back: **shut down, reset
 that died with the VM — delete them**, and a shut-down sandbox shows no session screens anywhere (its
 sessions ended with the VM; Start boots it fresh). A session whose program exited has none either.
 Duplicate, fork and templates never copy them.
+
+## Session bridges
+
+A session's terminal — `doz attach`/`run`/`up`, or a terminal in `doz ui` — is also how a program in
+the sandbox reaches your Mac for the few things it needs one for. Each bridge goes through the host
+(the one place every terminal passes), is shown to you every time it is used, and can be turned off
+for one sandbox (`doz config set --sandbox NAME KEY VALUE`, a flag of `doz create`, a key in
+`doz_project.yaml`) or for all (`doz config set KEY VALUE`). A bridge acts only while a terminal is
+attached to the session: a program that copies with nobody watching copies nothing.
+
+### The clipboard
+
+When a program copies — Claude Code's copy command, a yank in vim or tmux: the terminal's OSC 52 — the
+text goes on **your Mac's clipboard**, and a notice says so: `SANDBOX copied N chars`, drawn over the
+bottom row of `doz attach` for 3 seconds (then the screen is redrawn), or a message in the corner of
+`doz ui`. Off a terminal (`doz run … > file`) the notice is a line on stderr.
+
+- **A sandbox can never read your clipboard.** A program's request to read it is dropped — it never
+  reaches your terminal either, so no terminal app can answer it for the sandbox — and logged once.
+- **Limits:** 1 MiB per copy; at most 10 copies in 10 seconds per sandbox. More is refused, and said.
+- **The risk:** an agent could put a command on your clipboard for you to paste. The notice tells you
+  every time (the agent's facts say so too); turn the bridge off where you do not want it:
+
+```bash
+doz config set --sandbox NAME sandbox.clipboard off   # this sandbox (applies at once)
+doz config set sandbox.clipboard off                  # every sandbox without its own choice
+doz create NAME --clipboard off …                     # from the start; or `clipboard: off` in doz_project.yaml
+doz config show --sandbox NAME                        # its per-sandbox settings, and whose value each is
+doz config unset --sandbox NAME sandbox.clipboard     # follow the setting again
+```
 
 ## Agents and keys
 
@@ -887,11 +918,14 @@ the others say when they apply (the next sandbox created, the next session, or a
 | `[store]` | `path` (`--store`, `$DOZ_STORE`) |
 | `[claude]` | `permissions` (`skip` · `ask`) — Claude Code's own prompts in a claude-code sandbox; `-e DOZ_CLAUDE_PERMISSIONS=…` on `run`/`exec` still wins |
 | `[defaults]` | `cpus` (2), `nat_subnet` (a free one; `$DOZ_SUBNET`) |
-| `[sandbox]` | `agent_sudo` (true — the agent's passwordless sudo inside claude-code and pi sandboxes; a sandbox's `--no-agent-sudo` / `agent_sudo` wins; from its next session and boot), `timezone` (`mac` — the Mac's zone, read again at every start and wake, so a sandbox that slept while you travelled wakes in your new zone — or a zone like `Australia/Sydney`; the agent's facts say it) |
+| `[sandbox]` | `agent_sudo` (true — the agent's passwordless sudo inside claude-code and pi sandboxes; a sandbox's `--no-agent-sudo` / `agent_sudo` wins; from its next session and boot), `timezone` (`mac` — the Mac's zone, read again at every start and wake, so a sandbox that slept while you travelled wakes in your new zone — or a zone like `Australia/Sydney`; the agent's facts say it), `clipboard` (`write` · `off` — the clipboard bridge, see "Session bridges"; applies at once) |
 | `[images]` | `claude_code_version`, `pi_version` (`latest`, or an exact version like `2.1.227` — see "Agent versions" below) |
 | `[images.lab]` · `[images.claude-code]` · `[images.pi]` | `memory_mib` (1024 · 2048 · 2048), `network` (`bake` · `agent` · `agent`) — a custom image follows the image it was saved from |
 | `[kernel]` | `path` (`$DOZ_KERNEL`), `cache` (`$DOZ_KERNEL_CACHE`) |
 
+- **Per sandbox:** `sandbox.clipboard` and `sandbox.agent_sudo` can also be one sandbox's own
+  (`doz config set|get|unset|show --sandbox NAME …`, `doz create` flags, `doz_project.yaml`); its
+  value wins over the file's.
 - **Precedence:** a command-line flag, then its environment variable, then the file, then the
   default. A value the environment sets is read-only on the Settings page (change it where it is
   set), and so is a host path (`store.path`, `kernel.*`: `doz config set`).

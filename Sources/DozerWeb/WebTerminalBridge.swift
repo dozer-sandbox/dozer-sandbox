@@ -261,6 +261,10 @@ final class WebTerminalBridge: @unchecked Sendable {
             var pending: [UInt8] = []
             while let chunk = await att.read() {
                 pending += chunk
+                // 599 (594.B1/B2): what a bridge did — a toast on the page, never bytes on the screen.
+                for n in ClientWire.takeNotices(&pending) {
+                    await sendText(WebTerminalMessage.encode(WebTerminalMessage.Notice(kind: n.kind, text: n.text)))
+                }
                 if let (ending, start) = ClientWire.findEnding(in: pending) {
                     if start > 0 { await sendBinary(pending[..<start]) }
                     let text = WebTerminalWire.endingText(pending[start...])

@@ -55,9 +55,12 @@ public enum WebTerminalWire {
     /// plus the `ESC[0m` the notice starts with (so no piece of the notice reaches the screen; what
     /// is held is at most an SGR reset, sent with the next read).
     public static func holdBack(_ bytes: [UInt8]) -> Int {
-        let sentinel = Array(ClientWire.sentinelPrefix.utf8)
+        // 599: a bridge's notice not finished yet; and the start of either notice (they share `dozPrefix`).
+        let unfinished = ClientWire.unfinishedNotice(bytes)
+        if unfinished > 0 { return unfinished }
+        let sentinel = Array(ClientWire.dozPrefix.utf8)
         let patterns = [[0x1B, 0x5B, 0x30, 0x6D] + sentinel, sentinel]
-        let window = min(bytes.count, sentinel.count + 28)
+        let window = min(bytes.count, ClientWire.sentinelPrefix.utf8.count + 28)
         guard window > 0 else { return 0 }
         for i in (bytes.count - window)..<bytes.count where bytes[i] == 0x1B {
             let tail = Array(bytes[i...])
@@ -322,6 +325,12 @@ enum WebTerminalMessage {
         let t = "ended"
         let ending: String
         let code: Int32?
+        let text: String
+    }
+    /// 599: a bridge's notice ("hello copied 42 chars") — the page toasts it.
+    struct Notice: Encodable {
+        let t = "notice"
+        let kind: String
         let text: String
     }
     struct Failure: Encodable {

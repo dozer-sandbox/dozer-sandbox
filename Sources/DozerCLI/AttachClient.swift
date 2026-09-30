@@ -64,6 +64,47 @@ private func writeSession(_ bytes: ArraySlice<UInt8>) {
     UnixSocket.writeAll(STDOUT_FILENO, Data(bytes))
 }
 
+// MARK: 599 — a line drawn over the bottom row (a bridge's notice; B4's Ctrl-] menu), removed by a repaint
+
+/// Bumped by every drawing: a repaint scheduled for an older one is skipped.
+nonisolated(unsafe) private var overlayGeneration = 0
+
+/// Draw `text` over the bottom row (cursor and attributes saved and restored around it). False when
+/// stdout is not a terminal (nothing is drawn).
+@discardableResult
+private func drawBottomLine(_ text: String) -> Bool {
+    guard rawMode, isatty(STDOUT_FILENO) != 0 else { return false }
+    let size = terminalSize()
+    let width = max(10, Int(size.cols) - 2)
+    let shown = text.count > width ? String(text.prefix(width - 1)) + "…" : text
+    let pad = String(repeating: " ", count: max(0, Int(size.cols) - shown.count - 1))
+    outputLock.lock(); defer { outputLock.unlock() }
+    guard !outerRestored else { return false }
+    // DECSC, bottom row, clear it, reverse video, DECRC. Written to the terminal, not the session model.
+    UnixSocket.writeAll(STDOUT_FILENO, Data("\u{1B}7\u{1B}[\(size.rows);1H\u{1B}[2K\u{1B}[7m \(shown)\(pad)\u{1B}[0m\u{1B}8".utf8))
+    return true
+}
+
+/// Ask the host for a fresh snapshot of the session's screen (what removes a drawn line).
+private func requestRepaint() {
+    let fd = currentSocket()
+    if fd >= 0 { UnixSocket.writeAll(fd, Data(ClientWire.repaint)) }
+}
+
+/// 599 (594.B1/B2): what the host did for this session — shown every time: over the bottom row for 3 s
+/// (then a repaint), or as a line on stderr when this is not a terminal.
+private func showNotice(_ n: BridgeNotice) {
+    socketLock.lock(); overlayGeneration += 1; let mine = overlayGeneration; socketLock.unlock()
+    guard drawBottomLine("doz: " + n.text) else {
+        FileHandle.standardError.write(Data("[doz] \(n.text)\n".utf8))
+        return
+    }
+    DispatchQueue.global().asyncAfter(deadline: .now() + 3) {
+        socketLock.lock(); let current = overlayGeneration == mine; socketLock.unlock()
+        if current { requestRepaint() }
+    }
+}
+
 /// Put the outer terminal back (once): its modes, when stdout is a terminal, then the saved termios.
 private func restoreTerminal() {
     outputLock.lock()
@@ -228,11 +269,14 @@ enum AttachClient {
             var buf = [UInt8](repeating: 0, count: 65536)
             var ending: ClientWire.Ending?
             while true {
+                // 599: a bridge's notice (removed from the bytes; drawn once they are written).
+                let notices = ClientWire.takeNotices(&pending)
                 if let (e, start) = ClientWire.findEnding(in: pending) {
                     writeOut(pending[..<start])
                     let rest = pending[start...]
                     // The session is over: the terminal is put back before the host's last word.
                     restoreTerminal()
+                    for n in notices { say(n.text) }
                     if let bel = rest.firstIndex(of: 0x07) {
                         let text = String(decoding: rest[(bel + 1)...], as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
                         if !quiet && !text.isEmpty { say(text.replacingOccurrences(of: "[doz] ", with: "")) }
@@ -243,6 +287,7 @@ enum AttachClient {
                 let hold = holdBack(pending)
                 writeOut(pending[..<(pending.count - hold)])
                 pending = Array(pending.suffix(hold))
+                for n in notices { showNotice(n) }
                 let n = read(client.fd, &buf, buf.count)
                 if n < 0 && errno == EINTR { continue }
                 if n <= 0 { break }
@@ -269,8 +314,11 @@ enum AttachClient {
 
     /// How many trailing bytes might be the start of the ended notice (hold them for the next read).
     static func holdBack(_ bytes: [UInt8]) -> Int {
-        let prefix = Array(ClientWire.sentinelPrefix.utf8)
-        let window = min(bytes.count, prefix.count + 24)
+        // 599: either of the host's notices (`ended`, and a bridge's `notice`) — they share this start.
+        let prefix = Array(ClientWire.dozPrefix.utf8)
+        let unfinished = ClientWire.unfinishedNotice(bytes)
+        if unfinished > 0 { return unfinished }
+        let window = min(bytes.count, ClientWire.sentinelPrefix.utf8.count + 24)
         guard window > 0 else { return 0 }
         for i in (bytes.count - window)..<bytes.count where bytes[i] == 0x1B {
             let tail = Array(bytes[i...])

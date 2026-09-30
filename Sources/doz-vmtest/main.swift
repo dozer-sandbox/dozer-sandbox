@@ -915,6 +915,10 @@ Task {
             // 594 W28–W30: out-of-date images said, never rebuilt by themselves; own hostname; /usr/games.
             let binary = args.firstIndex(of: "--doz").flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil } ?? ".build/debug/doz"
             await cliImagesSuite(binary: URL(fileURLWithPath: binary).standardizedFileURL.path)
+        case "cli-clipboard":
+            // 599 (594.B1): the clipboard bridge.
+            let binary = args.firstIndex(of: "--doz").flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil } ?? ".build/debug/doz"
+            await cliClipboardSuite(binary: URL(fileURLWithPath: binary).standardizedFileURL.path)
         case "cli-timezone":
             // 594 W10: the sandbox follows the Mac's time zone at boot and wake.
             let binary = args.firstIndex(of: "--doz").flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil } ?? ".build/debug/doz"

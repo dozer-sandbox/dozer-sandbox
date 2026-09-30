@@ -88,6 +88,10 @@ public enum HostOp: String, Codable, Sendable, CaseIterable {
     case resourcesClean = "resources-clean"
     /// 595 (R5): which kernel NEW sandboxes boot — `kernel` = a kernel id (`kernel:<version>`) or `pinned`.
     case resourcesKernel = "resources-kernel"
+    /// 599: a sandbox's own choices of the per-sandbox settings (`DozerSettings.perSandbox`: the clipboard
+    /// and browser bridges, tmux, the agent's sudo) — read (no `setting`), set (`setting` + `settingValue`)
+    /// or cleared back to the setting (`setting` + `clearSetting`). `doz config set --sandbox NAME`.
+    case sandboxSettings = "sandbox-settings"
 
     /// Operations that only read — answered from the store in-process when no host is running.
     public var isReadOnly: Bool {
@@ -125,6 +129,8 @@ public struct CreateOptions: Codable, Equatable, Sendable {
     public var agentSudo: Bool?
     /// 594 W28: rebuild the image first (the user chose it: an out-of-date image is otherwise used as it is).
     public var rebuild: Bool?
+    /// 599: this sandbox's own values of per-sandbox settings (`DozerSettings.perSandbox` keys only).
+    public var settings: [String: TOMLValue]?
 
     public init(image: String, cpus: Int? = nil, memoryMiB: UInt64? = nil, workspace: String? = nil,
                 network: String? = nil, subnet: String? = nil, account: String? = nil) {
@@ -243,6 +249,10 @@ public struct HostRequest: Codable, Equatable, Sendable {
     public var ids: [String]?
     public var dryRun: Bool?
     public var kernel: String?
+    /// 599 `sandbox-settings`: the setting's key, and its value for this sandbox (or clear it).
+    public var setting: String?
+    public var settingValue: TOMLValue?
+    public var clearSetting: Bool?
 
     public init(_ op: HostOp, name: String? = nil) {
         v = HostProtocol.version

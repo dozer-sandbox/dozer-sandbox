@@ -38,6 +38,9 @@ struct CreateArguments: ParsableArguments {
     @Flag(inversion: .prefixedNo, help: "The agent (claude-code, pi) has passwordless sudo inside the sandbox (default: the setting sandbox.agent_sudo, on). Applied at every boot and session start.")
     var agentSudo: Bool?
 
+    @Option(name: .long, help: "write or off: a copy in this sandbox (OSC 52) reaches the Mac clipboard, with a notice every time (default: the setting sandbox.clipboard, write).")
+    var clipboard: String?
+
     @Flag(name: .long, help: "When the image is out of date (an older doz's recipe, or a newer agent release): rebuild it first (~2 min, needs network; existing sandboxes are not affected).")
     var rebuild = false
 
@@ -58,7 +61,19 @@ struct CreateArguments: ParsableArguments {
         o.isolated = isolated ? true : nil
         o.agentSudo = agentSudo
         try applyPrompt(to: &o)
+        o.settings = try sandboxSettings()
         return o
+    }
+
+    /// 599: the per-sandbox settings given as flags (nil: none).
+    func sandboxSettings() throws -> [String: TOMLValue]? {
+        var s: [String: TOMLValue] = [:]
+        func take(_ key: String, _ text: String?, _ flag: String) throws {
+            guard let text, let d = DozerSettings.definition(key) else { return }
+            do { s[key] = try d.parse(text) } catch let e as SettingsError { throw ValidationError("\(flag): \(e.message)") }
+        }
+        try take(SettingKey.clipboard, clipboard, "--clipboard")
+        return s.isEmpty ? nil : s
     }
 
     /// 594: a relative --workspace is this command's working folder's (the host takes absolute paths only).
@@ -88,6 +103,7 @@ struct CreateArguments: ParsableArguments {
 
     var givenAny: Bool {
         image != nil || cpus != nil || memory != nil || workspace != nil || network != nil || subnet != nil || account != nil || agentPrompt != nil || isolated || agentSudo != nil
+            || clipboard != nil
     }
 }
 
@@ -312,6 +328,7 @@ struct Up: AsyncParsableCommand {
                 if let w = create.absoluteWorkspace { o.workspace = w }
                 if create.isolated { o.workspace = nil; o.isolated = true }
                 if let s = create.agentSudo { o.agentSudo = s }
+                if let s = try create.sandboxSettings() { o.settings = (o.settings ?? [:]).merging(s) { _, flag in flag } }
                 try create.applyPrompt(to: &o)
                 // 594: doz_project.yaml's image and account are checked like any create.
                 try preflightAgentAccount(&o, g)
@@ -422,6 +439,17 @@ struct Up: AsyncParsableCommand {
             _ = try call(s, g)
             if !g.quiet && !g.json {
                 Out.stderr("[doz] agent_sudo \(project.agentSudo.map { $0 ? "true" : "false" } ?? "removed (the setting sandbox.agent_sudo decides)") in \(DozerProject.fileName) — it applies from the next session\n")
+            }
+        }
+        // 599: a per-sandbox setting changed in the file → the sandbox's own value follows it.
+        for k in DozerProject.settingKeys where cfg.settings?[k.setting] != project.settings[k.setting] {
+            var s = HostRequest(.sandboxSettings, name: name)
+            s.setting = k.setting
+            if let v = project.settings[k.setting] { s.settingValue = v } else { s.clearSetting = true }
+            _ = try call(s, g)
+            if !g.quiet && !g.json {
+                let applies = DozerSettings.definition(k.setting)?.applies.note ?? ""
+                Out.stderr("[doz] \(k.key) \(project.settings[k.setting].map(\.plain) ?? "removed (the setting \(k.setting) decides)") in \(DozerProject.fileName) — \(applies)\n")
             }
         }
         let mode = project.agentPrompt == nil ? nil : (project.agentPromptMode ?? "append")

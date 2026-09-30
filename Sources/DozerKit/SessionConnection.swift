@@ -81,6 +81,15 @@ public final class SessionConnection: @unchecked Sendable, Identifiable {
         inputContinuation.yield(DeckholdFrame.resize(size).encoded)
     }
 
+    /// 599: a fresh SNAPSHOT of the session's screen for this viewer, the program untouched — a HELLO of
+    /// 0×0 on the live connection (deckhold keeps the size for 0×0 and answers every HELLO with a
+    /// snapshot, as it does for a screen capture). What a client uses to remove what it drew over it.
+    public func repaint() {
+        lock.lock(); defer { lock.unlock() }
+        guard !closed else { return }
+        inputContinuation.yield(DeckholdFrame.hello(TermSize(cols: 0, rows: 0)).encoded)
+    }
+
     /// Detach this viewer. The session keeps running in the guest.
     public func close() { finish(.detached(.closedByClient)) }
 

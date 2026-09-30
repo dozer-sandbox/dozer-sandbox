@@ -61,7 +61,7 @@ doz uninstall [--keep-store] [--keep-config] [--yes]
   first if it never was). **`up` with no name**, in that folder, creates, starts or wakes exactly
   that sandbox, with the folder at `/workspace`, starts its `sessions` and attaches to the first.
   The file is YAML with a closed set of keys — `version`, `name`, `image`, `cpus`, `memory`,
-  `network`, `account`, `sessions`, `agent_prompt`, `agent_prompt_mode`, `agent_sudo`; an unknown key or a bad
+  `network`, `account`, `sessions`, `agent_prompt`, `agent_prompt_mode`, `agent_sudo`, `clipboard`; an unknown key or a bad
   value is an error naming its line.
 
   ```yaml
@@ -136,6 +136,20 @@ doz up NAME [same options] [--session S] [-d] [-- CMD …]
 
 **RAM held** in `ls` is what the VM costs the Mac right now: the allocation, less what the memory
 balloon returned after a wake — shown as `—` when the sandbox is off or hibernated.
+
+### Session bridges
+
+The host reads every attached terminal's output (`attach`/`run`/`up`, `doz ui`) for the sequences a
+bridge owns and takes them out; each use is shown as a notice (over the bottom row for 3 s, then a
+redraw; a toast in `doz ui`; a stderr line off a terminal). A bridge acts only while a terminal is
+attached.
+
+- **Clipboard (599):** OSC 52 copies reach the Mac clipboard — `SANDBOX copied N chars`. A READ is
+  never answered and never reaches the outer terminal (logged once per session). 1 MiB per copy, 10
+  copies per 10 s per sandbox. `sandbox.clipboard = write | off`; per sandbox with
+  `doz config set --sandbox NAME sandbox.clipboard off`, `doz create --clipboard off`, or
+  `clipboard: off` in `doz_project.yaml`. The risk — an agent can put a command on the clipboard — is
+  why every copy is shown, and why the agent's facts say so.
 
 ### Agents, keys and accounts
 
@@ -443,6 +457,8 @@ doz config set KEY VALUE   # write it to the file (checked against its type and 
 doz config unset KEY       # back to the default (commented out again)
 doz config init            # write the file: every setting listed, commented out at its default
 doz config path            # ${XDG_CONFIG_HOME:-~/.config}/dozer-sandbox/doz.toml
+doz config show|get|set|unset --sandbox NAME …   # 599: one sandbox's own value of a per-sandbox setting
+                                                  # (sandbox.clipboard, sandbox.agent_sudo) — it wins over the file
 ```
 
 One settings file, `doz.toml`, lists every setting grouped in sections (`[ui]`, `[host]`,
