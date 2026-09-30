@@ -382,6 +382,11 @@ func basesMatrixPart(_ binary: String) async {
     var pairs: [(String, AgentKind)] = []
     for b in ["node", "python", "go", "debian", "alpine"] { for a in [AgentKind.claudeCode, .none] { pairs.append((b, a)) } }
     pairs.append(("python", .pi))
+    // BASES_ONLY=alpine,python — only those bases (a re-run of part of the matrix).
+    if let only = ProcessInfo.processInfo.environment["BASES_ONLY"], !only.isEmpty {
+        let keep = Set(only.split(separator: ",").map(String.init))
+        pairs = pairs.filter { keep.contains($0.0) }
+    }
     for (b, a) in pairs {
         let base = BaseCatalogue.base(b)!
         let name = "m-\(b)-\(a == .claudeCode ? "cc" : a == .pi ? "pi" : "none")"
@@ -396,8 +401,13 @@ func basesMatrixPart(_ binary: String) async {
             continue
         }
         check(true, "\(name): \(image) prepared and booted in \(secs) s")
-        let who = h.run(["exec", name, "--", "sh", "-c", "id -un; sudo -n true && echo sudo-ok"]).out
-        check(who == "agent\nsudo-ok\n", "\(name): the agent user, passwordless sudo")
+        if image == "lab" {
+            // Alpine · none is the lab, unchanged by 596 (its own prepared disk; sessions run as root).
+            check(h.run(["exec", name, "--", "sh", "-c", "grep -c Alpine /etc/os-release; command -v bash"]).out.contains("/bin/bash"), "\(name): the lab (Alpine + bash), as before")
+        } else {
+            let who = h.run(["exec", name, "--", "sh", "-c", "id -un; sudo -n true && echo sudo-ok"]).out
+            check(who == "agent\nsudo-ok\n", "\(name): the agent user, passwordless sudo")
+        }
         if let t = base.toolchain, !(b == "node" && a != .none) {
             let out = h.run(["exec", name, "--"] + t.argv).out + h.run(["exec", name, "--", "sh", "-c", t.argv.joined(separator: " ") + " 2>&1"]).out
             check(t.expect.map(out.contains) ?? true, "\(name): the toolchain answers (\(t.argv.joined(separator: " ")) → \(out.split(separator: "\n").first ?? ""))")

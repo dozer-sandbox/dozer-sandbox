@@ -525,7 +525,7 @@ public enum ImageComposer {
         case .apt: return AgentImages.devBaselineVerify
         case .apk:
             return Array(AgentImages.devBaselineVerify.prefix(2)) + [
-                VerifyCheck(["sh", "-c", "apk search -e cowsay | grep -q cowsay && echo apk-index-ok"], expect: "apk-index-ok")]
+                VerifyCheck(["sh", "-c", "/sbin/apk search -e make | grep -q '^make-' && echo apk-index-ok"], expect: "apk-index-ok")]
         case .auto:
             return Array(AgentImages.devBaselineVerify.prefix(2))
         }
