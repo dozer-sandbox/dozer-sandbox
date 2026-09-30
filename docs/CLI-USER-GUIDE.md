@@ -143,6 +143,14 @@ that sandbox — the folder is its `/workspace` — starts its `sessions` (the f
 others detached) and keeps the sandbox's own agent prompt in step with the file (it applies from the
 next session). Options given to `up` win over the file's, for a new sandbox.
 
+**When a change to the file applies** (the file's comments say it too): `image`, `cpus`, `memory`,
+and a `network` of `nat` or `none` are the VM's make-up — only a new sandbox gets them (`doz rm NAME
+&& doz up` recreates it; the folder is kept); a proxied `network` preset (`agent`, `bake`, `locked`,
+`open`) is applied by the next `doz up`, live — unless you edited the policy since; `account`: `doz
+account use NAME ACCOUNT`; `sessions` at every `doz up`; `agent_prompt` and `agent_sudo` from the next
+session. `doz up` says each difference and what it did ("cpus 2 → 4 in doz_project.yaml: applies only
+when the sandbox is made — …", "network agent → locked …: applied now (live …)").
+
 ```yaml
 # doz_project.yaml
 version: 1
@@ -159,6 +167,7 @@ sessions:                   # what `doz up` starts; the first is attached
 agent_prompt: |             # this project's own lines for the agent
   The tests run with `make test`.
 agent_prompt_mode: append   # or replace
+agent_sudo: true            # the agent's passwordless sudo (default: the setting sandbox.agent_sudo)
 ```
 
 The schema is closed: an unknown key, a key given twice, a wrong type or a value out of range is an
@@ -242,14 +251,27 @@ doz up NAME [same options] [--session S] [-d] [-- CMD …]
   click away; `doz create` has no default folder, and `doz init` uses the folder it runs in.
 - `--agent-prompt FILE [--agent-prompt-mode append|replace]` gives the sandbox its own part of the
   agent's environment prompt (below).
+- `--no-agent-sudo` (or `--agent-sudo`) decides the agent's sudo for this sandbox (below); without
+  it, the setting `sandbox.agent_sudo` decides.
+
+**The agent has passwordless sudo** (owner ruling, 594): in a claude-code or pi sandbox the agent
+(the `agent` user) can `sudo apt-get install -y PACKAGE` — the image keeps apt's package lists
+(~18 MiB, shared by every sandbox of the image; `sudo apt-get update` refreshes them) and the
+`agent` network preset allows Debian's archive. Root inside the VM reaches no more than the agent:
+the VM has no network interface (every connection still goes through your policy), no credential
+is inside it, and nothing of your Mac but the `/workspace` share. `doz reset` or a restore point
+undoes what it installed. Turn it off for every sandbox with `doz config set sandbox.agent_sudo
+false`, or for one with `doz create --no-agent-sudo` / `agent_sudo: false` in `doz_project.yaml`;
+it applies at the sandbox's next session and every boot — no image is rebuilt. (The first
+preparation after 594 rebuilds the agent images once: they gained `sudo` and keep apt's lists.)
 
 ## Working inside
 
 | | |
 |---|---|
 | `doz attach NAME [SESSION]` | Your terminal becomes that session (without SESSION: the sandbox's own — `claude`, `pi` or `shell`). **Ctrl-]** detaches on the first press, however the program has set up your terminal's keyboard (plain, the kitty keyboard protocol, xterm's modifyOtherKeys); `--detach-key ctrl-x` or `none` choose another. On the way out your terminal is put back as it was (mouse, paste and keyboard modes), and the line names the shortest command that comes back: `doz up` in the sandbox's project folder, `doz attach NAME` for its own session, else `doz attach NAME SESSION`. A paused or sleeping sandbox is woken first (`--no-wake` waits instead). If the sandbox hibernates while you are attached, the client waits and reattaches by itself when it wakes. |
-| `doz run NAME [--session S] [-d] -- CMD …` | Open a **new** session running CMD and attach. It exits with CMD's exit code. There is no shell in front, so write `bash -lc '…'` if you want one. |
-| `doz exec NAME [--user U] [--workdir D] [-e K=V] [--timeout S] -- CMD …` | One-shot, no terminal: stdout, stderr and the exit code pass straight through (default timeout 120 s). On agent images it runs as the agent's user in `/workspace`; `--user root` for root. |
+| `doz run NAME [--session S] [-d] -- CMD …` | Open a **new** session running CMD and attach. It exits with CMD's exit code. There is no shell in front, so write `bash -lc '…'` if you want one. A sandbox that is off is started first (`--no-start` refuses instead). |
+| `doz exec NAME [--user U] [--workdir D] [-e K=V] [--timeout S] -- CMD …` | One-shot, no terminal: stdout, stderr and the exit code pass straight through (default timeout 120 s). On agent images it runs as the agent's user in `/workspace`; `--user root` for root. A paused or sleeping sandbox is woken and one that is off is **started** first (its progress on stderr; `--no-wake`, `--no-start` refuse instead); `--json` says so: `"started"`, `"woke"`, `"bootMilliseconds"`. So `doz create NAME … && doz exec NAME -- CMD` just works (or `doz create --start`). |
 | `doz sessions NAME [--screen SESSION [--vt]]` | The sandbox's sessions. While it is paused, asleep or hibernated they are listed from their **saved screens**, and nothing is woken. A shut-down sandbox has none ("no sessions — NAME is shut down"): Start boots it fresh, with new sessions. `--screen SESSION` prints that session's last saved screen as text; `--vt` writes its terminal bytes instead — to a file or a pipe (`> s.vt`, then `cat s.vt` in a terminal redraws it), never straight to a terminal. |
 | `doz ls` · `doz inspect NAME` | Every sandbox: image, phase, RAM held, disk, sessions, network · everything about one, as JSON. |
 
@@ -300,8 +322,8 @@ new workspace) and writes into the guest:
   Linux VM on the user's Mac, not a container) — name, image, CPUs, memory; `/workspace` shared from
   the Mac folder *X* (live) or **isolated** (no folder is shared with the Mac); the network (no interface; deny by default through
   the Mac's proxy; a refused host needs the user's rule — do not retry around it); credentials
-  (injected by the proxy; the placeholders are expected; never log in or ask for keys); sleep and
-  hibernation between turns. Claude Code gets it through its launcher (`/run/dozer/agent-prompt.md`
+  (injected by the proxy; the placeholders are expected; never log in or ask for keys); whether it
+  has passwordless sudo (and that the policy still applies to root); sleep and hibernation between turns. Claude Code gets it through its launcher (`/run/dozer/agent-prompt.md`
   → `--append-system-prompt`); pi's session is `pi --append-system-prompt /run/dozer/agent-prompt.md`.
 - the **`dozer` skill** — `~/.claude/skills/dozer/SKILL.md` (pi: `~/.pi/agent/skills/dozer/SKILL.md`),
   rewritten every start: what persists (root disk, state disk, restore points), the network policy
@@ -324,6 +346,7 @@ replacing (`agent_prompt_mode: replace`). Text may use `{{variables}}` from a cl
 `sandbox.name`, `sandbox.image`, `sandbox.cpus`, `sandbox.memory`, `workspace.shared`,
 `workspace.host_path`, `workspace.guest_path`, `workspace.description`, `network.mode`,
 `network.allowed_hosts`, `network.description`, `account.name`, `credentials.description`,
+`sandbox.sudo`, `sudo.description`, `sandbox.timezone`,
 `mac.hostname`, `dozer.version`. An unknown variable is an **error**: the agent's sessions do not
 start (the message names the variable and the file) until it is fixed or the prompt is turned off —
 never silently blank.
@@ -500,6 +523,13 @@ doz point rm NAME POINT
 doz point save-image NAME [POINT] --as myimage [--note …]    # a custom image (a template)
 doz up other --image myimage
 ```
+
+A point's name is kept exactly as you type it, up to **64 characters** (a longer one is refused,
+never cut). Wherever a command takes a POINT — revert, fork, rm, save-image, the web UI — it takes
+the name, the id (`rp-…`) or the start of either, as long as only one point matches (otherwise it
+lists the ones that do). Commands that ask first (`point revert`, `point rm`, `reset`, `rm`,
+`shutdown`, `image rm`, `template rm`) check that what you named exists **before** asking, and the
+question names the point's name, id and when it was taken.
 
 ```bash
 doz image ls                   # built-in images and templates, and whether each is baked here
@@ -848,6 +878,7 @@ the others say when they apply (the next sandbox created, the next session, or a
 | `[store]` | `path` (`--store`, `$DOZ_STORE`) |
 | `[claude]` | `permissions` (`skip` · `ask`) — Claude Code's own prompts in a claude-code sandbox; `-e DOZ_CLAUDE_PERMISSIONS=…` on `run`/`exec` still wins |
 | `[defaults]` | `cpus` (2), `nat_subnet` (a free one; `$DOZ_SUBNET`) |
+| `[sandbox]` | `agent_sudo` (true — the agent's passwordless sudo inside claude-code and pi sandboxes; a sandbox's `--no-agent-sudo` / `agent_sudo` wins; from its next session and boot), `timezone` (`mac` — the Mac's zone, read again at every start and wake, so a sandbox that slept while you travelled wakes in your new zone — or a zone like `Australia/Sydney`; the agent's facts say it) |
 | `[images]` | `claude_code_version`, `pi_version` (`latest`, or an exact version like `2.1.227` — see "Agent versions" below) |
 | `[images.lab]` · `[images.claude-code]` · `[images.pi]` | `memory_mib` (1024 · 2048 · 2048), `network` (`bake` · `agent` · `agent`) — a custom image follows the image it was saved from |
 | `[kernel]` | `path` (`$DOZ_KERNEL`), `cache` (`$DOZ_KERNEL_CACHE`) |

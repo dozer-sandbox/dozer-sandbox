@@ -173,6 +173,8 @@ public final class ProgressBoard: @unchecked Sendable {
 
     private func removeStep(_ label: String) -> Date? {
         if let i = steps.lastIndex(where: { $0.label == label }) { return steps.remove(at: i).started }
+        // 594 W8: a step may end with its result appended ("verify: X" ends as "verify: X → 2.1.285").
+        if let i = steps.lastIndex(where: { label.hasPrefix($0.label + " → ") }) { return steps.remove(at: i).started }
         return nil
     }
 

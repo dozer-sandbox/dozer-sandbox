@@ -80,6 +80,9 @@ struct ImageRemove: AsyncParsableCommand {
     @Argument var image: String
     @Flag(name: [.short, .long], help: "Do not ask.") var yes = false
     func run() async throws {
+        // 594 W26: an image that is not there fails before the question.
+        let known = try decode(try await query(HostRequest(.imageList), g), [ImageRow].self, g)
+        guard known.contains(where: { $0.name == image }) else { throw fail(HostError(.notFound, "no image \(image) (doz image ls)"), g) }
         try confirm("Remove the image \(image)? (It is baked again when next needed.)", yes: yes, g)
         var r = HostRequest(.imageRm)
         r.image = image
@@ -151,11 +154,13 @@ struct PointRevert: AsyncParsableCommand {
     @Argument(help: "The point's name or id.") var point: String
     @Flag(name: [.short, .long], help: "Do not ask.") var yes = false
     func run() async throws {
-        try confirm("Revert \(name) to \(point)? It shuts down (running programs end); the current disk is kept as a restore point.", yes: yes, g)
+        // 594 W26: the sandbox and the point are found BEFORE the question — never "[y/N]" for what fails.
+        let p = try await resolvePointFirst(name, point, g)
+        try confirm("Revert \(name) to \(describePoint(p))? It shuts down (running programs end); the current disk is kept as a restore point.", yes: yes, g)
         var r = HostRequest(.pointRevert, name: name)
-        r.point = point
-        let p = try decode(try call(r, g), RestorePoint.self, g)
-        if g.json { Out.json(p) } else { Out.stdout("\(name) reverted to \(printPoint(p)) — doz start \(name) boots it\n") }
+        r.point = p.id
+        let done = try decode(try call(r, g), RestorePoint.self, g)
+        if g.json { Out.json(done) } else { Out.stdout("\(name) reverted to \(printPoint(done)) — doz start \(name) boots it\n") }
     }
 }
 
@@ -181,12 +186,33 @@ struct PointRemove: AsyncParsableCommand {
     @Argument var point: String
     @Flag(name: [.short, .long], help: "Do not ask.") var yes = false
     func run() async throws {
-        try confirm("Delete restore point \(point) of \(name)?", yes: yes, g)
+        let p = try await resolvePointFirst(name, point, g)
+        try confirm("Delete restore point \(describePoint(p)) of \(name)?", yes: yes, g)
         var r = HostRequest(.pointRm, name: name)
-        r.point = point
-        let p = try decode(try call(r, g), RestorePoint.self, g)
-        if g.json { Out.json(p) } else { Out.stdout("deleted \(printPoint(p))\n") }
+        r.point = p.id
+        let done = try decode(try call(r, g), RestorePoint.self, g)
+        if g.json { Out.json(done) } else { Out.stdout("deleted \(printPoint(done))\n") }
     }
+}
+
+/// 594 W25/W26: the point a person typed (its id, its name, or an unambiguous prefix of either —
+/// the host's rule), found before anything is asked or done. Looking never starts a host.
+func resolvePointFirst(_ sandbox: String, _ ref: String, _ g: GlobalOptions) async throws -> RestorePoint {
+    let points = try decode(try await query(HostRequest(.pointList, name: sandbox), g), [RestorePoint].self, g)
+    do { return try HostCore.resolvePoint(ref, in: points, sandbox: sandbox) } catch let e as HostError { throw fail(e, g) }
+}
+
+/// "before-experiment (rp-20260930-…, taken 30 Sep 2026 at 10:01 pm)".
+func describePoint(_ p: RestorePoint) -> String {
+    "\(p.name) (\(p.id), taken \(p.createdAt.formatted(date: .abbreviated, time: .shortened)))"
+}
+
+/// 594 W26: the sandbox exists — checked before a question is asked about it.
+func requireSandbox(_ name: String, _ g: GlobalOptions) async throws {
+    var r = HostRequest(.ls)
+    r.withSessions = false
+    let rows = try decode(try await query(r, g), [SandboxInfo].self, g)
+    guard rows.contains(where: { $0.name == name }) else { throw fail(HostError(.notFound, "no sandbox \(name) (doz ls)"), g) }
 }
 
 struct PointSaveImage: AsyncParsableCommand {

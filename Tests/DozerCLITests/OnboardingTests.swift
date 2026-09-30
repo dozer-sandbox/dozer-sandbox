@@ -542,4 +542,99 @@ final class OnboardingTests: XCTestCase {
         try FileManager.default.createDirectory(at: s.appendingPathComponent("sandboxes"), withIntermediateDirectories: true)
         XCTAssertTrue(Uninstall.looksLikeStore(s))
     }
+
+    /// 594 W12: doz_project.yaml says when each key applies and what each network means, and still parses.
+    func testTheProjectFileSaysWhenEachKeyApplies() throws {
+        let p = DozerProject(name: "web", image: "claude-code", cpus: 4, memoryMiB: 4096, network: "agent")
+        let text = p.render()
+        for s in ["image, cpus, memory, network nat/none: when the sandbox is MADE", "network agent/bake/locked/open: at the next doz up, live",
+                  "account: doz account use NAME ACCOUNT", "sessions: every doz up", "#   locked — proxied: nothing leaves the sandbox",
+                  "#   nat    — a real network interface", "cpus: 4                     # when made"] {
+            XCTAssertTrue(text.contains(s), s)
+        }
+        let back = try DozerProject.parse(text)
+        XCTAssertEqual(back.cpus, 4)
+        XCTAssertEqual(back.memoryMiB, 4096)
+        XCTAssertEqual(back.image, "claude-code")
+        XCTAssertEqual(try DozerProject.parse(DozerProject(name: "a", image: "lab").render()).image, "lab")
+    }
+
+    /// 594 W10: the sandboxes' time zone — the Mac's (read now) or the setting's; the facts say it.
+    func testTheTimeZoneFollowsTheMacOrTheSetting() throws {
+        let none = DozerSettings(text: nil)
+        XCTAssertEqual(HostCore.guestTimeZone(settings: none, environment: ["DOZ_TEST_MAC_TIMEZONE": "Australia/Sydney"])?.name, "Australia/Sydney")
+        let file = root.appendingPathComponent("tz")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try "America/New_York\n".write(to: file, atomically: true, encoding: .utf8)
+        XCTAssertEqual(HostCore.guestTimeZone(settings: none, environment: ["DOZ_TEST_MAC_TIMEZONE": file.path])?.name, "America/New_York",
+                       "the seam's file is read at each look (a wake after the Mac changed zone)")
+        XCTAssertEqual(HostCore.guestTimeZone(settings: none, environment: [:])?.name, NSTimeZone.system.identifier, "mac: this Mac's")
+        let tokyo = DozerSettings(text: "[sandbox]\ntimezone = \"Asia/Tokyo\"\n")
+        XCTAssertEqual(HostCore.guestTimeZone(settings: tokyo, environment: ["DOZ_TEST_MAC_TIMEZONE": "Australia/Sydney"])?.name, "Asia/Tokyo")
+        XCTAssertThrowsError(try DozerSettings.definition("sandbox.timezone")!.parse("Mars/Olympus"))
+        XCTAssertThrowsError(try DozerSettings.definition("sandbox.timezone")!.parse("../x"))
+        XCTAssertNoThrow(try DozerSettings.definition("sandbox.timezone")!.parse("mac"))
+        let v = AgentPrompt.values(name: "n", image: "pi", cpus: 1, memoryMiB: 1024, workspace: nil, network: .none, account: nil, version: "1",
+                                   hostname: "h", timeZone: "Australia/Sydney")
+        XCTAssertTrue(try AgentPrompt.render(AgentPrompt.builtInTemplate, v, source: "b").contains("- Time zone: Australia/Sydney (the Mac's"))
+    }
+
+    /// 594 W6: the Images list says what WILL be installed — never a stale pin.
+    func testTheImagesListSaysWhatWillBeInstalled() throws {
+        let store = DozerStore(root: root)
+        try store.ensureDirectory()
+        let none = DozerSettings(text: nil)
+        XCTAssertEqual(Onboarding.agentVersionText("claude-code", store: store, settings: none), "latest", "never asked: latest")
+        XCTAssertNil(Onboarding.agentVersionText("lab", store: store, settings: none))
+        AgentVersions.update("claude-code", store) { $0.latest = AgentRelease(version: "2.1.285", integrity: "sha512-x") }
+        XCTAssertEqual(Onboarding.agentVersionText("claude-code", store: store, settings: none), "latest (2.1.285)")
+        let exact = DozerSettings(text: "[images]\nclaude_code_version = \"2.1.227\"\n")
+        XCTAssertEqual(Onboarding.agentVersionText("claude-code", store: store, settings: exact), "2.1.227")
+        let opts = Onboarding.imageOptions([], versions: ["claude-code": "latest (2.1.285)"])
+        XCTAssertEqual(opts.first?.summary, "Claude Code — latest (2.1.285) — on Debian (node), with git, ripgrep, python3 and the usual tools")
+        XCTAssertTrue(opts[1].summary.hasPrefix("the pi coding agent — latest — "))
+        XCTAssertFalse(opts.map(\.summary).joined().contains("{version}"))
+    }
+
+    /// 594 W23: the agent's passwordless sudo — the setting (default on), a sandbox's own choice over
+    /// it, the facts text both ways, doz_project.yaml's agent_sudo, and create's flags.
+    func testAgentSudoSettingFactsProjectAndFlags() throws {
+        XCTAssertTrue(DozerSettings(text: nil).bool(SettingKey.agentSudo), "on by default (owner ruling)")
+        let off = DozerSettings(text: "[sandbox]\nagent_sudo = false\n")
+        XCTAssertFalse(off.bool(SettingKey.agentSudo))
+        var cfg = SandboxConfig(name: "a", image: "pi", spec: SandboxSpec(name: "a", storeRoot: root), workspace: nil)
+        XCTAssertTrue(HostCore.agentSudo(cfg, settings: DozerSettings(text: nil)))
+        XCTAssertFalse(HostCore.agentSudo(cfg, settings: off), "nil follows the setting")
+        cfg.agentSudo = true
+        XCTAssertTrue(HostCore.agentSudo(cfg, settings: off), "the sandbox's own choice wins")
+        cfg.agentSudo = false
+        XCTAssertFalse(HostCore.agentSudo(cfg, settings: DozerSettings(text: nil)))
+
+        let yes = AgentPrompt.values(name: "n", image: "pi", cpus: 1, memoryMiB: 1024, workspace: nil, network: .proxied(.agent), account: nil, version: "1", hostname: "h")
+        XCTAssertEqual(yes["sandbox.sudo"], "yes")
+        XCTAssertTrue(yes["sudo.description"]!.hasPrefix("you have passwordless sudo in this sandbox"))
+        XCTAssertTrue(yes["sudo.description"]!.contains("The network policy and the credential rules still apply to root"))
+        XCTAssertTrue(yes["sudo.description"]!.contains("`doz reset n` or a restore point"))
+        let facts = try AgentPrompt.render(AgentPrompt.builtInTemplate, yes, source: "b")
+        XCTAssertTrue(facts.contains("- System: you have passwordless sudo"))
+        let no = AgentPrompt.values(name: "n", image: "pi", cpus: 1, memoryMiB: 1024, workspace: nil, network: .none, account: nil, version: "1",
+                                    hostname: "h", agentSudo: false)
+        XCTAssertEqual(no["sandbox.sudo"], "no")
+        XCTAssertTrue(no["sudo.description"]!.hasPrefix("no sudo:"))
+        XCTAssertTrue(try AgentPrompt.render(AgentPrompt.skillTemplate, no, source: "s").contains("Sudo: no — no sudo:"))
+
+        let p = try DozerProject.parse("version: 1\nname: a\nimage: pi\nagent_sudo: false\n")
+        XCTAssertEqual(p.agentSudo, false)
+        XCTAssertEqual(p.createOptions(folder: root, file: root.appendingPathComponent("doz_project.yaml")).agentSudo, false)
+        XCTAssertNil(try DozerProject.parse("version: 1\nname: a\nimage: pi\n").agentSudo)
+        XCTAssertThrowsError(try DozerProject.parse("version: 1\nname: a\nimage: pi\nagent_sudo: maybe\n"))
+        XCTAssertTrue(p.render().contains("agent_sudo: false\n"))
+        XCTAssertTrue(DozerProject(name: "a", image: "pi").render().contains("# agent_sudo: true"))
+        XCTAssertEqual(try DozerProject.parse(p.render()).agentSudo, false, "render → parse round-trips")
+
+        let c = try XCTUnwrap(try DozerCommand.parseAsRoot(["create", "b", "--image", "pi", "--no-agent-sudo"]) as? Create)
+        XCTAssertEqual(try c.create.options().agentSudo, false)
+        let d = try XCTUnwrap(try DozerCommand.parseAsRoot(["create", "b", "--image", "pi"]) as? Create)
+        XCTAssertNil(try d.create.options().agentSudo, "no flag: the setting decides")
+    }
 }

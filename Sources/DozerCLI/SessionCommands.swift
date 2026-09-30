@@ -156,6 +156,7 @@ struct Run: AsyncParsableCommand {
     @Option(name: [.short, .customLong("env")], help: "KEY=VALUE for the program (repeatable).") var env: [String] = []
     @Flag(name: [.short, .customLong("detach")], help: "Start it and return; attach later.") var detach = false
     @Option(name: .long, help: "The key that detaches: ctrl-] (default), ctrl-<letter>, or none.") var detachKey = "ctrl-]"
+    @Flag(name: .long, help: "Fail instead of starting (cold-booting) a sandbox that is off.") var noStart = false
     @Argument(parsing: .postTerminator, help: "The program and its arguments, after --.") var command: [String] = []
 
     func validate() throws {
@@ -165,6 +166,7 @@ struct Run: AsyncParsableCommand {
     func run() async throws {
         let key = try parseDetachKey(detachKey)
         var r = HostRequest(.openSession, name: name)
+        r.start = !noStart      // 594 W27: an off sandbox boots first
         r.session = session
         r.argv = command
         r.workdir = workdir
@@ -197,7 +199,7 @@ func parseEnv(_ pairs: [String]) throws -> [String: String]? {
 struct Exec: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         abstract: "Run a command in the sandbox, non-interactively; its output and exit code pass through.",
-        discussion: "doz exec NAME -- CMD…. No terminal, no stdin; for an interactive program use run. A paused or sleeping sandbox is woken first.")
+        discussion: "doz exec NAME -- CMD…. No terminal, no stdin; for an interactive program use run. A paused or sleeping sandbox is woken first, and one that is off is started (--no-wake, --no-start refuse instead).")
     @OptionGroup var g: GlobalOptions
     @Argument var name: String
     @Option(name: .long, help: "Working directory in the guest (default: the session's).") var workdir: String?
@@ -205,6 +207,7 @@ struct Exec: AsyncParsableCommand {
     @Option(name: [.short, .customLong("env")], help: "KEY=VALUE (repeatable).") var env: [String] = []
     @Option(name: .long, help: "Give up after this many seconds (default 120).") var timeout: Int64 = 120
     @Flag(name: .long, help: "Fail instead of waking a sleeping sandbox.") var noWake = false
+    @Flag(name: .long, help: "Fail instead of starting (cold-booting) a sandbox that is off.") var noStart = false
     @Argument(parsing: .postTerminator, help: "The command and its arguments, after --.") var command: [String] = []
 
     func validate() throws {
@@ -219,14 +222,19 @@ struct Exec: AsyncParsableCommand {
         r.environment = try parseEnv(env)
         r.timeoutSeconds = timeout
         r.wake = !noWake
+        r.start = !noStart      // 594 W27: an off sandbox boots first (its progress on stderr)
         let m = try rawCall(r, g)
         guard m.ok == true, let v = m.result else {
             throw fail(m.error ?? HostError(.failed, "exec failed"), g, code: DozerExit.dozerFailed)
         }
         let out = try decode(v, ExecOutput.self, g)
         if g.json {
-            Out.json(["exitCode": .number(Double(out.exitCode)), "stdout": .string(String(decoding: out.stdout, as: UTF8.self)),
-                      "stderr": .string(String(decoding: out.stderr, as: UTF8.self)), "milliseconds": .number(out.milliseconds)] as [String: JSONValue])
+            var j: [String: JSONValue] = ["exitCode": .number(Double(out.exitCode)), "stdout": .string(String(decoding: out.stdout, as: UTF8.self)),
+                                          "stderr": .string(String(decoding: out.stderr, as: UTF8.self)), "milliseconds": .number(out.milliseconds),
+                                          // 594 W27: what had to happen first.
+                                          "started": .bool(out.started == true), "woke": .bool(out.woke == true)]
+            if let b = out.bootMilliseconds { j["bootMilliseconds"] = .number(b) }
+            Out.json(j)
         } else {
             FileHandle.standardOutput.write(out.stdout)
             FileHandle.standardError.write(out.stderr)

@@ -89,7 +89,10 @@ struct OnboardingFlow {
         // 3. Images (D2): claude-code ticked; lab and pi opt-in.
         say("\n3. Images")
         if imagesFlag == nil {
-            let opts = Onboarding.imageOptions(rows)
+            let settings = DozerSettings.load()
+            let versions = Dictionary(uniqueKeysWithValues: ["claude-code", "pi"].compactMap { i in
+                Onboarding.agentVersionText(i, store: store, settings: settings).map { (i, $0) } })
+            let opts = Onboarding.imageOptions(rows, versions: versions)
             let ticks = asker.checklist("  Which images to prepare now (in the background — minutes, once)?",
                                         opts.map { ("\($0.name) — \($0.summary); \($0.download); \($0.prepared ? "ready" : $0.estimate)", $0.recommended || $0.prepared) })
             chosen = zip(opts, ticks).filter(\.1).map(\.0.name)
