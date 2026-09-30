@@ -463,6 +463,9 @@ func cliSuite() async throws {
     await cliPointsSuite(binary: h.binary)
     await cliTimeZoneSuite(binary: h.binary)
     await cliImagesSuite(binary: h.binary)
+    // 596: base × agent images — the CLI, Dockerfiles through a fake container, the real build when
+    // Apple's services run (SKIPs otherwise). The matrix is `make test-cli-bases` alone.
+    await cliBasesSuite(binary: h.binary, parts: ["cli", "dockerfile", "real"])
 }
 
 /// 593: how `doz image bake lab -v` shows its progress — plain (no escape, no \r, no spinner) when

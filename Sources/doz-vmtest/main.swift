@@ -927,6 +927,13 @@ Task {
             // 594 W23: only the agent-sudo part of `cli` (a store of its own; prepares claude-code).
             let binary = args.firstIndex(of: "--doz").flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil } ?? ".build/debug/doz"
             await cliAgentSudoSuite(binary: URL(fileURLWithPath: binary).standardizedFileURL.path)
+        case "cli-bases":
+            // 596: base × agent images — cli, dockerfile (a fake container), real (Apple's), matrix
+            // (BASES_PARTS=cli,dockerfile,real,matrix; default all).
+            let binary = args.firstIndex(of: "--doz").flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil } ?? ".build/debug/doz"
+            let parts = Set((ProcessInfo.processInfo.environment["BASES_PARTS"].flatMap { $0.isEmpty ? nil : $0 } ?? "cli,dockerfile,real,matrix")
+                .split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) })
+            await cliBasesSuite(binary: URL(fileURLWithPath: binary).standardizedFileURL.path, parts: parts)
         case "cli-onboarding":
             // 594: only the onboarding part of `cli` (its stores are its own).
             let binary = args.firstIndex(of: "--doz").flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil } ?? ".build/debug/doz"

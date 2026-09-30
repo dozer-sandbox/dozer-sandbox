@@ -106,7 +106,7 @@ struct BuilderInstall: AsyncParsableCommand {
 /// yes is the consent); otherwise say exactly what to run. `required`: a build follows now (start/up).
 func builderPreflight(_ g: GlobalOptions, required: Bool, yes: Bool = false) async throws {
     let s = try decode(try await query(HostRequest(.builderStatus), g), ContainerToolStatus.self, g)
-    if !g.json, !g.quiet { Out.stderr("[doz] \(Dockerfiles.outsidePolicyNote)\n") }
+    if !g.quiet { Out.stderr("[doz] \(Dockerfiles.outsidePolicyNote)\n") }     // stderr: --json's stdout stays JSON
     guard s.state != "ready" else { return }
     guard required else {
         if !g.json { Out.stderr("[doz] \(s.note) Its first start builds the Dockerfile: \(s.state == "stopped" ? "doz builder start" : "doz builder install") first.\n") }

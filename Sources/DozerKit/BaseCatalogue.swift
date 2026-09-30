@@ -463,17 +463,25 @@ public enum ImageComposer {
     static func createUser(_ pm: PackageManager) -> BakeStep {
         switch pm {
         case .apt: return AgentImages.createAgent
-        case .apk: return BakeStep.script("create the agent user", apkUser + "\nmkdir -p /workspace && chown agent:agent /workspace", needsNetworkFalse: ())
+        case .apk: return shStep("create the agent user", apkUser + "\nmkdir -p /workspace && chown agent:agent /workspace", network: false)
         case .auto:
-            return BakeStep.script("create the agent user", """
+            return shStep("create the agent user", """
                 if command -v useradd >/dev/null 2>&1; then
                   id agent >/dev/null 2>&1 || useradd -m -s /bin/bash -u 1001 agent
                 else
                 \(apkUser)
                 fi
                 mkdir -p /workspace && chown agent:agent /workspace
-                """, needsNetworkFalse: ())
+                """, network: false)
         }
+    }
+
+    /// A POSIX `sh` step — for what runs before the baseline has installed bash (Alpine has none; a
+    /// Dockerfile's base may not either). BusyBox ash and dash both take `-eu`.
+    static func shStep(_ name: String, _ script: String, network: Bool = true) -> BakeStep {
+        var s = BakeStep(name, argv: ["sh", "-eu", "-c", script])
+        s.needsNetwork = network
+        return s
     }
 
     static let apkUser = """
@@ -491,9 +499,9 @@ public enum ImageComposer {
     static func baseline(_ pm: PackageManager) -> BakeStep {
         switch pm {
         case .apt: return AgentImages.devBaseline
-        case .apk: return BakeStep.script("install the developer baseline (\(apkBaselinePackages.joined(separator: " ")))", apkBaselineScript)
+        case .apk: return shStep("install the developer baseline (\(apkBaselinePackages.joined(separator: " ")))", apkBaselineScript)
         case .auto:
-            return BakeStep.script("install the developer baseline (apt or apk)", """
+            return shStep("install the developer baseline (apt or apk)", """
                 if command -v apt-get >/dev/null 2>&1; then
                 \(AgentImages.devBaseline.argv.last!)
                 elif command -v apk >/dev/null 2>&1; then
