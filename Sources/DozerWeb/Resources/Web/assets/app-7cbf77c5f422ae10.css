@@ -636,7 +636,8 @@ dialog.dlg:has(.image-picker) { width: min(780px, calc(100vw - 32px)); }
 .base-card.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; background: color-mix(in srgb, var(--accent) 8%, var(--bg)); }
 .base-card .base-title { font-weight: 600; font-size: 13px; }
 .base-card .base-use { color: var(--muted); }
-.base-card .base-ref { font-family: var(--mono); font-size: 11px; background: var(--code); padding: 1px 4px; border-radius: 4px; }
+.base-card .base-ref { font-family: var(--mono); font-size: 11px; background: var(--code); padding: 1px 4px; border-radius: 4px; max-width: 100%; overflow-wrap: anywhere; }
+.image-picker [hidden], .base-grid[hidden], .df-panel[hidden], .tpl-panel[hidden] { display: none; }
 .base-card .base-meta { color: var(--muted); font-size: 11.5px; font-variant-numeric: tabular-nums; }
 .base-card .base-prepared { color: var(--run); font-size: 11.5px; font-weight: 600; }
 .base-card .base-prepared:empty { display: none; }

@@ -227,13 +227,31 @@ off mid-startup (Claude Code's first network calls, for example) can otherwise f
 ## Creating and entering sandboxes
 
 ```bash
-doz create NAME --image lab|claude-code|pi|<custom> \
+doz create NAME --image lab|claude-code|pi|<base>-<agent>|<custom> \
     [--cpus 2] [--memory 2G] [--workspace ~/code/proj | --isolated] \
     [--network agent|bake|locked|open|nat|none] [--subnet CIDR]
+doz create NAME --agent claude-code|pi|none --base python     # or --dockerfile ./Dockerfile
 
 doz up NAME [same options] [--session S] [-d] [-- CMD …]
 ```
 
+- **The agent and the base (596).** A sandbox's image is two choices: the agent (`--agent
+  claude-code`, `pi`, or `none` for a shell only) and the base — a recommended one (`--base node`,
+  `python`, `go`, `rust`, `java`, `ruby`, `dotnet`, `debian`, `ubuntu`, `alpine`; `doz base ls` shows
+  each image, its download and its first-prepare time) or **your own Dockerfile** (`--dockerfile
+  PATH`). Dozer adds its developer baseline and the agent on top — Claude Code as its standalone
+  native build on a base without Node (no Node is added for it), pi with Node under `/opt/node`. The
+  image is named `<base>-<agent>` (`python-claude-code`; `debian` for no agent); `claude-code`, `pi`
+  and `lab` are Node · Claude Code, Node · pi and Alpine · none, as before.
+- **A Dockerfile** is built with Apple's `container build` — `doz builder status` says whether it is
+  installed and running; `doz builder install` opens Apple's signed installer package in macOS
+  Installer (you approve it; doz never uses sudo); `doz builder start` starts its services (they
+  register with launchd and run in the background). The Dockerfile's folder is the build context and
+  the workspace unless you give one. **Its `RUN` steps run in Apple's builder, outside Dozer's
+  network policy** — they reach the internet directly; the sandbox made from the image is under the
+  policy as usual. An unchanged Dockerfile re-prepares in seconds and bakes nothing; a changed one is
+  said ("Dockerfile changed — rebuild available"): `doz image bake df-…` rebuilds, `doz reset NAME`
+  takes the new image.
 - **`up`** is the everyday command, in the manner of `vagrant up` and `docker compose up`: create
   if missing, start or wake, then attach to the image's own session (`claude`, `pi`, or a
   `bash -l` shell called `shell`), opening it if needed. With `-d` it does all that without

@@ -32,6 +32,12 @@ doctor
 host
 events
 console
+base
+base/ls
+builder
+builder/status
+builder/start
+builder/install
 image/ls
 image/bake
 image/rm

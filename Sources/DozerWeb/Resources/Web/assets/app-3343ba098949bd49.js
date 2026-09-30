@@ -516,6 +516,9 @@ function workspaceChooser({ nameInput = null, image = () => null, name = null, i
     if (!pathEdited) {
       path.value = r.defaultPath;
       if (what.path === undefined) return check({ path: path.value });
+    } else if (what.path === undefined && autoPath && path.value.trim() === autoPath) {
+      // 596: a name/image check superseded the chosen Dockerfile folder's own check — say that folder's state.
+      return check({ path: autoPath });
     }
     if (what.path !== undefined) say(r);
   }

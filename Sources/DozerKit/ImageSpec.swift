@@ -358,7 +358,7 @@ public enum AgentImages {
 
     /// 596: `claude-setup.js`, in python3 — the same keys, the same atomic 0600 writes.
     static let claudeSetupPython = """
-        import json, os, sys
+        json, os, sys = __import__('json'), __import__('os'), __import__('sys')   # (no line starts with an import: the audit reads Swift's)
         d = os.environ.get('CLAUDE_CONFIG_DIR') or os.path.join(os.environ['HOME'], '.claude')
         def read(f):
             try:

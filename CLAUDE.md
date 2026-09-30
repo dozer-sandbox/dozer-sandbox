@@ -78,6 +78,7 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
 | `Sources/DozerHost/BootLogs.swift`; `Sources/DozerWeb/WebBootLogs.swift` | 593: each sandbox's kept boots (`<sandbox>/boots/`), the recorder, the one renderer; the web's Boot log projections |
 | `Scripts/release.sh` (`make release`), `Makefile.config.example`; `ReleaseStamp` in `Sources/DozerCLI/DozerCommand.swift`; `HostUpgradeCheck` in `GroupCommands.swift`; `HostCore.programGone`; `Tests/DozerCLITests/ReleaseTests.swift` | 598: the Homebrew artefact (signed; Developer ID + notarised when configured), the version stamp, `doz host upgrade-check`, the refusal when an upgrade removed a running host's keg |
 | `Sources/DozerHost/Resources.swift`, `HostCore+Resources.swift`; `Sources/DozerCLI/ResourcesCommands.swift`; `Sources/DozerWeb/WebResources.swift`; `Tests/DozerCLITests/ResourcesTests.swift` | 595: the account of everything Dozer uses (the walk, one leaf per entry, the three numbers from `DiskAccounting.exclusive`), refusals, the plan and the deletion; the host ops `resources` / `resources-rm` / `resources-clean` / `resources-kernel`; `doz resources`; the web projection + preview route |
+| `Sources/DozerKit/BaseCatalogue.swift`, `OCIImport.swift`; `Sources/DozerHost/BaseImages.swift`, `ContainerTool.swift`, `AppleContainerResources.swift`; `Sources/DozerCLI/BaseCommands.swift`; `Sources/DozerWeb/WebBases.swift`; `Sources/doz-vmtest/BasesSuite.swift` | 596: base × agent images — the catalogue, `ImageChoice` names, `ImageComposer` (+ `recompose` for W28), native Claude Code, pi's Node, digests; the store's base digests and Dockerfiles; Apple's `container` (status/start/install/build) and its storage in Resources; `doz base`, `doz builder`; the bases route and the Dockerfile picker; `make test-cli-bases` |
 | `Tests/DozerWebTests/` | 590: the security rules one by one, and a real listener driven with raw HTTP |
 | `Tests/DozerKitTests/` | Unit tests — no VM |
 
@@ -724,6 +725,54 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
 - **"Use this kernel"** writes `kernel.path` (nil = the pinned one): new sandboxes only (the kernel is
   baked into a sandbox's spec at create); refused when `DOZ_KERNEL` sets it.
 
+### Base images: agent × base (596) — design: workspace `changes/596-*/596.01-DESIGN.md`
+
+- **An image is two choices** (`ImageChoice`): the AGENT (claude-code · pi · none) and the BASE (a
+  `BaseCatalogue` id, or `df-<12 hex of the Dockerfile's path>`). Its name is `<base>-<agent>` (`<base>`
+  alone for none) — except the three that existed: `claude-code` (Node · Claude Code), `pi` (Node · pi),
+  `lab` (Alpine · none, its own `bakePackages` path). Every switch on an image NAME goes through
+  `ImageChoice.parse(…)?.agent` (credentials, the default session, the agent prompt, settings sections,
+  `withClaudePermissions`) — never `== "claude-code"`.
+- **The Node images are byte-identical to before 596** (`BaseImagesTests.test_nodeImagesAreByteIdentical`
+  pins their canonical JSON): `ImageComposer` returns `AgentImages.claudeCode/.pi(release, base:)` for
+  the catalogue's Node, `ImageSpec.bakeHosts` is nil for them (absent from the canonical JSON), and the
+  launcher's `.node` script is the old one. Keep that test green: a key change re-bakes every store.
+- **Claude Code on a base without Node is its NATIVE build** (`NativeClaudeBuild`: the sha256 of
+  linux-arm64 and linux-arm64-musl from `downloads.claude.ai/claude-code-releases/<v>/manifest.json`,
+  resolved on the Mac — `AgentVersions.refresh` remembers it per version in agent-versions.json; the pin
+  for 2.1.227 is built in), its setup in python3 (`claudeSetupPython` — the same keys as the JS). pi on a
+  base without Node: Node's official tarball under /opt/node (`NodeRuntime`, checksum-verified; Alpine:
+  apk nodejs), and `/usr/local/bin/pi` puts it first on pi's PATH only. Steps before the baseline run in
+  POSIX `sh` on apk/auto bases (Alpine has no bash).
+- **Bases are digest-resolved, never followed silently**: `BaseDigests` (`<store>/base-digests.json`)
+  asks the tag's registry at most hourly (`freshen`; `DOZ_TEST_BASE_REGISTRY=offline|pinned`), a
+  preparation uses the last digest (else the catalogue's pin). A prepared image made from an older digest
+  is `ImageRow.baseUpdate` / `BaseRow.updateAvailable` — offered, never rebuilt (W28). The W28 recipe check
+  is `ImageComposer.recompose(spec)` (same base, same release) — it works for every pair.
+- **A base's language registries join a proxied policy** (`NetworkPolicy.adding(registries:)`, HTTPS,
+  appended, preset name kept; locked/open untouched); a bake reaches the spec's `bakeHosts` too
+  (`NetworkPolicy.bake(adding:)`).
+- **Dockerfiles** (`Dockerfiles`, `<store>/dockerfiles.json`): a create registers it (validated: absolute,
+  a file ≤ 1 MiB, not in the store); a sandbox made before its first build holds a placeholder base
+  (`dozer.local/df-…@sha256:0…`) and its start builds, then `rebindDockerfileImage` re-adopts it with the
+  built spec (only with no root disk). A preparation runs `container build -t dozer/<base>:latest` then
+  `container image save --platform linux/arm64 -o` (1.2.2's `-o type=oci,dest=` fails after exporting),
+  `DockerfileImport` → `OCIImport.load` into Dozer's store as `dozer.local/<base>@<digest>`; the SAME
+  LAYERS keep the previous reference (nothing re-baked — B8). The image's ENV reaches sessions (PATH
+  entries ahead of the defaults). "Dockerfile changed — rebuild available" comes from the file's sha256.
+- **Apple's `container` is started or installed only because a person asked** (`ContainerTool`):
+  `builder-start` = `container system start --enable-kernel-install`, `builder-install` = the pinned signed
+  pkg, sha256-checked, `pkgutil --check-signature`, opened in Installer — never sudo. The CLI asks (or
+  `--yes`); the page shows what each does before its button. Seams: `DOZ_TEST_CONTAINER` (a fake; a
+  non-executable path = not installed), `DOZ_TEST_CONTAINER_INSTALL` (records, never downloads/opens),
+  `DOZ_TEST_FILE_PICKER`, `DOZ_TEST_APPLE_CONTAINER_ROOT`. **B9: a Dockerfile build runs OUTSIDE Dozer's
+  network policy** — said on the card, by the CLI, and in the preparation's log (`Dockerfiles.outsidePolicyNote`).
+- **Apple's storage is shown, never deleted** (`Resources.appleContainerItems`): an `outside:apple-container`
+  row (its data folder by part, the program, Dozer's own `dozer/…` images), not in Dozer's total or the
+  unattributed check, no checkbox on the page.
+- **Never rebuild a running test's `doz` in place**: a long VM run (the matrix) runs from a COPY of the
+  binary and its bundles — `make cli` under a running host is the 591 incident.
+
 ### Browser terminals (591, on by default — owner ruling) — design: workspace `changes/591-*/591.01-DESIGN.md`
 
 - **A terminal is two steps.** `POST …/terminal-ticket` (CSRF, strict body) mints a 256-bit ticket that
@@ -809,6 +858,7 @@ make test-vm-upgrade # 591: the previous release sleeps sandboxes, this build wa
 make test-vm-templates # 593: templates and duplicates on pi — no state disk in a template; duplicate's workspace and fresh/copied state disk
 make test-cli-onboarding # 594: test-cli's onboarding part alone (onboard, a joining start, detach/cancel, init/up, the agent prompt, uninstall)
 make test-cli-timezone # 594 W10: the Mac's (stubbed) zone at boot and every wake, or sandbox.timezone
+make test-cli-bases  # 596: base × agent — cli, Dockerfiles via a fake container, the real container build (SKIPs unless Apple's services run; BASES_START_BUILDER=1), the VM matrix (BASES_PARTS=…)
 make test-cli-points # 594 W25–W27: point names/lookup, check before asking, exec/run start an off sandbox
 make test-cli-agentsudo # 594 W23: the agent's sudo in a fresh claude-code sandbox (prepares it; network), --no-agent-sudo, the setting at the next boot, root reaches no more
 make test-cli-hoststop # 594 W22: test-cli's host-stop part alone (per-sandbox progress plain/animated, --json, nothing running, a host killed mid-stop)

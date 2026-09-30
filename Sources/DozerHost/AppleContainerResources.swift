@@ -49,6 +49,8 @@ extension Resources {
     /// The notes column: it is Apple's, and how to inspect and prune it with its own commands.
     static let appleContainerRefusal = "Apple's container tool — managed with its own commands: `container image ls` / `container image prune`, `container system df` (what it uses), `container builder delete` (the builder and its cache), `container system stop` (its services). Never deleted by Dozer."
 
+    static let appleContainerPart = "Apple's — never deleted by Dozer (its commands are on the row above)"
+
     /// The rows (group `outside`): sizes by allocated blocks, as the rest of Resources measures.
     public static func appleContainerItems(_ f: AppleContainerFacts) -> [ResourceItem] {
         let st = f.status
@@ -69,19 +71,19 @@ extension Resources {
             let dataTotal = parts.values.reduce(0, +)
             total += dataTotal
             dataRows.append(ResourceItem(id: "outside:apple-container/data", group: "outside", parent: "outside:apple-container", name: "its data folder (all of it)",
-                                         detail: root.path, sizeBytes: dataTotal, refusal: appleContainerRefusal, path: root.path))
+                                         detail: root.path, sizeBytes: dataTotal, refusal: appleContainerPart, path: root.path))
             // One level under the tool's row (the page shows a row's parts, not their parts).
             for (key, label) in [("snapshots", "its data — snapshots (unpacked images, containers)"), ("content", "its data — content (the image cache)"),
                                  ("kernels", "its data — kernels"), ("other", "its data — other (builder, networks, state)")] {
                 dataRows.append(ResourceItem(id: "outside:apple-container/data/\(key)", group: "outside", parent: "outside:apple-container",
-                                             name: label, sizeBytes: parts[key] ?? 0, refusal: appleContainerRefusal))
+                                             name: label, sizeBytes: parts[key] ?? 0, refusal: appleContainerPart))
             }
             if let dozer = dozerShare(root) {
                 dataRows.append(ResourceItem(id: "outside:apple-container/dozer", group: "outside", parent: "outside:apple-container",
                                              name: "of which Dozer's builds", detail: dozer.images == 0
                                                 ? "no image tagged dozer/… in it (Dozer's builds are exported to its own store)"
                                                 : "\(dozer.images) image\(dozer.images == 1 ? "" : "s") tagged dozer/… (their snapshots and layers)",
-                                             sizeBytes: dozer.bytes, refusal: appleContainerRefusal))
+                                             sizeBytes: dozer.bytes, refusal: "`container image ls` lists them (dozer/…); `container image delete NAME` removes one — Dozer keeps its own copy in its store"))
             }
         }
         var programBytes: Int64 = 0

@@ -102,11 +102,42 @@ those 3 s first (Claude Code's first network calls, for example, can otherwise f
 ### Creating and entering sandboxes
 
 ```bash
-doz create NAME --image lab|claude-code|pi|<custom> \
+doz create NAME --image lab|claude-code|pi|<base>-<agent>|<template> \
     [--cpus 2] [--memory 2G] [--workspace ~/code/proj | --isolated] \
     [--network agent|bake|locked|open|nat|none] [--subnet CIDR]
+doz create NAME --agent claude-code|pi|none --base node|python|go|rust|java|ruby|dotnet|debian|ubuntu|alpine
+doz create NAME --agent claude-code --dockerfile ./Dockerfile      # 596: your own base (workspace = its folder)
 
 doz up NAME [same options] [--session S] [-d] [-- CMD …]
+```
+
+- **596: two choices — the agent and the base.** `--agent` (Claude Code, pi, or none: a shell only)
+  and `--base` (a recommended base: `doz base ls`) name the image `<base>-<agent>`
+  (`python-claude-code`, `go-pi`; `debian` for no agent). The three old names stay:
+  `claude-code` = Node · Claude Code, `pi` = Node · pi, `lab` = Alpine · none — `--image claude-code`
+  is the shorthand for `--agent claude-code --base node`. The image is the base + the developer
+  baseline (apt or apk) + the agent: Claude Code on a base without Node is its standalone native
+  build (downloads.claude.ai, `latest` resolved at preparation, sha256-checked — no Node added for
+  it); pi gets Node under `/opt/node` (Node's official tarball, checksum-verified; Alpine's own
+  `nodejs`), on pi's PATH only. A base's language registries join the sandbox's policy (Go's module
+  proxy, crates.io, Maven Central, RubyGems, NuGet). Each base's tag is resolved to a digest when an
+  image is prepared (hourly after; the catalogue's pin offline) and `image ls` says when the tag has
+  moved on — never rebuilt by itself.
+- **`--dockerfile PATH`**: your Dockerfile is the base, built with Apple's `container build`
+  (installed on demand — `doz builder`), and Dozer still adds the baseline and the agent (you need
+  not install Claude Code in it). Its folder is the build context and, unless `--workspace` says
+  otherwise, the workspace. **The build runs in Apple's builder, OUTSIDE Dozer's network policy:**
+  its `RUN` steps reach the internet directly. Every preparation builds it again (Apple's cache
+  makes an unchanged one take seconds) and re-bakes only when the built image's layers changed; a
+  sandbox says "Dockerfile changed — rebuild available" and keeps its disk until `doz reset`.
+- **`doz_project.yaml`** takes `agent:`, `base:` and `dockerfile:` (relative to the project folder)
+  instead of `image:`.
+
+```bash
+doz base ls                    # the recommended bases: image, digest, download, first prepare, registries
+doz builder status             # Apple's container tool: missing, stopped or ready — and what each step does
+doz builder install [--yes]    # Apple's signed package (pinned, sha256-checked) opened in macOS Installer; never sudo
+doz builder start [--yes]      # container system start --enable-kernel-install (launchd services, its kernel)
 ```
 
 - **`up`** is the everyday command, in the manner of `vagrant up` and `docker compose up`: create
