@@ -64,7 +64,7 @@ DOCC_OUT         ?= .docc-build
 DOCC_BASE_PATH   ?= /DozerKit/
 DOCC_PREVIEW_PORT ?= 8000
 
-.PHONY: help build test audit web-assets web-assets-check test-cli-onboarding test-cli-terminal test-cli-hoststop test-cli-agentsudo test-cli-points test-cli-timezone test-cli-images test-cli-bases pullbench test-vm test-vm-agents test-vm-network test-vm-hardening test-vm-lineage prev-cli test-vm-upgrade vmtest-host kernel deckhold deckhold-verify doznet doznet-verify cli install-cli test-cli test-vm-claude test-vm-templates docs docs-preview docs-drift-check release
+.PHONY: help build test audit web-assets web-assets-check test-cli-onboarding test-cli-terminal test-cli-hoststop test-cli-agentsudo test-cli-points test-cli-timezone test-cli-images test-cli-bases test-cli-permissions pullbench test-vm test-vm-agents test-vm-network test-vm-hardening test-vm-lineage prev-cli test-vm-upgrade vmtest-host kernel deckhold deckhold-verify doznet doznet-verify cli install-cli test-cli test-vm-claude test-vm-templates docs docs-preview docs-drift-check release
 
 help: ## Show this help
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) | sed 's/:.*## /\t/' | expand -t 22
@@ -215,6 +215,9 @@ test-cli-images: cli vmtest-host ## 594 W28–W30: an older doz's pi image said 
 BASES_PARTS ?= cli,dockerfile,real,matrix
 test-cli-bases: cli vmtest-host ## 596: base × agent images — doz base ls, --agent/--base/--dockerfile, doz_project.yaml; Dockerfiles through a FAKE container (install recorded, services, build/import/bake, unchanged = no bake, rebuild available, reset); the REAL container build (needs Apple's services — SKIPs otherwise; BASES_START_BUILDER=1 starts them through doz); the matrix Node/Python/Go/Debian/Alpine × Claude Code/none + pi on Python (network, ~1 h). BASES_PARTS=… picks
 	BASES_PARTS="$(BASES_PARTS)" perl -e 'alarm shift; exec @ARGV' 7200 $(VMTEST_BIN) cli-bases --doz $(CLI_BIN)
+
+test-cli-permissions: cli vmtest-host ## 597: agent permissions — doz net permissions / NAME / allow / deny, create --allow, Claude Code's own hosts reached under Standard, a refusal → a suggestion, live changes, the web warns, the facts in plain words, stored by name, defaults.permissions (prepares claude-code; network)
+	perl -e 'alarm shift; exec @ARGV' 2400 $(VMTEST_BIN) cli-permissions --doz $(CLI_BIN)
 
 pullbench: vmtest-host ## 594 D12: pull the node base with 3 vs 6 concurrent layer downloads into fresh stores (network; ROUNDS=3)
 	$(VMTEST_BIN) pullbench --rounds $(or $(ROUNDS),3)

@@ -934,6 +934,10 @@ Task {
             let parts = Set((ProcessInfo.processInfo.environment["BASES_PARTS"].flatMap { $0.isEmpty ? nil : $0 } ?? "cli,dockerfile,real,matrix")
                 .split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) })
             await cliBasesSuite(binary: URL(fileURLWithPath: binary).standardizedFileURL.path, parts: parts)
+        case "cli-permissions":
+            // 597: agent permissions (a store of its own; prepares claude-code; network).
+            let binary = args.firstIndex(of: "--doz").flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil } ?? ".build/debug/doz"
+            await cliPermissionsSuite(binary: URL(fileURLWithPath: binary).standardizedFileURL.path)
         case "cli-onboarding":
             // 594: only the onboarding part of `cli` (its stores are its own).
             let binary = args.firstIndex(of: "--doz").flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil } ?? ".build/debug/doz"
