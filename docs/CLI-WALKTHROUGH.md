@@ -1,5 +1,8 @@
 # `doz` walkthrough
 
+> The [user manual](manual/README.md) covers every topic here in depth, for the command line and the
+> dashboard; start with its [Getting started](manual/01-getting-started.md) if you prefer the browser.
+
 A first run of the `doz` CLI, start to finish, from nothing installed. It takes about 25 minutes,
 most of it the one-time image preparation (which runs in the background while you read on). By the
 end you will have:

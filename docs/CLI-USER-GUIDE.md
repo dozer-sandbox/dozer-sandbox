@@ -3,7 +3,8 @@
 `doz` runs Linux sandboxes on your Mac that pause in a millisecond, hibernate to disk and wake
 in about a third of a second, with the programs inside them still running where they were. It is
 the command-line face of DozerKit. New to it? Start with the
-[walkthrough](CLI-WALKTHROUGH.md).
+[walkthrough](CLI-WALKTHROUGH.md). The [user manual](manual/README.md) covers the same ground by
+task, for the CLI and the dashboard side by side; this guide is the terse command-line companion.
 
 ## Concepts
 
@@ -668,7 +669,7 @@ doz net log NAME [--denied] [--follow]              # host, verdict, rule, bytes
 Policy changes apply to the next connection and are kept for the next start. A name the policy
 cannot allow doesn't even resolve. Current limits: IPv4 only, HTTP/1.1 on the hosts whose traffic
 the proxy decrypts, UDP refused (clients fall back to TCP), and no port forwards from the Mac into
-a sandbox yet.
+a sandbox yet (apart from a sign-in's callback, briefly — "The browser, and sign-ins").
 
 ## Restore points, templates and duplicates
 
@@ -973,7 +974,8 @@ view — the session keeps running, as Ctrl-] does in `doz attach`.
   A paste with line breaks into a program that did not ask for bracketed paste, or over 64 KiB,
   asks first; over 1 MiB is refused.
 - **Links** in terminal output are not clickable, and a program inside the sandbox can never read
-  or set your clipboard. Cmd-C copies a selection (so does selecting with the mouse); Cmd-V pastes.
+  your clipboard (it can set it only through the clipboard bridge, with a notice each time — "Session
+  bridges"). Cmd-C copies a selection (so does selecting with the mouse); Cmd-V pastes.
   Cmd shortcuts belong to the browser (Cmd-W closes the tab — the session runs on).
 - An open terminal keeps the host running, as `doz attach` does; the dashboard alone does not.
 - The terminal itself runs in an isolated frame of the page: whatever a sandbox prints can never
@@ -1138,6 +1140,6 @@ is created, and become part of it.
 - Moving a *running* sandbox to another Mac: the snapshot is encrypted with a key specific to each
   Mac. A cold move (shut down, copy, start) works but has no command yet.
 - Image pull/push.
-- Port forwards.
+- Port forwards (beyond a sign-in's callback).
 - IPv6 and HTTP/2 through the proxy.
 - An idle auto-suspend scheduler: today nothing pauses or sleeps a sandbox by itself.

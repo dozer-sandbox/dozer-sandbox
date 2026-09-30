@@ -255,9 +255,16 @@ Homebrew installs `libexec/doz/{doz, VERSION, its resource bundles}` in the keg 
 release downloaded with `HOMEBREW_GITHUB_API_TOKEN`. From a checkout, contributors use `make
 install-cli` (below) — and `make release VERSION=X.Y.Z` builds the artefact the tap installs.
 
-New to it: the [walkthrough](docs/CLI-WALKTHROUGH.md) (~25 min, from nothing installed to
-uninstalling again) and the [user guide](docs/CLI-USER-GUIDE.md) (concepts, every command by task,
-keys, network, troubleshooting). `doz ui` opens on a setup wizard when this Mac was never onboarded.
+**Documentation.** The [user manual](docs/manual/README.md) is the place to start: task-oriented
+pages for people — getting started, installing and upgrading, projects, the lifecycle, the dashboard,
+terminals and sessions, images and bases, agents and accounts, permissions, signing in from a
+sandbox, restore points, resources, letting another agent drive Dozer, every setting, the security
+model, troubleshooting — each with the CLI and `doz ui` side by side. It is checked against the
+program on every build (`make docs-drift-check`: every command, flag and setting it names exists, and
+its settings table is generated from `doz config show`). For command-line users there is also the
+[walkthrough](docs/CLI-WALKTHROUGH.md) (~25 min, from nothing installed to uninstalling again) and
+the terser [user guide](docs/CLI-USER-GUIDE.md); the [CLI reference](Sources/DozerKit/DozerKit.docc/Articles/CLIReference.md)
+is the complete command list. `doz ui` opens on a setup wizard when this Mac was never onboarded.
 
 `make cli` builds and signs `.build/debug/doz` for development. An unsigned `doz` runs every
 command but cannot boot a VM (`doz doctor` says so).
