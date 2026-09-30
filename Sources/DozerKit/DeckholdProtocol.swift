@@ -273,6 +273,115 @@ public enum GuestCommand {
             + " && mv -f \(tmp) '\(agentSudoersPath)' || rm -f \(tmp); fi"
     }
 
+    // MARK: 599 (594.B2) — the browser bridge's guest half
+
+    /// Where the `xdg-open` shim lives (root-owned; first on every session's PATH).
+    public static let openShimDirectory = "/usr/local/lib/doz/bin"
+    public static let openShimPath = openShimDirectory + "/xdg-open"
+    /// The other names a program reaches for (links to the shim).
+    public static let openShimAliases = ["open", "sensible-browser", "www-browser", "x-www-browser"]
+    static let openShimStamp = "doz:open-url-shim:v3"
+
+    /// `path` with the shim's directory first (once).
+    public static func withOpenShim(_ path: String) -> String {
+        let parts = path.split(separator: ":").map(String.init)
+        guard parts.first != openShimDirectory else { return path }
+        return ([openShimDirectory] + parts.filter { $0 != openShimDirectory }).joined(separator: ":")
+    }
+
+    /// The shim (DeckStack's technique, 535/539 — read, not depended on): this sandbox has no browser,
+    /// so the URL is handed to the Mac as a private OSC 6340 marker on the session's terminal, which the
+    /// host's attach relay takes out and decides on (http/https only, the setting, a notice); plus a
+    /// line a person can read. The marker goes to the controlling terminal, else the session's own
+    /// (`$DOZ_TTY`, exported by deckhold — an opener that `setsid`s its child has no controlling
+    /// terminal), else stdout. `2>/dev/null` BEFORE `>`: a failed rung prints nothing (DeckStack's lesson).
+    public static let openShim = #"""
+    #!/bin/sh
+    # doz:open-url-shim:v3
+    # Dozer Sandbox's browser bridge: this sandbox has no browser, so an http(s) URL is handed to the
+    # Mac through the session's terminal (doz shows it and opens it in the Mac's default browser —
+    # unless the sandbox's browser bridge is off). Written at every boot; see `doz config show --sandbox`.
+    url="${1:-}"
+    [ -n "$url" ] || { echo "usage: xdg-open URL" >&2; exit 1; }
+    [ "${#url}" -le 2048 ] || { echo "xdg-open: the URL is longer than 2048 bytes — not sent to the Mac" >&2; exit 1; }
+    clean=$(printf '%s' "$url" | tr -d '\000-\037\177')
+    [ "$clean" = "$url" ] || { echo "xdg-open: the URL has control characters — not sent to the Mac" >&2; exit 1; }
+    case "$url" in
+        http://*|https://*) ;;
+        *) echo "xdg-open: this sandbox has no browser, and only http and https URLs go to the Mac: $url" >&2; exit 1 ;;
+    esac
+    emit() { printf 'Asking your Mac to open: %s\r\n\033]6340;doz-open;%s\007' "$url" "$url"; }
+    # Inside tmux (sessions.tmux) the pane's terminal is tmux's, which drops a sequence it does not
+    # know: the marker goes to the session's own terminal ($DOZ_TTY, tmux's client), the line to the pane.
+    if [ -n "${TMUX:-}" ] && [ -n "${DOZ_TTY:-}" ] && [ -w "$DOZ_TTY" ] \
+        && printf '\033]6340;doz-open;%s\007' "$url" 2>/dev/null > "$DOZ_TTY"; then
+        printf 'Asking your Mac to open: %s\n' "$url" 2>/dev/null > /dev/tty || printf 'Asking your Mac to open: %s\n' "$url"
+        exit 0
+    fi
+    if [ -w /dev/tty ] 2>/dev/null && emit 2>/dev/null > /dev/tty; then exit 0; fi
+    if [ -n "${DOZ_TTY:-}" ] && [ -w "$DOZ_TTY" ] && emit 2>/dev/null > "$DOZ_TTY"; then exit 0; fi
+    emit
+    """#
+
+    /// A login shell (`bash -l`, the lab's own session) resets PATH in /etc/profile (Alpine and Debian
+    /// both): this drop-in, which /etc/profile sources, puts the shim's directory back in front.
+    public static let openShimProfilePath = "/etc/profile.d/doz-browser-bridge.sh"
+    static let openShimProfile = """
+    # doz: the browser bridge's xdg-open first on PATH (a login shell's /etc/profile resets PATH).
+    case ":$PATH:" in *":\(openShimDirectory):"*) ;; *) PATH="\(openShimDirectory):$PATH" ;; esac
+    export PATH
+    """
+
+    /// Root shell: install the shim, its aliases and the profile drop-in when missing or older
+    /// (idempotent, never fails the caller).
+    public static var openShimInstall: String {
+        let quoted = "'" + openShim.replacingOccurrences(of: "'", with: "'\\''") + "\n'"
+        let profile = "'" + openShimProfile.replacingOccurrences(of: "'", with: "'\\''") + "\n'"
+        let links = openShimAliases.map { "ln -sf xdg-open '\(openShimDirectory)/\($0)'" }.joined(separator: "; ")
+        return "{ grep -q '\(openShimStamp)' '\(openShimPath)' 2>/dev/null || { mkdir -p '\(openShimDirectory)'"
+            + " && printf '%s' \(quoted) > '\(openShimPath).tmp' && chmod 0755 '\(openShimPath).tmp'"
+            + " && mv -f '\(openShimPath).tmp' '\(openShimPath)' && \(links)"
+            + "; mkdir -p /etc/profile.d && printf '%s' \(profile) > '\(openShimProfilePath)'; }; } || true"
+    }
+
+    // MARK: 599 (594.B3) — tmux inside a session
+
+    /// doz's tmux configuration (root-owned, rewritten at each tmux session start).
+    public static let tmuxConfPath = "/usr/local/lib/doz/tmux.conf"
+
+    /// What a session inside tmux needs to keep doz's features: the mouse (the web terminal's reports,
+    /// W14), OSC 52 passed OUT to deckhold (the clipboard bridge), titles, extended keys where tmux has
+    /// them, a TERM the image knows; `update-environment` is not needed — one tmux server per session.
+    public static let tmuxConf = """
+    # doz: tmux inside a Dozer session (sessions.tmux) — rewritten at each session start.
+    set -g mouse on
+    set -s set-clipboard on
+    set -as terminal-features ',*:clipboard'
+    set -s extended-keys on
+    set -as terminal-features ',*:extkeys'
+    set -g set-titles on
+    set -g set-titles-string '#S'
+    set -g history-limit 50000
+    set -s escape-time 10
+    set -g default-terminal screen-256color
+    if-shell 'test -e /usr/share/terminfo/t/tmux-256color -o -e /lib/terminfo/t/tmux-256color -o -e /etc/terminfo/t/tmux-256color' 'set -g default-terminal tmux-256color'
+    """
+
+    /// Root shell: write the configuration; then say whether tmux is there (`tmux=yes|no` on stdout).
+    public static var tmuxPrepare: String {
+        let quoted = "'" + tmuxConf.replacingOccurrences(of: "'", with: "'\\''") + "\n'"
+        return "{ mkdir -p '\(openShimDirectory)' && printf '%s' \(quoted) > '\(tmuxConfPath)' && chmod 0644 '\(tmuxConfPath)'; } 2>/dev/null; "
+            + "if command -v tmux >/dev/null 2>&1; then echo tmux=yes; else echo tmux=no; fi"
+    }
+
+    /// `argv` inside tmux: its own server per session (`-L doz-NAME` — the session's environment, not
+    /// another's), attached to the tmux session `NAME` or making it (`-A`, so a reopened session finds a
+    /// program tmux still holds).
+    public static func inTmux(session: String, argv: [String]) -> [String] {
+        let name = session.replacingOccurrences(of: ".", with: "_")          // tmux refuses . and : in a name
+        return ["tmux", "-L", "doz-\(name)", "-f", tmuxConfPath, "new-session", "-A", "-s", name] + argv
+    }
+
     public static func stateKey(_ dir: String) -> String {
         String(dir.drop(while: { $0 == "/" })).replacingOccurrences(of: "/", with: "_")
     }
@@ -288,6 +397,7 @@ public enum GuestCommand {
     public static func prepareGuest(imageSpec: ImageSpec?, agentSudo: Bool = true, timeZone: GuestTimeZone? = nil) -> String {
         var s = "set -e; rm -rf /run/deckhold; mkdir -p /run/deckhold; chmod 1777 /run/deckhold"
         s += "; " + ownHostnameScript
+        s += "; " + openShimInstall                    // 599: the browser bridge's xdg-open (every image)
         if let tz = timeZone { s += "; " + tz.script }
         guard let r = imageSpec else { return s }
         s += "; " + agentSudoScript(user: r.user, on: agentSudo)

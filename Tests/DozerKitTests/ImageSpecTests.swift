@@ -105,7 +105,9 @@ final class ImageSpecTests: XCTestCase {
         let plain = Sandbox.sessionContext(imageSpec: nil, environment: ["A": "1"], workingDirectory: nil, user: nil)
         XCTAssertEqual(plain.workingDirectory, "/root")
         XCTAssertNil(plain.user)
-        XCTAssertEqual(plain.environment, ["A": "1"])
+        // 599: every session's PATH leads with the browser bridge's xdg-open, which is also $BROWSER.
+        XCTAssertEqual(plain.environment, ["A": "1", "PATH": GuestCommand.openShimDirectory + ":" + GuestCommand.path,
+                                           "BROWSER": GuestCommand.openShimPath])
     }
 
     /// The state disk: mounted at /state, one directory per persist dir, bind-mounted over it,
@@ -177,7 +179,7 @@ final class ImageSpecTests: XCTestCase {
         XCTAssertTrue(s.contains("mountpoint -q '/home/agent/.pi/agent' ||"), "idempotent")
         XCTAssertTrue(s.contains("chown agent:agent '/state/home_agent_.pi_agent'"))
         XCTAssertEqual(GuestCommand.prepareGuest(imageSpec: nil), "set -e; rm -rf /run/deckhold; mkdir -p /run/deckhold; chmod 1777 /run/deckhold; "
-                       + GuestCommand.ownHostnameScript,
+                       + GuestCommand.ownHostnameScript + "; " + GuestCommand.openShimInstall,
                        "a kept root disk must not carry the last boot's sessions")
         let layout = StoreLayout(root: URL(fileURLWithPath: "/tmp/s"), name: "lab")
         XCTAssertEqual(layout.stateDisk.path, "/tmp/s/sandboxes/lab/state.ext4")

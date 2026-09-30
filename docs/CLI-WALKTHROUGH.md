@@ -95,7 +95,7 @@ agent). The folder itself is shared at `/workspace`.
 doz up                             # no name: this folder's sandbox — created, started, attached
 ```
 
-That is Claude Code, in a VM, in your folder. **Ctrl-]** detaches. Part 4 comes back to it; next, a
+That is Claude Code, in a VM, in your folder. **Ctrl-] Ctrl-]** detaches. Part 4 comes back to it; next, a
 plain shell sandbox to learn the lifecycle on.
 
 ## 2. A first sandbox (1 min; ~40 s of it is the one-time lab bake)
@@ -115,7 +115,8 @@ echo "I was here" > /root/marker
 top                                   # leave it running
 ```
 
-Press **Ctrl-]** to detach. Your terminal comes back, and `top` keeps running in the sandbox.
+Press **Ctrl-]** twice to detach (once opens a one-line menu at the bottom: `d detach · n next · p prev ·
+s sessions · Esc back`). Your terminal comes back, and `top` keeps running in the sandbox.
 
 ```bash
 doz ls                             # lab1  lab  running  …RAM held…  1 session
@@ -149,7 +150,7 @@ doz attach lab1                    # wakes it (~0.3 s) and reattaches: top is st
 ```
 
 `top` never stopped counting from its own point of view: same process, same PID, same screen.
-Detach with **Ctrl-]**.
+Detach with **Ctrl-] Ctrl-]**.
 
 Commands without a terminal:
 
@@ -220,7 +221,7 @@ Ask it something, for example "create hello.txt saying hi, then run ls -l". The 
 To keep Claude Code's own permission prompts, start it with
 `doz run doz-try -e DOZ_CLAUDE_PERMISSIONS=ask -- claude`.
 
-**Ctrl-]** detaches. Then check what the sandbox actually has:
+**Ctrl-] Ctrl-]** detaches. Then check what the sandbox actually has:
 
 ```bash
 doz exec doz-try -- printenv ANTHROPIC_API_KEY     # doz_cred_… , a placeholder, not your key

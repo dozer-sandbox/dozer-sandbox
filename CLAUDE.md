@@ -801,6 +801,63 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   `PermissionReport`). The facts block's `network.permissions` / `network.description` list them in
   plain words (`PermissionPolicy.facts`).
 
+### Session bridges (599) — design: workspace `changes/599-*/599.01-DESIGN.md`
+
+- **One place: the host's attach relay.** Every terminal (`doz attach`/`run`/`up`, every `doz ui` pane)
+  reads a session through `HostServer.pump`, so the bridges live there: `SessionBridgeScanner` takes
+  OSC 52 and OSC 6340 (`doz-open`) out of DATA frames (never a SNAPSHOT — a replayed screen must not
+  re-copy; `reset()` on each), `HostCore.bridge` decides (nonisolated — pbcopy and `open` never run on
+  the actor), and each viewer is told with `ClientWire.notice` (`ESC]777;doz;notice;KIND;TEXT BEL`,
+  every control character stripped). Both clients take notices out BEFORE `findEnding`, and hold an
+  unfinished one (`ClientWire.unfinishedNotice`) — a notice split by a read must never reach a screen.
+- **Two viewers of one session see every sequence twice**: `BridgeState.once` acts once (the copy's
+  hash within 2 s — serialised, so two pumps cannot both act) and both get the notice.
+- **An OSC 52 READ is never answered and never forwarded** (the outer terminal would answer it with the
+  Mac's clipboard); logged once per session. Everything a scanner does not own passes through byte for
+  byte (`SessionBridgeTests` cuts at every offset).
+- **The CLI's drawn line** (a notice; B4's menu) is DECSC → bottom row → reverse video → DECRC, removed
+  by a REPAINT (`ClientWire.repaint`, `0xFF 'S'`): the host sends deckhold HELLO 0×0 on the live
+  connection (`SessionConnection.repaint`) — a fresh snapshot, no resize, no deckhold change.
+- **Per-sandbox settings** (`DozerSettings.perSandbox`): `SandboxConfig.settings[key]` wins over the
+  file (`HostCore.sandboxValue`); `sandbox-settings` reads (in-process when no host) and sets;
+  `doz config … --sandbox`, `doz create` flags, `doz_project.yaml` keys (`DozerProject.settingKeys`,
+  synced by `doz up`). `sandbox.agent_sudo` keeps its own field.
+- **The browser bridge (B2)** is DeckStack's technique, re-done (never a DeckStack dependency): the
+  guest shim (`GuestCommand.openShim`, `/usr/local/lib/doz/bin`, written by `prepareGuest` AND at each
+  session open — a woken sandbox predates it) prints a human line + `ESC]6340;doz-open;URL BEL` to
+  `/dev/tty`, else `$DOZ_TTY` (deckhold exports the session's pty: a `setsid` opener has no ctty),
+  else stdout — `2>/dev/null` BEFORE `>` on each rung. `BrowserBridge.check` = http/https only, never
+  the Mac's loopback; `callback(in:)` reads ONLY `redirect_uri` (http, `localhost`/`127.0.0.1` exactly,
+  explicit port ≥ 1024). `LoopbackForward` binds the Mac's 127.0.0.1 (+ [::1]) BEFORE the URL opens,
+  relays each connection through `Sandbox.openGuestStream([deckhold, connect, -p, PORT])` (no NIC
+  needed), ends 3 s after the first answered callback or at 10 min; one per sandbox. Notices and the
+  host log show `BrowserBridge.shown` (scheme, host, path) — never the query (a sign-in's state).
+- **A login shell resets PATH** (/etc/profile on Alpine and Debian): the shim's dir comes back through
+  `/etc/profile.d/doz-browser-bridge.sh` (written with the shim). A test in `bash --norc -i` would not
+  have caught it — `test-cli-browser` checks `bash -lc`.
+- **tmux (B3) runs INSIDE deckhold**, never instead of it: `GuestCommand.inTmux` = `tmux -L doz-NAME -f
+  tmuxConfPath new-session -A -s NAME ARGV…` — a server PER SESSION (a shared server would give a later
+  session the first one's environment: its placeholders, its `$DOZ_TTY`). `tmuxPrepare` writes the conf
+  and answers `tmux=yes|no` in the one root exec the session open already makes; no tmux → run without
+  it + `SessionOpened.notice`. The conf keeps the bridges alive (`set-clipboard on` + the clipboard
+  feature: tmux passes OSC 52 out; the shim sends its marker to `$DOZ_TTY` when `$TMUX` is set, because
+  tmux drops a sequence it does not know). The "already running" check compares the wrapped argv too.
+  tmux is in `devBaselinePackages` and `labPackages` — a recipe change: W28's "older recipe" names it.
+- **The title and the Ctrl-] menu (B4)**: no reserved rows (owner ruling). The attach client pushes the
+  terminal's title (CSI 22;0 t) the first time it sets one, re-renders `TerminalTitle` each minute and
+  on every attach answer (a switch, a hold: the host's attach answer now carries `image`), and pops it
+  (CSI 23;0 t) with W13's restore; `TitleFilter` keeps the session's OSC 0/1/2 out while it does. The
+  menu: the FIRST detach-key press (any W16 encoding — `DetachKeyScanner` now returns what followed it
+  in the read) opens it when stdin AND stdout are terminals; while it shows, `writeSession` drops the
+  session's bytes (a notice waits in `pendingNotices`); closing it asks for a REPAINT. A second press
+  within 0.5 s or at the menu detaches. n/p/s set `switchTarget` and shut the socket: the main loop
+  reattaches THAT session in the same client. `MenuKey.decode` reads keys in plain, kitty CSI-u (a
+  release is not a press) and modifyOtherKeys form. The web pane's tab renders the same template
+  (`terminalTitle(t)` in app.js).
+- **Tests never touch the Mac**: `DOZ_TEST_PASTEBOARD=<file>` replaces pbcopy; `DOZ_TEST_OPEN_URL=<file>`
+  replaces `/usr/bin/open` and plays the browser's last step (GET the callback on the Mac's port).
+  A fake OAuth server must READ before it answers (busybox `nc -e`), as a real one does.
+
 ### Browser terminals (591, on by default — owner ruling) — design: workspace `changes/591-*/591.01-DESIGN.md`
 
 - **A terminal is two steps.** `POST …/terminal-ticket` (CSRF, strict body) mints a 256-bit ticket that

@@ -49,6 +49,29 @@ public enum SettingType: Sendable, Equatable {
         return words
     }
 
+    /// 599 (594.B4): a terminal title — text with `{sandbox}` `{session}` `{image}` `{time}` `{phase}`
+    /// (a closed set), ≤ 120 characters, no control character; `""` = leave the title alone.
+    case titleTemplate
+
+    /// The variables a title may use.
+    public static let titleVariables = ["sandbox", "session", "image", "time", "phase"]
+
+    /// Why `s` is not a title template, or nil.
+    public static func titleTemplateProblem(_ s: String) -> String? {
+        guard s.count <= 120 else { return "at most 120 characters" }
+        guard !s.unicodeScalars.contains(where: { $0.value < 0x20 || $0.value == 0x7F || (0x80...0x9F).contains($0.value) }) else {
+            return "no control characters"
+        }
+        var rest = Substring(s)
+        while let open = rest.firstIndex(of: "{") {
+            guard let close = rest[open...].firstIndex(of: "}") else { return "a { without its }" }
+            let name = String(rest[rest.index(after: open)..<close])
+            guard titleVariables.contains(name) else { return "{\(name)} is not a variable (they are {\(titleVariables.joined(separator: "} {"))})" }
+            rest = rest[rest.index(after: close)...]
+        }
+        return rest.contains("}") ? "a } without its {" : nil
+    }
+
     /// An IANA zone name this Mac knows (plain characters only — it becomes a guest file's content).
     public static func isTimeZoneName(_ s: String) -> Bool {
         s.count <= 64 && s.range(of: #"^[A-Za-z][A-Za-z0-9_+-]*(/[A-Za-z0-9_+-]+)*$"#, options: .regularExpression) != nil
@@ -65,6 +88,7 @@ public enum SettingType: Sendable, Equatable {
         case .version: "latest, or an exact version like 2.1.227"
         case .timeZone: "mac, or a time zone like Australia/Sydney"
         case .permissions: "standard | locked | open, or permissions like +web,-error-reports (doz net permissions)"
+        case .titleTemplate: "a title with {sandbox} {session} {image} {time} {phase} (\"\" = leave the title alone)"
         }
     }
 
@@ -164,6 +188,9 @@ public struct SettingDefinition: Sendable {
         case (.permissions, .string(let s)):
             guard SettingType.permissionWords(s) != nil else { throw SettingsError("\(key) is standard, locked, open, or permissions like +web,-error-reports (doz net permissions)") }
             return v
+        case (.titleTemplate, .string(let s)):
+            if let why = SettingType.titleTemplateProblem(s) { throw SettingsError("\(key): \(why)") }
+            return v
         default:
             throw SettingsError("\(key) is a \(type.name), not a \(v.typeName)")
         }
@@ -184,6 +211,8 @@ public struct SettingDefinition: Sendable {
             return try validate(.int(i))
         case .choice, .path, .subnet, .version, .timeZone, .permissions:
             return try validate(.string(t))
+        case .titleTemplate:
+            return try validate(.string(text))          // its spaces are its own
         }
     }
 
@@ -255,6 +284,8 @@ public enum SettingKey {
     public static let confirmShutdown = "ui.confirm_shutdown"
     public static let splitDefault = "ui.split_default"
     public static let terminals = "ui.terminals"
+    /// 599 (594.B4): the terminal title template.
+    public static let terminalTitle = "ui.terminal_title"
     public static let terminalFontSize = "ui.terminal_font_size"
     public static let theme = "ui.theme"
     public static let detailsOpen = "ui.details_open"
@@ -281,6 +312,12 @@ public enum SettingKey {
     public static let timeZone = "sandbox.timezone"
     /// 597: the permissions of a new proxied sandbox.
     public static let permissions = "defaults.permissions"
+    /// 599 (594.B1): the clipboard bridge — `write` or `off`.
+    public static let clipboard = "sandbox.clipboard"
+    /// 599 (594.B2): the browser bridge (open a URL on the Mac; a sign-in's callback) — `on` or `off`.
+    public static let browserBridge = "sandbox.browser_bridge"
+    /// 599 (594.B3): new sessions run inside tmux.
+    public static let tmux = "sessions.tmux"
     /// 594 (owner ruling): the web UI may take an API key or a setup token (a masked field).
     public static let allowSecretEntry = "ui.allow_secret_entry"
     /// 594 W19 (owner: "a new web page opening up every time i run doz ui"): when `doz ui` opens a tab.
@@ -325,6 +362,9 @@ public struct DozerSettings: Sendable {
                   applies: .now),
             .init("ui", "terminals", .bool, .bool(true),
                   "Terminals in the browser. false: the UI opens none and refuses a terminal ticket (Terminal.app still works).",
+                  applies: .now),
+            .init("ui", "terminal_title", .titleTemplate, .string("{sandbox} · {session} · {time}"),
+                  "The title doz attach gives your terminal (window or tab) while attached, and a doz ui terminal's tab: {sandbox} {session} {image} {time} (this Mac's, HH:MM, refreshed each minute) {phase}. The terminal's own title comes back when you detach (where the terminal keeps a title stack: iTerm2, Ghostty, kitty, xterm). While doz sets it, a session's own title is not shown; \"\" leaves the title to the session.",
                   applies: .now),
             .init("ui", "terminal_font_size", .int(9...32), .int(13),
                   "The browser terminal's font size, in points (a terminal opened from now on).",
@@ -399,6 +439,15 @@ public struct DozerSettings: Sendable {
             .init("defaults", "permissions", .permissions, .string("standard"),
                   "What a new sandbox's agent may do (its network, as permissions — doz net permissions): standard (talk to its AI model, update itself, install system packages and its base's language packages, use GitHub, send error reports), locked (its AI model only), open (everything, the web included), or standard with changes like +web,-error-reports. Stored by name: a Dozer update that adds a host to a permission reaches every sandbox that has it.",
                   flag: "doz create --allow / --network", applies: .nextCreate),
+            .init("sandbox", "clipboard", .choice(["write", "off"]), .string("write"),
+                  "The clipboard bridge: a program in a sandbox that copies (OSC 52 — Claude Code, vim, tmux) puts the text on this Mac's clipboard, and every copy shows a notice (SANDBOX copied N chars) in doz attach and doz ui. At most 1 MiB a copy and 10 copies in 10 s. A sandbox can never READ the Mac clipboard. The risk: an agent could put a command there for you to paste — off turns the bridge off (copies are dropped, and said). A sandbox's own choice (doz config set --sandbox NAME, clipboard in doz_project.yaml) wins over this.",
+                  flag: "doz create --clipboard write|off", applies: .now),
+            .init("sandbox", "browser_bridge", .choice(["on", "off"]), .string("on"),
+                  "The browser bridge: xdg-open (and $BROWSER, open, sensible-browser) in a sandbox opens an http or https URL in this Mac's default browser, with a notice every time (at most 3 in 10 s). A sign-in whose redirect is the sandbox's localhost (Claude Code's /login) gets that port forwarded from the Mac into the sandbox for up to 10 minutes, so the login completes. Never file: or other schemes, never the Mac's own localhost. off: nothing opens (said). A sandbox's own choice (doz config set --sandbox NAME, browser_bridge in doz_project.yaml) wins over this.",
+                  flag: "doz create --browser-bridge on|off", applies: .now),
+            .init("sessions", "tmux", .bool, .bool(false),
+                  "Run each new session inside tmux (within Dozer's own session holder, so saved screens, sleep and wake, browser terminals and Ctrl-] detach keep working): tmux's windows, panes and copy mode, its status bar and prefix key (Ctrl-b). tmux takes the mouse, and the kitty keyboard protocol and modifyOtherKeys do not fully pass through it; the session's exit code is tmux's. Needs tmux in the image (the built-in images this doz prepares have it; on an image an older doz prepared the session runs without it, and says so). A sandbox's own choice (doz create --tmux, tmux: true in doz_project.yaml, doz config set --sandbox) wins over this.",
+                  flag: "doz create --tmux / --no-tmux", applies: .nextSession),
         ]
         s.append(.init("images", "claude_code_version", .version, .string("latest"),
                        "The Claude Code the claude-code image is prepared with: latest (asked of the npm registry when the image is prepared, then installed at that exact version, integrity-checked; a newer one is only said — doz image bake claude-code rebuilds when you choose) or an exact version like 2.1.227. A sandbox keeps the version it was created with; doz reset NAME moves it to the image's current one.",
@@ -424,6 +473,10 @@ public struct DozerSettings: Sendable {
     }()
 
     public static func definition(_ key: String) -> SettingDefinition? { schema.first { $0.key == key } }
+
+    /// 599: the settings a sandbox can also have its own value of (`doz config set --sandbox NAME KEY V`,
+    /// `doz create`, `doz_project.yaml`) — the sandbox's value wins over the file's.
+    public static let perSandbox: [String] = [SettingKey.clipboard, SettingKey.browserBridge, SettingKey.tmux, SettingKey.agentSudo]
 
     /// What cannot be set here, by design, and why — printed in the file and the docs.
     public static let notSettable: [String] = [
@@ -597,6 +650,7 @@ public struct DozerSettings: Sendable {
             case .version: kind = "version"
             case .timeZone: kind = "timezone"
             case .permissions: kind = "permissions"
+            case .titleTemplate: kind = "template"
             }
             var note: String?
             switch r.source {

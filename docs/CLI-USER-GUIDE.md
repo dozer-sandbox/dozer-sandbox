@@ -177,6 +177,9 @@ agent_prompt: |             # this project's own lines for the agent
   The tests run with `make test`.
 agent_prompt_mode: append   # or replace
 agent_sudo: true            # the agent's passwordless sudo (default: the setting sandbox.agent_sudo)
+clipboard: write            # a copy in the sandbox reaches the Mac clipboard, with a notice; off: never (applies at once)
+browser_bridge: on          # xdg-open opens http(s) URLs in the Mac's browser, a sign-in's callback forwarded; off: never
+tmux: false                 # true: sessions run inside tmux (from the next session)
 ```
 
 The schema is closed: an unknown key, a key given twice, a wrong type or a value out of range is an
@@ -296,7 +299,7 @@ preparation after 594 rebuilds the agent images once: they gained `sudo` and kee
 
 | | |
 |---|---|
-| `doz attach NAME [SESSION]` | Your terminal becomes that session (without SESSION: the sandbox's own — `claude`, `pi` or `shell`). **Ctrl-]** detaches on the first press, however the program has set up your terminal's keyboard (plain, the kitty keyboard protocol, xterm's modifyOtherKeys); `--detach-key ctrl-x` or `none` choose another. On the way out your terminal is put back as it was (mouse, paste and keyboard modes), and the line names the shortest command that comes back: `doz up` in the sandbox's project folder, `doz attach NAME` for its own session, else `doz attach NAME SESSION`. A paused or sleeping sandbox is woken first (`--no-wake` waits instead). If the sandbox hibernates while you are attached, the client waits and reattaches by itself when it wakes. |
+| `doz attach NAME [SESSION]` | Your terminal becomes that session (without SESSION: the sandbox's own — `claude`, `pi` or `shell`). **Ctrl-]** opens a one-line menu over the bottom row — `d detach · n next · p prev · s sessions · Esc back` — and **a second Ctrl-]** (or `d`) detaches, however the program has set up your terminal's keyboard (plain, the kitty keyboard protocol, xterm's modifyOtherKeys); `--detach-key ctrl-x` or `none` choose another (see "The title and the Ctrl-] menu"). On the way out your terminal is put back as it was (mouse, paste and keyboard modes), and the line names the shortest command that comes back: `doz up` in the sandbox's project folder, `doz attach NAME` for its own session, else `doz attach NAME SESSION`. A paused or sleeping sandbox is woken first (`--no-wake` waits instead). If the sandbox hibernates while you are attached, the client waits and reattaches by itself when it wakes. |
 | `doz run NAME [--session S] [-d] -- CMD …` | Open a **new** session running CMD and attach. It exits with CMD's exit code. There is no shell in front, so write `bash -lc '…'` if you want one. A sandbox that is off is started first (`--no-start` refuses instead). |
 | `doz exec NAME [--user U] [--workdir D] [-e K=V] [--timeout S] -- CMD …` | One-shot, no terminal: stdout, stderr and the exit code pass straight through (default timeout 120 s). On agent images it runs as the agent's user in `/workspace`; `--user root` for root. A paused or sleeping sandbox is woken and one that is off is **started** first (its progress on stderr; `--no-wake`, `--no-start` refuse instead); `--json` says so: `"started"`, `"woke"`, `"bootMilliseconds"`. So `doz create NAME … && doz exec NAME -- CMD` just works (or `doz create --start`). |
 | `doz sessions NAME [--screen SESSION [--vt]]` | The sandbox's sessions. While it is paused, asleep or hibernated they are listed from their **saved screens**, and nothing is woken. A shut-down sandbox has none ("no sessions — NAME is shut down"): Start boots it fresh, with new sessions. `--screen SESSION` prints that session's last saved screen as text; `--vt` writes its terminal bytes instead — to a file or a pipe (`> s.vt`, then `cat s.vt` in a terminal redraws it), never straight to a terminal. |
@@ -315,6 +318,98 @@ Saved screens exist only while you can wake the sandbox back: **shut down, reset
 that died with the VM — delete them**, and a shut-down sandbox shows no session screens anywhere (its
 sessions ended with the VM; Start boots it fresh). A session whose program exited has none either.
 Duplicate, fork and templates never copy them.
+
+### The title and the Ctrl-] menu
+
+doz keeps no rows of your terminal for itself. Instead:
+
+- **The title.** While attached, `doz attach` sets your terminal's own title (the window or tab) from
+  `ui.terminal_title` — by default `{sandbox} · {session} · {time}`, e.g. `webapp · claude · 14:05`;
+  the variables are `{sandbox}` `{session}` `{image}` `{time}` (this Mac's, refreshed each minute)
+  `{phase}`. When you detach, the terminal's previous title comes back (iTerm2, Ghostty, kitty and
+  xterm keep a title stack; Terminal.app keeps doz's until something sets another). While doz sets
+  it, the session's own title (Claude Code sets one) is not shown; `doz config set ui.terminal_title
+  ""` leaves the title to the session. A terminal's tab in `doz ui` shows the same text.
+- **The menu.** **Ctrl-]** draws one line over the bottom row: `d detach · n next · p prev · s
+  sessions · Esc back`. `n` / `p` move this same terminal to the sandbox's next / previous session;
+  `s` lists them (`1 shell* · 2 claude · …`) and a number switches; `Esc` (or any other key) goes back.
+  The screen is held while the menu shows and then redrawn cleanly from the session's own screen, so
+  nothing of the menu is left behind. A second **Ctrl-]** — quickly, or at the menu — detaches. With
+  a pipe for input (not a terminal), Ctrl-] detaches at once, as before.
+
+## Session bridges
+
+A session's terminal — `doz attach`/`run`/`up`, or a terminal in `doz ui` — is also how a program in
+the sandbox reaches your Mac for the few things it needs one for. Each bridge goes through the host
+(the one place every terminal passes), is shown to you every time it is used, and can be turned off
+for one sandbox (`doz config set --sandbox NAME KEY VALUE`, a flag of `doz create`, a key in
+`doz_project.yaml`) or for all (`doz config set KEY VALUE`). A bridge acts only while a terminal is
+attached to the session: a program that copies with nobody watching copies nothing.
+
+### The clipboard
+
+When a program copies — Claude Code's copy command, a yank in vim or tmux: the terminal's OSC 52 — the
+text goes on **your Mac's clipboard**, and a notice says so: `SANDBOX copied N chars`, drawn over the
+bottom row of `doz attach` for 3 seconds (then the screen is redrawn), or a message in the corner of
+`doz ui`. Off a terminal (`doz run … > file`) the notice is a line on stderr.
+
+- **A sandbox can never read your clipboard.** A program's request to read it is dropped — it never
+  reaches your terminal either, so no terminal app can answer it for the sandbox — and logged once.
+- **Limits:** 1 MiB per copy; at most 10 copies in 10 seconds per sandbox. More is refused, and said.
+- **The risk:** an agent could put a command on your clipboard for you to paste. The notice tells you
+  every time (the agent's facts say so too); turn the bridge off where you do not want it:
+
+```bash
+doz config set --sandbox NAME sandbox.clipboard off   # this sandbox (applies at once)
+doz config set sandbox.clipboard off                  # every sandbox without its own choice
+doz create NAME --clipboard off …                     # from the start; or `clipboard: off` in doz_project.yaml
+doz config show --sandbox NAME                        # its per-sandbox settings, and whose value each is
+doz config unset --sandbox NAME sandbox.clipboard     # follow the setting again
+```
+
+### The browser, and sign-ins
+
+A sandbox has no browser. Its `xdg-open` (and `$BROWSER`, `open`, `sensible-browser` — every session's
+PATH leads with doz's own, installed at each boot) hands an **http or https** URL to your Mac, which
+opens it in your default browser, and says so: `SANDBOX opened https://… in your browser`. The session
+shows the URL in plain text too.
+
+**Sign-ins that come back to the sandbox.** An agent's browser sign-in (Claude Code's `/login`, most
+OAuth CLIs) listens on the SANDBOX's `localhost:PORT` and asks the provider to send the browser back
+there (`redirect_uri=http://localhost:PORT/…`). When the URL says so, doz forwards your Mac's
+`localhost:PORT` into the sandbox before opening it — the notice says `sign-in callback localhost:PORT
+forwarded (10 min)` — so the browser's last redirect reaches the agent and the login completes. The
+forward is loopback only, one per sandbox (a new sign-in replaces it), and closes 3 s after the callback
+was answered or after 10 minutes. If that port is already in use on your Mac, the notice says the
+sign-in cannot come back.
+
+- **Refused, and said:** anything but http and https (`file:`, `javascript:` …), a URL naming the Mac's
+  own loopback (`http://localhost:3000` from inside is the sandbox's own server — tell the user the
+  address instead), more than 3 URLs in 10 seconds, anything over 2048 bytes.
+- **Off:** `doz config set --sandbox NAME sandbox.browser_bridge off` (or for all, or
+  `doz create --browser-bridge off`, `browser_bridge: off` in `doz_project.yaml`): nothing opens, and
+  the notice says so. A later "Sign in" permission (feature 597) can build on this switch.
+- The shim and the forward helper (`deckhold connect`) arrive with the sandbox's next start; a sandbox
+  woken from before gets the shim at its next session.
+
+### tmux inside a session
+
+Off by default. With `sessions.tmux` on — for every sandbox (`doz config set sessions.tmux true`),
+or one (`doz create --tmux`, `tmux: true` in `doz_project.yaml`, `doz config set --sandbox NAME
+sessions.tmux true`) — each **new** session runs its program inside tmux: windows, panes, copy mode,
+its status bar and its prefix key, **Ctrl-b**. tmux runs *within* doz's own session holder, so
+everything else is unchanged: `doz attach` and **Ctrl-]**, sleep and wake (tmux and its programs
+are where they were), saved screens (tmux's screen, status bar included), browser terminals, and the
+clipboard and browser bridges (a copy and an `xdg-open` from inside tmux reach the Mac). Each session
+has a tmux server of its own (`tmux -L doz-SESSION`), and reopening a session finds a program tmux
+still holds.
+
+Limits: tmux takes Ctrl-b and the mouse (in `doz ui`, Shift+drag still selects text); the kitty
+keyboard protocol and xterm's modifyOtherKeys do not fully pass through tmux, so a program that relies
+on them (Claude Code's richer key handling) sees less; the session's exit code is tmux's (0), not the
+program's. tmux must be in the image: the built-in images this doz prepares have it; a sandbox on an
+image an older doz prepared runs the session without it and says how to get it (`doz image bake`,
+then `doz reset`).
 
 ## Agents and keys
 
@@ -938,16 +1033,20 @@ the others say when they apply (the next sandbox created, the next session, or a
 
 | Section | Settings |
 |---|---|
-| `[ui]` | `boot_view_on_start` (true), `confirm_shutdown` (true), `split_default` (`shell` · `watch` · `attach` · `dialog`), `terminals` (true), `terminal_font_size` (13), `theme` (`auto` · `light` · `dark`), `details_open` (true), `grid_live_tiles` (8, 1–12), `grid_tile_size` (`small` · `medium` · `large`), `progress` (`animated` · `plain`; `$DOZ_PROGRESS`, `--progress auto\|plain`), `open_browser` (`auto` · `always` · `never`; `doz ui --open\|--no-open` — when `doz ui` opens a tab; applies to the next `doz ui`) |
+| `[ui]` | `terminal_title` (`{sandbox} · {session} · {time}` — see "The title and the Ctrl-] menu"; `""` leaves the title to the session), `boot_view_on_start` (true), `confirm_shutdown` (true), `split_default` (`shell` · `watch` · `attach` · `dialog`), `terminals` (true), `terminal_font_size` (13), `theme` (`auto` · `light` · `dark`), `details_open` (true), `grid_live_tiles` (8, 1–12), `grid_tile_size` (`small` · `medium` · `large`), `progress` (`animated` · `plain`; `$DOZ_PROGRESS`, `--progress auto\|plain`), `open_browser` (`auto` · `always` · `never`; `doz ui --open\|--no-open` — when `doz ui` opens a tab; applies to the next `doz ui`) |
 | `[host]` | `idle_timeout_minutes` (5; `$DOZ_HOST_IDLE`), `boot_logs_kept` (5, 1–50; `$DOZ_BOOT_LOGS` — boots kept per sandbox for `doz console --boot N` and the Boot log), `screen_capture_minutes` (5, 0–1440; `$DOZ_SCREEN_CAPTURE` — how often a running sandbox's changed session screens are saved; 0 = only at pause, sleep and hibernate), `keepalive` (false — for a store that has not chosen with `doz account keepalive`) |
 | `[store]` | `path` (`--store`, `$DOZ_STORE`) |
 | `[claude]` | `permissions` (`skip` · `ask`) — Claude Code's own prompts in a claude-code sandbox; `-e DOZ_CLAUDE_PERMISSIONS=…` on `run`/`exec` still wins |
 | `[defaults]` | `cpus` (2), `nat_subnet` (a free one; `$DOZ_SUBNET`) |
-| `[sandbox]` | `agent_sudo` (true — the agent's passwordless sudo inside claude-code and pi sandboxes; a sandbox's `--no-agent-sudo` / `agent_sudo` wins; from its next session and boot), `timezone` (`mac` — the Mac's zone, read again at every start and wake, so a sandbox that slept while you travelled wakes in your new zone — or a zone like `Australia/Sydney`; the agent's facts say it) |
+| `[sandbox]` | `agent_sudo` (true — the agent's passwordless sudo inside claude-code and pi sandboxes; a sandbox's `--no-agent-sudo` / `agent_sudo` wins; from its next session and boot), `timezone` (`mac` — the Mac's zone, read again at every start and wake, so a sandbox that slept while you travelled wakes in your new zone — or a zone like `Australia/Sydney`; the agent's facts say it), `clipboard` (`write` · `off` — the clipboard bridge, see "Session bridges"; applies at once), `browser_bridge` (`on` · `off` — xdg-open to the Mac's browser and a sign-in's callback; applies at once) |
+| `[sessions]` | `tmux` (false — new sessions run inside tmux; see "tmux inside a session"; from the next session) |
 | `[images]` | `claude_code_version`, `pi_version` (`latest`, or an exact version like `2.1.227` — see "Agent versions" below) |
 | `[images.lab]` · `[images.claude-code]` · `[images.pi]` | `memory_mib` (1024 · 2048 · 2048), `network` (`bake` · `agent` · `agent`) — a custom image follows the image it was saved from |
 | `[kernel]` | `path` (`$DOZ_KERNEL`), `cache` (`$DOZ_KERNEL_CACHE`) |
 
+- **Per sandbox:** `sandbox.clipboard`, `sandbox.browser_bridge`, `sessions.tmux` and `sandbox.agent_sudo` can also be one sandbox's own
+  (`doz config set|get|unset|show --sandbox NAME …`, `doz create` flags, `doz_project.yaml`); its
+  value wins over the file's.
 - **Precedence:** a command-line flag, then its environment variable, then the file, then the
   default. A value the environment sets is read-only on the Settings page (change it where it is
   set), and so is a host path (`store.path`, `kernel.*`: `doz config set`).

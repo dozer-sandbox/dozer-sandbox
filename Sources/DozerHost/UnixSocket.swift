@@ -158,11 +158,14 @@ public enum ClientWire {
 
     public static func hello(_ s: TermSize) -> [UInt8] { [0xFF, 0x48] + be(s) }
     public static func resize(_ s: TermSize) -> [UInt8] { [0xFF, 0x52] + be(s) }
+    /// 599: REPAINT (`0xFF 'S' 0 0 0 0`) — send this viewer a fresh SNAPSHOT of the session's screen (the
+    /// program is not resized): what clears a notice or the Ctrl-] menu the client drew over it.
+    public static let repaint: [UInt8] = [0xFF, 0x53, 0, 0, 0, 0]
     private static func be(_ s: TermSize) -> [UInt8] {
         [UInt8(s.cols >> 8), UInt8(s.cols & 0xFF), UInt8(s.rows >> 8), UInt8(s.rows & 0xFF)]
     }
 
-    public enum Frame: Equatable { case hello(TermSize), resize(TermSize), input(Data) }
+    public enum Frame: Equatable { case hello(TermSize), resize(TermSize), input(Data), repaint }
 
     /// Incremental parser for the client → host direction.
     public struct Parser {
@@ -181,6 +184,7 @@ public enum ClientWire {
                     let size = TermSize(cols: UInt16(b[i + 2]) << 8 | UInt16(b[i + 3]), rows: UInt16(b[i + 4]) << 8 | UInt16(b[i + 5]))
                     if b[i + 1] == 0x48 { flush(); out.append(.hello(size)); i += 6; continue }
                     if b[i + 1] == 0x52 { flush(); out.append(.resize(size)); i += 6; continue }
+                    if b[i + 1] == 0x53 { flush(); out.append(.repaint); i += 6; continue }
                 }
                 input.append(b[i]); i += 1
             }
@@ -208,6 +212,52 @@ public enum ClientWire {
         case .stopped: token = "stopped"
         }
         return Data("\u{1B}[0m\(sentinelPrefix)\(token)\(sentinelEnd)\r\n[doz] \(text)\r\n".utf8)
+    }
+
+    // MARK: 599 — what a bridge did, told to each viewer
+
+    /// `ESC ] 777 ; doz ; notice ; KIND ; TEXT BEL` — in the host → client stream, like the ended notice.
+    public static let noticePrefix = "\u{1B}]777;doz;notice;"
+    /// What `holdBack` looks for: the start of either notice.
+    public static let dozPrefix = "\u{1B}]777;doz;"
+
+    /// A notice for the viewer (kind and text with every control character removed, the text capped).
+    public static func notice(_ n: BridgeNotice) -> Data {
+        func clean(_ s: String, _ max: Int) -> String {
+            String(String(s.unicodeScalars.filter { $0.value >= 0x20 && $0.value != 0x7F && !(0x80...0x9F).contains($0.value) }).prefix(max))
+        }
+        let kind = clean(n.kind, 32).replacingOccurrences(of: ";", with: "")
+        return Data("\(noticePrefix)\(kind);\(clean(n.text, 400))\u{07}".utf8)
+    }
+
+    /// How many trailing bytes are a notice whose end has not arrived yet (a whole `ESC]777;doz;` with no
+    /// BEL after it, within the last KiB) — held for the next read, so no piece of a notice is shown.
+    public static func unfinishedNotice(_ bytes: [UInt8]) -> Int {
+        let prefix = Array(dozPrefix.utf8)
+        let from = max(0, bytes.count - 1024)
+        var at: Int?
+        var i = from
+        while i < bytes.count, let r = bytes[i...].firstRange(of: prefix) { at = r.lowerBound; i = r.upperBound }
+        guard var at, !bytes[at...].contains(0x07) else { return 0 }
+        // The ended notice's `ESC[0m` in front of it is the notice's too.
+        if at >= 4, Array(bytes[(at - 4)..<at]) == [0x1B, 0x5B, 0x30, 0x6D] { at -= 4 }
+        return bytes.count - at
+    }
+
+    /// Takes every complete notice out of `bytes`, in order.
+    public static func takeNotices(_ bytes: inout [UInt8]) -> [BridgeNotice] {
+        let prefix = Array(noticePrefix.utf8)
+        var found: [BridgeNotice] = []
+        var from = 0
+        while from < bytes.count, let r = bytes[from...].firstRange(of: prefix) {
+            guard let end = bytes[r.upperBound...].firstIndex(of: 0x07) else { break }
+            let body = String(decoding: bytes[r.upperBound..<end], as: UTF8.self)
+            let parts = body.split(separator: ";", maxSplits: 1, omittingEmptySubsequences: false)
+            found.append(BridgeNotice(String(parts[0]), parts.count > 1 ? String(parts[1]) : ""))
+            bytes.removeSubrange(r.lowerBound...end)
+            from = r.lowerBound
+        }
+        return found
     }
 
     /// Finds a notice in `bytes` (which may hold more): the ending and where the notice starts.

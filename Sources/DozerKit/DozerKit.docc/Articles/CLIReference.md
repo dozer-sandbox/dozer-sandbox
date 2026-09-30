@@ -61,7 +61,7 @@ doz uninstall [--keep-store] [--keep-config] [--yes]
   first if it never was). **`up` with no name**, in that folder, creates, starts or wakes exactly
   that sandbox, with the folder at `/workspace`, starts its `sessions` and attaches to the first.
   The file is YAML with a closed set of keys — `version`, `name`, `image`, `cpus`, `memory`,
-  `network`, `account`, `sessions`, `agent_prompt`, `agent_prompt_mode`, `agent_sudo`; an unknown key or a bad
+  `network`, `account`, `sessions`, `agent_prompt`, `agent_prompt_mode`, `agent_sudo`, `clipboard`, `browser_bridge`, `tmux`; an unknown key or a bad
   value is an error naming its line.
 
   ```yaml
@@ -159,7 +159,7 @@ doz builder start [--yes]      # container system start --enable-kernel-install 
 
 | command | what |
 |---|---|
-| `attach NAME [SESSION] [--no-wake]` | Your terminal becomes that session. **Ctrl-]** detaches (`--detach-key ctrl-x\|none`). A paused or sleeping sandbox wakes first unless `--no-wake`. Hibernated while attached: the client waits and reattaches by itself on wake. |
+| `attach NAME [SESSION] [--no-wake]` | Your terminal becomes that session. **Ctrl-]** opens a one-line menu over the bottom row (`d detach · n next · p prev · s sessions · Esc back`; n/p/s move this terminal to another session of the sandbox; removed by a clean redraw from the session's snapshot); a second Ctrl-] (quickly, or at the menu) detaches — in every keyboard encoding (`--detach-key ctrl-x\|none`; a pipe on stdin detaches at once). The terminal's title is `ui.terminal_title` (`{sandbox} · {session} · {time}`; `{image}` `{phase}` too), refreshed each minute, the terminal's own pushed and popped (CSI 22/23 t); the session's own title is kept out meanwhile (`""`: leave it to the session). A paused or sleeping sandbox wakes first unless `--no-wake`. Hibernated while attached: the client waits and reattaches by itself on wake. |
 | `run NAME [--session S] [-d] -- CMD …` | A **new** session running `CMD`, attached; exits with `CMD`'s exit code. No shell in front — write `bash -lc '…'` for one. |
 | `exec NAME [--user U] [--workdir D] [-e K=V] [--timeout S] -- CMD …` | One-shot, no terminal: stdout, stderr and the exit code pass straight through (default timeout 120 s). Agent images run as the agent's user in `/workspace`; `--user root` for root. A sleeping sandbox is woken and an off one started first (594; `--no-wake`, `--no-start`; `--json` has `started`, `woke`, `bootMilliseconds`) — `run` starts one too. |
 | `sessions NAME` | The sandbox's terminal sessions. |
@@ -167,6 +167,35 @@ doz builder start [--yes]      # container system start --enable-kernel-install 
 
 **RAM held** in `ls` is what the VM costs the Mac right now: the allocation, less what the memory
 balloon returned after a wake — shown as `—` when the sandbox is off or hibernated.
+
+### Session bridges
+
+The host reads every attached terminal's output (`attach`/`run`/`up`, `doz ui`) for the sequences a
+bridge owns and takes them out; each use is shown as a notice (over the bottom row for 3 s, then a
+redraw; a toast in `doz ui`; a stderr line off a terminal). A bridge acts only while a terminal is
+attached.
+
+- **Clipboard (599):** OSC 52 copies reach the Mac clipboard — `SANDBOX copied N chars`. A READ is
+  never answered and never reaches the outer terminal (logged once per session). 1 MiB per copy, 10
+  copies per 10 s per sandbox. `sandbox.clipboard = write | off`; per sandbox with
+  `doz config set --sandbox NAME sandbox.clipboard off`, `doz create --clipboard off`, or
+  `clipboard: off` in `doz_project.yaml`. The risk — an agent can put a command on the clipboard — is
+  why every copy is shown, and why the agent's facts say so.
+- **Browser and sign-ins (599):** the guest's `xdg-open` (`$BROWSER`, `open`, `sensible-browser`;
+  `/usr/local/lib/doz/bin`, first on every session's PATH, written at each boot) hands an http(s)
+  URL to the Mac's default browser — `SANDBOX opened https://… in your browser`. A URL whose
+  `redirect_uri` is `http://localhost:PORT` or `127.0.0.1:PORT` (1024–65535) gets the Mac's
+  `localhost:PORT` forwarded into the sandbox's (each connection a guest `deckhold connect -p PORT`)
+  until 3 s after the callback was answered, 10 min at most; one per sandbox. Refused: other
+  schemes, the Mac's own loopback, > 3 per 10 s, > 2048 bytes. `sandbox.browser_bridge = on | off`,
+  per sandbox as the clipboard (`--browser-bridge`, `browser_bridge:`). A login shell finds the shim
+  through `/etc/profile.d/doz-browser-bridge.sh`.
+- **tmux (599):** `sessions.tmux` (default off; `doz create --tmux`, `tmux: true`, per sandbox) runs each
+  new session as `tmux -L doz-SESSION -f /usr/local/lib/doz/tmux.conf new-session -A -s SESSION CMD…`
+  inside deckhold: attach/detach, sleep/wake, saved screens, browser terminals and both bridges keep
+  working (mouse on, set-clipboard on). Limits: Ctrl-b and the mouse are tmux's; the kitty keyboard
+  protocol and modifyOtherKeys do not fully pass through; the exit code is tmux's. No tmux in the
+  image (an older doz's): the session runs without it and `run`/`up` say so.
 
 ### Agents, keys and accounts
 
@@ -496,6 +525,9 @@ doz config set KEY VALUE   # write it to the file (checked against its type and 
 doz config unset KEY       # back to the default (commented out again)
 doz config init            # write the file: every setting listed, commented out at its default
 doz config path            # ${XDG_CONFIG_HOME:-~/.config}/dozer-sandbox/doz.toml
+doz config show|get|set|unset --sandbox NAME …   # 599: one sandbox's own value of a per-sandbox setting
+                                                  # (sandbox.clipboard, sandbox.browser_bridge, sessions.tmux,
+                                                  #  sandbox.agent_sudo) — it wins over the file
 ```
 
 One settings file, `doz.toml`, lists every setting grouped in sections (`[ui]`, `[host]`,

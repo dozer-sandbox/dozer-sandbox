@@ -13,10 +13,12 @@ final class BaseImagesTests: XCTestCase {
 
     /// The two Node images are EXACTLY what they were before 596 (canonical JSON sha256 captured from
     /// fe9e746, before any 596 change) — so every prepared image in every store keeps its key.
+    /// 599 changed them ON PURPOSE (tmux joined the dev baseline; W28's warning names it — "adds: tmux"):
+    /// before 599 they were 7dc167ad…, 39946455…, 04976cf1…. Change these only with a recipe change.
     func test_nodeImagesAreByteIdentical() throws {
-        XCTAssertEqual(Self.sha(AgentImages.claudeCode.canonicalJSON), "7dc167adcd814b2e5cf1e6242e96a63500714f8fcfc2771bc8c6c72ff77ba031")
-        XCTAssertEqual(Self.sha(AgentImages.pi.canonicalJSON), "399464553ba3ce28ae6019a1774049c0d765e2211b4eeec28cb03b901bdf1735")
-        XCTAssertEqual(Self.sha(AgentImages.claudeCode(release).canonicalJSON), "04976cf1eb9a6aee858c540e263dd3762c00dc30b8072a02a08c7f175a031d34")
+        XCTAssertEqual(Self.sha(AgentImages.claudeCode.canonicalJSON), "c698b09dcb3020fa9336a4e455d400c454ea4ff0659de973c19d63aadea8ef73")
+        XCTAssertEqual(Self.sha(AgentImages.pi.canonicalJSON), "33c6ed411162d35ebd8bc6594d0727f119e34071e55e43351f5bd4ebc47d3e47")
+        XCTAssertEqual(Self.sha(AgentImages.claudeCode(release).canonicalJSON), "cffee713e6854e3d68618a1fceda00fd7af656471ef68c843bb1287a8a20bedb")
         // Composed from the catalogue's Node at its pin: the same spec.
         let node = BaseCatalogue.base("node")!
         XCTAssertEqual(node.pinnedReference, AgentImages.nodeBase)

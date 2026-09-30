@@ -55,13 +55,173 @@ nonisolated(unsafe) private var outerModes = TerminalModes()
 nonisolated(unsafe) private var outerRestored = false
 private let outputLock = NSLock()
 
-/// Write session bytes to the terminal (following the modes they set) — unless it was restored.
+/// Write session bytes to the terminal (following the modes they set) — unless it was restored, or the
+/// Ctrl-] menu is up (599: its line stays; the repaint that closes it brings the screen up to date).
 private func writeSession(_ bytes: ArraySlice<UInt8>) {
     guard !bytes.isEmpty else { return }
     outputLock.lock(); defer { outputLock.unlock() }
-    guard !outerRestored else { return }
-    outerModes.feed(bytes)
-    UnixSocket.writeAll(STDOUT_FILENO, Data(bytes))
+    guard !outerRestored, !menuOpen else { return }
+    // 599 (594.B4): while doz owns the title, the session's own title sequences are taken out.
+    let out = titleFilter != nil ? titleFilter!.feed(bytes) : Array(bytes)
+    outerModes.feed(out)
+    UnixSocket.writeAll(STDOUT_FILENO, Data(out))
+}
+
+// MARK: 599 (594.B4) — the terminal's title (`ui.terminal_title`), under `outputLock`
+
+nonisolated(unsafe) private var titleTemplate: String?
+nonisolated(unsafe) private var titleFilter: TitleFilter?
+nonisolated(unsafe) private var titlePushed = false
+nonisolated(unsafe) private var titleVars: (sandbox: String, session: String, image: String?, phase: String?) = ("", "", nil, nil)
+
+/// Set the terminal's title from the template (the first time, the terminal's own is pushed first:
+/// `CSI 22;0 t` — popped on every way out).
+private func setTitle(session: String? = nil, image: String? = nil, phase: String? = nil) {
+    outputLock.lock(); defer { outputLock.unlock() }
+    guard let t = titleTemplate, !outerRestored else { return }
+    if let session { titleVars.session = session }
+    if let image { titleVars.image = image }
+    if let phase { titleVars.phase = phase }
+    var s = ""
+    if !titlePushed { s += "\u{1B}[22;0t"; titlePushed = true }
+    s += "\u{1B}]2;" + TerminalTitle.render(t, sandbox: titleVars.sandbox, session: titleVars.session, image: titleVars.image, phase: titleVars.phase) + "\u{07}"
+    UnixSocket.writeAll(STDOUT_FILENO, Data(s.utf8))
+}
+
+// MARK: 599 (594.B4) — the Ctrl-] menu
+
+/// Guarded by `outputLock` (it gates the session's bytes).
+nonisolated(unsafe) private var menuOpen = false
+/// The live sessions the menu's `s` listed (nil: the main line).
+nonisolated(unsafe) private var menuSessions: [String]?
+/// A session the menu switched to — the main loop reattaches there (under `socketLock`).
+nonisolated(unsafe) private var switchTarget: String?
+nonisolated(unsafe) private var pendingNotices: [BridgeNotice] = []
+private let menuLine = "d detach · n next · p prev · s sessions · Esc back"
+
+private func menuIsOpen() -> Bool { outputLock.withLock { menuOpen } }
+
+private func openMenu() {
+    outputLock.withLock { menuOpen = true; menuSessions = nil }
+    socketLock.lock(); overlayGeneration += 1; let mine = overlayGeneration; socketLock.unlock()
+    drawBottomLine("doz: " + menuLine)
+    // Nobody at the keyboard: the menu goes by itself (the screen was held while it showed).
+    DispatchQueue.global().asyncAfter(deadline: .now() + 15) {
+        socketLock.lock(); let current = overlayGeneration == mine; socketLock.unlock()
+        if current, menuIsOpen() { closeMenu() }
+    }
+}
+
+/// Close the menu: a clean redraw from deckhold's snapshot (and any notice that came meanwhile).
+private func closeMenu(repaint: Bool = true) {
+    let notices: [BridgeNotice] = outputLock.withLock {
+        menuOpen = false
+        menuSessions = nil
+        defer { pendingNotices = [] }
+        return pendingNotices
+    }
+    socketLock.lock(); overlayGeneration += 1; socketLock.unlock()
+    if repaint { requestRepaint() }
+    if !notices.isEmpty {
+        DispatchQueue.global().asyncAfter(deadline: .now() + 0.4) { for n in notices { showNotice(n) } }
+    }
+}
+
+/// The live sessions of `sandbox`, in the guest's order (empty when they cannot be read).
+private func liveSessions(store: DozerStore, sandbox: String) -> [String] {
+    guard let m = try? HostClient.request(HostRequest(.sessions, name: sandbox), store: store, autostart: false),
+          m.ok == true, let rows = try? m.result?.decode([SessionRow].self) else { return [] }
+    return rows.filter { !$0.ended && $0.saved != true }.map(\.name)
+}
+
+/// Reattach this client to `target` (the main loop does, once the current connection is closed).
+private func switchSession(to target: String) {
+    socketLock.lock(); switchTarget = target; let fd = socketFD; socketLock.unlock()
+    closeMenu(repaint: false)                          // the new session's snapshot is the redraw
+    if fd >= 0 { Darwin.shutdown(fd, SHUT_RDWR) }
+}
+
+private func takeSwitch() -> String? {
+    socketLock.lock(); defer { socketLock.unlock() }
+    let t = switchTarget
+    switchTarget = nil
+    return t
+}
+
+/// A key at the menu. True: detach.
+private func menuKey(_ bytes: [UInt8], store: DozerStore, sandbox: String) -> Bool {
+    let listed: [String]? = outputLock.withLock { menuSessions }
+    switch MenuKey.decode(bytes) {
+    case .release:
+        return false
+    case .char("d"), .char("D"):
+        return true
+    case .char(let c) where listed == nil && (c == "n" || c == "p"):
+        let all = liveSessions(store: store, sandbox: sandbox)
+        let current = attachedSession?.session
+        guard all.count > 1, let at = all.firstIndex(where: { $0 == current }) ?? (all.isEmpty ? nil : 0) else {
+            drawBottomLine("doz: no other session in \(sandbox) — " + menuLine)
+            return false
+        }
+        switchSession(to: all[(at + (c == "n" ? 1 : all.count - 1)) % all.count])
+    case .char("s") where listed == nil:
+        let all = liveSessions(store: store, sandbox: sandbox)
+        outputLock.withLock { menuSessions = Array(all.prefix(9)) }
+        let current = attachedSession?.session
+        let items = all.prefix(9).enumerated().map { "\($0.offset + 1) \($0.element)\($0.element == current ? "*" : "")" }
+        drawBottomLine("doz: " + (items.isEmpty ? "no sessions" : items.joined(separator: " · ")) + " — 1–9 switch · Esc back")
+    case .char(let c) where listed != nil && c.isNumber:
+        let i = (c.wholeNumberValue ?? 0) - 1
+        guard let list = listed, list.indices.contains(i) else { return false }
+        if list[i] == attachedSession?.session { closeMenu() } else { switchSession(to: list[i]) }
+    default:
+        closeMenu()                                    // Esc, or any other key: back to the session
+    }
+    return false
+}
+
+// MARK: 599 — a line drawn over the bottom row (a bridge's notice; B4's Ctrl-] menu), removed by a repaint
+
+/// Bumped by every drawing: a repaint scheduled for an older one is skipped.
+nonisolated(unsafe) private var overlayGeneration = 0
+
+/// Draw `text` over the bottom row (cursor and attributes saved and restored around it). False when
+/// stdout is not a terminal (nothing is drawn).
+@discardableResult
+private func drawBottomLine(_ text: String) -> Bool {
+    guard rawMode, isatty(STDOUT_FILENO) != 0 else { return false }
+    let size = terminalSize()
+    let width = max(10, Int(size.cols) - 2)
+    let shown = text.count > width ? String(text.prefix(width - 1)) + "…" : text
+    let pad = String(repeating: " ", count: max(0, Int(size.cols) - shown.count - 1))
+    outputLock.lock(); defer { outputLock.unlock() }
+    guard !outerRestored else { return false }
+    // DECSC, bottom row, clear it, reverse video, DECRC. Written to the terminal, not the session model.
+    UnixSocket.writeAll(STDOUT_FILENO, Data("\u{1B}7\u{1B}[\(size.rows);1H\u{1B}[2K\u{1B}[7m \(shown)\(pad)\u{1B}[0m\u{1B}8".utf8))
+    return true
+}
+
+/// Ask the host for a fresh snapshot of the session's screen (what removes a drawn line).
+private func requestRepaint() {
+    let fd = currentSocket()
+    if fd >= 0 { UnixSocket.writeAll(fd, Data(ClientWire.repaint)) }
+}
+
+/// 599 (594.B1/B2): what the host did for this session — shown every time: over the bottom row for 3 s
+/// (then a repaint), or as a line on stderr when this is not a terminal.
+private func showNotice(_ n: BridgeNotice) {
+    // At the Ctrl-] menu: shown once it closes (never lost, never over the menu).
+    let held: Bool = outputLock.withLock { if menuOpen { pendingNotices.append(n) }; return menuOpen }
+    if held { return }
+    socketLock.lock(); overlayGeneration += 1; let mine = overlayGeneration; socketLock.unlock()
+    guard drawBottomLine("doz: " + n.text) else {
+        FileHandle.standardError.write(Data("[doz] \(n.text)\n".utf8))
+        return
+    }
+    DispatchQueue.global().asyncAfter(deadline: .now() + 3) {
+        socketLock.lock(); let current = overlayGeneration == mine; socketLock.unlock()
+        if current { requestRepaint() }
+    }
 }
 
 /// Put the outer terminal back (once): its modes, when stdout is a terminal, then the saved termios.
@@ -69,7 +229,8 @@ private func restoreTerminal() {
     outputLock.lock()
     if !outerRestored {
         outerRestored = true
-        if isatty(STDOUT_FILENO) != 0 { UnixSocket.writeAll(STDOUT_FILENO, Data(outerModes.restoreSequence.utf8)) }
+        // 599 (594.B4): and the terminal's own title back (pushed when doz first set one).
+        if isatty(STDOUT_FILENO) != 0 { UnixSocket.writeAll(STDOUT_FILENO, Data((outerModes.restoreSequence + (titlePushed ? "\u{1B}[23;0t" : "")).utf8)) }
     }
     outputLock.unlock()
     restoreTTY()
@@ -139,10 +300,40 @@ enum AttachClient {
             retained.append(s)
         }
 
+        // 599 (594.B4): the terminal's title, while attached (a terminal on stdout, a template set).
+        if isatty(STDOUT_FILENO) != 0, case .string(let t) = DozerSettings.load().resolve(SettingKey.terminalTitle).value, !t.isEmpty {
+            outputLock.withLock {
+                titleTemplate = t
+                titleFilter = TitleFilter()
+                titleVars = (sandbox, session ?? "", nil, nil)
+            }
+            let tick = DispatchSource.makeTimerSource(queue: .global())
+            tick.schedule(deadline: .now() + TerminalTitle.secondsToNextMinute(), repeating: 60)
+            tick.setEventHandler { setTitle() }
+            tick.resume()
+            retainedTimer = tick
+        }
+
+        func detachNow(_ before: [UInt8]) -> Never {
+            let fd = currentSocket()
+            if fd >= 0, !before.isEmpty { UnixSocket.writeAll(fd, Data(before)) }
+            restoreTerminal()
+            if !quiet {
+                // 594 (W17): the shortest command that reattaches from here.
+                let again = attachedSession.map { reattachCommand(sandbox: sandbox, session: $0.session, defaultSession: $0.defaultSession) }
+                    ?? "doz attach \(sandbox)\(session.map { " \($0)" } ?? "")"
+                say("detached — the session keeps running (\(again))")
+            }
+            finish(0)
+        }
+
         // Keyboard → host, for the whole life of the client. Dropped while disconnected or held.
         Thread.detachNewThread {
             var buf = [UInt8](repeating: 0, count: 4096)
             var scanner = detachKey.map(DetachKeyScanner.init(key:))
+            // 599 (594.B4): Ctrl-] opens a one-line menu (a terminal on both ends); a second press detaches.
+            let menuAllowed = rawMode && isatty(STDOUT_FILENO) != 0
+            var lastPress = Date.distantPast
             while true {
                 let n = read(STDIN_FILENO, &buf, buf.count)
                 if n < 0 && errno == EINTR { continue }
@@ -153,23 +344,31 @@ enum AttachClient {
                     return
                 }
                 var bytes = Array(buf[0..<n])
+                if menuIsOpen() {
+                    // At the menu: the detach key (any encoding) detaches; the rest are menu keys.
+                    if scanner != nil, case .detach(let before, _) = scanner!.scan(bytes) { detachNow(before) }
+                    if menuKey(bytes, store: store, sandbox: sandbox) { detachNow([]) }
+                    continue
+                }
                 // 594 (W16): the detach key in every encoding the session may have put the terminal in
                 // (legacy byte, kitty CSI-u, modifyOtherKeys) — found on the FIRST press, never forwarded.
                 if scanner != nil {
                     switch scanner!.scan(bytes) {
                     case .forward(let b):
                         bytes = b
-                    case .detach(let before):
+                    case .detach(let before, let after):
+                        guard menuAllowed else { detachNow(before) }
+                        // A quick double press is a plain detach.
+                        if Date().timeIntervalSince(lastPress) < 0.5 { detachNow(before) }
+                        lastPress = Date()
                         let fd = currentSocket()
                         if fd >= 0, !before.isEmpty { UnixSocket.writeAll(fd, Data(before)) }
-                        restoreTerminal()
-                        if !quiet {
-                            // 594 (W17): the shortest command that reattaches from here.
-                            let again = attachedSession.map { reattachCommand(sandbox: sandbox, session: $0.session, defaultSession: $0.defaultSession) }
-                                ?? "doz attach \(sandbox)\(session.map { " \($0)" } ?? "")"
-                            say("detached — the session keeps running (\(again))")
+                        openMenu()
+                        if !after.isEmpty {
+                            if case .detach(let b2, _) = scanner!.scan(after) { detachNow(b2) }
+                            if menuKey(after, store: store, sandbox: sandbox) { detachNow([]) }
                         }
-                        finish(0)
+                        continue
                     }
                 }
                 if bytes.isEmpty { continue }
@@ -213,7 +412,11 @@ enum AttachClient {
             first = false
             resolvedSession = reply.result?["session"]?.stringValue ?? resolvedSession
             if let s = resolvedSession { setAttached(s, reply.result?["defaultSession"]?.stringValue) }
-            if reply.result?["state"]?.stringValue == "held" {
+            // 599 (594.B4): the title follows the session (a switch, a hold, a wake).
+            let held = reply.result?["state"]?.stringValue == "held"
+            setTitle(session: resolvedSession, image: reply.result?["image"]?.stringValue,
+                     phase: held ? reply.result?["phase"]?.stringValue ?? "asleep" : "running")
+            if held {
                 if !announcedHeld && !quiet {
                     let phase = reply.result?["phase"]?.stringValue.map { Out.phaseLabel($0) } ?? "not running"
                     say("\(sandbox) is \(phase) — waiting for it to run (\(detachKey.map(describeKey) ?? "close the terminal") to detach)")
@@ -228,11 +431,14 @@ enum AttachClient {
             var buf = [UInt8](repeating: 0, count: 65536)
             var ending: ClientWire.Ending?
             while true {
+                // 599: a bridge's notice (removed from the bytes; drawn once they are written).
+                let notices = ClientWire.takeNotices(&pending)
                 if let (e, start) = ClientWire.findEnding(in: pending) {
                     writeOut(pending[..<start])
                     let rest = pending[start...]
                     // The session is over: the terminal is put back before the host's last word.
                     restoreTerminal()
+                    for n in notices { say(n.text) }
                     if let bel = rest.firstIndex(of: 0x07) {
                         let text = String(decoding: rest[(bel + 1)...], as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
                         if !quiet && !text.isEmpty { say(text.replacingOccurrences(of: "[doz] ", with: "")) }
@@ -243,12 +449,19 @@ enum AttachClient {
                 let hold = holdBack(pending)
                 writeOut(pending[..<(pending.count - hold)])
                 pending = Array(pending.suffix(hold))
+                for n in notices { showNotice(n) }
                 let n = read(client.fd, &buf, buf.count)
                 if n < 0 && errno == EINTR { continue }
                 if n <= 0 { break }
                 pending += buf[0..<n]
             }
             setSocket(-1)
+            // 599 (594.B4): the menu switched sessions — attach there (the same client, the same terminal).
+            if ending == nil, let target = takeSwitch() {
+                resolvedSession = target
+                announcedHeld = false
+                continue
+            }
             if let ending {
                 switch ending {
                 case .exited(let c): finish(c)
@@ -264,13 +477,17 @@ enum AttachClient {
     }
 
     nonisolated(unsafe) private static var retained: [DispatchSourceSignal] = []
+    nonisolated(unsafe) private static var retainedTimer: DispatchSourceTimer?
 
     private static func writeOut(_ bytes: ArraySlice<UInt8>) { writeSession(bytes) }
 
     /// How many trailing bytes might be the start of the ended notice (hold them for the next read).
     static func holdBack(_ bytes: [UInt8]) -> Int {
-        let prefix = Array(ClientWire.sentinelPrefix.utf8)
-        let window = min(bytes.count, prefix.count + 24)
+        // 599: either of the host's notices (`ended`, and a bridge's `notice`) — they share this start.
+        let prefix = Array(ClientWire.dozPrefix.utf8)
+        let unfinished = ClientWire.unfinishedNotice(bytes)
+        if unfinished > 0 { return unfinished }
+        let window = min(bytes.count, ClientWire.sentinelPrefix.utf8.count + 24)
         guard window > 0 else { return 0 }
         for i in (bytes.count - window)..<bytes.count where bytes[i] == 0x1B {
             let tail = Array(bytes[i...])

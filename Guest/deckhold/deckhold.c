@@ -113,6 +113,7 @@
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <netinet/in.h>
 #include <poll.h>
 #include <signal.h>
 #include <stdarg.h>
@@ -640,6 +641,10 @@ static int serve(int argc, char **argv, const char *name, uint16_t cols, uint16_
     if (S.child < 0) { logf_("forkpty: %s", strerror(errno)); return 1; }
     if (S.child == 0) {
         setenv("TERM", "xterm-256color", 1);
+        /* 599: the session's own terminal, for a helper that has lost its controlling terminal (a
+         * browser opener that setsid()s its child) and still has something to say to the viewer —
+         * the xdg-open shim of the browser bridge writes its marker here. */
+        { const char *tty = ttyname(0); if (tty) setenv("DOZ_TTY", tty, 1); }
         reset_signals();
         execvp(argv[0], argv);
         fprintf(stderr, "deckhold: exec %s: %s\n", argv[0], strerror(errno));
@@ -934,6 +939,45 @@ static int ls(void) {
     return 0;
 }
 
+/* ── connect (599) ───────────────────────────────────────────────────────────────────────── */
+
+/* `deckhold connect -p PORT`: stdin/stdout ⇄ one TCP connection to this guest's loopback PORT
+ * (127.0.0.1, else ::1) — how the host forwards a sign-in's localhost callback from the Mac into the
+ * sandbox (the browser bridge), as a plain exec: no network interface, no listener in the guest.
+ * stdin's end half-closes the socket (the request is complete); the socket's end ends the command.
+ * Exit 3 when nothing listens there. */
+static int connect_port(int port) {
+    int fd = -1;
+    struct sockaddr_in a4 = { .sin_family = AF_INET, .sin_port = htons((uint16_t)port), .sin_addr.s_addr = htonl(INADDR_LOOPBACK) };
+    fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (fd >= 0 && connect(fd, (struct sockaddr *)&a4, sizeof a4) != 0) { close(fd); fd = -1; }
+    if (fd < 0) {
+        struct sockaddr_in6 a6 = { .sin6_family = AF_INET6, .sin6_port = htons((uint16_t)port), .sin6_addr = IN6ADDR_LOOPBACK_INIT };
+        fd = socket(AF_INET6, SOCK_STREAM, 0);
+        if (fd >= 0 && connect(fd, (struct sockaddr *)&a6, sizeof a6) != 0) { close(fd); fd = -1; }
+    }
+    if (fd < 0) { fprintf(stderr, "deckhold: connect: nothing listens on localhost:%d\n", port); return 3; }
+    signal(SIGPIPE, SIG_IGN);
+    bool in_open = true;
+    uint8_t b[16384];
+    for (;;) {
+        struct pollfd p[2] = { { .fd = fd, .events = POLLIN }, { .fd = in_open ? 0 : -1, .events = POLLIN } };
+        if (poll(p, 2, -1) < 0) { if (errno == EINTR) continue; break; }
+        if (p[0].revents & (POLLIN | POLLHUP | POLLERR)) {
+            ssize_t n = read(fd, b, sizeof b);
+            if (n <= 0) break;
+            if (!write_all(1, b, (size_t)n)) break;
+        }
+        if (in_open && (p[1].revents & (POLLIN | POLLHUP | POLLERR))) {
+            ssize_t n = read(0, b, sizeof b);
+            if (n <= 0) { in_open = false; shutdown(fd, SHUT_WR); }
+            else if (!write_all(fd, b, (size_t)n)) break;
+        }
+    }
+    close(fd);
+    return 0;
+}
+
 /* ── main ───────────────────────────────────────────────────────────────────────────────── */
 
 static int usage(void) {
@@ -945,6 +989,7 @@ static int usage(void) {
             "                                   ended ones as NAME<TAB>ended=CODE\n"
             "       deckhold dump -s NAME       the holder's active screen as plain text + cursor\n"
             "       deckhold exec -- CMD [ARGS...]   reset every signal to default, then exec CMD\n"
+            "       deckhold connect -p PORT    stdio ⇄ TCP localhost:PORT in this guest (the browser bridge)\n"
             "sockets live in $DECKHOLD_DIR (default /run/deckhold)\n");
     return 2;
 }
@@ -971,10 +1016,12 @@ int main(int argc, char **argv) {
     unsigned cols = 80, rows = 24;
     size_t scrollback = 10u << 20;       /* BYTES — ~9,000 rows at 120 columns */
     bool fg = false;
+    int port = 0;
     int i = 2;
     for (; i < argc; i++) {
         if (!strcmp(argv[i], "--")) { i++; break; }
         if (!strcmp(argv[i], "-s") && i + 1 < argc) name = argv[++i];
+        else if (!strcmp(argv[i], "-p") && i + 1 < argc) port = atoi(argv[++i]);
         else if (!strcmp(argv[i], "-x") && i + 1 < argc) cols = (unsigned)atoi(argv[++i]);
         else if (!strcmp(argv[i], "-y") && i + 1 < argc) rows = (unsigned)atoi(argv[++i]);
         else if (!strcmp(argv[i], "--scrollback") && i + 1 < argc) scrollback = (size_t)strtoull(argv[++i], NULL, 10);
@@ -982,6 +1029,7 @@ int main(int argc, char **argv) {
         else return usage();
     }
     if (!strcmp(cmd, "ls")) return ls();
+    if (!strcmp(cmd, "connect")) return port >= 1 && port <= 65535 ? connect_port(port) : usage();
     if (!strcmp(cmd, "exec")) {            /* deckhold exec -- CMD…: reset signals, then exec (used to start tmux) */
         if (i >= argc) return usage();
         reset_signals();

@@ -36,20 +36,21 @@ func cliImagesSuite(binary: String) async {
     // 2. This doz names it — and never rebuilds it by itself.
     func piRow() -> ImageRow? { t.json(["image", "ls"], [ImageRow].self)?.first { $0.name == "pi" } }
     var row = piRow()
-    check(row?.status == "older recipe" && row?.olderRecipe == ["sudo", "apt-utils", "package lists"],
-          "image ls: pi is an older recipe, adds sudo, apt-utils, package lists (\(row?.status ?? "?"), \(row?.olderRecipe ?? []))")
+    // (599: tmux joined the baseline — the older recipe lacks it too.)
+    check(row?.status == "older recipe" && row?.olderRecipe == ["sudo", "apt-utils", "tmux", "package lists"],
+          "image ls: pi is an older recipe, adds sudo, apt-utils, tmux, package lists (\(row?.status ?? "?"), \(row?.olderRecipe ?? []))")
     r = t.run(["image", "ls"])
-    check(r.out.contains("STATUS") && r.out.contains("older recipe") && r.out.contains("pi: prepared by an older doz — this doz's image adds: sudo, apt-utils, package lists — rebuild when ready: doz image bake pi"),
+    check(r.out.contains("STATUS") && r.out.contains("older recipe") && r.out.contains("pi: prepared by an older doz — this doz's image adds: sudo, apt-utils, tmux, package lists — rebuild when ready: doz image bake pi"),
           "image ls: the STATUS column and the line")
     r = t.run(["doctor"])
     check(r.out.contains("image pi") && r.out.contains("prepared by an older doz"), "doctor warns about pi")
     r = t.run(["create", "p1", "--image", "pi", "--account", "none", "--isolated", "--memory", "1G", "--json"], timeout: 120)
     let p1 = try? HostWire.decoder.decode(SandboxInfo.self, from: r.outData)
-    check(r.code == 0 && p1?.olderImage == ["sudo", "apt-utils", "package lists"] && (p1?.imageNotice ?? "").contains("used the current pi image (missing: sudo, apt-utils, package lists)"),
+    check(r.code == 0 && p1?.olderImage == ["sudo", "apt-utils", "tmux", "package lists"] && (p1?.imageNotice ?? "").contains("used the current pi image (missing: sudo, apt-utils, tmux, package lists)"),
           "create --json (no terminal): the current image, with the notice in the JSON")
     r = t.run(["create", "p0", "--image", "pi", "--account", "none", "--isolated", "--memory", "1G", "--use-current"], timeout: 120)
     check(r.code == 0 && r.err.contains("warning: used the current pi image"), "create --use-current: the warning")
-    check(t.run(["ls"]).out.contains("p1: made from an older pi image (it lacks: sudo, apt-utils, package lists) — after a rebuild (doz image bake pi), doz reset p1 takes the new one"),
+    check(t.run(["ls"]).out.contains("p1: made from an older pi image (it lacks: sudo, apt-utils, tmux, package lists) — after a rebuild (doz image bake pi), doz reset p1 takes the new one"),
           "ls: the sandbox made from an older image, and what reset keeps")
     check(t.run(["start", "p1"], timeout: 600).code == 0, "start p1 — no preparation (the older image is used)")
     usleep(3_000_000)

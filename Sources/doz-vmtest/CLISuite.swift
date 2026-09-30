@@ -468,6 +468,10 @@ func cliSuite() async throws {
     await cliBasesSuite(binary: h.binary, parts: ["cli", "dockerfile", "real"])
     // 597: agent permissions — the checklist, live changes, suggestions, the facts, stored by name.
     await cliPermissionsSuite(binary: h.binary)
+    // 599: the session bridges.
+    await cliClipboardSuite(binary: h.binary)
+    await cliBrowserSuite(binary: h.binary)
+    await cliTmuxSuite(binary: h.binary)
 }
 
 /// 593: how `doz image bake lab -v` shows its progress — plain (no escape, no \r, no spinner) when

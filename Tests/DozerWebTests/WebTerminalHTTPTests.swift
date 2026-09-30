@@ -191,6 +191,28 @@ final class WebTerminalHTTPTests: XCTestCase {
         ws.close()
     }
 
+    /// 599 (594.B1/B2): a bridge's notice becomes a `notice` text frame (the page toasts it) — never bytes
+    /// on the screen, even when a read cuts it.
+    func testABridgeNoticeIsATextFrameNeverScreenBytes() throws {
+        let a = FakeAttachment(.attached(session: "shell"))
+        let (ws, _, _) = try open(a)
+        _ = try ws.readText(containing: #""headline":"Attaching…""#)
+        let notice = Array(ClientWire.notice(BridgeNotice("clipboard", "demo copied 22 chars")))
+        a.feed(Data(Array("one".utf8) + notice.prefix(12)))
+        a.feed(Data(Array(notice.dropFirst(12)) + Array("two".utf8)))
+        var screen: [UInt8] = []
+        var text = ""
+        let deadline = Date().addingTimeInterval(5)
+        while Date() < deadline, !(String(decoding: screen, as: UTF8.self).contains("two") && text.contains(#""t":"notice""#)) {
+            let (op, p) = try ws.readFrame()
+            if op == 2 { screen += p }
+            if op == 1, String(decoding: p, as: UTF8.self).contains(#""t":"notice""#) { text = String(decoding: p, as: UTF8.self) }
+        }
+        XCTAssertEqual(String(decoding: screen, as: UTF8.self), "onetwo", "nothing of the notice reaches the screen")
+        XCTAssertTrue(text.contains(#""kind":"clipboard""#) && text.contains(#""text":"demo copied 22 chars""#), text)
+        ws.close()
+    }
+
     func testTheEndNoticeEndsTheTerminalAndNeverReachesTheScreen() throws {
         let a = FakeAttachment(.attached(session: "shell"))
         let (ws, _, _) = try open(a)

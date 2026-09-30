@@ -118,6 +118,10 @@ public struct SandboxConfig: Codable, Equatable, Sendable {
     public var agentSudo: Bool?
     /// 596: the Dockerfile its image's base was built from (absolute), when it has one.
     public var dockerfile: String?
+    /// 599: this sandbox's own values of the per-sandbox settings (`DozerSettings.perSandbox`: the
+    /// clipboard and browser bridges, tmux) — a key absent follows the setting. (`sandbox.agent_sudo`
+    /// keeps its own field above.)
+    public var settings: [String: TOMLValue]?
 
     public init(name: String, image: String, spec: SandboxSpec, workspace: String?, createdAt: Date = Date(),
                 credentialSources: [String: String] = [:], diedWithHostAt: Date? = nil) {
@@ -164,7 +168,8 @@ public struct SandboxConfig: Codable, Equatable, Sendable {
 public enum DozerImages {
     public static let builtIn = ["lab", "claude-code", "pi"]
     /// The lab's apk packages (Alpine 3.20).
-    public static let labPackages = ["bash", "ncurses", "fd"]
+    /// 599 (594.B3): tmux too (sessions.tmux).
+    public static let labPackages = ["bash", "ncurses", "fd", "tmux"]
 
     /// Where a workspace is shared in the guest.
     public static let workspaceGuestPath = "/workspace"

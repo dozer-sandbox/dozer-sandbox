@@ -1518,10 +1518,19 @@ public actor Sandbox {
     /// The environment, working directory and user a session runs with (see `openSession`).
     static func sessionContext(imageSpec: ImageSpec?, environment: [String: String], workingDirectory: String?,
                                user: String?) -> (environment: [String: String], workingDirectory: String, user: String?) {
-        guard let r = imageSpec else { return (environment, workingDirectory ?? "/root", user) }
+        // 599 (594.B2): the browser bridge's xdg-open first on every session's PATH, and $BROWSER — unless
+        // the caller gave its own.
+        let bridge = [GuestCommand.openShimDirectory, GuestCommand.openShimPath]
+        guard let r = imageSpec else {
+            var env = environment
+            if env["PATH"] == nil { env["PATH"] = bridge[0] + ":" + GuestCommand.path }
+            if env["BROWSER"] == nil { env["BROWSER"] = bridge[1] }
+            return (env, workingDirectory ?? "/root", user)
+        }
         let runAs = user ?? r.user
         var env = r.sessionEnvironment
-        if let p = env["PATH"] { env["PATH"] = withGames(p) }
+        if let p = env["PATH"] { env["PATH"] = GuestCommand.withOpenShim(withGames(p)) }
+        env["BROWSER"] = bridge[1]
         if runAs == r.user { env["HOME"] = r.home; env["USER"] = r.user }
         env.merge(environment) { _, caller in caller }
         return (env, workingDirectory ?? r.workdir, runAs == "root" ? nil : runAs)
@@ -1574,6 +1583,33 @@ public actor Sandbox {
     }
 
     private func forget(_ c: SessionConnection) { connections.removeValue(forKey: c.id) }
+
+    /// 599: run `argv` (as root, no terminal) with its stdin and stdout as a byte stream — the browser
+    /// bridge's `deckhold connect -p PORT`. The stream's `output` finishes when the program exits (or
+    /// the VM stops under it); `finishInput()` closes its stdin.
+    public func openGuestStream(_ argv: [String]) async throws -> GuestStream {
+        guard phase == .running, let container else { throw SandboxError.notRunning(phase) }
+        let stream = GuestStream()
+        let proc = try await container.exec("g-\(UUID().uuidString.prefix(12).lowercased())") { cfg in
+            cfg.arguments = argv
+            cfg.environmentVariables = GuestCommand.environment()
+            cfg.terminal = false
+            cfg.stdin = ConnectionReader(source: stream.input)
+            cfg.stdout = GuestStreamWriter(stream: stream)
+            cfg.stderr = OutputCollector()
+        }
+        do { try await proc.start() } catch {
+            stream.ended(nil)
+            try? await proc.delete()
+            throw error
+        }
+        Task.detached {
+            let code = try? await proc.wait().exitCode
+            stream.ended(code)
+            try? await proc.delete()
+        }
+        return stream
+    }
 
     /// The guest's sessions (`deckhold ls`), live and ended.
     public func sessions() async throws -> [SessionInfo] {

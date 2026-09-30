@@ -494,7 +494,9 @@ public enum ImageComposer {
     /// `sudo apk add` works at once).
     public static let apkBaselinePackages = ["bash", "procps", "git", "less", "jq", "unzip", "openssh-client", "ca-certificates",
                                              "curl", "vim", "ripgrep", "fd", "python3", "sudo", "ncurses", "coreutils",
-                                             "findutils", "libgcc", "libstdc++", "shadow", "tzdata", "xz"]
+                                             "findutils", "libgcc", "libstdc++", "shadow", "tzdata", "xz",
+                                             // 599 (sessions.tmux) — and the baseline's verify asks for it on every base.
+                                             "tmux"]
 
     static func baseline(_ pm: PackageManager) -> BakeStep {
         switch pm {

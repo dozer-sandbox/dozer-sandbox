@@ -47,6 +47,15 @@ struct CreateArguments: ParsableArguments {
     @Flag(inversion: .prefixedNo, help: "The agent (claude-code, pi) has passwordless sudo inside the sandbox (default: the setting sandbox.agent_sudo, on). Applied at every boot and session start.")
     var agentSudo: Bool?
 
+    @Option(name: .long, help: "write or off: a copy in this sandbox (OSC 52) reaches the Mac clipboard, with a notice every time (default: the setting sandbox.clipboard, write).")
+    var clipboard: String?
+
+    @Option(name: .long, help: "on or off: xdg-open in this sandbox opens http(s) URLs in the Mac's browser, a sign-in's localhost callback forwarded (default: the setting sandbox.browser_bridge, on).")
+    var browserBridge: String?
+
+    @Flag(inversion: .prefixedNo, help: "Run this sandbox's sessions inside tmux (its windows, panes, copy mode; Ctrl-b) — default: the setting sessions.tmux, off.")
+    var tmux: Bool?
+
     @Flag(name: .long, help: "When the image is out of date (an older doz's recipe, or a newer agent release): rebuild it first (~2 min, needs network; existing sandboxes are not affected).")
     var rebuild = false
 
@@ -114,7 +123,21 @@ struct CreateArguments: ParsableArguments {
             if o.workspace == nil, !isolated { o.workspace = (df as NSString).deletingLastPathComponent }
         }
         try applyPrompt(to: &o)
+        o.settings = try sandboxSettings()
         return o
+    }
+
+    /// 599: the per-sandbox settings given as flags (nil: none).
+    func sandboxSettings() throws -> [String: TOMLValue]? {
+        var s: [String: TOMLValue] = [:]
+        func take(_ key: String, _ text: String?, _ flag: String) throws {
+            guard let text, let d = DozerSettings.definition(key) else { return }
+            do { s[key] = try d.parse(text) } catch let e as SettingsError { throw ValidationError("\(flag): \(e.message)") }
+        }
+        try take(SettingKey.clipboard, clipboard, "--clipboard")
+        try take(SettingKey.browserBridge, browserBridge, "--browser-bridge")
+        if let tmux { s[SettingKey.tmux] = .bool(tmux) }
+        return s.isEmpty ? nil : s
     }
 
     /// 594: a relative --workspace is this command's working folder's (the host takes absolute paths only).
@@ -145,6 +168,7 @@ struct CreateArguments: ParsableArguments {
     var givenAny: Bool {
         image != nil || cpus != nil || memory != nil || workspace != nil || network != nil || subnet != nil || account != nil || agentPrompt != nil || isolated || agentSudo != nil
             || agent != nil || base != nil || dockerfile != nil || !allow.isEmpty
+            || clipboard != nil || browserBridge != nil || tmux != nil
     }
 }
 
@@ -323,8 +347,8 @@ struct Up: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         abstract: "Create the sandbox if it is missing, start or wake it, then attach (vagrant up / compose up).",
         discussion: """
-        Attaches to the image's session (claude, pi, or a bash shell), opening it when it is not running. Ctrl-] detaches; \
-        the session keeps running. With no NAME, in a folder with doz_project.yaml (doz init): that project's sandbox — \
+        Attaches to the image's session (claude, pi, or a bash shell), opening it when it is not running. Ctrl-] opens a menu \
+        (detach · next · prev · sessions), Ctrl-] twice detaches; the session keeps running. With no NAME, in a folder with doz_project.yaml (doz init): that project's sandbox — \
         the folder is its /workspace, and its sessions start (the first is attached).
         """)
 
@@ -376,6 +400,7 @@ struct Up: AsyncParsableCommand {
                 if let s = create.agentSudo { o.agentSudo = s }
                 let allowWords = create.allow.flatMap { $0.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) } }.filter { !$0.isEmpty }
                 if !allowWords.isEmpty { o.allow = allowWords }       // 597
+                if let s = try create.sandboxSettings() { o.settings = (o.settings ?? [:]).merging(s) { _, flag in flag } }
                 try create.applyPrompt(to: &o)
                 // 594: doz_project.yaml's image and account are checked like any create.
                 try preflightAgentAccount(&o, g)
@@ -412,7 +437,8 @@ struct Up: AsyncParsableCommand {
                 o.session = s.name
                 o.argv = s.command
                 let opened = try decode(try call(o, g), SessionOpened.self, g)
-                if !g.json && !g.quiet && opened.created { Out.stderr("[doz] started session \(s.name)\n") }
+                if !g.json && !g.quiet && opened.created { Out.stderr("[doz] started session \(s.name)\(opened.tmux == true ? " (in tmux)" : "")\n") }
+                if !g.json, let n = opened.notice { Out.stderr("[doz] \(n)\n") }
             }
             open.session = first.name
             open.argv = first.command
@@ -421,6 +447,7 @@ struct Up: AsyncParsableCommand {
         open.cols = size.cols
         open.rows = size.rows
         let opened = try decode(try call(open, g), SessionOpened.self, g)
+        if !g.json, let n = opened.notice { Out.stderr("[doz] \(n)\n") }
         if g.json || detach {
             if g.json { Out.json(["name": .string(name), "session": .string(opened.session), "phase": .string(started.phase),
                                   "created": .bool(!exists), "sessionCreated": .bool(opened.created),
@@ -430,7 +457,7 @@ struct Up: AsyncParsableCommand {
         }
         if !g.quiet {
             let how = started.changed ? String(format: "%@ in %.0f ms", started.phaseBefore == "off" ? "started" : "woke", started.milliseconds) : "running"
-            Out.stderr("[doz] \(name) \(how) — attaching to \(opened.session)\(key.map { " (\(describeKey($0)) detaches)" } ?? "")\n")
+            Out.stderr("[doz] \(name) \(how) — attaching to \(opened.session)\(key.map { " (\(describeKey($0)): the menu · twice: detach)" } ?? "")\n")
         }
         AttachClient.run(store: g.dozerStore, sandbox: name, session: opened.session, wake: true, detachKey: key, quiet: g.quiet)
     }
@@ -488,6 +515,17 @@ struct Up: AsyncParsableCommand {
             _ = try call(s, g)
             if !g.quiet && !g.json {
                 Out.stderr("[doz] agent_sudo \(project.agentSudo.map { $0 ? "true" : "false" } ?? "removed (the setting sandbox.agent_sudo decides)") in \(DozerProject.fileName) — it applies from the next session\n")
+            }
+        }
+        // 599: a per-sandbox setting changed in the file → the sandbox's own value follows it.
+        for k in DozerProject.settingKeys where cfg.settings?[k.setting] != project.settings[k.setting] {
+            var s = HostRequest(.sandboxSettings, name: name)
+            s.setting = k.setting
+            if let v = project.settings[k.setting] { s.settingValue = v } else { s.clearSetting = true }
+            _ = try call(s, g)
+            if !g.quiet && !g.json {
+                let applies = DozerSettings.definition(k.setting)?.applies.note ?? ""
+                Out.stderr("[doz] \(k.key) \(project.settings[k.setting].map(\.plain) ?? "removed (the setting \(k.setting) decides)") in \(DozerProject.fileName) — \(applies)\n")
             }
         }
         let mode = project.agentPrompt == nil ? nil : (project.agentPromptMode ?? "append")

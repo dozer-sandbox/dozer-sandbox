@@ -383,6 +383,8 @@ public final class HostServer: @unchecked Sendable {
             let name = sandbox.spec.name
             // 594 (W17): the client's detach line names the shortest command that reattaches.
             let defaultSession: JSONValue = (await core.defaultSessionName(name)).map { .string($0) } ?? .null
+            // 599 (594.B4): the terminal title's {image}.
+            let imageName: JSONValue = (await core.imageName(of: name)).map { .string($0) } ?? .null
             var announced = false
             while !state.gone {
                 guard let phase = await core.phase(of: name) else {
@@ -413,7 +415,7 @@ public final class HostServer: @unchecked Sendable {
                         guard state.adopt(c) else { c.close(); return }
                         if !announced {
                             conn.send(.success(.object(["state": .string("attached"), "session": .string(session), "sandbox": .string(name),
-                                                        "defaultSession": defaultSession])))
+                                                        "defaultSession": defaultSession, "image": imageName])))
                             announced = true
                         }
                         await core.sessionAttached(name, session: session, ms: ms(since: t0))
@@ -439,7 +441,7 @@ public final class HostServer: @unchecked Sendable {
                 default:
                     if !announced {
                         conn.send(.success(.object(["state": .string("held"), "session": .string(session), "sandbox": .string(name),
-                                                    "defaultSession": defaultSession,
+                                                    "defaultSession": defaultSession, "image": imageName,
                                                     "phase": .string(phase.rawValue)])))
                         announced = true
                     }
@@ -454,6 +456,7 @@ public final class HostServer: @unchecked Sendable {
                 switch f {
                 case .hello(let s), .resize(let s): state.setSize(s)?.resize(s)
                 case .input(let d): state.session?.send(d)       // dropped while held: nobody to type to
+                case .repaint: state.session?.repaint()           // 599: a fresh snapshot (a notice or menu drawn over it)
                 }
             }
         }
@@ -473,10 +476,19 @@ public final class HostServer: @unchecked Sendable {
     /// Session → client, until the session connection ends.
     private static func pump(_ c: SessionConnection, to conn: HostConnection, state: AttachState, core: HostCore,
                              sandbox: String, session: String) async {
+        // 599 (594.B1/B2): the bridges' sequences are read here, once for every kind of viewer, and removed.
+        var scanner = SessionBridgeScanner()
         for await out in c.output {
             switch out {
-            case .snapshot(let d), .data(let d):
+            case .snapshot(let d):
+                scanner.reset()                     // a replayed screen never copies or opens anything
                 conn.write(d)
+            case .data(let d):
+                let (bytes, events) = scanner.feed(d)
+                if !bytes.isEmpty { conn.write(Data(bytes)) }
+                for e in events {
+                    if let n = await core.bridge(e, sandbox: sandbox, session: session) { conn.write(ClientWire.notice(n)) }
+                }
             case .ended(let code):
                 let text = code.map { "the \(session) session has ended (exit \($0))" } ?? "there is no \(session) session in \(sandbox)"
                 conn.write(ClientWire.endedNotice(code.map { .exited($0) } ?? .noSession, text: text))

@@ -133,7 +133,7 @@ struct Sessions: AsyncParsableCommand {
 struct Attach: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         abstract: "Attach this terminal to a session (a paused or sleeping sandbox is woken).",
-        discussion: "Ctrl-] detaches (the session keeps running). Hibernating disconnects you; the client waits and reattaches when the sandbox runs again.")
+        discussion: "Ctrl-] opens a one-line menu (d detach · n next · p prev · s sessions · Esc back); Ctrl-] twice detaches (the session keeps running). The terminal's title is ui.terminal_title while attached. Hibernating disconnects you; the client waits and reattaches when the sandbox runs again.")
     @OptionGroup var g: GlobalOptions
     @Argument var name: String
     @Argument(help: "The session (default: the image's own — claude, pi or shell).") var session: String?
@@ -178,6 +178,7 @@ struct Run: AsyncParsableCommand {
         r.cols = size.cols
         r.rows = size.rows
         let opened = try decode(try call(r, g), SessionOpened.self, g)
+        if !g.json, let n = opened.notice { Out.stderr("[doz] \(n)\n") }
         if detach || g.json {
             if g.json { Out.json(opened) } else {
                 Out.stdout("session \(opened.session) \(opened.created ? "started" : "is already running") in \(name) — \(reattachCommand(sandbox: name, session: opened.session, defaultSession: opened.defaultSession))\n")

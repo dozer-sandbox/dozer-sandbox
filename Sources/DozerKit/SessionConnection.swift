@@ -81,6 +81,15 @@ public final class SessionConnection: @unchecked Sendable, Identifiable {
         inputContinuation.yield(DeckholdFrame.resize(size).encoded)
     }
 
+    /// 599: a fresh SNAPSHOT of the session's screen for this viewer, the program untouched — a HELLO of
+    /// 0×0 on the live connection (deckhold keeps the size for 0×0 and answers every HELLO with a
+    /// snapshot, as it does for a screen capture). What a client uses to remove what it drew over it.
+    public func repaint() {
+        lock.lock(); defer { lock.unlock() }
+        guard !closed else { return }
+        inputContinuation.yield(DeckholdFrame.hello(TermSize(cols: 0, rows: 0)).encoded)
+    }
+
     /// Detach this viewer. The session keeps running in the guest.
     public func close() { finish(.detached(.closedByClient)) }
 
@@ -208,6 +217,52 @@ final class OutputCollector: Writer, @unchecked Sendable {
     }
     func close() throws {}
     var data: Data { lock.lock(); defer { lock.unlock() }; return buffer }
+}
+
+/// 599: a byte stream to a guest program's stdin/stdout (`Sandbox.openGuestStream`) — the browser
+/// bridge's `deckhold connect -p PORT`, relaying one TCP connection from the Mac into the guest's loopback.
+public final class GuestStream: @unchecked Sendable {
+    /// The program's stdout, until it exits.
+    public let output: AsyncStream<Data>
+    let outputContinuation: AsyncStream<Data>.Continuation
+    let input: AsyncStream<Data>
+    private let inputContinuation: AsyncStream<Data>.Continuation
+    private let lock = NSLock()
+    private var inputOpen = true
+    /// The program's exit code, once it exited (nil before, or when the transport died).
+    public private(set) var exitCode: Int32?
+
+    init() {
+        (output, outputContinuation) = AsyncStream<Data>.makeStream(bufferingPolicy: .unbounded)
+        (input, inputContinuation) = AsyncStream<Data>.makeStream(bufferingPolicy: .unbounded)
+    }
+
+    /// Bytes for the program's stdin (dropped once the input is finished).
+    public func send(_ d: Data) {
+        guard !d.isEmpty else { return }
+        lock.lock(); defer { lock.unlock() }
+        if inputOpen { inputContinuation.yield(d) }
+    }
+
+    /// The program's stdin reaches its end (the program sees EOF).
+    public func finishInput() {
+        lock.lock(); defer { lock.unlock() }
+        guard inputOpen else { return }
+        inputOpen = false
+        inputContinuation.finish()
+    }
+
+    func ended(_ code: Int32?) {
+        lock.lock(); exitCode = code; lock.unlock()
+        outputContinuation.finish()
+    }
+}
+
+/// A guest stream's stdout → its `output`.
+struct GuestStreamWriter: Writer {
+    let stream: GuestStream
+    func write(_ data: Data) throws { stream.outputContinuation.yield(data) }
+    func close() throws {}
 }
 
 /// The result of `Sandbox.exec`.
