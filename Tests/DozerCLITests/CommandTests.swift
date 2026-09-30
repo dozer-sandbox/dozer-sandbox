@@ -154,4 +154,32 @@ final class CommandTests: XCTestCase {
         let t = Out.table([["NAME", "RAM"], ["box", "512 MiB"], ["a-much-longer-name", "—"]], rightAligned: [1])
         XCTAssertEqual(t, "NAME                    RAM\nbox                 512 MiB\na-much-longer-name        —\n")
     }
+
+    /// 594 W19: when `doz ui` opens a tab — the flag over the setting (`ui.open_browser`), auto by default.
+    func testWhenDozUIOpensATab() throws {
+        func mode(_ args: [String], _ file: String? = nil) throws -> String {
+            let c = try XCTUnwrap(try parse(["ui"] + args) as? UIServe)
+            return c.delivery.openMode(DozerSettings(text: file))
+        }
+        XCTAssertEqual(try mode([]), "auto")
+        XCTAssertEqual(try mode([], "[ui]\nopen_browser = \"never\"\n"), "never")
+        XCTAssertEqual(try mode([], "[ui]\nopen_browser = \"always\"\n"), "always")
+        XCTAssertEqual(try mode(["--open"], "[ui]\nopen_browser = \"never\"\n"), "always", "--open over the file")
+        XCTAssertEqual(try mode(["--no-open"], "[ui]\nopen_browser = \"always\"\n"), "never", "--no-open over the file")
+        XCTAssertEqual(try mode([], "[ui]\nopen_browser = \"sometimes\"\n"), "auto", "a bad value: the default")
+        XCTAssertThrowsError(try parse(["ui", "--open", "--no-open"]))
+        XCTAssertTrue(try parse(["ui", "--new-link"]) is UIServe)
+        XCTAssertTrue(try parse(["ui", "link", "--rotate"]) is UILink)
+        XCTAssertThrowsError(try parse(["ui", "link", "--no-open"]), "doz ui link hands a link over")
+    }
+
+    /// 594 W18: the probes' version seam takes a plain version string only.
+    func testTheTestVersionSeamTakesAPlainVersionOnly() {
+        XCTAssertEqual(DozerCommand.testVersion("0.12.0-rc.4"), "0.12.0-rc.4")
+        XCTAssertNil(DozerCommand.testVersion(nil))
+        XCTAssertNil(DozerCommand.testVersion(""))
+        XCTAssertNil(DozerCommand.testVersion("1.0 && rm"))
+        XCTAssertNil(DozerCommand.testVersion("\u{1b}[31m1.0"))
+        XCTAssertNil(DozerCommand.testVersion(String(repeating: "1", count: 41)))
+    }
 }

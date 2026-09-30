@@ -11,7 +11,17 @@ public struct DozerCommand: AsyncParsableCommand {
     /// The release this build ships as — the package's semver tag. Bump it with the tag (it was left
     /// at 0.5.0 through v0.6.0 and v0.7.0; `doz ui`'s host card showed it, 590). The host and
     /// `doctor` compare it to the running host's.
-    public static let version = "0.10.0"
+    public static let version = testVersion(ProcessInfo.processInfo.environment["DOZ_TEST_VERSION"]) ?? "0.10.0"
+
+    /// 594 W18: a TEST seam — `DOZ_TEST_VERSION` stamps this process (and the host it starts, which
+    /// inherits the environment) as another build, so the host-watch probe can put "a host of another
+    /// build" in front of a page. Only a plain version string (≤ 40 of `0-9A-Za-z.+-`); anything else
+    /// is ignored.
+    static func testVersion(_ v: String?) -> String? {
+        guard let v, !v.isEmpty, v.count <= 40,
+              v.unicodeScalars.allSatisfy({ CharacterSet.alphanumerics.contains($0) && $0.isASCII || ".+-".unicodeScalars.contains($0) }) else { return nil }
+        return v
+    }
 
     public static let configuration = CommandConfiguration(
         commandName: "doz",

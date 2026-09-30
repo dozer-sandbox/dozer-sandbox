@@ -91,6 +91,24 @@ nav a.active { background: var(--ink); color: var(--bg); }
 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--off); }
 .live.on .dot { background: var(--run); }
 .live.bad .dot { background: var(--fail); }
+.live.warn .dot { background: var(--pause); }
+.live .dot { flex: none; }
+.live .foot-k { min-width: 42px; flex: none; color: var(--muted); }
+.live #live-text, .live #host-text { color: var(--ink); min-width: 0; overflow-wrap: anywhere; }
+.live.stale #host-text { color: var(--muted); font-style: italic; }
+.live.stale .dot { opacity: 0.45; }
+/* 594 W18: the host's and doz ui's transitions, above every page (the terminal pages too). */
+.banners { display: flex; flex-direction: column; gap: 8px; }
+.banners:not(:empty) { margin-bottom: 14px; }
+.banner { display: flex; align-items: flex-start; gap: 12px; background: var(--panel); border: 1px solid var(--line);
+          border-left: 4px solid var(--accent); padding: 9px 12px; border-radius: var(--radius); flex: none; }
+.banner.bad { border-left-color: var(--fail); }
+.banner.warn { border-left-color: var(--pause); }
+.banner .b-text { flex: 1; min-width: 0; }
+.banner .b-text a { margin-right: 6px; }
+.banner .b-acts { display: flex; gap: 8px; align-items: center; flex: none; }
+.banner .b-x { background: none; border: 0; color: var(--muted); cursor: pointer; font-size: 16px; line-height: 1; padding: 2px 4px; }
+.banner .b-x:hover { color: var(--ink); }
 .version { font-variant-numeric: tabular-nums; }
 .link-button { background: none; border: 0; color: var(--accent); padding: 0; cursor: pointer; font: inherit; text-align: left; }
 

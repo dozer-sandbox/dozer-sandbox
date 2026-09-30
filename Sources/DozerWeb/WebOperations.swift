@@ -36,7 +36,7 @@ final class WebOperations: @unchecked Sendable {
     /// `firstLine`: what the operation says until the host's first step (591: "a key typed in a
     /// terminal — waking" for a keystroke wake).
     func start(_ action: WebAction, firstLine: String = "requested — waiting for the host") throws -> WebOperation {
-        let verb = action.hostOp == .openSession ? "open-session" : action.hostRequest.op.rawValue
+        let verb = action.hostOp == .openSession ? "open-session" : action == .hostStart ? "host-start" : action.hostRequest.op.rawValue
         let op = WebOperation(id: String(WebRandom.token().prefix(12)), action: verb, label: action.label, sandbox: action.sandbox,
                               state: "running", text: firstLine, startedAt: Date(), milliseconds: nil)
         let key = action.dedupeKey
@@ -160,6 +160,9 @@ final class WebOperations: @unchecked Sendable {
             let preparing = r?.preparations.filter(\.running).map(\.image) ?? []
             if !preparing.isEmpty { return "preparing \(preparing.joined(separator: ", ")) in the host — it goes on in the background; the onboarding is recorded when it is done" }
             return images.isEmpty ? "onboarded (no image prepared now)" : "onboarded — \(images.joined(separator: ", ")) ready"
+        case .hostStart:
+            let s = try? v.decode(HostStatus.self)
+            return s.map { "the host is running (pid \($0.pid), doz \($0.version))" } ?? "the host is running"
         case .prepareCancel:
             let ps = (try? v.decode([PreparationInfo].self)) ?? []
             return ps.isEmpty ? "nothing was being prepared" : "cancelling the preparation of \(ps.map(\.image).joined(separator: ", "))"

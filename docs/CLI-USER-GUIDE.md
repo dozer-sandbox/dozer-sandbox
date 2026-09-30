@@ -762,11 +762,15 @@ permission prompt.
 
 | | |
 |---|---|
-| **Where** | `http://127.0.0.1:<port>`, a port the system picks. Only this Mac can reach it. |
-| **Signing in** | The link it opens (or prints) works **once**, for **five minutes**. It signs that browser in until you close the UI or sign out. Another browser or tab needs another link: `doz ui link`, or run `doz ui` again. Treat a printed link like a password — anyone with it signs in to your UI. |
-| **Stopping** | Ctrl-C in the terminal that runs it. Signing out and stopping both end every browser's session. |
+| **Where** | `http://127.0.0.1:<port>`: the port this store's last UI had when it is free, else one the system picks. Only this Mac can reach it. |
+| **Signing in** | The link it opens (or prints) works **once**, for **five minutes**. It signs that browser in until you sign out (or for 12 hours without the page open) — also across a restart of `doz ui` on the same port. Another browser or tab needs another link: `doz ui link`, or run `doz ui` again. Treat a printed link like a password — anyone with it signs in to your UI. |
+| **Stopping** | Ctrl-C in the terminal that runs it. Signing out ends that browser's session; `doz ui --new-link` ends every one. Stopping `doz ui` keeps them for the next `doz ui` on the same port (below). |
 | **One per store** | Each store has at most one UI. `--store` (or `$DOZ_STORE`) picks the store, as for every command. |
 | **The host** | The UI is a client of the host, like the CLI. Looking never starts a host: with none running, the UI reads the store (nothing is live). It follows the host's events only while a sandbox is live, so an open UI never keeps an idle host from exiting. |
+| **Watching the host** | The sidebar's footer shows two facts: the page's link to `doz ui`, and the host's state and build. When the host stops cleanly (`doz host stop`, idle, SIGTERM) a banner says your sandboxes were hibernated and offers **Start host**; when it is killed or crashes, a banner names the sandboxes that were running (they are shut down: start them again); when a host of another build takes over, a banner says so — and, once, that `doz ui` and the host are different builds (restart `doz ui`). Every page's phases follow at once. Any action starts a host when none runs, as the CLI does. |
+| **When `doz ui` stops** | The page keeps what it showed, says so (and whether the host was running when it last heard), and retries every second. The next `doz ui` listens on the same port when it can and keeps its pages' sessions, so the page reconnects by itself, still signed in — and `doz ui` then opens no new tab (the page shows "doz ui restarted"). If the port changed, or after `--new-link`, the page asks for a new link: `doz ui link`. |
+| **One tab, not one per start** | Running `doz ui` while one runs reuses it: it opens a tab only when none of its pages is open, else it just says where it runs. `ui.open_browser` (`auto`, the default; `always`; `never`) sets when a tab opens; `--open` and `--no-open` override it for one run. |
+| **A new link for every page** | `doz ui --new-link` (or `doz ui link --rotate` on a running UI) signs every page out and makes a new link; each open page says so. Kept sessions live in `<store>/ui.sessions` (0600) as digests of their cookies, never the cookies: the file signs nobody in, and it has the store's own trust. |
 | **Terminals** | In the page: each terminal is opened with a one-use ticket over a WebSocket on the same loopback address, and only for a signed-in browser. Open in Terminal runs `doz attach NAME [SESSION] --store …` in a new Terminal tab (waking the sandbox if it sleeps). The page also shows that command to copy. |
 | **Secrets** | Never shown. Keys and accounts appear as a state, a source name (`keychain:…`, `account:mac`) and a fingerprint. |
 
@@ -806,7 +810,7 @@ the others say when they apply (the next sandbox created, the next session, or a
 
 | Section | Settings |
 |---|---|
-| `[ui]` | `boot_view_on_start` (true), `confirm_shutdown` (true), `split_default` (`shell` · `watch` · `attach` · `dialog`), `terminals` (true), `terminal_font_size` (13), `theme` (`auto` · `light` · `dark`), `details_open` (true), `grid_live_tiles` (8, 1–12), `grid_tile_size` (`small` · `medium` · `large`), `progress` (`animated` · `plain`; `$DOZ_PROGRESS`, `--progress auto\|plain`) |
+| `[ui]` | `boot_view_on_start` (true), `confirm_shutdown` (true), `split_default` (`shell` · `watch` · `attach` · `dialog`), `terminals` (true), `terminal_font_size` (13), `theme` (`auto` · `light` · `dark`), `details_open` (true), `grid_live_tiles` (8, 1–12), `grid_tile_size` (`small` · `medium` · `large`), `progress` (`animated` · `plain`; `$DOZ_PROGRESS`, `--progress auto\|plain`), `open_browser` (`auto` · `always` · `never`; `doz ui --open\|--no-open` — when `doz ui` opens a tab; applies to the next `doz ui`) |
 | `[host]` | `idle_timeout_minutes` (5; `$DOZ_HOST_IDLE`), `boot_logs_kept` (5, 1–50; `$DOZ_BOOT_LOGS` — boots kept per sandbox for `doz console --boot N` and the Boot log), `screen_capture_minutes` (5, 0–1440; `$DOZ_SCREEN_CAPTURE` — how often a running sandbox's changed session screens are saved; 0 = only at pause, sleep and hibernate), `keepalive` (false — for a store that has not chosen with `doz account keepalive`) |
 | `[store]` | `path` (`--store`, `$DOZ_STORE`) |
 | `[claude]` | `permissions` (`skip` · `ask`) — Claude Code's own prompts in a claude-code sandbox; `-e DOZ_CLAUDE_PERMISSIONS=…` on `run`/`exec` still wins |
