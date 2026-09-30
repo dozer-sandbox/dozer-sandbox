@@ -636,6 +636,13 @@ and can take two minutes), and the page updates when it ends. **Operations** in 
 shows how many run (with a spinner) and a red dot when one failed since you last looked (a failure
 also shows a message).
 
+**The mouse in a browser terminal** works as in a native terminal. A program that tracks the mouse
+(Claude Code does) gets the wheel as wheel events, and clicks and drags as mouse events, in the
+encoding it asked for. Hold **Shift** to select text instead, or to scroll the pane itself. A program
+that does not track the mouse gets nothing from it: the wheel scrolls the pane's own scrollback. In
+a full-screen program the wheel becomes arrow keys only if the program asked for that
+(alternate scroll, `?1007`).
+
 **A sandbox's panes are remembered** — which terminals it shows, split or not, which session each
 tab shows — by the host, beside the sandbox (not in the browser): after `doz ui` restarts, after a
 reload or in another browser the page shows the same panes, attached. While a sandbox is paused,

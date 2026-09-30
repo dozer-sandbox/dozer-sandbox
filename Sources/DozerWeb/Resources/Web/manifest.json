@@ -6,7 +6,15 @@
       "mimeType" : "text/html; charset=utf-8",
       "publicPath" : "/",
       "resourcePath" : "index.html",
-      "sha256" : "d9d891afb1046358320c2bc73319f5dac2e9321f1d5a3440b1b7af80a6da1cac"
+      "sha256" : "9d86a967b3405c6cd3d130d8ac7de8986512b00f99be41918af9a9bddda15953"
+    },
+    {
+      "cachePolicy" : "public, max-age=31536000, immutable",
+      "class" : "page",
+      "mimeType" : "application/javascript; charset=utf-8",
+      "publicPath" : "/assets/app-3ae0712fa7f1f04a.js",
+      "resourcePath" : "assets/app-3ae0712fa7f1f04a.js",
+      "sha256" : "3ae0712fa7f1f04a8d3995fc351a3c0dd1485dd23ea3cf19f9515f88a98e1c0a"
     },
     {
       "cachePolicy" : "public, max-age=31536000, immutable",
@@ -19,26 +27,18 @@
     {
       "cachePolicy" : "public, max-age=31536000, immutable",
       "class" : "page",
-      "mimeType" : "application/javascript; charset=utf-8",
-      "publicPath" : "/assets/app-4f33214671feef4b.js",
-      "resourcePath" : "assets/app-4f33214671feef4b.js",
-      "sha256" : "4f33214671feef4ba46bdf0a499b1322e21e8c6ee20fa8c86d225ce676d6e308"
-    },
-    {
-      "cachePolicy" : "public, max-age=31536000, immutable",
-      "class" : "page",
-      "mimeType" : "application/javascript; charset=utf-8",
-      "publicPath" : "/assets/frame-0cfc83b215bb79e7.js",
-      "resourcePath" : "assets/frame-0cfc83b215bb79e7.js",
-      "sha256" : "0cfc83b215bb79e7a79dd64e6d062d6ea950e3445e44ae9ea47699c8f2a7f472"
-    },
-    {
-      "cachePolicy" : "public, max-age=31536000, immutable",
-      "class" : "page",
       "mimeType" : "text/css; charset=utf-8",
       "publicPath" : "/assets/frame-94140d7445706e1a.css",
       "resourcePath" : "assets/frame-94140d7445706e1a.css",
       "sha256" : "94140d7445706e1adf88aa304acd3b040e5582909db2446364a04d9996ced326"
+    },
+    {
+      "cachePolicy" : "public, max-age=31536000, immutable",
+      "class" : "page",
+      "mimeType" : "application/javascript; charset=utf-8",
+      "publicPath" : "/assets/frame-d823f1d0d7d2226e.js",
+      "resourcePath" : "assets/frame-d823f1d0d7d2226e.js",
+      "sha256" : "d823f1d0d7d2226e602c2e665d79e635da20d58201bcce4845bc62a2c97c3d72"
     },
     {
       "cachePolicy" : "public, max-age=31536000, immutable",
@@ -70,7 +70,7 @@
       "mimeType" : "text/html; charset=utf-8",
       "publicPath" : "/terminal-frame",
       "resourcePath" : "terminal.html",
-      "sha256" : "56e42f52dcded76c0e9e1eb553ea91962da06cc690445a1f858623515398150e"
+      "sha256" : "22fb2e2c7bf82cb655b7e5461cced4bf7327653050d33dc212b3997803642628"
     }
   ],
   "version" : 1
