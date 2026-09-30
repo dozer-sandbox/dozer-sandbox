@@ -623,9 +623,9 @@ struct HostUpgradeCheck: AsyncParsableCommand {
             }
         }
         if g.json { Out.json(a); return }
+        // 594 W4 (owner's walkthrough): Homebrew's post-install runs this on EVERY install, first ones
+        // included — speak only when an older host is running; otherwise there is nothing to say.
         if let note = a.note { Out.stdout("note: \(note)\n") }
-        else if a.running { Out.stdout("the running host is this build (doz \(DozerCommand.version))\n") }
-        else { Out.stdout("no host is running — the next command uses doz \(DozerCommand.version)\n") }
     }
 
     /// A process's executable path (the kernel's record — `proc_pidpath`), or nil.
