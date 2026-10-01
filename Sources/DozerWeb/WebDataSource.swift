@@ -71,9 +71,16 @@ public protocol DozerWebData: Sendable {
     /// 596: the recommended bases and Apple's container tool (the host's `bases` and `builder-status`,
     /// in-process when no host runs — looking never starts anything).
     func bases() async throws -> WebBases
+    /// 599e: the Access report — from the record (never starting a host), or after a live check of
+    /// `items` (the host's `access` with `check`), of `choices` when given (else the settings').
+    func access(check: WebAccessCheck?) async throws -> AccessReport
+    /// 599e: set or remove the default GitHub key (the host's `access-github-key`); never echoed.
+    func setAccessGitHubKey(_ k: WebAccessGitHubKey) async throws -> AccessReport
 }
 
 extension DozerWebData {
+    public func access(check: WebAccessCheck?) async throws -> AccessReport { throw HostError(.notImplemented, "access") }
+    public func setAccessGitHubKey(_ k: WebAccessGitHubKey) async throws -> AccessReport { throw HostError(.notImplemented, "access") }
     public func bases() async throws -> WebBases { throw HostError(.notImplemented, "bases") }
     public func restartHost(onEvent: @escaping @Sendable (HostEvent) -> Void) async throws -> JSONValue {
         throw HostError(.notImplemented, "host restart")
@@ -206,6 +213,30 @@ public final class HostWebData: DozerWebData, @unchecked Sendable {
         let m = try await blocking { try HostClient.request(r, store: store, autostart: true) }
         guard m.ok == true else { throw m.error ?? HostError(.failed, "the host gave no reason") }
         return try (m.result ?? .null).decode([CredentialRow].self).map(WebCredential.init)
+    }
+
+    public func access(check: WebAccessCheck?) async throws -> AccessReport {
+        guard let check else { return try await query(HostRequest(.access)).0.decode(AccessReport.self) }
+        let store = self.store
+        var r = HostRequest(.access)
+        r.check = true
+        r.items = check.items
+        r.accessChoices = check.choices?.dictionary
+        let request = r
+        let m = try await blocking { try HostClient.request(request, store: store, autostart: true) }
+        guard m.ok == true else { throw m.error ?? HostError(.failed, "the host gave no reason") }
+        return try (m.result ?? .null).decode(AccessReport.self)
+    }
+
+    public func setAccessGitHubKey(_ k: WebAccessGitHubKey) async throws -> AccessReport {
+        let store = self.store
+        var r = HostRequest(.accessGithubKey)
+        if let s = k.secret { r.secret = s } else { r.clearSetting = true }
+        let request = r
+        let m = try await blocking { try HostClient.request(request, store: store, autostart: true) }
+        guard m.ok == true else { throw m.error ?? HostError(.failed, "the host gave no reason") }
+        return try await access(check: nil)          // the host answers it (it runs now): its keychain says
+
     }
 
     public func preparations() async throws -> [WebPreparation] {

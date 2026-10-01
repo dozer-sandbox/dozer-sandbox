@@ -259,6 +259,13 @@ public enum DozerImages {
                 names = AgentPermissions.preset(preset, base: baseID) ?? []
             } else {
                 names = PermissionPolicy.names(from: SettingType.permissionWords(settings.string(SettingKey.permissions) ?? "standard") ?? ["standard"], base: baseID)
+                // 599e: the Access step's GitHub choice joins the default permissions (defaults.github) — not a
+                // named network or the form's exact list; `--allow` / `--github` words below still win.
+                switch settings.string(SettingKey.defaultGithub) {
+                case "read"?: names = AgentPermissions.normalized(names + [AgentPermissions.gitHubAsYou])
+                case "push"?: names = AgentPermissions.normalized(names + [AgentPermissions.gitHubAsYou, AgentPermissions.gitHubPush])
+                default: break
+                }
             }
             var sites: [String] = []
             for w in o.allow ?? [] {

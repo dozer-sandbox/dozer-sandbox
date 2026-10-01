@@ -107,6 +107,12 @@ public enum HostOp: String, Codable, Sendable, CaseIterable {
     /// and browser bridges, tmux, the agent's sudo) — read (no `setting`), set (`setting` + `settingValue`)
     /// or cleared back to the setting (`setting` + `clearSetting`). `doz config set --sandbox NAME`.
     case sandboxSettings = "sandbox-settings"
+    /// 599e: the Access step — every credential choice and its last confirmation (`AccessReport`); with
+    /// `check`, each (or `items`) is CONFIRMED live first (needs the host: a key it holds, the Mac's gh).
+    case access
+    /// 599e: the default GitHub key (`github.credentials = key` without a sandbox's own): `secret` sets it
+    /// (the login keychain, `doz-github`), `clearSetting` removes it. Never echoed.
+    case accessGithubKey = "access-github-key"
 
     /// Operations that only read — answered from the store in-process when no host is running.
     public var isReadOnly: Bool {
@@ -279,6 +285,12 @@ public struct HostRequest: Codable, Equatable, Sendable {
     public var setting: String?
     public var settingValue: TOMLValue?
     public var clearSetting: Bool?
+    /// 599e `access`: confirm live (true), and which credentials (`claude`, `github`, `ssh`; nil: all).
+    public var check: Bool?
+    public var items: [String]?
+    /// 599e `access`: the choices to confirm instead of the settings' (`github`, `githubSource`, `ssh`) —
+    /// the onboarding confirms before it writes them (its settings file is written only when missing).
+    public var accessChoices: [String: String]?
 
     public init(_ op: HostOp, name: String? = nil) {
         v = HostProtocol.version

@@ -20,6 +20,8 @@ struct OnboardReport: Encodable {
     var promptTemplate: String
     var promptTemplatePath: String?
     var images: [String]
+    /// 599e: the Access step — each credential's choice and whether it was confirmed.
+    var access: [AccessItem]
     var result: PrepareResult?
 }
 
@@ -37,6 +39,11 @@ struct OnboardingFlow {
     var plan: String? = nil
     var secretStdin = false
     var force = false
+    /// 599e: the Access step's flags (nil: asked on a terminal, else left as the settings are).
+    var githubFlag: String? = nil
+    var githubSourceFlag: String? = nil
+    var sshFlag: String? = nil
+    var githubKeyStdin = false
 
     func say(_ s: String) { if talk { Out.stdout(s + "\n") } }
 
@@ -58,9 +65,11 @@ struct OnboardingFlow {
             throw fail(HostError(.failed, "onboarding stopped: \(stop.check) — \(stop.detail)"), g)
         }
 
-        // 2. The Claude account (D6): offered, never logged in. A key or a token goes EXACTLY the way
-        //    `doz account add` takes it: pasted at a no-echo prompt (or, with --secret-stdin, stdin).
-        say("\n2. Claude account")
+        // 2. Access (599e): the Claude account (D6: offered, never logged in — a key or a token goes EXACTLY
+        //    the way `doz account add` takes it), GitHub as you, the SSH agent — each a purposeful choice,
+        //    then each CONFIRMED live; a failure is skipped (kept, not confirmed), never blocking.
+        say("\n2. Access — what sandboxes may use as you (each is confirmed; nothing is on unless you choose it)")
+        say("  Claude account")
         let choice: Onboarding.Account
         if let a = accountFlag {
             choice = a
@@ -85,6 +94,16 @@ struct OnboardingFlow {
         case .apiKey, .setupToken:
             added = try addAccount(choice)
         }
+        var step = AccessStep(g: g, asker: asker, talk: talk, githubFlag: githubFlag, sourceFlag: githubSourceFlag, sshFlag: sshFlag)
+        step.checkClaude = choice != .later
+        if githubKeyStdin { step.githubKey = readGitHubToken(fromStdin: true) }
+        let chosenAccess = step.choose()
+        say("  Confirming")
+        let (access, accessReport) = try step.confirm(AccessChoices(github: chosenAccess.github,
+                                                                    githubSource: step.githubKey != nil ? "key" : chosenAccess.githubSource,
+                                                                    ssh: chosenAccess.ssh))
+        // Written only when CHOSEN (a flag, or answered on a terminal): `--yes` alone changes nothing.
+        let accessChosen = asker.interactive || githubFlag != nil || sshFlag != nil || githubSourceFlag != nil || step.githubKey != nil
 
         // 3. Images (D2): claude-code ticked; lab and pi opt-in.
         say("\n3. Images")
@@ -111,6 +130,16 @@ struct OnboardingFlow {
         case .written: say("  wrote \(settingsPath ?? "doz.toml") — every setting listed at its default; set: defaults.image\(Onboarding.defaultAccount(for: choice) == nil ? "" : ", defaults.account")")
         case .kept: say("  \(settingsPath ?? "doz.toml") exists — left exactly as it is")
         case .unavailable: say("  no settings file (neither XDG_CONFIG_HOME nor HOME is set)")
+        }
+        // 599e: the Access choices are the defaults for new sandboxes (written even into a file that was kept).
+        if accessChosen, settings != .unavailable {
+            let set: [String]
+            do {
+                set = try Access.write(github: access.github, githubSource: access.github == "off" && githubSourceFlag == nil ? nil : access.githubSource,
+                                       ssh: access.ssh)
+            } catch { throw fail(HostError(.failed, "\(error)"), g) }
+            say(set.isEmpty ? "  Access: the settings already say so (defaults.github = \(access.github), sandbox.ssh_agent = \(access.ssh))"
+                            : "  Access: set " + set.joined(separator: ", ") + " — new sandboxes follow them (doz access set changes them)")
         }
         let (template, templatePath) = try settingsOutcome { try Onboarding.writePromptTemplateIfMissing() }
         switch template {
@@ -145,7 +174,7 @@ struct OnboardingFlow {
         return OnboardReport(store: store.root.path, checks: checks, account: choice.rawValue, accountAdded: added,
                              accountCommands: added == nil ? Onboarding.accountCommands(choice) : [],
                              settings: settings.rawValue, settingsPath: settingsPath, promptTemplate: template.rawValue,
-                             promptTemplatePath: templatePath, images: chosen, result: result)
+                             promptTemplatePath: templatePath, images: chosen, access: accessReport.items, result: result)
     }
 
     /// A key or a setup token, added exactly as `doz account add` adds it, then made the store default.
@@ -237,7 +266,7 @@ func followingCall(_ r: HostRequest, _ g: GlobalOptions,
 
 struct Onboard: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
-        abstract: "Set up this Mac for Dozer Sandbox (once): check it, choose the Claude account, write the settings, prepare images in the background.",
+        abstract: "Set up this Mac for Dozer Sandbox (once): check it, choose and confirm Access (the Claude account, GitHub, the SSH agent), write the settings, prepare images in the background.",
         discussion: """
         Re-running is safe: it checks again, leaves existing settings alone and prepares only what is \
         missing. The images are prepared by the host: Ctrl-C detaches (the preparation goes on), \
@@ -256,9 +285,18 @@ struct Onboard: AsyncParsableCommand {
     @Option(name: .long, help: "With --account setup-token: the plan (max, pro, team, enterprise).") var plan: String?
     @Flag(name: .long, help: "With --account api-key|setup-token off a terminal: read the key or token from stdin (as doz account add does). On a terminal it is pasted at a no-echo prompt.") var secretStdin = false
     @Flag(name: .long, help: "With --account api-key|setup-token: replace an account of that name.") var force = false
-    @Flag(name: [.short, .long], help: "Accept every default; ask nothing.") var yes = false
+    @Option(name: .long, help: "The Access step's GitHub choice without asking: off, read or push (new sandboxes signed in to GitHub as you).") var github: String?
+    @Option(name: .long, help: "Where the GitHub token comes from: gh (this Mac's gh login) or key (--github-key-stdin).") var githubSource: String?
+    @Flag(name: .long, help: "Read a GitHub token from stdin as the default key (implies --github-source key).") var githubKeyStdin = false
+    @Option(name: .long, help: "The Access step's SSH choice without asking: on or off (forward this Mac's ssh-agent, github.com only).") var sshAgent: String?
+    @Flag(name: [.short, .long], help: "Accept every default; ask nothing. A credential that cannot be confirmed is skipped with a note (exit 0).") var yes = false
 
     func validate() throws {
+        if let v = github, !["off", "read", "push"].contains(v) { throw ValidationError("--github: off, read or push") }
+        if let v = githubSource, !["gh", "key"].contains(v) { throw ValidationError("--github-source: gh or key") }
+        if let v = sshAgent, !["on", "off"].contains(v) { throw ValidationError("--ssh-agent: on or off") }
+        if githubKeyStdin && secretStdin { throw ValidationError("--github-key-stdin and --secret-stdin both read stdin — add one later (doz access set --github-key / doz account add)") }
+        if githubKeyStdin && githubSource == "gh" { throw ValidationError("--github-key-stdin goes with --github-source key") }
         if [status, cancel].filter({ $0 }).count + ((images != nil || allImages || noImages || account != nil) ? 1 : 0) > 1 {
             throw ValidationError("--status and --cancel stand alone")
         }
@@ -289,6 +327,10 @@ struct Onboard: AsyncParsableCommand {
         flow.accountName = accountName
         flow.plan = plan?.lowercased()
         flow.secretStdin = secretStdin
+        flow.githubFlag = github
+        flow.githubSourceFlag = githubKeyStdin ? "key" : githubSource
+        flow.sshFlag = sshAgent
+        flow.githubKeyStdin = githubKeyStdin
         flow.force = force
         let report = try await flow.run()
         if g.json { Out.json(report) }

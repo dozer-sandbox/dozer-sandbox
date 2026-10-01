@@ -605,6 +605,25 @@ public final class DozerWebServer: @unchecked Sendable {
             } catch {
                 throw HostError(.failed, k.scrub(error.localizedDescription))
             }
+        case .access:
+            return json(try await data.access(check: nil))
+        case .accessCheck:
+            // 599e: changes no setting (the record of the last check only); POST (CSRF, above) — it starts
+            // the host and carries the choices to confirm before they are written.
+            try Self.requireJSONBody(md)
+            return json(try await data.access(check: try WebAccessCheck.decode(body)))
+        case .accessGithubKey:
+            // The model of accountAdd: CSRF (above), the setting, a strict body, scrubbed errors.
+            try Self.requireJSONBody(md)
+            guard settings.secretEntryAllowed else { throw WebRejection.secretEntryOff }
+            let k = try WebAccessGitHubKey.decode(body)
+            do {
+                return json(try await data.setAccessGitHubKey(k))
+            } catch let e as HostError {
+                throw HostError(e.code, k.scrub(e.message))
+            } catch {
+                throw HostError(.failed, k.scrub(error.localizedDescription))
+            }
         case .workspaceCheck:
             // Changes nothing; POST (CSRF, above) because it carries a typed path.
             try Self.requireJSONBody(md)
