@@ -472,6 +472,7 @@ func cliSuite() async throws {
     await cliClipboardSuite(binary: h.binary)
     await cliBrowserSuite(binary: h.binary)
     await cliOpenFilesSuite(binary: h.binary)
+    await cliGitHubSuite(binary: h.binary)
     await cliTmuxSuite(binary: h.binary)
 }
 
