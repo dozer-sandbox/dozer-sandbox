@@ -119,8 +119,7 @@ final class OpenFilesTests: XCTestCase {
         XCTAssertTrue(refusal("/workspace/x.command").contains(".command is never opened (an app, script or installer type)"))
         XCTAssertTrue(refusal("/workspace/x.sh").contains(".sh is never opened"))
         XCTAssertTrue(refusal("/workspace/x.webloc").contains(".webloc is never opened"))
-        XCTAssertTrue(refusal("/workspace/Thing.app").contains("folder"), "an app bundle is a folder")
-        XCTAssertTrue(refusal("/workspace/sub").contains("folder"))
+        XCTAssertTrue(refusal("/workspace/Thing.app").contains("Thing.app is an app or package: never opened"), "an app bundle, even for the Finder")
         XCTAssertTrue(refusal("/workspace/noext").contains("no document type"))
         XCTAssertTrue(refusal("/workspace/data.bin").contains(".bin is never opened"))
         try? "x".write(toFile: ws + "/sheet.xlsx", atomically: true, encoding: .utf8)
@@ -162,10 +161,10 @@ final class OpenFilesTests: XCTestCase {
         XCTAssertEqual(other, "Safari is not in bridges.open_apps")
         guard case .refused(_, let bad) = d("../Evil", workspace: ws, apps: ["Typora"]) else { return XCTFail("bad name") }
         XCTAssertTrue(bad.contains("not an app name"), bad)
-        guard case .open(let path, "notes.md", let app) = d("typora", workspace: ws, apps: ["Visual Studio Code", "Typora"]) else { return XCTFail("listed") }
+        guard case .open(let path, "notes.md", let app, .app) = d("typora", workspace: ws, apps: ["Visual Studio Code", "Typora"]) else { return XCTFail("listed") }
         XCTAssertEqual(app, "Typora", "the LISTED spelling reaches open -a, never the guest's")
         XCTAssertTrue(path.hasSuffix("/ws/notes.md"))
-        guard case .open(_, _, nil) = d(workspace: ws) else { return XCTFail("the default app") }
+        guard case .open(_, _, nil, .app) = d(workspace: ws) else { return XCTFail("the default app") }
         XCTAssertEqual(WorkspaceFiles.shownRequest("/workspace/sub/../a\u{07}.md"), "a.md")
         XCTAssertEqual(WorkspaceFiles.shownRequest("/etc/hosts"), "/etc/hosts")
     }
@@ -223,15 +222,93 @@ final class OpenFilesTests: XCTestCase {
         let on = files("/Users/u/p", true)
         XCTAssertTrue(on.contains("`xdg-open FILE`") && on.contains("notice") && on.contains("Only the file's default app"), on)
         XCTAssertTrue(files("/Users/u/p", true, ["Typora"]).contains("doz-open --app NAME FILE") && files("/Users/u/p", true, ["Typora"]).contains("Typora"))
-        XCTAssertTrue(AgentPrompt.builtInTemplate.contains("{{files.description}}") && AgentPrompt.skillTemplate.contains("{{files.description}}"))
+        XCTAssertTrue(on.contains("in the Finder") && on.contains("--reveal"), "the skill's longer version names folders and --reveal")
+        // The facts block: ONE line for every open bridge (the skill has the long version).
+        XCTAssertTrue(AgentPrompt.builtInTemplate.contains("- {{mac.open}}"))
+        XCTAssertFalse(AgentPrompt.builtInTemplate.contains("{{files.description}}") || AgentPrompt.builtInTemplate.contains("{{browser.description}}"))
+        XCTAssertTrue(AgentPrompt.skillTemplate.contains("{{files.description}}") && AgentPrompt.skillTemplate.contains("{{browser.description}}"))
+    }
+
+    func testTheFactsHaveOneOpenLineSayingOnlyWhatIsOn() throws {
+        func line(_ workspace: String?, browser: Bool, files: Bool) -> String {
+            AgentPrompt.values(name: "n", image: "pi", cpus: 1, memoryMiB: 1024, workspace: workspace, network: .none, account: nil, version: "1",
+                               hostname: "h", browser: browser, openFiles: files)["mac.open"] ?? "?"
+        }
+        let all = line("/Users/u/p", browser: true, files: true)
+        XCTAssertEqual(all, "You can show the user things on their Mac: `open`/`xdg-open` a URL (their browser), a /workspace document (its app), or a /workspace folder (Finder); `doz-open --reveal PATH` shows a file in its folder. The user sees a notice each time.")
+        XCTAssertEqual(line("/Users/u/p", browser: true, files: false), "You can show the user things on their Mac: `open`/`xdg-open` a URL (their browser). The user sees a notice each time.",
+                       "files off: only what still works")
+        XCTAssertEqual(line("/Users/u/p", browser: false, files: true),
+                       "You can show the user things on their Mac: `open`/`xdg-open` a /workspace document (its app), or a /workspace folder (Finder); `doz-open --reveal PATH` shows a file in its folder. The user sees a notice each time.")
+        XCTAssertEqual(line(nil, browser: true, files: true),
+                       "You can show the user things on their Mac: `open`/`xdg-open` a URL (their browser); folders and documents can't be opened — nothing is shared. The user sees a notice each time.")
+        XCTAssertEqual(line("/Users/u/p", browser: false, files: false), "", "both off: nothing")
+        XCTAssertEqual(line(nil, browser: false, files: true), "", "isolated with the browser off: nothing works")
+        // Rendered: an empty line is no line at all.
+        let v = AgentPrompt.values(name: "n", image: "pi", cpus: 1, memoryMiB: 1024, workspace: nil, network: .none, account: nil, version: "1",
+                                   hostname: "h", browser: false, openFiles: false)
+        let off = try AgentPrompt.render(AgentPrompt.builtInTemplate, v, source: "b")
+        let on = try AgentPrompt.render(AgentPrompt.builtInTemplate,
+                                        AgentPrompt.values(name: "n", image: "pi", cpus: 1, memoryMiB: 1024, workspace: "/w", network: .none, account: nil,
+                                                           version: "1", hostname: "h"), source: "b")
+        XCTAssertFalse(off.split(separator: "\n").contains { $0.trimmingCharacters(in: .whitespaces) == "-" })
+        XCTAssertEqual(on.split(separator: "\n").count, off.split(separator: "\n").count + 1)
+        XCTAssertTrue(on.contains("- You can show the user things on their Mac"))
+    }
+
+    // MARK: folders and --reveal
+
+    func testFoldersOpenInTheFinderAndPackagesNever() throws {
+        func d(_ path: String, app: String? = nil, reveal: Bool = false, workspace: String? = nil) -> WorkspaceFiles.Decision {
+            WorkspaceFiles.decide(guestPath: path, app: app, reveal: reveal, workspace: workspace ?? ws, enabled: true, allowedApps: ["Typora"])
+        }
+        let real = try XCTUnwrap(WorkspaceFiles.realPath(ws))
+        XCTAssertEqual(d("/workspace"), .open(macPath: real, shown: "the workspace", app: nil, how: .finder), "the workspace itself")
+        XCTAssertEqual(d("/workspace/sub/.."), .open(macPath: real, shown: "the workspace", app: nil, how: .finder))
+        XCTAssertEqual(d("/workspace/sub"), .open(macPath: real + "/sub", shown: "sub/", app: nil, how: .finder), "a child folder")
+        guard case .refused(_, let up) = d("/workspace/.."), case .refused(_, let out) = d("/workspace/dirlink") else { return XCTFail("escapes") }
+        XCTAssertTrue(up.contains("only files in /workspace"), up)
+        XCTAssertTrue(out.contains("leads outside the shared folder"), "a link to a folder outside: \(out)")
+        guard case .refused(_, let pkg) = d("/workspace/Thing.app") else { return XCTFail("a package") }
+        XCTAssertTrue(pkg.contains("app or package"), pkg)
+        // A folder macOS calls a package without a known extension (.rtfd is one).
+        try FileManager.default.createDirectory(atPath: ws + "/Notes.rtfd", withIntermediateDirectories: true)
+        guard case .refused(_, let rtfd) = d("/workspace/Notes.rtfd") else { return XCTFail("isPackage") }
+        XCTAssertTrue(rtfd.contains("app or package"), rtfd)
+        guard case .refused(_, let withApp) = d("/workspace/sub", app: "Typora") else { return XCTFail("--app with a folder") }
+        XCTAssertTrue(withApp.contains("a folder opens in the Finder"), withApp)
+        guard case .refused(_, let iso) = WorkspaceFiles.decide(guestPath: "/workspace/sub", app: nil, workspace: nil, enabled: true, allowedApps: []) else { return XCTFail("isolated") }
+        XCTAssertTrue(iso.contains("isolated"))
+        // --reveal: a file selected in its folder (its type is not checked — nothing opens), a folder shown,
+        // a package selected in its parent; never outside.
+        XCTAssertEqual(d("/workspace/notes.md", reveal: true), .open(macPath: real + "/notes.md", shown: "notes.md", app: nil, how: .reveal))
+        XCTAssertEqual(d("/workspace/x.command", reveal: true), .open(macPath: real + "/x.command", shown: "x.command", app: nil, how: .reveal))
+        XCTAssertEqual(d("/workspace/sub", reveal: true), .open(macPath: real + "/sub", shown: "sub/", app: nil, how: .finder))
+        XCTAssertEqual(d("/workspace/Thing.app", reveal: true), .open(macPath: real + "/Thing.app", shown: "Thing.app", app: nil, how: .reveal))
+        guard case .refused = d("/workspace/abs-out.html", reveal: true), case .refused = d("/workspace/notes.md", app: "Typora", reveal: true) else {
+            return XCTFail("reveal never outside, never with --app")
+        }
+        // The seam.
+        let seam = root.appendingPathComponent("folders.log").path
+        XCTAssertTrue(WorkspaceFiles.open(real + "/sub", app: nil, how: .finder, environment: ["DOZ_TEST_OPEN_URL": seam]))
+        XCTAssertTrue(WorkspaceFiles.open(real + "/notes.md", app: nil, how: .reveal, environment: ["DOZ_TEST_OPEN_URL": seam]))
+        XCTAssertEqual(try String(contentsOfFile: seam, encoding: .utf8), "open-folder \(real)/sub\nreveal \(real)/notes.md\n")
+    }
+
+    func testTheScannerTakesAReveal() {
+        var s = SessionBridgeScanner()
+        let (out, ev) = s.feed(bytes("a\u{1B}]6340;doz-reveal;/workspace/x y.md\u{07}b"))
+        XCTAssertEqual(String(decoding: out, as: UTF8.self), "ab")
+        XCTAssertEqual(ev, [.revealFile(path: "/workspace/x y.md")])
     }
 
     // MARK: the guest half
 
     func testTheShimTakesFilesAndIsValidShell() throws {
         let shim = GuestCommand.openShim
-        XCTAssertTrue(shim.contains("# doz:open-url-shim:v4"), "a new stamp: a wake re-installs it")
-        XCTAssertTrue(GuestCommand.openShimInstall.contains("doz:open-url-shim:v4"))
+        XCTAssertTrue(shim.contains("# doz:open-url-shim:v5"), "a new stamp: a wake re-installs it")
+        XCTAssertTrue(GuestCommand.openShimInstall.contains("doz:open-url-shim:v5"))
+        XCTAssertTrue(shim.contains("send \"doz-reveal;$abs\"") && shim.contains("send \"doz-file;;$abs\" \"Asking your Mac to open in the Finder"))
         XCTAssertTrue(GuestCommand.openShimAliases.contains("doz-open"))
         XCTAssertTrue(shim.contains("send \"doz-file;$app;$abs\""))
         XCTAssertTrue(shim.contains("*.command|") && shim.contains("*.html|"), "the type lists are in the shim")

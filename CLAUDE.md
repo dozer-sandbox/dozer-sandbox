@@ -879,6 +879,14 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   answer, never with `-q`, never on stdout; `rawCall` (every host request but ping/host-stop) and
   `doz attach` call it. `hostBuildNote` uses the web UI's `WebVersion.compare` (a newer host: upgrade
   this doz). `image ls` STATUS is always a word (W32; a template is `up to date`).
+- **Workspace folders (599b, owner's addition)**: a FOLDER — /workspace itself (relative path "") or any
+  child, the same mapping and Mac-side `realpath` — opens with `open -a Finder` (never as an app); a
+  package folder (`URLResourceValues.isPackage`, or a never-list extension) is refused even then.
+  `doz-open --reveal` (`doz-reveal;PATH`, `BridgeEvent.revealFile`) is `open -R` — nothing opens, so a
+  file's type is not checked and a package may be revealed; never outside, never with `--app`. Seam
+  lines `open-folder PATH` / `reveal PATH`. The facts block has ONE `{{mac.open}}` line for every open
+  bridge (only what is on; empty → the bullet is dropped by `AgentPrompt.render`); the skill keeps
+  `{{browser.description}}` and `{{files.description}}`.
 - **Workspace files (599b) ride the SAME shim and marker** — never a second guest→host channel. The shim
   (`openShim`, stamp `doz:open-url-shim:vN` — bump it on ANY change, so a wake's `guestFixes` re-installs
   it) takes a file as well as a URL and sends `ESC]6340;doz-file;APP;/workspace/… BEL` (made absolute and

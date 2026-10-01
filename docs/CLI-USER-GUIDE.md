@@ -412,7 +412,12 @@ sign-in cannot come back.
 
 The same `xdg-open` (and `open`, and `doz-open`) takes a **file** too: a document under `/workspace`
 (relative names are the caller's folder's) opens on your Mac — the shared folder's own file — in its
-default app, and the notice says which: `SANDBOX opened report.html in Safari`.
+default app, and the notice says which: `SANDBOX opened report.html in Safari`. A **folder** under
+`/workspace` (`open .` — the workspace itself — or any child) opens in the **Finder** (`open -a Finder`,
+never as an app): `SANDBOX opened src/ in the Finder`; `doz-open --reveal PATH` shows a file selected
+in its folder (`open -R`; nothing is opened): `SANDBOX showed app.zip in the Finder`. A package folder
+(`.app`, a bundle, anything macOS calls a package) is refused even for the Finder — `--reveal` can show
+it; `--app` with a folder is refused.
 
 ```sh
 xdg-open report.html                 # inside the sandbox: the Mac's default app for .html (your browser)

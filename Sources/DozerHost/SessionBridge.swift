@@ -31,6 +31,8 @@ public enum BridgeEvent: Equatable, Sendable {
     /// 599b: the shim's workspace file (`doz-file;APP;PATH` — the guest's absolute path, and the app it
     /// named, nil: the default app). Not yet checked — the host decides (`WorkspaceFiles`).
     case openFile(path: String, app: String?)
+    /// 599b: `doz-open --reveal PATH` (`doz-reveal;PATH`) — shown selected in its folder in the Finder.
+    case revealFile(path: String)
 }
 
 public struct SessionBridgeScanner: Sendable {
@@ -157,6 +159,12 @@ public struct SessionBridgeScanner: Sendable {
                 let path = String(rest[rest.index(after: semi)...])
                 if path.utf8.count > Self.maximumURLBytes { events.append(.openTooLong); return }
                 if !path.isEmpty { events.append(.openFile(path: path, app: app.isEmpty ? nil : app)) }
+                return
+            }
+            if text.hasPrefix("doz-reveal;") {
+                let path = String(text.dropFirst("doz-reveal;".count))
+                if path.utf8.count > Self.maximumURLBytes { events.append(.openTooLong); return }
+                if !path.isEmpty { events.append(.revealFile(path: path)) }
                 return
             }
             guard text.hasPrefix("doz-open;") else { return }

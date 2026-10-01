@@ -141,14 +141,20 @@ the agent) runs `xdg-open report.html` — or `open notes.md`, or `doz-open note
 sandbox with a shared workspace, the file opens **on your Mac**, in its default app: an html page in
 your browser, markdown in your editor, a PDF in Preview. A relative name is the program's own folder's.
 
+A **folder** — the workspace itself or any folder in it — opens in the **Finder**, and
+`doz-open --reveal` shows a file selected in its folder:
+
 ```sh
 xdg-open report.html                    # in the sandbox: opens ~/Developer/my-app/report.html on the Mac
 open docs/notes.md                      # the same
 doz-open --app Typora notes.md          # in a named app — only one you allowed (below)
+open .                                  # the workspace folder, in the Finder
+open src                                # a folder in it, in the Finder
+doz-open --reveal dist/app.zip          # the Finder, with that file selected (nothing is opened)
 ```
 
 Every time, your terminal (or the dashboard) says what happened: `my-app opened report.html in
-Safari`.
+Safari`, `my-app opened src/ in the Finder`, `my-app showed app.zip in the Finder`.
 
 ![The open-file notice in the dashboard](images/open-file-toast.png)
 
@@ -157,15 +163,18 @@ What it never does:
 - **Nothing outside the workspace.** The path is mapped to your shared folder and resolved on the
   Mac; a `..` or a link (made in the sandbox or on the Mac) that leads out of it is refused.
 - **Documents only:** html, md, pdf, images (png, jpg, gif, webp, svg, …), txt and log, csv and tsv,
-  json, yaml, xml, toml. Never a folder (so never an app bundle), never an app, script, installer or
-  link file (`.app`, `.command`, `.sh`, `.pkg`, `.dmg`, `.webloc`, …), never a file with its
-  executable bit set, and never a program or `#!` script whatever its name says — the first bytes are
-  checked.
+  json, yaml, xml, toml. Never an app, script, installer or link file (`.command`, `.sh`, `.pkg`,
+  `.dmg`, `.webloc`, …), never a file with its executable bit set, and never a program or `#!` script
+  whatever its name says — the first bytes are checked.
+- **Folders only in the Finder**, never as an app. A folder the Mac treats as a package (an `.app`, a
+  bundle, an `.rtfd` …) is never opened, not even in the Finder; `doz-open --reveal` can still show it,
+  selected in its parent folder.
 - **No app you didn't name.** A file opens in its default app. To let a sandbox name another one, list
-  it: `doz config set bridges.open_apps "Typora, Visual Studio Code"`. Any other name is refused.
+  it: `doz config set bridges.open_apps "Typora, Visual Studio Code"`. Any other name is refused, and
+  so is naming an app for a folder.
 - **An isolated sandbox** has nothing of yours to open, and says so.
 - **Only while you watch:** like the clipboard, it acts only while a terminal is attached to the
-  session; at most 3 files in 10 seconds per sandbox.
+  session; at most 3 files or folders in 10 seconds per sandbox.
 
 URLs work exactly as before ([Signing in from a sandbox](11-signing-in-from-a-sandbox.md)). Turn
 files off where you don't want them:
@@ -204,7 +213,7 @@ Limits:
 |---|---|---|
 | `ui.terminal_title` | `{sandbox} · {session} · {time}` | The title of your terminal while attached, and of dashboard tabs. `""` leaves it to the program. |
 | `sandbox.clipboard` | `write` | `write`: copies reach your Mac's clipboard, with a notice. `off`: never. Per sandbox too. |
-| `sandbox.open_files` | `on` | `on`: `xdg-open FILE` opens a `/workspace` document on your Mac, with a notice. `off`: never. Per sandbox too. |
+| `sandbox.open_files` | `on` | `on`: `xdg-open PATH` opens a `/workspace` document in its app, or a folder in the Finder, on your Mac, with a notice. `off`: never. Per sandbox too. |
 | `bridges.open_apps` | `""` | The apps a sandbox may name to open a file in (`doz-open --app NAME`). Empty: default apps only. |
 | `sessions.tmux` | `false` | New sessions run inside tmux. Per sandbox too. |
 | `ui.terminals` | `true` | Terminals in the browser at all. |

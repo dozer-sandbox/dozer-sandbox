@@ -129,35 +129,46 @@ extension HostCore {
             return await openURL(raw, sandbox: sandbox, session: session)
         case .openFile(let path, let app):
             return await openFile(path, app: app, sandbox: sandbox, session: session)
+        case .revealFile(let path):
+            return await openFile(path, app: nil, reveal: true, sandbox: sandbox, session: session)
         }
     }
 
     /// 599b: a /workspace file → the Mac's default app (or an app the user listed). `WorkspaceFiles`
     /// decides (the setting, isolation, the app, the path resolved on the Mac, the type and content);
     /// here: the rate limit, acting once for two viewers, the notice and the log line.
-    nonisolated func openFile(_ guestPath: String, app: String?, sandbox: String, session: String) async -> BridgeNotice {
+    /// A folder opens in the Finder; `reveal` shows a file selected in its folder.
+    nonisolated func openFile(_ guestPath: String, app: String?, reveal: Bool = false, sandbox: String, session: String) async -> BridgeNotice {
         let enabled = await sandboxValue(named: sandbox, SettingKey.openFiles) != .string("off")
         let workspace = await workspaceHostPath(of: sandbox)
         let allowed = WorkspaceFiles.appNames(DozerSettings.load().string(SettingKey.openApps) ?? "") ?? []
         let asked = WorkspaceFiles.shownRequest(guestPath)
         let inApp = app.map { " in " + String($0.unicodeScalars.filter { $0.value >= 0x20 && $0.value != 0x7F }.prefix(64)) } ?? ""
-        switch WorkspaceFiles.decide(guestPath: guestPath, app: app, workspace: workspace, enabled: enabled, allowedApps: allowed) {
+        let verb = reveal ? "show" : "open"
+        switch WorkspaceFiles.decide(guestPath: guestPath, app: app, reveal: reveal, workspace: workspace, enabled: enabled, allowedApps: allowed) {
         case .refused(let kind, let why):
             // Said to the viewer only (as the browser bridge's refusals): a program that keeps asking
             // must not grow the host log.
-            return BridgeNotice(kind, "\(sandbox) asked to open \(asked)\(inApp) — \(why)")
-        case .open(let macPath, let shown, let listed):
+            return BridgeNotice(kind, "\(sandbox) asked to \(verb) \(asked)\(inApp) — \(why)")
+        case .open(let macPath, let shown, let listed, let how):
             let state = bridgeState
-            let (n, fresh) = state.once("file/\(sandbox)/\(macPath)/\(listed ?? "")", within: 10) {
+            let (n, fresh) = state.once("file/\(sandbox)/\(how.rawValue)/\(macPath)/\(listed ?? "")", within: 10) {
                 guard state.fileOpens.allow(sandbox) else {
-                    return BridgeNotice("file-refused", "\(sandbox) asked to open too many files — \(shown) not opened (at most \(WorkspaceFiles.rateCount) in \(Int(WorkspaceFiles.rateWindow)) s)")
+                    return BridgeNotice("file-refused", "\(sandbox) asked to \(verb) too many files — \(shown) not opened (at most \(WorkspaceFiles.rateCount) in \(Int(WorkspaceFiles.rateWindow)) s)")
                 }
-                guard WorkspaceFiles.open(macPath, app: listed) else {
-                    return BridgeNotice("file-refused", "\(sandbox) asked to open \(shown)\(inApp), but this Mac could not open it")
+                guard WorkspaceFiles.open(macPath, app: listed, how: how) else {
+                    return BridgeNotice("file-refused", "\(sandbox) asked to \(verb) \(shown)\(inApp), but this Mac could not open it")
                 }
-                return BridgeNotice("file", "\(sandbox) opened \(shown) in \(listed ?? MacDefaultApp.name(forFile: macPath) ?? "its default app")")
+                switch how {
+                case .finder: return BridgeNotice("file", "\(sandbox) opened \(shown) in the Finder")
+                case .reveal: return BridgeNotice("file", "\(sandbox) showed \(shown) in the Finder")
+                case .app: return BridgeNotice("file", "\(sandbox) opened \(shown) in \(listed ?? MacDefaultApp.name(forFile: macPath) ?? "its default app")")
+                }
             }
-            if fresh { await note(sandbox, "the \(session) session asked for /workspace/\(shown): \(n.text)") }
+            if fresh {
+                let place = shown == "the workspace" ? "/workspace" : "/workspace/\(shown)"
+                await note(sandbox, "the \(session) session asked for \(place): \(n.text)")
+            }
             return n
         }
     }

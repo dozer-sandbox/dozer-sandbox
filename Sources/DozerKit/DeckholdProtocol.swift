@@ -287,7 +287,7 @@ public enum GuestCommand {
     public static let openShimPath = openShimDirectory + "/xdg-open"
     /// The other names a program reaches for (links to the shim). 599b: `doz-open` (`--app NAME FILE`).
     public static let openShimAliases = ["open", "sensible-browser", "www-browser", "x-www-browser", "doz-open"]
-    static let openShimStamp = "doz:open-url-shim:v4"
+    static let openShimStamp = "doz:open-url-shim:v5"
 
     /// 599b: the document types a /workspace file may have to be opened on the Mac (lowercased
     /// extensions). The host (`WorkspaceFiles`) decides; the shim checks the same lists first so the
@@ -329,25 +329,31 @@ public enum GuestCommand {
     /// the caller's directory; the host resolves it again on the Mac and decides). The shim's own checks
     /// (in /workspace, a document type, not executable, not `#!`) only tell the agent why at once — the
     /// notice goes to the person's terminal, not the agent's. `-a`/`--app NAME` (`doz-open --app`).
+    /// 599b, later: a FOLDER in /workspace (`open .` too) opens in the Finder (the same `doz-file;;PATH` —
+    /// the host sees it is a folder); `-R`/`--reveal PATH` sends `doz-reveal;PATH` (shown selected in its
+    /// folder). A package folder (`*.app`, …) is refused unless revealed. Stamp v5.
     public static let openShim = #"""
     #!/bin/sh
-    # doz:open-url-shim:v4
+    # doz:open-url-shim:v5
     # Dozer Sandbox's bridge to the Mac. This sandbox has no browser and no desktop, so an http(s) URL,
-    # or a document in /workspace (the folder shared with the Mac), is handed to the Mac through the
-    # session's terminal: doz shows it and opens it (the URL in the Mac's default browser, the document
-    # in its default app, or in an app the user allowed: bridges.open_apps) unless that bridge is off
-    # for this sandbox. Written at every boot and wake; see `doz config show --sandbox`.
+    # or a document or folder in /workspace (the folder shared with the Mac), is handed to the Mac
+    # through the session's terminal: doz shows it and opens it (the URL in the Mac's default browser,
+    # the document in its default app or in an app the user allowed: bridges.open_apps, the folder in
+    # the Finder) unless that bridge is off for this sandbox. --reveal shows a file selected in its
+    # folder. Written at every boot and wake; see `doz config show --sandbox`.
     me=${0##*/}
     app=""
+    reveal=""
     status=0
     usage() {
-        echo "usage: $me URL | FILE...    (a FILE is a document in /workspace; $me --app NAME FILE... opens it in another Mac app the user allowed)" >&2
+        echo "usage: $me URL | PATH...    (a PATH in /workspace: a document opens in its app, a folder in the Finder; $me --app NAME FILE... another Mac app the user allowed; $me --reveal PATH... shows it in its folder)" >&2
         exit "${1:-1}"
     }
     while [ $# -gt 0 ]; do
         case "$1" in
             -a|--app) [ $# -ge 2 ] || usage; app="$2"; shift 2 ;;
             --app=*) app="${1#--app=}"; shift ;;
+            -R|--reveal) reveal=1; shift ;;
             -h|--help) usage 0 ;;
             --) shift; break ;;
             -?*) echo "$me: unknown option $1 ($me here opens a URL, or a /workspace file, on your Mac)" >&2; exit 1 ;;
@@ -378,23 +384,34 @@ public enum GuestCommand {
     }
     open_url() {
         [ -z "$app" ] || { refuse "--app is for files; a URL opens in your Mac's default browser: $1"; return; }
+        [ -z "$reveal" ] || { refuse "--reveal is for files and folders in /workspace, not a URL: $1"; return; }
         send "doz-open;$1" "Asking your Mac to open: $1"
     }
     open_file() {
         t=$1
         if ! grep -qs ' /workspace ' /proc/mounts; then
-            refuse "this sandbox is isolated (nothing on your Mac is shared), so no file can be opened there: $t"; return
+            refuse "this sandbox is isolated (nothing on your Mac is shared), so no file or folder can be opened there: $t"; return
         fi
         [ -e "$t" ] || { refuse "no such file: $t"; return; }
-        [ -d "$t" ] && { refuse "$t is a folder; only documents are opened on your Mac"; return; }
         case "$t" in /*) p=$t ;; *) p=./$t ;; esac
         abs=$(realpath "$p" 2>/dev/null || readlink -f "$p" 2>/dev/null)
         case "$abs" in
-            /workspace/*) ;;
-            *) refuse "only files in /workspace (the folder shared with your Mac) are opened there, not $t"; return ;;
+            /workspace|/workspace/*) ;;
+            *) refuse "only files and folders in /workspace (the folder shared with your Mac) are opened there, not $t"; return ;;
         esac
         name=${abs##*/}
         lower=$(printf '%s' "$name" | tr 'A-Z' 'a-z')
+        if [ -n "$reveal" ]; then
+            [ -z "$app" ] || { refuse "--app with --reveal: it is shown in the Finder"; return; }
+            send "doz-reveal;$abs" "Asking your Mac to show: $abs"; return
+        fi
+        if [ -d "$abs" ]; then
+            [ -z "$app" ] || { refuse "--app is for files; a folder opens in the Finder: $t"; return; }
+            case "$lower" in
+                \#(casePatterns(openFileNeverTypes))) refuse "$name is an app or package: never opened on your Mac ($me --reveal shows it in its folder)"; return ;;
+            esac
+            send "doz-file;;$abs" "Asking your Mac to open in the Finder: $abs"; return
+        fi
         case "$lower" in
             \#(casePatterns(openFileNeverTypes))) refuse "$name is a program, script or installer type: never opened on your Mac"; return ;;
             \#(casePatterns(openFileDocumentTypes))) ;;

@@ -19,6 +19,13 @@ import DozerKit
 //   4. a named app must be in the user's `bridges.open_apps`, and the LISTED spelling is what reaches
 //      `open -a` — never the guest's text.
 //
+// Owner, later the same day: "add a command (bridge variation) so the agent in the VM can open the
+// workspace (or child dir of) directory in the Finder". A FOLDER — /workspace itself or any folder in it,
+// by the same mapping and the same Mac-side resolution — opens in the Finder (`open -a Finder`, so it is
+// never taken for an app); a package folder (an app, a bundle: `isPackage`, or a never-list extension)
+// is still refused. `doz-open --reveal PATH` (`doz-reveal;PATH`) shows a file selected in its folder
+// (`open -R` — nothing is opened, so a file's type is not checked; a package may be shown this way).
+//
 // Residual risk (said in the security model): the agent can still change the file between the check and
 // LaunchServices opening it (a rename race of a few milliseconds). What it could swap in is limited to
 // what the shared folder already reaches, and `open` is never given anything but a resolved path.
@@ -40,11 +47,22 @@ public enum WorkspaceFiles {
     /// or redirect). Anything not in `documentTypes` is refused too; this list only makes the refusal clear.
     public static var neverTypes: [String] { GuestCommand.openFileNeverTypes }
 
+    /// How a resolved path is shown on the Mac.
+    public enum How: String, Equatable, Sendable {
+        /// A document, in its default app or the listed one (`open [-a APP] PATH`).
+        case app
+        /// A folder, in the Finder (`open -a Finder PATH` — never as an app).
+        case finder
+        /// A file selected in its folder (`open -R PATH` — nothing is opened).
+        case reveal
+    }
+
     /// What the host decided.
     public enum Decision: Equatable, Sendable {
-        /// Open `macPath` (resolved, inside the shared folder) with `app` (the LISTED spelling; nil: the
-        /// default app). `shown`: the path inside the workspace, as the notice shows it.
-        case open(macPath: String, shown: String, app: String?)
+        /// Show `macPath` (resolved, inside the shared folder) `how`; `app` (the LISTED spelling; nil: the
+        /// default app) only for `.app`. `shown`: the path inside the workspace, as the notice shows it
+        /// (a folder ends in `/`; the workspace itself is `the workspace`).
+        case open(macPath: String, shown: String, app: String?, how: How)
         /// `kind`: `file-off` or `file-refused`; `why` is said after the request.
         case refused(kind: String, why: String)
     }
@@ -52,8 +70,9 @@ public enum WorkspaceFiles {
     // MARK: the decision
 
     /// The whole decision but the rate limit: the setting, isolation, the app, the path, the type and
-    /// content. `workspace`: the Mac folder shared at /workspace (nil: an isolated sandbox).
-    public static func decide(guestPath: String, app: String?, workspace: String?, enabled: Bool,
+    /// content. `workspace`: the Mac folder shared at /workspace (nil: an isolated sandbox). `reveal`:
+    /// `doz-open --reveal` — a file shown selected in its folder, a folder shown.
+    public static func decide(guestPath: String, app: String?, reveal: Bool = false, workspace: String?, enabled: Bool,
                               allowedApps: [String]) -> Decision {
         guard enabled else {
             return .refused(kind: "file-off", why: "opening files is off for it (sandbox.open_files)")
@@ -63,14 +82,20 @@ public enum WorkspaceFiles {
         }
         var listed: String?
         if let app {
+            if reveal { return .refused(kind: "file-refused", why: "--app with --reveal: a file is shown in the Finder") }
             switch appCheck(app, allowed: allowedApps) {
             case .success(let name): listed = name
             case .failure(let why): return .refused(kind: "file-refused", why: why.message)
             }
         }
-        switch resolve(guestPath: guestPath, workspace: workspace) {
+        switch resolve(guestPath: guestPath, workspace: workspace, reveal: reveal) {
         case .failure(let why): return .refused(kind: "file-refused", why: why.message)
-        case .success(let r): return .open(macPath: r.macPath, shown: r.shown, app: listed)
+        case .success(let r):
+            if r.folder {
+                if listed != nil { return .refused(kind: "file-refused", why: "--app is for files: a folder opens in the Finder") }
+                return .open(macPath: r.macPath, shown: r.shown, app: nil, how: .finder)
+            }
+            return .open(macPath: r.macPath, shown: r.shown, app: reveal ? nil : listed, how: reveal ? .reveal : .app)
         }
     }
 
@@ -117,8 +142,8 @@ public enum WorkspaceFiles {
     // MARK: the path
 
     /// The part of an absolute guest path under /workspace, normalised lexically (`.`, `..`, `//`);
-    /// nil when it is not under /workspace (or is /workspace itself).
-    public static func lexicalRelative(_ guestPath: String) -> String? {
+    /// nil when it is not under /workspace (or is /workspace itself, unless `root`: then "").
+    public static func lexicalRelative(_ guestPath: String, root: Bool = false) -> String? {
         guard guestPath.hasPrefix("/") else { return nil }
         var parts: [Substring] = []
         for c in guestPath.split(separator: "/", omittingEmptySubsequences: true) {
@@ -126,37 +151,55 @@ public enum WorkspaceFiles {
             if c == ".." { if !parts.isEmpty { parts.removeLast() }; continue }
             parts.append(c)
         }
-        let root = guestRoot.split(separator: "/")
-        guard parts.count > root.count, Array(parts.prefix(root.count)) == root else { return nil }
-        return parts.dropFirst(root.count).joined(separator: "/")
+        let base = guestRoot.split(separator: "/")
+        // `root`: /workspace itself is a place too (a folder to show) — its relative path is "".
+        guard parts.count > base.count || (root && parts.count == base.count), Array(parts.prefix(base.count)) == base else { return nil }
+        return parts.dropFirst(base.count).joined(separator: "/")
     }
 
     /// The guest path → the Mac file, resolved on the Mac and checked (see the top of this file).
-    public static func resolve(guestPath: String, workspace: String) -> Result<(macPath: String, shown: String), Refusal> {
+    /// A folder (the workspace itself or any folder in it) opens in the Finder — never an app or a package
+    /// (that is a program, to the Mac), which only `--reveal` may show, selected in its parent. With
+    /// `reveal`, a file is shown, not opened, so its type and content are not checked.
+    public static func resolve(guestPath: String, workspace: String, reveal: Bool = false)
+        -> Result<(macPath: String, shown: String, folder: Bool), Refusal> {
         guard guestPath.utf8.count <= maximumPathBytes else { return .failure(Refusal("the path is longer than \(maximumPathBytes) bytes")) }
         guard !guestPath.unicodeScalars.contains(where: { $0.value < 0x20 || $0.value == 0x7F }) else {
             return .failure(Refusal("the path has control characters"))
         }
         // Every reason is short and starts with what matters: a notice is one terminal row.
-        guard let rel = lexicalRelative(guestPath) else { return .failure(Refusal("only files in /workspace are opened")) }
+        guard let rel = lexicalRelative(guestPath, root: true) else { return .failure(Refusal("only files in /workspace are opened")) }
         guard let root = realPath(workspace) else { return .failure(Refusal("the shared folder is not there on this Mac")) }
-        let asked = (workspace.hasSuffix("/") ? workspace : workspace + "/") + rel
+        let asked = rel.isEmpty ? workspace : (workspace.hasSuffix("/") ? workspace : workspace + "/") + rel
         guard let real = realPath(asked) else { return .failure(Refusal("no such file in the workspace")) }
-        guard real.hasPrefix(root == "/" ? "/" : root + "/"), real.count > root.count + 1 else {
+        guard real == root || (real.hasPrefix(root == "/" ? "/" : root + "/") && real.count > root.count + 1) else {
             return .failure(Refusal("it leads outside the shared folder (a link or ..)"))
         }
-        let shown = String(real.dropFirst(root.count + 1))
+        let inside = real == root ? "" : String(real.dropFirst(root.count + 1))
         var st = stat()
         guard lstat(real, &st) == 0 else { return .failure(Refusal("no such file in the workspace")) }
         switch st.st_mode & S_IFMT {
         case S_IFREG: break
-        case S_IFDIR: return .failure(Refusal("it is a folder (folders and apps are never opened)"))
+        case S_IFDIR:
+            let name = (real as NSString).lastPathComponent
+            let ext = (name as NSString).pathExtension.lowercased()
+            let package = (try? URL(fileURLWithPath: real, isDirectory: true).resourceValues(forKeys: [.isPackageKey]))?.isPackage == true
+            if inside.isEmpty { return .success((real, "the workspace", true)) }
+            if package || neverTypes.contains(ext) {
+                // A package (an app, a bundle) is a program to the Mac: never opened, even in the Finder —
+                // but it may be shown selected in its folder.
+                if reveal { return .success((real, inside, false)) }
+                return .failure(Refusal("\(name) is an app or package: never opened (doz-open --reveal shows it)"))
+            }
+            return .success((real, inside + "/", true))
         default: return .failure(Refusal("it is not a regular file"))
         }
+        let shown = inside
+        if reveal { return .success((real, shown, false)) }
         if let why = typeProblem(real) { return .failure(Refusal(why)) }
         if st.st_mode & 0o111 != 0 { return .failure(Refusal("it is executable: never opened")) }
         if let why = contentProblem(real, expecting: st) { return .failure(Refusal(why)) }
-        return .success((real, shown))
+        return .success((real, shown, false))
     }
 
     /// Why a file name's type is not opened (nil: a document type).
@@ -210,14 +253,26 @@ public enum WorkspaceFiles {
     /// Open `path` on the Mac — its default app, or `app` (`open -a`) — or, in tests
     /// (`DOZ_TEST_OPEN_URL=<file>`, the browser bridge's seam), append `open-file APP|default PATH` to that
     /// file instead. Never a real app from a test.
-    public static func open(_ path: String, app: String?, environment: [String: String] = ProcessInfo.processInfo.environment) -> Bool {
+    /// A folder: `open -a Finder PATH` (the Finder shows it — a folder is never launched as an app);
+    /// `.reveal`: `open -R PATH` (selected in its folder; nothing opened). Seam lines: `open-folder PATH`,
+    /// `reveal PATH`.
+    public static func open(_ path: String, app: String?, how: How = .app,
+                            environment: [String: String] = ProcessInfo.processInfo.environment) -> Bool {
         if let seam = environment["DOZ_TEST_OPEN_URL"], !seam.isEmpty {
-            BrowserBridge.append(seam, "open-file \(app ?? "default") \(path)\n")
+            switch how {
+            case .app: BrowserBridge.append(seam, "open-file \(app ?? "default") \(path)\n")
+            case .finder: BrowserBridge.append(seam, "open-folder \(path)\n")
+            case .reveal: BrowserBridge.append(seam, "reveal \(path)\n")
+            }
             return true
         }
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/usr/bin/open")
-        p.arguments = (app.map { ["-a", $0] } ?? []) + [path]
+        switch how {
+        case .app: p.arguments = (app.map { ["-a", $0] } ?? []) + [path]
+        case .finder: p.arguments = ["-a", "Finder", path]
+        case .reveal: p.arguments = ["-R", path]
+        }
         p.standardOutput = FileHandle.nullDevice
         p.standardError = FileHandle.nullDevice
         do { try p.run() } catch { return false }
