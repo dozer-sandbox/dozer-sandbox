@@ -75,7 +75,8 @@ public enum PermissionPolicy {
     public static func inferred(_ p: NetworkPolicy) -> (names: [String], rules: [EgressRule]) {
         if let names = p.permissions { return (names, p.rules) }
         var names: [String] = []
-        for perm in AgentPermissions.all where perm.id != "web" {
+        // 599d: never inferred — the user's GitHub login is only ever on because it was switched on by name.
+        for perm in AgentPermissions.all where perm.id != "web" && perm.group != "github" {
             let covered = perm.hosts.allSatisfy { h in
                 let host = h.host.hasPrefix("*.") ? "x" + h.host.dropFirst(1) : h.host
                 return p.evaluateConnection(host: host, port: h.ports?.first ?? 443).kind != .deny
@@ -114,6 +115,8 @@ public enum PermissionPolicy {
             } else {
                 guard AgentPermissions.isValid(g) else { throw HostError(.invalid, "no permission \(g) — doz net permissions lists them (or site:HOST)") }
                 names.insert(g)
+                // 599d: "Push to GitHub" is a step of "Use GitHub as you" — granting it grants both.
+                if g == AgentPermissions.gitHubPush { names.insert(AgentPermissions.gitHubAsYou) }
             }
         }
         for r in revoke {

@@ -331,6 +331,11 @@ public enum SettingKey {
     public static let openFiles = "sandbox.open_files"
     /// 599b: the apps a sandbox may name to open a workspace file in (`doz-open --app NAME`).
     public static let openApps = "bridges.open_apps"
+    /// 599d: where "Use GitHub as you" gets the user's token — `gh` (the Mac's gh login), `key` (only a
+    /// token given with `doz key set NAME --github`), `off`.
+    public static let githubCredentials = "github.credentials"
+    /// 599d (G4): forward the Mac's SSH agent into the sandbox — `off` or `on` (per sandbox).
+    public static let sshAgent = "sandbox.ssh_agent"
     /// 594 (owner ruling): the web UI may take an API key or a setup token (a masked field).
     public static let allowSecretEntry = "ui.allow_secret_entry"
     /// 594 W19 (owner: "a new web page opening up every time i run doz ui"): when `doz ui` opens a tab.
@@ -467,6 +472,12 @@ public struct DozerSettings: Sendable {
             .init("bridges", "open_apps", .appList, .string(""),
                   "The Mac apps a sandbox may name to open a workspace file in (doz-open --app NAME FILE, or open -a NAME FILE in the sandbox), comma-separated — e.g. \"Typora, Visual Studio Code\". Empty: a file opens only in its default app, and naming an app is refused. Never a path, only an app's name. For every sandbox.",
                   applies: .now),
+            .init("sandbox", "ssh_agent", .choice(["off", "on"]), .string("off"),
+                  "Forward this Mac's SSH agent into the sandbox (proxied sandboxes): ssh and git over SSH there can ask your agent to sign — your keys never enter the sandbox — and only github.com:22 is reachable over SSH. A notice on first use. While it is on, the agent can authenticate as you to github.com. A sandbox's own choice (doz create --ssh-agent on, ssh_agent in doz_project.yaml, doz config set --sandbox NAME) wins over this.",
+                  flag: "doz create --ssh-agent on|off", applies: .now),
+            .init("github", "credentials", .choice(["gh", "key", "off"]), .string("gh"),
+                  "Where \"Use GitHub as you\" (a permission, off by default) gets your GitHub login: gh (this Mac's gh login, read when used — gh auth token — and kept in memory a few minutes, never written anywhere; gh auth logout revokes it), key (only a token you give a sandbox with doz key set NAME --github — a fine-grained token limited to some repositories is best), or off (never, even with the permission on). The sandbox only ever sees a placeholder; Dozer's proxy puts the real token in on the way to GitHub.",
+                  applies: .now),
         ]
         s.append(.init("images", "claude_code_version", .version, .string("latest"),
                        "The Claude Code the claude-code image is prepared with: latest (asked of the npm registry when the image is prepared, then installed at that exact version, integrity-checked; a newer one is only said — doz image bake claude-code rebuilds when you choose) or an exact version like 2.1.227. A sandbox keeps the version it was created with; doz reset NAME moves it to the image's current one.",
@@ -495,7 +506,8 @@ public struct DozerSettings: Sendable {
 
     /// 599: the settings a sandbox can also have its own value of (`doz config set --sandbox NAME KEY V`,
     /// `doz create`, `doz_project.yaml`) — the sandbox's value wins over the file's.
-    public static let perSandbox: [String] = [SettingKey.clipboard, SettingKey.browserBridge, SettingKey.openFiles, SettingKey.tmux, SettingKey.agentSudo]
+    public static let perSandbox: [String] = [SettingKey.clipboard, SettingKey.browserBridge, SettingKey.openFiles, SettingKey.sshAgent,
+                                              SettingKey.tmux, SettingKey.agentSudo]
 
     /// What cannot be set here, by design, and why — printed in the file and the docs.
     public static let notSettable: [String] = [

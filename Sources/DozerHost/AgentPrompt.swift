@@ -73,6 +73,8 @@ public enum AgentPrompt {
         ("browser.description", "a sentence: xdg-open opens http(s) URLs in the Mac's browser and a sign-in's localhost callback is forwarded (or the bridge is off)"),
         ("files.description", "a sentence: xdg-open FILE opens a /workspace document (its app) or folder (the Finder) on the user's Mac — which types, a named app, --reveal, the notice — or why not (isolated, off)"),
         ("mac.open", "one short line: what open/xdg-open can show the user on their Mac (URLs, /workspace documents and folders) — only what is on; empty when nothing is"),
+        ("github.facts", "one short line: git and gh signed in as the user on GitHub (read-only or with push) and the forwarded SSH agent — empty when neither is on"),
+        ("github.description", "a paragraph: how the user's GitHub login reaches the sandbox (a placeholder; the proxy), what read-only refuses, push, SSH — or that it is off and how to ask"),
         ("mac.hostname", "the Mac's name"),
         ("dozer.version", "the doz that rendered it"),
     ]
@@ -89,6 +91,7 @@ public enum AgentPrompt {
     - Time zone: {{sandbox.timezone}} (the Mac's — `date` shows the user's local time).
     - Clipboard: {{clipboard.description}}
     - {{mac.open}}
+    - {{github.facts}}
     - The user may pause, sleep or hibernate this VM between your turns; your processes, files and sessions survive it.
     - More — what persists (root disk, state disk, restore points), the network policy, what you cannot do from inside — is in the `dozer` skill.
     """
@@ -126,6 +129,10 @@ public enum AgentPrompt {
     ## Credentials
 
     {{credentials.description}}
+
+    ## GitHub
+
+    {{github.description}}
 
     ## Installing software (root)
 
@@ -190,8 +197,34 @@ public enum AgentPrompt {
                               hostname: String = macHostname(), credentialProblem: String? = nil, agentSudo: Bool = true,
                               timeZone: String? = nil, sudoMissingFromImage: String? = nil,
                               base: String? = nil, apk: Bool = false, clipboard: Bool = true,
-                              browser: Bool = true, openFiles: Bool = true, openApps: [String] = []) -> [String: String] {
+                              browser: Bool = true, openFiles: Bool = true, openApps: [String] = [],
+                              github: GitHubAccess.Mode? = nil, sshAgent: Bool = false) -> [String: String] {
         var v: [String: String] = [:]
+        // 599d: the user's GitHub login and SSH agent — one short facts line (none when both are off), the
+        // details in the skill.
+        let ssh = sshAgent ? "SSH to github.com uses the user's forwarded ssh-agent (their keys stay on the Mac)." : ""
+        switch github {
+        case .read?:
+            v["github.facts"] = "GitHub: `git` and `gh` are signed in as the user on github.com, read-only (clone, fetch, read issues and pull requests; a push or a change is refused — ask the user to turn on \"Push to GitHub\"). Use HTTPS remotes." + (ssh.isEmpty ? "" : " " + ssh)
+        case .push?:
+            v["github.facts"] = "GitHub: `git` and `gh` are signed in as the user on github.com, with push — push and change things only as the user asked. Use HTTPS remotes." + (ssh.isEmpty ? "" : " " + ssh)
+        case nil:
+            v["github.facts"] = ssh.isEmpty ? "" : "GitHub: " + ssh + " Use git@github.com: remotes for it."
+        }
+        var gd: String
+        switch github {
+        case nil:
+            gd = "You are not signed in to GitHub as the user. Public repositories work anonymously over HTTPS when the network allows GitHub. For their private repositories, a push or `gh`, ask the user to turn on \"Use GitHub as you\" (`doz net allow \(name) github:as-you`; push: `github:push`)."
+        case let mode?:
+            gd = "The user's GitHub login reaches GitHub from here without ever entering this VM: `GH_TOKEN`/`GITHUB_TOKEN` and git's credential helper hold a doz placeholder (`doz_cred_…`), and Dozer's proxy on the Mac swaps in the user's real token on the way to github.com and api.github.com — only there. Do not set a token of your own or put one in a URL; keep HTTPS remotes (`https://github.com/OWNER/REPO.git`). The user sees a notice when you first use it."
+            gd += mode == .read
+                ? " It is READ-ONLY: clone, fetch, `gh repo view`, reading issues and pull requests work; `git push` and anything that changes GitHub (creating issues or pull requests, comments, GraphQL mutations) is refused with a 403 that says so — tell the user, who can turn on \"Push to GitHub\" (`doz net allow \(name) github:push`)."
+                : " Push is ON: you can push and change things on GitHub as the user, within what their token may do — do it only when the user asked for it; every such request is in the sandbox's network log."
+        }
+        if sshAgent {
+            gd += " SSH agent forwarding is on: `ssh`/`git` over SSH to github.com (git@github.com:OWNER/REPO.git) authenticate with the user's ssh-agent on the Mac — the keys never enter this VM; only github.com:22 is reachable over SSH."
+        }
+        v["github.description"] = gd
         // 599b: workspace files opened on the Mac — said only as it is for THIS sandbox.
         let types = "html, md, pdf, images (png, jpg, gif, webp, svg), txt, log, csv, tsv, json, yaml, xml, toml"
         let apps = openApps.isEmpty
@@ -371,7 +404,9 @@ public enum AgentPrompt {
                           clipboard: HostCore.sandboxValue(config, SettingKey.clipboard, settings: settings) != .string("off"),
                           browser: HostCore.sandboxValue(config, SettingKey.browserBridge, settings: settings) != .string("off"),
                           openFiles: HostCore.sandboxValue(config, SettingKey.openFiles, settings: settings) != .string("off"),
-                          openApps: WorkspaceFiles.appNames(settings.string(SettingKey.openApps) ?? "") ?? [])
+                          openApps: WorkspaceFiles.appNames(settings.string(SettingKey.openApps) ?? "") ?? [],
+                          github: AgentPermissions.gitHubMode(policy?.permissions),
+                          sshAgent: policy != nil && HostCore.sandboxValue(config, SettingKey.sshAgent, settings: settings) == .string("on"))
         var r = AgentPromptReport(enabled: settings.bool(SettingKey.agentPrompt), agent: agent, text: nil, error: nil, layers: [],
                                   skill: nil, promptPath: guestPromptPath,
                                   skillPath: skillDirectory(agent: agent, home: imageSpec.home) + "/SKILL.md")

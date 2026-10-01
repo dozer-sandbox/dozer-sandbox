@@ -72,6 +72,7 @@ extension HostCore {
             if !readOnly {
                 try m.config.write(store.configFile(m.name))
                 if key == SettingKey.agentSudo { m.sandbox.setAgentSudo(Self.agentSudo(m.config)) }
+                if key == SettingKey.sshAgent { applyGitHub(m) }          // 599d: on/off at once
                 note(m.name, "\(changed ?? key) — \(d.applies.note)")
             }
         }

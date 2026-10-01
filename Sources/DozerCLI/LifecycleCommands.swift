@@ -56,6 +56,12 @@ struct CreateArguments: ParsableArguments {
     @Option(name: .long, help: "on or off: xdg-open PATH in this sandbox opens a document from its /workspace in the Mac's default app (or an app in bridges.open_apps), or a folder in the Finder, with a notice every time (default: the setting sandbox.open_files, on).")
     var openFiles: String?
 
+    @Option(name: .long, help: "off, read or push: git and gh in this sandbox are signed in as you on GitHub (your Mac's gh login, or doz key set NAME --github) — read-only, or also push and make changes. The token never enters the sandbox. Proxied sandboxes only; the permissions \"Use GitHub as you\" and \"Push to GitHub\" (default: off).")
+    var github: String?
+
+    @Option(name: .long, help: "on or off: forward this Mac's SSH agent into the sandbox (your keys stay on the Mac; github.com:22 only). Proxied sandboxes only (default: the setting sandbox.ssh_agent, off).")
+    var sshAgent: String?
+
     @Flag(inversion: .prefixedNo, help: "Run this sandbox's sessions inside tmux (its windows, panes, copy mode; Ctrl-b) — default: the setting sessions.tmux, off.")
     var tmux: Bool?
 
@@ -117,7 +123,9 @@ struct CreateArguments: ParsableArguments {
         o.isolated = isolated ? true : nil
         o.agentSudo = agentSudo
         // 597 (P6): --allow web,site:api.example.com,-error-reports
-        let words = allow.flatMap { $0.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) } }.filter { !$0.isEmpty }
+        var words = allow.flatMap { $0.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) } }.filter { !$0.isEmpty }
+        // 599d: --github read|push|off is the same as allowing (or not) its two permissions.
+        words += try Self.githubWords(github, flag: "--github")
         if !words.isEmpty { o.allow = words }
         if let df = absoluteDockerfile {
             guard FileManager.default.fileExists(atPath: df) else { throw ValidationError("--dockerfile: no file at \(df)") }
@@ -130,6 +138,17 @@ struct CreateArguments: ParsableArguments {
         return o
     }
 
+    /// 599d: `off` / `read` / `push` → permission words for `--allow` (and `github:` in doz_project.yaml).
+    static func githubWords(_ v: String?, flag: String) throws -> [String] {
+        switch v?.lowercased() {
+        case nil: return []
+        case "off"?: return ["-" + AgentPermissions.gitHubAsYou, "-" + AgentPermissions.gitHubPush]
+        case "read"?: return ["+" + AgentPermissions.gitHubAsYou, "-" + AgentPermissions.gitHubPush]
+        case "push"?: return ["+" + AgentPermissions.gitHubAsYou, "+" + AgentPermissions.gitHubPush]
+        default: throw ValidationError("\(flag): off, read or push")
+        }
+    }
+
     /// 599: the per-sandbox settings given as flags (nil: none).
     func sandboxSettings() throws -> [String: TOMLValue]? {
         var s: [String: TOMLValue] = [:]
@@ -140,6 +159,7 @@ struct CreateArguments: ParsableArguments {
         try take(SettingKey.clipboard, clipboard, "--clipboard")
         try take(SettingKey.browserBridge, browserBridge, "--browser-bridge")
         try take(SettingKey.openFiles, openFiles, "--open-files")
+        try take(SettingKey.sshAgent, sshAgent, "--ssh-agent")
         if let tmux { s[SettingKey.tmux] = .bool(tmux) }
         return s.isEmpty ? nil : s
     }
@@ -172,7 +192,7 @@ struct CreateArguments: ParsableArguments {
     var givenAny: Bool {
         image != nil || cpus != nil || memory != nil || workspace != nil || network != nil || subnet != nil || account != nil || agentPrompt != nil || isolated || agentSudo != nil
             || agent != nil || base != nil || dockerfile != nil || !allow.isEmpty
-            || clipboard != nil || browserBridge != nil || openFiles != nil || tmux != nil
+            || clipboard != nil || browserBridge != nil || openFiles != nil || tmux != nil || github != nil || sshAgent != nil
     }
 }
 
@@ -475,7 +495,8 @@ struct Up: AsyncParsableCommand {
                 if create.isolated { o.workspace = nil; o.isolated = true }
                 if let s = create.agentSudo { o.agentSudo = s }
                 let allowWords = create.allow.flatMap { $0.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) } }.filter { !$0.isEmpty }
-                if !allowWords.isEmpty { o.allow = allowWords }       // 597
+                    + (try CreateArguments.githubWords(create.github, flag: "--github"))   // 599d
+                if !allowWords.isEmpty { o.allow = (o.allow ?? []) + allowWords }       // 597 (the file's github: first, the flags after)
                 if let s = try create.sandboxSettings() { o.settings = (o.settings ?? [:]).merging(s) { _, flag in flag } }
                 try create.applyPrompt(to: &o)
                 // 594: doz_project.yaml's image and account are checked like any create.

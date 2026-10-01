@@ -478,6 +478,9 @@ public final class HostServer: @unchecked Sendable {
                              sandbox: String, session: String) async {
         // 599 (594.B1/B2): the bridges' sequences are read here, once for every kind of viewer, and removed.
         var scanner = SessionBridgeScanner()
+        // 599d: this terminal hears the notices that come from elsewhere (the GitHub login, the SSH agent).
+        core.bridgeState.addViewer(sandbox, conn)
+        defer { core.bridgeState.removeViewer(sandbox, conn) }
         for await out in c.output {
             switch out {
             case .snapshot(let d):

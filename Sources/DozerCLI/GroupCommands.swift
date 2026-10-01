@@ -344,13 +344,39 @@ struct KeySet: AsyncParsableCommand {
     @Flag(name: .long, help: "Anthropic's API key (api.anthropic.com, x-api-key; ANTHROPIC_API_KEY in the guest is a placeholder).") var anthropic = false
     @Option(name: .long, help: "Read it from this keychain item (a generic password's service name).") var keychain: String?
     @Flag(name: .long, help: "Use this Mac's own Claude Code login (a Claude subscription) instead of an API key: the host reads its access token from the keychain and keeps it current; the guest's CLAUDE_CODE_OAUTH_TOKEN is a placeholder.") var claudeLogin = false
+    @Flag(name: .long, help: "A GitHub token for \"Use GitHub as you\" (instead of this Mac's gh login) — a fine-grained token limited to some repositories is best. The guest's GH_TOKEN and git's login are placeholders; used only while the permission is on.") var github = false
 
     func validate() throws {
-        if anthropic == claudeLogin { throw ValidationError("which key? --anthropic or --claude-login") }
-        if claudeLogin && keychain != nil { throw ValidationError("--claude-login reads Claude Code's own keychain item; --keychain is for --anthropic") }
+        if [anthropic, claudeLogin, github].filter({ $0 }).count != 1 { throw ValidationError("which key? --anthropic, --claude-login or --github") }
+        if claudeLogin && keychain != nil { throw ValidationError("--claude-login reads Claude Code's own keychain item; --keychain is for --anthropic or --github") }
     }
 
     func run() async throws {
+        if github {
+            let secret: String, source: String
+            if let service = keychain {
+                guard let s = Keychain.read(service: service) else { throw fail(HostError(.notFound, "no readable keychain item with service \(service)"), g) }
+                secret = s; source = "keychain:\(service)"
+            } else if isatty(STDIN_FILENO) != 0 {
+                var buf = [CChar](repeating: 0, count: 4096)
+                guard let p = readpassphrase("GitHub token (not echoed): ", &buf, buf.count, 0) else { throw fail(HostError(.failed, "no token read"), g) }
+                secret = String(cString: p)
+                memset(&buf, 0, buf.count)
+                source = "prompt"
+            } else {
+                secret = String(decoding: FileHandle.standardInput.readDataToEndOfFile(), as: UTF8.self)
+                source = "stdin"
+            }
+            let trimmed = secret.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { throw fail(HostError(.invalid, "an empty token (pipe it in: doz key set \(name) --github < file)"), g) }
+            var r = HostRequest.keySet(name: name, secret: trimmed, source: source)
+            r.binding = CredentialBinding.github.id
+            let rows = try decode(try call(r, g), [CredentialRow].self, g)
+            if g.json { Out.json(rows) } else {
+                Out.stdout("github token set for \(name) (from \(source); held by the host, never in the sandbox) — used while \"Use GitHub as you\" is on (doz net allow \(name) github:as-you)\n")
+            }
+            return
+        }
         if claudeLogin {
             var r = HostRequest(.keySet, name: name)
             r.binding = CredentialBinding.claudeOAuth.id
@@ -395,10 +421,11 @@ struct KeyRemove: AsyncParsableCommand {
     @Argument var name: String
     @Flag(name: .long) var anthropic = false
     @Flag(name: .long) var claudeLogin = false
-    func validate() throws { if anthropic == claudeLogin { throw ValidationError("which key? --anthropic or --claude-login") } }
+    @Flag(name: .long) var github = false
+    func validate() throws { if [anthropic, claudeLogin, github].filter({ $0 }).count != 1 { throw ValidationError("which key? --anthropic, --claude-login or --github") } }
     func run() async throws {
         var r = HostRequest(.keyRm, name: name)
-        r.binding = claudeLogin ? CredentialBinding.claudeOAuth.id : CredentialBinding.anthropic.id
+        r.binding = github ? CredentialBinding.github.id : claudeLogin ? CredentialBinding.claudeOAuth.id : CredentialBinding.anthropic.id
         let rows = try decode(try call(r, g), [CredentialRow].self, g)
         if g.json { Out.json(rows) } else { Out.stdout("\(r.binding!) removed from \(name)\n") }
     }

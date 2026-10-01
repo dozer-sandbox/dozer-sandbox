@@ -40,6 +40,8 @@ struct DozerProject: Equatable {
     var dockerfile: String?
     /// 599: the sandbox's own per-sandbox settings (`settingKeys`), by setting key.
     var settings: [String: TOMLValue] = [:]
+    /// 599d: `off` / `read` / `push` — "Use GitHub as you" (and "Push to GitHub") when the sandbox is made.
+    var github: String?
 
     /// 599: the project keys that are a per-sandbox setting — the key, the setting, and the commented
     /// line `doz init` writes when the file does not set it.
@@ -50,6 +52,8 @@ struct DozerProject: Equatable {
          "# browser_bridge: on         # xdg-open in the sandbox opens http(s) URLs in the Mac's browser (a sign-in's callback forwarded); off: never. Applies now"),
         ("open_files", SettingKey.openFiles,
          "# open_files: on             # xdg-open FILE in the sandbox opens a /workspace document in the Mac's default app, with a notice; off: never. Applies now"),
+        ("ssh_agent", SettingKey.sshAgent,
+         "# ssh_agent: off             # on: forward this Mac's SSH agent (keys stay on the Mac; github.com:22 only). Applies now"),
         ("tmux", SettingKey.tmux,
          "# tmux: false                # true: sessions run inside tmux (windows, panes, Ctrl-b). From the next session"),
     ]
@@ -70,6 +74,7 @@ struct DozerProject: Equatable {
         ("agent_prompt", "this project's own lines for the agent's environment prompt"),
         ("agent_prompt_mode", "append (to the template, the default) or replace"),
         ("agent_sudo", "true or false: the agent's passwordless sudo in the sandbox (default: the setting sandbox.agent_sudo, true)"),
+        ("github", "off, read or push: git and gh signed in as you on GitHub — the permissions \"Use GitHub as you\" / \"Push to GitHub\" (default off; when the sandbox is made — later: doz net allow NAME github:as-you)"),
     ] + settingKeys.map { k in
         (k.key, "\(DozerSettings.definition(k.setting)?.type.name ?? "a value"): this sandbox's \(k.setting) (default: the setting)")
     }
@@ -233,6 +238,11 @@ struct DozerProject: Equatable {
             case "agent_sudo":
                 guard let b = v.bool else { throw bad(v, "agent_sudo: true or false") }
                 p.agentSudo = b
+            case "github":
+                // YAML reads `off` as a boolean false.
+                let s = v.bool == false ? "off" : try scalarString(v, key)
+                guard ["off", "read", "push"].contains(s) else { throw bad(v, "github: off, read or push") }
+                p.github = s
             default:
                 // 599: a per-sandbox setting, checked against the setting's own type.
                 if let sk = settingKeys.first(where: { $0.key == key }), let d = DozerSettings.definition(sk.setting) {
@@ -337,6 +347,8 @@ struct DozerProject: Equatable {
         out += agentPromptMode.map { "agent_prompt_mode: \($0)\n" } ?? "# agent_prompt_mode: append  # or replace\n"
         out += agentSudo.map { "agent_sudo: \($0)\n" }
             ?? "# agent_sudo: true           # the agent's passwordless sudo (apt-get install …); false: none. From the next session\n"
+        out += github.map { "github: \($0)\n" }
+            ?? "# github: off                # read: git and gh signed in as you on GitHub (read-only); push: also push. When the sandbox is made\n"
         for k in Self.settingKeys {
             out += settings[k.setting].map { "\(k.key): \($0.plain)\n" } ?? k.comment + "\n"
         }
@@ -350,6 +362,8 @@ struct DozerProject: Equatable {
         o.agentPromptMode = agentPromptMode
         o.agentSudo = agentSudo
         o.settings = settings.isEmpty ? nil : settings
+        // 599d: github: → the two permissions, as --github does.
+        if let words = try? CreateArguments.githubWords(github, flag: "github"), !words.isEmpty { o.allow = words }
         o.project = file.path
         // 596 (B6): a Dockerfile relative to this folder (its folder is the build context).
         if let d = dockerfile {

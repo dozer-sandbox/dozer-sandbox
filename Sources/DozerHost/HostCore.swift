@@ -73,6 +73,9 @@ public actor HostCore {
     let sessionGate = KeyedGate()
     /// 599: the session bridges' limits and recent actions (`HostCore+Bridges`).
     nonisolated let bridgeState = BridgeState()
+    /// 599d: GitHub tokens given with `doz key set NAME --github` from stdin — in this host's MEMORY only
+    /// (never written: a new host needs them given again, or a keychain item).
+    var githubKeys: [String: String] = [:]
     /// 594: the image preparation running per image (single-flight), and the recent finished ones.
     var preparations: [String: Preparation] = [:]
     var recentPreparations: [Preparation] = []
@@ -165,6 +168,7 @@ public actor HostCore {
             }
             installCredentialHooks(m)
             applyAccount(m)
+            applyGitHub(m)                                  // 599d
         }
         return m
     }
@@ -549,6 +553,10 @@ public actor HostCore {
         if let n = r.name, let m = managed[n] {
             m.sandbox.setAgentSudo(Self.agentSudo(m.config))
             m.sandbox.setTimeZone(Self.guestTimeZone())
+            // 599d: the setting sandbox.ssh_agent changed in the file since — follow it.
+            if m.sandbox.egress != nil, (Self.sandboxValue(m.config, SettingKey.sshAgent) == .string("on")) != (m.sandbox.sshAgentSocket != nil) {
+                applyGitHub(m)
+            }
         }
         switch r.op {
         case .ping:
@@ -1772,7 +1780,9 @@ public actor HostCore {
             // 597 (P2): locked / agent (Standard) / open are sets of permissions (for the sandbox's base);
             // bake stays a preset of rules (image preparation).
             if let names = AgentPermissions.preset(preset == "standard" ? "agent" : preset, base: base) {
-                p = .permissions(names, preset: preset == "standard" ? "agent" : preset)
+                // 599d: the user's GitHub login is beside the preset — choosing a preset keeps it as it was.
+                let identity = (p.permissions ?? []).filter { $0 == AgentPermissions.gitHubAsYou || $0 == AgentPermissions.gitHubPush }
+                p = .permissions(names + identity, preset: preset == "standard" ? "agent" : preset)
             } else {
                 guard let np = NetworkPolicy.presets[preset] else { throw HostError(.invalid, "unknown preset \(preset) — locked, standard (agent), open or bake") }
                 p = np
@@ -1806,6 +1816,8 @@ public actor HostCore {
         m.sandbox.setNetworkPolicy(Self.withSignInBlock(p, strict: egress.vault.foreignPolicy == .strict))
         m.config.spec.network = .proxied(p)
         try m.config.write(store.configFile(m.name))
+        // 599d: "Use GitHub as you" / "Push to GitHub" take effect at once (turning it off revokes every placeholder).
+        if AgentPermissions.gitHubMode(p.permissions) != egress.github?.mode { applyGitHub(m) }
         metrics?.record(run: metricsRun, action: "network policy", sandbox: m.name, image: m.config.image, startedAt: Date(), durationMs: 0,
                         detail: ["preset": p.preset ?? "custom", "rules": String(p.rules.count)])
         note(m.name, "network policy: \(p.preset ?? "custom") (\(p.rules.count) rules)")
@@ -1823,7 +1835,8 @@ public actor HostCore {
         switch r.binding ?? CredentialBinding.anthropic.id {
         case CredentialBinding.anthropic.id: binding = .anthropic
         case CredentialBinding.claudeOAuth.id: binding = .claudeOAuth
-        case let other: throw HostError(.invalid, "unknown credential \(other) — anthropic or claude-oauth")
+        case CredentialBinding.github.id: return try setGitHubKey(m, r)
+        case let other: throw HostError(.invalid, "unknown credential \(other) — anthropic, claude-oauth or github")
         }
         // 588 (D10): `key set --claude-login` is `account use NAME mac`; `key rm --claude-login`
         // of an account-managed sandbox is `account use NAME none`.

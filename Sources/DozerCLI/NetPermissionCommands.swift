@@ -61,6 +61,14 @@ struct NetAllow: AsyncParsableCommand {
             if !g.json { Out.stderr("Browse the web: \(w)\n") }
             try confirm("Let the agent reach any website?", yes: yes, g)
         }
+        // 599d: the user's GitHub login is said before it is switched on.
+        if what.contains(AgentPermissions.gitHubPush) || what.contains(AgentPermissions.gitHubAsYou) {
+            let push = what.contains(AgentPermissions.gitHubPush)
+            if let w = AgentPermissions.permission(push ? AgentPermissions.gitHubPush : AgentPermissions.gitHubAsYou)?.warning, !g.json {
+                Out.stderr("\(push ? "Push to GitHub" : "Use GitHub as you"): \(w) The token never enters the sandbox; doz net deny \(name) github:as-you revokes it at once.\n")
+            }
+            try confirm(push ? "Let the agent push and act on GitHub as you?" : "Sign the agent in to GitHub as you (read-only)?", yes: yes, g)
+        }
         try changePermissions(name, grant: what.filter { !presets.contains($0) }, revoke: [], preset: presets.last.map { $0 == "standard" ? "agent" : $0 }, g)
     }
 }
@@ -88,7 +96,7 @@ struct NetPermissionsList: AsyncParsableCommand {
                       p.hosts.map { $0.host + ($0.pathPrefixes != nil ? " (its own package)" : "") }.joined(separator: ", ")])
         }
         Out.stdout(Out.table(t))
-        Out.stdout("\nPresets: locked (model only), standard (model, update, system + the base's packages, github, error-reports), open (everything).\n"
+        Out.stdout("\nPresets: locked (model only), standard (model, update, system + the base's packages, github, error-reports), open (everything but your GitHub login — github:as-you and github:push are only ever switched on by name).\n"
                    + "doz net allow NAME PERMISSION|site:HOST · doz net deny NAME … · doz create NAME --allow web,site:… · the setting defaults.permissions\n")
     }
 }

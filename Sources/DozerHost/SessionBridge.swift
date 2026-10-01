@@ -277,4 +277,25 @@ final class BridgeState: @unchecked Sendable {
     }
     func forwardEnded(_ f: LoopbackForward) { lock.withLock { if forwards[f.sandbox] === f { forwards[f.sandbox] = nil } } }
     func forward(of sandbox: String) -> LoopbackForward? { lock.withLock { forwards[sandbox] } }
+
+    // MARK: 599d — notices that do not come from a session's output (the GitHub login, the SSH agent)
+
+    /// Every terminal attached to each sandbox right now (the attach relay registers them).
+    private var viewers: [String: [ObjectIdentifier: HostConnection]] = [:]
+    func addViewer(_ sandbox: String, _ c: HostConnection) { lock.withLock { viewers[sandbox, default: [:]][ObjectIdentifier(c)] = c } }
+    func removeViewer(_ sandbox: String, _ c: HostConnection) { lock.withLock { viewers[sandbox]?[ObjectIdentifier(c)] = nil } }
+
+    /// Tell every terminal attached to `sandbox`; false: none is (the host log still has it).
+    @discardableResult
+    func notifyViewers(_ sandbox: String, _ n: BridgeNotice) -> Bool {
+        let cs = lock.withLock { Array((viewers[sandbox] ?? [:]).values) }
+        for c in cs { _ = c.write(ClientWire.notice(n)) }
+        return !cs.isEmpty
+    }
+
+    /// "sandbox|what" announced since the setup was last applied.
+    private var announced: Set<String> = []
+    /// True the first time `what` is used by `sandbox` since `resetFirstUse`.
+    func firstUse(_ sandbox: String, _ what: String) -> Bool { lock.withLock { announced.insert(sandbox + "|" + what).inserted } }
+    func resetFirstUse(_ sandbox: String) { lock.withLock { announced = announced.filter { !$0.hasPrefix(sandbox + "|") } } }
 }
