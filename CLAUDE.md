@@ -214,7 +214,11 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   the rule itself is never baked: `GuestCommand.agentSudoScript` writes `/etc/sudoers.d/dozer-agent`
   (0440, root, `user ALL=(ALL) NOPASSWD:ALL`, put in place only after `/usr/sbin/visudo -cf` accepts it;
   absolute paths — a utility exec's PATH may lack sbin) or removes it — at every fresh boot
-  (`prepareGuest`, from `Sandbox.agentSudo`) and every agent session start (`deliverAgentPrompt`), so a
+  (`prepareGuest`, from `Sandbox.agentSudo`), every wake (W34: `GuestCommand.guestFixes` — the live-safe
+  part of `prepareGuest`: /etc/hosts, debconf Noninteractive, the open-URL shim, the time zone, the sudo
+  rule — run as ONE root exec by `LifecycleStep.applyGuestFixes` after a wake from sleep, from
+  hibernation and a restore after a host restart; never on a resume from Pause; best effort, a failure
+  is noted; NOT the deckhold socket reset or the bind mounts) and every agent session start (`deliverAgentPrompt`), so a
   toggle needs no rebake. The value: `SandboxConfig.agentSudo` (`--[no-]agent-sudo`, `agent_sudo` in
   doz_project.yaml, synced by `doz up` through `agent-prompt`'s `agentSudo`/`clearAgentSudo`) else the
   setting `sandbox.agent_sudo` (read per request — `HostCore.agentSudo`). The facts block and skill say

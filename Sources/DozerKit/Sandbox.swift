@@ -192,7 +192,7 @@ public actor Sandbox {
                 }
             }
             setPhase(.running)
-            for step in [LifecycleStep.resyncClock, .remountShares, .deleteSnapshot, .returnFreeMemory, .persistState] {
+            for step in [LifecycleStep.resyncClock, .applyGuestFixes, .remountShares,.deleteSnapshot, .returnFreeMemory, .persistState] {
                 try await run(step, target: .running)
             }
             note(String(format: "restored after a crash in %.2f s — sessions are where they were", seconds(since: t0)))
@@ -852,12 +852,23 @@ public actor Sandbox {
                     await closeKeepingOnFailure(agent)
                 }
             }
-            // 594 W10: the zone too — the Mac may have changed zone while this sandbox slept. Best
-            // effort: a wake never fails for it.
-            if let tz = timeZone {
-                _ = try? await retryingFirstGuestCall("set the guest's time zone") {
-                    try await execInContainer(["sh", "-c", tz.script], privileged: true, timeout: 15)
+        case .applyGuestFixes:
+            // 594 W34: what a fresh boot applies, at every wake too — the time zone among them (W10:
+            // the Mac may have changed zone while this sandbox slept). ONE root exec; best effort: a
+            // wake never fails for it, a failure is noted.
+            let script = GuestCommand.guestFixes(imageSpec: spec.imageSpec, agentSudo: agentSudo, timeZone: timeZone)
+            let t0 = ContinuousClock.now
+            do {
+                let r = try await retryingFirstGuestCall("apply the guest fixes") {
+                    try await execInContainer(["sh", "-c", script], privileged: true, timeout: 15)
                 }
+                if r.exitCode != 0 {
+                    note("the guest fixes exited \(r.exitCode): \(String((r.output + r.errorOutput).suffix(200))) — the wake goes on")
+                } else {
+                    note(String(format: "applied the guest fixes in %.0f ms", seconds(since: t0) * 1000))
+                }
+            } catch {
+                note("could not apply the guest fixes: \(error.localizedDescription) — the wake goes on")
             }
         case .remountShares:
             let tags = (identity?.shareTags ?? [:]).map { (tag: $0.value, guestPath: $0.key) }.sorted { $0.guestPath < $1.guestPath }
