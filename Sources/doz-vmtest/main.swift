@@ -923,6 +923,10 @@ Task {
             // 599 (594.B2): the browser bridge and a sign-in's callback.
             let binary = args.firstIndex(of: "--doz").flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil } ?? ".build/debug/doz"
             await cliBrowserSuite(binary: URL(fileURLWithPath: binary).standardizedFileURL.path)
+        case "cli-openfiles":
+            // 599b: workspace files opened on the Mac (through the opener seam).
+            let binary = args.firstIndex(of: "--doz").flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil } ?? ".build/debug/doz"
+            await cliOpenFilesSuite(binary: URL(fileURLWithPath: binary).standardizedFileURL.path)
         case "cli-tmux":
             // 599 (594.B3): sessions inside tmux.
             let binary = args.firstIndex(of: "--doz").flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil } ?? ".build/debug/doz"

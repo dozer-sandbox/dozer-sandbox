@@ -64,7 +64,7 @@ DOCC_OUT         ?= .docc-build
 DOCC_BASE_PATH   ?= /DozerKit/
 DOCC_PREVIEW_PORT ?= 8000
 
-.PHONY: help build test audit web-assets web-assets-check test-cli-onboarding test-cli-terminal test-cli-hoststop test-cli-agentsudo test-cli-points test-cli-timezone test-cli-images test-cli-bases test-cli-permissions test-cli-clipboard test-cli-browser test-cli-tmux pullbench test-vm test-vm-agents test-vm-network test-vm-hardening test-vm-lineage prev-cli test-vm-upgrade vmtest-host kernel deckhold deckhold-verify doznet doznet-verify cli install-cli test-cli test-vm-claude test-vm-templates docs docs-preview docs-drift-check release
+.PHONY: help build test audit web-assets web-assets-check test-cli-onboarding test-cli-terminal test-cli-hoststop test-cli-agentsudo test-cli-points test-cli-timezone test-cli-images test-cli-bases test-cli-permissions test-cli-clipboard test-cli-browser test-cli-openfiles test-cli-tmux pullbench test-vm test-vm-agents test-vm-network test-vm-hardening test-vm-lineage prev-cli test-vm-upgrade vmtest-host kernel deckhold deckhold-verify doznet doznet-verify cli install-cli test-cli test-vm-claude test-vm-templates docs docs-preview docs-drift-check release
 
 help: ## Show this help
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) | sed 's/:.*## /\t/' | expand -t 22
@@ -224,6 +224,9 @@ test-cli-clipboard: cli vmtest-host ## 599 (594.B1): OSC 52 → the Mac clipboar
 
 test-cli-browser: cli vmtest-host ## 599 (594.B2): xdg-open/$BROWSER → the Mac's browser (a file, DOZ_TEST_OPEN_URL), a fake OAuth sign-in's localhost callback forwarded into the sandbox; refusals, rate, sandbox.browser_bridge off
 	perl -e 'alarm shift; exec @ARGV' 900 $(VMTEST_BIN) cli-browser --doz $(CLI_BIN)
+
+test-cli-openfiles: cli vmtest-host ## 599b: xdg-open/open/doz-open FILE in a shared-workspace sandbox → the Mac file in its default app or a listed one (a file, DOZ_TEST_OPEN_URL — never a real app); every refusal (outside, .., links out, non-documents, Mach-O as .txt, unlisted app, off, isolated), rate, URLs as before
+	perl -e 'alarm shift; exec @ARGV' 900 $(VMTEST_BIN) cli-openfiles --doz $(CLI_BIN)
 
 test-cli-tmux: cli vmtest-host ## 599 (594.B3): sessions.tmux — a lab shell and Claude Code inside tmux (within deckhold): attach/detach, hibernate/wake, saved screens, a copy and xdg-open through tmux, no tmux in the image (prepares claude-code; network)
 	perl -e 'alarm shift; exec @ARGV' 2400 $(VMTEST_BIN) cli-tmux --doz $(CLI_BIN)

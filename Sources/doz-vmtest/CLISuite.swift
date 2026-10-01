@@ -471,6 +471,7 @@ func cliSuite() async throws {
     // 599: the session bridges.
     await cliClipboardSuite(binary: h.binary)
     await cliBrowserSuite(binary: h.binary)
+    await cliOpenFilesSuite(binary: h.binary)
     await cliTmuxSuite(binary: h.binary)
 }
 
