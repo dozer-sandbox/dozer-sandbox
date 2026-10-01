@@ -87,4 +87,32 @@ func cliAgentSudoSuite(binary: String) async {
     check(t.run(["exec", "sn", "--", "sh", "-c", "sudo -n true 2>/dev/null || echo NOSUDO"]).out == "NOSUDO\n", "sn: still no sudo (its own choice wins)")
     let images = t.json(["image", "ls"], [ImageRow].self)?.filter { $0.name == "claude-code" }.count ?? 0
     check(images == 1, "one claude-code image — nothing was rebuilt for the toggle (\(images))")
+
+    // 5. W34 (the owner's claude-sandbox-3 asked apt's keyboard question on rc.11: it had only hibernated
+    // and woken since W31 landed): a WAKE applies the guest fixes — no cold boot.
+    print("cli: a wake applies the guest fixes (W34)")
+    let fixed = "sudo -n debconf-show debconf 2>/dev/null | grep -i frontend | sed 's/.*: *//'; grep -c \"\\s$(hostname)\\b\" /etc/hosts; cat /proc/sys/kernel/random/boot_id"
+    let breakIt = "echo 'debconf debconf/frontend select Readline' | sudo -n debconf-set-selections && sudo -n sed -i '/^127\\.0\\.1\\.1\\s/d' /etc/hosts"
+    func state() -> [String] { t.run(["exec", "su", "--", "sh", "-c", fixed]).out.split(separator: "\n").map(String.init) }
+    func timed(_ args: [String]) -> (ok: Bool, ms: Int) {
+        let t0 = Date()
+        let ok = t.run(args, timeout: 180).code == 0
+        return (ok, Int(Date().timeIntervalSince(t0) * 1000))
+    }
+    let bootID = state().last ?? "?"
+    var wakeMs: [Int] = []
+    for (i, how) in ["hibernate", "sleep", "hibernate"].enumerated() {
+        check(t.run(["exec", "su", "--", "sh", "-c", breakIt]).code == 0, "\(how) #\(i + 1): debconf's frontend set back to Readline, the 127.0.1.1 line removed")
+        let broken = state()
+        check(broken.first == "Readline" && broken.dropFirst().first == "0", "  broken in the running guest (\(broken.prefix(2).joined(separator: " ")))")
+        check(t.run([how, "su"], timeout: 180).code == 0, "  \(how) su")
+        let w = timed(["wake", "su"])
+        check(w.ok, "  wake su (\(w.ms) ms)")
+        if how == "hibernate" { wakeMs.append(w.ms) }
+        let s = state()
+        check(s.first == "Noninteractive", "  after the wake: debconf's frontend is Noninteractive again (\(s.first ?? "—"))")
+        check(s.dropFirst().first == "1", "  after the wake: the guest's own name is back in /etc/hosts (\(s.dropFirst().first ?? "—"))")
+        check(s.last == bootID, "  the same boot — no cold boot (boot_id \(s.last ?? "—"))")
+    }
+    info("hibernate → wake: \(wakeMs.map { "\($0) ms" }.joined(separator: ", ")) (doz wake, wall clock)")
 }

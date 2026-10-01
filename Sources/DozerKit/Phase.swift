@@ -122,6 +122,10 @@ public enum LifecycleStep: Equatable, Sendable {
     case restoreSnapshot
     /// Set the guest clock from the host's (a restored guest believes no time passed).
     case resyncClock
+    /// 594 W34: best effort, never fails the operation — one root exec of `GuestCommand.guestFixes`
+    /// (debconf, /etc/hosts, the open-URL shim, the time zone, the agent's sudo): what a fresh boot
+    /// applies, for a sandbox that is only ever woken. A failure is noted.
+    case applyGuestFixes
     /// Re-mount every virtio-fs share (virtio-fs does not survive a VM stop).
     case remountShares
     /// Delete the snapshot file: it is valid only while the VM is paused.
@@ -178,11 +182,14 @@ public enum LifecyclePlanner {
         switch (op, phase) {
         case (.pause, .running):
             return [.captureScreens, .pauseVM]
-        case (.resume, .paused), (.resume, .asleep), (.wake, .asleep):
-            // Resume from Pause; Wake from Sleep (resume in place). `resume` from Sleep is the
-            // pre-rename spelling and still works. The snapshot is valid only while paused:
+        case (.resume, .paused):
+            // Resume from Pause (~1 ms): no guest call. The snapshot is valid only while paused:
             // running again invalidates it.
             return [.resumeVM, .deleteSnapshot, .persistState]
+        case (.resume, .asleep), (.wake, .asleep):
+            // Wake from Sleep (resume in place); `resume` from Sleep is the pre-rename spelling and
+            // still works. W34: a wake applies the guest fixes.
+            return [.resumeVM, .applyGuestFixes, .deleteSnapshot, .persistState]
         case (.sleep, .running):
             return [.captureScreens, .restoreGuestMemory, .pauseVM, .saveSnapshot, .persistState]
         case (.sleep, .paused):
@@ -196,7 +203,7 @@ public enum LifecyclePlanner {
         case (.hibernate, .asleep):
             return [.detachSessions(.sandboxSleeping), .stopVMDirect, .persistState]
         case (.wake, .hibernated):
-            return [.restoreSnapshot, .resyncClock, .remountShares, .deleteSnapshot, .returnFreeMemory, .persistState]
+            return [.restoreSnapshot, .resyncClock, .applyGuestFixes, .remountShares, .deleteSnapshot, .returnFreeMemory, .persistState]
         case (.shutDown, _):
             // 593 (owner, 2026-09-30): no capture — the sessions end with the VM, and every saved screen
             // goes with them. From off there is nothing to stop and nothing changes.

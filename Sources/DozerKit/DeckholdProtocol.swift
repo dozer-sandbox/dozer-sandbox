@@ -389,6 +389,23 @@ public enum GuestCommand {
         return ["tmux", "-L", "doz-\(name)", "-f", tmuxConfPath, "new-session", "-A", "-s", name] + argv
     }
 
+    /// 594 W34 (the owner's claude-sandbox-3 still asked apt's keyboard question on rc.11: W31's
+    /// debconf setting ran only at a FRESH boot, and that sandbox had only hibernated and woken since):
+    /// the root guest fixes that are safe on a LIVE system — run at every fresh boot (inside
+    /// `prepareGuest`) AND at every wake (`LifecycleStep.applyGuestFixes`), so a sandbox that is only
+    /// ever woken still gets what a newer doz brings. Each part is idempotent and never fails:
+    /// the guest's own host name in /etc/hosts (W29), debconf Noninteractive (W31), the open-URL shim
+    /// (599), the time zone (W10), and the agent's sudo following the setting (W23). NOT here: the
+    /// deckhold socket reset and the persist-dir bind mounts — those must not run under live sessions.
+    public static func guestFixes(imageSpec: ImageSpec?, agentSudo: Bool = true, timeZone: GuestTimeZone? = nil) -> String {
+        var s = ownHostnameScript
+        s += "; " + debconfNoninteractiveScript
+        s += "; " + openShimInstall
+        if let tz = timeZone { s += "; " + tz.script }
+        if let r = imageSpec { s += "; " + agentSudoScript(user: r.user, on: agentSudo) }
+        return s
+    }
+
     public static func stateKey(_ dir: String) -> String {
         String(dir.drop(while: { $0 == "/" })).replacingOccurrences(of: "/", with: "_")
     }
@@ -401,14 +418,11 @@ public enum GuestCommand {
     /// 594 W23: `agentSudo` — the image's user gets passwordless sudo (a sudoers drop-in) or not (the
     /// drop-in removed); applied at every fresh boot, so it follows the sandbox's setting without a rebake.
     /// 594 W10: `timeZone` — the guest's /etc/localtime (every image, the lab too).
+    /// 594 W34: plus `guestFixes` — the part that is also safe on a LIVE guest, and runs at every wake too.
     public static func prepareGuest(imageSpec: ImageSpec?, agentSudo: Bool = true, timeZone: GuestTimeZone? = nil) -> String {
         var s = "set -e; rm -rf /run/deckhold; mkdir -p /run/deckhold; chmod 1777 /run/deckhold"
-        s += "; " + ownHostnameScript
-        s += "; " + debconfNoninteractiveScript        // 594 W31: apt never asks (keyboard-configuration …)
-        s += "; " + openShimInstall                   // 599: the browser bridge's xdg-open (every image)
-        if let tz = timeZone { s += "; " + tz.script }
+        s += "; " + guestFixes(imageSpec: imageSpec, agentSudo: agentSudo, timeZone: timeZone)
         guard let r = imageSpec else { return s }
-        s += "; " + agentSudoScript(user: r.user, on: agentSudo)
         for d in r.resolvedPersistDirs {
             let src = "\(stateMount)/\(stateKey(d))"
             s += "; mkdir -p '\(src)' '\(d)'; chown \(r.user):\(r.user) '\(src)'"

@@ -98,7 +98,7 @@ final class LifecycleTests: XCTestCase {
 
     /// Wake resyncs the clock and re-mounts shares, after the restore and before the snapshot goes.
     func test_wakeRestoresThenResyncsClockAndRemountsShares() {
-        XCTAssertEqual(plan(.wake, .hibernated), [.restoreSnapshot, .resyncClock, .remountShares, .deleteSnapshot, .returnFreeMemory, .persistState])
+        XCTAssertEqual(plan(.wake, .hibernated), [.restoreSnapshot, .resyncClock, .applyGuestFixes, .remountShares, .deleteSnapshot, .returnFreeMemory, .persistState])
         XCTAssertNil(plan(.wake, .running))
     }
 
@@ -117,7 +117,8 @@ final class LifecycleTests: XCTestCase {
         XCTAssertEqual(plan(.pause, .running), [.captureScreens, .pauseVM])
         XCTAssertNil(plan(.pause, .paused))
         XCTAssertEqual(plan(.resume, .paused), [.resumeVM, .deleteSnapshot, .persistState])
-        XCTAssertEqual(plan(.resume, .asleep), [.resumeVM, .deleteSnapshot, .persistState])
+        XCTAssertEqual(plan(.resume, .asleep), [.resumeVM, .applyGuestFixes, .deleteSnapshot, .persistState])
+        XCTAssertFalse(plan(.resume, .paused)!.contains(.applyGuestFixes), "W34: a resume from Pause stays ~1 ms — no guest call")
         XCTAssertNil(plan(.resume, .hibernated), "on disk needs a wake, not a resume")
         XCTAssertEqual(plan(.sleep, .running), [.captureScreens, .restoreGuestMemory, .pauseVM, .saveSnapshot, .persistState])
         XCTAssertEqual(plan(.sleep, .paused), [.saveSnapshot, .persistState])
@@ -320,7 +321,7 @@ final class PersistedSandboxTests: XCTestCase {
     // MARK: the 2026-09-25 vocabulary (Pause/Suspend · Sleep · Hibernate · Wake · Shut Down · Start/Cold Boot)
 
     func test_wakeFromSleepResumesInPlace_andResumeStillWorksFromSleep() {
-        XCTAssertEqual(LifecyclePlanner.plan(.wake, from: .asleep), [.resumeVM, .deleteSnapshot, .persistState])
+        XCTAssertEqual(LifecyclePlanner.plan(.wake, from: .asleep), [.resumeVM, .applyGuestFixes, .deleteSnapshot, .persistState])
         XCTAssertEqual(LifecyclePlanner.plan(.resume, from: .asleep), LifecyclePlanner.plan(.wake, from: .asleep), "resume from Sleep is the old spelling of wake")
         XCTAssertNil(LifecyclePlanner.plan(.wake, from: .running))
         XCTAssertNil(LifecyclePlanner.plan(.wake, from: .paused), "a paused sandbox resumes, it does not wake")

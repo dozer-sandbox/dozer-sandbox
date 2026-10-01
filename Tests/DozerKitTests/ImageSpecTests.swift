@@ -170,6 +170,23 @@ final class ImageSpecTests: XCTestCase {
         XCTAssertTrue(GuestCommand.prepareGuest(imageSpec: nil).contains("printf '127.0.1.1\\t%s\\n' \"$h\" >> /etc/hosts"))
     }
 
+    /// 594 W34: the live-safe guest fixes run at every wake as well as at boot — and carry nothing that
+    /// must not run under live sessions (the deckhold socket reset, the bind mounts).
+    func test_guestFixesAreTheLiveSafePartOfTheBoot() throws {
+        let tz = try XCTUnwrap(GuestTimeZone(named: "Australia/Sydney"))
+        let fixes = GuestCommand.guestFixes(imageSpec: AgentImages.pi, agentSudo: true, timeZone: tz)
+        for part in [GuestCommand.ownHostnameScript, GuestCommand.debconfNoninteractiveScript, GuestCommand.openShimInstall,
+                     tz.script, GuestCommand.agentSudoScript(user: "agent", on: true)] {
+            XCTAssertTrue(fixes.contains(part))
+        }
+        XCTAssertTrue(GuestCommand.guestFixes(imageSpec: AgentImages.pi, agentSudo: false).contains("rm -f '/etc/sudoers.d/dozer-agent'"), "follows the setting")
+        for live in ["/run/deckhold", "mount --bind", "set -e"] {
+            XCTAssertFalse(fixes.contains(live), "never at a wake: \(live)")
+        }
+        XCTAssertTrue(GuestCommand.prepareGuest(imageSpec: AgentImages.pi, timeZone: tz).contains(fixes), "the boot runs the same fixes")
+        XCTAssertFalse(GuestCommand.guestFixes(imageSpec: nil).contains("sudoers"), "the lab (root) gets no rule")
+    }
+
     func test_stateDiskLayoutScript() {
         XCTAssertEqual(GuestCommand.stateKey("/home/agent/.pi/agent"), "home_agent_.pi_agent")
         let s = GuestCommand.prepareGuest(imageSpec: AgentImages.pi)
