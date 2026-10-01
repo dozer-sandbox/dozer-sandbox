@@ -931,6 +931,10 @@ Task {
             // 599b: workspace files opened on the Mac (through the opener seam).
             let binary = args.firstIndex(of: "--doz").flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil } ?? ".build/debug/doz"
             await cliOpenFilesSuite(binary: URL(fileURLWithPath: binary).standardizedFileURL.path)
+        case "cli-projectwizard":
+            // 599f: doz init's steps and the project file — doz up makes what it says.
+            let binary = args.firstIndex(of: "--doz").flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil } ?? ".build/debug/doz"
+            await cliProjectWizardSuite(binary: URL(fileURLWithPath: binary).standardizedFileURL.path)
         case "cli-quickadd":
             // 599c: doz new — every default, created, started, attached.
             let binary = args.firstIndex(of: "--doz").flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil } ?? ".build/debug/doz"
