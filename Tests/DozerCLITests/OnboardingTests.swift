@@ -131,7 +131,8 @@ final class OnboardingTests: XCTestCase {
         XCTAssertTrue(text.contains("Mac-1"))
         XCTAssertTrue(text.contains("deny by default"))
         XCTAssertTrue(text.contains("never log in"))
-        XCTAssertLessThan(text.split(separator: "\n").count, 12, "the facts block is short (D15a)")
+        // 599b: one line more — opening workspace files on the Mac is something the agent would not know to ask.
+        XCTAssertLessThan(text.split(separator: "\n").count, 13, "the facts block is short (D15a)")
         XCTAssertTrue(shared.skill?.hasPrefix("---\nname: dozer\n") == true)
         XCTAssertEqual(shared.skillPath, "/home/agent/.claude/skills/dozer/SKILL.md")
         XCTAssertEqual(shared.layers, ["built-in"])

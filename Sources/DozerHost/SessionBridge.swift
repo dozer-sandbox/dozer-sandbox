@@ -10,6 +10,8 @@ import Foundation
 //            terminal can answer it on the sandbox's behalf.
 //   OSC 6340 `ESC ] 6340 ; doz-open ; <url> (BEL | ESC \)` — the guest's xdg-open shim asking for a
 //            URL in the Mac's browser (DeckStack's marker technique; `sandbox.browser_bridge`).
+//            599b: `ESC ] 6340 ; doz-file ; <app> ; <path> …` — the same shim asking for a /workspace
+//            file in the Mac's default app (or a named one) (`sandbox.open_files`, `WorkspaceFiles`).
 //
 // Every other byte passes through unchanged (other OSCs included). A sequence cut by a read is held until
 // the next; one too long is dropped whole (said as an event), never passed through.
@@ -26,6 +28,9 @@ public enum BridgeEvent: Equatable, Sendable {
     case openURL(String)
     /// An open request longer than `maximumURLBytes`.
     case openTooLong
+    /// 599b: the shim's workspace file (`doz-file;APP;PATH` — the guest's absolute path, and the app it
+    /// named, nil: the default app). Not yet checked — the host decides (`WorkspaceFiles`).
+    case openFile(path: String, app: String?)
 }
 
 public struct SessionBridgeScanner: Sendable {
@@ -143,6 +148,17 @@ public struct SessionBridgeScanner: Sendable {
             if bytes.count > Self.maximumCopyBytes { events.append(.copyTooLarge(encodedBytes: data.utf8.count)); return }
             events.append(.copy(bytes))
         case .open:
+            // 599b: `doz-file;APP;PATH` — APP has no `;` (the shim and the host both refuse one); the path
+            // is everything after it.
+            if text.hasPrefix("doz-file;") {
+                let rest = text.dropFirst("doz-file;".count)
+                guard let semi = rest.firstIndex(of: ";") else { return }
+                let app = String(rest[..<semi])
+                let path = String(rest[rest.index(after: semi)...])
+                if path.utf8.count > Self.maximumURLBytes { events.append(.openTooLong); return }
+                if !path.isEmpty { events.append(.openFile(path: path, app: app.isEmpty ? nil : app)) }
+                return
+            }
             guard text.hasPrefix("doz-open;") else { return }
             let url = String(text.dropFirst("doz-open;".count))
             if url.utf8.count > Self.maximumURLBytes { events.append(.openTooLong); return }
@@ -162,7 +178,8 @@ public struct SessionBridgeScanner: Sendable {
 
 /// What the host did about a bridge event, as each viewer is told (`ClientWire.notice`).
 public struct BridgeNotice: Equatable, Sendable {
-    /// `clipboard`, `clipboard-off`, `clipboard-refused`, `open`, `open-refused`, `oauth`.
+    /// `clipboard`, `clipboard-off`, `clipboard-refused`, `open`, `open-refused`, `oauth`; 599b: `file`,
+    /// `file-off`, `file-refused`.
     public var kind: String
     public var text: String
     public init(_ kind: String, _ text: String) { self.kind = kind; self.text = text }
@@ -214,6 +231,8 @@ final class BridgeState: @unchecked Sendable {
     private let lock = NSLock()
     let copies = BridgeRateLimit(count: 10, window: 10)
     let opens = BridgeRateLimit(count: 3, window: 10)
+    /// 599b: workspace files opened on the Mac — their own limit, so a burst of files never costs a sign-in.
+    let fileOpens = BridgeRateLimit(count: WorkspaceFiles.rateCount, window: WorkspaceFiles.rateWindow)
     private var recent: [String: (Date, BridgeNotice)] = [:]
     private var readLogged: Set<String> = []
 

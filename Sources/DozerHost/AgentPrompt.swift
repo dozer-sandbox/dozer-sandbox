@@ -71,6 +71,7 @@ public enum AgentPrompt {
         ("sudo.description", "a sentence: sudo, and that the network policy still applies to root"),
         ("clipboard.description", "a sentence: a copy reaches the Mac clipboard with a notice (or the bridge is off); the clipboard is never readable"),
         ("browser.description", "a sentence: xdg-open opens http(s) URLs in the Mac's browser and a sign-in's localhost callback is forwarded (or the bridge is off)"),
+        ("files.description", "a sentence: xdg-open FILE opens a /workspace document on the user's Mac (which types, a named app, the notice) — or why not (isolated, off)"),
         ("mac.hostname", "the Mac's name"),
         ("dozer.version", "the doz that rendered it"),
     ]
@@ -87,6 +88,7 @@ public enum AgentPrompt {
     - Time zone: {{sandbox.timezone}} (the Mac's — `date` shows the user's local time).
     - Clipboard: {{clipboard.description}}
     - Browser: {{browser.description}}
+    - Files on the Mac: {{files.description}}
     - The user may pause, sleep or hibernate this VM between your turns; your processes, files and sessions survive it.
     - More — what persists (root disk, state disk, restore points), the network policy, what you cannot do from inside — is in the `dozer` skill.
     """
@@ -131,11 +133,13 @@ public enum AgentPrompt {
 
     Root inside this VM does not widen what you can reach: the VM is the boundary, every connection still goes through the user's network policy, and no credential is in the VM to find. Packages you install live on the root disk (kept across restarts, discarded by a reset).
 
-    ## The user's Mac: clipboard and browser
+    ## The user's Mac: clipboard, browser and files
 
     {{clipboard.description}}
 
     {{browser.description}}
+
+    {{files.description}}
 
     ## Sleep and hibernation
 
@@ -186,8 +190,18 @@ public enum AgentPrompt {
                               hostname: String = macHostname(), credentialProblem: String? = nil, agentSudo: Bool = true,
                               timeZone: String? = nil, sudoMissingFromImage: String? = nil,
                               base: String? = nil, apk: Bool = false, clipboard: Bool = true,
-                              browser: Bool = true) -> [String: String] {
+                              browser: Bool = true, openFiles: Bool = true, openApps: [String] = []) -> [String: String] {
         var v: [String: String] = [:]
+        // 599b: workspace files opened on the Mac — said only as it is for THIS sandbox.
+        let types = "html, md, pdf, images (png, jpg, gif, webp, svg), txt, log, csv, tsv, json, yaml, xml, toml"
+        let apps = openApps.isEmpty
+            ? "Only the file's default app is used (the user has allowed no other: bridges.open_apps)."
+            : "`doz-open --app NAME FILE` (or `open -a NAME FILE`) opens it in one of the apps the user allowed: \(openApps.joined(separator: ", "))."
+        v["files.description"] = workspace == nil
+            ? "this sandbox is isolated (nothing on the Mac is shared), so no file of yours can be opened on the Mac — show the user the file's content instead."
+            : !openFiles
+            ? "opening workspace files on the user's Mac is off for this sandbox; tell the user the file's path under their shared folder instead (they can turn it on: `doz config set --sandbox \(name) sandbox.open_files on`)."
+            : "`xdg-open FILE` (also `open FILE`) on a document under /workspace opens it on the user's Mac in its default app (an html page in their browser, markdown in their editor), and the user sees a notice every time. Documents only — \(types); never a folder, app, script, installer or executable file, and only files inside /workspace (a link that leads out is refused). \(apps) At most 3 files in 10 seconds; open a file only when the user would want to see it."
         // 599 (594.B2): the browser bridge.
         v["browser.description"] = browser
             ? "this VM has no browser, but `xdg-open URL` (also $BROWSER, `open`) opens an http or https URL in the user's Mac browser, and the user sees a notice. A sign-in that redirects to this VM's localhost (e.g. Claude Code's /login) completes: that port is forwarded from the Mac for up to 10 minutes. `http://localhost:PORT` of a server you run here does NOT open on the Mac — tell the user the address instead."
@@ -343,7 +357,9 @@ public enum AgentPrompt {
                           sudoMissingFromImage: wanted && sudoInstalled == false ? config.spec.imageSpec?.name ?? config.image : nil,
                           base: base.text, apk: base.apk,
                           clipboard: HostCore.sandboxValue(config, SettingKey.clipboard, settings: settings) != .string("off"),
-                          browser: HostCore.sandboxValue(config, SettingKey.browserBridge, settings: settings) != .string("off"))
+                          browser: HostCore.sandboxValue(config, SettingKey.browserBridge, settings: settings) != .string("off"),
+                          openFiles: HostCore.sandboxValue(config, SettingKey.openFiles, settings: settings) != .string("off"),
+                          openApps: WorkspaceFiles.appNames(settings.string(SettingKey.openApps) ?? "") ?? [])
         var r = AgentPromptReport(enabled: settings.bool(SettingKey.agentPrompt), agent: agent, text: nil, error: nil, layers: [],
                                   skill: nil, promptPath: guestPromptPath,
                                   skillPath: skillDirectory(agent: agent, home: imageSpec.home) + "/SKILL.md")

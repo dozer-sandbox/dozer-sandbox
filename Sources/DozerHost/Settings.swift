@@ -52,6 +52,9 @@ public enum SettingType: Sendable, Equatable {
     /// 599 (594.B4): a terminal title — text with `{sandbox}` `{session}` `{image}` `{time}` `{phase}`
     /// (a closed set), ≤ 120 characters, no control character; `""` = leave the title alone.
     case titleTemplate
+    /// 599b: Mac app names, comma-separated (`Typora, Visual Studio Code`) — `WorkspaceFiles.appNames`;
+    /// `""` = none.
+    case appList
 
     /// The variables a title may use.
     public static let titleVariables = ["sandbox", "session", "image", "time", "phase"]
@@ -89,6 +92,7 @@ public enum SettingType: Sendable, Equatable {
         case .timeZone: "mac, or a time zone like Australia/Sydney"
         case .permissions: "standard | locked | open, or permissions like +web,-error-reports (doz net permissions)"
         case .titleTemplate: "a title with {sandbox} {session} {image} {time} {phase} (\"\" = leave the title alone)"
+        case .appList: "app names, comma-separated, like \"Typora, Visual Studio Code\" (\"\" = none)"
         }
     }
 
@@ -191,6 +195,11 @@ public struct SettingDefinition: Sendable {
         case (.titleTemplate, .string(let s)):
             if let why = SettingType.titleTemplateProblem(s) { throw SettingsError("\(key): \(why)") }
             return v
+        case (.appList, .string(let s)):
+            guard WorkspaceFiles.appNames(s) != nil else {
+                throw SettingsError("\(key) is app names separated by commas (at most 16, each 1–64 characters, no / or ;), or \"\"")
+            }
+            return v
         default:
             throw SettingsError("\(key) is a \(type.name), not a \(v.typeName)")
         }
@@ -209,7 +218,7 @@ public struct SettingDefinition: Sendable {
         case .int:
             guard let i = Int(t) else { throw SettingsError("\(key) is a whole number") }
             return try validate(.int(i))
-        case .choice, .path, .subnet, .version, .timeZone, .permissions:
+        case .choice, .path, .subnet, .version, .timeZone, .permissions, .appList:
             return try validate(.string(t))
         case .titleTemplate:
             return try validate(.string(text))          // its spaces are its own
@@ -318,6 +327,10 @@ public enum SettingKey {
     public static let browserBridge = "sandbox.browser_bridge"
     /// 599 (594.B3): new sessions run inside tmux.
     public static let tmux = "sessions.tmux"
+    /// 599b: the file bridge — a /workspace document opened on the Mac — `on` or `off`.
+    public static let openFiles = "sandbox.open_files"
+    /// 599b: the apps a sandbox may name to open a workspace file in (`doz-open --app NAME`).
+    public static let openApps = "bridges.open_apps"
     /// 594 (owner ruling): the web UI may take an API key or a setup token (a masked field).
     public static let allowSecretEntry = "ui.allow_secret_entry"
     /// 594 W19 (owner: "a new web page opening up every time i run doz ui"): when `doz ui` opens a tab.
@@ -445,9 +458,15 @@ public struct DozerSettings: Sendable {
             .init("sandbox", "browser_bridge", .choice(["on", "off"]), .string("on"),
                   "The browser bridge: xdg-open (and $BROWSER, open, sensible-browser) in a sandbox opens an http or https URL in this Mac's default browser, with a notice every time (at most 3 in 10 s). A sign-in whose redirect is the sandbox's localhost (Claude Code's /login) gets that port forwarded from the Mac into the sandbox for up to 10 minutes, so the login completes. Never file: or other schemes, never the Mac's own localhost. off: nothing opens (said). A sandbox's own choice (doz config set --sandbox NAME, browser_bridge in doz_project.yaml) wins over this.",
                   flag: "doz create --browser-bridge on|off", applies: .now),
+            .init("sandbox", "open_files", .choice(["on", "off"]), .string("on"),
+                  "Open workspace files on this Mac: xdg-open FILE (and open FILE, doz-open FILE) in a sandbox opens a document from its /workspace in the Mac's default app — an html page in your browser, markdown in your editor — with a notice every time (at most 3 in 10 s). Only the shared folder's own files (a link or .. that leads out is refused), only documents (html, md, pdf, images, txt, csv, json, yaml, xml…) — never a folder, an app, a script, an installer or an executable. An isolated sandbox has no file to open. An app other than the default only when it is in bridges.open_apps. off: nothing opens (said). A sandbox's own choice (doz config set --sandbox NAME, open_files in doz_project.yaml) wins over this.",
+                  flag: "doz create --open-files on|off", applies: .now),
             .init("sessions", "tmux", .bool, .bool(false),
                   "Run each new session inside tmux (within Dozer's own session holder, so saved screens, sleep and wake, browser terminals and Ctrl-] detach keep working): tmux's windows, panes and copy mode, its status bar and prefix key (Ctrl-b). tmux takes the mouse, and the kitty keyboard protocol and modifyOtherKeys do not fully pass through it; the session's exit code is tmux's. Needs tmux in the image (the built-in images this doz prepares have it; on an image an older doz prepared the session runs without it, and says so). A sandbox's own choice (doz create --tmux, tmux: true in doz_project.yaml, doz config set --sandbox) wins over this.",
                   flag: "doz create --tmux / --no-tmux", applies: .nextSession),
+            .init("bridges", "open_apps", .appList, .string(""),
+                  "The Mac apps a sandbox may name to open a workspace file in (doz-open --app NAME FILE, or open -a NAME FILE in the sandbox), comma-separated — e.g. \"Typora, Visual Studio Code\". Empty: a file opens only in its default app, and naming an app is refused. Never a path, only an app's name. For every sandbox.",
+                  applies: .now),
         ]
         s.append(.init("images", "claude_code_version", .version, .string("latest"),
                        "The Claude Code the claude-code image is prepared with: latest (asked of the npm registry when the image is prepared, then installed at that exact version, integrity-checked; a newer one is only said — doz image bake claude-code rebuilds when you choose) or an exact version like 2.1.227. A sandbox keeps the version it was created with; doz reset NAME moves it to the image's current one.",
@@ -476,7 +495,7 @@ public struct DozerSettings: Sendable {
 
     /// 599: the settings a sandbox can also have its own value of (`doz config set --sandbox NAME KEY V`,
     /// `doz create`, `doz_project.yaml`) — the sandbox's value wins over the file's.
-    public static let perSandbox: [String] = [SettingKey.clipboard, SettingKey.browserBridge, SettingKey.tmux, SettingKey.agentSudo]
+    public static let perSandbox: [String] = [SettingKey.clipboard, SettingKey.browserBridge, SettingKey.openFiles, SettingKey.tmux, SettingKey.agentSudo]
 
     /// What cannot be set here, by design, and why — printed in the file and the docs.
     public static let notSettable: [String] = [
@@ -651,6 +670,7 @@ public struct DozerSettings: Sendable {
             case .timeZone: kind = "timezone"
             case .permissions: kind = "permissions"
             case .titleTemplate: kind = "template"
+            case .appList: kind = "apps"
             }
             var note: String?
             switch r.source {

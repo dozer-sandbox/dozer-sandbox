@@ -285,9 +285,32 @@ public enum GuestCommand {
     /// Where the `xdg-open` shim lives (root-owned; first on every session's PATH).
     public static let openShimDirectory = "/usr/local/lib/doz/bin"
     public static let openShimPath = openShimDirectory + "/xdg-open"
-    /// The other names a program reaches for (links to the shim).
-    public static let openShimAliases = ["open", "sensible-browser", "www-browser", "x-www-browser"]
-    static let openShimStamp = "doz:open-url-shim:v3"
+    /// The other names a program reaches for (links to the shim). 599b: `doz-open` (`--app NAME FILE`).
+    public static let openShimAliases = ["open", "sensible-browser", "www-browser", "x-www-browser", "doz-open"]
+    static let openShimStamp = "doz:open-url-shim:v4"
+
+    /// 599b: the document types a /workspace file may have to be opened on the Mac (lowercased
+    /// extensions). The host (`WorkspaceFiles`) decides; the shim checks the same lists first so the
+    /// agent hears why at once.
+    public static let openFileDocumentTypes: [String] = [
+        "html", "htm", "xhtml",
+        "md", "markdown", "mdown", "mkd",
+        "pdf",
+        "png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "tif", "tiff", "heic",
+        "txt", "text", "log",
+        "csv", "tsv",
+        "json", "yaml", "yml", "xml", "toml",
+    ]
+    /// 599b: types never opened (apps, scripts, installers, link files that run or redirect). Anything not
+    /// a document type is refused too; this list only makes the refusal say why.
+    public static let openFileNeverTypes: [String] = [
+        "app", "command", "tool", "terminal", "scpt", "scptd", "applescript", "workflow", "action", "shortcut",
+        "webloc", "inetloc", "url", "fileloc", "afploc", "ftploc",
+        "pkg", "mpkg", "dmg", "jar", "mobileconfig", "prefpane", "saver", "kext", "plugin", "bundle", "framework",
+        "appex", "xpc", "service", "osax", "dylib", "so", "bin", "exe",
+        "sh", "bash", "zsh", "csh", "tcsh", "ksh", "fish", "py", "rb", "pl", "php", "js", "mjs", "lua", "swift",
+    ]
+    static func casePatterns(_ types: [String]) -> String { types.map { "*.\($0)" }.joined(separator: "|") }
 
     /// `path` with the shim's directory first (once).
     public static func withOpenShim(_ path: String) -> String {
@@ -302,32 +325,100 @@ public enum GuestCommand {
     /// line a person can read. The marker goes to the controlling terminal, else the session's own
     /// (`$DOZ_TTY`, exported by deckhold — an opener that `setsid`s its child has no controlling
     /// terminal), else stdout. `2>/dev/null` BEFORE `>`: a failed rung prints nothing (DeckStack's lesson).
+    /// 599b: a FILE as well — `doz-file;APP;/workspace/…` (the path made absolute and resolved HERE, in
+    /// the caller's directory; the host resolves it again on the Mac and decides). The shim's own checks
+    /// (in /workspace, a document type, not executable, not `#!`) only tell the agent why at once — the
+    /// notice goes to the person's terminal, not the agent's. `-a`/`--app NAME` (`doz-open --app`).
     public static let openShim = #"""
     #!/bin/sh
-    # doz:open-url-shim:v3
-    # Dozer Sandbox's browser bridge: this sandbox has no browser, so an http(s) URL is handed to the
-    # Mac through the session's terminal (doz shows it and opens it in the Mac's default browser —
-    # unless the sandbox's browser bridge is off). Written at every boot; see `doz config show --sandbox`.
-    url="${1:-}"
-    [ -n "$url" ] || { echo "usage: xdg-open URL" >&2; exit 1; }
-    [ "${#url}" -le 2048 ] || { echo "xdg-open: the URL is longer than 2048 bytes — not sent to the Mac" >&2; exit 1; }
-    clean=$(printf '%s' "$url" | tr -d '\000-\037\177')
-    [ "$clean" = "$url" ] || { echo "xdg-open: the URL has control characters — not sent to the Mac" >&2; exit 1; }
-    case "$url" in
-        http://*|https://*) ;;
-        *) echo "xdg-open: this sandbox has no browser, and only http and https URLs go to the Mac: $url" >&2; exit 1 ;;
-    esac
-    emit() { printf 'Asking your Mac to open: %s\r\n\033]6340;doz-open;%s\007' "$url" "$url"; }
-    # Inside tmux (sessions.tmux) the pane's terminal is tmux's, which drops a sequence it does not
-    # know: the marker goes to the session's own terminal ($DOZ_TTY, tmux's client), the line to the pane.
-    if [ -n "${TMUX:-}" ] && [ -n "${DOZ_TTY:-}" ] && [ -w "$DOZ_TTY" ] \
-        && printf '\033]6340;doz-open;%s\007' "$url" 2>/dev/null > "$DOZ_TTY"; then
-        printf 'Asking your Mac to open: %s\n' "$url" 2>/dev/null > /dev/tty || printf 'Asking your Mac to open: %s\n' "$url"
-        exit 0
+    # doz:open-url-shim:v4
+    # Dozer Sandbox's bridge to the Mac. This sandbox has no browser and no desktop, so an http(s) URL,
+    # or a document in /workspace (the folder shared with the Mac), is handed to the Mac through the
+    # session's terminal: doz shows it and opens it (the URL in the Mac's default browser, the document
+    # in its default app, or in an app the user allowed: bridges.open_apps) unless that bridge is off
+    # for this sandbox. Written at every boot and wake; see `doz config show --sandbox`.
+    me=${0##*/}
+    app=""
+    status=0
+    usage() {
+        echo "usage: $me URL | FILE...    (a FILE is a document in /workspace; $me --app NAME FILE... opens it in another Mac app the user allowed)" >&2
+        exit "${1:-1}"
+    }
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            -a|--app) [ $# -ge 2 ] || usage; app="$2"; shift 2 ;;
+            --app=*) app="${1#--app=}"; shift ;;
+            -h|--help) usage 0 ;;
+            --) shift; break ;;
+            -?*) echo "$me: unknown option $1 ($me here opens a URL, or a /workspace file, on your Mac)" >&2; exit 1 ;;
+            *) break ;;
+        esac
+    done
+    [ $# -ge 1 ] || usage
+    if [ -n "$app" ]; then
+        capp=$(printf '%s' "$app" | tr -d '\000-\037\177')
+        case "$app" in
+            -*|.*|*/*|*';'*|*,*) capp="" ;;
+        esac
+        [ "$capp" = "$app" ] && [ "${#app}" -le 64 ] || { echo "$me: \"$capp\" is not an app name" >&2; exit 1; }
     fi
-    if [ -w /dev/tty ] 2>/dev/null && emit 2>/dev/null > /dev/tty; then exit 0; fi
-    if [ -n "${DOZ_TTY:-}" ] && [ -w "$DOZ_TTY" ] && emit 2>/dev/null > "$DOZ_TTY"; then exit 0; fi
-    emit
+    refuse() { echo "$me: $*" >&2; status=1; }
+    # The marker on the session's terminal ($1: its body) and a line a person can read ($2).
+    send() {
+        # Inside tmux (sessions.tmux) the pane's terminal is tmux's, which drops a sequence it does not
+        # know: the marker goes to the session's own terminal ($DOZ_TTY, tmux's client), the line to the pane.
+        if [ -n "${TMUX:-}" ] && [ -n "${DOZ_TTY:-}" ] && [ -w "$DOZ_TTY" ] \
+            && printf '\033]6340;%s\007' "$1" 2>/dev/null > "$DOZ_TTY"; then
+            printf '%s\n' "$2" 2>/dev/null > /dev/tty || printf '%s\n' "$2"
+            return 0
+        fi
+        if [ -w /dev/tty ] 2>/dev/null && printf '%s\r\n\033]6340;%s\007' "$2" "$1" 2>/dev/null > /dev/tty; then return 0; fi
+        if [ -n "${DOZ_TTY:-}" ] && [ -w "$DOZ_TTY" ] && printf '%s\r\n\033]6340;%s\007' "$2" "$1" 2>/dev/null > "$DOZ_TTY"; then return 0; fi
+        printf '%s\r\n\033]6340;%s\007' "$2" "$1"
+    }
+    open_url() {
+        [ -z "$app" ] || { refuse "--app is for files; a URL opens in your Mac's default browser: $1"; return; }
+        send "doz-open;$1" "Asking your Mac to open: $1"
+    }
+    open_file() {
+        t=$1
+        if ! grep -qs ' /workspace ' /proc/mounts; then
+            refuse "this sandbox is isolated (nothing on your Mac is shared), so no file can be opened there: $t"; return
+        fi
+        [ -e "$t" ] || { refuse "no such file: $t"; return; }
+        [ -d "$t" ] && { refuse "$t is a folder; only documents are opened on your Mac"; return; }
+        case "$t" in /*) p=$t ;; *) p=./$t ;; esac
+        abs=$(realpath "$p" 2>/dev/null || readlink -f "$p" 2>/dev/null)
+        case "$abs" in
+            /workspace/*) ;;
+            *) refuse "only files in /workspace (the folder shared with your Mac) are opened there, not $t"; return ;;
+        esac
+        name=${abs##*/}
+        lower=$(printf '%s' "$name" | tr 'A-Z' 'a-z')
+        case "$lower" in
+            \#(casePatterns(openFileNeverTypes))) refuse "$name is a program, script or installer type: never opened on your Mac"; return ;;
+            \#(casePatterns(openFileDocumentTypes))) ;;
+            *) refuse "only documents are opened on your Mac (html, md, pdf, images, txt, csv, json, yaml, xml...), not $name"; return ;;
+        esac
+        [ -x "$abs" ] && { refuse "$name is executable: never opened on your Mac"; return; }
+        [ "$(head -c 2 "$abs" 2>/dev/null)" = '#!' ] && { refuse "$name is a script: never opened on your Mac"; return; }
+        send "doz-file;$app;$abs" "Asking your Mac to open: $abs${app:+ in $app}"
+    }
+    for target in "$@"; do
+        if [ "${#target}" -gt 2048 ]; then refuse "the URL or file name is longer than 2048 bytes: not sent to the Mac"; continue; fi
+        clean=$(printf '%s' "$target" | tr -d '\000-\037\177')
+        if [ "$clean" != "$target" ]; then refuse "the URL or file name has control characters: not sent to the Mac"; continue; fi
+        case "$target" in
+            http://*|https://*) open_url "$target" ;;
+            *)
+                if [ ! -e "$target" ] && printf '%s' "$target" | grep -Eq '^[A-Za-z][A-Za-z0-9+.-]*:'; then
+                    refuse "this sandbox has no browser, and only http and https URLs go to the Mac: $target (a file in /workspace goes by its path)"
+                else
+                    open_file "$target"
+                fi ;;
+        esac
+    done
+    exit $status
     """#
 
     /// A login shell (`bash -l`, the lab's own session) resets PATH in /etc/profile (Alpine and Debian

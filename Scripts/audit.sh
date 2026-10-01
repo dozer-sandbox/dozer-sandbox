@@ -80,8 +80,10 @@ $H1"
 WS=$(grep -rlE --include='*.swift' '^[[:space:]]*import[[:space:]]+NIOWebSocket([[:space:]]|$)' "$PACKAGE/Sources" | grep -vE "/Sources/DozerWeb/" || true)
 [[ -z "$WS" ]] || fail "NIOWebSocket is imported outside Sources/DozerWeb:
 $WS"
-CS=$(grep -rlE --include='*.swift' '^[[:space:]]*import[[:space:]]+CoreServices([[:space:]]|$)' "$PACKAGE/Sources" | grep -vE "/Sources/DozerCLI/UICommand.swift$" || true)
-[[ -z "$CS" ]] || fail "CoreServices is imported outside Sources/DozerCLI/UICommand.swift:
+# 599b: + Sources/DozerHost/MacDefaultApp.swift — LaunchServices asked, read-only, which app is a file's
+#       default (the notice names it); it opens nothing.
+CS=$(grep -rlE --include='*.swift' '^[[:space:]]*import[[:space:]]+CoreServices([[:space:]]|$)' "$PACKAGE/Sources" | grep -vE "/Sources/DozerCLI/UICommand.swift$|/Sources/DozerHost/MacDefaultApp.swift$" || true)
+[[ -z "$CS" ]] || fail "CoreServices is imported outside Sources/DozerCLI/UICommand.swift and Sources/DozerHost/MacDefaultApp.swift:
 $CS"
 WH=$(grep -rlE --include='*.swift' '^[[:space:]]*import[[:space:]]+DozerWeb([[:space:]]|$)' "$PACKAGE/Sources/DozerHost" || true)
 [[ -z "$WH" ]] || fail "the host imports the web UI (the UI is a client of the host):

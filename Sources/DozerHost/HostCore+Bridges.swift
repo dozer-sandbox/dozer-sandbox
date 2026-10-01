@@ -124,10 +124,46 @@ extension HostCore {
             if fresh, n.kind == "clipboard" { await note(sandbox, "the \(session) session copied \(Self.chars(data)) to the Mac clipboard") }
             return n
         case .openTooLong:
-            return BridgeNotice("open-refused", "\(sandbox) asked to open a URL longer than 2048 bytes — not opened")
+            return BridgeNotice("open-refused", "\(sandbox) asked to open a URL or file longer than 2048 bytes — not opened")
         case .openURL(let raw):
             return await openURL(raw, sandbox: sandbox, session: session)
+        case .openFile(let path, let app):
+            return await openFile(path, app: app, sandbox: sandbox, session: session)
         }
+    }
+
+    /// 599b: a /workspace file → the Mac's default app (or an app the user listed). `WorkspaceFiles`
+    /// decides (the setting, isolation, the app, the path resolved on the Mac, the type and content);
+    /// here: the rate limit, acting once for two viewers, the notice and the log line.
+    nonisolated func openFile(_ guestPath: String, app: String?, sandbox: String, session: String) async -> BridgeNotice {
+        let enabled = await sandboxValue(named: sandbox, SettingKey.openFiles) != .string("off")
+        let workspace = await workspaceHostPath(of: sandbox)
+        let allowed = WorkspaceFiles.appNames(DozerSettings.load().string(SettingKey.openApps) ?? "") ?? []
+        let asked = WorkspaceFiles.shownRequest(guestPath)
+        let inApp = app.map { " in " + String($0.unicodeScalars.filter { $0.value >= 0x20 && $0.value != 0x7F }.prefix(64)) } ?? ""
+        switch WorkspaceFiles.decide(guestPath: guestPath, app: app, workspace: workspace, enabled: enabled, allowedApps: allowed) {
+        case .refused(let kind, let why):
+            // Said to the viewer only (as the browser bridge's refusals): a program that keeps asking
+            // must not grow the host log.
+            return BridgeNotice(kind, "\(sandbox) asked to open \(asked)\(inApp) — \(why)")
+        case .open(let macPath, let shown, let listed):
+            let state = bridgeState
+            let (n, fresh) = state.once("file/\(sandbox)/\(macPath)/\(listed ?? "")", within: 10) {
+                guard state.fileOpens.allow(sandbox) else {
+                    return BridgeNotice("file-refused", "\(sandbox) asked to open too many files — \(shown) not opened (at most \(WorkspaceFiles.rateCount) in \(Int(WorkspaceFiles.rateWindow)) s)")                }
+                guard WorkspaceFiles.open(macPath, app: listed) else {
+                    return BridgeNotice("file-refused", "\(sandbox) asked to open \(shown)\(inApp), but this Mac could not open it")
+                }
+                return BridgeNotice("file", "\(sandbox) opened \(shown) in \(listed ?? MacDefaultApp.name(forFile: macPath) ?? "its default app")")
+            }
+            if fresh { await note(sandbox, "the \(session) session asked for /workspace/\(shown): \(n.text)") }
+            return n
+        }
+    }
+
+    /// 599b: the Mac folder actually shared at /workspace (from the sandbox's spec — never a guest's word).
+    func workspaceHostPath(of name: String) -> String? {
+        managed[name]?.config.spec.shares.first { $0.guestPath == DozerImages.workspaceGuestPath }?.hostPath
     }
 
     /// 599 (594.B2): the guest's xdg-open → the Mac's default browser, and a sign-in's localhost callback

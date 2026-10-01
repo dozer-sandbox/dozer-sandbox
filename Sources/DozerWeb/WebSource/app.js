@@ -852,7 +852,8 @@ const SETTING_SECTIONS = {
   ui: 'This UI', host: 'The host', store: 'The store', claude: 'Claude Code', defaults: 'New sandboxes', agent: 'The agent', sandbox: 'Inside every sandbox',
   'images.lab': 'New lab sandboxes', 'images.claude-code': 'New claude-code sandboxes', 'images.pi': 'New pi sandboxes', kernel: 'The kernel',
 };
-function shownValue(v) { return typeof v === 'string' ? (v === '' ? '""  (automatic)' : v) : String(v); }
+// An empty app list means none (default apps only), not "automatic".
+function shownValue(v, type) { return typeof v === 'string' ? (v === '' ? (type === 'apps' ? '""  (none)' : '""  (automatic)') : v) : String(v); }
 async function viewSettings() {
   adoptSettings(await api('settings'));
   const rep = state.settings.report;
@@ -880,17 +881,17 @@ function settingRow(r) {
   const source = h('span', { class: 'pill src src-' + r.source, title: r.source === 'file' ? 'set in the file' : r.source === 'default' ? 'not set: the default' : (r.note || '') },
     r.source === 'env' ? 'env ' + r.environment : r.source);
   const reset = r.editable && r.source === 'file'
-    ? btn('Default', () => changeSetting(r.key, null), { small: true, title: 'Comment it out in the file: the default (' + shownValue(r.defaultValue) + ') applies' }) : null;
+    ? btn('Default', () => changeSetting(r.key, null), { small: true, title: 'Comment it out in the file: the default (' + shownValue(r.defaultValue, r.type) + ') applies' }) : null;
   return h('div', { class: 'setting', 'data-key': r.key },
     h('div', { class: 'setting-main' },
       h('div', { class: 'setting-name' }, h('code', null, r.name), ' ', source),
       h('div', null, r.description),
-      h('div', { class: 'muted setting-meta' }, 'default ', h('code', null, shownValue(r.defaultValue)), ' · ', r.appliesNote,
+      h('div', { class: 'muted setting-meta' }, 'default ', h('code', null, shownValue(r.defaultValue, r.type)), ' · ', r.appliesNote,
         r.note ? h('div', null, r.note) : null)),
     h('div', { class: 'setting-control' }, settingControl(r), reset));
 }
 function settingControl(r) {
-  if (!r.editable) return h('code', { class: 'setting-value', title: r.note || '' }, shownValue(r.value));
+  if (!r.editable) return h('code', { class: 'setting-value', title: r.note || '' }, shownValue(r.value, r.type));
   let input;
   if (r.type === 'bool') {
     input = h('input', { type: 'checkbox', 'aria-label': r.key });
@@ -938,7 +939,9 @@ function settingControl(r) {
       changeSetting(r.key, n);
     });
   } else {
-    input = h('input', { type: 'text', spellcheck: 'false', autocomplete: 'off', 'aria-label': r.key, placeholder: '"" = automatic' });
+    // The open-files bridge's app list is names, comma-separated (empty: only each file's default app).
+    const placeholder = r.type === 'apps' ? 'e.g. Typora, Visual Studio Code (empty: default apps only)' : '"" = automatic';
+    input = h('input', { type: 'text', spellcheck: 'false', autocomplete: 'off', 'aria-label': r.key, placeholder });
     input.value = String(r.value);
     input.addEventListener('change', () => changeSetting(r.key, input.value.trim()));
   }

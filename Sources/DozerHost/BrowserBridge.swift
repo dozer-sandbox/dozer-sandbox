@@ -92,7 +92,8 @@ public enum BrowserBridge {
         return p.terminationStatus == 0
     }
 
-    private static func append(_ path: String, _ line: String) {
+    /// The opener seam's file (599b: the file bridge records there too).
+    static func append(_ path: String, _ line: String) {
         let lock = seamLock
         lock.lock(); defer { lock.unlock() }
         if let h = FileHandle(forWritingAtPath: path) {

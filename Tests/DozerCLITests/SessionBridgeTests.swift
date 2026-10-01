@@ -159,7 +159,9 @@ final class SessionBridgeTests: XCTestCase {
         XCTAssertTrue(agent["PATH"]?.hasPrefix(GuestCommand.openShimDirectory + ":") == true, agent["PATH"] ?? "")
         XCTAssertEqual(GuestCommand.withOpenShim(GuestCommand.withOpenShim("/a:/b")), GuestCommand.openShimDirectory + ":/a:/b", "once")
         XCTAssertTrue(GuestCommand.prepareGuest(imageSpec: nil).contains(GuestCommand.openShimPath), "installed at every boot, the lab too")
-        XCTAssertTrue(GuestCommand.openShim.contains("\\033]6340;doz-open;%s\\007"), "the marker the scanner reads")
+        // The marker the scanner reads: `ESC ] 6340 ; doz-open ; URL BEL` (599b: the body is built per target).
+        XCTAssertTrue(GuestCommand.openShim.contains("\\033]6340;%s\\007") && GuestCommand.openShim.contains("send \"doz-open;$1\""),
+                      "the marker the scanner reads")
     }
 
     // MARK: B3 — tmux
