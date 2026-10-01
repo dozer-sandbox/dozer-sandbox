@@ -180,6 +180,7 @@ agent_prompt_mode: append   # or replace
 agent_sudo: true            # the agent's passwordless sudo (default: the setting sandbox.agent_sudo)
 clipboard: write            # a copy in the sandbox reaches the Mac clipboard, with a notice; off: never (applies at once)
 browser_bridge: on          # xdg-open opens http(s) URLs in the Mac's browser, a sign-in's callback forwarded; off: never
+open_files: on              # xdg-open FILE opens a /workspace document in the Mac's default app, with a notice; off: never
 tmux: false                 # true: sessions run inside tmux (from the next session)
 ```
 
@@ -392,6 +393,31 @@ sign-in cannot come back.
   the notice says so. A later "Sign in" permission (feature 597) can build on this switch.
 - The shim and the forward helper (`deckhold connect`) arrive with the sandbox's next start; a sandbox
   woken from before gets the shim at its next session.
+
+### Workspace files, opened on the Mac
+
+The same `xdg-open` (and `open`, and `doz-open`) takes a **file** too: a document under `/workspace`
+(relative names are the caller's folder's) opens on your Mac — the shared folder's own file — in its
+default app, and the notice says which: `SANDBOX opened report.html in Safari`.
+
+```sh
+xdg-open report.html                 # inside the sandbox: the Mac's default app for .html (your browser)
+open docs/notes.md                   # the same
+doz-open --app Typora notes.md       # a named app — only one listed in bridges.open_apps (also: open -a NAME FILE)
+```
+
+- **The path** is mapped to the shared folder and resolved on the Mac; it must stay inside it (`..`, a
+  link made in the sandbox or on the Mac that leads out: refused).
+- **Documents only:** html/htm, md/markdown, pdf, png/jpg/jpeg/gif/webp/svg/bmp/tiff/heic, txt/log,
+  csv/tsv, json/yaml/xml/toml. Never a folder or app bundle; never `.app`, `.command`, `.sh`, `.pkg`,
+  `.dmg`, `.webloc` and the like; never an executable file; never a Mach-O/ELF program or `#!` script
+  whatever it is named (the first bytes are read).
+- **Named apps:** `doz config set bridges.open_apps "Typora, Visual Studio Code"` (names, not paths; empty
+  by default — then only default apps). Any other name is refused, naming the setting.
+- **Refused, and said:** an isolated sandbox (nothing is shared), `sandbox.open_files` off
+  (`doz config set --sandbox NAME sandbox.open_files off`, `doz create --open-files off`,
+  `open_files: off` in `doz_project.yaml`), more than 3 files in 10 seconds. The shim refuses what it
+  can tell itself first, so the program (or agent) hears why too.
 
 ### tmux inside a session
 
@@ -1043,13 +1069,14 @@ the others say when they apply (the next sandbox created, the next session, or a
 | `[store]` | `path` (`--store`, `$DOZ_STORE`) |
 | `[claude]` | `permissions` (`skip` · `ask`) — Claude Code's own prompts in a claude-code sandbox; `-e DOZ_CLAUDE_PERMISSIONS=…` on `run`/`exec` still wins |
 | `[defaults]` | `cpus` (2), `nat_subnet` (a free one; `$DOZ_SUBNET`) |
-| `[sandbox]` | `agent_sudo` (true — the agent's passwordless sudo inside claude-code and pi sandboxes; a sandbox's `--no-agent-sudo` / `agent_sudo` wins; from its next session and boot), `timezone` (`mac` — the Mac's zone, read again at every start and wake, so a sandbox that slept while you travelled wakes in your new zone — or a zone like `Australia/Sydney`; the agent's facts say it), `clipboard` (`write` · `off` — the clipboard bridge, see "Session bridges"; applies at once), `browser_bridge` (`on` · `off` — xdg-open to the Mac's browser and a sign-in's callback; applies at once) |
+| `[sandbox]` | `agent_sudo` (true — the agent's passwordless sudo inside claude-code and pi sandboxes; a sandbox's `--no-agent-sudo` / `agent_sudo` wins; from its next session and boot), `timezone` (`mac` — the Mac's zone, read again at every start and wake, so a sandbox that slept while you travelled wakes in your new zone — or a zone like `Australia/Sydney`; the agent's facts say it), `clipboard` (`write` · `off` — the clipboard bridge, see "Session bridges"; applies at once), `browser_bridge` (`on` · `off` — xdg-open to the Mac's browser and a sign-in's callback; applies at once), `open_files` (`on` · `off` — xdg-open FILE opens a /workspace document on the Mac; see "Workspace files, opened on the Mac"; applies at once) |
 | `[sessions]` | `tmux` (false — new sessions run inside tmux; see "tmux inside a session"; from the next session) |
+| `[bridges]` | `open_apps` (`""` — the Mac apps a sandbox may name to open a workspace file in, comma-separated; empty: default apps only; applies at once) |
 | `[images]` | `claude_code_version`, `pi_version` (`latest`, or an exact version like `2.1.227` — see "Agent versions" below) |
 | `[images.lab]` · `[images.claude-code]` · `[images.pi]` | `memory_mib` (1024 · 2048 · 2048), `network` (`bake` · `agent` · `agent`) — a custom image follows the image it was saved from |
 | `[kernel]` | `path` (`$DOZ_KERNEL`), `cache` (`$DOZ_KERNEL_CACHE`) |
 
-- **Per sandbox:** `sandbox.clipboard`, `sandbox.browser_bridge`, `sessions.tmux` and `sandbox.agent_sudo` can also be one sandbox's own
+- **Per sandbox:** `sandbox.clipboard`, `sandbox.browser_bridge`, `sandbox.open_files`, `sessions.tmux` and `sandbox.agent_sudo` can also be one sandbox's own
   (`doz config set|get|unset|show --sandbox NAME …`, `doz create` flags, `doz_project.yaml`); its
   value wins over the file's.
 - **Precedence:** a command-line flag, then its environment variable, then the file, then the

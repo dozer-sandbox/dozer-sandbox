@@ -78,6 +78,7 @@ Add `-v` to any command to see every step it takes.
 | Open in Terminal does nothing | Make a terminal app the handler for `.command` files (Finder › Get Info › Open with › Change All…). |
 | A copy didn't reach the clipboard | Look at the notice (off, too big, too many); `doz config show --sandbox NAME`. |
 | A sign-in page didn't open | Is a terminal attached? Is `sandbox.browser_bridge` on? See [Signing in from a sandbox](11-signing-in-from-a-sandbox.md#troubleshooting). |
+| A workspace file didn't open on the Mac | Read the notice (and the program's own message): outside `/workspace`, not a document type, executable, an app not in `bridges.open_apps`, an isolated sandbox, or `sandbox.open_files` off. See [Opening workspace files](07-terminals-and-sessions.md#opening-workspace-files-on-your-mac). |
 
 ### Images and disk space
 

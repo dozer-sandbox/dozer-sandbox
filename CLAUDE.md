@@ -866,8 +866,24 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   answer, never with `-q`, never on stdout; `rawCall` (every host request but ping/host-stop) and
   `doz attach` call it. `hostBuildNote` uses the web UI's `WebVersion.compare` (a newer host: upgrade
   this doz). `image ls` STATUS is always a word (W32; a template is `up to date`).
+- **Workspace files (599b) ride the SAME shim and marker** — never a second guest→host channel. The shim
+  (`openShim`, stamp `doz:open-url-shim:vN` — bump it on ANY change, so a wake's `guestFixes` re-installs
+  it) takes a file as well as a URL and sends `ESC]6340;doz-file;APP;/workspace/… BEL` (made absolute and
+  resolved in the GUEST, only so the agent hears refusals at once — the notice goes to the person). The
+  HOST decides in `WorkspaceFiles` and trusts nothing the guest said: lexical normalisation under
+  /workspace → the Mac folder from the sandbox's SPEC (`shares`, never a guest path) → `realpath` ON THE
+  MAC, inside the shared folder's own realpath → a regular file (a folder, so any bundle, never) → the
+  document allow-list / never-list (`GuestCommand.openFileDocumentTypes` / `openFileNeverTypes`, shared
+  with the shim) → no executable bit → the content (`O_NOFOLLOW` descriptor, same dev/ino as the lstat,
+  no `com.apple.ResourceFork`, no Mach-O/ELF/`#!` in the first bytes). A named app must be in
+  `bridges.open_apps` and the LISTED spelling reaches `open -a`. `sandbox.open_files` per sandbox; its own
+  rate limit (`BridgeState.fileOpens`). Notices are one terminal row (the CLI cuts at the width): keep
+  every refusal short, the key fact first. The notice names the default app through LaunchServices,
+  read-only (`MacDefaultApp` — the audit allows CoreServices there and in `UICommand.swift` only).
+  `make test-cli-openfiles`.
 - **Tests never touch the Mac**: `DOZ_TEST_PASTEBOARD=<file>` replaces pbcopy; `DOZ_TEST_OPEN_URL=<file>`
-  replaces `/usr/bin/open` and plays the browser's last step (GET the callback on the Mac's port).
+  replaces `/usr/bin/open` and plays the browser's last step (GET the callback on the Mac's port); a
+  workspace file is recorded there as `open-file APP|default MACPATH`.
   A fake OAuth server must READ before it answers (busybox `nc -e`), as a real one does.
 
 ### Browser terminals (591, on by default — owner ruling) — design: workspace `changes/591-*/591.01-DESIGN.md`
@@ -959,6 +975,7 @@ make test-cli-bases  # 596: base × agent — cli, Dockerfiles via a fake contai
 make test-cli-permissions # 597: agent permissions — net show/allow/deny/permissions, create --allow, Claude Code's hosts reached under Standard, suggestions, live changes, facts, stored by name (prepares claude-code; network)
 make test-cli-points # 594 W25–W27: point names/lookup, check before asking, exec/run start an off sandbox
 make test-cli-agentsudo # 594 W23: the agent's sudo in a fresh claude-code sandbox (prepares it; network), --no-agent-sudo, the setting at the next boot, root reaches no more
+make test-cli-openfiles # 599b: workspace files opened on the Mac through the opener seam — every refusal, isolated, off, --app, URLs as before
 make test-cli-hoststop # 594 W22: test-cli's host-stop part alone (per-sandbox progress plain/animated, --json, nothing running, a host killed mid-stop)
 make pullbench       # 594 D12: the node base pulled with 3 vs 6 concurrent layer downloads, fresh stores (network)
 ```

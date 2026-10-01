@@ -37,8 +37,8 @@ settings that name a folder on your Mac, are shown read-only there — change th
 
 ### Per sandbox
 
-`sandbox.clipboard`, `sandbox.browser_bridge`, `sessions.tmux` and `sandbox.agent_sudo` can also be
-set for one sandbox:
+`sandbox.clipboard`, `sandbox.browser_bridge`, `sandbox.open_files`, `sessions.tmux` and
+`sandbox.agent_sudo` can also be set for one sandbox:
 
 ```sh
 doz config show --sandbox my-app                          # its values, and whose value each is
@@ -47,8 +47,8 @@ doz config get --sandbox my-app sessions.tmux
 doz config unset --sandbox my-app sandbox.clipboard       # follow the setting again
 ```
 
-Or when you create it (`doz create --clipboard off --browser-bridge off --tmux --no-agent-sudo`), or
-in its `doz_project.yaml` (`clipboard:`, `browser_bridge:`, `tmux:`, `agent_sudo:`).
+Or when you create it (`doz create --clipboard off --browser-bridge off --open-files off --tmux --no-agent-sudo`),
+or in its `doz_project.yaml` (`clipboard:`, `browser_bridge:`, `open_files:`, `tmux:`, `agent_sudo:`).
 
 ## About the file
 
@@ -141,12 +141,19 @@ This table is generated from `doz config show` and checked against it on every b
 | `sandbox.timezone` | `mac` | mac, or a time zone like Australia/Sydney | next start or wake | — | The sandboxes' time zone: mac (this Mac's, read again at every boot and wake — a laptop that travels while a sandbox sleeps is followed) or a zone like Australia/Sydney. Written to the guest's /etc/localtime; the agent's facts say it. |
 | `sandbox.clipboard` | `write` | write \| off | at once | `doz create --clipboard write\|off` | The clipboard bridge: a program in a sandbox that copies (OSC 52 — Claude Code, vim, tmux) puts the text on this Mac's clipboard, and every copy shows a notice (SANDBOX copied N chars) in doz attach and doz ui. At most 1 MiB a copy and 10 copies in 10 s. A sandbox can never READ the Mac clipboard. The risk: an agent could put a command there for you to paste — off turns the bridge off (copies are dropped, and said). A sandbox's own choice (doz config set --sandbox NAME, clipboard in doz_project.yaml) wins over this. |
 | `sandbox.browser_bridge` | `on` | on \| off | at once | `doz create --browser-bridge on\|off` | The browser bridge: xdg-open (and $BROWSER, open, sensible-browser) in a sandbox opens an http or https URL in this Mac's default browser, with a notice every time (at most 3 in 10 s). A sign-in whose redirect is the sandbox's localhost (Claude Code's /login) gets that port forwarded from the Mac into the sandbox for up to 10 minutes, so the login completes. Never file: or other schemes, never the Mac's own localhost. off: nothing opens (said). A sandbox's own choice (doz config set --sandbox NAME, browser_bridge in doz_project.yaml) wins over this. |
+| `sandbox.open_files` | `on` | on \| off | at once | `doz create --open-files on\|off` | Open workspace files on this Mac: xdg-open FILE (and open FILE, doz-open FILE) in a sandbox opens a document from its /workspace in the Mac's default app — an html page in your browser, markdown in your editor — with a notice every time (at most 3 in 10 s). Only the shared folder's own files (a link or .. that leads out is refused), only documents (html, md, pdf, images, txt, csv, json, yaml, xml…) — never a folder, an app, a script, an installer or an executable. An isolated sandbox has no file to open. An app other than the default only when it is in bridges.open_apps. off: nothing opens (said). A sandbox's own choice (doz config set --sandbox NAME, open_files in doz_project.yaml) wins over this. |
 
 ### `[sessions]`
 
 | key | default | values | applies | overridden by | what it does |
 |---|---|---|---|---|---|
 | `sessions.tmux` | `false` | boolean | next session | `doz create --tmux / --no-tmux` | Run each new session inside tmux (within Dozer's own session holder, so saved screens, sleep and wake, browser terminals and Ctrl-] detach keep working): tmux's windows, panes and copy mode, its status bar and prefix key (Ctrl-b). tmux takes the mouse, and the kitty keyboard protocol and modifyOtherKeys do not fully pass through it; the session's exit code is tmux's. Needs tmux in the image (the built-in images this doz prepares have it; on an image an older doz prepared the session runs without it, and says so). A sandbox's own choice (doz create --tmux, tmux: true in doz_project.yaml, doz config set --sandbox) wins over this. |
+
+### `[bridges]`
+
+| key | default | values | applies | overridden by | what it does |
+|---|---|---|---|---|---|
+| `bridges.open_apps` | `""` | app names, comma-separated, like "Typora, Visual Studio Code" ("" = none) | at once | — | The Mac apps a sandbox may name to open a workspace file in (doz-open --app NAME FILE, or open -a NAME FILE in the sandbox), comma-separated — e.g. "Typora, Visual Studio Code". Empty: a file opens only in its default app, and naming an app is refused. Never a path, only an app's name. For every sandbox. |
 
 ### `[images]`
 

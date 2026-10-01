@@ -149,7 +149,7 @@ At every session start, Dozer tells the agent where it is:
   your Mac, not a container) with its name, image, CPUs and memory; whether `/workspace` is your Mac
   folder (and which) or isolated; how its network works and what to do when refused; that its
   credentials are supplied by the proxy; whether it has sudo; its time zone; what the clipboard and
-  browser bridges do;
+  browser bridges do, and whether it can open a workspace file on your Mac (which types, which apps);
 - the **`dozer` skill** (`~/.claude/skills/dozer/SKILL.md`, pi: `~/.pi/agent/skills/dozer/SKILL.md`),
   which it reads when a question is about the machine: what persists, the network, credentials,
   sleep, and what it can't do from inside (and must ask you for).
@@ -167,7 +167,7 @@ replacing (`--agent-prompt-mode replace`). Your text may use `{{variables}}` fro
 `workspace.shared`, `workspace.host_path`, `workspace.guest_path`, `workspace.description`,
 `network.mode`, `network.allowed_hosts`, `network.description`, `network.permissions`,
 `account.name`, `credentials.description`, `sandbox.sudo`, `sandbox.timezone`, `sudo.description`,
-`clipboard.description`, `browser.description`, `mac.hostname`, `dozer.version` (the template
+`clipboard.description`, `browser.description`, `files.description`, `mac.hostname`, `dozer.version` (the template
 `agent-prompt.md` lists them with what each says). `doz inspect NAME --prompt` shows any mistake: an unknown variable is an error that stops the
 agent's sessions from starting until it's fixed, never silently blank.
 

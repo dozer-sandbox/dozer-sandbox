@@ -82,9 +82,10 @@ You can watch it all in the dashboard (`doz ui`): the sandbox appears under **Sa
   change permissions or delete).
 - **Prefer `--isolated`** for work that shouldn't touch your folder at all.
 - **Use restore points** before each risky step; they cost almost nothing.
-- **Watch the clipboard and browser notices.** A sandboxed agent can put text on your clipboard or open
-  a page in your browser, and each time you're told. Turn either off for a sandbox with
-  `doz config set --sandbox NAME sandbox.clipboard off` or `… sandbox.browser_bridge off`.
+- **Watch the clipboard, browser and file notices.** A sandboxed agent can put text on your clipboard,
+  open a page in your browser or open a workspace document on your Mac, and each time you're told.
+  Turn any of them off for a sandbox with `doz config set --sandbox NAME sandbox.clipboard off`,
+  `… sandbox.browser_bridge off` or `… sandbox.open_files off`.
 - **Scripts on a schedule** should use exact agent versions (`images.claude_code_version`) so an image
   never needs the internet to prepare.
 

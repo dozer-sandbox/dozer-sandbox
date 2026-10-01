@@ -56,16 +56,24 @@ the agent install what it needs. Turn it off with `sandbox.agent_sudo` if you pr
 
 ## The bridges — deliberate ways in to your Mac
 
-A session's terminal lets a program in the sandbox do two things on your Mac, because agents need
+A session's terminal lets a program in the sandbox do three things on your Mac, because agents need
 them. Each is announced every time it's used, rate-limited, works only while a terminal is attached,
-and can be turned off per sandbox or for all.
+and can be turned off per sandbox or for all. All three travel the same way — a private escape
+sequence in the session's output, which Dozer's host takes out and decides on; the sandbox has no other
+channel to your Mac.
 
 | bridge | what the sandbox can do | what it can't | the risk | turn it off |
 |---|---|---|---|---|
 | **Clipboard** | put text on your Mac's clipboard (up to 1 MiB, 10 copies per 10 s) | **read** your clipboard — ever | an agent could plant a command for you to paste | `sandbox.clipboard = off` |
-| **Browser** | open an http(s) page in your default browser (3 per 10 s); during a sign-in, receive the redirect on one loopback port for up to 10 minutes | open files or other schemes, reach your Mac's own `localhost`, forward any other port | an agent could open a misleading page | `sandbox.browser_bridge = off` |
+| **Browser** | open an http(s) page in your default browser (3 per 10 s); during a sign-in, receive the redirect on one loopback port for up to 10 minutes | open `file:` or other schemes, reach your Mac's own `localhost`, forward any other port | an agent could open a misleading page | `sandbox.browser_bridge = off` |
+| **Files** | open a document from its shared `/workspace` in its default app, or in an app you listed in `bridges.open_apps` (3 per 10 s) | open anything outside the shared folder (paths are resolved on the Mac — `..` and links that lead out are refused), a folder or app bundle, an app, script, installer or link file, an executable, a program or `#!` script renamed as a document (the first bytes are checked), or an app you didn't list; anything at all in an isolated sandbox | an agent could open a misleading page or document (an html file runs its scripts in your browser, as a local page) | `sandbox.open_files = off` |
 
-The agent is told about both, including that you see a notice every time.
+The agent is told about all three, including that you see a notice every time.
+
+One limit of the files bridge, stated plainly: the file is checked and then handed to macOS to open,
+so an agent racing that moment (a few milliseconds) could swap in another file from your shared
+folder. It can only ever name something the shared folder reaches, and macOS is only ever given a
+fully resolved path.
 
 ## Things that run outside a sandbox
 
@@ -80,8 +88,8 @@ The agent is told about both, including that you see a notice every time.
 
 - **Your shared folder.** It's the agent's to change. Commit often.
 - **What you allow.** A permission or a site you allow is reachable; data can go there.
-- **What you paste or open.** Read clipboard and browser notices, and don't run what an agent put on
-  your clipboard without looking.
+- **What you paste or open.** Read clipboard, browser and file notices, and don't run what an agent put
+  on your clipboard without looking.
 - **Another agent driving `doz` on your Mac** has your permissions: brief it to leave permissions and
   deletion to you ([Letting another agent drive Dozer](14-letting-another-agent-drive.md)).
 - **Secrets you put on a sandbox's disk yourself** travel with its restore points and templates.
@@ -93,6 +101,8 @@ The agent is told about both, including that you see a notice every time.
 | `defaults.permissions` | `standard` | What a new sandbox's agent may reach. |
 | `sandbox.clipboard` | `write` | The clipboard bridge. |
 | `sandbox.browser_bridge` | `on` | The browser bridge. |
+| `sandbox.open_files` | `on` | The files bridge. |
+| `bridges.open_apps` | `""` | The apps a sandbox may name for the files bridge (none: default apps only). |
 | `sandbox.agent_sudo` | `true` | The agent's sudo inside its sandbox. |
 | `ui.allow_secret_entry` | `true` | The dashboard may take a key or token. |
 | `claude.permissions` | `skip` | Claude Code's own permission prompts (`ask` to keep them). |

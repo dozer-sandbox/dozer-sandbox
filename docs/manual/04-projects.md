@@ -54,7 +54,7 @@ With no sandbox name, in a project folder, `doz up`:
 3. starts the file's `sessions` — the first one attached to your terminal, the others in the
    background;
 4. brings the sandbox's own settings into line with the file (its agent prompt, sudo, clipboard,
-   browser bridge, tmux), and says what it changed.
+   browser bridge, opening files, tmux), and says what it changed.
 
 Options you give `up` win over the file's, for a new sandbox: `doz up --memory 8G`.
 `doz up -d` does it all without attaching. When you detach (**Ctrl-]** twice), the line printed
@@ -86,6 +86,7 @@ agent_prompt_mode: append   # or replace
 agent_sudo: true
 clipboard: write            # or off
 browser_bridge: on          # or off
+open_files: on              # or off
 tmux: false                 # or true
 ```
 
@@ -107,6 +108,7 @@ tmux: false                 # or true
 | `agent_sudo` | `true` or `false` | `sandbox.agent_sudo` (true) | the next session |
 | `clipboard` | `write` or `off` | `sandbox.clipboard` (write) | at once |
 | `browser_bridge` | `on` or `off` | `sandbox.browser_bridge` (on) | at once |
+| `open_files` | `on` or `off` | `sandbox.open_files` (on) | at once |
 | `tmux` | `true` or `false` | `sessions.tmux` (false) | the next session |
 
 The schema is closed: an unknown key, a key given twice, a wrong type or a value out of range is an
