@@ -28,8 +28,15 @@
  * Every connection is dialled afresh, so after a sleep to disk → wake (which severs every vsock
  * stream) the next connection simply works.
  *
+ * 599d (G4): `doznet agent` — the guest half of the user's forwarded SSH agent (only while the user
+ * turned it on): a unix socket whose every connection is relayed, bytes as they are, over vsock to the
+ * host (CID 2, port 5801), which connects it to the Mac's ssh-agent. The keys never enter the guest; the
+ * guest can only ask the agent to sign. It decides nothing either.
+ *
  * Usage:  doznet up [-p VSOCK_PORT] [--no-firewall]    daemonizes once listening
  *         doznet status                                 prints the pid, or exits 1
+ *         doznet agent [-p VSOCK_PORT] -s SOCKET        daemonizes once listening (599d)
+ *         doznet agent status | doznet agent stop
  * Build:  Guest/doznet/build.sh (pinned Zig; see PROVENANCE.md)
  */
 #define _GNU_SOURCE
@@ -50,6 +57,7 @@
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/un.h>
 #include <unistd.h>
 #include <linux/netfilter_ipv4.h>
 #include <linux/netfilter_ipv4/ip_tables.h>
@@ -402,16 +410,95 @@ static int firewall(void) {
 
 /* ── main ──────────────────────────────────────────────────────────────────────────────────── */
 
-static int status(void) {
-    FILE *f = fopen(PIDFILE, "r");
+static int running_pid(const char *pidfile) {
+    FILE *f = fopen(pidfile, "r");
     int pid = 0;
     if (f) { if (fscanf(f, "%d", &pid) != 1) pid = 0; fclose(f); }
-    if (pid > 0 && kill(pid, 0) == 0) { printf("%d\n", pid); return 0; }
+    return pid > 0 && kill(pid, 0) == 0 ? pid : 0;
+}
+
+static int status(void) {
+    int pid = running_pid(PIDFILE);
+    if (pid) { printf("%d\n", pid); return 0; }
     return 1;
+}
+
+/* ── 599d: the forwarded SSH agent ─────────────────────────────────────────────────────────── */
+
+#define AGENT_PIDFILE "/run/doznet-agent.pid"
+
+static void *agent_conn(void *arg) {
+    int c = (int)(intptr_t)arg;
+    int h = dial_host();
+    if (h < 0) { logf_("agent: vsock dial failed: %s", strerror(errno)); close(c); return NULL; }
+    relay(c, h);
+    close(h);
+    close(c);
+    return NULL;
+}
+
+static int agent_main(int argc, char **argv) {
+    if (argc >= 3 && !strcmp(argv[2], "status")) {
+        int pid = running_pid(AGENT_PIDFILE);
+        if (pid) { printf("%d\n", pid); return 0; }
+        return 1;
+    }
+    if (argc >= 3 && !strcmp(argv[2], "stop")) {
+        int pid = running_pid(AGENT_PIDFILE);
+        if (pid) kill(pid, SIGTERM);
+        unlink(AGENT_PIDFILE);
+        return 0;
+    }
+    const char *path = NULL;
+    g_vport = 5801;
+    for (int i = 2; i < argc; i++) {
+        if (!strcmp(argv[i], "-p") && i + 1 < argc) g_vport = (unsigned)atoi(argv[++i]);
+        else if (!strcmp(argv[i], "-s") && i + 1 < argc) path = argv[++i];
+    }
+    struct sockaddr_un a = { .sun_family = AF_UNIX };
+    if (!path || path[0] != '/' || strlen(path) >= sizeof a.sun_path) {
+        fprintf(stderr, "usage: doznet agent [-p VSOCK_PORT] -s /absolute/socket | doznet agent status | doznet agent stop\n");
+        return 2;
+    }
+    if (running_pid(AGENT_PIDFILE)) { printf("doznet agent: already running\n"); return 0; }
+    signal(SIGPIPE, SIG_IGN);
+    mkdir("/run", 0755);
+    g_log = fopen(LOGFILE, "a");
+    char dir[sizeof a.sun_path];
+    snprintf(dir, sizeof dir, "%s", path);
+    char *slash = strrchr(dir, '/');
+    if (slash && slash != dir) { *slash = 0; mkdir(dir, 0755); }
+    strcpy(a.sun_path, path);
+    unlink(path);
+    int s = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+    if (s < 0 || bind(s, (struct sockaddr *)&a, sizeof a) != 0 || listen(s, 64) != 0) {
+        fprintf(stderr, "doznet agent: listen on %s: %s\n", path, strerror(errno));
+        return 1;
+    }
+    chmod(path, 0666);              /* every user of the sandbox — the agent is the sandbox's to use */
+    pid_t p = fork();
+    if (p < 0) { perror("fork"); return 1; }
+    if (p > 0) {
+        FILE *f = fopen(AGENT_PIDFILE, "w");
+        if (f) { fprintf(f, "%d\n", p); fclose(f); }
+        printf("doznet agent: %s → vsock %u\n", path, g_vport);
+        return 0;
+    }
+    setsid();
+    int dn = open("/dev/null", O_RDWR);
+    dup2(dn, 0); dup2(dn, 1); dup2(dn, 2);
+    if (dn > 2) close(dn);
+    logf_("agent: %s → vsock port %u", path, g_vport);
+    for (;;) {
+        int c = accept4(s, NULL, NULL, SOCK_CLOEXEC);
+        if (c < 0) { if (errno == EINTR) continue; logf_("agent: accept: %s", strerror(errno)); sleep(1); continue; }
+        spawn(agent_conn, (void *)(intptr_t)c);
+    }
 }
 
 int main(int argc, char **argv) {
     if (argc >= 2 && !strcmp(argv[1], "status")) return status();
+    if (argc >= 2 && !strcmp(argv[1], "agent")) return agent_main(argc, argv);
     if (argc < 2 || strcmp(argv[1], "up") != 0) {
         fprintf(stderr, "usage: doznet up [-p VSOCK_PORT] [--no-firewall] | doznet status\n");
         return 2;

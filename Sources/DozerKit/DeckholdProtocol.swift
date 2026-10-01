@@ -505,13 +505,96 @@ public enum GuestCommand {
     /// the guest's own host name in /etc/hosts (W29), debconf Noninteractive (W31), the open-URL shim
     /// (599), the time zone (W10), and the agent's sudo following the setting (W23). NOT here: the
     /// deckhold socket reset and the persist-dir bind mounts — those must not run under live sessions.
-    public static func guestFixes(imageSpec: ImageSpec?, agentSudo: Bool = true, timeZone: GuestTimeZone? = nil) -> String {
+    public static func guestFixes(imageSpec: ImageSpec?, agentSudo: Bool = true, timeZone: GuestTimeZone? = nil,
+                                  git: GitGuestSetup? = nil, sshAgent: Bool = false) -> String {
         var s = ownHostnameScript
         s += "; " + debconfNoninteractiveScript
         s += "; " + openShimInstall
         if let tz = timeZone { s += "; " + tz.script }
         if let r = imageSpec { s += "; " + agentSudoScript(user: r.user, on: agentSudo) }
+        // 599d: git's credential helper (always installed — it answers only with a doz placeholder), the
+        // user's GitHub setup (identity + helper config, or none), the forwarded SSH agent (or none).
+        s += "; " + gitCredentialInstall
+        s += "; " + gitConfigScript(git ?? .off)
+        s += "; " + sshAgentScript(on: sshAgent)
         return s
+    }
+
+    // MARK: 599d — GitHub as the user, in the guest
+
+    /// git's credential helper for https://github.com (root-owned, on every image).
+    public static let gitCredentialHelperPath = openShimDirectory + "/git-credential-doz"
+    static let gitCredentialStamp = "doz:git-credential:v1"
+
+    /// It answers git with this session's PLACEHOLDER — `$GH_TOKEN`, set by doz while "Use GitHub as you"
+    /// is on — and only for https://github.com; Dozer's proxy swaps the user's real token in on the way
+    /// out. Without a doz placeholder it answers nothing (git goes on to its other helpers).
+    public static let gitCredentialHelper = #"""
+    #!/bin/sh
+    # doz:git-credential:v1
+    # Dozer Sandbox: git's credential helper for https://github.com. It answers with this session's doz
+    # placeholder ($GH_TOKEN) — never a real token: Dozer's proxy on the Mac swaps in the user's own login
+    # (read-only unless the user turned on "Push to GitHub"). See the dozer skill.
+    [ "${1:-}" = get ] || exit 0
+    host=; proto=
+    while IFS= read -r line && [ -n "$line" ]; do
+        case "$line" in
+            host=*) host=${line#host=} ;;
+            protocol=*) proto=${line#protocol=} ;;
+        esac
+    done
+    [ "$proto" = https ] && [ "$host" = github.com ] || exit 0
+    tok=${GH_TOKEN:-${GITHUB_TOKEN:-}}
+    case "$tok" in doz_cred_*) ;; *) exit 0 ;; esac
+    printf 'username=x-access-token\npassword=%s\n' "$tok"
+    """#
+
+    public static var gitCredentialInstall: String {
+        let quoted = "'" + gitCredentialHelper.replacingOccurrences(of: "'", with: "'\\''") + "\n'"
+        return "{ grep -q '\(gitCredentialStamp)' '\(gitCredentialHelperPath)' 2>/dev/null || { mkdir -p '\(openShimDirectory)'"
+            + " && printf '%s' \(quoted) > '\(gitCredentialHelperPath).tmp' && chmod 0755 '\(gitCredentialHelperPath).tmp'"
+            + " && mv -f '\(gitCredentialHelperPath).tmp' '\(gitCredentialHelperPath)'; }; } || true"
+    }
+
+    /// Dozer's own git config, included from the system's (/etc/gitconfig) — the user's identity and the
+    /// helper while "Use GitHub as you" is on; EMPTY otherwise (nothing of the user's stays).
+    public static let dozerGitConfigPath = "/etc/dozer/gitconfig"
+
+    /// The file's text for `setup`.
+    public static func dozerGitConfig(_ setup: GitGuestSetup) -> String {
+        guard setup.on else { return "# Dozer: \"Use GitHub as you\" is off for this sandbox.\n" }
+        func value(_ s: String) -> String {
+            "\"" + s.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"") + "\""
+        }
+        var t = "# Dozer: \"Use GitHub as you\" is on — rewritten at every boot and wake.\n"
+        t += "[credential \"https://github.com\"]\n\thelper = \(value(gitCredentialHelperPath))\n"
+        var user = ""
+        if let n = setup.name { user += "\tname = \(value(n))\n" }
+        if let e = setup.email { user += "\temail = \(value(e))\n" }
+        if !user.isEmpty { t += "[user]\n" + user }
+        return t
+    }
+
+    /// Root shell: write the file and include it from /etc/gitconfig (once). Idempotent, never fails the caller.
+    public static func gitConfigScript(_ setup: GitGuestSetup) -> String {
+        let quoted = "'" + dozerGitConfig(setup).replacingOccurrences(of: "'", with: "'\\''") + "'"
+        return "{ mkdir -p /etc/dozer && printf '%s' \(quoted) > '\(dozerGitConfigPath).tmp' && chmod 0644 '\(dozerGitConfigPath).tmp'"
+            + " && mv -f '\(dozerGitConfigPath).tmp' '\(dozerGitConfigPath)'"
+            + " && { grep -qs 'path = \(dozerGitConfigPath)' /etc/gitconfig || printf '[include]\\n\\tpath = \(dozerGitConfigPath)\\n' >> /etc/gitconfig; }; } || true"
+    }
+
+    /// 599d (G4): where the forwarded SSH agent listens in the guest (sessions get `SSH_AUTH_SOCK` = it).
+    public static let sshAgentGuestSocket = "/run/doz/ssh-agent.sock"
+
+    /// Root shell: start (once) or stop the guest half of the forwarded SSH agent — `doznet agent` relays
+    /// each connection on the socket to the Mac over vsock. Only where doznet is (a proxied sandbox);
+    /// never fails the caller.
+    public static func sshAgentScript(on: Bool) -> String {
+        let d = EgressProxy.guestShimPath
+        if on {
+            return "{ [ -x \(d) ] && { \(d) agent status >/dev/null 2>&1 || \(d) agent -p \(SSHAgentRelay.vsockPort) -s \(sshAgentGuestSocket) >/dev/null; }; } || true"
+        }
+        return "{ [ -x \(d) ] && \(d) agent stop >/dev/null 2>&1; rm -f \(sshAgentGuestSocket); } || true"
     }
 
     public static func stateKey(_ dir: String) -> String {
@@ -527,9 +610,11 @@ public enum GuestCommand {
     /// drop-in removed); applied at every fresh boot, so it follows the sandbox's setting without a rebake.
     /// 594 W10: `timeZone` — the guest's /etc/localtime (every image, the lab too).
     /// 594 W34: plus `guestFixes` — the part that is also safe on a LIVE guest, and runs at every wake too.
-    public static func prepareGuest(imageSpec: ImageSpec?, agentSudo: Bool = true, timeZone: GuestTimeZone? = nil) -> String {
+    public static func prepareGuest(imageSpec: ImageSpec?, agentSudo: Bool = true, timeZone: GuestTimeZone? = nil,
+                                    git: GitGuestSetup? = nil) -> String {
         var s = "set -e; rm -rf /run/deckhold; mkdir -p /run/deckhold; chmod 1777 /run/deckhold"
-        s += "; " + guestFixes(imageSpec: imageSpec, agentSudo: agentSudo, timeZone: timeZone)
+        // 599d: the SSH agent's guest half needs doznet, which a fresh boot installs after this (the boot starts it then).
+        s += "; " + guestFixes(imageSpec: imageSpec, agentSudo: agentSudo, timeZone: timeZone, git: git, sshAgent: false)
         guard let r = imageSpec else { return s }
         for d in r.resolvedPersistDirs {
             let src = "\(stateMount)/\(stateKey(d))"

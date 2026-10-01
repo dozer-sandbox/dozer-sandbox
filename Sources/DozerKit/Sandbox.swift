@@ -856,7 +856,8 @@ public actor Sandbox {
             // 594 W34: what a fresh boot applies, at every wake too — the time zone among them (W10:
             // the Mac may have changed zone while this sandbox slept). ONE root exec; best effort: a
             // wake never fails for it, a failure is noted.
-            let script = GuestCommand.guestFixes(imageSpec: spec.imageSpec, agentSudo: agentSudo, timeZone: timeZone)
+            let script = GuestCommand.guestFixes(imageSpec: spec.imageSpec, agentSudo: agentSudo, timeZone: timeZone,
+                                                 git: gitSetup, sshAgent: sshAgentSocket != nil)
             let t0 = ContinuousClock.now
             do {
                 let r = try await retryingFirstGuestCall("apply the guest fixes") {
@@ -917,6 +918,7 @@ public actor Sandbox {
             }
             container = nil; instance = nil; handle = nil; identity = nil; cleanlyStopped = false; balloonHeld = 0
             egress?.stopListening()
+            sshRelayBox.withLock { $0 }?.stop()          // 599d: listens again at the next boot
             egress?.vault.revokeAll()
         case .removeRootDisk:
             for url in [layout.rootfs, layout.persistedState, layout.snapshot] { try? FileManager.default.removeItem(at: url) }
@@ -1179,7 +1181,8 @@ public actor Sandbox {
                 try await c.copyIn(from: deckhold, to: URL(fileURLWithPath: GuestCommand.deckholdPath), mode: 0o755)
             }
             try await timed(spec.imageSpec == nil ? "prepared the guest" : "prepared the guest (persist dirs bound from the state disk)") {
-                let r = try await Self.exec(on: c, ["sh", "-c", GuestCommand.prepareGuest(imageSpec: spec.imageSpec, agentSudo: agentSudo, timeZone: timeZone)], environment: [:],
+                let r = try await Self.exec(on: c, ["sh", "-c", GuestCommand.prepareGuest(imageSpec: spec.imageSpec, agentSudo: agentSudo, timeZone: timeZone,
+                                                                                         git: gitSetup)], environment: [:],
                                             workingDirectory: "/", privileged: true, timeout: 30)
                 if r.exitCode != 0 { throw SandboxError.commandFailed(command: "prepare guest", exitCode: r.exitCode, output: r.output + r.errorOutput) }
             }
@@ -1188,6 +1191,11 @@ public actor Sandbox {
                 egress.ca = ca
                 try await timed("network: no interface; doznet + the sandbox CA installed, DNS and egress via the Mac's proxy (\(egress.policy.preset ?? "custom") policy)") {
                     try await Self.startEgressShim(on: c, caFile: layout.sandboxDirectory.appendingPathComponent("egress-ca.pem"))
+                }
+                // 599d (G4): doznet is in place only now — the forwarded SSH agent's guest half starts here.
+                if sshAgentSocket != nil {
+                    _ = try? await Self.exec(on: c, ["sh", "-c", GuestCommand.sshAgentScript(on: true)], environment: [:],
+                                             workingDirectory: "/", privileged: true, timeout: 15)
                 }
             }
         } else if let egress, egress.ca == nil {
@@ -1363,6 +1371,50 @@ public actor Sandbox {
     private func listenForEgress() throws {
         guard let egress, let instance, let v = vzInstance(of: instance) else { return }
         try egress.listen(on: v)
+        // 599d (G4): the forwarded SSH agent's listener, while it is on.
+        if let relay = sshRelayBox.withLock({ $0 }) { try? relay.listen(on: v) }
+    }
+
+    // MARK: 599d — GitHub as the user
+
+    /// The user's GitHub setup in the guest (identity + helper config, or none), applied at every fresh
+    /// boot and wake (`guestFixes`); `applyGitHubToGuest` applies it to a running guest at once.
+    public nonisolated var gitSetup: GitGuestSetup { gitSetupBox.withLock { $0 } }
+    public nonisolated func setGitSetup(_ s: GitGuestSetup) { gitSetupBox.withLock { $0 = s } }
+    private nonisolated let gitSetupBox = LockedBox<GitGuestSetup>(.off)
+
+    /// The Mac's agent socket while the SSH agent is forwarded (nil: not forwarded).
+    public nonisolated var sshAgentSocket: String? { sshRelayBox.withLock { $0?.agentSocket } }
+    private nonisolated let sshRelayBox = LockedBox<SSHAgentRelay?>(nil)
+
+    /// Forward the Mac's SSH agent at `socket` into the sandbox (nil: stop). A proxied sandbox only (the
+    /// guest half is doznet). Applied at once to a running VM, and at every later boot and wake.
+    public func setSSHAgent(socket: String?, onConnect: (@Sendable () -> Void)? = nil) async {
+        guard let egress else { return }
+        let old = sshRelayBox.withLock { r -> SSHAgentRelay? in
+            let o = r
+            r = socket.map { SSHAgentRelay(agentSocket: $0) }
+            r?.onConnect = onConnect
+            return o
+        }
+        old?.stop()
+        egress.sshToGitHub = socket != nil
+        guard phase == .running, let instance, let v = vzInstance(of: instance) else { return }
+        if let relay = sshRelayBox.withLock({ $0 }) { try? relay.listen(on: v) }
+        await applyGitHubToGuest()
+    }
+
+    /// Apply the GitHub setup and the SSH agent's guest half to the RUNNING guest now (best effort).
+    public func applyGitHubToGuest() async {
+        guard phase == .running else { return }
+        let script = GuestCommand.gitCredentialInstall + "; " + GuestCommand.gitConfigScript(gitSetup)
+            + "; " + GuestCommand.sshAgentScript(on: sshAgentSocket != nil)
+        do {
+            let r = try await execInContainer(["sh", "-c", script], privileged: true, timeout: 15)
+            if r.exitCode != 0 { note("the GitHub setup exited \(r.exitCode): \(String((r.output + r.errorOutput).suffix(200)))") }
+        } catch {
+            note("could not apply the GitHub setup: \(error.localizedDescription)")
+        }
     }
 
     /// Install and start the guest half of a proxied network in a freshly booted container: the
@@ -1434,17 +1486,20 @@ public actor Sandbox {
         guard let egress else { return caller }
         var env = egress.guestEnvironment
         var callerEnv = caller
-        for b in egress.vault.allBindings {
+        for b in egress.vault.allBindings where b.swapOnly != true {
             guard let v = b.environmentVariable, let value = callerEnv[v], !value.isEmpty,
                   !value.hasPrefix(CredentialVault.placeholderPrefix) else { continue }
             egress.vault.set(b, secret: value)
             callerEnv[v] = egress.vault.mint(b.id)          // the guest sees a placeholder, never the key
         }
         if placeholders {
-            for b in egress.vault.allBindings where egress.vault.hasSecret(b.id) {
-                if let v = b.environmentVariable, let t = egress.vault.mint(b.id) { env[v] = t }
+            // 599d: a binding read on use (GitHub) issues placeholders too; one token in every variable it names.
+            for b in egress.vault.allBindings where egress.vault.issuesPlaceholder(b.id) {
+                if !b.placeholderVariables.isEmpty, let t = egress.vault.mint(b.id) { for v in b.placeholderVariables { env[v] = t } }
                 env.merge(egress.vault.sessionExtras(b.id)) { a, _ in a }
             }
+            // 599d (G4): the forwarded SSH agent's socket, while it is on.
+            if sshAgentSocket != nil { env["SSH_AUTH_SOCK"] = GuestCommand.sshAgentGuestSocket }
         }
         env.merge(callerEnv) { _, caller in caller }
         return env

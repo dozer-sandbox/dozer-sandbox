@@ -50,13 +50,33 @@ public struct CredentialBinding: Sendable, Codable, Equatable, Identifiable {
     public var header: CredentialHeader
     /// The guest environment variable a session gets the placeholder in, e.g. `ANTHROPIC_API_KEY`.
     public var environmentVariable: String?
+    /// 599d: more variables that carry the SAME placeholder (`GITHUB_TOKEN` beside `GH_TOKEN`).
+    /// Optional: a record written before 599d decodes without it.
+    public var alsoEnvironmentVariables: [String]?
+    /// 599d: true — the secret is only ever SWAPPED for a placeholder the request carries, never added
+    /// to a request without one (GitHub: an anonymous clone stays anonymous unless git asked for a login).
+    public var swapOnly: Bool?
 
-    public init(id: String, hosts: [String], header: CredentialHeader, environmentVariable: String? = nil) {
+    public init(id: String, hosts: [String], header: CredentialHeader, environmentVariable: String? = nil,
+                alsoEnvironmentVariables: [String]? = nil, swapOnly: Bool? = nil) {
         self.id = id
         self.hosts = hosts.map { $0.lowercased() }
         self.header = header
         self.environmentVariable = environmentVariable
+        self.alsoEnvironmentVariables = alsoEnvironmentVariables
+        self.swapOnly = swapOnly
     }
+
+    /// 599d: the user's GitHub login ("Use GitHub as you"): `GH_TOKEN`/`GITHUB_TOKEN` for `gh`, and git's
+    /// credential helper (`git-credential-doz`) answers with the same placeholder as git's Basic password.
+    /// The proxy swaps it on these hosts only — in `Authorization: Bearer|token …` AND inside
+    /// `Authorization: Basic base64(user:…)` (decoded, swapped, re-encoded) — and never adds it.
+    public static let github = CredentialBinding(id: "github", hosts: GitHubAccess.credentialHosts, header: .bearer,
+                                                 environmentVariable: "GH_TOKEN", alsoEnvironmentVariables: ["GITHUB_TOKEN"],
+                                                 swapOnly: true)
+
+    /// Every variable a session gets this binding's placeholder in.
+    public var placeholderVariables: [String] { (environmentVariable.map { [$0] } ?? []) + (alsoEnvironmentVariables ?? []) }
 
     /// Anthropic's API key: `x-api-key` on api.anthropic.com, `ANTHROPIC_API_KEY` in the guest.
     public static let anthropic = CredentialBinding(id: "anthropic", hosts: ["api.anthropic.com"], header: .xAPIKey,
@@ -202,8 +222,70 @@ public final class CredentialVault: @unchecked Sendable {
         set { lock.lock(); _onPlaceholders = newValue; lock.unlock() }
     }
     private var _onPlaceholders: (@Sendable () -> Void)?
+    /// 599d: a request used binding `id`'s secret (swapped or injected) — the owner tells the user on
+    /// first use. Called on a proxy thread, never under the vault's lock.
+    public var onUse: (@Sendable (String) -> Void)? {
+        get { lock.lock(); defer { lock.unlock() }; return _onUse }
+        set { lock.lock(); _onUse = newValue; lock.unlock() }
+    }
+    private var _onUse: (@Sendable (String) -> Void)?
+
+    /// 599d: a secret READ ON USE from its source (the Mac's `gh auth token`, a keychain item), kept in
+    /// memory for `ttl` seconds, then read again on the next request that needs it. Never persisted.
+    public typealias SecretRead = (secret: String?, notice: String?)
+    private var providers: [String: (ttl: TimeInterval, version: (@Sendable () -> String)?, read: @Sendable () -> SecretRead)] = [:]
+    private var fetchedAt: [String: Date] = [:]
+    private var fetchedVersion: [String: String] = [:]
 
     public init() {}
+
+    /// 599d: bind `binding` to a source read on use (see `SecretRead`); any secret held before is dropped.
+    /// `version` (cheap, asked on every request that needs it): when it changes — the user chose another
+    /// source — the cached read is dropped at once, not after `ttl`.
+    public func setProvider(_ binding: CredentialBinding, ttl: TimeInterval, version: (@Sendable () -> String)? = nil,
+                            read: @escaping @Sendable () -> SecretRead) {
+        lock.lock(); defer { lock.unlock() }
+        bindings[binding.id] = binding
+        providers[binding.id] = (ttl, version, read)
+        fetchedAt[binding.id] = nil
+        fetchedVersion[binding.id] = nil
+        secrets[binding.id] = nil
+        notices[binding.id] = nil
+    }
+
+    /// Whether sessions get a placeholder for `id`: it holds a secret, or reads one on use.
+    public func issuesPlaceholder(_ id: String) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        return secrets[id] != nil || providers[id] != nil
+    }
+
+    /// Read the providers of `host`'s bindings whose secret is missing or older than their ttl — OUTSIDE
+    /// the lock (a source may be a process).
+    func refreshProviders(host: String, now: Date = Date()) {
+        lock.lock()
+        let mine = providers.filter { id, _ in bindings[id]?.covers(host) == true }
+        let fetched = fetchedAt, versions = fetchedVersion
+        lock.unlock()
+        for (id, p) in mine {
+            let version = p.version?() ?? ""
+            let stale = fetched[id].map { now.timeIntervalSince($0) >= p.ttl } ?? true
+            guard stale || versions[id] != version else { continue }
+            let r = p.read()
+            lock.lock()
+            if providers[id] != nil {
+                secrets[id] = r.secret.flatMap { $0.isEmpty ? nil : $0 }
+                notices[id] = secrets[id] == nil ? r.notice : nil
+                fetchedAt[id] = now
+                fetchedVersion[id] = version
+            }
+            lock.unlock()
+        }
+    }
+
+    /// Forget the cached reads (the next request reads its source again).
+    public func expireProviders() {
+        lock.lock(); fetchedAt.removeAll(); lock.unlock()
+    }
 
     public func set(_ binding: CredentialBinding, secret: String?) {
         lock.lock(); defer { lock.unlock() }
@@ -232,6 +314,9 @@ public final class CredentialVault: @unchecked Sendable {
         expiries[id] = nil
         extras[id] = nil
         notices[id] = nil
+        providers[id] = nil
+        fetchedAt[id] = nil
+        fetchedVersion[id] = nil
         placeholders = placeholders.filter { $0.value != id }
         restoredHashes = restoredHashes.filter { $0.value != id }
     }
@@ -275,7 +360,7 @@ public final class CredentialVault: @unchecked Sendable {
     /// Hosts whose TLS the proxy must decrypt (a binding with a secret covers them).
     public var boundHosts: Set<String> {
         lock.lock(); defer { lock.unlock() }
-        return Set(bindings.values.filter { secrets[$0.id] != nil || notices[$0.id] != nil }.flatMap(\.hosts))
+        return Set(bindings.values.filter { secrets[$0.id] != nil || notices[$0.id] != nil || providers[$0.id] != nil }.flatMap(\.hosts))
     }
 
     /// A fresh placeholder for binding `id` (nil if there is no such binding).
@@ -299,8 +384,8 @@ public final class CredentialVault: @unchecked Sendable {
         // Only bindings that hold a secret (as `Sandbox.guestEnvironment` does): a placeholder with
         // nothing behind it would only be refused, and it would steer a tool that prefers one
         // variable (Claude Code: ANTHROPIC_API_KEY over CLAUDE_CODE_OAUTH_TOKEN) the wrong way.
-        for b in allBindings where hasSecret(b.id) {
-            if let v = b.environmentVariable, let t = mint(b.id) { env[v] = t }
+        for b in allBindings where issuesPlaceholder(b.id) {
+            if !b.placeholderVariables.isEmpty, let t = mint(b.id) { for v in b.placeholderVariables { env[v] = t } }
             env.merge(sessionExtras(b.id)) { a, _ in a }
         }
         return env
@@ -345,6 +430,7 @@ public final class CredentialVault: @unchecked Sendable {
     /// identical except for the one header value it changes). `inject: false` — the connection
     /// has carried the guest's own credential — never adds our secret to a request without one.
     public func rewrite(head: [UInt8], host: String, inject: Bool = true, now: Date = Date()) -> CredentialDecision {
+        refreshProviders(host: host.lowercased(), now: now)
         var d = decide(head: head, host: host, inject: inject, now: now, staleCheck: true)
         if case .stale(let id) = d {
             onStale?(id)
@@ -352,7 +438,39 @@ public final class CredentialVault: @unchecked Sendable {
         }
         let out = d.publicDecision
         if case .foreign(_, let f) = out, f.requests == 1, let cb = onForeign { cb(f) }
+        switch out {
+        case .swapped(_, let b), .injected(_, let b): onUse?(b)
+        default: break
+        }
         return out
+    }
+
+    /// Every placeholder a request head carries — in clear, or inside an authorization field's Basic login.
+    public static func placeholders(inHead head: [UInt8]) -> [String] {
+        var text = String(decoding: head, as: UTF8.self)
+        for f in HTTPHead(head)?.fields ?? [] where f.name == "authorization" || f.name == "proxy-authorization" {
+            if let d = basicDecoded(String(decoding: head[f.valueRange], as: UTF8.self)) { text += "\n" + d }
+        }
+        return placeholderTokens(in: text)
+    }
+
+    /// 599d: `Basic base64(user:password)` → `user:password` (nil: not Basic, or not decodable).
+    static func basicDecoded(_ value: String) -> String? {
+        let t = value.trimmingCharacters(in: .whitespaces)
+        guard t.count > 6, t.prefix(6).lowercased() == "basic " else { return nil }
+        var b = String(t.dropFirst(6)).trimmingCharacters(in: .whitespaces)
+        let r = b.utf8.count % 4
+        if r == 1 { return nil }
+        if r > 0 { b += String(repeating: "=", count: 4 - r) }
+        guard let d = Data(base64Encoded: b), let s = String(data: d, encoding: .utf8) else { return nil }
+        return s
+    }
+
+    /// 599d: the text a placeholder may hide in, per field: the value, and — for an authorization
+    /// field in Basic — its decoded `user:password` too (git's way of sending a login).
+    static func searchable(_ value: String, field name: String) -> String {
+        guard name == "authorization" || name == "proxy-authorization", let d = basicDecoded(value) else { return value }
+        return value + "\n" + d
     }
 
     private enum Internal {
@@ -370,8 +488,12 @@ public final class CredentialVault: @unchecked Sendable {
         lock.lock(); defer { lock.unlock() }
         let h = host.lowercased()
         let parsed = HTTPHead(head)
-        // Every placeholder anywhere in the head is checked, not only in the bound header.
-        let text = String(decoding: head, as: UTF8.self)
+        // Every placeholder anywhere in the head is checked, not only in the bound header — 599d: and
+        // inside an authorization field's Basic `user:password` (git's login), decoded.
+        var text = String(decoding: head, as: UTF8.self)
+        for f in parsed?.fields ?? [] where f.name == "authorization" || f.name == "proxy-authorization" {
+            if let d = Self.basicDecoded(String(decoding: head[f.valueRange], as: UTF8.self)) { text += "\n" + d }
+        }
         let tokens = Self.placeholderTokens(in: text)
         for t in tokens {
             guard let bid = bindingFor(token: t) else { return .decided(.reject("an unknown or revoked credential placeholder")) }
@@ -395,7 +517,7 @@ public final class CredentialVault: @unchecked Sendable {
         if !forHost.isEmpty { authHeaders.insert("authorization") }
         let present = (parsed?.fields ?? []).filter { authHeaders.contains($0.name) }
         let foreignField = present.first { f in
-            let value = String(decoding: head[f.valueRange], as: UTF8.self)
+            let value = Self.searchable(String(decoding: head[f.valueRange], as: UTF8.self), field: f.name)
             return !value.isEmpty && !tokens.contains { value.contains($0) }
         }
         if let f = foreignField, carried == nil {
@@ -407,18 +529,21 @@ public final class CredentialVault: @unchecked Sendable {
             s.lastSeen = now
             s.requests += 1
             sightings[fp] = s
-            if _policy == .strict {
+            // 599d: "strict" pins the sandbox to the ANTHROPIC credential doz holds; a guest's own GitHub
+            // token (a swap-only binding's host) is only flagged.
+            if _policy == .strict, forHost.contains(where: { $0.swapOnly != true }) {
                 let msg = (_strictNotice ?? "this sandbox is pinned to the credential doz holds for it; it refused the request's own credential (fp {fp})")
                     .replacingOccurrences(of: "{fp}", with: fp)
                 return .decided(.refuse(403, msg))
             }
             return .decided(.foreign(head, s))
         }
-        let binding = carried ?? (present.isEmpty && inject ? forHost.first { secrets[$0.id] != nil } : nil)
+        // 599d: a swap-only binding (GitHub) is never added to a request that does not carry its placeholder.
+        let binding = carried ?? (present.isEmpty && inject ? forHost.first { secrets[$0.id] != nil && $0.swapOnly != true } : nil)
         guard let binding, let secret = secrets[binding.id] else {
             // Nothing to do — but a request with no credential while the credential is unavailable
             // gets the reason, not a confusing upstream 401.
-            if present.isEmpty, inject, let b = forHost.first(where: { notices[$0.id] != nil }), let n = notices[b.id] {
+            if present.isEmpty, inject, let b = forHost.first(where: { notices[$0.id] != nil && $0.swapOnly != true }), let n = notices[b.id] {
                 return .decided(.refuse(401, n))
             }
             return .decided(.passThrough(head))
@@ -432,10 +557,18 @@ public final class CredentialVault: @unchecked Sendable {
         let name = binding.header.headerName
         if let field = parsed?.field(named: name) {
             let value = String(decoding: head[field.valueRange], as: UTF8.self)
-            guard let t = tokens.first(where: { value.contains($0) }), bindingFor(token: t) == binding.id else {
+            guard let t = tokens.first(where: { Self.searchable(value, field: name).contains($0) }), bindingFor(token: t) == binding.id else {
                 return .decided(.passThrough(head))
             }
-            let newValue = Array(value.replacingOccurrences(of: t, with: secret).utf8)
+            let newValue: [UInt8]
+            if value.contains(t) {
+                newValue = Array(value.replacingOccurrences(of: t, with: secret).utf8)
+            } else if let decoded = Self.basicDecoded(value) {
+                // 599d: git's Basic login — decode, swap, re-encode.
+                newValue = Array(("Basic " + Data(decoded.replacingOccurrences(of: t, with: secret).utf8).base64EncodedString()).utf8)
+            } else {
+                return .decided(.passThrough(head))
+            }
             var out = head
             out.replaceSubrange(field.valueRange, with: newValue)
             return .decided(.swapped(out, binding: binding.id))

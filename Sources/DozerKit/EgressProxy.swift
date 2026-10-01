@@ -74,6 +74,56 @@ public final class EgressProxy: @unchecked Sendable {
         set { lock.lock(); _policy = newValue; lock.unlock() }
     }
 
+    /// 599d: this sandbox's GitHub login and its mode — read-only is enforced on every request that
+    /// carries it (`GitHubAccess`). nil: the login is not this sandbox's.
+    public var github: GitHubGate? {
+        get { lock.lock(); defer { lock.unlock() }; return _github }
+        set { lock.lock(); _github = newValue; lock.unlock() }
+    }
+    private var _github: GitHubGate?
+
+    /// 599d (G4): while the user's SSH agent is forwarded, `github.com:22` is allowed — and only that.
+    public var sshToGitHub: Bool {
+        get { lock.lock(); defer { lock.unlock() }; return _sshToGitHub }
+        set { lock.lock(); _sshToGitHub = newValue; lock.unlock() }
+    }
+    private var _sshToGitHub = false
+
+    /// 599d TEST SEAM: the GitHub hosts' upstream leg goes to `host:port` instead, verified against
+    /// `anchorsPEM` ONLY (the fake upstream's own CA) for the GitHub host name. The host sets it only from
+    /// `DOZ_TEST_GITHUB_UPSTREAM` + `DOZ_TEST_GITHUB_CA`; nothing else reaches it.
+    public struct UpstreamOverride: Sendable, Equatable {
+        public var host: String
+        public var port: UInt16
+        public var anchorsPEM: String
+        public init(host: String, port: UInt16, anchorsPEM: String) { self.host = host; self.port = port; self.anchorsPEM = anchorsPEM }
+    }
+    public var githubUpstreamForTests: UpstreamOverride? {
+        get { lock.lock(); defer { lock.unlock() }; return _githubUpstream }
+        set { lock.lock(); _githubUpstream = newValue; lock.unlock() }
+    }
+    private var _githubUpstream: UpstreamOverride?
+
+    /// The policy's verdict for a connection, with 599d's one addition: `github.com:22` while the SSH
+    /// agent is forwarded.
+    func connectionVerdict(host: String, port: UInt16) -> NetworkPolicy.ConnectionVerdict {
+        if port == 22, host.lowercased() == "github.com", sshToGitHub {
+            return NetworkPolicy.ConnectionVerdict(kind: .allow, rule: "SSH agent forwarding (github.com:22)", ruleIndex: nil)
+        }
+        return policy.evaluateConnection(host: host, port: port)
+    }
+
+    /// 599d test seam: where a GitHub host's upstream leg goes instead (nil: the real host).
+    func upstreamOverride(for host: String) -> UpstreamOverride? {
+        guard let o = githubUpstreamForTests, GitHubAccess.credentialHosts.contains(host.lowercased()) else { return nil }
+        return o
+    }
+
+    /// DNS: the policy's answer, and github.com while the SSH agent is forwarded.
+    func allowsName(_ name: String) -> Bool {
+        policy.allowsName(name) || (sshToGitHub && name.lowercased() == "github.com")
+    }
+
     // MARK: listening
 
     /// Accept the guest's connections on `instance`'s vsock port. Call again after every wake from
@@ -189,7 +239,7 @@ public final class EgressProxy: @unchecked Sendable {
                             name: nil, allowed: true, rule: "", summary: "the sandbox's own name")
         }
         let pol = policy
-        guard pol.allowsName(name) else {
+        guard allowsName(name) else {
             return DNSReply(bytes: DNSMessage.response(to: q, questionEnd: qEnd, rcode: 3, answers: []), name: name,
                             allowed: false, rule: pol.evaluate(host: name, port: 443).rule, summary: "type \(qtype) → NXDOMAIN (policy)")
         }
@@ -263,9 +313,10 @@ public final class EgressProxy: @unchecked Sendable {
     func tunnel(_ fd: Int32, host: String, port: UInt16, kind: ConnectionRecord.Kind, leftover: [UInt8], connectReply: Bool,
                 connectTo: String? = nil) {
         let t0 = ContinuousClock.now
-        let v = policy.evaluateConnection(host: host, port: port)
+        let v = connectionVerdict(host: host, port: port)
         var rec = ConnectionRecord(kind: kind, host: host, port: port, verdict: .allowed, rule: v.rule, open: true)
-        let bound = vault.boundHosts.contains(host)
+        // A credential is only ever inserted into HTTPS; SSH (599d, port 22) is end-to-end and passes as it is.
+        let bound = vault.boundHosts.contains(host) && port != 22
         let decrypt = (bound || v.kind == .inspect) && IPv4CIDR.parseAddress(host) == nil
         if v.kind == .deny || (v.kind == .inspect && (ca == nil || !decrypt)) {
             rec.verdict = .denied
@@ -328,7 +379,7 @@ public final class EgressProxy: @unchecked Sendable {
             return
         }
         // A placeholder has no business on plain HTTP (secrets are only ever sent over TLS).
-        if !CredentialVault.placeholderTokens(in: String(decoding: head, as: UTF8.self)).isEmpty {
+        if !CredentialVault.placeholders(inHead: head).isEmpty {
             rec.verdict = .denied; rec.open = false; rec.credential = "rejected: a credential placeholder over plain HTTP"
             log.upsert(rec)
             _ = Wire.writeAll(fd, Self.forbidden("a credential placeholder may not be sent to \(host) (plain HTTP)"))
@@ -401,10 +452,11 @@ public final class EgressProxy: @unchecked Sendable {
             tunnel(fd, host: host, port: port, kind: .tcp, leftover: [], connectReply: false, connectTo: ip)
             return
         }
-        let v = policy.evaluateConnection(host: host, port: port)
-        if v.kind != .allow || vault.boundHosts.contains(host) {
+        let v = connectionVerdict(host: host, port: port)
+        let bound = vault.boundHosts.contains(host) && port != 22          // 599d: SSH is never inspected
+        if v.kind != .allow || bound {
             log.upsert(ConnectionRecord(kind: .tcp, host: host, port: port, verdict: .denied, rule: v.rule,
-                                        detail: v.kind == .inspect || vault.boundHosts.contains(host) ? "this host needs the HTTP proxy (request inspection)" : (name == nil ? "address not resolved through the sandbox DNS" : nil)))
+                                        detail: v.kind == .inspect || bound ? "this host needs the HTTP proxy (request inspection)" : (name == nil ? "address not resolved through the sandbox DNS" : nil)))
             return
         }
         tunnel(fd, host: host, port: port, kind: .tcp, leftover: [], connectReply: false, connectTo: ip)
@@ -448,6 +500,55 @@ public final class EgressProxy: @unchecked Sendable {
             _ = toGuest()
             closing = true
         }
+        // 599d: a read-only GitHub request whose BODY decides it (GraphQL, LFS) is held here — head and
+        // body — until the body is whole; nothing of it goes upstream before.
+        var held: (head: [UInt8], record: ConnectionRecord, kind: GitHubAccess.BodyKind, length: Int, body: [UInt8])?
+        /// Open the upstream leg (once) and send `out`; false: it could not be opened (the guest was told).
+        func sendUpstream(_ out: [UInt8], _ record: ConnectionRecord) -> Bool {
+            var r = record
+            if upstream == nil {
+                let ut0 = ContinuousClock.now
+                guard let u = TLSUpstream(host: host, port: port, context: clientContext, override: upstreamOverride(for: host)) else {
+                    r.verdict = .failed; r.open = false; r.detail = "could not connect from the Mac"
+                    log.upsert(r)
+                    reject(Array("HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\nContent-Length: 0\r\n\r\n".utf8))
+                    return false
+                }
+                upstream = u
+                rec.latencyMs = milliseconds(since: ut0)
+                r.latencyMs = rec.latencyMs
+            }
+            upstream?.send(out)
+            r.bytesUp = out.count
+            rec.bytesUp += out.count
+            current = r
+            log.upsert(r)
+            return true
+        }
+        func refuseGitHub(_ record: ConnectionRecord, _ why: String) {
+            var r = record
+            r.verdict = .denied; r.open = false; r.credential = "refused: GitHub is read-only for this sandbox"
+            log.upsert(r)
+            current = nil
+            reject(Self.response(403, why + "\n", extra: "X-Sandbox-Policy: github\r\n"))
+        }
+        func releaseHeld() {
+            guard let hd = held else { return }
+            held = nil
+            let gate = github
+            switch GitHubAccess.classify(body: hd.body, kind: hd.kind, sandbox: gate?.sandbox ?? "this sandbox") {
+            case .allow:
+                if sendUpstream(hd.head, hd.record), !hd.body.isEmpty {
+                    upstream?.send(hd.body)
+                    rec.bytesUp += hd.body.count
+                    current?.bytesUp += hd.body.count
+                }
+            case .refuse(let why):
+                refuseGitHub(hd.record, why)
+            case .needsBody:
+                refuseGitHub(hd.record, GitHubAccess.pushOff(gate?.sandbox ?? "this sandbox", "a request Dozer could not decide was refused"))
+            }
+        }
         func process(_ events: [HTTPRequestReader.Event]) {
             for e in events {
                 if closing { return }
@@ -489,25 +590,51 @@ public final class EgressProxy: @unchecked Sendable {
                     case .foreign(_, let f): r.credential = f.label; foreignOnConnection = true
                     case .passThrough: break
                     }
-                    if upstream == nil {
-                        let ut0 = ContinuousClock.now
-                        guard let u = TLSUpstream(host: host, port: port, context: clientContext) else {
-                            r.verdict = .failed; r.open = false; r.detail = "could not connect from the Mac"
-                            log.upsert(r)
-                            reject(Array("HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\nContent-Length: 0\r\n\r\n".utf8))
+                    let out = decision.head ?? raw
+                    // 599d: a request carrying the user's GitHub login, judged against the sandbox's mode.
+                    let usesGitHubLogin: Bool = {
+                        switch decision {
+                        case .swapped(_, let b), .injected(_, let b): return b == CredentialBinding.github.id
+                        default: return false
+                        }
+                    }()
+                    if usesGitHubLogin {
+                        let gate = github ?? GitHubGate(mode: .read, sandbox: "this sandbox")   // no gate: the strictest
+                        switch GitHubAccess.classify(mode: gate.mode, method: h.method, host: host, target: h.target, sandbox: gate.sandbox) {
+                        case .allow:
+                            r.credential = "swapped github (\(gate.mode.rawValue))"
+                        case .refuse(let why):
+                            refuseGitHub(r, why)
+                            return
+                        case .needsBody(let kind):
+                            r.credential = "swapped github (read — body checked)"
+                            if h.value("transfer-encoding") != nil {
+                                refuseGitHub(r, GitHubAccess.pushOff(gate.sandbox, "a request Dozer could not check (chunked) was refused"))
+                                return
+                            }
+                            let length = Int(h.value("content-length") ?? "0") ?? -1
+                            guard length >= 0, length <= GitHubAccess.maximumBody else {
+                                refuseGitHub(r, GitHubAccess.pushOff(gate.sandbox, "a request too large to check was refused"))
+                                return
+                            }
+                            held = (out, r, kind, length, [])
+                            if length == 0 { releaseHeld() }
+                            continue
+                        }
+                    }
+                    guard sendUpstream(out, r) else { return }
+                case .body(let b), .raw(let b):
+                    if var hd = held {
+                        hd.body += b
+                        held = hd
+                        if hd.body.count > hd.length {
+                            held = nil
+                            refuseGitHub(hd.record, GitHubAccess.pushOff(github?.sandbox ?? "this sandbox", "a request longer than it said was refused"))
                             return
                         }
-                        upstream = u
-                        rec.latencyMs = milliseconds(since: ut0)
-                        r.latencyMs = rec.latencyMs
+                        if hd.body.count == hd.length { releaseHeld() }
+                        continue
                     }
-                    let out = decision.head ?? raw
-                    upstream?.send(out)
-                    r.bytesUp = out.count
-                    rec.bytesUp += out.count
-                    current = r
-                    log.upsert(r)
-                case .body(let b), .raw(let b):
                     upstream?.send(b)
                     rec.bytesUp += b.count
                     current?.bytesUp += b.count
@@ -632,15 +759,17 @@ final class TLSUpstream {
     private var buf = [UInt8](repeating: 0, count: 65536)
     private var failure: String?
 
-    init?(host: String, port: UInt16, context: NIOSSLContext) {
-        let fd = Wire.connectTCP(host, port)
+    init?(host: String, port: UInt16, context: NIOSSLContext, override: EgressProxy.UpstreamOverride? = nil) {
+        // 599d test seam: another address, and ONLY the given anchors trusted (for `host`'s name).
+        let fd = Wire.connectTCP(override?.host ?? host, override?.port ?? port)
         guard fd >= 0 else { return nil }
         self.fd = fd
         channel = EmbeddedChannel()
         let failureBox = FailureBox()
+        let anchors = override.map { TLSUpstream.certificates(pem: $0.anchorsPEM) }
         do {
             let handler = try NIOSSLClientHandler(context: context, serverHostname: host) { certs, promise in
-                if TLSUpstream.trusted(certs, host: host) { promise.succeed(.certificateVerified) } else {
+                if TLSUpstream.trusted(certs, host: host, anchors: anchors) { promise.succeed(.certificateVerified) } else {
                     failureBox.value = "the certificate of \(host) is not trusted by this Mac"
                     promise.succeed(.failed)
                 }
@@ -691,7 +820,7 @@ final class TLSUpstream {
         Darwin.close(fd)
     }
 
-    static func trusted(_ certs: [NIOSSLCertificate], host: String) -> Bool {
+    static func trusted(_ certs: [NIOSSLCertificate], host: String, anchors: [SecCertificate]? = nil) -> Bool {
         let sec = certs.compactMap { c -> SecCertificate? in
             guard let der = try? c.toDERBytes() else { return nil }
             return SecCertificateCreateWithData(nil, Data(der) as CFData)
@@ -700,7 +829,24 @@ final class TLSUpstream {
         var trust: SecTrust?
         guard SecTrustCreateWithCertificates(sec as CFArray, SecPolicyCreateSSL(true, host as CFString), &trust) == errSecSuccess,
               let trust else { return false }
+        if let anchors {
+            // 599d test seam: these anchors and nothing else (never the Mac's store as well).
+            guard !anchors.isEmpty, SecTrustSetAnchorCertificates(trust, anchors as CFArray) == errSecSuccess,
+                  SecTrustSetAnchorCertificatesOnly(trust, true) == errSecSuccess else { return false }
+        }
         return SecTrustEvaluateWithError(trust, nil)
+    }
+
+    /// The certificates in a PEM text.
+    static func certificates(pem: String) -> [SecCertificate] {
+        var out: [SecCertificate] = []
+        var rest = Substring(pem)
+        while let b = rest.range(of: "-----BEGIN CERTIFICATE-----"), let e = rest[b.upperBound...].range(of: "-----END CERTIFICATE-----") {
+            let body = rest[b.upperBound..<e.lowerBound].filter { !$0.isWhitespace }
+            if let der = Data(base64Encoded: String(body)), let c = SecCertificateCreateWithData(nil, der as CFData) { out.append(c) }
+            rest = rest[e.upperBound...]
+        }
+        return out
     }
 }
 

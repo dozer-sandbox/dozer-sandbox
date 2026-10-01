@@ -22,7 +22,8 @@ final class AgentPermissionsTests: XCTestCase {
         for p in AgentPermissions.all {
             XCTAssertFalse(p.summary.isEmpty)
             XCTAssertFalse(p.phrase.isEmpty)
-            XCTAssertFalse(p.hosts.isEmpty, p.id)
+            // 599d: "Push to GitHub" adds no host — it lifts read-only on the hosts "Use GitHub as you" has.
+            XCTAssertFalse(p.hosts.isEmpty && p.id != AgentPermissions.gitHubPush, p.id)
         }
     }
 
@@ -33,7 +34,8 @@ final class AgentPermissionsTests: XCTestCase {
         XCTAssertEqual(AgentPermissions.preset("agent", base: nil), ["model", "update", "install:system", "github", "error-reports"],
                        "a Dockerfile's: system packages only")
         XCTAssertEqual(AgentPermissions.preset("agent", base: "debian"), ["model", "update", "install:system", "github", "error-reports"])
-        XCTAssertEqual(AgentPermissions.preset("open", base: nil), AgentPermissions.all.map(\.id))
+        // 599d: Open is everything but the user's GitHub login.
+        XCTAssertEqual(AgentPermissions.preset("open", base: nil), AgentPermissions.all.map(\.id).filter { !$0.hasPrefix("github:") })
         XCTAssertNil(AgentPermissions.preset("bake", base: nil), "bake stays a preset of rules")
         XCTAssertEqual(AgentPermissions.presetName(["model"], base: "go"), "locked")
         XCTAssertEqual(AgentPermissions.presetName(AgentPermissions.preset("agent", base: "go")!.reversed(), base: "go"), "agent")

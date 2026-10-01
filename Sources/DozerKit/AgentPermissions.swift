@@ -83,6 +83,17 @@ public enum AgentPermissions {
         a += [
             AgentPermission(id: "github", title: "Use GitHub", summary: "Clone and fetch code; Claude Code plugins.", phrase: "use GitHub (clone, fetch, plugins)",
                             hosts: ["github.com", "raw.githubusercontent.com", "codeload.github.com", "objects.githubusercontent.com"].map { PermissionHost($0) }, locked: false),
+            // 599d: the user's own GitHub login, through the proxy (the token never enters the sandbox).
+            AgentPermission(id: gitHubAsYou, title: "Use GitHub as you",
+                            summary: "git and gh are signed in as you on github.com (your Mac's gh login, or a token you add) — read-only: clone and fetch your private repositories, read issues and pull requests.",
+                            phrase: "use GitHub signed in as the user (read-only)",
+                            hosts: GitHubAccess.credentialHosts.map { PermissionHost($0) }, locked: false,
+                            warning: "The agent can read everything your login can on GitHub.", group: "github"),
+            AgentPermission(id: gitHubPush, title: "Push to GitHub",
+                            summary: "Also push commits and change things on GitHub as you (open pull requests, comment, create issues) — within what your token may do.",
+                            phrase: "push and make changes on GitHub as the user",
+                            hosts: [], locked: false,
+                            warning: "The agent can push and act on GitHub as you.", group: "github"),
             AgentPermission(id: "error-reports", title: "Send error reports", summary: "Let the agent report its own crashes to its maker.",
                             phrase: "send your own error reports",
                             hosts: [PermissionHost("http-intake.logs.us5.datadoghq.com"), PermissionHost("browser-intake-us5-datadoghq.com")], locked: false),
@@ -98,6 +109,18 @@ public enum AgentPermissions {
 
     public static func permission(_ id: String) -> AgentPermission? { all.first { $0.id == id } }
 
+    /// 599d: "Use GitHub as you" and "Push to GitHub" (which needs it). Off in EVERY preset — Open
+    /// included: Open is about the network, these are the user's identity; each is turned on by name.
+    public static let gitHubAsYou = "github:as-you"
+    public static let gitHubPush = "github:push"
+    static let identityPermissions: Set<String> = [gitHubAsYou, gitHubPush]
+
+    /// The GitHub mode `names` give: nil (off), read, or push (push needs "as you").
+    public static func gitHubMode(_ names: [String]?) -> GitHubAccess.Mode? {
+        guard let names, names.contains(gitHubAsYou) else { return nil }
+        return names.contains(gitHubPush) ? .push : .read
+    }
+
     public static func isValid(_ id: String) -> Bool { permission(id) != nil }
 
     /// The ecosystems a base installs from by default (system packages always).
@@ -110,20 +133,24 @@ public enum AgentPermissions {
         switch name {
         case "locked": return ["model"]
         case "agent", "standard": return ["model", "update"] + installDefaults(base: base) + ["github", "error-reports"]
-        case "open": return all.map(\.id)
+        case "open": return all.map(\.id).filter { !identityPermissions.contains($0) }
         default: return nil
         }
     }
 
     /// Which preset `names` is for `base` (nil: Custom).
     public static func presetName(_ names: [String], base: String?) -> String? {
-        for p in ["locked", "agent", "open"] where Set(preset(p, base: base) ?? []) == Set(names) { return p }
+        // 599d: the user's GitHub login is beside the preset, not part of it (a preset + "as you" is still that preset).
+        let rest = Set(names).subtracting(identityPermissions)
+        for p in ["locked", "agent", "open"] where Set(preset(p, base: base) ?? []) == rest { return p }
         return nil
     }
 
     /// Canonical order, locked ones forced on, unknown names dropped.
     public static func normalized(_ names: [String]) -> [String] {
-        let set = Set(names)
+        var set = Set(names)
+        // 599d: "Push to GitHub" is a step of "Use GitHub as you" — never on without it.
+        if !set.contains(gitHubAsYou) { set.remove(gitHubPush) }
         return all.filter { $0.locked || set.contains($0.id) }.map(\.id)
     }
 
@@ -148,7 +175,8 @@ public enum AgentPermissions {
     /// specific: an exact host before a pattern; "Update itself" is not offered for npm (Install is).
     public static func permission(forHost host: String) -> AgentPermission? {
         let h = host.lowercased()
-        let candidates = all.filter { $0.id != "web" }
+        // 599d: a denied host never suggests the user's own GitHub login (that is switched on deliberately).
+        let candidates = all.filter { $0.id != "web" && $0.group != "github" }
         for p in candidates {
             for ph in p.hosts where ph.host == h && ph.pathPrefixes == nil { return p }
         }

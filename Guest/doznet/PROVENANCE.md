@@ -8,8 +8,8 @@ rebuild; `make doznet-verify` rebuilds from scratch and checks the committed byt
 
 | | |
 |---|---|
-| sha256 (auto) | `da229127ea23f8d998d41e19f9c72e240423da1166aa001cc21467b7fb268155` |
-| size (auto) | 70840 bytes |
+| sha256 (auto) | `160107d3f8143d2b1a4390491fcdb420ef8b1999b410fd1960194ceef6153cfb` |
+| size (auto) | 73360 bytes |
 | format | ELF 64-bit LSB executable, ARM aarch64, statically linked (musl), stripped |
 | source | [`doznet.c`](doznet.c) (this directory) — libc and Linux UAPI headers only |
 | Zig | 0.16.0 — the same pinned toolchain as deckhold (see `../deckhold/build.sh`) |
@@ -20,5 +20,8 @@ What it does (details in the source header): listens on 127.0.0.1:3128 (HTTP pro
 (transparent TCP, via a nat OUTPUT REDIRECT it installs with `IPT_SO_SET_REPLACE` — no iptables
 binary needed) and :53/udp (DNS); relays each over vsock to the host's `EgressProxy` (CID 2, port
 5800); adds a default route via `lo` and REJECTs non-loopback UDP. It decides nothing — the host does.
+`doznet agent -s SOCKET` (599d) is the guest half of the user's forwarded SSH agent, started only while
+`sandbox.ssh_agent` is on: a unix socket whose every connection is relayed as it is over vsock (port
+5801) to the host, which connects it to the Mac's ssh-agent.
 
 Licences: doznet itself (MIT, this package) and musl libc (MIT), statically linked by Zig.
