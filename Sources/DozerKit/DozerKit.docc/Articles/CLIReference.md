@@ -35,6 +35,7 @@ cannot be stapled: Gatekeeper checks a notarised `doz` online the first time it 
 ```bash
 doz onboard [--images claude-code,pi,lab | --all-images | --no-images] [--account mac|api-key|setup-token|later] [--yes]
             [--account-name NAME] [--plan PLAN] [--secret-stdin] [--force]
+            [--github off|read|push] [--github-source gh|key] [--github-key-stdin] [--ssh-agent on|off]
 doz onboard --status        # the onboarding record and the images; follows a preparation that runs
 doz onboard --cancel        # cancel the images being prepared
 doz init [DIR] [--name N] [--image I] [--cpus N] [--memory M] [--network …] [--permissions W] [--account A]
@@ -46,12 +47,21 @@ doz uninstall [--keep-store] [--keep-config] [--yes]
 
 - **`onboard`** sets up this Mac, once: the doctor's checks (a *required* one that fails —
   not Apple silicon, macOS too old, no virtualization, the entitlement, the store not on APFS, too
-  little disk for the chosen images — stops it; the rest only warn), the **Claude account** (this
+  little disk for the chosen images — stops it; the rest only warn), **Access** (every
+  credential sandboxes may use as you, each a purposeful choice and each **confirmed live**; see
+  [Access](#Access) below): the **Claude account** (this
   Mac's Claude Code login when it is signed in; otherwise an API key or a setup token **pasted at a
   hidden prompt** and stored exactly as `doz account add` stores it — the login keychain, one tiny
   check request, `--plan` for a token — then made the default; or **Decide later**. It never logs in
   and never copies Claude Code's refresh token. Off a terminal a key is read from stdin only with
-  `--secret-stdin`; otherwise that step is skipped and the command shown), the settings file and your prompt template (each written **only when
+  `--secret-stdin`; otherwise that step is skipped and the command shown), **GitHub as you**
+  (off, read-only or read and push; the token from this Mac's gh login or a key you give —
+  `--github`, `--github-source`, `--github-key-stdin`) and **SSH agent forwarding** (`--ssh-agent`);
+  each is confirmed, and one that cannot be is **skipped with its reason** — the choice kept, not
+  confirmed — so the onboarding never blocks (`--yes` or no terminal: skipped with a note, exit 0).
+  The GitHub and SSH choices are written as the defaults for new sandboxes even into an existing
+  settings file, but only when chosen (a flag, or answered on a terminal) — `--yes` alone changes
+  nothing. Then the settings file and your prompt template (each written **only when
   missing**), then **prepares the images** — the kernel, the guest init disk, the base image and
   the bake, the waiting a first start would do. `claude-code` is prepared by default; `pi` and
   `lab` are opt-in. The preparation runs **in the host**: Ctrl-C detaches (it goes on; `--status`
@@ -292,6 +302,38 @@ account add NAME --api-key`, or `--account NAME`); on a terminal it offers the a
 hidden paste of a key. `--account none` is an explicit choice. The web forms offer only the accounts
 that fit (the key field in the form when none do); an existing sandbox whose account does not fit
 shows a banner with a picker, and its agent is told that no credential is attached.
+
+### Access
+
+Every credential sandboxes may use as you, in one place — the onboarding's Access step, again
+whenever you like:
+
+```bash
+doz access                                       # each choice and its state, after a LIVE check (= doz access show)
+doz access --no-check                            # the last confirmation only (starts no host)
+doz access set --github read                     # new sandboxes: git and gh signed in as you, read-only (push: also push)
+doz access set --github push --github-source gh  # the token from this Mac's gh login (gh auth token)
+doz access set --github read --github-key        # a token you give (no-echo prompt, or stdin): github.credentials = key
+doz access set --remove-github-key
+doz access set --ssh-agent on                    # forward this Mac's ssh-agent (github.com only)
+```
+
+- **Claude account** — the store's default account: this Mac's login is checked signed in; a key
+  or a token gets the account check `doz account verify` makes. Choose it with `doz account default`.
+- **GitHub as you** — `defaults.github` (`off`, `read`, `push`) with `github.credentials` (`gh` or
+  `key`). The check reads the token the way a sandbox gets it, then asks `GET
+  https://api.github.com/user` over the proxy's own TLS leg: **signed in as LOGIN** and the classic
+  token's scopes, or — for a fine-grained token — how many repositories it can see.
+- **SSH agent forwarding** — `sandbox.ssh_agent`: the Mac's ssh-agent is asked for its keys (what
+  `ssh-add -l` shows): "the ssh-agent has N keys".
+
+A check that fails says why and **keeps the choice** (not confirmed) — `doz access set` turns it
+off. The last answers are in `<store>/access.json` (states and reasons, never a token); an answer
+counts only for the choice it was given for. The default GitHub key is in the login keychain as
+`doz-github` (a sandbox's own `doz key set NAME --github` wins over it). The choices are the
+**defaults for new sandboxes** — `doz new`, `create`, `up`, Quick add, the forms; one sandbox can
+differ (`doz create --github off|read|push`, `--allow`/`--network`, `doz net allow|deny NAME
+github:as-you`, `doz config set --sandbox NAME sandbox.ssh_agent on`).
 
 ### A credential the guest brings itself
 

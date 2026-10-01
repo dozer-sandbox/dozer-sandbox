@@ -336,6 +336,8 @@ public enum SettingKey {
     public static let githubCredentials = "github.credentials"
     /// 599d (G4): forward the Mac's SSH agent into the sandbox — `off` or `on` (per sandbox).
     public static let sshAgent = "sandbox.ssh_agent"
+    /// 599e: "Use GitHub as you" for NEW sandboxes — `off`, `read` or `push` (the Access step's choice).
+    public static let defaultGithub = "defaults.github"
     /// 594 (owner ruling): the web UI may take an API key or a setup token (a masked field).
     public static let allowSecretEntry = "ui.allow_secret_entry"
     /// 594 W19 (owner: "a new web page opening up every time i run doz ui"): when `doz ui` opens a tab.
@@ -475,6 +477,9 @@ public struct DozerSettings: Sendable {
             .init("sandbox", "ssh_agent", .choice(["off", "on"]), .string("off"),
                   "Forward this Mac's SSH agent into the sandbox (proxied sandboxes): ssh and git over SSH there can ask your agent to sign — your keys never enter the sandbox — and only github.com:22 is reachable over SSH. A notice on first use. While it is on, the agent can authenticate as you to github.com. A sandbox's own choice (doz create --ssh-agent on, ssh_agent in doz_project.yaml, doz config set --sandbox NAME) wins over this.",
                   flag: "doz create --ssh-agent on|off", applies: .now),
+            .init("defaults", "github", .choice(["off", "read", "push"]), .string("off"),
+                  "\"Use GitHub as you\" for new sandboxes: off, read (git and gh signed in as you on GitHub, read-only) or push (also push and make changes) — the Access step's choice (doz access set --github). A sandbox can differ: doz create --github, github: in doz_project.yaml, or its permissions later (doz net allow|deny NAME github:as-you). Proxied sandboxes only.",
+                  flag: "doz create --github off|read|push", applies: .nextCreate),
             .init("github", "credentials", .choice(["gh", "key", "off"]), .string("gh"),
                   "Where \"Use GitHub as you\" (a permission, off by default) gets your GitHub login: gh (this Mac's gh login, read when used — gh auth token — and kept in memory a few minutes, never written anywhere; gh auth logout revokes it), key (only a token you give a sandbox with doz key set NAME --github — a fine-grained token limited to some repositories is best), or off (never, even with the permission on). The sandbox only ever sees a placeholder; Dozer's proxy puts the real token in on the way to GitHub.",
                   applies: .now),

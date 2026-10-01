@@ -99,6 +99,7 @@ extension HostCore {
         if let mode {
             let own = m.config.credentialSources[CredentialBinding.github.id]
             let memoryKey = githubKeys[name]
+            let keychain = services.keychain
             let read: @Sendable () -> CredentialVault.SecretRead = {
                 // The source is read EACH time (the setting can change while the sandbox runs).
                 let source = DozerSettings.load(environment: env).string(SettingKey.githubCredentials) ?? "gh"
@@ -111,7 +112,9 @@ extension HostCore {
                     return (nil, "Dozer: the GitHub token of \(name) is gone (it was held in memory by a host that stopped) — give it again: doz key set \(name) --github")
                 }
                 if source == "key" {
-                    return (nil, "Dozer: \(name) has no GitHub token (github.credentials is key) — doz key set \(name) --github")
+                    // 599e: the default key (the Access step's), when the sandbox has none of its own.
+                    if let s = keychain.read(service: Access.githubKeyService, account: Keychain.user).value { return (s, nil) }
+                    return (nil, "Dozer: \(name) has no GitHub token (github.credentials is key) — doz key set \(name) --github, or a default: doz access set --github-key")
                 }
                 return GitHubLogin.ghToken(environment: env)
             }

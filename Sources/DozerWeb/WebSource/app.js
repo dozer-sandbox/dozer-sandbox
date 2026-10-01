@@ -864,12 +864,21 @@ async function viewSettings() {
     s.rows.push(r);
   }
   const warnings = rep.warnings.filter((w) => !rep.error || !w.startsWith(rep.error));
+  // 599e: Access — each credential's last confirmation and "Check again" (the choices are the settings
+  // below: defaults.github, github.credentials, sandbox.ssh_agent; the Claude account: Accounts).
+  const accessBox = h('div', { class: 'panel access-panel', 'data-settings-access': '' });
+  renderAccessStep(accessBox, { mode: 'settings', claude: true });
   return h('div', null, h('h1', null, 'Settings'),
     h('p', { class: 'sub' }, 'Written to ', h('code', null, rep.path || 'no file (neither XDG_CONFIG_HOME nor HOME is set)'),
       rep.exists ? '' : ' — not written yet: the first change writes it, with every setting listed at its default',
       '. A command-line flag wins, then the environment, then this file, then the default; ', h('code', null, 'doz config show'), ' prints the same.'),
     rep.error ? h('div', { class: 'notice bad' }, rep.error + ' — nothing in it applies, and the UI will not overwrite it. Fix it (or remove it) first.') : null,
     warnings.length ? h('div', { class: 'notice' }, h('ul', { class: 'plain' }, warnings.map((w) => h('li', null, w)))) : null,
+    h('h2', { id: 'access' }, 'Access'),
+    h('p', { class: 'sub' }, 'What sandboxes may use as you. Change a choice in the settings below (',
+      h('code', null, 'defaults.github'), ', ', h('code', null, 'github.credentials'), ', ', h('code', null, 'sandbox.ssh_agent'),
+      ') or with ', h('code', null, 'doz access set'), '; the Claude account on the Accounts page.'),
+    accessBox,
     sections.flatMap((sec) => [
       h('h2', null, SETTING_SECTIONS[sec.name] || sec.name, ' ', h('code', { class: 'muted' }, '[' + sec.name + ']')),
       h('div', { class: 'panel settings' }, sec.rows.map(settingRow)),
@@ -2142,7 +2151,8 @@ function newSandboxPermissions(bases, picker, network) {
   let on = new Set(), touched = false;
   const baseKey = () => { const b = picker.base(); return b === null ? null : b; };
   const presetFor = (net, b) => net === 'locked' ? ['model'] : net === 'open' ? bases.permissions.map((r) => r.id)
-    : net === 'agent' ? (bases.standard[b] || bases.standard[''] || []) : (bases.defaults[b] || bases.defaults[''] || []);
+    : net === 'agent' ? (bases.standard[b] || bases.standard[''] || [])
+    : [...(bases.defaults[b] || bases.defaults[''] || []), ...(bases.github || [])];   // 599e: + the Access step's GitHub choice
   const visible = () => baseKey() !== null && !['bake', 'nat', 'none'].includes(network.value);
   const reset = () => { if (!touched) on = new Set(presetFor(network.value, baseKey() || '')); paint(); };
   const change = (id, v) => {
@@ -2648,7 +2658,8 @@ function permissionSwitches(rows, on, change, opts = {}) {
     return h('div', { class: 'perm' + (indent ? ' perm-sub' : '') + (box.checked ? ' perm-on' : ''), 'data-perm-row': r.id },
       h('label', { class: 'perm-main' }, box, h('span', { class: 'perm-title' }, r.title, r.locked ? h('span', { class: 'muted' }, ' — always') : null)),
       h('div', { class: 'perm-summary muted' }, r.summary, r.warning ? h('span', { class: 'perm-warn' }, ' ' + r.warning) : null),
-      opts.hosts === false ? null : h('details', { class: 'perm-hosts' }, h('summary', null, 'hosts'), h('div', { class: 'mono muted' }, r.hosts.join(', '))));
+      // 599e: no "hosts" expander for a permission without hosts of its own (Push to GitHub: a gate on "Use GitHub as you").
+      opts.hosts === false || !(r.hosts && r.hosts.length) ? null : h('details', { class: 'perm-hosts' }, h('summary', null, 'hosts'), h('div', { class: 'mono muted' }, r.hosts.join(', '))));
   };
   // The user's GitHub login: "Use GitHub as you", with "Push to GitHub" under it, after "Use GitHub".
   const top = rows.filter((r) => r.group !== 'install' && r.group !== 'github'), inst = rows.filter((r) => r.group === 'install');
@@ -3416,6 +3427,187 @@ async function viewDoctor() {
     panel(table(['', 'Check', 'Detail'], rows)));
 }
 
+// ── Access (599e) ───────────────────────────────────────────────────────────
+// Owner (2026-10-02): "github access on or off would be a pusposeful choice … a general 'Access' step in the
+// onboarding where the credentials get confirmed (with the option to skip the confirmation if there is an
+// issue so the onboarding doesnt get blocked)". ONE self-contained component, drawn by the onboarding wizard,
+// the Settings page and (599f) the New Sandbox wizard:
+//
+//   const ctl = renderAccessStep(container, {
+//     mode: 'onboarding' | 'sandbox' | 'settings',
+//     state,        // optional: an object the caller keeps across its own re-renders (the component fills it)
+//     claude,       // optional (onboarding): confirm the store's default Claude account too
+//     choices,      // optional: the initial {github: off|read|push, githubSource: gh|key, ssh: off|on}
+//                   //   (else the settings' — what new sandboxes get now)
+//     onChange,     // optional: (choices) => void, after a choice changes
+//   });
+//   ctl.choices()   → {github, githubSource, ssh}, as chosen on the page
+//   ctl.resolved()  → true when every credential is confirmed, off, or skipped
+//   ctl.confirm()   → Promise<bool>: checks what is not resolved yet (POST /api/v1/access/check with the
+//                     choices — no setting is written); resolves to ctl.resolved()
+//   ctl.render()    → draws it again into `container`
+//
+// It WRITES NOTHING but the default GitHub key (its masked field, while ui.allow_secret_entry): the caller
+// writes the choices (onboarding: POST onboarding/config {access}; sandbox: its create request; settings: the
+// setting rows below it). A failure shows its reason with Skip (keep the choice, not confirmed), Turn it off,
+// or Check again. 'settings' mode shows the last confirmation of each and "Check again", without choices.
+const ACCESS_TITLES = { claude: 'Claude account', github: 'GitHub as you', ssh: 'SSH agent forwarding' };
+function renderAccessStep(container, opts = {}) {
+  const mode = opts.mode || 'onboarding';
+  const st = opts.state || {};
+  if (!st.results) st.results = {};
+  if (!st.skipped) st.skipped = new Set();
+  const ctl = { state: st, choices: () => ({ ...(st.choices || {}) }), resolved, confirm, render };
+  const ids = () => [...(opts.claude ? ['claude'] : []), 'github', 'ssh'];
+  const isOff = (id) => (id === 'github' ? st.choices.github === 'off' : id === 'ssh' ? st.choices.ssh === 'off' : false);
+  const confirmed = (id) => !!st.results[id] && st.results[id].state === 'confirmed';
+  function resolved() { return !!st.choices && ids().every((id) => isOff(id) || st.skipped.has(id) || confirmed(id)); }
+  function changed(id) {
+    delete st.results[id];
+    st.skipped.delete(id);
+    if (opts.onChange) opts.onChange(ctl.choices());
+    render();
+  }
+  async function check(which) {
+    st.busy = true;
+    render();
+    try {
+      const body = { items: which };
+      if (mode !== 'settings') body.choices = st.choices;
+      const r = await api('access/check', { method: 'POST', json: body });
+      st.report = { ...st.report, githubKeySet: r.githubKeySet };
+      for (const it of r.items) if (which.includes(it.id)) { st.results[it.id] = it; st.skipped.delete(it.id); }
+    } catch (e) {
+      for (const id of which) st.results[id] = { id, state: 'failed', detail: e.message || String(e) };
+    } finally {
+      st.busy = false;
+      render();
+    }
+  }
+  async function confirm() {
+    if (!st.choices) return false;
+    const todo = ids().filter((id) => !isOff(id) && !st.skipped.has(id) && !confirmed(id));
+    if (todo.length) await check(todo);
+    return resolved();
+  }
+  function radios(name, value, options, onPick) {
+    return options.map(([v, label, sub]) => {
+      const input = h('input', { type: 'radio', name: 'access-' + name + '-' + mode, value: v });
+      input.checked = v === value;
+      input.addEventListener('change', () => onPick(v));
+      const a = { class: 'wiz-choice' + (v === value ? ' chosen' : '') };
+      a['data-access-' + name] = v;
+      return h('label', a, input, h('span', null, label, sub ? h('div', { class: 'muted' }, sub) : null));
+    });
+  }
+  function keyNode() {
+    if (st.report.githubKeySet) {
+      const rm = btn('Remove key', async () => {
+        try { st.report = await api('access/github-key', { method: 'POST', json: { remove: true } }); delete st.results.github; render(); }
+        catch (e) { toast(e.message || String(e), true); }
+      }, { small: true, icon: 'trash-2' });
+      return h('div', { class: 'notice', 'data-access-key': 'set' }, 'A GitHub key is set (in the login keychain as doz-github — never in a sandbox). ', rm);
+    }
+    if (!secretEntryAllowed()) {
+      return h('div', { class: 'panel wiz-cmds', 'data-access-key': 'commands' },
+        h('div', null, 'In a terminal on this Mac (tokens are not taken in this browser — ui.allow_secret_entry is off):'),
+        h('pre', { class: 'mono' }, 'doz access set --github-key   (paste it; not echoed)'));
+    }
+    const secret = h('input', { type: 'password', name: 'access-github-key', autocomplete: 'off', spellcheck: 'false', autocapitalize: 'off',
+                                'data-secret': '1', placeholder: 'paste it here' });
+    const error = h('div', { class: 'dlg-error', role: 'alert' });
+    const save = btn('Save key', async (ev) => {
+      const b = ev.currentTarget, value = secret.value.trim();
+      secret.value = '';                                   // gone from the page before the request
+      error.textContent = '';
+      if (value.length < 20 || /\s/.test(value)) { error.textContent = 'Paste the whole token (one word).'; return; }
+      b.disabled = true;
+      try { st.report = await api('access/github-key', { method: 'POST', json: { secret: value } }); delete st.results.github; render(); }
+      catch (e) { error.textContent = e.message || String(e); b.disabled = false; }
+    }, { primary: true, icon: 'key-round' });
+    return h('div', { class: 'panel acct-form', 'data-access-key': 'form' },
+      h('label', { class: 'field' }, h('span', null, 'GitHub token'), secret,
+        h('small', null, 'Best: a fine-grained token limited to the repositories the agent needs (github.com → Settings → Developer settings). Not shown, not kept in this page.')),
+      error, h('div', { class: 'wiz-buttons' }, save));
+  }
+  function statusRow(id) {
+    const r = st.results[id];
+    const skipped = st.skipped.has(id);
+    const off = mode !== 'settings' && isOff(id);
+    const s = off ? 'off' : skipped ? 'skipped' : r ? r.state : 'unchecked';
+    const pill = h('span', { class: 'pill ' + ({ confirmed: 'st-ok', failed: 'st-fail', skipped: 'st-warn' }[s] || 'st-off') },
+      { confirmed: 'confirmed', failed: 'not confirmed', skipped: 'skipped', off: 'off', unchecked: 'not checked' }[s] || s);
+    const detail = off ? 'off — nothing to confirm' : skipped ? 'kept, not confirmed' + (r && r.detail ? ' — ' + r.detail : '') : r ? r.detail : 'not checked yet';
+    const row = h('div', { class: 'access-item', 'data-access-item': id, 'data-state': s },
+      h('div', { class: 'access-head' }, pill, ' ', h('strong', null, ACCESS_TITLES[id]),
+        r && r.choice && mode === 'settings' ? h('code', { class: 'muted' }, ' ' + r.choice + (id === 'github' && r.choice !== 'off' ? ' (' + (r.source === 'key' ? 'a key' : 'gh login') + ')' : '')) : null),
+      h('div', { class: s === 'failed' ? 'st-fail' : 'muted' }, detail));
+    if (s === 'failed' && mode !== 'settings') {
+      const acts = [btn('Skip', () => { st.skipped.add(id); render(); }, { small: true, icon: 'skip-forward', title: 'Keep ' + ACCESS_TITLES[id] + ' as chosen, not confirmed — doz access checks again later' })];
+      if (id !== 'claude') acts.push(btn('Turn it off', () => { st.choices[id] = 'off'; changed(id); }, { small: true, icon: 'power' }));
+      acts.push(btn('Check again', () => check([id]), { small: true, icon: 'refresh-cw' }));
+      row.append(h('div', { class: 'wiz-buttons access-fix' }, acts));
+    }
+    return row;
+  }
+  function render() {
+    if (!st.report) {
+      container.replaceChildren(h('p', { class: 'muted' }, 'Reading the Access choices…'));
+      if (!st.loading) {
+        st.loading = true;
+        api('access').then((r) => {
+          st.report = r;
+          const item = (id) => r.items.find((x) => x.id === id) || {};
+          if (!st.choices) {
+            st.choices = opts.choices ? { ...opts.choices }
+              : { github: item('github').choice || 'off', githubSource: item('github').source === 'key' ? 'key' : 'gh', ssh: item('ssh').choice || 'off' };
+          }
+          if (mode === 'settings') for (const it of r.items) st.results[it.id] = it;
+          render();
+        }).catch((e) => { container.replaceChildren(h('div', { class: 'notice bad' }, e.message || String(e))); })
+          .finally(() => { st.loading = false; });
+      }
+      return ctl;
+    }
+    const c = st.choices, cons = st.report.consequences || {};
+    const parts = [];
+    if (mode !== 'settings') {
+      parts.push(h('fieldset', { class: 'wiz-choices', 'data-access-choice': 'github' },
+        h('legend', null, 'GitHub as you — should git and gh in ' + (mode === 'sandbox' ? 'this sandbox' : 'new sandboxes') + ' be signed in to GitHub as you?'),
+        radios('github', c.github, [['off', 'Off', 'not signed in as you (public repositories still work)'],
+                                    ['read', 'Read-only', 'clone and read your private repositories, issues and pull requests; no push'],
+                                    ['push', 'Read and push', 'also push and change things on GitHub as you']],
+               (v) => { c.github = v; changed('github'); })));
+      parts.push(h('p', { class: 'access-consequence', 'data-consequence': 'github' }, (cons.github || {})[c.github] || ''));
+      if (c.github !== 'off') {
+        parts.push(h('fieldset', { class: 'wiz-choices', 'data-access-choice': 'source' }, h('legend', null, 'Where the token comes from'),
+          radios('source', c.githubSource, [['gh', 'This Mac’s gh login', 'gh auth token — read when used, never stored; gh auth logout ends it'],
+                                            ['key', 'A token you give Dozer', 'kept in the login keychain; a fine-grained token can be limited to some repositories']],
+                 (v) => { c.githubSource = v; changed('github'); })));
+        if (c.githubSource === 'key') parts.push(keyNode());
+      }
+      parts.push(h('fieldset', { class: 'wiz-choices', 'data-access-choice': 'ssh' },
+        h('legend', null, 'SSH agent forwarding — may ssh and git over SSH ask this Mac’s ssh-agent to sign?'),
+        radios('ssh', c.ssh, [['off', 'Off', null], ['on', 'On', 'github.com only; your keys never leave the Mac']], (v) => { c.ssh = v; changed('ssh'); })));
+      parts.push(h('p', { class: 'access-consequence', 'data-consequence': 'ssh' }, (cons.ssh || {})[c.ssh] || ''));
+    } else if (st.report.githubKeySet || (st.results.github && st.results.github.source === 'key')) {
+      parts.push(keyNode());
+    }
+    const confirmBtn = btn(mode === 'settings' ? 'Check again' : 'Confirm', () => (mode === 'settings' ? check(ids()) : confirm()),
+      { icon: mode === 'settings' ? 'refresh-cw' : 'badge-check', title: 'Confirm each credential works now, live' });
+    confirmBtn.dataset.accessConfirm = '';
+    if (st.busy) confirmBtn.disabled = true;
+    parts.push(h('div', { class: 'access-status', 'aria-live': 'polite', 'data-busy': st.busy ? '1' : null },
+      h('h3', null, mode === 'settings' ? 'Each credential, as last confirmed' : 'Confirmed?'),
+      ids().map(statusRow),
+      h('div', { class: 'wiz-buttons' }, st.busy ? h('span', { class: 'muted' }, h('span', { class: 'mini-spin', 'aria-hidden': 'true' }), ' checking…') : null, confirmBtn)));
+    container.replaceChildren(h('div', { class: 'access-step', 'data-access-mode': mode }, parts));
+    return ctl;
+  }
+  render();
+  return ctl;
+}
+
 // ── onboarding (594) ────────────────────────────────────────────────────────
 // The wizard (D11): Welcome → Checks → Claude account → Images → Preparing → First sandbox → Done.
 // The same model as every page: facts from GET /api/v1/onboarding; changes through the typed actions
@@ -3424,7 +3616,7 @@ async function viewDoctor() {
 // overwritten). A key or a setup token: the masked field (accountForm) while ui.allow_secret_entry,
 // else the CLI command. The preparation runs in the HOST: "Continue in the background" leaves it
 // running (Operations shows it), and closing this tab changes nothing.
-const WIZ_STEPS = ['Welcome', 'Checks', 'Claude account', 'Images', 'Preparing', 'First sandbox', 'Done'];
+const WIZ_STEPS = ['Welcome', 'Checks', 'Access', 'Images', 'Preparing', 'First sandbox', 'Done'];
 const WIZ_ORDER = ['claude-code', 'pi', 'lab'];
 let wizTimer = null;
 function wizardStopPolling() { clearInterval(wizTimer); wizTimer = null; }
@@ -3533,8 +3725,21 @@ function wizStep2(d, w) {
   } else if (keyed) {
     entry = accountCommandsNode(w.account);
   }
+  // 599e: the rest of the Access step — GitHub as you and the SSH agent, then each credential confirmed.
+  // The Claude account is confirmed too once it is one (this Mac's login, or an account just added).
+  if (!w.access) w.access = {};
+  const claudeConfirmable = w.account === 'mac' || (keyed && !!w.added);
+  if (w.accessClaudeFor !== (claudeConfirmable ? (w.added ? w.added.name : w.account) : null)) {
+    delete w.access.results?.claude;
+    w.access.skipped?.delete('claude');
+    w.accessClaudeFor = claudeConfirmable ? (w.added ? w.added.name : w.account) : null;
+  }
+  const accessBox = h('div', { class: 'wiz-access' });
+  const access = renderAccessStep(accessBox, { mode: 'onboarding', state: w.access, claude: claudeConfirmable });
   return [
-    h('h2', null, 'Claude account'),
+    h('h2', null, 'Access'),
+    h('p', { class: 'sub' }, 'What sandboxes may use as you — each one a choice of yours (nothing is on unless you choose it), then confirmed live. A credential that cannot be confirmed can be skipped: the setup is never blocked.'),
+    h('h3', null, 'Claude account'),
     h('p', null, d.macSignedIn
       ? 'Claude Code is signed in on this Mac. Sandboxes can use that login: nothing is copied into them — the Mac’s proxy adds it to their requests to Anthropic, and the Mac keeps renewing it.'
       : 'Claude Code is not signed in on this Mac. A sandbox can use an Anthropic API key or a Claude setup token instead, or you can decide later.'),
@@ -3542,12 +3747,16 @@ function wizStep2(d, w) {
     entry,
     h('p', { class: 'muted' }, 'The setup never logs in for you and never copies Claude Code’s refresh token. A key or a token is stored as doz account add stores it (the login keychain). The store’s default account now: ' +
       (w.added ? w.added.name : d.defaultAccount) + '.'),
+    h('h3', null, 'GitHub and SSH'),
+    accessBox,
     wizButtons(btn('Back', () => wizGo(1)), btn('Next', async (ev) => {
       const b = ev.currentTarget;
       b.disabled = true;
       try {
-        if (w.account === 'mac' && d.defaultAccount !== 'mac') await actOrThrow({ action: 'account-default', account: 'mac' });
-        wizGo(3);
+        if (w.account === 'mac' && d.defaultAccount !== 'mac') { await actOrThrow({ action: 'account-default', account: 'mac' }); d.defaultAccount = 'mac'; }
+        // Confirm what is not yet; a failure stays on this step with its reason and Skip — never a dead end.
+        if (await access.confirm()) wizGo(3);
+        else { toast('Not everything is confirmed — Skip it, turn it off, or check again', true); b.disabled = false; }
       } catch (e) { toast(e.message || String(e), true); b.disabled = false; }
     }, { primary: true })),
   ];
@@ -3572,7 +3781,9 @@ function wizStep3(d, w) {
     const b = ev.currentTarget;
     b.disabled = true;
     try {
-      w.config = await api('onboarding/config', { method: 'POST', json: { defaultImage: chosen[0] || 'claude-code', account: w.account || d.preferredAccount } });
+      const config = { defaultImage: chosen[0] || 'claude-code', account: w.account || d.preferredAccount };
+      if (w.access && w.access.choices) config.access = { ...w.access.choices };     // 599e: the defaults for new sandboxes
+      w.config = await api('onboarding/config', { method: 'POST', json: config });
       await actOrThrow({ action: 'onboard', images: chosen });
       w.prepImages = todo;
       wizGo(todo.length ? 4 : 5);
@@ -3743,6 +3954,11 @@ function wizStep6(d, w) {
     h('ul', { class: 'plain wiz-summary' },
       h('li', null, 'Claude account: ' + (w.added ? 'the account ' + w.added.name + ' (' + w.added.kind + '), the store default'
         : (d.accountOptions.find((o) => o.value === w.account) || { label: w.account || '—' }).label)),
+      w.access && w.access.choices ? h('li', { 'data-access-summary': '' }, 'Access for new sandboxes: GitHub as you ' +
+        ({ off: 'off', read: 'read-only', push: 'read and push' }[w.access.choices.github] || w.access.choices.github) +
+        (w.access.choices.github !== 'off' ? ' (' + (w.access.choices.githubSource === 'key' ? 'your key' : 'the Mac’s gh login') + ')' : '') +
+        ', SSH agent ' + w.access.choices.ssh +
+        (w.access.skipped && w.access.skipped.size ? ' — not confirmed: ' + [...w.access.skipped].map((id) => ACCESS_TITLES[id]).join(', ') + ' (Settings › Access checks again)' : '')) : null,
       c ? fileLine('Settings', c.settings, c.settingsPath) : null,
       c ? fileLine('Your environment prompt template', c.promptTemplate, c.promptTemplatePath) : null,
       // 599c: where Quick add, New sandbox and doz new put each sandbox's workspace folder.

@@ -128,7 +128,14 @@ public final class WebSettingsStore: @unchecked Sendable {
             let account = Onboarding.Account(rawValue: c.account).flatMap(Onboarding.defaultAccount(for:))
             let (s, sp) = try Onboarding.writeSettingsIfMissing(defaultImage: c.defaultImage, account: account, environment: environment)
             let (t, tp) = try Onboarding.writePromptTemplateIfMissing(environment: environment)
-            return WebOnboardingConfigResult(settings: s.rawValue, settingsPath: sp, promptTemplate: t.rawValue, promptTemplatePath: tp)
+            // 599e: the Access step's choices — the defaults for new sandboxes (even into a file that was kept).
+            var accessSet: [String]?
+            if let a = c.access, s != .unavailable {
+                do {
+                    accessSet = try Access.write(github: a.github, githubSource: a.github == "off" ? nil : a.githubSource, ssh: a.ssh, environment: environment)
+                } catch { throw HostError(.invalid, "\(error)") }
+            }
+            return WebOnboardingConfigResult(settings: s.rawValue, settingsPath: sp, promptTemplate: t.rawValue, promptTemplatePath: tp, accessSet: accessSet)
         } catch let e as SettingsError {
             throw HostError(.failed, e.message)
         }
@@ -230,22 +237,112 @@ public struct WebKeySet: Equatable, Sendable, CustomStringConvertible, CustomDeb
     public func scrub(_ text: String) -> String { WebSecretText.scrub(text, secret) }
 }
 
-/// 594: `POST /api/v1/onboarding/config`, decoded strictly: exactly {defaultImage, account}.
+/// 599e: the Access choices (each optional) — `{github?: off|read|push, githubSource?: gh|key, ssh?: off|on}`.
+public struct WebAccessChoices: Equatable, Sendable {
+    public var github: String?
+    public var githubSource: String?
+    public var ssh: String?
+
+    public init(github: String? = nil, githubSource: String? = nil, ssh: String? = nil) {
+        self.github = github; self.githubSource = githubSource; self.ssh = ssh
+    }
+
+    static let allowed: [String: [String]] = ["github": ["off", "read", "push"], "githubSource": ["gh", "key"], "ssh": ["off", "on"]]
+
+    public static func decode(_ any: Any?) throws -> WebAccessChoices {
+        guard let d = any as? [String: Any] else { throw WebAction.Invalid("choices: an object") }
+        guard Set(d.keys).isSubset(of: Set(allowed.keys)) else { throw WebAction.Invalid("choices: github, githubSource, ssh") }
+        var c = WebAccessChoices()
+        for (k, v) in d {
+            guard let s = v as? String, allowed[k]!.contains(s) else { throw WebAction.Invalid("\(k): \(allowed[k]!.joined(separator: ", "))") }
+            switch k { case "github": c.github = s; case "githubSource": c.githubSource = s; default: c.ssh = s }
+        }
+        return c
+    }
+
+    /// For the host request (only those given).
+    public var dictionary: [String: String] {
+        var d: [String: String] = [:]
+        if let github { d["github"] = github }
+        if let githubSource { d["githubSource"] = githubSource }
+        if let ssh { d["ssh"] = ssh }
+        return d
+    }
+}
+
+/// 599e: `POST /api/v1/access/check`, decoded strictly: {items?: [claude|github|ssh], choices?}.
+public struct WebAccessCheck: Equatable, Sendable {
+    public var items: [String]?
+    public var choices: WebAccessChoices?
+
+    public static func decode(_ body: Data) throws -> WebAccessCheck {
+        guard let obj = try? JSONSerialization.jsonObject(with: body), let d = obj as? [String: Any] else {
+            throw WebAction.Invalid("the body must be a JSON object")
+        }
+        guard Set(d.keys).isSubset(of: ["items", "choices"]) else { throw WebAction.Invalid("items and choices only") }
+        var c = WebAccessCheck()
+        if let i = d["items"] {
+            guard let a = i as? [String], !a.isEmpty, a.count <= 3, Set(a).isSubset(of: ["claude", "github", "ssh"]) else {
+                throw WebAction.Invalid("items: some of claude, github, ssh")
+            }
+            c.items = a
+        }
+        if d["choices"] != nil { c.choices = try WebAccessChoices.decode(d["choices"]) }
+        return c
+    }
+}
+
+/// 599e: `POST /api/v1/access/github-key`, decoded strictly: exactly {secret} or exactly {remove: true}.
+/// Redacted description; no message echoes the value.
+public struct WebAccessGitHubKey: Equatable, Sendable, CustomStringConvertible, CustomDebugStringConvertible, CustomReflectable {
+    /// nil: remove the default key.
+    public let secret: String?
+
+    public var description: String { secret == nil ? "WebAccessGitHubKey(remove)" : "WebAccessGitHubKey(secret: <redacted>)" }
+    public var debugDescription: String { description }
+    public var customMirror: Mirror { Mirror(self, children: ["secret": secret == nil ? "nil" : "<redacted>"]) }
+
+    public static func decode(_ body: Data) throws -> WebAccessGitHubKey {
+        guard let obj = try? JSONSerialization.jsonObject(with: body), let d = obj as? [String: Any] else {
+            throw WebAction.Invalid("the body must be a JSON object")
+        }
+        if Set(d.keys) == ["remove"] {
+            guard d["remove"] as? Bool == true else { throw WebAction.Invalid("remove: true") }
+            return WebAccessGitHubKey(secret: nil)
+        }
+        guard Set(d.keys) == ["secret"] else { throw WebAction.Invalid("exactly secret (or remove)") }
+        guard let s = d["secret"] as? String, WebSecretText.valid(s), !s.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              !s.trimmingCharacters(in: .whitespacesAndNewlines).contains(where: { $0.isWhitespace }) else {
+            throw WebAction.Invalid("secret: the token as GitHub printed it (one word, 20–4096 characters)")
+        }
+        return WebAccessGitHubKey(secret: s)
+    }
+
+    public func scrub(_ text: String) -> String { secret.map { WebSecretText.scrub(text, $0) } ?? text }
+}
+
+/// 594: `POST /api/v1/onboarding/config`, decoded strictly: exactly {defaultImage, account} — and (599e)
+/// optionally `access` (the Access step's choices, written as the defaults for new sandboxes).
 public struct WebOnboardingConfig: Equatable, Sendable {
     public let defaultImage: String
     public let account: String
+    public var access: WebAccessChoices? = nil
 
     public static func decode(_ body: Data) throws -> WebOnboardingConfig {
         guard let obj = try? JSONSerialization.jsonObject(with: body), let d = obj as? [String: Any] else {
             throw WebAction.Invalid("the body must be a JSON object")
         }
-        guard Set(d.keys) == ["defaultImage", "account"] else { throw WebAction.Invalid("exactly defaultImage and account") }
+        guard Set(d.keys) == ["defaultImage", "account"] || Set(d.keys) == ["defaultImage", "account", "access"] else {
+            throw WebAction.Invalid("exactly defaultImage and account (and access)")
+        }
         guard let i = d["defaultImage"] as? String, ["lab", "claude-code", "pi"].contains(i) else {
             throw WebAction.Invalid("defaultImage: lab, claude-code or pi")
         }
         guard let a = d["account"] as? String, Onboarding.Account(rawValue: a) != nil else {
             throw WebAction.Invalid("account: \(Onboarding.Account.allCases.map(\.rawValue).joined(separator: ", "))")
         }
-        return WebOnboardingConfig(defaultImage: i, account: a)
+        var c = WebOnboardingConfig(defaultImage: i, account: a)
+        if d["access"] != nil { c.access = try WebAccessChoices.decode(d["access"]) }
+        return c
     }
 }

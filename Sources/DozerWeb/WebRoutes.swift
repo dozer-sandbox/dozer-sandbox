@@ -92,6 +92,12 @@ public enum WebRoute: Equatable, Sendable {
     // file picker for a Dockerfile (one at a time; the answer is a path and its folder).
     case bases                     // GET  /api/v1/bases
     case dockerfileChoose          // POST /api/v1/dockerfile/choose  ({start?})
+    // 599e — Access: each credential's choice and last confirmation (read, never starts a host); a live
+    // check (changes no setting; POST + CSRF: it carries choices to confirm before they are written);
+    // the default GitHub key (a secret in the body alone, while ui.allow_secret_entry, like accountAdd).
+    case access                    // GET  /api/v1/access
+    case accessCheck               // POST /api/v1/access/check  ({items?, choices?: {github?, githubSource?, ssh?}})
+    case accessGithubKey           // POST /api/v1/access/github-key  ({secret} | {remove: true})
 
     public var isStatic: Bool {
         switch self { case .index, .asset, .terminalFrame: true; default: false }
@@ -133,6 +139,8 @@ public enum WebRoute: Equatable, Sendable {
         case (.post, 3) where rest == ["settings", "projects-dir", "choose"]: return .projectsDirChoose
         case (.post, 2) where rest == ["resources", "preview"]: return .resourcesPreview
         case (.post, 2) where rest == ["dockerfile", "choose"]: return .dockerfileChoose
+        case (.post, 2) where rest == ["access", "check"]: return .accessCheck
+        case (.post, 2) where rest == ["access", "github-key"]: return .accessGithubKey
         case (.post, 4) where rest[0] == "sandboxes" && isSandboxName(rest[1]) && rest[2] == "network" && rest[3] == "preview":
             return .policyPreview(rest[1])
         case (.post, 3) where rest[0] == "sandboxes" && isSandboxName(rest[1]) && rest[2] == "terminal":
@@ -163,6 +171,7 @@ public enum WebRoute: Equatable, Sendable {
             case "preparations": return .preparations
             case "resources": return .resources
             case "bases": return .bases
+            case "access": return .access
             default: return nil
             }
         case 2 where rest == ["images", "tree"]:

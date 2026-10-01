@@ -64,6 +64,9 @@ public struct WebBases: Codable, Equatable, Sendable {
     public var permissions: [WebPermissions.Row] = WebBases.permissionRows
     public var standard: [String: [String]] = WebBases.standardByBase
     public var defaults: [String: [String]] = [:]
+    /// 599e: what the Access step's `defaults.github` adds to a new sandbox's permissions (New Sandbox
+    /// switches them on too) — `[]`, `["github:as-you"]` or both GitHub ids.
+    public var github: [String] = []
 
     public static var permissionRows: [WebPermissions.Row] {
         AgentPermissions.all.map { p in
@@ -88,9 +91,15 @@ extension HostWebData {
         var b = WebBases(bases: rows.map(WebBase.init), builder: WebBuilder(builder), outsidePolicy: Dockerfiles.outsidePolicyNote,
                          deckstack: WebBases.deckstackNote, agents: WebBases.agentChoices)
         // 597: what defaults.permissions gives a new sandbox of each base.
-        let words = SettingType.permissionWords(DozerSettings.load().string(SettingKey.permissions) ?? "standard") ?? ["standard"]
+        let settings = DozerSettings.load()
+        let words = SettingType.permissionWords(settings.string(SettingKey.permissions) ?? "standard") ?? ["standard"]
         b.defaults[""] = PermissionPolicy.names(from: words, base: nil)
         for id in BaseCatalogue.ids { b.defaults[id] = PermissionPolicy.names(from: words, base: id) }
+        switch settings.string(SettingKey.defaultGithub) {
+        case "read"?: b.github = [AgentPermissions.gitHubAsYou]
+        case "push"?: b.github = [AgentPermissions.gitHubAsYou, AgentPermissions.gitHubPush]
+        default: break
+        }
         return b
     }
 }

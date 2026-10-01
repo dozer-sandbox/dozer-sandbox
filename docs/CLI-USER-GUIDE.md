@@ -63,6 +63,7 @@ doz onboard --images claude-code,pi --yes     # scripts: ask nothing (--yes, --j
 doz onboard --all-images | --no-images        # every image (~15+ min the first time) · none now
 doz onboard --account mac|api-key|setup-token|later   # answer the account step (and skip the Claude Code checks)
 doz onboard --account setup-token --account-name work --plan max --secret-stdin --yes < token.txt   # scripts: the token from stdin
+doz onboard --github off|read|push [--github-source gh|key] [--github-key-stdin] --ssh-agent on|off   # answer the rest of Access
 doz onboard --status                          # the record and the images; follows a preparation that runs
 doz onboard --cancel                          # stop the images being prepared
 ```
@@ -74,14 +75,27 @@ It does, in order:
    images, a store path short enough for its socket. The rest only warn: Claude Code missing or
    signed out (a claude-code sandbox still works with an account added later), vmnet (only
    `--network nat` needs it).
-2. **Claude account** — offered, never logged in for you. Claude Code signed in on this Mac: "use
+2. **Access** — every credential sandboxes may use as you, each a purposeful choice, then each
+   **confirmed live**; a failure says why and is **skipped** (the choice kept, *not confirmed*) — the
+   onboarding never blocks, and `--yes` off a terminal never asks (exit 0, a note per skip). `doz
+   access` shows and confirms them again later; `doz access set` changes one.
+   - **GitHub as you** — off (the default), read or push (`defaults.github`), the token from this Mac's
+     `gh` login or a token you give (`github.credentials`): confirmed by `GET https://api.github.com/user`
+     over the proxy's own TLS leg — *signed in as LOGIN* with a classic token's scopes, or how many
+     repositories a fine-grained token sees.
+   - **SSH agent forwarding** — off (the default) or on (`sandbox.ssh_agent`): confirmed by asking
+     the Mac's ssh-agent for its keys (*the ssh-agent has N keys*).
+   - The choices are the **defaults for new sandboxes** (written even into an existing `doz.toml`, but
+     only when chosen — a flag or an answer; `--yes` alone changes nothing).
+   - **The Claude account** — offered, never logged in for you. Claude Code signed in on this Mac: "use
    this Mac's login" (the account `mac`) is the default. Otherwise: **an API key or a setup token,
    pasted right there** at a no-echo prompt (with its account name, and the plan for a token) and
    stored exactly as `doz account add` stores it — the login keychain (`doz-anthropic:NAME`,
    `doz-claude:NAME`) after one tiny check request — then made the store's default; or **Decide
    later** (nothing changes). Off a terminal the key is read from stdin only with `--secret-stdin`
    (as `doz account add` reads it); otherwise the step is skipped and the command shown. Onboarding
-   never touches Claude Code's refresh token.
+   never touches Claude Code's refresh token. The account chosen is confirmed too (this Mac's login
+   signed in; a key or token by `doz account verify`'s check) — "Decide later" is not checked.
 3. **Images** — `claude-code` is prepared by default; `pi` and `lab` are opt-in.
 4. **Settings** — `doz.toml` (every setting at its default, with `defaults.image` and
    `defaults.account` from your answers) and `agent-prompt.md` beside it (see "The agent's
@@ -454,7 +468,8 @@ doz-open --app Typora notes.md       # a named app — only one listed in bridge
 
 ### GitHub as you
 
-Off until you turn it on per sandbox (`doz net allow NAME github:as-you`, `doz create --github read|push`,
+Off until you choose it — for new sandboxes (the onboarding's Access step, `doz access set --github
+read|push`: the setting `defaults.github`) or per sandbox (`doz net allow NAME github:as-you`, `doz create --github read|push`,
 `github:` in `doz_project.yaml`, or the switch in `doz ui`): `git` and `gh` in the sandbox are then signed in
 to github.com as you, while the token stays on the Mac — `GH_TOKEN`/`GITHUB_TOKEN` and git's credential helper
 (`git-credential-doz`) hold a `doz_cred_` placeholder, which the proxy swaps for the real token on the way to
@@ -465,7 +480,11 @@ re-encoded), and nowhere else.
   call (a GraphQL request passes only when its document holds queries alone — anything unsure is refused),
   with a 403 that says how to allow it. With push, every change is in `doz net log`.
 - **The token**: `github.credentials` = `gh` (the Mac's `gh auth token`, read on use, kept in memory a few
-  minutes), `key` (only `doz key set NAME --github`, stdin or `--keychain`), or `off`. A sandbox's own key wins.
+  minutes), `key` (a sandbox's `doz key set NAME --github`, stdin or `--keychain`, else the default one from
+  `doz access set --github-key` — the login keychain, `doz-github`), or `off`. A sandbox's own key wins.
+- **Confirmed**: `doz access` reads the token as a sandbox would and asks `GET /user` — *signed in as LOGIN*
+  and the scopes (or, fine-grained, how many repositories it sees); a failure says why (`<store>/access.json`
+  keeps the answer, never the token).
 - **Identity**: the Mac's global `user.name`/`user.email` in the sandbox's git config while it's on.
 - **Off** (`doz net deny NAME github:as-you`) revokes every placeholder at once and removes the identity.
 - **SSH**: `doz config set --sandbox NAME sandbox.ssh_agent on` forwards the Mac's ssh-agent (vsock; the keys

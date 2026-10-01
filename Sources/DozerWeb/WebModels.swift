@@ -748,6 +748,8 @@ public struct WebOnboardingConfigResult: Codable, Equatable, Sendable {
     public var settingsPath: String?
     public var promptTemplate: String
     public var promptTemplatePath: String?
+    /// 599e: the Access settings written (`key = value`), when the wizard sent its choices.
+    public var accessSet: [String]? = nil
 }
 
 public struct WebConnection: Codable, Equatable, Sendable {

@@ -40,8 +40,8 @@ out. Inside the sandbox the agent sees a placeholder (`doz_cred_…`), so there'
 - a credential the agent brings itself is flagged or refused (the [key policy](09-agents-and-accounts.md#a-credential-the-agent-brings-itself));
 - accounts are stored in your login keychain, and the dashboard never shows a secret.
 
-**Your GitHub login** works the same way, and only when you turn it on for a sandbox
-([GitHub as you](18-github.md)):
+**Your GitHub login** works the same way, and only when you choose it — for new sandboxes in setup's
+Access step, or for one sandbox ([GitHub as you](18-github.md)):
 
 - the token (your Mac's `gh` login, read when used and kept in the proxy's memory a few minutes, or a
   token you gave the sandbox) never enters the VM, the store or a log — the sandbox's `GH_TOKEN` and
@@ -60,6 +60,24 @@ out. Inside the sandbox the agent sees a placeholder (`doz_cred_…`), so there'
   — and so authenticate as you to github.com — while it's on; your keys never leave the Mac, it can't
   add, remove or lock keys in your agent (only list and sign get through), and only `github.com:22` is
   reachable over SSH.
+
+**Access — every credential is a purposeful choice.** Setup's Access step (and `doz access`) puts the
+Claude account, GitHub as you and SSH agent forwarding side by side, each with what it means. GitHub
+and SSH are **off** until you choose them, and nothing is turned on silently — not by `doz onboard
+--yes`, not by the **Open** preset. Each choice is confirmed live, on your Mac:
+
+- GitHub: the real token is read the way a sandbox would get it and sent to `api.github.com` (`GET
+  /user`, plus `/user/repos` for a fine-grained token) over the proxy's own TLS connection, verified
+  against your Mac's trust store. The answer you see is the login and the scopes or a repository count —
+  never the token;
+- SSH: your agent is asked for its list of keys — nothing is signed;
+- the result is kept in `access.json` in the store: states and reasons only, never a secret. A pasted
+  GitHub token goes straight to the host and into your login keychain (`doz-github`) — the dashboard
+  takes it only while `ui.allow_secret_entry` is on, in a masked field it empties at once, and never
+  shows it again.
+
+A check that fails never turns anything on or off by itself: **Skip** keeps your choice, marked *not
+confirmed*; turning it off is yours to do.
 
 ### 4. Root inside is not root outside
 
@@ -127,6 +145,7 @@ fully resolved path.
 | `sandbox.browser_bridge` | `on` | The browser bridge. |
 | `sandbox.open_files` | `on` | The files bridge. |
 | `bridges.open_apps` | `""` | The apps a sandbox may name for the files bridge (none: default apps only). |
+| `defaults.github` | `off` | "Use GitHub as you" for new sandboxes: `off`, `read` or `push`. |
 | `github.credentials` | `gh` | Where "Use GitHub as you" gets your login: `gh`, `key` or `off`. |
 | `sandbox.ssh_agent` | `off` | Forward your Mac's ssh-agent (github.com:22 only). |
 | `sandbox.agent_sudo` | `true` | The agent's sudo inside its sandbox. |

@@ -423,7 +423,7 @@ public actor HostCore {
         if readOnly && !(r.op.isReadOnly || (r.op == .netPolicy && isPolicyQuery(r)) || r.op == .sessions || (r.op == .netLog && r.follow != true)
                          || (r.op == .console && r.follow != true) || (r.op == .agentPrompt && r.prompt == nil && r.clearPrompt != true && r.agentSudo == nil && r.clearAgentSudo != true)
                          || r.op == .terminalLayoutSet || ([.resourcesRemove, .resourcesClean].contains(r.op) && r.dryRun == true)
-                         || (r.op == .sandboxSettings && r.setting == nil)) {
+                         || (r.op == .sandboxSettings && r.setting == nil) || (r.op == .access && r.check != true)) {
             return .failure(HostError(.unavailable, "\(r.op.rawValue) needs the host"))
         }
         // 598: an upgrade removed this host's installation — refuse a boot plainly, before it fails oddly.
@@ -693,6 +693,10 @@ public actor HostCore {
             return try JSONValue(encoding: try agentPrompt(r))
         case .sandboxSettings:
             return try JSONValue(encoding: try sandboxSettings(r))
+        case .access:
+            return try JSONValue(encoding: try await access(r))
+        case .accessGithubKey:
+            return try JSONValue(encoding: try setAccessGithubKey(r))
         case .attach, .events, .hostStop:
             throw HostError(.invalid, "\(r.op.rawValue) is handled by the server")
         }

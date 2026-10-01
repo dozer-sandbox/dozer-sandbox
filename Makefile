@@ -64,7 +64,7 @@ DOCC_OUT         ?= .docc-build
 DOCC_BASE_PATH   ?= /DozerKit/
 DOCC_PREVIEW_PORT ?= 8000
 
-.PHONY: help build test audit web-assets web-assets-check test-cli-onboarding test-cli-terminal test-cli-hoststop test-cli-agentsudo test-cli-points test-cli-timezone test-cli-images test-cli-bases test-cli-permissions test-cli-clipboard test-cli-browser test-cli-openfiles test-cli-github test-cli-quickadd test-cli-projectwizard test-cli-tmux pullbench test-vm test-vm-agents test-vm-network test-vm-hardening test-vm-lineage prev-cli test-vm-upgrade vmtest-host kernel deckhold deckhold-verify doznet doznet-verify cli install-cli test-cli test-vm-claude test-vm-templates docs docs-preview docs-drift-check release
+.PHONY: help build test audit web-assets web-assets-check test-cli-onboarding test-cli-terminal test-cli-hoststop test-cli-agentsudo test-cli-points test-cli-timezone test-cli-images test-cli-bases test-cli-permissions test-cli-clipboard test-cli-browser test-cli-openfiles test-cli-github test-cli-access test-cli-quickadd test-cli-projectwizard test-cli-tmux pullbench test-vm test-vm-agents test-vm-network test-vm-hardening test-vm-lineage prev-cli test-vm-upgrade vmtest-host kernel deckhold deckhold-verify doznet doznet-verify cli install-cli test-cli test-vm-claude test-vm-templates docs docs-preview docs-drift-check release
 
 help: ## Show this help
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) | sed 's/:.*## /\t/' | expand -t 22
@@ -233,6 +233,9 @@ test-cli-github: cli vmtest-host ## 599d: GitHub as the user through SEAMS only 
 
 test-cli-projectwizard: cli vmtest-host ## 599f: doz init --yes (every choice a flag) then doz up in the folder makes exactly that sandbox; doz_project.yml; both spellings refused; an interactive doz init on a pseudo-terminal walks the 9 steps, and again replaces the file only after its diff and a yes
 	perl -e 'alarm shift; exec @ARGV' 1200 $(VMTEST_BIN) cli-projectwizard --doz $(CLI_BIN)
+
+test-cli-access: cli vmtest-host ## 599e: the Access step through SEAMS only (a fake GitHub API with its own CA, a fake gh, a throwaway ssh-agent; no VM): onboard --yes confirms GitHub (login + scopes) and SSH (N keys) and writes them as the defaults; a refused token and a missing agent are skipped with the reason (exit 0); doz access / access set (a fine-grained key: repositories it sees); no token anywhere
+	perl -e 'alarm shift; exec @ARGV' 600 $(VMTEST_BIN) cli-access --doz $(CLI_BIN)
 
 test-cli-quickadd: cli vmtest-host ## 599c: doz new — what it chose, created + started, a command runs, <projects_dir>/<name> is its /workspace; again → -2; --isolated/--name/--json; a taken name; pi without an API-key account; attached on a terminal (lab, a scratch projects folder)
 	perl -e 'alarm shift; exec @ARGV' 900 $(VMTEST_BIN) cli-quickadd --doz $(CLI_BIN)
