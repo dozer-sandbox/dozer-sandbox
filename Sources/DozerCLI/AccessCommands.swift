@@ -30,25 +30,31 @@ struct AccessStep {
     var githubKey: String?
     /// Confirm the Claude account too (false: "decide later").
     var checkClaude = true
+    /// 599f: whose choice it is — "new sandboxes" (onboarding) or "this sandbox" (`doz init`, a project).
+    var subject = "new sandboxes"
+    /// 599f: ask where the token comes from (a setting of the Mac's — not a project's: `doz init` does not ask).
+    var askSource = true
+    /// 599f: the choices before the questions (a project file's), else the settings'.
+    var start: AccessChoices?
 
     func say(_ s: String) { if talk { Out.stdout(s + "\n") } }
 
     /// The choices: the flags, else the questions (on a terminal), else the settings as they are.
     func choose() -> AccessChoices {
         let s = DozerSettings.load()
-        var c = AccessChoices(github: githubFlag ?? s.string(SettingKey.defaultGithub) ?? "off",
-                              githubSource: sourceFlag ?? s.string(SettingKey.githubCredentials).flatMap { $0 == "off" ? "gh" : $0 } ?? "gh",
-                              ssh: sshFlag ?? s.string(SettingKey.sshAgent) ?? "off")
+        var c = AccessChoices(github: githubFlag ?? start?.github ?? s.string(SettingKey.defaultGithub) ?? "off",
+                              githubSource: sourceFlag ?? start?.githubSource ?? s.string(SettingKey.githubCredentials).flatMap { $0 == "off" ? "gh" : $0 } ?? "gh",
+                              ssh: sshFlag ?? start?.ssh ?? s.string(SettingKey.sshAgent) ?? "off")
         if githubFlag == nil {
             let opts = ["off", "read", "push"]
-            let i = asker.choose("  GitHub as you — should git and gh in new sandboxes be signed in to GitHub as you? (the token stays on this Mac)",
+            let i = asker.choose("  GitHub as you — should git and gh in \(subject) be signed in to GitHub as you? (the token stays on this Mac)",
                                  ["Off — not signed in as you (public repositories still work)",
                                   "Read-only — clone and read your private repositories, issues and pull requests; no push",
                                   "Read and push — also push and change things on GitHub as you"],
                                  preferred: opts.firstIndex(of: c.github) ?? 0)
             c.github = opts[i]
         }
-        if c.github != "off", sourceFlag == nil {
+        if c.github != "off", sourceFlag == nil, askSource {
             let i = asker.choose("  Where the GitHub token comes from:",
                                  ["This Mac's gh login (gh auth token — gh auth logout ends it)",
                                   "A token you give Dozer (best: a fine-grained token limited to some repositories)"],
@@ -56,7 +62,7 @@ struct AccessStep {
             c.githubSource = i == 1 ? "key" : "gh"
         }
         if sshFlag == nil {
-            let i = asker.choose("  SSH agent forwarding — let ssh and git over SSH in sandboxes ask this Mac's ssh-agent to sign? (github.com only; keys stay on the Mac)",
+            let i = asker.choose("  SSH agent forwarding — let ssh and git over SSH in \(subject == "new sandboxes" ? "sandboxes" : subject) ask this Mac's ssh-agent to sign? (github.com only; keys stay on the Mac)",
                                  ["Off", "On"], preferred: c.ssh == "on" ? 1 : 0)
             c.ssh = i == 1 ? "on" : "off"
         }

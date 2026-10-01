@@ -533,7 +533,7 @@ public final class DozerWebServer: @unchecked Sendable {
                 guard Set(d.keys) == ["action", "folder"], let folder = d["folder"] as? String, folder.count <= 1024 else {
                     throw WebAction.Invalid("project-create: only folder")
                 }
-                return json(try operations.start(try WebProject.createAction(folder: folder)), status: 202)
+                return json(try operations.start(try WebProject.createAction(folder: folder, settings: settings.current)), status: 202)
             }
             let action = try WebAction.decode(body)
             return json(try operations.start(action), status: 202)

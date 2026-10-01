@@ -1742,7 +1742,7 @@ async function nwGo(i) {
   const nw = state.nw;
   nw.error = '';
   try {
-    await nw.collect();
+    await nw.collect(i > nw.step);
   } catch (e) {
     // Back never stops on the step's own check (the folder step's excepted: nothing is open without it).
     if (i > nw.step || nw.step === 0) {
@@ -1843,32 +1843,36 @@ function nwAccount() {
   };
 }
 function nwAccess() {
+  // 599e's Access component (the onboarding wizard's and Settings' own), for THIS sandbox: GitHub as you
+  // (off · read-only · read and push, and where the token comes from) and SSH agent forwarding, each choice
+  // confirmed live on Next (Skip · Turn it off · Check again — never a dead end). It writes nothing but the
+  // default GitHub key; the choices go into this project's file (github, ssh_agent) and so the create request.
   const nw = state.nw, f = nw.form, net = nwNetwork(f);
-  const gh = f.github || 'off';
-  const ghOk = nwPermissionNet(net);
-  const opts = [['off', 'Off', 'git and gh in the sandbox are not signed in.'], ['read', 'Read', 'git and gh signed in as you — clone and fetch your private repositories; nothing is pushed.'],
-                ['push', 'Read and push', 'Also push commits and change things on GitHub as you (pull requests, issues).']];
-  const radios = opts.map(([v, label, note]) => {
-    const r = h('input', { type: 'radio', name: 'nw-github', value: v, 'data-nw-github': v });
-    r.checked = gh === v;
-    r.disabled = !ghOk && v !== 'off';
-    r.addEventListener('change', () => {
-      if (!r.checked) return;
-      const apply = () => { nwSet('github', v); nwRender(); };
-      if (v === 'off') apply(); else confirmGitHub(v === 'push' ? 'github:push' : 'github:as-you', async () => apply());
-      nwRender();
-    });
-    return h('label', { class: 'wiz-choice' + (gh === v ? ' chosen' : '') }, r, h('span', null, h('strong', null, label), h('div', { class: 'muted' }, note)));
-  });
-  const ssh = h('input', { type: 'checkbox', role: 'switch', 'data-nw-ssh': '' });
-  ssh.checked = (f.sshAgent || setting('sandbox.ssh_agent', 'off')) === 'on';
-  ssh.addEventListener('change', () => nwSet('ssh_agent', ssh.checked ? 'on' : 'off'));
+  const box = h('div', { class: 'wiz-access', 'data-nw-access': '' });
+  if (!nw.access) {
+    nw.access = {};
+    nw.accessStart = { github: f.github || setting('defaults.github', 'off'),
+                       githubSource: setting('github.credentials', 'gh') === 'key' ? 'key' : 'gh',
+                       ssh: f.sshAgent || setting('sandbox.ssh_agent', 'off') };
+  }
+  const ctl = renderAccessStep(box, { mode: 'sandbox', state: nw.access, choices: nw.accessStart, onChange: (c) => {
+    if (c.github !== (f.github || setting('defaults.github', 'off'))) nwSet('github', c.github);
+    if (c.ssh !== (f.sshAgent || setting('sandbox.ssh_agent', 'off'))) nwSet('ssh_agent', c.ssh);
+  } });
+  const note = nwPermissionNet(net) ? null
+    : h('p', { class: 'notice', 'data-nw-github-net': net }, 'GitHub as you needs a network with permissions (agent, locked or open) — this sandbox’s is ' + net +
+      '. Choose it under Permissions and network, or leave GitHub off.');
   return {
-    el: h('div', { class: 'nw-fields' },
-      h('fieldset', { class: 'wiz-choices' }, h('legend', null, 'GitHub — as you'), radios,
-        ghOk ? h('small', { class: 'muted' }, 'Your token stays on this Mac: the proxy adds it to requests to GitHub.')
-             : h('small', { class: 'muted' }, 'Needs a network with permissions (agent, locked or open) — this sandbox’s is ' + net + '.')),
-      h('label', { class: 'field check' }, ssh, h('span', null, 'Forward this Mac’s SSH agent — ssh and git over SSH can ask it to sign; the keys never enter the sandbox (github.com:22 only)'))),
+    el: h('div', { class: 'nw-fields' }, note, box),
+    async collect(forward) {
+      // Next (and Skip to review) confirms; Back keeps the choices without a check.
+      if (!ctl.choices().github) return;                    // not read yet: nothing chosen here
+      if (forward && !(await ctl.confirm())) throw new Error('Not everything is confirmed — Skip it, turn it off, or check again.');
+      const c = ctl.choices();
+      // Kept as chosen (a default that was not changed stays the setting's — commented in the file).
+      if (c.github !== (f.github || setting('defaults.github', 'off')) || nw.explicit.has('github')) nwSet('github', c.github);
+      if (c.ssh !== (f.sshAgent || setting('sandbox.ssh_agent', 'off')) || nw.explicit.has('ssh_agent')) nwSet('ssh_agent', c.ssh);
+    },
   };
 }
 function nwPermissions() {

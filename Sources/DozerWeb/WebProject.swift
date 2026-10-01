@@ -296,11 +296,11 @@ enum WebProject {
     }
 
     /// The action `project-create`: the sandbox the folder's file describes, as `doz up` makes it.
-    static func createAction(folder raw: String) throws -> WebAction {
+    static func createAction(folder raw: String, settings: DozerSettings? = nil) throws -> WebAction {
         let folder = try Workspace.normalize(raw)
         guard let (url, text) = try WebProjectFiles.existing(folder) else { throw HostError(.notFound, "\(folder) has no \(DozerProject.fileName)") }
         let p: DozerProject
         do { p = try WebProjectFiles.parse(text, file: url.lastPathComponent) } catch let e as DozerProject.Invalid { throw HostError(.invalid, e.message) }
-        return .create(name: p.name, options: p.createOptions(folder: URL(fileURLWithPath: folder), file: url))
+        return .create(name: p.name, options: p.createOptions(folder: URL(fileURLWithPath: folder), file: url, settings: settings))
     }
 }

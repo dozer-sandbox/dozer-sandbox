@@ -100,7 +100,7 @@ func cliProjectWizardSuite(binary: String) async {
         }
         answer("Sandbox name [gamma]", "", "Step 1: the name, from the folder (Enter keeps gamma)")
         answer("Image —", "", "Step 2: the image (Enter keeps the setting's, lab)")
-        answer("GitHub —", "", "Step 4: GitHub (Enter keeps off)")
+        answer("GitHub as you — should git and gh in this sandbox", "", "Step 4: GitHub as you — onboarding's question, for this sandbox (Enter keeps off)")
         answer("SSH agent", "", "Step 4: the SSH agent")
         answer("Network", "1", "Step 5: the network — 1 (agent)")
         answer("What the agent may do", "+web", "Step 5: the permissions — +web")
@@ -132,7 +132,7 @@ func cliProjectWizardSuite(binary: String) async {
             c.type(text + "\r")
             usleep(200_000)
         }
-        for (p, a) in [("Sandbox name [gamma]", ""), ("Image —", ""), ("GitHub —", ""), ("SSH agent", ""), ("Network", ""), ("What the agent may do", ""),
+        for (p, a) in [("Sandbox name [gamma]", ""), ("Image —", ""), ("GitHub as you", ""), ("SSH agent", ""), ("Network", ""), ("What the agent may do", ""),
                        ("Virtual CPUs", ""), ("MiB) [768M]", "1G")] { answer(p, a) }
         check(c.text.contains("MiB) [768M]"), "run again: the file's memory is the default (768M)")
         for p in ["Mac clipboard", "Mac's browser", "open on the Mac", "inside tmux", "passwordless sudo"] { answer(p, "") }

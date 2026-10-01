@@ -35,7 +35,11 @@ On a terminal `doz init` walks the same steps as the dashboard's **New sandbox**
 1. **Project folder** — the folder, and the sandbox's name (suggested from the folder's);
 2. **Agent and base** — the image (suggested from the setting `defaults.image`);
 3. **Account** — for an agent: `default` (the store's), `none`, or an account;
-4. **Access** — GitHub as you (`off`, `read` or `push`), and forwarding this Mac's SSH agent;
+4. **Access** — the same questions as onboarding's Access step, for this sandbox: GitHub as you (`off`,
+   `read` or `push`; the default is the setting `defaults.github`) and SSH agent forwarding. What you
+   turn on is confirmed live (as `doz access` does); one that can't be confirmed can be skipped — kept,
+   not confirmed — turned off, or checked again. Where the GitHub token comes from is this Mac's choice
+   (`doz access set`), not the project's;
 5. **Permissions and network** — the network, and what the agent may do (`standard`, `locked`,
    `open`, or changes like `+web,-error-reports`);
 6. **Resources** — CPUs and memory (the disk is the image's own; it isn't set per sandbox);

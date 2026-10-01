@@ -190,21 +190,29 @@ struct Init: AsyncParsableCommand {
             Out.stdout("  \(img) runs no agent: no account\n")
         }
 
-        // 4. Access: GitHub, the SSH agent.
+        // 4. Access: GitHub, the SSH agent — `doz onboard`'s Access step (599e), for this sandbox: the same
+        // questions and flags (--github, --ssh-agent), each choice confirmed live on a terminal (Skip / Turn it off /
+        // Check again — never blocking). Where the token comes from is the Mac's (github.credentials, doz access set).
         step("access")
-        let ghOptions = ["off", "read", "push"]
-        if let gh = github {
-            guard ghOptions.contains(gh) else { throw invalid("--github: off, read or push") }
-            p.github = gh
-            explicit.insert("github")
-        } else if asker.interactive {
-            let i = asker.choose("GitHub — git and gh signed in as you (the token stays on the Mac)",
-                                 ["off", "read — clone and fetch your private repositories", "push — read, and push"],
-                                 preferred: ghOptions.firstIndex(of: p.github ?? "off") ?? 0)
-            p.github = ghOptions[i]
+        if let gh = github, !["off", "read", "push"].contains(gh) { throw invalid("--github: off, read or push") }
+        if let s = sshAgent, !["on", "off"].contains(s) { throw invalid("--ssh-agent: on or off") }
+        var access = AccessStep(g: g, asker: asker, talk: asker.interactive, githubFlag: github, sourceFlag: nil, sshFlag: sshAgent)
+        access.checkClaude = false
+        access.subject = "this sandbox"
+        access.askSource = false
+        if p.github != nil || p.settings[SettingKey.sshAgent] != nil {
+            access.start = AccessChoices(github: p.github ?? settings.string(SettingKey.defaultGithub) ?? "off",
+                                         githubSource: settings.string(SettingKey.githubCredentials).flatMap { $0 == "off" ? "gh" : $0 } ?? "gh",
+                                         ssh: p.settings[SettingKey.sshAgent]?.plain ?? settings.string(SettingKey.sshAgent) ?? "off")
         }
-        try setting(&p, SettingKey.sshAgent, "ssh_agent", flag: sshAgent, explicit: &explicit, asker: asker, settings: settings,
-                    question: "Forward this Mac's SSH agent (keys stay on the Mac; github.com:22 only)", options: ["off", "on"])
+        var chosen = access.choose()
+        if asker.interactive, chosen.github != "off" || chosen.ssh == "on" {
+            chosen = try access.confirm(chosen).0
+        }
+        p.github = chosen.github
+        p.settings[SettingKey.sshAgent] = .string(chosen.ssh)
+        if github != nil { explicit.insert("github") }
+        if sshAgent != nil { explicit.insert("ssh_agent") }
 
         // 5. Permissions and network.
         step("permissions")

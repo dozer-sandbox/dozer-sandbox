@@ -124,8 +124,15 @@ final class ProjectWizardTests: XCTestCase {
         XCTAssertEqual(o.workspace, dir.path)
         p.permissions = ["locked"]
         p.github = nil
-        o = p.createOptions(folder: dir, file: dir)
+        o = p.createOptions(folder: dir, file: dir, settings: DozerSettings(text: ""))
         XCTAssertEqual(o.allow, ["locked"])
+        // 599e: permissions without a github key keep the Access step's default (defaults.github).
+        o = p.createOptions(folder: dir, file: dir, settings: DozerSettings(text: "[defaults]\ngithub = \"read\"\n"))
+        XCTAssertEqual(o.allow, ["locked", "+github:as-you", "-github:push"])
+        var q = DozerProject(name: "x", image: "claude-code")
+        q.github = "read"
+        q.dropDefaults(settings: DozerSettings(text: "[defaults]\ngithub = \"read\"\n"), explicit: [])
+        XCTAssertNil(q.github, "the Access step's default is left to the setting")
     }
 
     func testTheDiff() {

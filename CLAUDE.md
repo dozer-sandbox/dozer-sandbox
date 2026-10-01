@@ -607,7 +607,11 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   `defaults.permissions` words, given to the host as `allow = ["standard"] + words` (a preset alone as is);
   `permissions`/`github` with a network of bake/nat/none is refused. `agent_prompt` renders `|-` when it has
   no final newline (exact round-trip). The page: `#/new` (`viewNew`, `nw*` in app.js; never re-rendered
-  by a live refresh); only `explicit` keys are sent. `make test-cli-projectwizard` drives an interactive
+  by a live refresh); only `explicit` keys are sent. Its Access step IS 599e's `renderAccessStep` (mode
+  'sandbox', state `nw.access`, pre-filled from the file else `defaults.github`/`sandbox.ssh_agent`; Next
+  confirms, Back does not) — the choices become the file's `github`/`ssh_agent`; `doz init` uses 599e's
+  `AccessStep` (`subject` "this sandbox", no source question — the token source is the Mac's). A file with
+  `permissions` but no `github` keeps `defaults.github` (`createOptions(…settings:)`). `make test-cli-projectwizard` drives an interactive
   `doz init` through `script(1)` (the Asker needs a controlling terminal).
 - **`doz uninstall`** removes a store only if it looks like one, the settings dir only if named
   `dozer-sandbox`, and the installed doz only when THIS executable is `<prefix>/libexec/doz/doz` (the

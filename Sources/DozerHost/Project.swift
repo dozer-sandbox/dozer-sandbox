@@ -250,7 +250,9 @@ public struct DozerProject: Equatable, Sendable {
     }
 
     /// The create options this project gives a new sandbox (the folder is its workspace).
-    public func createOptions(folder: URL, file: URL) -> CreateOptions {
+    /// `settings`: a file that sets `permissions` but not `github` keeps the Access step's GitHub default
+    /// (`defaults.github`, 599e) — the permissions are given on Standard, which would otherwise drop it.
+    public func createOptions(folder: URL, file: URL, settings given: DozerSettings? = nil) -> CreateOptions {
         var o = CreateOptions(image: image, cpus: cpus, memoryMiB: memoryMiB, workspace: folder.path, network: network, account: account)
         o.agentPrompt = agentPrompt
         o.agentPromptMode = agentPromptMode
@@ -261,7 +263,11 @@ public struct DozerProject: Equatable, Sendable {
         if let p = permissions {
             words = p == ["standard"] || p == ["locked"] || p == ["open"] ? p : ["standard"] + p
         }
-        words += Self.gitHubWords(github) ?? []
+        var gh = github
+        if gh == nil, permissions != nil {
+            gh = (given ?? .load()).string(SettingKey.defaultGithub).flatMap { $0 == "off" ? nil : $0 }
+        }
+        words += Self.gitHubWords(gh) ?? []
         if !words.isEmpty { o.allow = words }
         o.project = file.path
         // 596 (B6): a Dockerfile relative to this folder (its folder is the build context).
@@ -302,7 +308,8 @@ public struct DozerProject: Equatable, Sendable {
         if !explicit.contains("permissions"), let p = permissions,
            p == (SettingType.permissionWords(settings.string(SettingKey.permissions) ?? "standard") ?? ["standard"]) { permissions = nil }
         if !explicit.contains("account"), account == "default" { account = nil }
-        if !explicit.contains("github"), github == "off" { github = nil }
+        // 599e: the GitHub default is the Access step's (defaults.github).
+        if !explicit.contains("github"), github == (settings.string(SettingKey.defaultGithub) ?? "off") { github = nil }
         if !explicit.contains("agent_sudo"), agentSudo == settings.bool(SettingKey.agentSudo) { agentSudo = nil }
         for k in Self.settingKeys where !explicit.contains(k.key) {
             if let v = self.settings[k.setting], v == settings.resolve(k.setting).value { self.settings[k.setting] = nil }
