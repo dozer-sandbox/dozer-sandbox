@@ -1351,7 +1351,7 @@ function renderNavSandboxes() {
 }
 function paintNav() {
   for (const a of document.querySelectorAll('#nav > a')) {
-    a.classList.toggle('active', a.dataset.view === state.view || (state.view === 'sandbox' && a.dataset.view === 'overview'));
+    a.classList.toggle('active', a.dataset.view === state.view || ((state.view === 'sandbox' || state.view === 'new') && a.dataset.view === 'overview'));
   }
   renderNavSandboxes();
 }
@@ -1394,7 +1394,9 @@ async function refresh(scrollTop) {
   refreshing = true;
   try {
     const views = { overview: viewOverview, images: viewImages, resources: viewResources, operations: viewOperations, accounts: viewAccounts,
-                    metrics: viewMetrics, activity: viewActivity, doctor: viewDoctor, settings: viewSettings, onboarding: viewOnboarding };
+                    metrics: viewMetrics, activity: viewActivity, doctor: viewDoctor, settings: viewSettings, onboarding: viewOnboarding, new: viewNew };
+    // 599f: the wizard is never re-rendered under the person choosing (a live update); it re-renders itself.
+    if (state.view === 'new' && !scrollTop && state.nw && state.nw.node && $('view').contains(state.nw.node)) return;
     const fn = views[state.view] || viewOverview;
     const node = await fn();
     if (node && !state.signedOut) {
@@ -1553,7 +1555,11 @@ async function viewOverview() {
     h('td', null, lifecycleButtons(s, false))));
   return h('div', null,
     h('div', { class: 'head' }, h('h1', null, 'Sandboxes'),
-      h('div', { class: 'actions' }, quickAddButton(), btn('New sandbox', () => createDialog(), { primary: true }))),
+      h('div', { class: 'actions' }, quickAddButton(), (() => {
+        const b = btn('New sandbox', () => newSandboxWizard(), { primary: true, title: 'Step by step — your choices go in the project folder’s doz_project.yaml' });
+        b.dataset.newSandbox = '';
+        return b;
+      })())),
     h('p', { class: 'sub' }, o.source === 'host' ? 'Live from the host.' : 'No host is running: read from the store (nothing is live). An action starts the host.'),
     h('div', { class: 'cards' },
       hostCard(o.host),
@@ -1616,6 +1622,422 @@ async function quickAdd(button) {
     for (const b of document.querySelectorAll('[data-quick-add]')) b.disabled = false;
     if (button && button.isConnected) button.disabled = false;
   }
+}
+
+// ── 599f: the New Sandbox wizard (owner: "a new wizard process for creating a purposeful sandbox that steps
+// the user through all the choices, capturing the config in a doz_project.yml in the project / working dir").
+// #/new: project folder → agent and base → account → access → permissions and network → resources →
+// bridges → session → review. The steps are the host's list (`ProjectWizard.steps`, the same `doz init` walks);
+// every value is pre-filled from the settings, or from the folder's existing project file; only what the
+// person sets (or the file set) is written — the rest stays commented and follows the settings. The review
+// shows the EXACT file (rendered and read back by the CLI's parser), writes it (an existing one only after its
+// diff and a yes), then makes the sandbox as `doz up` would and opens it with the boot view, as Quick add does.
+const NW_FIELD = { cpus: 'cpus', memory: 'memory', network: 'network', permissions: 'permissions', account: 'account', github: 'github',
+                   agent_sudo: 'agentSudo', ssh_agent: 'sshAgent', clipboard: 'clipboard', browser_bridge: 'browserBridge', open_files: 'openFiles', tmux: 'tmux' };
+function newSandboxWizard(start = {}) {
+  state.nw = null;
+  state.nwStart = start;
+  if (location.hash === '#/new') refresh(true); else location.hash = '#/new';
+}
+async function viewNew() {
+  if (!state.nw) {
+    const [images, accounts, bases] = await Promise.all([api('images').catch(() => []), api('accounts').catch(() => ({ accounts: [] })), api('bases').catch(() => null)]);
+    let newName = 'my-project', projectsDir = setting('defaults.projects_dir', '~/Developer/dozer-sandbox-projects');
+    try { const qa = await api('quick-add', { method: 'POST', json: {} }); newName = qa.name; projectsDir = qa.projectsDir; } catch (_) { /* the defaults */ }
+    const start = state.nwStart || {};
+    // The steps are the host's (the list doz init walks); asking about the default folder changes nothing.
+    let steps = null;
+    try { steps = (await api('project/open', { method: 'POST', json: { folder: projectsDir + '/' + newName } })).steps; } catch (_) { /* shown after the folder */ }
+    state.nw = { step: 0, images, accounts, bases, projectsDir, newName, mode: start.folder ? 'existing' : 'new', path: start.folder || '',
+                 open: null, form: null, explicit: new Set(), preview: null, error: '', steps, reached: 0 };
+  }
+  return nwNode();
+}
+function nwRender() {
+  if (state.view !== 'new' || !state.nw) return;
+  $('view').replaceChildren(nwNode());
+  const first = $('view').querySelector('[data-nw-body] input:not([type=hidden]):not([disabled]), [data-nw-body] select, [data-nw-body] textarea, [data-nw-body] button.base-card');
+  if (first) first.focus();
+}
+function nwSection(form) {
+  const img = form.image || '';
+  if (img === 'lab') return 'lab';
+  const p = parseImageName(img, (state.nw.bases ? state.nw.bases.bases : []).map((b) => b.id));
+  return (p && p.agent === 'pi') || img === 'pi' ? 'pi' : 'claude-code';
+}
+function nwAgent(form) {
+  if (form.dockerfile) return form.agent && form.agent !== 'none' ? form.agent : null;
+  if (form.image === 'lab') return null;
+  const p = parseImageName(form.image || '', (state.nw.bases ? state.nw.bases.bases : []).map((b) => b.id));
+  if (p) return p.agent === 'none' ? null : p.agent;
+  const t = state.nw.images.find((x) => x.name === form.image);
+  return t && t.agent ? (AGENT_NAMES[t.agent] ? t.agent : null) : null;
+}
+function nwBase(form) {
+  const p = parseImageName(form.image || '', (state.nw.bases ? state.nw.bases.bases : []).map((b) => b.id));
+  return form.dockerfile ? '' : p ? p.base : '';
+}
+function nwNetwork(form) { return form.network || setting('images.' + nwSection(form) + '.network', nwSection(form) === 'lab' ? 'bake' : 'agent'); }
+const nwPermissionNet = (n) => ['agent', 'locked', 'open'].includes(n);
+function nwSet(key, value) {
+  const nw = state.nw;
+  nw.form[NW_FIELD[key] || key] = value;
+  if (NW_FIELD[key]) nw.explicit.add(key);
+  nw.preview = null;
+}
+/// What the page sends: the name and the image always; the other choices only when set on purpose (or by the file).
+function nwPayload() {
+  const nw = state.nw, f = nw.form, out = { name: f.name, image: f.image };
+  for (const k of ['agent', 'base', 'dockerfile', 'agentPrompt', 'agentPromptMode', 'sessions']) if (f[k] !== undefined && f[k] !== null && f[k] !== '') out[k] = f[k];
+  for (const [key, field] of Object.entries(NW_FIELD)) if (nw.explicit.has(key) && f[field] !== undefined && f[field] !== null) out[field] = f[field];
+  return { folder: nw.open.folder, form: out, explicit: [...nw.explicit] };
+}
+function nwNode() {
+  const nw = state.nw;
+  const steps = nw.steps || [{ id: 'folder', title: 'Project folder' }];
+  const stepper = h('ol', { class: 'wiz-steps', 'aria-label': 'Steps' }, steps.map((s, i) => {
+    const can = nw.form && i <= Math.max(nw.reached, 8) && i !== nw.step;
+    return h('li', { class: i === nw.step ? 'current' : i < nw.step ? 'done' : null, 'aria-current': i === nw.step ? 'step' : null, 'data-nw-step': s.id },
+      h('span', { class: 'wiz-n' }, String(i + 1)), can ? h('a', { href: '#/new', on: { click: (ev) => { ev.preventDefault(); nwGo(i); } } }, s.title) : s.title);
+  }));
+  const ids = steps.map((s) => s.id);
+  const id = ids[nw.step] || 'folder';
+  const step = { folder: nwFolder, image: nwImage, account: nwAccount, access: nwAccess, permissions: nwPermissions, resources: nwResources,
+                 bridges: nwBridges, session: nwSession, review: nwReview }[id]();
+  nw.collect = step.collect || (() => {});
+  const error = h('div', { class: 'dlg-error', role: 'alert', 'data-nw-error': '' }, nw.error || '');
+  const last = id === 'review';
+  const back = nw.step > 0 ? btn('Back', () => nwGo(nw.step - 1)) : null;
+  const skip = nw.form && !last ? btn('Skip to review', () => nwGo(ids.length - 1), { icon: 'skip-forward', title: 'Everything not chosen yet keeps its default' }) : null;
+  if (skip) skip.dataset.nwSkip = '';
+  const next = last ? null : h('button', { type: 'submit', class: 'btn primary', 'data-nw-next': '' }, withIcon('arrow-right', 'Next'));
+  const form = h('form', { class: 'wiz-body panel', 'data-nw-body': id, novalidate: '' },
+    h('h2', null, (steps[nw.step] || { title: 'Project folder' }).title), step.el, error,
+    h('div', { class: 'wiz-buttons' }, back, h('span', { class: 'wiz-gap' }), skip, step.extra || null, next));
+  form.addEventListener('submit', (ev) => { ev.preventDefault(); if (!last) nwGo(nw.step + 1); });
+  form.addEventListener('keydown', (ev) => {
+    // Alt+← / Alt+→: Back / Next (Enter in a field is Next; a textarea keeps its Enter).
+    if (ev.altKey && ev.key === 'ArrowLeft' && nw.step > 0) { ev.preventDefault(); nwGo(nw.step - 1); }
+    if (ev.altKey && ev.key === 'ArrowRight' && !last) { ev.preventDefault(); nwGo(nw.step + 1); }
+  });
+  const node = h('div', { class: 'wizard nw', 'data-nw': id },
+    h('div', { class: 'head' }, h('h1', null, 'New sandbox'),
+      h('div', { class: 'actions' }, btn('One-page form', () => createDialog(), { small: true, icon: 'table', title: 'All choices on one page (an isolated sandbox, no project file)' }))),
+    h('p', { class: 'sub' }, 'Step by step; your choices are written to the project folder’s ', h('code', null, 'doz_project.yaml'),
+      ' — ', h('code', null, 'doz up'), ' there makes the same sandbox. The same as ', h('code', null, 'doz init'), ' in a terminal.'),
+    stepper, form);
+  nw.node = node;
+  return node;
+}
+async function nwGo(i) {
+  const nw = state.nw;
+  nw.error = '';
+  try {
+    await nw.collect();
+  } catch (e) {
+    // Back never stops on the step's own check (the folder step's excepted: nothing is open without it).
+    if (i > nw.step || nw.step === 0) {
+      nw.error = e.message || String(e);
+      nwRender();
+      return;
+    }
+  }
+  if (!nw.form) { nwRender(); return; }
+  nw.step = Math.max(0, Math.min(i, nw.steps.length - 1));
+  nw.reached = Math.max(nw.reached, nw.step);
+  nwRender();
+  $('main').scrollTop = 0;
+}
+
+function nwFolder() {
+  const nw = state.nw;
+  const radio = (value, label, extra) => {
+    const r = h('input', { type: 'radio', name: 'nw-folder', value, 'data-nw-mode': value });
+    r.checked = nw.mode === value;
+    r.addEventListener('change', () => { if (r.checked) { nw.mode = value; nw.open = null; nw.form = null; nwRender(); } });
+    return h('label', { class: 'wiz-choice' + (nw.mode === value ? ' chosen' : '') }, r, h('span', null, label, extra));
+  };
+  const name = h('input', { type: 'text', name: 'nw-new-name', 'data-nw-new-name': '', autocomplete: 'off', spellcheck: 'false', placeholder: 'a-z 0-9 -' });
+  name.value = nw.newName;
+  const where = h('div', { class: 'muted mono', 'data-nw-new-path': '' }, nw.projectsDir + '/' + nw.newName);
+  name.addEventListener('input', () => { nw.newName = name.value.trim(); where.textContent = nw.projectsDir + '/' + nw.newName; nw.open = null; nw.form = null; });
+  const path = h('input', { type: 'text', name: 'nw-path', 'data-nw-path': '', autocomplete: 'off', spellcheck: 'false', placeholder: '~/code/my-app' });
+  path.value = nw.path;
+  path.addEventListener('input', () => { nw.path = path.value.trim(); nw.open = null; nw.form = null; });
+  const choose = btn('Choose…', async () => {
+    try {
+      const r = await api('workspace/choose', { method: 'POST', json: nw.path ? { start: nw.path } : {} });
+      if (r.cancelled) return;
+      nw.path = r.path; nw.mode = 'existing'; nw.open = null; nw.form = null;
+      nwRender();
+    } catch (e) { toast(e.message || String(e), true); }
+  }, { small: true, icon: 'folder', title: 'This Mac’s folder picker' });
+  choose.dataset.nwChoose = '';
+  const found = nw.open && nw.open.file
+    ? h('div', { class: 'notice', 'data-nw-found': nw.open.file }, icon('layout-template'), ' This folder has ', h('code', null, nw.open.file),
+        ' — the wizard starts from it; the review shows what changes before anything is written.') : null;
+  const el = h('div', { class: 'wiz-choices' },
+    radio('new', 'A new folder in your projects folder', h('div', { class: 'nw-sub' }, h('label', { class: 'field' }, h('span', null, 'Folder name'), name), where)),
+    radio('existing', 'A folder you have (your project)', h('div', { class: 'nw-sub' }, h('label', { class: 'field' }, h('span', null, 'Folder'), h('div', { class: 'row' }, path, choose)),
+      h('small', { class: 'muted' }, 'Shared at /workspace. If it has a doz_project.yaml (or .yml), the wizard starts from it.'))),
+    found);
+  return {
+    el,
+    async collect() {
+      if (nw.mode === 'new' && !/^[a-z0-9][a-z0-9-]{0,39}$/.test(nw.newName)) throw new Error('The folder name: 1–40 of a-z 0-9 - (it is also the sandbox’s name).');
+      const folder = nw.mode === 'new' ? nw.projectsDir + '/' + nw.newName : nw.path;
+      if (!folder) throw new Error('Choose a folder.');
+      if (nw.open && nw.form) return;
+      const r = await api('project/open', { method: 'POST', json: { folder } });
+      if (r.error) throw new Error(r.error);
+      nw.open = r;
+      nw.steps = r.steps;
+      nw.form = JSON.parse(JSON.stringify(r.form));
+      nw.explicit = new Set(r.explicit);
+      nw.reached = r.file ? r.steps.length - 1 : 0;
+    },
+  };
+}
+function nwImage() {
+  const nw = state.nw, f = nw.form;
+  const name = h('input', { type: 'text', name: 'nw-name', 'data-nw-name': '', autocomplete: 'off', spellcheck: 'false', placeholder: 'a-z 0-9 -' });
+  name.value = f.name;
+  name.addEventListener('input', () => { f.name = name.value.trim(); nw.preview = null; });
+  const picker = imagePicker({ images: nw.images, bases: nw.bases, value: f.dockerfile ? (f.agent === 'pi' ? 'pi' : f.agent === 'none' ? 'lab' : 'claude-code') : f.image,
+                               dockerfile: f.dockerfile || '', onChange: () => {} });
+  const el = h('div', { class: 'nw-fields' }, h('label', { class: 'field' }, h('span', null, 'Sandbox name'), name, h('small', { class: 'muted' }, 'Its name in doz ls and the dashboard.')), picker.el);
+  return {
+    el,
+    collect() {
+      if (!/^[a-z0-9][a-z0-9-]{0,39}$/.test(f.name || '')) throw new Error('The name: 1–40 of a-z 0-9 - (not starting with -).');
+      const why = picker.blocked();
+      if (why) throw new Error(why);
+      const before = f.image + '|' + (f.dockerfile || '');
+      const df = picker.dockerfile();
+      f.image = picker.image();
+      if (df) { f.dockerfile = df; f.agent = picker.agent() || 'none'; delete f.base; } else { delete f.dockerfile; delete f.agent; delete f.base; }
+      if (before !== f.image + '|' + (f.dockerfile || '')) nw.preview = null;
+    },
+  };
+}
+function nwAccount() {
+  const nw = state.nw, f = nw.form, agent = nwAgent(f);
+  if (!agent) return { el: h('p', { class: 'muted', 'data-nw-no-account': '' }, 'This image runs no agent: it needs no account.') };
+  if (!nwPermissionNet(nwNetwork(f)) && nwNetwork(f) !== 'bake') {
+    return { el: h('p', { class: 'muted' }, 'Its network (' + nwNetwork(f) + ') reaches no account’s API: it uses none.') };
+  }
+  const acct = accountChooser({ accounts: nw.accounts, agent: () => agent, defaultValue: 'default', value: f.account || null,
+                                onChange: () => { nwSet('account', acct.get() || 'default'); } });
+  return {
+    el: h('div', { class: 'nw-fields' }, acct.el, h('small', { class: 'muted' }, 'The account the Mac’s proxy uses for it — the sandbox only ever sees a placeholder.')),
+    collect() { if (!acct.ok()) throw new Error((AGENT_NAMES[agent] || 'This agent') + ' needs an Anthropic API key — add one above, or go back and choose another agent.'); },
+  };
+}
+function nwAccess() {
+  const nw = state.nw, f = nw.form, net = nwNetwork(f);
+  const gh = f.github || 'off';
+  const ghOk = nwPermissionNet(net);
+  const opts = [['off', 'Off', 'git and gh in the sandbox are not signed in.'], ['read', 'Read', 'git and gh signed in as you — clone and fetch your private repositories; nothing is pushed.'],
+                ['push', 'Read and push', 'Also push commits and change things on GitHub as you (pull requests, issues).']];
+  const radios = opts.map(([v, label, note]) => {
+    const r = h('input', { type: 'radio', name: 'nw-github', value: v, 'data-nw-github': v });
+    r.checked = gh === v;
+    r.disabled = !ghOk && v !== 'off';
+    r.addEventListener('change', () => {
+      if (!r.checked) return;
+      const apply = () => { nwSet('github', v); nwRender(); };
+      if (v === 'off') apply(); else confirmGitHub(v === 'push' ? 'github:push' : 'github:as-you', async () => apply());
+      nwRender();
+    });
+    return h('label', { class: 'wiz-choice' + (gh === v ? ' chosen' : '') }, r, h('span', null, h('strong', null, label), h('div', { class: 'muted' }, note)));
+  });
+  const ssh = h('input', { type: 'checkbox', role: 'switch', 'data-nw-ssh': '' });
+  ssh.checked = (f.sshAgent || setting('sandbox.ssh_agent', 'off')) === 'on';
+  ssh.addEventListener('change', () => nwSet('ssh_agent', ssh.checked ? 'on' : 'off'));
+  return {
+    el: h('div', { class: 'nw-fields' },
+      h('fieldset', { class: 'wiz-choices' }, h('legend', null, 'GitHub — as you'), radios,
+        ghOk ? h('small', { class: 'muted' }, 'Your token stays on this Mac: the proxy adds it to requests to GitHub.')
+             : h('small', { class: 'muted' }, 'Needs a network with permissions (agent, locked or open) — this sandbox’s is ' + net + '.')),
+      h('label', { class: 'field check' }, ssh, h('span', null, 'Forward this Mac’s SSH agent — ssh and git over SSH can ask it to sign; the keys never enter the sandbox (github.com:22 only)'))),
+  };
+}
+function nwPermissions() {
+  const nw = state.nw, f = nw.form, b = nw.bases;
+  const nets = [['', 'default for this image (' + setting('images.' + nwSection(f) + '.network', nwSection(f) === 'lab' ? 'bake' : 'agent') + ')'],
+                ['agent', 'agent — proxied: what the agent may do is its permissions'], ['bake', 'bake — proxied: package registries only'],
+                ['locked', 'locked — proxied: its AI model only'], ['open', 'open — proxied: everything, still logged'],
+                ['nat', 'nat — a real network interface, unfiltered'], ['none', 'none — no network']];
+  const sel = h('select', { name: 'network', 'data-nw-network': '', 'aria-label': 'Network' }, nets.map(([v, l]) => h('option', { value: v }, l)));
+  sel.value = f.network || '';
+  sel.addEventListener('change', () => { nwSet('network', sel.value || null); if (!sel.value) nw.explicit.delete('network'); nwRender(); });
+  const parts = [h('label', { class: 'field' }, h('span', null, 'Network'), sel)];
+  if (b && b.permissions && nwPermissionNet(nwNetwork(f))) {
+    const base = nwBase(f);
+    const rows = b.permissions.filter((r) => r.group !== 'github');
+    const std = new Set((b.standard[base] || b.standard[''] || []).filter((x) => !x.startsWith('github:')));
+    const all = rows.map((r) => r.id);
+    const fromWords = (ws) => {
+      let s = new Set(std);
+      for (const w of ws) {
+        if (w === 'standard') s = new Set(std);
+        else if (w === 'locked') s = new Set(['model']);
+        else if (w === 'open') s = new Set(all);
+        else if (w.startsWith('-')) s.delete(w.slice(1));
+        else s.add(w.startsWith('+') ? w.slice(1) : w);
+      }
+      return s;
+    };
+    const words = (on) => {
+      const same = (a, c) => a.size === c.size && [...a].every((x) => c.has(x));
+      if (same(on, std)) return 'standard';
+      if (same(on, new Set(['model']))) return 'locked';
+      if (same(on, new Set(all))) return 'open';
+      return [...all.filter((x) => on.has(x) && !std.has(x)).map((x) => '+' + x), ...all.filter((x) => !on.has(x) && std.has(x)).map((x) => '-' + x)].join(',');
+    };
+    const on = fromWords((f.permissions || setting('defaults.permissions', 'standard')).split(',').map((x) => x.trim()).filter(Boolean));
+    const label = words(on);
+    const preset = (name, set) => {
+      const bt = btn(name[0].toUpperCase() + name.slice(1), () => { nwSet('permissions', words(set)); nwRender(); }, { small: true, icon: name === 'locked' ? 'shield' : name === 'open' ? 'eye' : 'check' });
+      bt.dataset.nwPreset = name;
+      return bt;
+    };
+    parts.push(h('div', { class: 'field perm-field', 'data-nw-permissions': label },
+      h('span', null, 'What the agent can do ', h('code', { 'data-nw-perm-words': '' }, label)),
+      h('div', { class: 'row' }, preset('locked', new Set(['model'])), preset('standard', std), preset('open', new Set(all))),
+      permissionSwitches(rows, on, (id, v) => {
+        const apply = () => {
+          const inst = rows.filter((x) => x.group === 'install').map((x) => x.id);
+          for (const x of id === 'install' ? inst : [id]) { if (v) on.add(x); else on.delete(x); }
+          nwSet('permissions', words(on));
+          nwRender();
+        };
+        if (id === 'web' && v) confirmWeb(async () => apply()); else apply();
+      }, { hosts: true })));
+  } else {
+    parts.push(h('p', { class: 'muted' }, 'A ' + nwNetwork(f) + ' network has no permissions to choose.'));
+  }
+  return { el: h('div', { class: 'nw-fields' }, parts) };
+}
+function nwResources() {
+  const nw = state.nw, f = nw.form, sec = nwSection(f);
+  const cpus = h('input', { type: 'number', min: '1', max: '64', name: 'cpus', 'data-nw-cpus': '' });
+  cpus.value = String(f.cpus || setting('defaults.cpus', 2));
+  cpus.addEventListener('change', () => nwSet('cpus', Number(cpus.value)));
+  const memMiB = Number(setting('images.' + sec + '.memory_mib', sec === 'lab' ? 1024 : 2048));
+  const mem = h('input', { type: 'text', name: 'memory', 'data-nw-memory': '', placeholder: '2G, 512M' });
+  mem.value = f.memory || (memMiB % 1024 === 0 ? memMiB / 1024 + 'G' : memMiB + 'M');
+  mem.addEventListener('change', () => nwSet('memory', mem.value.trim()));
+  return {
+    el: h('div', { class: 'nw-fields' },
+      h('label', { class: 'field' }, h('span', null, 'CPUs'), cpus, h('small', { class: 'muted' }, 'Virtual CPUs, 1–64.')),
+      h('label', { class: 'field' }, h('span', null, 'Memory'), mem, h('small', { class: 'muted' }, 'Guest RAM, held only while it runs (2G, 512M).')),
+      h('div', { class: 'field' }, h('span', null, 'Disk'), h('small', { class: 'muted' }, 'The image’s own, shared with it until the sandbox writes — not set per sandbox.'))),
+    collect() {
+      const n = Number(cpus.value);
+      if (!Number.isInteger(n) || n < 1 || n > 64) throw new Error('CPUs: a whole number 1–64.');
+      if (!/^\s*\d+(\.\d+)?\s*([gm](i?b)?)?\s*$/i.test(mem.value)) throw new Error('Memory: a size like 2G or 512M.');
+    },
+  };
+}
+function nwSelect(key, label, options, value, note) {
+  const sel = h('select', { name: key, 'data-nw-setting': key, 'aria-label': label }, options.map(([v, l]) => h('option', { value: v }, l)));
+  sel.value = value;
+  sel.addEventListener('change', () => nwSet(key, sel.value));
+  return h('label', { class: 'field' }, h('span', null, label), sel, note ? h('small', { class: 'muted' }, note) : null);
+}
+function nwBridges() {
+  const f = state.nw.form;
+  return {
+    el: h('div', { class: 'nw-fields' },
+      nwSelect('clipboard', 'Clipboard', [['write', 'write — a copy in the sandbox reaches the Mac clipboard, with a notice'], ['off', 'off']],
+        f.clipboard || setting('sandbox.clipboard', 'write')),
+      nwSelect('browser_bridge', 'Browser', [['on', 'on — links opened in the sandbox open in the Mac’s browser'], ['off', 'off']],
+        f.browserBridge || setting('sandbox.browser_bridge', 'on')),
+      nwSelect('open_files', 'Workspace files', [['on', 'on — documents opened in the sandbox open on the Mac, with a notice'], ['off', 'off']],
+        f.openFiles || setting('sandbox.open_files', 'on'))),
+  };
+}
+function nwSession() {
+  const nw = state.nw, f = nw.form;
+  const box = (key, label, value) => {
+    const c = h('input', { type: 'checkbox', role: 'switch', 'data-nw-check': key });
+    c.checked = value;
+    c.addEventListener('change', () => nwSet(key, c.checked));
+    return h('label', { class: 'field check' }, c, h('span', null, label));
+  };
+  const prompt = h('textarea', { name: 'agentPrompt', rows: 3, 'data-nw-prompt': '', placeholder: 'e.g. The tests run with `make test`.', spellcheck: 'false' });
+  prompt.value = f.agentPrompt || '';
+  prompt.addEventListener('change', () => { f.agentPrompt = prompt.value.trim() ? prompt.value.replace(/\s+$/, '') : null; nw.preview = null; });
+  return {
+    el: h('div', { class: 'nw-fields' },
+      box('tmux', 'Run its sessions inside tmux (windows, panes, Ctrl-b)', f.tmux !== undefined && f.tmux !== null ? f.tmux : setting('sessions.tmux', false) === true),
+      box('agent_sudo', 'The agent has passwordless sudo (apt-get install …)', f.agentSudo !== undefined && f.agentSudo !== null ? f.agentSudo : setting('sandbox.agent_sudo', true) === true),
+      h('label', { class: 'field' }, h('span', null, 'This project’s lines for the agent (optional)'), prompt,
+        h('small', { class: 'muted' }, 'Added to what the agent is told about its sandbox, from its next session.')),
+      f.sessions && f.sessions.length ? h('p', { class: 'muted', 'data-nw-sessions': '' }, 'Sessions the file starts (kept): ' + f.sessions.map((s) => s.name).join(', ')) : null),
+  };
+}
+function nwReview() {
+  const nw = state.nw;
+  const pre = h('pre', { class: 'nw-yaml', 'data-nw-yaml': '' }, nw.preview ? nw.preview.text : 'Reading…');
+  const where = h('div', { class: 'muted mono', 'data-nw-file': '' }, nw.preview ? nw.preview.path : '');
+  const diffBox = h('div', { 'data-nw-diff-box': '' });
+  const go = btn(nw.open && nw.open.file ? 'Replace the file and create' : 'Write and create', () => nwCreate(go), { primary: true, icon: 'rocket' });
+  go.dataset.nwCreate = '';
+  go.disabled = !nw.preview;
+  const paint = () => {
+    pre.textContent = nw.preview.text;
+    where.textContent = nw.preview.path;
+    diffBox.replaceChildren(nw.preview.existing === undefined || nw.preview.existing === null ? h('small', { class: 'muted' }, 'A new file.')
+      : nw.preview.existing === nw.preview.text ? h('small', { class: 'muted', 'data-nw-same': '' }, 'The same as the file there now — nothing to write.')
+      : h('small', { class: 'muted' }, 'It replaces the file there now — you see what changes before it is written.'));
+    go.disabled = false;
+  };
+  if (nw.preview) setTimeout(paint, 0);
+  else {
+    api('project/preview', { method: 'POST', json: nwPayload() }).then((p) => { nw.preview = p; if (state.view === 'new' && state.nw === nw) paint(); })
+      .catch((e) => { pre.textContent = ''; const err = $('view').querySelector('[data-nw-error]'); if (err) err.textContent = e.message || String(e); });
+  }
+  return {
+    el: h('div', { class: 'nw-fields' }, h('p', null, 'The project file — exactly what is written:'), where, pre, diffBox,
+      h('small', { class: 'muted' }, 'Then the sandbox is made from it (as ', h('code', null, 'doz up'), ' there would), started, and opened.')),
+    extra: go,
+  };
+}
+function nwDiffNode(lines) {
+  return h('pre', { class: 'nw-diff', 'data-nw-diff': '' }, lines.map((l) => h('div', { class: l.startsWith('+ ') ? 'add' : l.startsWith('- ') ? 'del' : 'same' }, l)));
+}
+async function nwCreate(button) {
+  const nw = state.nw, p = nw.preview;
+  const run = async (replace) => {
+    button.disabled = true;
+    try {
+      const body = nwPayload();
+      if (replace) body.replace = replace;
+      const w = await api('project/write', { method: 'POST', json: body });
+      toast((w.written ? 'Wrote ' : 'Kept ') + w.path);
+      const op = await actOrThrow({ action: 'project-create', folder: w.folder });
+      const end = await waitOp(op.id);
+      if (!end || end.state !== 'done') { button.disabled = false; return; }
+      state.nw = null;
+      if (bootViewOnStart()) { await startWithBootView(nw.form.name); return; }
+      location.hash = '#/sandbox/' + nw.form.name;
+      act({ action: 'start', sandbox: nw.form.name });
+    } catch (e) {
+      button.disabled = false;
+      const err = $('view').querySelector('[data-nw-error]');
+      if (err) err.textContent = e.message || String(e); else toast(e.message || String(e), true);
+    }
+  };
+  if (p.existing !== undefined && p.existing !== null && p.existing !== p.text) {
+    const d = dialog('Replace ' + p.path.split('/').pop() + '?', 'The folder has a project file. These lines change (− there now, + to be written):',
+      [], 'Replace it', async () => { await run(p.replace); }, { danger: true });
+    d.querySelector('form > p.sub').after(nwDiffNode(p.diff.filter((l) => !l.startsWith('  '))));
+    d.dataset.nwConfirm = '';
+    return;
+  }
+  await run(null);
 }
 
 async function createDialog(quick = null) {
@@ -2765,8 +3187,8 @@ function accountForm(opts) {
 // ui.allow_secret_entry off, the commands. `ok()` says whether the form may create.
 const AGENT_NAMES = { 'claude-code': 'Claude Code', pi: 'pi' };
 const KIND_LABELS = { mac: 'this Mac’s login', 'setup-token': 'setup token', 'api-key': 'API key' };
-function accountChooser({ accounts, agent, same = null, defaultValue = '', onChange = () => {} }) {
-  let acc = accounts, current = agent(), chosen = null;
+function accountChooser({ accounts, agent, same = null, defaultValue = '', value = null, onChange = () => {} }) {
+  let acc = accounts, current = agent(), chosen = value;            // 599f: `value` pre-selects (a project file's account)
   const el = h('div', { class: 'field acct-chooser', 'data-acct-chooser': '' });
   const kindsOf = (a) => (a && acc.agents ? acc.agents[a] : null);
   const fits = (kinds) => acc.accounts.filter((x) => !kinds || kinds.includes(x.kind));

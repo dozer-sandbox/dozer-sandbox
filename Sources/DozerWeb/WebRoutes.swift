@@ -78,6 +78,11 @@ public enum WebRoute: Equatable, Sendable {
     // SERVER writes — the browser never names the path (the setting stays read-only to `settings`).
     case quickAdd                  // POST /api/v1/quick-add  ({image?, isolated?})
     case projectsDirChoose         // POST /api/v1/settings/projects-dir/choose  ({})
+    // 599f — the New Sandbox wizard's project file (WebProject.swift): read (changes nothing), the exact
+    // file it would write and its diff (changes nothing), and the write (an existing file only by its digest).
+    case projectOpen               // POST /api/v1/project/open     ({folder})
+    case projectPreview            // POST /api/v1/project/preview  ({folder, form, explicit})
+    case projectWrite              // POST /api/v1/project/write    ({folder, form, explicit, replace?})
     // 595 — Resources: the account of everything Dozer uses (read), and what a deletion WOULD do
     // (changes nothing; POST + CSRF because it carries ids). Deleting is the typed actions
     // `resources-rm` / `resources-clean`; choosing the kernel is `resources-kernel`.
@@ -122,6 +127,9 @@ public enum WebRoute: Equatable, Sendable {
         case (.post, 2) where rest == ["workspace", "check"]: return .workspaceCheck
         case (.post, 2) where rest == ["workspace", "choose"]: return .workspaceChoose
         case (.post, 1) where rest[0] == "quick-add": return .quickAdd
+        case (.post, 2) where rest == ["project", "open"]: return .projectOpen
+        case (.post, 2) where rest == ["project", "preview"]: return .projectPreview
+        case (.post, 2) where rest == ["project", "write"]: return .projectWrite
         case (.post, 3) where rest == ["settings", "projects-dir", "choose"]: return .projectsDirChoose
         case (.post, 2) where rest == ["resources", "preview"]: return .resourcesPreview
         case (.post, 2) where rest == ["dockerfile", "choose"]: return .dockerfileChoose

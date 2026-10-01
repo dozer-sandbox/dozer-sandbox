@@ -688,3 +688,15 @@ nav a.active + .nav-quick:hover { background: color-mix(in srgb, var(--bg) 22%, 
 .nav-quick:disabled { opacity: .45; cursor: default; }
 .quick-why { margin: 0 0 12px; }
 .path-setting { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+/* 599f: the New Sandbox wizard (#/new). */
+.nw .wiz-buttons .wiz-gap { flex: 1; }
+.nw-fields { display: flex; flex-direction: column; gap: 12px; }
+.nw-sub { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.nw-sub .row, .nw .perm-field .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.nw-sub .row input { flex: 1; min-width: 220px; }
+.nw-yaml, .nw-diff { margin: 0; white-space: pre-wrap; word-break: break-word; background: var(--code); border-radius: 6px; padding: 10px 12px;
+  font-family: var(--mono); font-size: 12.5px; max-height: 420px; overflow: auto; }
+.nw-diff .add { color: var(--run); }
+.nw-diff .del { color: var(--fail); }
+.nw-diff .same { color: var(--muted); }
+.wiz-steps li a { color: inherit; }

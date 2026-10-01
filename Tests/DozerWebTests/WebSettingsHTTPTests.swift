@@ -514,6 +514,34 @@ final class WebSettingsHTTPTests: XCTestCase {
         XCTAssertTrue(WebFolderPicker.script.contains("item 2 of argv"), "the prompt is an argument of the fixed script too")
     }
 
+    /// 599f: the wizard's project routes — CSRF, the exact Origin, strict bodies, POST only; `project-create`
+    /// only with {folder}. (The YAML itself is read by the CLI's parser: ProjectWizardTests.)
+    func testTheProjectRoutes() throws {
+        let (cookie, csrf) = try signIn()
+        func post(_ path: String, _ body: String, csrf c: String? = nil, origin o: String? = nil) throws -> RawResponse {
+            var h = ["Cookie": cookie, "Origin": o ?? origin, "Content-Type": "application/json"]
+            if let c { h["X-Doz-CSRF"] = c }
+            return try request(path, h, method: "POST", body: body)
+        }
+        let scratch = "/private/tmp/dzpr-\(UUID().uuidString.prefix(8))"
+        defer { try? FileManager.default.removeItem(atPath: scratch) }
+        for path in ["/api/v1/project/open", "/api/v1/project/preview", "/api/v1/project/write"] {
+            XCTAssertEqual(try post(path, #"{"folder":"\#(scratch)"}"#).status, 403, "\(path): no CSRF")
+            XCTAssertEqual(try post(path, #"{"folder":"\#(scratch)"}"#, csrf: csrf, origin: "http://evil.example").status, 403, "\(path): a foreign Origin")
+            XCTAssertEqual(try post(path, #"{"folder":"\#(scratch)","nope":1}"#, csrf: csrf).status, 400, "\(path): an unknown field")
+            XCTAssertEqual(try request(path, ["Cookie": cookie]).status, 404, "\(path): GET is not a route")
+        }
+        XCTAssertEqual(try post("/api/v1/project/open", #"{"folder":"\#(scratch)","form":{}}"#, csrf: csrf).status, 400, "open takes only the folder")
+        let r = try post("/api/v1/project/open", #"{"folder":"\#(scratch)/new"}"#, csrf: csrf)
+        XCTAssertEqual(r.status, 200, r.text)
+        XCTAssertTrue(r.text.contains("\"review\"") && r.text.contains("\"name\":\"new\""), r.text)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: scratch + "/new"), "open makes nothing")
+        XCTAssertEqual(try post("/api/v1/project/preview", #"{"folder":"\#(scratch)","form":{"name":"a","image":"lab","rogue":1}}"#, csrf: csrf).status, 400)
+        XCTAssertEqual(try post("/api/v1/project/write", #"{"folder":"\#(scratch)","form":{"name":"a","image":"lab"},"replace":"x"}"#, csrf: csrf).status, 400)
+        XCTAssertEqual(try post("/api/v1/actions", #"{"action":"project-create","folder":"\#(scratch)","image":"lab"}"#, csrf: csrf).status, 400)
+        XCTAssertEqual(try post("/api/v1/actions", #"{"action":"project-create","folder":"\#(scratch)"}"#, csrf: csrf).status, 404, "no project file there")
+    }
+
     /// 594 (owner ruling): a key or a token typed in the browser — ONE CSRF-checked POST, a strict body,
     /// allowed only while ui.allow_secret_entry; no response (success, refusal or failure) carries it.
     func testAnAccountFromAMaskedFieldNeverComesBack() throws {

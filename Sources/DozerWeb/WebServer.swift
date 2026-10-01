@@ -527,6 +527,14 @@ public final class DozerWebServer: @unchecked Sendable {
             return json(operations.recent)
         case .actions:
             try Self.requireJSONBody(md)
+            // 599f: `project-create` {folder} — the sandbox the folder's project file describes, made with
+            // the options `doz up` gives it.
+            if let d = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any], d["action"] as? String == "project-create" {
+                guard Set(d.keys) == ["action", "folder"], let folder = d["folder"] as? String, folder.count <= 1024 else {
+                    throw WebAction.Invalid("project-create: only folder")
+                }
+                return json(try operations.start(try WebProject.createAction(folder: folder)), status: 202)
+            }
             let action = try WebAction.decode(body)
             return json(try operations.start(action), status: 202)
         case .policyPreview(let name):
@@ -626,6 +634,18 @@ public final class DozerWebServer: @unchecked Sendable {
             let taken = Set(((try? await overview)?.sandboxes ?? []).map(\.name))
             return json(try q.plan(taken: taken, settings: settings.current, images: (try? await images) ?? [],
                                    accounts: (try? await accounts) ?? WebAccounts(accounts: [], defaultAccount: "none", keepalive: false)))
+        case .projectOpen:
+            // 599f: changes nothing; POST (CSRF, above) because it carries a path.
+            try Self.requireJSONBody(md)
+            let q = try WebProjectRequest.decode(body, allowed: ["folder"])
+            return json(WebProject.open(q, settings: settings.current, store: data.storePath))
+        case .projectPreview, .projectWrite:
+            try Self.requireJSONBody(md)
+            let writing = route == .projectWrite
+            let q = try WebProjectRequest.decode(body, allowed: writing ? ["folder", "form", "explicit", "replace"] : ["folder", "form", "explicit"])
+            let taken = Set(((try? await data.overview())?.sandboxes ?? []).map(\.name))
+            if writing { return json(try WebProject.write(q, settings: settings.current, store: data.storePath, taken: taken)) }
+            return json(try WebProject.preview(q, settings: settings.current, store: data.storePath, taken: taken).0)
         case .projectsDirChoose:
             // 599c: the Mac's picker; what the person chose there is written here — never a path from the page.
             try Self.requireJSONBody(md)
