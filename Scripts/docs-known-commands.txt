@@ -67,6 +67,9 @@ account/rm
 account/default
 account/use
 account/keepalive
+access
+access/show
+access/set
 host/start
 host/stop
 host/status

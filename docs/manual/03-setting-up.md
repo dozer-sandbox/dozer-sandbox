@@ -1,7 +1,8 @@
 # Setting up this Mac
 
-Setup — **onboarding** — is what you do once after installing: it checks your Mac, connects a Claude
-account, writes your settings and prepares the images your sandboxes start from. You can do it in the
+Setup — **onboarding** — is what you do once after installing: it checks your Mac, chooses and
+confirms what sandboxes may use as you (**Access**: a Claude account, GitHub, your SSH agent), writes
+your settings and prepares the images your sandboxes start from. You can do it in the
 terminal (`doz onboard`) or in the browser (the dashboard's setup wizard). Both do exactly the same
 thing, and both are safe to run again.
 
@@ -17,6 +18,12 @@ thing, and both are safe to run again.
 - **An account** is how a sandbox's agent pays for its AI model: your Mac's Claude Code login, a
   long-lived token, or an API key. The secret stays on your Mac; a sandbox only ever sees a stand-in.
   See [Agents and accounts](09-agents-and-accounts.md).
+- **Access** is every credential a sandbox may use as you — the Claude account, **GitHub as you**
+  ([GitHub](18-github.md)) and **SSH agent forwarding**. Each is a choice of yours (GitHub and SSH are
+  off until you choose them), and each is **confirmed live** when you choose it. A credential that
+  can't be confirmed can be **skipped**: the choice is kept, marked *not confirmed*, and setup goes on.
+  The choices are the defaults for new sandboxes; `doz access` and **Settings** › **Access** check
+  them again later.
 
 ## In the terminal
 
@@ -31,11 +38,25 @@ On a terminal it asks; **Enter** always accepts the recommended answer.
    for the chosen images, and a store path short enough. The rest only warn: Claude Code missing or
    signed out (you can add an account later), and the NAT network helper (only `--network nat`
    needs it).
-2. **Claude account** — offered, never done behind your back:
-   - **Use this Mac's login** (the default when Claude Code is signed in here);
-   - **an API key** or **a setup token** (from `claude setup-token`), pasted at a hidden prompt,
-     checked with one tiny request and stored in your login keychain, then made the default;
-   - **Decide later** — nothing changes.
+2. **Access** — what sandboxes may use as you, each offered and never done behind your back:
+   - **Claude account**: **Use this Mac's login** (the default when Claude Code is signed in here);
+     **an API key** or **a setup token** (from `claude setup-token`), pasted at a hidden prompt,
+     checked with one tiny request and stored in your login keychain, then made the default; or
+     **Decide later** — nothing changes.
+   - **GitHub as you**: *Off* (the default), *Read-only* or *Read and push* — and where the token
+     comes from: this Mac's `gh` login, or a token you paste (best: a fine-grained one).
+   - **SSH agent forwarding**: *Off* (the default) or *On*.
+
+   Each choice has a one-line consequence beside it. Then each is **confirmed**:
+
+   ```
+   ✓ Claude account        mac              confirmed — this Mac's Claude Code login (you@example.com), max
+   ✓ GitHub as you         read (gh login)  confirmed — signed in as you — scopes: repo, read:org (from this Mac's gh login)
+   ✗ SSH agent forwarding  on               not confirmed — this Mac has no ssh-agent to forward
+   ```
+
+   A failure says why, and offers **Skip** (keep the choice, not confirmed — `doz access` checks
+   again later), **Turn it off**, or **Check again**. Setup is never blocked by it.
 3. **Images** — Claude Code is prepared by default; pi and the lab shell are optional.
 4. **Settings** — `doz.toml` (every setting at its default, plus your answers) and `agent-prompt.md`
    beside it, each written **only if it doesn't exist yet**.
@@ -59,10 +80,15 @@ doz onboard --images claude-code,pi --account mac --yes
 doz onboard --all-images --yes            # claude-code, pi and lab (15 minutes or more the first time)
 doz onboard --no-images --account later --yes
 doz onboard --account setup-token --account-name work --plan max --secret-stdin --yes < token.txt
+doz onboard --no-images --account mac --github read --ssh-agent on --yes
+doz onboard --no-images --account later --github push --github-key-stdin --yes < github-token.txt
 ```
 
 `--yes`, `--json`, or no terminal: nothing is asked and the defaults are taken. A key or token is
-read from standard input only with `--secret-stdin`; it is never a command-line argument.
+read from standard input only with `--secret-stdin` (`--github-key-stdin` for a GitHub token); it is
+never a command-line argument. Each credential chosen is still confirmed; one that can't be is
+**skipped with a note** and the exit code stays 0. Without `--github` / `--ssh-agent`, `--yes` leaves
+those settings exactly as they are.
 
 | option | what it does |
 |---|---|
@@ -70,6 +96,9 @@ read from standard input only with `--secret-stdin`; it is never a command-line 
 | `--all-images` · `--no-images` | All three · none now (each is prepared the first time it's used). |
 | `--account mac\|api-key\|setup-token\|later` | Answer the account step (the Claude Code checks are then skipped). |
 | `--account-name NAME` · `--plan PLAN` · `--force` | For a key or token: its name (default `work`), a token's plan (`max`, `pro`, `team`, `enterprise`), replace an existing account. |
+| `--github off\|read\|push` | Answer "GitHub as you" (the setting `defaults.github`). |
+| `--github-source gh\|key` · `--github-key-stdin` | Where the GitHub token comes from: this Mac's `gh` login, or a token read from standard input (kept in the login keychain as `doz-github`). |
+| `--ssh-agent on\|off` | Answer "SSH agent forwarding" (the setting `sandbox.ssh_agent`). |
 | `--status` · `--cancel` | Follow · stop the preparation. |
 
 ## In the dashboard
@@ -82,8 +111,13 @@ A store that was never set up opens on the **setup wizard**:
 
 1. **Welcome**
 2. **Checks** — updating live; a failing required check stops here, with **Check again**.
-3. **Claude account** — this Mac's login when it is signed in; an API key or setup token in a masked
-   field; or *Decide later*.
+3. **Access** — the Claude account (this Mac's login when it is signed in; an API key or setup token
+   in a masked field; or *Decide later*), **GitHub as you** (off, read-only, read and push — from
+   this Mac's `gh` login or a token in a masked field) and **SSH agent forwarding**, each with its
+   consequence. **Next** confirms each one: *confirmed* with what was found (for GitHub, *signed in as
+   LOGIN* and the token's scopes, or how many repositories a fine-grained token can see; for SSH, how
+   many keys the agent has), or *not confirmed* with the reason and **Skip** · **Turn it off** ·
+   **Check again**. Skipping keeps the choice and moves on.
 4. **Images** — a checklist with each image's download size, time estimate and disk space.
 5. **Preparing** — a card per image with its progress. **Continue in the background** lets you use
    the dashboard meanwhile (the preparation shows under **Operations**); **Cancel preparation** stops
@@ -100,6 +134,19 @@ A store that was never set up opens on the **setup wizard**:
 You can run the wizard again at any time: **Onboarding** in the sidebar (with a dot beside it until
 the store is set up), or **Doctor** › **Run onboarding again**.
 
+## Checking access again
+
+```sh
+doz access                       # each credential, confirmed now
+doz access --no-check            # the last confirmation only
+doz access set --github push     # change a choice (and confirm it)
+doz access set --ssh-agent off
+```
+
+In the dashboard: **Settings** › **Access** shows each credential as last confirmed, with **Check
+again**; the choices themselves are the settings `defaults.github`, `github.credentials` and
+`sandbox.ssh_agent` further down the page.
+
 ## What was written where
 
 | what | where |
@@ -108,6 +155,8 @@ the store is set up), or **Doctor** › **Run onboarding again**.
 | Your agent prompt template | `agent-prompt.md` beside it — everything inside an HTML comment, so it changes nothing until you write your own text. See [Agents and accounts](09-agents-and-accounts.md#the-agents-environment-facts) |
 | The store (images, sandboxes) | `~/Library/Application Support/dozer-sandbox` |
 | Accounts with a secret | your login keychain, `doz-claude:NAME` (tokens) or `doz-anthropic:NAME` (API keys) |
+| A GitHub token you gave | your login keychain, `doz-github` |
+| The last access check | `access.json` in the store — states and reasons, never a secret |
 
 ## Settings
 
@@ -116,6 +165,9 @@ the store is set up), or **Doctor** › **Run onboarding again**.
 | `defaults.image` | `lab` | The image `doz up NAME`, `doz init` and the dashboard's New sandbox use when you don't name one. Onboarding sets it to the image you chose. |
 | `defaults.projects_dir` | `~/Developer/dozer-sandbox-projects` | Your projects folder: Quick add, `doz new` and New sandbox make each new sandbox's folder in it. `doz onboard` says where it is; the dashboard's **Settings** › **Choose…** or `doz config set defaults.projects_dir DIR` moves it. |
 | `defaults.account` | `mac` | The account of a store that hasn't chosen one. `doz account default` decides for a store once it has. |
+| `defaults.github` | `off` | "GitHub as you" for new sandboxes: `off`, `read` or `push`. The Access step's choice. |
+| `github.credentials` | `gh` | Where the GitHub token comes from: `gh` (this Mac's login), `key` (a token you gave), `off`. |
+| `sandbox.ssh_agent` | `off` | Forward this Mac's ssh-agent into sandboxes (github.com only). |
 | `ui.allow_secret_entry` | `true` | The dashboard may take an API key or setup token in a masked field. `false`: it shows the `doz account add` command instead. The dashboard can turn this off, never on. |
 | `images.claude_code_version` · `images.pi_version` | `latest` | Which agent version an image is prepared with. See [Agents and accounts](09-agents-and-accounts.md#agent-versions). |
 
@@ -135,4 +187,6 @@ the store is set up), or **Doctor** › **Run onboarding again**.
 | Preparation fails part way | `doz onboard --status` shows the failed step with its last output lines. Run `doz onboard` again: it continues with what's missing. |
 | "latest" can't be resolved (offline) | Set an exact agent version: `doz config set images.claude_code_version 2.1.227`. |
 | The wizard shows commands instead of a key field | `ui.allow_secret_entry` is off: use `doz account add NAME --api-key` in a terminal. |
+| GitHub *not confirmed: gh is not logged in* | Run `gh auth login` on the Mac, then `doz access` — or give a token: `doz access set --github-key`. |
+| SSH *not confirmed: no ssh-agent* or *no keys* | Start an agent and `ssh-add` your key on the Mac, then `doz access`. Or turn it off: `doz access set --ssh-agent off`. |
 | You want to start over | [Uninstall](02-install-upgrade-uninstall.md#uninstall), then install and onboard again. |

@@ -948,6 +948,34 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   CA), `DOZ_TEST_SSH_AUTH_SOCK` (a throwaway agent), `GIT_CONFIG_GLOBAL` (a scratch identity).
   `make test-cli-github` runs a python3 `git http-backend` over TLS as the fake GitHub.
 
+### Access (599e) — every credential a purposeful choice, each confirmed
+
+- **One step, three places**: `doz onboard`'s "2. Access" (`AccessStep` in `AccessCommands.swift`, shared with
+  `doz access` / `doz access set`), the wizard's step 2 and **Settings › Access** — both drawn by ONE
+  self-contained component, `renderAccessStep(container, {mode: 'onboarding'|'sandbox'|'settings', state,
+  claude, choices, onChange})` in app.js (599f's New Sandbox wizard reuses it). It writes NOTHING but the default
+  GitHub key; the caller writes the choices (onboarding: `POST onboarding/config {access}`; sandbox: its create).
+- **The host's `access` op** (`Access.swift`): the report (choice, source, state confirmed|failed|off|unchecked,
+  detail, consequence) and, with `check`, a LIVE check of `items`, of `accessChoices` when given (the onboarding
+  confirms before it writes). Read-only (no `check`) is answered in-process; `check` needs the host. The record
+  is `<store>/access.json` — states and reasons, NEVER a secret; an answer counts only for the choice (and
+  source) it was given for. `access-github-key` sets/removes the default key (keychain `doz-github`), which
+  `applyGitHub`'s provider reads after a sandbox's own key when `github.credentials = key`.
+- **The checks**: GitHub — the token as a sandbox gets it (`Access.githubToken`), then `GitHubAccess.confirm`:
+  `GET /user` over `TLSUpstream` (the proxy's leg; the test upstream seam), login + `X-OAuth-Scopes`, or for a
+  scope-less token `GET /user/repos?per_page=100`'s count. SSH — `SSHAgentRelay.listKeys` (REQUEST_IDENTITIES,
+  nothing signed). Claude — the store default: `ClaudeLoginStatus` for `mac`, `services.verifier` for a key.
+- **Never blocks, never silent**: a failure KEEPS the choice (Skip; "not confirmed") — turning it off is the
+  person's. `--yes`/no TTY skips with a note, exit 0. The onboarding writes `defaults.github` /
+  `github.credentials` / `sandbox.ssh_agent` only when CHOSEN (a flag or a TTY answer) — `--yes` alone changes
+  nothing. `defaults.github` (off|read|push, default off) joins the permissions only where `defaults.permissions`
+  applies (no `--network`, not the form's exact list); `WebBases.github` seeds New Sandbox's switches.
+- **Web**: `GET /api/v1/access` (never starts a host), `POST /api/v1/access/check` (CSRF, strict
+  `WebAccessCheck`), `POST /api/v1/access/github-key` (`WebAccessGitHubKey`, redacted, `allow_secret_entry`).
+- **Tests**: `AccessTests` (a scratch env passed to `access(_:environment:)` — never the process's XDG/agent),
+  `AccessWebTests`, `make test-cli-access` (no VM: a fake GitHub API with its own CA, a fake gh, a throwaway
+  agent; SSH_AUTH_SOCK removed), the workspace probe `probes/599e-*/run-access-probe.sh`.
+
 ### Browser terminals (591, on by default — owner ruling) — design: workspace `changes/591-*/591.01-DESIGN.md`
 
 - **A terminal is two steps.** `POST …/terminal-ticket` (CSRF, strict body) mints a 256-bit ticket that
