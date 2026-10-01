@@ -144,6 +144,39 @@ public final class SSHAgentRelay: @unchecked Sendable {
         }
     }
 
+    /// 599e: what `ssh-add -l` shows — the agent at `socket` asked for its keys (SSH2_AGENTC_REQUEST_IDENTITIES);
+    /// their comments, in order. Nothing is signed or changed.
+    public static func listKeys(socket path: String) -> Result<[String], CheckFailure> {
+        let fd = connectUnix(path)
+        guard fd >= 0 else { return .failure(CheckFailure("no ssh-agent answers at \(path)")) }
+        defer { close(fd) }
+        var tv = timeval(tv_sec: 5, tv_usec: 0)
+        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
+        guard Wire.writeAll(fd, [0, 0, 0, 1, 11]), let lenBytes = Wire.readExact(fd, 4) else { return .failure("the ssh-agent did not answer") }
+        let len = Int(lenBytes[0]) << 24 | Int(lenBytes[1]) << 16 | Int(lenBytes[2]) << 8 | Int(lenBytes[3])
+        guard len >= 5, len <= maximumMessage, let body = Wire.readExact(fd, len), body[0] == 12 else {
+            return .failure("the ssh-agent's answer was not a list of keys")
+        }
+        var i = 1
+        func u32() -> Int? {
+            guard i + 4 <= body.count else { return nil }
+            defer { i += 4 }
+            return Int(body[i]) << 24 | Int(body[i + 1]) << 16 | Int(body[i + 2]) << 8 | Int(body[i + 3])
+        }
+        func string() -> [UInt8]? {
+            guard let n = u32(), n >= 0, i + n <= body.count else { return nil }
+            defer { i += n }
+            return Array(body[i..<(i + n)])
+        }
+        guard let count = u32(), count < 10_000 else { return .failure("the ssh-agent's answer was malformed") }
+        var comments: [String] = []
+        for _ in 0..<count {
+            guard string() != nil, let c = string() else { return .failure("the ssh-agent's answer was malformed") }
+            comments.append(String(decoding: c, as: UTF8.self))
+        }
+        return .success(comments)
+    }
+
     /// A connected unix stream socket to `path`, or -1.
     public static func connectUnix(_ path: String) -> Int32 {
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)

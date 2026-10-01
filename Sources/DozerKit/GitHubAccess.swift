@@ -1,4 +1,6 @@
+import Darwin
 import Foundation
+import NIOSSL
 
 // 599d (owner: "how do we optionally give the agent in the vm git credentials (ie. the same that are on
 // the local machine) so it can operate the same way an agent would on the host. Another proxy credential
@@ -190,6 +192,107 @@ public enum GitHubAccess {
             return kv.count == 2 && (kv[0].removingPercentEncoding ?? String(kv[0])) == name
                 && (kv[1].removingPercentEncoding ?? String(kv[1])) == value
         }
+    }
+}
+
+// MARK: 599e — confirming a token works (the Access step)
+
+/// Who a GitHub token signs in as, and what it may do.
+public struct GitHubIdentity: Codable, Equatable, Sendable {
+    public var login: String
+    /// A classic token's scopes (`X-OAuth-Scopes`); nil for a fine-grained token or a GitHub App's.
+    public var scopes: [String]?
+    /// For a token without scopes: how many repositories it can see (capped at 100 — "100+").
+    public var repositories: Int?
+    public init(login: String, scopes: [String]? = nil, repositories: Int? = nil) {
+        self.login = login; self.scopes = scopes; self.repositories = repositories
+    }
+    /// "signed in as LOGIN — scopes: repo, read:org" / "… — it can see 3 repositories".
+    public var summary: String {
+        var s = "signed in as \(login)"
+        if let scopes { s += scopes.isEmpty ? " — no scopes (public data only)" : " — scopes: " + scopes.joined(separator: ", ") }
+        else if let n = repositories { s += " — it can see \(n >= 100 ? "100+" : String(n)) repositor\(n == 1 ? "y" : "ies")" }
+        return s
+    }
+}
+
+/// Why a check failed, in words.
+public struct CheckFailure: Error, Equatable, Sendable, ExpressibleByStringLiteral {
+    public let reason: String
+    public init(_ reason: String) { self.reason = reason }
+    public init(stringLiteral value: String) { reason = value }
+}
+
+extension GitHubAccess {
+    /// `GET https://api.github.com/user` with `token` — over the SAME leg the proxy uses (`TLSUpstream`:
+    /// verified against this Mac's trust store, or ONLY the test seam's CA with `override`) — then, for a
+    /// token without scopes, `GET /user/repos?per_page=100` to say how much it can see. The token goes in
+    /// the request's header only; nothing of it is returned or logged.
+    public static func confirm(token: String, override: EgressProxy.UpstreamOverride? = nil) -> Result<GitHubIdentity, CheckFailure> {
+        func get(_ path: String) -> Result<(status: Int, headers: [String: String], body: Data), CheckFailure> {
+            var cfg = TLSConfiguration.makeClientConfiguration()
+            cfg.applicationProtocols = ["http/1.1"]
+            guard let ctx = try? NIOSSLContext(configuration: cfg) else { return .failure("TLS could not be set up") }
+            guard let u = TLSUpstream(host: "api.github.com", port: 443, context: ctx, override: override) else {
+                return .failure("could not connect to api.github.com from this Mac")
+            }
+            defer { u.close() }
+            u.send(Array("GET \(path) HTTP/1.1\r\nHost: api.github.com\r\nAuthorization: token \(token)\r\nUser-Agent: Dozer-Sandbox\r\nAccept: application/vnd.github+json\r\nConnection: close\r\n\r\n".utf8))
+            var raw: [UInt8] = []
+            let deadline = Date().addingTimeInterval(20)
+            loop: while Date() < deadline, raw.count < 4 << 20 {
+                var p = pollfd(fd: u.fd, events: Int16(POLLIN), revents: 0)
+                if poll(&p, 1, 1000) <= 0 { continue }
+                switch u.receive() {
+                case .data(let d): raw += d
+                case .closed: break loop
+                case .failed(let why): return .failure(CheckFailure(why))
+                }
+            }
+            guard let sep = raw.firstRange(of: Array("\r\n\r\n".utf8)) else { return .failure("no answer from api.github.com") }
+            let head = String(decoding: raw[..<sep.lowerBound], as: UTF8.self).components(separatedBy: "\r\n")
+            let status = head.first.flatMap { Int($0.split(separator: " ").dropFirst().first ?? "") } ?? 0
+            var headers: [String: String] = [:]
+            for line in head.dropFirst() {
+                guard let c = line.firstIndex(of: ":") else { continue }
+                headers[line[..<c].lowercased()] = line[line.index(after: c)...].trimmingCharacters(in: .whitespaces)
+            }
+            var body = Data(raw[sep.upperBound...])
+            if headers["transfer-encoding"]?.lowercased().contains("chunked") == true { body = dechunked(body) }
+            return .success((status, headers, body))
+        }
+        switch get("/user") {
+        case .failure(let why): return .failure(why)
+        case .success(let r):
+            guard r.status == 200 else {
+                let msg = (try? JSONSerialization.jsonObject(with: r.body) as? [String: Any])?["message"] as? String
+                return .failure(CheckFailure(r.status == 401 ? "GitHub refused the token (401\(msg.map { ": \($0)" } ?? ""))" : "GitHub answered HTTP \(r.status)"))
+            }
+            guard let login = (try? JSONSerialization.jsonObject(with: r.body) as? [String: Any])?["login"] as? String else {
+                return .failure("GitHub's answer has no login")
+            }
+            if let s = r.headers["x-oauth-scopes"] {
+                return .success(GitHubIdentity(login: login, scopes: s.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }))
+            }
+            if case .success(let repos) = get("/user/repos?per_page=100"), repos.status == 200,
+               let list = try? JSONSerialization.jsonObject(with: repos.body) as? [Any] {
+                return .success(GitHubIdentity(login: login, repositories: list.count))
+            }
+            return .success(GitHubIdentity(login: login))
+        }
+    }
+
+    static func dechunked(_ d: Data) -> Data {
+        var out = Data(), rest = d[...]
+        while let nl = rest.firstRange(of: Data("\r\n".utf8)) {
+            guard let n = Int(String(decoding: rest[..<nl.lowerBound], as: UTF8.self).split(separator: ";").first ?? "", radix: 16), n > 0 else { break }
+            let start = nl.upperBound
+            guard rest.distance(from: start, to: rest.endIndex) >= n else { break }
+            let end = rest.index(start, offsetBy: n)
+            out += rest[start..<end]
+            rest = rest[end...].dropFirst(2)
+        }
+        return out
     }
 }
 
