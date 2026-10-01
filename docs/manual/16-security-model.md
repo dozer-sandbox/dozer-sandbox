@@ -40,6 +40,27 @@ out. Inside the sandbox the agent sees a placeholder (`doz_cred_…`), so there'
 - a credential the agent brings itself is flagged or refused (the [key policy](09-agents-and-accounts.md#a-credential-the-agent-brings-itself));
 - accounts are stored in your login keychain, and the dashboard never shows a secret.
 
+**Your GitHub login** works the same way, and only when you turn it on for a sandbox
+([GitHub as you](18-github.md)):
+
+- the token (your Mac's `gh` login, read when used and kept in the proxy's memory a few minutes, or a
+  token you gave the sandbox) never enters the VM, the store or a log — the sandbox's `GH_TOKEN` and
+  git's login are placeholders, swapped only on the way to `github.com`, `api.github.com`,
+  `uploads.github.com` and `codeload.github.com` (git's `Basic` login is decoded, swapped and
+  re-encoded there, and nowhere else);
+- **read-only is enforced by the proxy**, request by request: `git-receive-pack` (a push) is refused,
+  and so is every request to the API that isn't a read — except a GraphQL request whose document holds
+  only queries. Dozer reads that document conservatively: anything it can't tell is read-only is refused;
+- turning the permission off (or `gh auth logout` on the Mac) ends it at once: every placeholder already
+  issued is refused;
+- with **Push to GitHub** on, the agent can push and act on GitHub as you, within what your token may
+  do — so prefer a fine-grained token limited to the repositories it works on (`doz key set NAME
+  --github`). Every change it makes is in the network log;
+- with **SSH agent forwarding** on (`sandbox.ssh_agent`), the agent can ask your Mac's ssh-agent to sign
+  — and so authenticate as you to github.com — while it's on; your keys never leave the Mac, it can't
+  add, remove or lock keys in your agent (only list and sign get through), and only `github.com:22` is
+  reachable over SSH.
+
 ### 4. Root inside is not root outside
 
 The agent has passwordless `sudo` inside its sandbox by default. That's deliberate: root inside the VM
@@ -106,6 +127,8 @@ fully resolved path.
 | `sandbox.browser_bridge` | `on` | The browser bridge. |
 | `sandbox.open_files` | `on` | The files bridge. |
 | `bridges.open_apps` | `""` | The apps a sandbox may name for the files bridge (none: default apps only). |
+| `github.credentials` | `gh` | Where "Use GitHub as you" gets your login: `gh`, `key` or `off`. |
+| `sandbox.ssh_agent` | `off` | Forward your Mac's ssh-agent (github.com:22 only). |
 | `sandbox.agent_sudo` | `true` | The agent's sudo inside its sandbox. |
 | `ui.allow_secret_entry` | `true` | The dashboard may take a key or token. |
 | `claude.permissions` | `skip` | Claude Code's own permission prompts (`ask` to keep them). |

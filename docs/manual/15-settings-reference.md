@@ -37,8 +37,8 @@ settings that name a folder on your Mac, are shown read-only there — change th
 
 ### Per sandbox
 
-`sandbox.clipboard`, `sandbox.browser_bridge`, `sandbox.open_files`, `sessions.tmux` and
-`sandbox.agent_sudo` can also be set for one sandbox:
+`sandbox.clipboard`, `sandbox.browser_bridge`, `sandbox.open_files`, `sandbox.ssh_agent`,
+`sessions.tmux` and `sandbox.agent_sudo` can also be set for one sandbox:
 
 ```sh
 doz config show --sandbox my-app                          # its values, and whose value each is
@@ -47,8 +47,12 @@ doz config get --sandbox my-app sessions.tmux
 doz config unset --sandbox my-app sandbox.clipboard       # follow the setting again
 ```
 
-Or when you create it (`doz create --clipboard off --browser-bridge off --open-files off --tmux --no-agent-sudo`),
-or in its `doz_project.yaml` (`clipboard:`, `browser_bridge:`, `open_files:`, `tmux:`, `agent_sudo:`).
+Or when you create it (`doz create --clipboard off --browser-bridge off --open-files off --ssh-agent on --tmux --no-agent-sudo`),
+or in its `doz_project.yaml` (`clipboard:`, `browser_bridge:`, `open_files:`, `ssh_agent:`, `tmux:`, `agent_sudo:`).
+
+"Use GitHub as you" is a permission, not a setting: `doz net allow NAME github:as-you` (and
+`github:push`), `doz create --github read|push`, `github:` in `doz_project.yaml` — see
+[GitHub as you](18-github.md).
 
 ## About the file
 
@@ -142,6 +146,7 @@ This table is generated from `doz config show` and checked against it on every b
 | `sandbox.clipboard` | `write` | write \| off | at once | `doz create --clipboard write\|off` | The clipboard bridge: a program in a sandbox that copies (OSC 52 — Claude Code, vim, tmux) puts the text on this Mac's clipboard, and every copy shows a notice (SANDBOX copied N chars) in doz attach and doz ui. At most 1 MiB a copy and 10 copies in 10 s. A sandbox can never READ the Mac clipboard. The risk: an agent could put a command there for you to paste — off turns the bridge off (copies are dropped, and said). A sandbox's own choice (doz config set --sandbox NAME, clipboard in doz_project.yaml) wins over this. |
 | `sandbox.browser_bridge` | `on` | on \| off | at once | `doz create --browser-bridge on\|off` | The browser bridge: xdg-open (and $BROWSER, open, sensible-browser) in a sandbox opens an http or https URL in this Mac's default browser, with a notice every time (at most 3 in 10 s). A sign-in whose redirect is the sandbox's localhost (Claude Code's /login) gets that port forwarded from the Mac into the sandbox for up to 10 minutes, so the login completes. Never file: or other schemes, never the Mac's own localhost. off: nothing opens (said). A sandbox's own choice (doz config set --sandbox NAME, browser_bridge in doz_project.yaml) wins over this. |
 | `sandbox.open_files` | `on` | on \| off | at once | `doz create --open-files on\|off` | Open workspace files on this Mac: xdg-open PATH (and open PATH, doz-open PATH) in a sandbox opens a document from its /workspace in the Mac's default app — an html page in your browser, markdown in your editor — or a folder (the workspace itself, open .) in the Finder, and doz-open --reveal PATH shows a file selected in its folder; a notice every time (at most 3 in 10 s). Only the shared folder's own files (a link or .. that leads out is refused), only documents (html, md, pdf, images, txt, csv, json, yaml, xml…) — never an app or package folder, a script, an installer or an executable. An isolated sandbox has no file to open. An app other than the default only when it is in bridges.open_apps. off: nothing opens (said). A sandbox's own choice (doz config set --sandbox NAME, open_files in doz_project.yaml) wins over this. |
+| `sandbox.ssh_agent` | `off` | off \| on | at once | `doz create --ssh-agent on\|off` | Forward this Mac's SSH agent into the sandbox (proxied sandboxes): ssh and git over SSH there can ask your agent to sign — your keys never enter the sandbox — and only github.com:22 is reachable over SSH. A notice on first use. While it is on, the agent can authenticate as you to github.com. A sandbox's own choice (doz create --ssh-agent on, ssh_agent in doz_project.yaml, doz config set --sandbox NAME) wins over this. |
 
 ### `[sessions]`
 
@@ -154,6 +159,12 @@ This table is generated from `doz config show` and checked against it on every b
 | key | default | values | applies | overridden by | what it does |
 |---|---|---|---|---|---|
 | `bridges.open_apps` | `""` | app names, comma-separated, like "Typora, Visual Studio Code" ("" = none) | at once | — | The Mac apps a sandbox may name to open a workspace file in (doz-open --app NAME FILE, or open -a NAME FILE in the sandbox), comma-separated — e.g. "Typora, Visual Studio Code". Empty: a file opens only in its default app, and naming an app is refused. Never a path, only an app's name. For every sandbox. |
+
+### `[github]`
+
+| key | default | values | applies | overridden by | what it does |
+|---|---|---|---|---|---|
+| `github.credentials` | `gh` | gh \| key \| off | at once | — | Where "Use GitHub as you" (a permission, off by default) gets your GitHub login: gh (this Mac's gh login, read when used — gh auth token — and kept in memory a few minutes, never written anywhere; gh auth logout revokes it), key (only a token you give a sandbox with doz key set NAME --github — a fine-grained token limited to some repositories is best), or off (never, even with the permission on). The sandbox only ever sees a placeholder; Dozer's proxy puts the real token in on the way to GitHub. |
 
 ### `[images]`
 

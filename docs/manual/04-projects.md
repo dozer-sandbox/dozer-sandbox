@@ -93,6 +93,8 @@ agent_sudo: true
 clipboard: write            # or off
 browser_bridge: on          # or off
 open_files: on              # or off
+ssh_agent: off              # or on
+github: off                 # read or push: git and gh signed in as you
 tmux: false                 # or true
 ```
 
@@ -115,6 +117,8 @@ tmux: false                 # or true
 | `clipboard` | `write` or `off` | `sandbox.clipboard` (write) | at once |
 | `browser_bridge` | `on` or `off` | `sandbox.browser_bridge` (on) | at once |
 | `open_files` | `on` or `off` | `sandbox.open_files` (on) | at once |
+| `ssh_agent` | `on` or `off` | `sandbox.ssh_agent` (off) | at once |
+| `github` | `off`, `read` or `push` ([GitHub as you](18-github.md)) | off | when made (later: `doz net allow NAME github:as-you`) |
 | `tmux` | `true` or `false` | `sessions.tmux` (false) | the next session |
 
 The schema is closed: an unknown key, a key given twice, a wrong type or a value out of range is an

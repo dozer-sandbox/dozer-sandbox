@@ -181,6 +181,8 @@ agent_sudo: true            # the agent's passwordless sudo (default: the settin
 clipboard: write            # a copy in the sandbox reaches the Mac clipboard, with a notice; off: never (applies at once)
 browser_bridge: on          # xdg-open opens http(s) URLs in the Mac's browser, a sign-in's callback forwarded; off: never
 open_files: on              # xdg-open FILE opens a /workspace document in the Mac's default app, with a notice; off: never
+ssh_agent: off              # on: forward this Mac's SSH agent (keys stay on the Mac; github.com:22 only)
+github: off                 # read or push: git and gh signed in as you on GitHub (the token never enters the sandbox)
 tmux: false                 # true: sessions run inside tmux (from the next session)
 ```
 
@@ -437,6 +439,26 @@ doz-open --app Typora notes.md       # a named app — only one listed in bridge
   (`doz config set --sandbox NAME sandbox.open_files off`, `doz create --open-files off`,
   `open_files: off` in `doz_project.yaml`), more than 3 files in 10 seconds. The shim refuses what it
   can tell itself first, so the program (or agent) hears why too.
+
+### GitHub as you
+
+Off until you turn it on per sandbox (`doz net allow NAME github:as-you`, `doz create --github read|push`,
+`github:` in `doz_project.yaml`, or the switch in `doz ui`): `git` and `gh` in the sandbox are then signed in
+to github.com as you, while the token stays on the Mac — `GH_TOKEN`/`GITHUB_TOKEN` and git's credential helper
+(`git-credential-doz`) hold a `doz_cred_` placeholder, which the proxy swaps for the real token on the way to
+github.com, api.github.com, uploads.github.com and codeload.github.com (git's Basic login decoded, swapped,
+re-encoded), and nowhere else.
+
+- **Read-only** unless `github:push` is on too: the proxy refuses `git-receive-pack` and every non-read API
+  call (a GraphQL request passes only when its document holds queries alone — anything unsure is refused),
+  with a 403 that says how to allow it. With push, every change is in `doz net log`.
+- **The token**: `github.credentials` = `gh` (the Mac's `gh auth token`, read on use, kept in memory a few
+  minutes), `key` (only `doz key set NAME --github`, stdin or `--keychain`), or `off`. A sandbox's own key wins.
+- **Identity**: the Mac's global `user.name`/`user.email` in the sandbox's git config while it's on.
+- **Off** (`doz net deny NAME github:as-you`) revokes every placeholder at once and removes the identity.
+- **SSH**: `doz config set --sandbox NAME sandbox.ssh_agent on` forwards the Mac's ssh-agent (vsock; the keys
+  stay on the Mac) and allows github.com:22 only.
+- A notice the first time it's used: `NAME used your GitHub login (read-only)`.
 
 ### tmux inside a session
 
@@ -1088,14 +1110,15 @@ the others say when they apply (the next sandbox created, the next session, or a
 | `[store]` | `path` (`--store`, `$DOZ_STORE`) |
 | `[claude]` | `permissions` (`skip` · `ask`) — Claude Code's own prompts in a claude-code sandbox; `-e DOZ_CLAUDE_PERMISSIONS=…` on `run`/`exec` still wins |
 | `[defaults]` | `cpus` (2), `nat_subnet` (a free one; `$DOZ_SUBNET`) |
-| `[sandbox]` | `agent_sudo` (true — the agent's passwordless sudo inside claude-code and pi sandboxes; a sandbox's `--no-agent-sudo` / `agent_sudo` wins; from its next session and boot), `timezone` (`mac` — the Mac's zone, read again at every start and wake, so a sandbox that slept while you travelled wakes in your new zone — or a zone like `Australia/Sydney`; the agent's facts say it), `clipboard` (`write` · `off` — the clipboard bridge, see "Session bridges"; applies at once), `browser_bridge` (`on` · `off` — xdg-open to the Mac's browser and a sign-in's callback; applies at once), `open_files` (`on` · `off` — xdg-open FILE opens a /workspace document on the Mac; see "Workspace files, opened on the Mac"; applies at once) |
+| `[sandbox]` | `agent_sudo` (true — the agent's passwordless sudo inside claude-code and pi sandboxes; a sandbox's `--no-agent-sudo` / `agent_sudo` wins; from its next session and boot), `timezone` (`mac` — the Mac's zone, read again at every start and wake, so a sandbox that slept while you travelled wakes in your new zone — or a zone like `Australia/Sydney`; the agent's facts say it), `clipboard` (`write` · `off` — the clipboard bridge, see "Session bridges"; applies at once), `browser_bridge` (`on` · `off` — xdg-open to the Mac's browser and a sign-in's callback; applies at once), `open_files` (`on` · `off` — xdg-open FILE opens a /workspace document on the Mac; see "Workspace files, opened on the Mac"; applies at once), `ssh_agent` (`off` · `on` — forward the Mac's SSH agent, github.com:22 only; see "GitHub as you") |
+| `[github]` | `credentials` (`gh` · `key` · `off` — where "Use GitHub as you" gets your login; see "GitHub as you"; applies at once) |
 | `[sessions]` | `tmux` (false — new sessions run inside tmux; see "tmux inside a session"; from the next session) |
 | `[bridges]` | `open_apps` (`""` — the Mac apps a sandbox may name to open a workspace file in, comma-separated; empty: default apps only; applies at once) |
 | `[images]` | `claude_code_version`, `pi_version` (`latest`, or an exact version like `2.1.227` — see "Agent versions" below) |
 | `[images.lab]` · `[images.claude-code]` · `[images.pi]` | `memory_mib` (1024 · 2048 · 2048), `network` (`bake` · `agent` · `agent`) — a custom image follows the image it was saved from |
 | `[kernel]` | `path` (`$DOZ_KERNEL`), `cache` (`$DOZ_KERNEL_CACHE`) |
 
-- **Per sandbox:** `sandbox.clipboard`, `sandbox.browser_bridge`, `sandbox.open_files`, `sessions.tmux` and `sandbox.agent_sudo` can also be one sandbox's own
+- **Per sandbox:** `sandbox.clipboard`, `sandbox.browser_bridge`, `sandbox.open_files`, `sandbox.ssh_agent`, `sessions.tmux` and `sandbox.agent_sudo` can also be one sandbox's own
   (`doz config set|get|unset|show --sandbox NAME …`, `doz create` flags, `doz_project.yaml`); its
   value wins over the file's.
 - **Precedence:** a command-line flag, then its environment variable, then the file, then the

@@ -28,6 +28,7 @@ both.
 | [Images and bases](08-images-and-bases.md) | pick a language base, use your own Dockerfile, rebuild an out-of-date image |
 | [Agents and accounts](09-agents-and-accounts.md) | use Claude Code or pi, add accounts, change what the agent is told |
 | [Signing in from a sandbox](11-signing-in-from-a-sandbox.md) | let a tool in a sandbox sign in through your Mac's browser |
+| [GitHub as you](18-github.md) | let git and gh in a sandbox use your GitHub login — read-only or with push — without the token entering it |
 | [Restore points, duplicates and templates](12-restore-points-duplicates-templates.md) | undo, copy a sandbox, make your own starting image |
 | [Resources and disk space](13-resources-and-disk-space.md) | see where the disk went and free some |
 | [Letting another agent drive Dozer](14-letting-another-agent-drive.md) | have the agent on your Mac run sandboxes for you |

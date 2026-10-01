@@ -16,12 +16,16 @@ switches — and logs it. You decide what the agent may reach; the agent can't c
   | Install software — system packages | `install:system` | apt / apk | on |
   | Install software — Node, Python, Go, Rust, Java, Ruby, .NET | `install:node`, `install:python`, `install:go`, `install:rust`, `install:java`, `install:ruby`, `install:dotnet` (`install` = all) | that language's package registry | your base's language |
   | Use GitHub | `github` | clone and fetch code; Claude Code's plugins | on |
+  | Use GitHub as you | `github:as-you` | git and gh signed in as you — read-only ([GitHub as you](18-github.md)) | off, in every preset |
+  | Push to GitHub | `github:push` | also push and change things on GitHub as you | off, in every preset |
   | Send error reports | `error-reports` | the agent reporting its own crashes to its maker | on |
   | Browse the web | `web` | any website | off — **the agent could send your code anywhere** |
   | Sites you allow | `site:HOST` | one host (`api.example.com`, or `*.example.com`) | none |
 
   `doz net permissions` lists every permission with the exact hosts behind it in your version of Dozer.
-- **Presets:** **Locked** (its AI model only), **Standard**, **Open** (everything, still logged).
+- **Presets:** **Locked** (its AI model only), **Standard**, **Open** (everything, still logged). Your
+  GitHub login is never part of a preset — not even Open: it's switched on by name, and a preset you
+  choose later keeps it as it was.
   New sandboxes get the setting `defaults.permissions` (`standard`).
 - **Stored by name.** A sandbox remembers "Update itself", not a list of hosts, so when a new version
   of Dozer adds a host to a permission, every sandbox that has it gets it.

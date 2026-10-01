@@ -907,6 +907,47 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   workspace file is recorded there as `open-file APP|default MACPATH`.
   A fake OAuth server must READ before it answers (busybox `nc -e`), as a real one does.
 
+### GitHub as the user (599d) — design: workspace `changes/599d-*/599d.01-DESIGN.md`
+
+- **Proxy insertion, like the Anthropic credential — and nothing more.** `CredentialBinding.github`
+  (hosts `GitHubAccess.credentialHosts`: github.com, api.github.com, uploads.github.com, codeload.github.com)
+  is **swap-only** (`swapOnly`: never injected into a request without its placeholder) and puts ONE placeholder
+  in `GH_TOKEN` and `GITHUB_TOKEN` (`alsoEnvironmentVariables`). The vault finds a placeholder inside an
+  `Authorization: Basic` login too (`basicDecoded`/`searchable`/`placeholders(inHead:)` — the leak guard and
+  the plain-HTTP guard see it) and swaps it there by decode → swap → re-encode. "strict" (588) pins the
+  ANTHROPIC credential only: a guest's own GitHub token is flagged, never refused by it.
+- **The token is READ ON USE** (`CredentialVault.setProvider`): `gh auth token` (or the sandbox's own key —
+  memory `HostCore.githubKeys`, or a keychain item re-read), cached `GitHubLogin.cacheSeconds` in the vault's
+  memory only; the provider's `version` (the `github.credentials` value) drops the cache the moment the source
+  changes. Never in `doz.json` (only `credentialSources["github"] = stdin|keychain:…`), a log, an event or the
+  guest. Turning the permission off = `vault.remove("github")`: every placeholder issued is refused at once.
+- **Read-only is the PROXY's** (`GitHubAccess.classify`, in `EgressProxy.intercept` for requests whose decision
+  swapped the github binding): receive-pack anywhere (decoded, case-folded) refused; api.github.com only
+  GET/HEAD, plus `POST /graphql` whose BODY is held (≤ 256 KiB, Content-Length only — chunked refused) and
+  parsed by `graphQLIsQuery` (top-level definitions only; anything unsure → refused); LFS batch only
+  `"operation": "download"`. The 403 is `text/plain` so git shows it as `remote: …`. Keep the parser
+  conservative: a new GraphQL construct is refused until a test says it is a read.
+- **The state is the policy's permissions** — `github:as-you`, `github:push` (`AgentPermissions.gitHubMode`;
+  push needs as-you; never in a preset, Open included; a preset choice keeps them; never inferred from a
+  pre-597 policy, never suggested for a denied host). `--github`/`github:` are sugar for them. `HostCore.applyGitHub`
+  applies everything (vault provider, `EgressProxy.github` gate, identity, SSH agent) — at load/create, on a
+  `net-policy` change, `sandbox.ssh_agent`, `key set --github`.
+- **The guest half is in `guestFixes`** (boot AND wake): `git-credential-doz` (stamp `doz:git-credential:vN` — bump
+  on any change; it answers ONLY a `doz_cred_` placeholder, ONLY for https://github.com), `/etc/dozer/gitconfig`
+  (helper + the Mac's identity, or a comment when off) included once from `/etc/gitconfig`, and the SSH agent.
+  `Sandbox.applyGitHubToGuest` applies them to a running guest.
+- **SSH agent (G4)**: `SSHAgentRelay` (host vsock 5801 → the Mac's agent socket) only while `sandbox.ssh_agent`
+  is on; it FILTERS the guest's requests (`allowed`: list 11, sign 13, the session-bind extension 27 — anything
+  else, e.g. add/remove/lock, is answered SSH_AGENT_FAILURE and never reaches the Mac's agent); `doznet agent` (guest, `/run/doz/ssh-agent.sock`) — started after doznet is copied at a fresh boot,
+  by guestFixes at a wake; `EgressProxy.sshToGitHub` allows github.com:22 (and its DNS) and nothing else; port
+  22 is never decrypted. Off = no listener (the agent-sudo suite's "no vsock listener but 5800" holds).
+- **Notices** that come from the proxy (not a session's output) go through `BridgeState.notifyViewers`: the
+  attach relay registers every attached terminal per sandbox. First use per apply (`firstUse`/`resetFirstUse`).
+- **Tests never use the user's GitHub, gh, ssh-agent or git identity**: `DOZ_TEST_GH` (a fake gh),
+  `DOZ_TEST_GITHUB_UPSTREAM` + `DOZ_TEST_GITHUB_CA` (the upstream leg goes to a fake GitHub, trusting ONLY that
+  CA), `DOZ_TEST_SSH_AUTH_SOCK` (a throwaway agent), `GIT_CONFIG_GLOBAL` (a scratch identity).
+  `make test-cli-github` runs a python3 `git http-backend` over TLS as the fake GitHub.
+
 ### Browser terminals (591, on by default — owner ruling) — design: workspace `changes/591-*/591.01-DESIGN.md`
 
 - **A terminal is two steps.** `POST …/terminal-ticket` (CSRF, strict body) mints a 256-bit ticket that
@@ -996,6 +1037,7 @@ make test-cli-bases  # 596: base × agent — cli, Dockerfiles via a fake contai
 make test-cli-permissions # 597: agent permissions — net show/allow/deny/permissions, create --allow, Claude Code's hosts reached under Standard, suggestions, live changes, facts, stored by name (prepares claude-code; network)
 make test-cli-points # 594 W25–W27: point names/lookup, check before asking, exec/run start an off sandbox
 make test-cli-agentsudo # 594 W23: the agent's sudo in a fresh claude-code sandbox (prepares it; network), --no-agent-sudo, the setting at the next boot, root reaches no more
+make test-cli-github # 599d: GitHub as the user through seams (a fake GitHub, a fake gh, a throwaway ssh-agent): swap, read-only, push, no leak, identity, key source, off, SSH
 make test-cli-openfiles # 599b: workspace files opened on the Mac through the opener seam — every refusal, isolated, off, --app, URLs as before
 make test-cli-hoststop # 594 W22: test-cli's host-stop part alone (per-sandbox progress plain/animated, --json, nothing running, a host killed mid-stop)
 make pullbench       # 594 D12: the node base pulled with 3 vs 6 concurrent layer downloads, fresh stores (network)
