@@ -53,7 +53,7 @@ struct CreateArguments: ParsableArguments {
     @Option(name: .long, help: "on or off: xdg-open in this sandbox opens http(s) URLs in the Mac's browser, a sign-in's localhost callback forwarded (default: the setting sandbox.browser_bridge, on).")
     var browserBridge: String?
 
-    @Option(name: .long, help: "on or off: xdg-open FILE in this sandbox opens a document from its /workspace in the Mac's default app (or an app in bridges.open_apps), with a notice every time (default: the setting sandbox.open_files, on).")
+    @Option(name: .long, help: "on or off: xdg-open PATH in this sandbox opens a document from its /workspace in the Mac's default app (or an app in bridges.open_apps), or a folder in the Finder, with a notice every time (default: the setting sandbox.open_files, on).")
     var openFiles: String?
 
     @Flag(inversion: .prefixedNo, help: "Run this sandbox's sessions inside tmux (its windows, panes, copy mode; Ctrl-b) — default: the setting sessions.tmux, off.")

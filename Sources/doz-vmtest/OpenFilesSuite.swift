@@ -43,6 +43,10 @@ func cliOpenFilesSuite(binary: String) async {
     chmod(ws.appendingPathComponent("macho.txt").path, 0o644)
     fm.createFile(atPath: outside.appendingPathComponent("secret.html").path, contents: Data("<p>secret</p>".utf8))
     try? fm.createSymbolicLink(atPath: ws.appendingPathComponent("mac-out.html").path, withDestinationPath: outside.appendingPathComponent("secret.html").path)
+    // Folders: a child, a package macOS knows by its type (.rtfd), and a link to a folder outside.
+    try? fm.createDirectory(at: ws.appendingPathComponent("docs"), withIntermediateDirectories: true)
+    try? fm.createDirectory(at: ws.appendingPathComponent("Notes.rtfd"), withIntermediateDirectories: true)
+    try? fm.createSymbolicLink(atPath: ws.appendingPathComponent("mac-dir-out").path, withDestinationPath: outside.path)
     let real = (try? fm.destinationOfSymbolicLink(atPath: "/tmp")).map { "/" + $0 + "/dzo-\(pid)-fw" } ?? ws.path   // /private/tmp/…
 
     print("cli: open workspace files on the Mac (599b)")
@@ -50,8 +54,8 @@ func cliOpenFilesSuite(binary: String) async {
     check(t.run(["config", "set", "defaults.projects_dir", "/tmp/dzo-\(pid)-fp"]).code == 0, "defaults.projects_dir is a scratch path")
     var r = t.run(["up", "of", "--image", "lab", "--workspace", ws.path, "--memory", "512M", "--network", "none", "--detach"], timeout: 600)
     check(r.code == 0, "up of --image lab --workspace \(ws.path) --detach (exit \(r.code))")
-    r = t.run(["exec", "of", "--", "sh", "-c", "ls -l /usr/local/lib/doz/bin/ | grep -c 'doz-open -> xdg-open'; grep -c 'open-url-shim:v4' /usr/local/lib/doz/bin/xdg-open"])
-    check(r.out.split(separator: "\n").map(String.init) == ["1", "1"], "the v4 shim and its doz-open link are in the guest (\(r.out.debugDescription))")
+    r = t.run(["exec", "of", "--", "sh", "-c", "ls -l /usr/local/lib/doz/bin/ | grep -c 'doz-open -> xdg-open'; grep -c 'open-url-shim:v5' /usr/local/lib/doz/bin/xdg-open"])
+    check(r.out.split(separator: "\n").map(String.init) == ["1", "1"], "the v5 shim and its doz-open link are in the guest (\(r.out.debugDescription))")
 
     do {
         let c = try PTYClient(t, ["run", "of", "--session", "files", "--", "bash", "--norc", "-i"])
@@ -88,8 +92,8 @@ func cliOpenFilesSuite(binary: String) async {
         c.type("xdg-open x.command; xdg-open ../etc/passwd; xdg-open Thing.app; xdg-open exec.txt; xdg-open script.txt; xdg-open guest-abs.txt; echo F3-$((3+3))\r")
         check(c.wait(15) { $0.text.contains("F3-6") }, "the shim's refusals ran (F3-6)")
         check(c.text.contains("x.command is a program, script or installer type: never opened"), "shim: .command")
-        check(c.text.contains("only files in /workspace (the folder shared with your Mac) are opened there, not ../etc/passwd"), "shim: .. out of /workspace")
-        check(c.text.contains("Thing.app is a folder"), "shim: an app bundle (a folder)")
+        check(c.text.contains("only files and folders in /workspace (the folder shared with your Mac) are opened there, not ../etc/passwd"), "shim: .. out of /workspace")
+        check(c.text.contains("Thing.app is an app or package: never opened"), "shim: an app bundle (a package folder)")
         check(c.text.contains("exec.txt is executable"), "shim: an executable")
         check(c.text.contains("script.txt is a script"), "shim: a #! script")
         check(c.text.contains("not guest-abs.txt"), "shim: a guest link out of /workspace")
@@ -104,7 +108,7 @@ func cliOpenFilesSuite(binary: String) async {
         check(c.wait(5) { $0.text.contains("doz: of asked to open mac-out.html — it leads outside the shared folder") }, "host: a link made on the Mac leading out (resolved on the Mac)")
         check(c.wait(5) { $0.text.contains("doz: of asked to open guest-out.html — it leads outside the shared folder") }, "host: a relative link made in the guest leading out")
         check(c.wait(5) { $0.text.contains("doz: of asked to open run.webloc — .webloc is never opened") }, "host: .webloc")
-        check(c.wait(5) { $0.text.contains("doz: of asked to open Thing.app — it is a folder") }, "host: an app bundle")
+        check(c.wait(5) { $0.text.contains("doz: of asked to open Thing.app — Thing.app is an app or package") }, "host: an app bundle")
         check(c.wait(5) { $0.text.contains("doz: of asked to open exec.txt — it is executable") }, "host: the executable bit")
         check(c.wait(5) { $0.text.contains("doz: of asked to open script.txt — it is a script") }, "host: a #! script named .txt")
         check(c.wait(5) { $0.text.contains("doz: of asked to open noext — it has no document type") }, "host: no extension")
@@ -117,6 +121,41 @@ func cliOpenFilesSuite(binary: String) async {
         check(!log().contains("secret") && !log().contains("/etc/") && !log().contains("webloc") && !log().contains("macho") && !log().contains("Thing.app")
               && !log().contains("exec.txt") && !log().contains("script.txt") && !log().contains("noext") && !log().contains("guest-out"),
               "none of them was opened (\(log().debugDescription))")
+
+        // 3b. Folders in the Finder, and --reveal (owner: "open the workspace (or child dir of) directory in
+        //     the Finder").
+        c.type("xdg-open .; open docs; doz-open --reveal notes.md; echo D1-$((1+20))\r")
+        check(c.wait(15) { $0.text.contains("D1-21") }, "folders and a reveal asked for (D1-21)")
+        check(c.text.contains("Asking your Mac to open in the Finder: /workspace\r") || c.text.contains("Asking your Mac to open in the Finder: /workspace\n"),
+              "the shim: open . is the workspace")
+        check(c.wait(10) { _ in log().contains("open-folder \(real)\n") }, "open . → the workspace in the Finder (\(log().suffix(160).debugDescription))")
+        check(c.wait(5) { _ in log().contains("open-folder \(real)/docs\n") }, "open docs → a child folder in the Finder")
+        check(c.wait(5) { _ in log().contains("reveal \(real)/notes.md\n") }, "doz-open --reveal notes.md → shown selected in its folder")
+        check(c.wait(5) { $0.text.contains("doz: of opened the workspace in the Finder") }, "the notice: \"of opened the workspace in the Finder\"")
+        check(c.wait(5) { $0.text.contains("doz: of opened docs/ in the Finder") }, "the notice: \"of opened docs/ in the Finder\"")
+        check(c.wait(5) { $0.text.contains("doz: of showed notes.md in the Finder") }, "the notice: \"of showed notes.md in the Finder\"")
+        // Refused: a package even for the Finder (shim and host, incl. one macOS knows by type), --app with a
+        // folder, .. above the workspace, a link to a folder outside, a reveal outside.
+        c.type("open Thing.app; doz-open --app Typora docs; "
+               + "printf '\\033]6340;doz-file;;/workspace/..\\007'; printf '\\033]6340;doz-file;;/workspace/mac-dir-out\\007'; "
+               + "printf '\\033]6340;doz-file;;/workspace/Notes.rtfd\\007'; printf '\\033]6340;doz-file;Typora;/workspace/docs\\007'; "
+               + "printf '\\033]6340;doz-reveal;/workspace/mac-out.html\\007'; echo D2-$((2+20))\r")
+        check(c.wait(15) { $0.text.contains("D2-22") }, "folder refusals asked for (D2-22)")
+        check(c.text.contains("Thing.app is an app or package: never opened on your Mac (open --reveal shows it in its folder)"), "shim: a package folder")
+        check(c.text.contains("--app is for files; a folder opens in the Finder: docs"), "shim: --app with a folder")
+        check(c.wait(5) { $0.text.contains("doz: of asked to open /workspace/.. — only files in /workspace") }, "host: .. above the workspace")
+        check(c.wait(5) { $0.text.contains("doz: of asked to open mac-dir-out — it leads outside the shared folder") }, "host: a link to a folder outside")
+        check(c.wait(5) { $0.text.contains("doz: of asked to open Notes.rtfd — Notes.rtfd is an app or package") }, "host: a package by type (isPackage)")
+        check(c.wait(5) { $0.text.contains("doz: of asked to open docs in Typora — --app is for files: a folder opens in the Finder") }, "host: --app with a folder")
+        check(c.wait(5) { $0.text.contains("doz: of asked to show mac-out.html — it leads outside the shared folder") }, "host: a reveal outside")
+        check(!log().contains("outside") && !log().contains("rtfd") && !log().contains("dzo-\(pid)-fo") && !log().contains("Thing.app"), "none of them shown")
+        sleep(10)
+        c.type("doz-open --reveal Thing.app; doz-open --reveal sub; echo D3-$((3+20))\r")
+        check(c.wait(15) { $0.text.contains("D3-23") }, "reveals asked for (D3-23)")
+        check(c.wait(10) { _ in log().contains("reveal \(real)/Thing.app\n") }, "--reveal on a package shows it selected in its folder (never opened)")
+        check(c.wait(5) { _ in log().contains("open-folder \(real)/sub\n") }, "--reveal on a folder shows the folder")
+        check(c.wait(5) { $0.text.contains("doz: of showed Thing.app in the Finder") }, "the reveal's notice")
+        sleep(10)
 
         // 4. Off for this sandbox.
         check(t.run(["config", "set", "--sandbox", "of", "sandbox.open_files", "off"]).code == 0, "doz config set --sandbox of sandbox.open_files off")
@@ -147,11 +186,14 @@ func cliOpenFilesSuite(binary: String) async {
         let c = try PTYClient(t, ["run", "of2", "--session", "iso", "--", "bash", "--norc", "-i"])
         defer { c.close() }
         check(c.wait(30) { $0.text.contains("$") || $0.text.contains("#") }, "run of2 -- bash: a prompt")
-        c.type("echo hi > /tmp/n.md; xdg-open /tmp/n.md; printf '\\033]6340;doz-file;;/workspace/notes.md\\007'; echo F9-$((9+9))\r")
+        c.type("echo hi > /tmp/n.md; xdg-open /tmp/n.md; printf '\\033]6340;doz-file;;/workspace/notes.md\\007'; "
+               + "xdg-open /tmp; printf '\\033]6340;doz-file;;/workspace\\007'; echo F9-$((9+9))\r")
         check(c.wait(15) { $0.text.contains("F9-18") }, "isolated: asked (F9-18)")
         check(c.text.contains("this sandbox is isolated (nothing on your Mac is shared)"), "the shim: isolated")
         check(c.wait(5) { $0.text.contains("doz: of2 asked to open notes.md — it is isolated: nothing on this Mac is shared") }, "the host: isolated")
-        check(!log().contains("n.md"), "nothing opened")
+        check(c.wait(5) { $0.text.contains("doz: of2 asked to open /workspace — it is isolated: nothing on this Mac is shared") }, "the host: a folder in an isolated sandbox")
+        check(c.text.contains("no file or folder can be opened there: /tmp"), "the shim: a folder in an isolated sandbox")
+        check(!log().contains("n.md") && !log().contains("open-folder /tmp"), "nothing opened")
     } catch { check(false, "pty: \(error)") }
     check(t.run(["rm", "of2", "--yes"], timeout: 120).code == 0, "rm of2")
 

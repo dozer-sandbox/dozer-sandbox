@@ -71,7 +71,8 @@ public enum AgentPrompt {
         ("sudo.description", "a sentence: sudo, and that the network policy still applies to root"),
         ("clipboard.description", "a sentence: a copy reaches the Mac clipboard with a notice (or the bridge is off); the clipboard is never readable"),
         ("browser.description", "a sentence: xdg-open opens http(s) URLs in the Mac's browser and a sign-in's localhost callback is forwarded (or the bridge is off)"),
-        ("files.description", "a sentence: xdg-open FILE opens a /workspace document on the user's Mac (which types, a named app, the notice) — or why not (isolated, off)"),
+        ("files.description", "a sentence: xdg-open FILE opens a /workspace document (its app) or folder (the Finder) on the user's Mac — which types, a named app, --reveal, the notice — or why not (isolated, off)"),
+        ("mac.open", "one short line: what open/xdg-open can show the user on their Mac (URLs, /workspace documents and folders) — only what is on; empty when nothing is"),
         ("mac.hostname", "the Mac's name"),
         ("dozer.version", "the doz that rendered it"),
     ]
@@ -87,8 +88,7 @@ public enum AgentPrompt {
     - System: {{sudo.description}}
     - Time zone: {{sandbox.timezone}} (the Mac's — `date` shows the user's local time).
     - Clipboard: {{clipboard.description}}
-    - Browser: {{browser.description}}
-    - Files on the Mac: {{files.description}}
+    - {{mac.open}}
     - The user may pause, sleep or hibernate this VM between your turns; your processes, files and sessions survive it.
     - More — what persists (root disk, state disk, restore points), the network policy, what you cannot do from inside — is in the `dozer` skill.
     """
@@ -198,10 +198,19 @@ public enum AgentPrompt {
             ? "Only the file's default app is used (the user has allowed no other: bridges.open_apps)."
             : "`doz-open --app NAME FILE` (or `open -a NAME FILE`) opens it in one of the apps the user allowed: \(openApps.joined(separator: ", "))."
         v["files.description"] = workspace == nil
-            ? "this sandbox is isolated (nothing on the Mac is shared), so no file of yours can be opened on the Mac — show the user the file's content instead."
+            ? "this sandbox is isolated (nothing on the Mac is shared), so no file or folder of yours can be opened on the Mac — show the user the file's content instead."
             : !openFiles
-            ? "opening workspace files on the user's Mac is off for this sandbox; tell the user the file's path under their shared folder instead (they can turn it on: `doz config set --sandbox \(name) sandbox.open_files on`)."
-            : "`xdg-open FILE` (also `open FILE`) on a document under /workspace opens it on the user's Mac in its default app (an html page in their browser, markdown in their editor), and the user sees a notice every time. Documents only — \(types); never a folder, app, script, installer or executable file, and only files inside /workspace (a link that leads out is refused). \(apps) At most 3 files in 10 seconds; open a file only when the user would want to see it."
+            ? "opening workspace files and folders on the user's Mac is off for this sandbox; tell the user the path under their shared folder instead (they can turn it on: `doz config set --sandbox \(name) sandbox.open_files on`)."
+            : "`xdg-open FILE` (also `open FILE`) on a document under /workspace opens it on the user's Mac in its default app (an html page in their browser, markdown in their editor); on a folder under /workspace (`open .` included) it opens that folder in the Finder; `doz-open --reveal PATH` shows a file selected in its folder. The user sees a notice every time. Documents only — \(types); never an app or package (reveal it instead), script, installer or executable file, and only inside /workspace (a link that leads out is refused). \(apps) At most 3 in 10 seconds; open something only when the user would want to see it."
+        // 599b (owner: "add that to the prompt concisely"): ONE facts line for every open bridge, saying only
+        // what is on; nothing at all when nothing is (the line is dropped).
+        var shows: [String] = []
+        if browser { shows.append("a URL (their browser)") }
+        if openFiles, workspace != nil { shows.append("a /workspace document (its app), or a /workspace folder (Finder)") }
+        var line = shows.isEmpty ? "" : "You can show the user things on their Mac: `open`/`xdg-open` " + shows.joined(separator: ", ")
+        if !line.isEmpty, openFiles, workspace != nil { line += "; `doz-open --reveal PATH` shows a file in its folder" }
+        if !line.isEmpty, openFiles, workspace == nil { line += "; folders and documents can't be opened — nothing is shared" }
+        v["mac.open"] = line.isEmpty ? "" : line + ". The user sees a notice each time."
         // 599 (594.B2): the browser bridge.
         v["browser.description"] = browser
             ? "this VM has no browser, but `xdg-open URL` (also $BROWSER, `open`) opens an http or https URL in the user's Mac browser, and the user sees a notice. A sign-in that redirects to this VM's localhost (e.g. Claude Code's /login) completes: that port is forwarded from the Mac for up to 10 minutes. `http://localhost:PORT` of a server you run here does NOT open on the Mac — tell the user the address instead."
@@ -295,7 +304,10 @@ public enum AgentPrompt {
             rest = after[close.upperBound...]
         }
         out += rest
-        return out
+        // 599b: a bullet whose variable says nothing (`- {{mac.open}}` with every bridge off) is no line.
+        return out.split(separator: "\n", omittingEmptySubsequences: false)
+            .filter { $0.trimmingCharacters(in: .whitespaces) != "-" }
+            .joined(separator: "\n")
     }
 
     /// A template without its HTML comments; nil when nothing else is left.
