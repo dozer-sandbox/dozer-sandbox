@@ -767,7 +767,10 @@ doz host stop          # sandboxes that run hibernate; the host of the old build
 doz wake NAME          # (or attach / up / the web UI) — each wakes on the new build, sessions and all
 ```
 
-`brew upgrade` says when a host of the previous build is still running (`doz host upgrade-check`,
+Until then every command that a host of another build answers says so once, on stderr (never stdout,
+not with `-q`): `note: the doz host is X (this doz is Y) — doz host stop switches to Y; sandboxes
+hibernate and wake` (or, for a NEWER host, to upgrade this doz). `brew upgrade` says when a host of
+the previous build is still running (`doz host upgrade-check`,
 which you can run yourself). Homebrew then removes the previous version (`brew cleanup`) — the
 program that host runs and its resources. The host keeps running, and so does every sandbox it
 runs, but it can no longer boot one: a start, a wake or a new sandbox is refused with "this host's

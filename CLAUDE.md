@@ -854,6 +854,14 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   reattaches THAT session in the same client. `MenuKey.decode` reads keys in plain, kitty CSI-u (a
   release is not a press) and modifyOtherKeys form. The web pane's tab renders the same template
   (`terminalTitle(t)` in app.js).
+- **What a person reads carries no internal numbers** (owner): no feature numbers or walkthrough IDs in
+  `--help`, setting descriptions, messages or the dashboard's strings — they belong in comments.
+  `make docs-drift-check` runs `Scripts/user-text-check.swift` (and `Scripts/manual-check.swift` on
+  `docs/manual`). Shell comments inside guest scripts are exempt: they are part of an image's recipe.
+- **A host of another build is said** (W33): `noteHostBuild` — once per command, on stderr before the
+  answer, never with `-q`, never on stdout; `rawCall` (every host request but ping/host-stop) and
+  `doz attach` call it. `hostBuildNote` uses the web UI's `WebVersion.compare` (a newer host: upgrade
+  this doz). `image ls` STATUS is always a word (W32; a template is `up to date`).
 - **Tests never touch the Mac**: `DOZ_TEST_PASTEBOARD=<file>` replaces pbcopy; `DOZ_TEST_OPEN_URL=<file>`
   replaces `/usr/bin/open` and plays the browser's last step (GET the callback on the Mac's port).
   A fake OAuth server must READ before it answers (busybox `nc -e`), as a real one does.

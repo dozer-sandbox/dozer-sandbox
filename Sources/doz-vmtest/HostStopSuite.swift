@@ -88,4 +88,33 @@ func cliHostStopSuite(binary: String) async {
     ec.wait(5)
     check(!hung, "a host killed mid-stop: the CLI does not hang")
     check(p.terminationStatus != 0 && ec.text.contains("the host exited before it answered"), "…and says the host exited: \(ec.text.trimmingCharacters(in: .whitespacesAndNewlines).suffix(240))")
+
+    // W33 (the owner, after an upgrade: `doz image ls` showed no STATUS — an older host answered): a host
+    // of another build is said ONCE on stderr before the answer; never on stdout, never with -q.
+    print("cli: a host of another build is said (W33)")
+    t.run(["host", "stop"], timeout: 180)
+    let this = t.run(["--version"]).out.trimmingCharacters(in: .whitespacesAndNewlines)
+    for (stamp, expect) in [("0.0.1", "the doz host is 0.0.1 (this doz is \(this))"), ("99.0.0", "the doz host is 99.0.0, newer than this doz (\(this))")] {
+        var stamped = t.env
+        stamped["DOZ_TEST_VERSION"] = stamp
+        let start = Process()
+        start.executableURL = URL(fileURLWithPath: t.binary)
+        start.arguments = ["host", "start"]
+        start.environment = stamped
+        start.standardOutput = FileHandle.nullDevice
+        start.standardError = FileHandle.nullDevice
+        try? start.run()
+        start.waitUntilExit()
+        check(t.waitFor(20) { t.hostRunning }, "a host stamped \(stamp) runs")
+        let loud = t.run(["ls", "--json"]), quiet = t.run(["ls", "--json", "-q"])
+        check(occurrences(loud.err, "note: ") == 1 && loud.err.contains(expect), "\(stamp): one note on stderr — \(loud.err.trimmingCharacters(in: .whitespacesAndNewlines).prefix(200))")
+        check(!loud.out.contains("note:") && loud.outData == quiet.outData, "\(stamp): stdout (the JSON) is the same with or without the note")
+        check(!quiet.err.contains("note: "), "\(stamp): -q says nothing")
+        let plain = t.run(["image", "ls"])
+        check(occurrences(plain.err, "note: the doz host is") == 1, "\(stamp): once per command (image ls)")
+        t.run(["host", "stop"], timeout: 180)
+    }
+    t.run(["host", "start"])
+    let same = t.run(["ls"])
+    check(t.hostRunning && !same.err.contains("note: the doz host"), "a host of the same build: no note")
 }

@@ -3,6 +3,7 @@ import Darwin
 import Foundation
 import DozerKit
 import DozerHost
+import DozerWeb
 
 /// `doz` — Dozer Sandbox's command-line tool: pausable Linux sandboxes on a Mac (585). Every command is a thin client of the store's
 /// host (`doz host`), which the first command that needs it starts and which exits when nothing
@@ -316,8 +317,35 @@ func call(_ r: HostRequest, _ g: GlobalOptions, autostart: Bool = true) throws -
     throw fail(m.error ?? HostError(.failed, "the host gave no reason"), g)
 }
 
+/// W33 (owner, after an upgrade: `doz image ls` printed no STATUS — the host answering was still the
+/// previous build): when this command talks to a host of ANOTHER build, say so once, on stderr, before
+/// the answer — never on stdout (scripts read it), never with -q. The web UI says the same in a banner.
+nonisolated(unsafe) private var hostBuildNoted = false
+func noteHostBuild(_ g: GlobalOptions) {
+    guard !hostBuildNoted, !g.quiet else { return }
+    hostBuildNoted = true
+    let store = g.dozerStore
+    guard store.hostIsRunning(),
+          let m = try? HostClient.request(HostRequest(.ping), store: store, autostart: false), m.ok == true,
+          let st = try? (m.result ?? .null).decode(HostStatus.self), let line = hostBuildNote(host: st.version, this: DozerCommand.version)
+    else { return }
+    FileHandle.standardError.write(Data("note: \(line)\n".utf8))
+}
+
+/// The note for a host of `host`'s build seen by a doz of `this` build (nil: the same build).
+func hostBuildNote(host: String, this: String) -> String? {
+    guard host != this else { return nil }
+    if WebVersion.compare(host, this) == .orderedDescending {
+        return "the doz host is \(host), newer than this doz (\(this)) — upgrade this doz (brew upgrade doz), or `doz host stop` "
+            + "switches to \(this); sandboxes hibernate and wake"
+    }
+    return "the doz host is \(host) (this doz is \(this)) — `doz host stop` switches to \(this); sandboxes hibernate and wake"
+}
+
 /// The host's final message, whatever it says (a failure to REACH the host is thrown, printed).
 func rawCall(_ r: HostRequest, _ g: GlobalOptions, autostart: Bool = true) throws -> HostMessage {
+    // W33: a host of another build answers this command — said once, before the answer.
+    if ![.ping, .hostStop].contains(r.op) { noteHostBuild(g) }
     let progress = Progress(g)
     defer { progress.finish() }
     do {

@@ -62,6 +62,15 @@ doz host stop
 doz wake my-app        # or doz up, doz attach, or just use the dashboard
 ```
 
+Until you do, every command that talks to the old host says so, once, on stderr (never in its output,
+and not with `-q`):
+
+```
+note: the doz host is 0.12.0-rc.9 (this doz is 0.12.0-rc.10) — `doz host stop` switches to 0.12.0-rc.10; sandboxes hibernate and wake
+```
+
+(If the host is the *newer* one — you ran an older `doz` — the note says to upgrade this `doz`.)
+
 If you skip `doz host stop`, nothing breaks right away: your sandboxes keep running. But the old
 host can no longer boot anything once Homebrew has removed its files, so a start, a wake or a new
 sandbox is refused with a message that tells you to run `doz host stop`. Once nothing runs and

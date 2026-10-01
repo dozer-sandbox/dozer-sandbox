@@ -142,6 +142,7 @@ struct Attach: AsyncParsableCommand {
 
     func run() async throws {
         let key = try parseDetachKey(detachKey)
+        noteHostBuild(g)                // W33: before the terminal is taken over
         AttachClient.run(store: g.dozerStore, sandbox: name, session: session, wake: !noWake, detachKey: key, quiet: g.quiet)
     }
 }

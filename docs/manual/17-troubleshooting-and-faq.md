@@ -36,6 +36,7 @@ Add `-v` to any command to see every step it takes.
 | "cannot boot a VM", or about the entitlement | `doz doctor`; `brew reinstall doz`. A self-built copy must be signed (`make install-cli`). |
 | "this host's program … is gone — an upgrade removed it" | `doz host stop`, then retry. |
 | "this host's program was updated underneath it" | `doz host stop`, then retry. |
+| "note: the doz host is X (this doz is Y)" | A host of the previous version still runs and answered: `doz host stop` (sandboxes hibernate, and wake on the new version). |
 
 ### Starting and waking
 
