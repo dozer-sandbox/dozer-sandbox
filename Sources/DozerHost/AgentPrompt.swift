@@ -53,7 +53,7 @@ public enum AgentPrompt {
     public static let variables: [(name: String, summary: String)] = [
         ("sandbox.name", "the sandbox's name"),
         ("sandbox.image", "its image (claude-code, pi, python-claude-code, …, or a template's name)"),
-        ("sandbox.base", "its base: a recommended one (Python — python:3.13-bookworm) or the user's Dockerfile (596)"),
+        ("sandbox.base", "its base: a recommended one (Python — python:3.13-bookworm) or the user's Dockerfile"),
         ("sandbox.cpus", "its virtual CPUs"),
         ("sandbox.memory", "its memory, e.g. 2 GiB"),
         ("workspace.shared", "yes or no"),
@@ -63,7 +63,7 @@ public enum AgentPrompt {
         ("network.mode", "agent, bake, locked, open, custom (proxied), nat or none"),
         ("network.allowed_hosts", "the hosts the policy allows (proxied), comma-separated"),
         ("network.description", "a sentence: how the sandbox reaches the network and what to do when refused"),
-        ("network.permissions", "597: what the agent may and may not do, in plain words, and the permission to ask for"),
+        ("network.permissions", "what the agent may and may not do, in plain words, and the permission to ask for"),
         ("account.name", "the Anthropic account the proxy injects, or none"),
         ("credentials.description", "a sentence: how credentials reach the agent"),
         ("sandbox.sudo", "yes or no: the agent has passwordless sudo (sandbox.agent_sudo)"),

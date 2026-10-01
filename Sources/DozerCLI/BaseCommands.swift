@@ -15,7 +15,7 @@ func tildePath(_ p: String) -> String {
 
 struct BaseCommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(commandName: "base",
-        abstract: "The recommended bases a sandbox's image is made from (596: base × agent).",
+        abstract: "The recommended bases a sandbox's image is made from (an image is a base × an agent).",
         subcommands: [BaseList.self])
 }
 

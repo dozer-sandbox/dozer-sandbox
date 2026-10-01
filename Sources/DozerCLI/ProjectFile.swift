@@ -57,7 +57,7 @@ struct DozerProject: Equatable {
         ("version", "the file's format: 1"),
         ("name", "the sandbox: 1–40 of a-z 0-9 -"),
         ("image", "claude-code, pi, lab, a base × agent image (python-claude-code, …), or a template (doz image ls) — or agent + base/dockerfile"),
-        ("agent", "claude-code, pi or none (596; default claude-code)"),
+        ("agent", "claude-code, pi or none (default claude-code)"),
         ("base", "a recommended base: node, python, go, rust, java, ruby, dotnet, debian, ubuntu, alpine (doz base ls)"),
         ("dockerfile", "your Dockerfile (./Dockerfile): built with Apple's container build — its RUN steps run OUTSIDE Dozer's network policy"),
         ("cpus", "virtual CPUs, 1–64 (default: the settings' defaults.cpus)"),
@@ -274,7 +274,7 @@ struct DozerProject: Equatable {
         # session. This folder is shared at /workspace. Unknown keys are errors; a commented key takes
         # its default (doz config show).
         #
-        # When a change applies (594 W12) — `doz up` says what differs and what it did:
+        # When a change applies — `doz up` says what differs and what it did:
         #   image (agent, base, dockerfile), cpus, memory, network nat/none: when the sandbox is MADE —
         #     doz rm NAME && doz up recreates it (this folder is kept);
         #   network agent/bake/locked/open: at the next doz up, live (unless you edited the policy);

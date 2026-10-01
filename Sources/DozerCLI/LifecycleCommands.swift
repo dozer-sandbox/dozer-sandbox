@@ -8,13 +8,13 @@ struct CreateArguments: ParsableArguments {
     @Option(name: .long, help: "lab (Alpine + bash), claude-code, pi, a base × agent image (python-claude-code, go, …), or a template (doz image ls). Shorthand for --agent/--base.")
     var image: String?
 
-    @Option(name: .long, help: "596: the agent — claude-code, pi or none (a shell only). Default claude-code.")
+    @Option(name: .long, help: "The agent — claude-code, pi or none (a shell only). Default claude-code.")
     var agent: String?
 
-    @Option(name: .long, help: "596: a recommended base (doz base ls): node, python, go, rust, java, ruby, dotnet, debian, ubuntu, alpine. Default node.")
+    @Option(name: .long, help: "A recommended base (doz base ls): node, python, go, rust, java, ruby, dotnet, debian, ubuntu, alpine. Default node.")
     var base: String?
 
-    @Option(name: .long, help: "596: your own Dockerfile as the base, built with Apple's container build (installed on demand; its RUN steps run OUTSIDE Dozer's network policy). The workspace defaults to its folder.")
+    @Option(name: .long, help: "Your own Dockerfile as the base, built with Apple's container build (installed on demand; its RUN steps run OUTSIDE Dozer's network policy). The workspace defaults to its folder.")
     var dockerfile: String?
 
     @Option(name: .long, help: "Virtual CPUs (default 2).")
@@ -60,7 +60,7 @@ struct CreateArguments: ParsableArguments {
     var rebuild = false
 
     // `--allow -error-reports`: the value may start with a dash.
-    @Option(name: .long, parsing: .unconditionalSingleValue, help: "597: what the agent may do, on top of the default (defaults.permissions): permissions (doz net permissions), -PERMISSION to remove, site:HOST, or standard/locked/open. Comma-separated or repeated.")
+    @Option(name: .long, parsing: .unconditionalSingleValue, help: "What the agent may do, on top of the default (defaults.permissions): permissions (doz net permissions), -PERMISSION to remove, site:HOST, or standard/locked/open. Comma-separated or repeated.")
     var allow: [String] = []
 
     @Flag(name: .long, help: "When the image is out of date: use it as it is (the default off a terminal; said as a warning).")
@@ -216,7 +216,7 @@ struct Create: AsyncParsableCommand {
     @OptionGroup var g: GlobalOptions
     @Argument(help: "The sandbox's name: 1–40 characters of a-z 0-9 -.") var name: String
     @OptionGroup var create: CreateArguments
-    @Flag(name: .long, help: "Start it too (594 W27).") var start = false
+    @Flag(name: .long, help: "Start it too.") var start = false
 
     func run() async throws {
         var r = HostRequest(.create, name: name)

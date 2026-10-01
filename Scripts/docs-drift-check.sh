@@ -70,3 +70,7 @@ printf 'ok docs-drift-check: %d command names match the CLI exactly (top level +
 if [[ -d "$PACKAGE/docs/manual" ]]; then
     (cd "$PACKAGE" && swift Scripts/manual-check.swift --doz "$BIN" --manual docs/manual)
 fi
+
+# What a person reads — every --help, every setting's description, the user-facing strings in the
+# sources and the dashboard — carries no internal feature number or walkthrough ID.
+(cd "$PACKAGE" && swift Scripts/user-text-check.swift --doz "$BIN")
