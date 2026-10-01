@@ -102,7 +102,7 @@ final class OnboardingTests: XCTestCase {
         XCTAssertEqual(back.cpus, 3)
         XCTAssertEqual(back.memoryMiB, 1536)
         XCTAssertEqual(back.sessions, p.sessions)
-        XCTAssertEqual(back.agentPrompt, "line one\nline two\n")
+        XCTAssertEqual(back.agentPrompt, "line one\nline two", "599f: exactly as written (`|-`)")
         XCTAssertEqual(DozerProject.suggestedName(for: URL(fileURLWithPath: "/x/My Project_2")), "my-project-2")
         XCTAssertEqual(DozerProject.suggestedName(for: URL(fileURLWithPath: "/x/___")), "project")
     }

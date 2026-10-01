@@ -1,4 +1,5 @@
 import Foundation
+import DozerHost
 
 // 594 (owner's walkthrough W13): after Ctrl-] detached `doz up` from Claude Code, moving the mouse typed
 // `35;44;37M…` into the Mac's shell — Claude Code had turned on SGR mouse reporting (?1006 + ?1003) in
@@ -167,7 +168,7 @@ enum MenuKey: Equatable, Sendable {
 /// `doz attach NAME` for the sandbox's default session; else `doz attach NAME SESSION`.
 func reattachCommand(sandbox: String, session: String, defaultSession: String?,
                      folder: URL = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)) -> String {
-    if let f = DozerProject.find(in: folder), let p = try? DozerProject.load(f), p.name == sandbox,
+    if let f = try? DozerProject.find(in: folder), let p = try? DozerProject.load(f), p.name == sandbox,
        (p.sessions.first?.name ?? defaultSession) == session {
         return "doz up"
     }

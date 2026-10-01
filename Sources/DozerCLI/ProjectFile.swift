@@ -3,93 +3,13 @@ import Yams
 import DozerKit
 import DozerHost
 
-/// 594 (D9, owner ruling: YAML, like dbt's `dbt_project.yml`) — `doz_project.yaml`: a folder that
-/// is a Dozer Sandbox project. `doz init` writes it; `doz up` with no name, in that folder, creates,
-/// starts or wakes exactly that sandbox and attaches. The folder is its /workspace.
-///
-/// The schema is CLOSED, as doz.toml's is: an unknown key, a value of the wrong type or outside its
-/// rule is an error naming its line. No anchors or aliases, no multiple documents, 64 KiB at most.
-/// 594 accepts image NAMES only (an image from a Dockerfile is 595's).
-struct DozerProject: Equatable {
-    static let fileName = "doz_project.yaml"
-    static let maximumBytes = 64 << 10
-
-    struct Session: Equatable {
-        var name: String
-        /// nil: the image's own program (the default session), or a login shell for `shell`.
-        var command: [String]?
-    }
-
-    var version = 1
-    var name: String
-    var image: String
-    var cpus: Int?
-    var memoryMiB: UInt64?
-    var network: String?
-    var account: String?
-    /// What `doz up` starts, in order; the first is attached. Empty: the image's own session.
-    var sessions: [Session] = []
-    var agentPrompt: String?
-    var agentPromptMode: String?
-    /// 594 W23: the agent's passwordless sudo (nil: the setting sandbox.agent_sudo decides).
-    var agentSudo: Bool?
-    /// 596 (B10): the agent and the base instead of `image` — a recommended base, or a Dockerfile
-    /// (a path relative to this folder, or absolute).
-    var agent: String?
-    var base: String?
-    var dockerfile: String?
-    /// 599: the sandbox's own per-sandbox settings (`settingKeys`), by setting key.
-    var settings: [String: TOMLValue] = [:]
-    /// 599d: `off` / `read` / `push` — "Use GitHub as you" (and "Push to GitHub") when the sandbox is made.
-    var github: String?
-
-    /// 599: the project keys that are a per-sandbox setting — the key, the setting, and the commented
-    /// line `doz init` writes when the file does not set it.
-    static let settingKeys: [(key: String, setting: String, comment: String)] = [
-        ("clipboard", SettingKey.clipboard,
-         "# clipboard: write           # a copy in the sandbox (OSC 52) reaches the Mac clipboard, with a notice; off: never. Applies now"),
-        ("browser_bridge", SettingKey.browserBridge,
-         "# browser_bridge: on         # xdg-open in the sandbox opens http(s) URLs in the Mac's browser (a sign-in's callback forwarded); off: never. Applies now"),
-        ("open_files", SettingKey.openFiles,
-         "# open_files: on             # xdg-open FILE in the sandbox opens a /workspace document in the Mac's default app, with a notice; off: never. Applies now"),
-        ("ssh_agent", SettingKey.sshAgent,
-         "# ssh_agent: off             # on: forward this Mac's SSH agent (keys stay on the Mac; github.com:22 only). Applies now"),
-        ("tmux", SettingKey.tmux,
-         "# tmux: false                # true: sessions run inside tmux (windows, panes, Ctrl-b). From the next session"),
-    ]
-
-    /// The keys, in the order the file lists them, with what each says.
-    static let keys: [(key: String, summary: String)] = [
-        ("version", "the file's format: 1"),
-        ("name", "the sandbox: 1–40 of a-z 0-9 -"),
-        ("image", "claude-code, pi, lab, a base × agent image (python-claude-code, …), or a template (doz image ls) — or agent + base/dockerfile"),
-        ("agent", "claude-code, pi or none (default claude-code)"),
-        ("base", "a recommended base: node, python, go, rust, java, ruby, dotnet, debian, ubuntu, alpine (doz base ls)"),
-        ("dockerfile", "your Dockerfile (./Dockerfile): built with Apple's container build — its RUN steps run OUTSIDE Dozer's network policy"),
-        ("cpus", "virtual CPUs, 1–64 (default: the settings' defaults.cpus)"),
-        ("memory", "guest RAM: 2G, 512M or MiB (default: per image, in the settings)"),
-        ("network", "agent, bake, locked, open (proxied), nat or none (default: per image)"),
-        ("account", "default (the store's), none, or an account name (doz account ls)"),
-        ("sessions", "what `doz up` starts; the first is attached (default: the image's own)"),
-        ("agent_prompt", "this project's own lines for the agent's environment prompt"),
-        ("agent_prompt_mode", "append (to the template, the default) or replace"),
-        ("agent_sudo", "true or false: the agent's passwordless sudo in the sandbox (default: the setting sandbox.agent_sudo, true)"),
-        ("github", "off, read or push: git and gh signed in as you on GitHub — the permissions \"Use GitHub as you\" / \"Push to GitHub\" (default off; when the sandbox is made — later: doz net allow NAME github:as-you)"),
-    ] + settingKeys.map { k in
-        (k.key, "\(DozerSettings.definition(k.setting)?.type.name ?? "a value"): this sandbox's \(k.setting) (default: the setting)")
-    }
-
-    struct Invalid: Error, LocalizedError, Equatable {
-        let message: String
-        var errorDescription: String? { message }
-    }
-
-    /// The project file in `directory`, if there is one.
-    static func find(in directory: URL) -> URL? {
-        let u = directory.appendingPathComponent(fileName)
-        return FileManager.default.fileExists(atPath: u.path) ? u : nil
-    }
-
+/// 594 (D9) — READING `doz_project.yaml` (or, 599f, `doz_project.yml`). The model, the renderer and the
+/// whole-project check are `DozerHost.DozerProject` (shared with the dashboard's wizard, which `doz ui`
+/// hands this parser); Yams stays in the CLI's commands. The schema is CLOSED: an unknown key, a value of
+/// the wrong type or outside its rule is an error naming its line. No anchors or aliases, no multiple
+/// documents, 64 KiB at most.
+extension DozerProject {
+    /// The project file in `directory`, if there is one (`find(in:)`; both spellings at once → Invalid).
     static func load(_ url: URL) throws -> DozerProject {
         guard let data = FileManager.default.contents(atPath: url.path) else { throw Invalid(message: "\(url.path) cannot be read") }
         guard data.count <= maximumBytes else { throw Invalid(message: "\(url.path) is over 64 KiB") }
@@ -102,6 +22,7 @@ struct DozerProject: Equatable {
         func bad(_ node: Node?, _ what: String) -> Invalid {
             Invalid(message: "\(file)" + (node?.mark.map { " line \($0.line)" } ?? "") + ": " + what)
         }
+        guard text.utf8.count <= maximumBytes else { throw Invalid(message: "\(file) is over 64 KiB") }
         // The parser stays alive while the tree is checked: it holds the anchors a node names.
         let parser: Parser
         let root: Node?
@@ -189,6 +110,18 @@ struct DozerProject: Equatable {
                 let s = try scalarString(v, key)
                 guard ["agent", "bake", "locked", "open", "nat", "none"].contains(s) else { throw bad(v, "network: agent, bake, locked, open, nat or none") }
                 p.network = s
+            case "permissions":
+                // 599f: a string (`standard`, `+web,-error-reports`) or a list of words.
+                let words: [String]
+                switch v {
+                case .scalar(let s): words = s.string.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+                case .sequence(let seq): words = try seq.map { try scalarString($0, "a permission") }
+                default: throw bad(v, "permissions: words like standard or +web,-error-reports")
+                }
+                guard SettingType.permissionWords(words.joined(separator: ",")) != nil else {
+                    throw bad(v, "permissions: standard, locked, open, or permissions like +web,-error-reports (doz net permissions)")
+                }
+                p.permissions = words
             case "account":
                 let s = try scalarString(v, key)
                 guard s == "default" || s == "none" || s.range(of: "^[a-z0-9][a-z0-9-]{0,39}$", options: .regularExpression) != nil else {
@@ -265,123 +198,9 @@ struct DozerProject: Equatable {
         }
         p.name = name
         p.image = image
+        // 599f: the whole-project check the wizard and doz init share (what the file says by itself).
+        if let why = p.problem() { throw bad(root, why) }
         return p
-    }
-
-    /// 596: the image agent + base name (a Dockerfile's: the agent's, the host swaps in its base).
-    var chosenImage: String {
-        let a: AgentKind = switch agent ?? "claude-code" { case "pi": .pi; case "none": .none; default: .claudeCode }
-        if dockerfile != nil { return ImageChoice(base: a == .none ? "alpine" : "node", agent: a).name }
-        return ImageChoice(base: base ?? "node", agent: a).name
-    }
-
-    /// The file `doz init` writes: every key listed; the ones not set are commented (their defaults).
-    func render() -> String {
-        func quoted(_ s: String) -> String {
-            s.range(of: "^[A-Za-z0-9._/-]+$", options: .regularExpression) != nil ? s : "\"" + s.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"") + "\""
-        }
-        var out = """
-        # doz_project.yaml — a Dozer Sandbox project (written by doz init).
-        # `doz up` in this folder creates, starts or wakes the sandbox below and attaches to its first
-        # session. This folder is shared at /workspace. Unknown keys are errors; a commented key takes
-        # its default (doz config show).
-        #
-        # When a change applies — `doz up` says what differs and what it did:
-        #   image (agent, base, dockerfile), cpus, memory, network nat/none: when the sandbox is MADE —
-        #     doz rm NAME && doz up recreates it (this folder is kept);
-        #   network agent/bake/locked/open: at the next doz up, live (unless you edited the policy);
-        #   account: doz account use NAME ACCOUNT (from the next session);
-        #   sessions: every doz up; agent_prompt, agent_sudo: from the next session.
-        version: 1
-        name: \(name)
-
-        """
-        // 596 (B10): the image as agent + base/dockerfile when the file said so, else by name.
-        if agent != nil || base != nil || dockerfile != nil {
-            out += "agent: \(agent ?? "claude-code")               # claude-code, pi or none — when made\n"
-            out += base.map { "base: \($0)                   # doz base ls — when made\n" } ?? "# base: node                 # doz base ls — or dockerfile — when made\n"
-            out += dockerfile.map { "dockerfile: \(quoted($0))     # built with Apple's container build, OUTSIDE Dozer's network policy — when made\n" } ?? ""
-        } else {
-            out += "image: \(image)                  # when made\n"
-            out += "# (or: agent: claude-code|pi|none with base: python … or dockerfile: ./Dockerfile — doz base ls)\n"
-        }
-        out += "\n"
-        out += cpus.map { "cpus: \($0)                     # when made\n" } ?? "# cpus: 2                    # when made\n"
-        out += memoryMiB.map { "memory: \($0 % 1024 == 0 ? "\($0 / 1024)G" : "\($0)M")                 # when made\n" } ?? "# memory: 2G                 # when made\n"
-        out += network.map { "network: \($0)\n" } ?? "# network: agent\n"
-        out += """
-        #   agent  — proxied: Anthropic's API and sign-in, Claude Code's own hosts, GitHub, package registries
-        #   bake   — proxied: package registries only (what an image bake needs)
-        #   locked — proxied: nothing leaves the sandbox (DNS included)
-        #   open   — proxied: every host allowed, every connection still logged
-        #   nat    — a real network interface (vmnet), unfiltered and unlogged
-        #   none   — no network at all
-        #   (proxied: no network interface; every connection judged by the policy on the Mac and logged)
-
-        """
-        out += account.map { "account: \(quoted($0))\n" } ?? "# account: default          # default (the store's), none, or an account name\n"
-        if sessions.isEmpty {
-            out += """
-            # sessions:                 # what doz up starts; the first is attached (default: the image's own)
-            #   - claude
-            #   - name: server
-            #     command: npm run dev
-
-            """
-        } else {
-            out += "sessions:\n"
-            for s in sessions {
-                if let c = s.command { out += "  - name: \(s.name)\n    command: [\(c.map(quoted).joined(separator: ", "))]\n" }
-                else { out += "  - \(s.name)\n" }
-            }
-        }
-        if let a = agentPrompt {
-            out += "agent_prompt: |\n" + a.split(separator: "\n", omittingEmptySubsequences: false).map { "  " + $0 }.joined(separator: "\n") + "\n"
-        } else {
-            out += """
-            # agent_prompt: |           # this project's own lines for the agent (see doz inspect NAME --prompt)
-            #   The tests run with `make test`.
-
-            """
-        }
-        out += agentPromptMode.map { "agent_prompt_mode: \($0)\n" } ?? "# agent_prompt_mode: append  # or replace\n"
-        out += agentSudo.map { "agent_sudo: \($0)\n" }
-            ?? "# agent_sudo: true           # the agent's passwordless sudo (apt-get install …); false: none. From the next session\n"
-        out += github.map { "github: \($0)\n" }
-            ?? "# github: off                # read: git and gh signed in as you on GitHub (read-only); push: also push. When the sandbox is made\n"
-        for k in Self.settingKeys {
-            out += settings[k.setting].map { "\(k.key): \($0.plain)\n" } ?? k.comment + "\n"
-        }
-        return out
-    }
-
-    /// The create options this project gives a new sandbox (the folder is its workspace).
-    func createOptions(folder: URL, file: URL) -> CreateOptions {
-        var o = CreateOptions(image: image, cpus: cpus, memoryMiB: memoryMiB, workspace: folder.path, network: network, account: account)
-        o.agentPrompt = agentPrompt
-        o.agentPromptMode = agentPromptMode
-        o.agentSudo = agentSudo
-        o.settings = settings.isEmpty ? nil : settings
-        // 599d: github: → the two permissions, as --github does.
-        if let words = try? CreateArguments.githubWords(github, flag: "github"), !words.isEmpty { o.allow = words }
-        o.project = file.path
-        // 596 (B6): a Dockerfile relative to this folder (its folder is the build context).
-        if let d = dockerfile {
-            let expanded = (d as NSString).expandingTildeInPath
-            o.dockerfile = (expanded.hasPrefix("/") ? URL(fileURLWithPath: expanded) : URL(fileURLWithPath: expanded, relativeTo: folder)).standardizedFileURL.path
-        }
-        return o
-    }
-
-    /// A sandbox name from a folder's name: lower-cased, runs of anything else become `-`.
-    static func suggestedName(for folder: URL) -> String {
-        var s = ""
-        for ch in folder.lastPathComponent.lowercased() {
-            if ("a"..."z").contains(ch) || ("0"..."9").contains(ch) { s.append(ch) }
-            else if s.last != "-" { s.append("-") }
-        }
-        s = String(s.trimmingCharacters(in: CharacterSet(charactersIn: "-")).prefix(40))
-        return s.isEmpty ? "project" : s
     }
 }
 

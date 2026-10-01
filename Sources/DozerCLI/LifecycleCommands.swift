@@ -140,13 +140,8 @@ struct CreateArguments: ParsableArguments {
 
     /// 599d: `off` / `read` / `push` → permission words for `--allow` (and `github:` in doz_project.yaml).
     static func githubWords(_ v: String?, flag: String) throws -> [String] {
-        switch v?.lowercased() {
-        case nil: return []
-        case "off"?: return ["-" + AgentPermissions.gitHubAsYou, "-" + AgentPermissions.gitHubPush]
-        case "read"?: return ["+" + AgentPermissions.gitHubAsYou, "-" + AgentPermissions.gitHubPush]
-        case "push"?: return ["+" + AgentPermissions.gitHubAsYou, "+" + AgentPermissions.gitHubPush]
-        default: throw ValidationError("\(flag): off, read or push")
-        }
+        guard let w = DozerProject.gitHubWords(v) else { throw ValidationError("\(flag): off, read or push") }
+        return w
     }
 
     /// 599: the per-sandbox settings given as flags (nil: none).
@@ -463,7 +458,9 @@ struct Up: AsyncParsableCommand {
         var projectFile: URL?
         let folder = URL(fileURLWithPath: FileManager.default.currentDirectoryPath).standardizedFileURL
         if name == nil {
-            guard let f = DozerProject.find(in: folder) else {
+            let found: URL?
+            do { found = try DozerProject.find(in: folder) } catch { throw fail(HostError(.invalid, error.localizedDescription), g) }
+            guard let f = found else {
                 throw fail(HostError(.invalid, "which sandbox? doz up NAME — or run it in a folder with \(DozerProject.fileName) (doz init makes one)"), g)
             }
             do { project = try DozerProject.load(f) } catch { throw fail(HostError(.invalid, error.localizedDescription), g) }

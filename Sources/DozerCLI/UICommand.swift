@@ -128,6 +128,8 @@ struct UIServe: AsyncParsableCommand {
             Doctor.checks(store: store, claude: probeClaude).map { WebDoctorCheck(check: $0.check, status: $0.status.rawValue, detail: $0.detail) }
         }
         let server: DozerWebServer
+        // 599f: the New Sandbox wizard reads project files with the CLI's own parser (Yams stays here).
+        WebProjectFiles.install { text, file in try DozerProject.parse(text, file: file) }
         // 591: the Settings page edits the settings file this process's environment names.
         let settings = WebSettingsStore(environment: ProcessInfo.processInfo.environment, flags: configFlags(g))
         // 594 W18: the port this store's last UI had, when free — an open page then reconnects by itself.
