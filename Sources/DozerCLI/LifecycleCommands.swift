@@ -247,6 +247,78 @@ struct Create: AsyncParsableCommand {
     }
 }
 
+/// 599c (owner: "a "Quick Add" sandbox that picks defaults for workspace name etc and opens it
+/// immediately"): the shortest way in — every default, created, started and attached. Each flag
+/// changes just that one thing; `doz create`/`doz up` take everything else.
+struct New: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+        abstract: "The quickest way in: a new sandbox with every default — created, started and attached.",
+        discussion: """
+        The image is the setting defaults.image; the name is the image's (claude-sandbox, then claude-sandbox-2, …); its \
+        workspace is <defaults.projects_dir>/<name>, made now; the account and permissions are the defaults. It prints what \
+        it chose. Each flag changes just that one thing — doz create and doz up take every other option.
+        """)
+
+    @OptionGroup var g: GlobalOptions
+    @Option(name: .long, help: "The image (default: the setting defaults.image).") var image: String?
+    @Option(name: .long, help: "The name (default: the image's — claude-sandbox, claude-sandbox-2, …).") var name: String?
+    @Flag(name: .long, help: "Share no folder: /workspace is private to the sandbox.") var isolated = false
+    @Flag(name: [.short, .customLong("detach")], help: "Create and start it, but do not attach.") var detach = false
+
+    func run() async throws {
+        let rows = try decode(try await query(HostRequest(.ls), g), [SandboxInfo].self, g)
+        let plan: QuickAddPlan
+        do {
+            plan = try QuickAdd.plan(image: image, name: name, isolated: isolated, taken: Set(rows.map(\.name)), settings: .load())
+        } catch let e as HostError {
+            throw fail(e, g)
+        }
+        if !g.json { Out.stdout(plan.line() + "\n") }
+        var o = CreateOptions(image: plan.image, workspace: plan.workspace)
+        o.isolated = isolated ? true : nil
+        do {
+            try preflightAgentAccount(&o, g)      // pi needs an API-key account: offered on a terminal, else the next step
+        } catch {
+            if !g.json {
+                Out.stderr("[doz] doz new uses the store's default account: doz account default NAME makes one the default "
+                           + "— or doz create NAME --image \(plan.image) --account NAME --start\n")
+            }
+            throw error
+        }
+        let notice = try await chooseImage(&o, rebuild: false, useCurrent: false, g)
+        var r = HostRequest(.create, name: plan.name)
+        r.create = o
+        let info = try decode(try call(r, g), SandboxInfo.self, g)
+        noteWorkspace(info, isolatedAsked: isolated, g)
+        let started = try decode(try call(HostRequest(.start, name: plan.name), g), LifecycleResult.self, g)
+        var open = HostRequest(.openSession, name: plan.name)
+        let size = terminalSize()
+        open.cols = size.cols
+        open.rows = size.rows
+        let opened = try decode(try call(open, g), SessionOpened.self, g)
+        if !g.json, let n = opened.notice { Out.stderr("[doz] \(n)\n") }
+        if g.json {
+            var out: [String: JSONValue] = ["name": .string(plan.name), "image": .string(plan.image), "phase": .string(started.phase),
+                                            "session": .string(opened.session), "milliseconds": .number(started.milliseconds)]
+            out["workspace"] = info.workspace.map(JSONValue.string) ?? .null
+            if let notice { out["imageNotice"] = .string(notice) }
+            Out.json(out)
+            return
+        }
+        if detach {
+            Out.stdout("\(plan.name) is \(Out.phaseLabel(started.phase)); session \(opened.session)\(opened.created ? " started" : "") — "
+                       + "\(reattachCommand(sandbox: plan.name, session: opened.session, defaultSession: opened.defaultSession))\n")
+            return
+        }
+        let key = try parseDetachKey("ctrl-]")
+        if !g.quiet {
+            Out.stderr(String(format: "[doz] %@ started in %.0f ms — attaching to %@", plan.name, started.milliseconds, opened.session)
+                       + (key.map { " (\(describeKey($0)): the menu · twice: detach)" } ?? "") + "\n")
+        }
+        AttachClient.run(store: g.dozerStore, sandbox: plan.name, session: opened.session, wake: true, detachKey: key, quiet: g.quiet)
+    }
+}
+
 /// One lifecycle operation, printed.
 func lifecycle(_ op: HostOp, _ name: String, _ g: GlobalOptions) throws -> LifecycleResult {
     let v = try call(HostRequest(op, name: name), g)

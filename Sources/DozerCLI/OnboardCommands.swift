@@ -118,6 +118,9 @@ struct OnboardingFlow {
         case .kept: say("  \(templatePath ?? AgentPrompt.userTemplateName) exists — left as it is")
         case .unavailable: break
         }
+        // 599c: where doz new and the UI's Quick add / New sandbox put each new sandbox's workspace folder.
+        let projects = (Workspace.defaultPath(name: "x") as NSString).deletingLastPathComponent
+        say("  new sandboxes' workspace folders: \(projects)/<name> (defaults.projects_dir — doz config set defaults.projects_dir DIR moves it)")
 
         // 5. The preparation (D3): in the host; Ctrl-C detaches.
         var result: PrepareResult?
@@ -137,7 +140,7 @@ struct OnboardingFlow {
         }
         if let rec = result?.onboarded {
             say("\nDone — this Mac is onboarded (\(rec.images.isEmpty ? "no image prepared yet" : rec.images.joined(separator: ", ") + " ready")).")
-            say("Next: doz init in a project folder (then doz up there), or doz up NAME --workspace DIR · the UI: doz ui")
+            say("Next: doz new (a sandbox with every default, attached) · doz init in a project folder (then doz up there) · the UI: doz ui")
         }
         return OnboardReport(store: store.root.path, checks: checks, account: choice.rawValue, accountAdded: added,
                              accountCommands: added == nil ? Onboarding.accountCommands(choice) : [],

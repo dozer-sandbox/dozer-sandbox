@@ -5,6 +5,7 @@
 onboard
 init
 uninstall
+new
 create
 up
 start

@@ -431,7 +431,7 @@ public struct DozerSettings: Sendable {
                   "The image of a new sandbox when none is named (doz up NAME, doz init, the UI's New sandbox). doz onboard writes the one you chose.",
                   flag: "doz create --image", applies: .nextCreate),
             .init("defaults", "projects_dir", .path, .string("~/Developer/dozer-sandbox-projects"),
-                  "Where the web UI puts a new sandbox's workspace by default: <projects_dir>/<sandbox name> (created when missing, like any workspace). The CLI's doz create has no default workspace (it is isolated unless --workspace); doz init uses the folder it runs in.",
+                  "The base folder of new sandboxes' workspaces: the web UI's New sandbox and Quick add, and doz new, share <projects_dir>/<sandbox name> (created when missing, like any workspace). doz create is isolated unless --workspace; doz init uses the folder it runs in. In the web UI, Settings › Choose… sets it with the Mac's folder picker.",
                   applies: .nextCreate, ui: false),
             .init("defaults", "account", .choice(["mac", "none"]), .string("mac"),
                   "The Anthropic account of a store that has not chosen one: mac (this Mac's Claude Code login) or none. doz account default decides for a store once it has.",
@@ -678,7 +678,12 @@ public struct DozerSettings: Sendable {
             case .flag: note = "set on this process's command line (\(d.flag ?? "a flag"))"
             case .file, .default: break
             }
-            if !d.editableInUI, note == nil { note = "a host path — set it with: doz config set \(d.key) PATH" }
+            if !d.editableInUI, note == nil {
+                // 599c: the projects folder has the web UI's Choose… (the Mac's folder picker) too.
+                note = d.key == SettingKey.projectsDir
+                    ? "a host path — Choose… (this Mac's folder picker), or doz config set \(d.key) PATH"
+                    : "a host path — set it with: doz config set \(d.key) PATH"
+            }
             if fileError != nil, note == nil { note = "the settings file does not parse — fix it (or remove it) first" }
             return SettingRow(key: d.key, section: d.section, name: d.name, value: r.value, defaultValue: d.defaultValue,
                               source: r.source, fileValue: r.fileValue, type: kind, typeName: d.type.name, choices: choices,

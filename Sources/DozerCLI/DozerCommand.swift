@@ -34,8 +34,8 @@ public struct DozerCommand: AsyncParsableCommand {
         abstract: "Dozer Sandbox — fast, suspendable micro-VMs for your Mac: pause in a millisecond, hibernate to disk, wake in a third of a second.",
         discussion: """
         Lifecycle (aliases in brackets): start [cold-boot] · pause [suspend] · resume · sleep · \
-        hibernate · wake · shutdown · reset · rm. `doz up NAME` creates, starts or \
-        wakes, and attaches. Every command takes --json and --store (or $DOZ_STORE).
+        hibernate · wake · shutdown · reset · rm. `doz new` makes a sandbox with every default \
+        and attaches; `doz up NAME` creates, starts or wakes, and attaches. Every command takes --json and --store (or $DOZ_STORE).
 
         Exit codes: 0 ok · 1 failed · 2 not found · 3 not possible in this phase · 4 already exists · \
         5 not confirmed · 6 host unavailable · 7 not implemented yet · 64 usage. exec, run and attach \
@@ -43,7 +43,7 @@ public struct DozerCommand: AsyncParsableCommand {
         """,
         version: version,
         subcommands: [
-            Onboard.self, Init.self, Create.self, Up.self, Start.self, Pause.self, Resume.self, SleepCommand.self, Hibernate.self, Wake.self,
+            Onboard.self, Init.self, New.self, Create.self, Up.self, Start.self, Pause.self, Resume.self, SleepCommand.self, Hibernate.self, Wake.self,
             Shutdown.self, Reset.self, Remove.self,
             List.self, Inspect.self, Sessions.self, Attach.self, Run.self, Exec.self,
             ImageCommand.self, BaseCommand.self, BuilderCommand.self, ResourcesCommand.self, TemplateCommand.self, Duplicate.self, PointCommand.self, NetCommand.self, KeyCommand.self, AccountCommand.self,

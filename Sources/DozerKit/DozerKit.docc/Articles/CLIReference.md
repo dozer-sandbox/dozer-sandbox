@@ -102,6 +102,7 @@ those 3 s first (Claude Code's first network calls, for example, can otherwise f
 ### Creating and entering sandboxes
 
 ```bash
+doz new [--image I] [--name N] [--isolated] [-d]     # 599c: every default — created, started, attached
 doz create NAME --image lab|claude-code|pi|<base>-<agent>|<template> \
     [--cpus 2] [--memory 2G] [--workspace ~/code/proj | --isolated] \
     [--network agent|bake|locked|open|nat|none] [--subnet CIDR]
@@ -111,6 +112,14 @@ doz create NAME --agent claude-code --dockerfile ./Dockerfile      # 596: your o
 doz up NAME [same options] [--session S] [-d] [-- CMD …]
 ```
 
+- **599c: `doz new` — the quickest way in.** The image is `defaults.image`; the name is the image's
+  (`claude-sandbox`, then `-2`, `-3`, … when a sandbox has it or its folder under the projects folder
+  is not empty); the workspace is `<defaults.projects_dir>/<name>`, made now; the default account and
+  permissions. It prints what it chose (`claude-sandbox-2 · claude-code · ~/Developer/dozer-sandbox-projects/claude-sandbox-2`),
+  starts it and attaches. `--image`, `--name`, `--isolated` and `-d` change just that one thing;
+  `--json` answers `{name, image, workspace, phase, session, milliseconds}` without attaching. The
+  prerequisites are `doz create`'s (pi's API-key account, an out-of-date image) — asked on a terminal.
+  The web UI's **Quick add** is the same.
 - **596: two choices — the agent and the base.** `--agent` (Claude Code, pi, or none: a shell only)
   and `--base` (a recommended base: `doz base ls`) name the image `<base>-<agent>`
   (`python-claude-code`, `go-pi`; `debian` for no agent). The three old names stay:
