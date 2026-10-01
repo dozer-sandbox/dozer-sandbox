@@ -150,7 +150,8 @@ extension HostCore {
             let state = bridgeState
             let (n, fresh) = state.once("file/\(sandbox)/\(macPath)/\(listed ?? "")", within: 10) {
                 guard state.fileOpens.allow(sandbox) else {
-                    return BridgeNotice("file-refused", "\(sandbox) asked to open too many files — \(shown) not opened (at most \(WorkspaceFiles.rateCount) in \(Int(WorkspaceFiles.rateWindow)) s)")                }
+                    return BridgeNotice("file-refused", "\(sandbox) asked to open too many files — \(shown) not opened (at most \(WorkspaceFiles.rateCount) in \(Int(WorkspaceFiles.rateWindow)) s)")
+                }
                 guard WorkspaceFiles.open(macPath, app: listed) else {
                     return BridgeNotice("file-refused", "\(sandbox) asked to open \(shown)\(inApp), but this Mac could not open it")
                 }
