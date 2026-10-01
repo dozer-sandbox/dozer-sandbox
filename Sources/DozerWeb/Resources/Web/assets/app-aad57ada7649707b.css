@@ -677,3 +677,14 @@ dialog.dlg:has(.image-picker) { width: min(780px, calc(100vw - 32px)); }
 .perm-field .perm-list { border: 1px solid var(--line); border-radius: 8px; padding: 4px; max-height: 320px; overflow: auto; }
 .perm-field[hidden] { display: none; }
 .perm-setting { display: flex; flex-direction: column; gap: 6px; min-width: 320px; }
+/* 599c: Quick add — in the sidebar, at the right end of the Sandboxes row; the projects folder's Choose…. */
+nav { position: relative; }
+.nav-quick { position: absolute; top: 4px; right: 4px; width: 26px; height: 26px; display: grid; place-items: center; padding: 0;
+  border: 0; border-radius: 6px; background: transparent; color: var(--muted); cursor: pointer; }
+.nav-quick:hover { background: var(--line); color: var(--ink); }
+.nav-quick:focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; }
+nav a.active + .nav-quick { color: var(--bg); }
+nav a.active + .nav-quick:hover { background: color-mix(in srgb, var(--bg) 22%, transparent); color: var(--bg); }
+.nav-quick:disabled { opacity: .45; cursor: default; }
+.quick-why { margin: 0 0 12px; }
+.path-setting { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }

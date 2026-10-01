@@ -616,6 +616,27 @@ public final class DozerWebServer: @unchecked Sendable {
             let start = try WebFolderPicker.decodeStart(body)
             let projects = (Workspace.defaultPath(name: "x", settings: settings.current) as NSString).deletingLastPathComponent
             return json(try await folderPicker.choose(start: WebFolderPicker.startFolder(start, projectsDir: projects)))
+        case .quickAdd:
+            // 599c: changes nothing; POST (CSRF, above) like the workspace check.
+            try Self.requireJSONBody(md)
+            let q = try WebQuickAddQuery.decode(body)
+            async let overview = data.overview()
+            async let images = data.images()
+            async let accounts = data.accounts()
+            let taken = Set(((try? await overview)?.sandboxes ?? []).map(\.name))
+            return json(try q.plan(taken: taken, settings: settings.current, images: (try? await images) ?? [],
+                                   accounts: (try? await accounts) ?? WebAccounts(accounts: [], defaultAccount: "none", keepalive: false)))
+        case .projectsDirChoose:
+            // 599c: the Mac's picker; what the person chose there is written here — never a path from the page.
+            try Self.requireJSONBody(md)
+            guard let obj = try? JSONSerialization.jsonObject(with: body) as? [String: Any], obj.isEmpty else {
+                throw WebAction.Invalid("the body is {}")
+            }
+            let projects = (Workspace.defaultPath(name: "x", settings: settings.current) as NSString).deletingLastPathComponent
+            let c = try await folderPicker.choose(start: WebFolderPicker.startFolder(projects, projectsDir: projects), prompt: WebFolderPicker.projectsPrompt)
+            guard let path = c.path, !c.cancelled else { return json(WebProjectsDirChoice(path: nil, cancelled: true, report: settings.report())) }
+            let report = try settings.applyProjectsDir(path, store: data.storePath)
+            return json(WebProjectsDirChoice(path: (try? Workspace.normalize(path)) ?? path, cancelled: false, report: report))
         case .bases:
             return json(try await data.bases())
         case .dockerfileChoose:

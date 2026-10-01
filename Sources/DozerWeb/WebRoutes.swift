@@ -73,6 +73,11 @@ public enum WebRoute: Equatable, Sendable {
     // answer is a path string, nothing else).
     case workspaceCheck            // POST /api/v1/workspace/check   ({image?, name?, path?})
     case workspaceChoose           // POST /api/v1/workspace/choose  ({start?})
+    // 599c — Quick add: what one click would make (changes nothing; POST + CSRF like the check), and
+    // the Settings page's Choose… for defaults.projects_dir: the Mac's folder picker, whose answer the
+    // SERVER writes — the browser never names the path (the setting stays read-only to `settings`).
+    case quickAdd                  // POST /api/v1/quick-add  ({image?, isolated?})
+    case projectsDirChoose         // POST /api/v1/settings/projects-dir/choose  ({})
     // 595 — Resources: the account of everything Dozer uses (read), and what a deletion WOULD do
     // (changes nothing; POST + CSRF because it carries ids). Deleting is the typed actions
     // `resources-rm` / `resources-clean`; choosing the kernel is `resources-kernel`.
@@ -116,6 +121,8 @@ public enum WebRoute: Equatable, Sendable {
         case (.post, 1) where rest[0] == "accounts": return .accountAdd
         case (.post, 2) where rest == ["workspace", "check"]: return .workspaceCheck
         case (.post, 2) where rest == ["workspace", "choose"]: return .workspaceChoose
+        case (.post, 1) where rest[0] == "quick-add": return .quickAdd
+        case (.post, 3) where rest == ["settings", "projects-dir", "choose"]: return .projectsDirChoose
         case (.post, 2) where rest == ["resources", "preview"]: return .resourcesPreview
         case (.post, 2) where rest == ["dockerfile", "choose"]: return .dockerfileChoose
         case (.post, 4) where rest[0] == "sandboxes" && isSandboxName(rest[1]) && rest[2] == "network" && rest[3] == "preview":

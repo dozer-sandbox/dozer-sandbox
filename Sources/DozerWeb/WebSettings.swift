@@ -95,6 +95,24 @@ public final class WebSettingsStore: @unchecked Sendable {
         }
     }
 
+    /// 599c: a host path the SERVER chose (the Mac's folder picker) — never one the browser sent. The
+    /// same refusals as `apply` for the environment, a flag and an unreadable file.
+    func applyHostPath(_ key: String, _ path: String) throws -> SettingsReport {
+        lock.lock()
+        defer { lock.unlock() }
+        let s = current
+        guard let d = DozerSettings.definition(key), d.type == .path else { throw WebAction.Invalid("unknown setting") }
+        let r = s.resolve(d.key, flag: flags[d.key])
+        if r.source == .env { throw HostError(.invalidPhase, "\(d.key) is set by $\(d.environment ?? "?") in the environment of this doz ui — change it there") }
+        if r.source == .flag { throw HostError(.invalidPhase, "\(d.key) is set on the command line of this doz ui") }
+        if let e = s.fileError { throw HostError(.invalidPhase, "\(e) — fix it (or remove it) first; the UI does not overwrite it") }
+        do {
+            return try s.writing(d.key, .string(path)).report(flags: flags)
+        } catch let e as SettingsError {
+            throw HostError(.failed, e.message)
+        }
+    }
+
     /// `ui.terminals` — off, no ticket is minted.
     public var terminalsEnabled: Bool { current.bool(SettingKey.terminals) }
 

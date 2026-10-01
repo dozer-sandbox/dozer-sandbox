@@ -891,6 +891,13 @@ function settingRow(r) {
     h('div', { class: 'setting-control' }, settingControl(r), reset));
 }
 function settingControl(r) {
+  // 599c: the projects folder — chosen in the Mac's own folder picker (the server writes what was chosen;
+  // the page never sends a path). Not when the environment or the command line sets it.
+  if (r.key === 'defaults.projects_dir' && r.source !== 'env' && r.source !== 'flag') {
+    const choose = btn('Choose…', () => chooseProjectsDir(), { small: true, icon: 'folder', title: 'Pick the folder in this Mac’s folder picker' });
+    choose.dataset.projectsChoose = '';
+    return h('div', { class: 'path-setting' }, h('code', { class: 'setting-value', 'data-projects-dir': '' }, shownValue(r.value, r.type)), choose);
+  }
   if (!r.editable) return h('code', { class: 'setting-value', title: r.note || '' }, shownValue(r.value, r.type));
   let input;
   if (r.type === 'bool') {
@@ -947,6 +954,17 @@ function settingControl(r) {
   }
   return input;
 }
+async function chooseProjectsDir() {
+  try {
+    const c = await api('settings/projects-dir/choose', { method: 'POST', json: {} });
+    if (c.cancelled) return;
+    adoptSettings(c.report);
+    toast('defaults.projects_dir saved: ' + c.path, false);
+  } catch (e) {
+    toast(e.message || String(e), true);
+  }
+  refresh(false);
+}
 async function changeSetting(key, value) {
   try {
     if (value === null) await resetSetting(key); else await saveSetting(key, value);
@@ -987,6 +1005,9 @@ function signedOut(message) {
       ' — it opens a fresh one-use link. (If the UI is not running: ', h('code', null, 'doz ui'), '.)'),
     h('p', { class: 'muted' }, 'Links work once and expire after a few minutes. Nothing on this page can sign you in by itself.')));
 }
+// 599c: Quick add in the sidebar, beside Sandboxes.
+$('nav-quick-add').replaceChildren(icon('plus'));
+$('nav-quick-add').addEventListener('click', (ev) => { ev.preventDefault(); quickAdd(ev.currentTarget); });
 $('sign-out').addEventListener('click', async () => {
   try { await api('session', { method: 'DELETE' }); } catch (_) { /* already gone */ }
   signedOut('You signed out.');
@@ -1531,7 +1552,8 @@ async function viewOverview() {
       : h('td', { class: 'muted', title: 'its network cannot reach an account’s API' }, 'n/a'),
     h('td', null, lifecycleButtons(s, false))));
   return h('div', null,
-    h('div', { class: 'head' }, h('h1', null, 'Sandboxes'), btn('New sandbox', () => createDialog(), { primary: true })),
+    h('div', { class: 'head' }, h('h1', null, 'Sandboxes'),
+      h('div', { class: 'actions' }, quickAddButton(), btn('New sandbox', () => createDialog(), { primary: true }))),
     h('p', { class: 'sub' }, o.source === 'host' ? 'Live from the host.' : 'No host is running: read from the store (nothing is live). An action starts the host.'),
     h('div', { class: 'cards' },
       hostCard(o.host),
@@ -1545,7 +1567,58 @@ async function viewOverview() {
       'No sandboxes yet — New sandbox, or doz create NAME --image lab'));
 }
 
-async function createDialog() {
+// ── 599c: Quick add (owner: "a "Quick Add" sandbox that picks defaults for workspace name etc and opens
+// it immediately") — one click, no form: the default image (defaults.image), a free name (claude-sandbox,
+// -2, …), its workspace <defaults.projects_dir>/<name> (made), the default account and permissions;
+// created, started with the boot view, its page open. What one click cannot decide (the agent's
+// account, an out-of-date image) opens New sandbox with the requirement said.
+function quickAddTitle() {
+  return 'One click: a ' + setting('defaults.image', 'lab') + ' sandbox with a free name, its folder in ' + setting('defaults.projects_dir', '~/Developer/dozer-sandbox-projects') + ' — started and opened';
+}
+function quickAddButton() {
+  const b = btn('Quick add', (ev) => quickAdd(ev.currentTarget), { icon: 'rocket', title: quickAddTitle() });
+  b.dataset.quickAdd = '';
+  return b;
+}
+/// Until the operation `id` this page started ends (its SSE end, or the answer) — or `max` ms.
+async function waitOp(id, max = 120000) {
+  const t0 = Date.now();
+  while (Date.now() - t0 < max) {
+    const o = state.ops.get(id);
+    if (o && o.state !== 'running') return o;
+    await new Promise((r) => setTimeout(r, 150));
+  }
+  return state.ops.get(id) || null;
+}
+async function quickAdd(button) {
+  if (state.quickAdding) return;
+  state.quickAdding = true;
+  const buttons = [...document.querySelectorAll('[data-quick-add]')];
+  for (const b of buttons) b.disabled = true;
+  try {
+    const p = await api('quick-add', { method: 'POST', json: {} });
+    if (p.requirement) { createDialog({ why: p.requirement, kind: p.requirementKind, image: p.image }); return; }
+    const op = await actOrThrow({ action: 'create', sandbox: p.name, image: p.image, ...(p.workspace ? { workspace: p.workspace } : { isolated: true }) });
+    const end = await waitOp(op.id);
+    if (!end || end.state !== 'done') return;        // a failure is said by the operation's own toast
+    toast('Quick add: ' + p.name + ' · ' + p.image + ' · ' + (p.workspace || 'isolated'));
+    if (bootViewOnStart()) { await startWithBootView(p.name); return; }
+    location.hash = '#/sandbox/' + p.name;
+    const started = await act({ action: 'start', sandbox: p.name });
+    if (started && terminalsAllowed()) {
+      const s = await waitOp(started.id, 600000);
+      if (s && s.state === 'done' && state.view === 'sandbox' && state.param === p.name) openTerminal(p.name, null, 'interactive');
+    }
+  } catch (e) {
+    toast(e.message || String(e), true);
+  } finally {
+    state.quickAdding = false;
+    for (const b of document.querySelectorAll('[data-quick-add]')) b.disabled = false;
+    if (button && button.isConnected) button.disabled = false;
+  }
+}
+
+async function createDialog(quick = null) {
   let images = [], accounts = { accounts: [] }, bases = null;
   try { [images, accounts] = await Promise.all([api('images'), api('accounts')]); } catch (_) { /* defaults */ }
   try { bases = await api('bases'); } catch (_) { /* no catalogue: the picker shows what it can */ }
@@ -1608,6 +1681,13 @@ async function createDialog() {
     await actOrThrow(body);
   });
   let chooser = null, acct = null;
+  // 599c: Quick add could not decide this one — said at the top; the form below is pre-filled with its defaults.
+  if (quick && quick.why) {
+    const sub = dlg.querySelector('form > p.sub');
+    const note = h('div', { class: 'notice quick-why', role: 'note', 'data-quick-why': quick.kind || '' },
+      icon(quick.kind === 'account' ? 'key-round' : 'flame'), ' Quick add needs your choice: ' + quick.why);
+    if (sub) sub.after(note); else dlg.querySelector('form').prepend(note);
+  }
   const submit = dlg.querySelector('button[type="submit"]');
   const why = h('small', { class: 'dlg-why', 'data-create-why': '', 'aria-live': 'polite' });
   submit.parentElement.before(why);
@@ -1616,7 +1696,7 @@ async function createDialog() {
     why.textContent = w || '';
     submit.disabled = !!w || (acct ? !acct.ok() : false);
   };
-  const picker = imagePicker({ images, bases, value: setting('defaults.image', 'claude-code'),
+  const picker = imagePicker({ images, bases, value: (quick && quick.image) || setting('defaults.image', 'claude-code'),
     onChange: () => { if (chooser) chooser.imageChanged(); if (acct) acct.agentChanged(); renderImgNote(picker.image()); if (perms.baseChanged) perms.baseChanged(); gate(); },
     onDockerfile: (folder) => { if (chooser) chooser.suggest(folder); } });
   imgSlot.replaceWith(picker.el);
@@ -3228,6 +3308,9 @@ function wizStep6(d, w) {
         : (d.accountOptions.find((o) => o.value === w.account) || { label: w.account || '—' }).label)),
       c ? fileLine('Settings', c.settings, c.settingsPath) : null,
       c ? fileLine('Your environment prompt template', c.promptTemplate, c.promptTemplatePath) : null,
+      // 599c: where Quick add, New sandbox and doz new put each sandbox's workspace folder.
+      h('li', { 'data-wiz-projects': '' }, 'Workspace folders of new sandboxes: ', h('code', null, setting('defaults.projects_dir', '~/Developer/dozer-sandbox-projects') + '/<name>'),
+        ' — Quick add and doz new use it; Settings › Choose… moves it'),
       h('li', null, 'Images: ' + (wizChosenImages().join(', ') || 'none now (each is prepared by its first start)')),
       w.created ? h('li', null, 'First sandbox: ', h('a', { href: '#/sandbox/' + w.created }, w.created)) : null),
     h('p', { class: 'muted' }, 'From a terminal: doz init in a project folder, then doz up there. This wizard is always here: Doctor › Run onboarding again.'),

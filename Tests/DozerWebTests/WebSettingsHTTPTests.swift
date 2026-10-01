@@ -448,6 +448,72 @@ final class WebSettingsHTTPTests: XCTestCase {
                       "the start folder is an argument of the fixed script, never its text")
     }
 
+    /// 599c: Quick add's plan (CSRF, strict body; changes nothing) — the default image, a free name, the
+    /// folder under projects_dir, and a requirement when one click cannot decide; and the Settings page's
+    /// Choose… for defaults.projects_dir: the Mac's picker (the seam), its answer written by the SERVER —
+    /// the settings route still refuses the key from the browser.
+    func testQuickAddAndTheProjectsFolderPicker() throws {
+        let (cookie, csrf) = try signIn()
+        func post(_ path: String, _ body: String, csrf c: String? = nil) throws -> RawResponse {
+            var h = ["Cookie": cookie, "Origin": origin, "Content-Type": "application/json"]
+            if let c { h["X-Doz-CSRF"] = c }
+            return try request(path, h, method: "POST", body: body)
+        }
+        func object(_ r: RawResponse) -> [String: Any] { (try? JSONSerialization.jsonObject(with: r.body) as? [String: Any]) ?? [:] }
+        let scratch = "/private/tmp/dzqa-\(UUID().uuidString.prefix(8))"
+        defer { try? FileManager.default.removeItem(atPath: scratch) }
+        try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try "[defaults]\nprojects_dir = \"\(scratch)/projects\"\nimage = \"lab\"\n".write(to: file, atomically: true, encoding: .utf8)
+
+        for path in ["/api/v1/quick-add", "/api/v1/settings/projects-dir/choose"] {
+            XCTAssertEqual(try post(path, "{}").status, 403, "\(path): no CSRF")
+            XCTAssertEqual(try post(path, #"{"nope":1}"#, csrf: csrf).status, 400, "\(path): an unknown field")
+            XCTAssertEqual(try request(path, ["Cookie": cookie]).status, 404, "\(path): GET is not a route")
+        }
+        XCTAssertEqual(try post("/api/v1/settings/projects-dir/choose", #"{"path":"/etc"}"#, csrf: csrf).status, 400, "the page never names the path")
+        XCTAssertEqual(try post("/api/v1/quick-add", #"{"isolated":"yes"}"#, csrf: csrf).status, 400)
+
+        // The plan: lab (the setting), lab-sandbox (demo is the fake's sandbox), its folder — nothing made.
+        var r = try post("/api/v1/quick-add", "{}", csrf: csrf)
+        XCTAssertEqual(r.status, 200, r.text)
+        var o = object(r)
+        XCTAssertEqual(o["name"] as? String, "lab-sandbox")
+        XCTAssertEqual(o["image"] as? String, "lab")
+        XCTAssertEqual(o["workspace"] as? String, scratch + "/projects/lab-sandbox")
+        XCTAssertNil(o["requirement"])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: scratch + "/projects"), "a plan makes nothing")
+        o = object(try post("/api/v1/quick-add", #"{"isolated":true}"#, csrf: csrf))
+        XCTAssertNil(o["workspace"])
+        // pi, with no API-key account (the fake has none): the form, with the requirement.
+        o = object(try post("/api/v1/quick-add", #"{"image":"pi"}"#, csrf: csrf))
+        XCTAssertEqual(o["name"] as? String, "pi-sandbox")
+        XCTAssertEqual(o["requirementKind"] as? String, "account")
+        XCTAssertTrue((o["requirement"] as? String)?.contains("pi needs an Anthropic API key") == true, "\(o)")
+
+        // The projects folder: never from the settings route (a host path) …
+        XCTAssertEqual(try change(#"{"key":"defaults.projects_dir","value":"\#(scratch)/x"}"#, cookie, csrf).status, 400)
+        // … but from the Mac's picker: what was chosen there is written.
+        try FileManager.default.createDirectory(atPath: scratch + "/chosen", withIntermediateDirectories: true)
+        server.folderPicker.setRunner { _ in scratch + "/chosen/" }
+        r = try post("/api/v1/settings/projects-dir/choose", "{}", csrf: csrf)
+        XCTAssertEqual(r.status, 200, r.text)
+        o = object(r)
+        XCTAssertEqual(o["path"] as? String, scratch + "/chosen")
+        XCTAssertEqual(o["cancelled"] as? Bool, false)
+        XCTAssertTrue(try String(contentsOf: file, encoding: .utf8).contains("projects_dir = \"\(scratch)/chosen\""))
+        XCTAssertEqual(object(try post("/api/v1/quick-add", "{}", csrf: csrf))["workspace"] as? String, scratch + "/chosen/lab-sandbox")
+        // Cancelled: nothing changes. Inside the store: refused.
+        server.folderPicker.setRunner { _ in nil }
+        o = object(try post("/api/v1/settings/projects-dir/choose", "{}", csrf: csrf))
+        XCTAssertEqual(o["cancelled"] as? Bool, true)
+        XCTAssertTrue(try String(contentsOf: file, encoding: .utf8).contains("projects_dir = \"\(scratch)/chosen\""))
+        server.folderPicker.setRunner { _ in "/tmp/fake-store/projects" }
+        r = try post("/api/v1/settings/projects-dir/choose", "{}", csrf: csrf)
+        XCTAssertEqual(r.status, 400, r.text)
+        XCTAssertTrue(r.text.contains("inside the store"), r.text)
+        XCTAssertTrue(WebFolderPicker.script.contains("item 2 of argv"), "the prompt is an argument of the fixed script too")
+    }
+
     /// 594 (owner ruling): a key or a token typed in the browser — ONE CSRF-checked POST, a strict body,
     /// allowed only while ui.allow_secret_entry; no response (success, refusal or failure) carries it.
     func testAnAccountFromAMaskedFieldNeverComesBack() throws {

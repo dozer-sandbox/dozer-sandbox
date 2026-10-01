@@ -99,7 +99,13 @@ public final class WebFolderPicker: @unchecked Sendable {
 
     private let lock = NSLock()
     private var open = false
-    private var run: Runner
+    /// nil: the Mac's dialog (osascript), with the prompt of the call.
+    private var run: Runner?
+
+    /// The dialog's prompts — fixed texts, chosen by the route (never the request's words).
+    public static let workspacePrompt = "Choose the folder to share at /workspace"
+    /// 599c: the Settings page's Choose… for `defaults.projects_dir`.
+    public static let projectsPrompt = "Choose the folder where new sandboxes get their workspace folders"
 
     /// `run` shows the picker at `start` and returns the chosen folder (nil: cancelled). The default:
     /// the environment's test seam when set, else osascript.
@@ -107,8 +113,6 @@ public final class WebFolderPicker: @unchecked Sendable {
         if let run { self.run = run; return }
         if let seam = environment["DOZ_TEST_FOLDER_PICKER"] {
             self.run = { _ in seam == "cancel" ? nil : seam }
-        } else {
-            self.run = Self.osascript
         }
     }
 
@@ -147,11 +151,11 @@ public final class WebFolderPicker: @unchecked Sendable {
         return Workspace.home()
     }
 
-    public func choose(start: String) async throws -> WebFolderChoice {
+    public func choose(start: String, prompt: String = WebFolderPicker.workspacePrompt) async throws -> WebFolderChoice {
         let runner: Runner? = lock.withLock {
             if open { return nil }
             open = true
-            return run
+            return run ?? { s in try await Self.osascript(s, prompt) }
         }
         guard let runner else { throw WebRejection.pickerOpen }
         defer { lock.withLock { open = false } }
@@ -162,12 +166,13 @@ public final class WebFolderPicker: @unchecked Sendable {
         return WebFolderChoice(path: p, cancelled: false)
     }
 
-    /// The fixed script: the start folder is its only argument (`argv`), never part of its text.
+    /// The fixed script: the start folder and the prompt (one of the fixed prompts above) are its
+    /// arguments (`argv`), never part of its text.
     static let script = """
         on run argv
           activate
           try
-            set f to choose folder with prompt "Choose the folder to share at /workspace" default location (POSIX file (item 1 of argv))
+            set f to choose folder with prompt (item 2 of argv) default location (POSIX file (item 1 of argv))
             return POSIX path of f
           on error number -128
             return ""
@@ -176,10 +181,10 @@ public final class WebFolderPicker: @unchecked Sendable {
         """
 
     /// At most 10 minutes open; then it is closed as cancelled.
-    static let osascript: Runner = { start in
+    static func osascript(_ start: String, _ prompt: String) async throws -> String? {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-        p.arguments = ["-e", script, start]
+        p.arguments = ["-e", script, start, prompt]
         let out = Pipe()
         p.standardOutput = out
         p.standardError = FileHandle.nullDevice
