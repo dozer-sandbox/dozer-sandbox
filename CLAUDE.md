@@ -527,8 +527,21 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   the UI badge, the agent's facts). The UI's defaults (`Workspace.suggestedName`/`defaultPath`,
   `defaults.projects_dir` — a path, so `doz config set` only) and the Mac's folder picker are
   `WebWorkspace.swift`: `POST /api/v1/workspace/check` (makes nothing) and `/choose` (a FIXED
-  AppleScript run by `/usr/bin/osascript`, the start folder its argv; one at a time → 409; tests use
-  `DOZ_TEST_FOLDER_PICKER=/path|cancel` or `setRunner` — never a real dialog).
+  AppleScript run by `/usr/bin/osascript`, the start folder and one of the FIXED prompts its argv; one
+  at a time → 409; tests use `DOZ_TEST_FOLDER_PICKER=/path|cancel` or `setRunner` — never a real dialog).
+- **Quick add / `doz new`** (599c, `DozerHost/QuickAdd.swift`): ONE plan for both — `QuickAdd.plan`
+  (the image `defaults.image` or given; the name `Workspace.suggestedName` past sandboxes and non-empty
+  folders, or a given one — taken → `.exists`; the workspace `<projects_dir>/<name>`, nil when isolated)
+  and `QuickAdd.requirement` (what one click cannot decide: the agent's account via
+  `AgentCredentials.createProblem` unless the image's network is nat/none, then an out-of-date image).
+  The UI: `POST /api/v1/quick-add` {image?, isolated?} (CSRF, makes nothing; `WebQuickAdd.swift`) →
+  the page runs the ordinary `create` action, waits for its end (`waitOp`), then `startWithBootView`;
+  a requirement opens `createDialog({why, kind, image})` instead. The CLI: `New` (LifecycleCommands) —
+  create → start → open the session → attach; `preflightAgentAccount` + `chooseImage` as `create`.
+  **`defaults.projects_dir` stays read-only to `POST /settings`** (a host path); its Settings-page
+  **Choose…** is `POST /api/v1/settings/projects-dir/choose` `{}`: the Mac's picker with the projects
+  prompt, and the SERVER writes what was chosen (`WebSettingsStore.applyProjectsDir` → `applyHostPath`;
+  never `/` or inside the store; env/flag/unreadable file refused as in `apply`).
 
 ### Onboarding, projects, the agent's environment prompt (594) — design: workspace `changes/594-*/594.01-DESIGN.md`
 

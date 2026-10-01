@@ -52,6 +52,9 @@ the agent install what it needs. Turn it off with `sandbox.agent_sudo` if you pr
 - The dashboard listens on your Mac's loopback only, signs a browser in with a one-use link, checks the
   exact host and origin and a CSRF token on every change, and runs each terminal in an isolated frame:
   whatever a sandbox prints can't reach the dashboard's session or other terminals.
+- The dashboard never sets a folder of your Mac from what the page sends: the projects folder's
+  **Choose…** opens your Mac's own folder picker, and the folder you pick there is what is saved
+  (never a folder inside the store, never `/`).
 - A dashboard link is a key: don't paste it anywhere.
 
 ## The bridges — deliberate ways in to your Mac

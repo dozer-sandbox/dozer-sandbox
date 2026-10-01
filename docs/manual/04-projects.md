@@ -15,6 +15,12 @@ sandbox from a checkout.
 - **Some choices are made when the sandbox is made.** Its image, CPUs and memory — and a `nat` or
   `none` network — are the virtual machine's make-up. Changing them in the file affects a **new**
   sandbox only; `doz up` tells you so. Other keys apply at once or from the next session (below).
+- **Your projects folder is not a project.** The setting `defaults.projects_dir`
+  (`~/Developer/dozer-sandbox-projects`) is where **Quick add**, **New sandbox** and `doz new` make a
+  folder for each new sandbox that has none of its own — `claude-sandbox`, `claude-sandbox-2`, … —
+  with no `doz_project.yaml`. Run `doz init` in one of them to make it a project. Change the folder in
+  **Settings** › **Choose…** or with `doz config set defaults.projects_dir DIR`
+  ([The quickest way](05-sandboxes-and-lifecycle.md#the-quickest-way-quick-add-and-doz-new)).
 
 ## Make a folder a project
 

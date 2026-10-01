@@ -128,6 +128,11 @@ Your terminal's title shows where you are, for example `my-app · claude · 14:0
 what it was when you detach. Details: [Projects](04-projects.md) and
 [Terminals and sessions](07-terminals-and-sessions.md).
 
+> **No project yet?** `doz new` — or **Quick add** in the dashboard — makes a sandbox with every
+> default and puts you in it: a free name like `claude-sandbox`, and its own folder in your projects
+> folder (`~/Developer/dozer-sandbox-projects/claude-sandbox`). See
+> [The quickest way](05-sandboxes-and-lifecycle.md#the-quickest-way-quick-add-and-doz-new).
+
 ## Talk to your agent
 
 You're now in Claude Code, inside the sandbox. Its first-run screens are done and it doesn't stop to

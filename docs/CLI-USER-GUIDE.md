@@ -238,8 +238,20 @@ doz create NAME --image lab|claude-code|pi|<base>-<agent>|<custom> \
 doz create NAME --agent claude-code|pi|none --base python     # or --dockerfile ./Dockerfile
 
 doz up NAME [same options] [--session S] [-d] [-- CMD …]
+doz new [--image I] [--name N] [--isolated] [-d]
 ```
 
+- **`doz new` — the quickest way in (599c).** Every default: the image `defaults.image`, the image's
+  name (`claude-sandbox`; `-2`, `-3` when a sandbox has it or its folder is not empty), its workspace
+  `<defaults.projects_dir>/<name>` (made), the default account and permissions. It prints what it
+  chose (`claude-sandbox-2 · claude-code · ~/Developer/dozer-sandbox-projects/claude-sandbox-2`),
+  starts it and attaches. `--image`, `--name`, `--isolated` and `-d` change just that one thing;
+  `--json` answers `{name, image, workspace, phase, session, milliseconds}` without attaching. The
+  prerequisites are `doz create`'s: pi's API-key account (on a terminal: chosen or added; off one: the
+  next step, nothing made — `doz new` uses the store's default account), an out-of-date image (asked).
+  The web UI's **Quick add** (Sandboxes, and the **+** beside Sandboxes in the sidebar) is the same
+  in one click: made, started with the boot view, its page open — or, when one click cannot decide,
+  the New sandbox form with the requirement said.
 - **The agent and the base (596).** A sandbox's image is two choices: the agent (`--agent
   claude-code`, `pi`, or `none` for a shell only) and the base — a recommended one (`--base node`,
   `python`, `go`, `rust`, `java`, `ruby`, `dotnet`, `debian`, `ubuntu`, `alpine`; `doz base ls` shows
@@ -279,8 +291,10 @@ doz up NAME [same options] [--session S] [-d] [-- CMD …]
   `--isolated` asks for it on purpose (no note; not together with `--workspace`). The web UI's New
   sandbox, Duplicate and the wizard default to a **Shared folder** instead —
   `<defaults.projects_dir>/<name>`, `~/Developer/dozer-sandbox-projects/<name>` unless you set
-  `defaults.projects_dir` (`doz config set defaults.projects_dir PATH`) — with **Isolated** one
-  click away; `doz create` has no default folder, and `doz init` uses the folder it runs in.
+  `defaults.projects_dir` (`doz config set defaults.projects_dir PATH`, or Settings › **Choose…** in
+  the web UI — the Mac's folder picker, whose answer the server writes) — with **Isolated** one
+  click away; `doz new` uses the same folder; `doz create` has no default folder, and `doz init`
+  uses the folder it runs in.
 - `--agent-prompt FILE [--agent-prompt-mode append|replace]` gives the sandbox its own part of the
   agent's environment prompt (below).
 - `--no-agent-sudo` (or `--agent-sudo`) decides the agent's sudo for this sandbox (below); without

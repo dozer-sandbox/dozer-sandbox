@@ -91,7 +91,9 @@ A store that was never set up opens on the **setup wizard**:
 6. **First sandbox** (optional) — pick the agent; it suggests a name (`claude-sandbox`) and a project
    folder (`~/Developer/dozer-sandbox-projects/claude-sandbox`, made if it doesn't exist).
    **Choose…** opens the Mac's own folder picker. Or pick **Isolated** to share no folder.
-7. **Done**
+7. **Done** — what was written where, and your **projects folder**
+   (`~/Developer/dozer-sandbox-projects`): each new sandbox from **Quick add**, **New sandbox** or
+   `doz new` gets its own folder there. **Settings** › **Choose…** moves it.
 
 ![The wizard's checks](images/wizard-checks.png)
 
@@ -112,6 +114,7 @@ the store is set up), or **Doctor** › **Run onboarding again**.
 | key | default | what it does |
 |---|---|---|
 | `defaults.image` | `lab` | The image `doz up NAME`, `doz init` and the dashboard's New sandbox use when you don't name one. Onboarding sets it to the image you chose. |
+| `defaults.projects_dir` | `~/Developer/dozer-sandbox-projects` | Your projects folder: Quick add, `doz new` and New sandbox make each new sandbox's folder in it. `doz onboard` says where it is; the dashboard's **Settings** › **Choose…** or `doz config set defaults.projects_dir DIR` moves it. |
 | `defaults.account` | `mac` | The account of a store that hasn't chosen one. `doz account default` decides for a store once it has. |
 | `ui.allow_secret_entry` | `true` | The dashboard may take an API key or setup token in a masked field. `false`: it shows the `doz account add` command instead. The dashboard can turn this off, never on. |
 | `images.claude_code_version` · `images.pi_version` | `latest` | Which agent version an image is prepared with. See [Agents and accounts](09-agents-and-accounts.md#agent-versions). |
