@@ -27,14 +27,32 @@ the background **host** that runs them all.
 
 ## The states
 
+```mermaid
+stateDiagram-v2
+    direction LR
+    [*] --> off: doz create
+    off --> booting: doz start
+    booting --> running
+    booting --> failed
+    failed --> booting: doz start
+    running --> paused: doz pause
+    paused --> running: doz resume
+    running --> asleep: doz sleep
+    asleep --> running: doz wake
+    running --> hibernated: doz hibernate
+    hibernated --> running: doz wake
+    running --> off: doz shutdown
+    running --> off: doz reset (a fresh disk)
+    off --> [*]: doz rm
+
+    note right of paused: frozen · memory kept · back in ~1 ms
+    note right of asleep: frozen and saved to disk · memory kept · back in ~0.3 s
+    note right of hibernated: saved to disk · memory given back · back in ~0.3 s
+    note left of off: powered off · disks kept · programs ended
 ```
-            start                               pause
-   off  ──────────────►  running  ◄──────────────────────►  paused
-    ▲                     │  ▲                 resume
-    │ shutdown            │  │ wake
-    └─────────────────────┤  ├──────────── asleep       (sleep: RAM kept, saved to disk)
-                          │  └──────────── hibernated   (hibernate: saved to disk, RAM given back)
-```
+
+`doz ls` and the dashboard show which of these states each sandbox is in. `doz up` also wakes an
+asleep or hibernated sandbox and resumes a paused one, so it's the one command to remember.
 
 | command | what happens | typical time | memory | programs |
 |---|---|---|---|---|

@@ -65,11 +65,24 @@ for n in pageNames { pages[n] = (try? String(contentsOf: manualURL.appendingPath
 /// Code: fenced blocks (whole lines) and inline `spans`.
 func codeFragments(_ text: String) -> [String] {
     var out: [String] = []
-    var inFence = false
+    var inFence = false, mermaid = false
     var prose: [String] = []
     for line in text.components(separatedBy: "\n") {
         let t = line.trimmingCharacters(in: .whitespaces)
-        if t.hasPrefix("```") || t.hasPrefix("````") { inFence.toggle(); continue }
+        if t.hasPrefix("```") || t.hasPrefix("````") {
+            inFence.toggle()
+            mermaid = inFence && t.hasSuffix("mermaid")
+            continue
+        }
+        if inFence && mermaid {
+            // A Mermaid diagram: its edge labels (`a --> b: doz start`) are checked as commands, the rest
+            // is the diagram's own syntax.
+            if let colon = t.range(of: ": doz ") {
+                let label = String(t[t.index(colon.lowerBound, offsetBy: 2)...])
+                out.append(label.components(separatedBy: " (").first ?? label)
+            }
+            continue
+        }
         if inFence { out.append(line) } else { prose.append(line) }
     }
     let joined = prose.joined(separator: "\n")

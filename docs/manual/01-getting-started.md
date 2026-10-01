@@ -83,6 +83,21 @@ sandbox**.
 
 Details: [Setting up](03-setting-up.md).
 
+### What you just set up
+
+<!-- A hand-drawn diagram of these parts is to come here. -->
+
+- **Each sandbox is a small Linux virtual machine,** not a container, with its own kernel and disk.
+  It can't see your Mac's files, apart from the one project folder you share at `/workspace`.
+- **The Dozer host runs the sandboxes.** It's a background program that starts when you need it and
+  exits when nothing is running. `doz` and the dashboard are remote controls for it.
+- **Sandboxes sit behind a network proxy on your Mac.** They have no network card of their own:
+  every connection goes through the proxy, which allows only what you permit, and logs it.
+- **Your credentials never enter a sandbox.** The agent sees a stand-in; the proxy adds your real
+  login as each request leaves for Anthropic.
+- **Two files hold your choices:** `~/.config/dozer-sandbox/doz.toml` (your settings for this Mac)
+  and a project's `doz_project.yaml` (its sandbox). Everything else is kept by the host.
+
 ## Your first project
 
 A sandbox works on one project folder, shared into it at `/workspace`: the agent's changes appear on
