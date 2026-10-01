@@ -791,9 +791,9 @@ public struct ImageRow: Codable, Equatable, Sendable {
     }
 
     /// 594 W28: the image's standing in one word — `up to date`, `older recipe`, `update available`,
-    /// `not prepared`, `preparing` (nil for a template).
+    /// `not prepared`, `preparing`. W32: never nil — a template (a saved disk, never rebuilt) is `up to date`.
     public var computedStatus: String? {
-        guard kind == "builtin" else { return nil }
+        guard kind == "builtin" else { return "up to date" }
         if preparing == true { return "preparing" }
         if !baked { return "not prepared" }
         if olderRecipe != nil { return "older recipe" }

@@ -98,6 +98,10 @@ baseline and the agent on top as usual.
 
 ## See and manage images
 
+Each image's **STATUS** (also on the Images page, and `status` in `--json`) is one of: **up to date**,
+**update available** (a newer agent release), **older recipe** (an older Dozer prepared it), **not
+prepared** (it's prepared the first time it's needed) or **preparing**.
+
 ```sh
 doz image ls                   # every image and template: baked here?, its agent version, status
 doz image ls --tree            # the lineage: base → image → template → sandboxes, with sizes

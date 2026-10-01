@@ -2293,6 +2293,8 @@ async function viewImages() {
       r.standing ? h('div', { class: 'muted img-standing', 'data-image-standing': '' }, r.standing) : null),
     // 596 (B1): base × agent ("Python · Claude Code").
     h('td', { 'data-image-base': r.base || '' }, r.kind === 'custom' ? 'template' : (r.title || r.kind)),
+    // W32: what the image's state means, in words — never a bare dash.
+    h('td', { 'data-image-status-cell': '' }, h('span', { class: r.status === 'up to date' ? 'muted' : '' }, r.status || 'up to date')),
     h('td', null, r.baked ? (r.bakedAt ? full(r.bakedAt) : 'yes') : h('span', { class: 'muted' }, 'no — bakes on first start')),
     h('td', { class: 'num' }, r.allocatedBytes ? bytes(r.allocatedBytes) : '—'),
     h('td', { class: 'num', 'data-own-cell': '' }, n ? sizePart(own, size) : '—'),
@@ -2328,7 +2330,7 @@ async function viewImages() {
       h('div', { class: 'actions' }, btn('Refresh', () => { remeasure(); refresh(false); }, { small: true, title: 'Measure again' }), imagesToggle())),
     h('p', { class: 'sub' }, 'Built-in images, and templates saved from sandboxes (a sandbox’s root disk — never its state disk). Own is what only this image holds (what removing it frees); shared is what it reuses from the disk it was made from. Progress of a bake shows under Operations. Everything Dozer uses: ',
       h('a', { href: '#/resources' }, 'Resources'), '.'),
-    panel(table(['Image', 'Base · Agent', 'Baked', 'Size', 'Own', 'Shared', barLegend(), 'Version', 'Note', 'Key', ''], rows, [3, 4, 5])));
+    panel(table(['Image', 'Base · Agent', 'Status', 'Baked', 'Size', 'Own', 'Shared', barLegend(), 'Version', 'Note', 'Key', ''], rows, [4, 5, 6])));
 }
 async function viewLineage() {
   const t = await measured('tree', 'images/tree');

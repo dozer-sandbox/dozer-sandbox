@@ -1723,6 +1723,7 @@ public actor HostCore {
             var row = ImageRow(name: c.name, kind: "custom", baked: true, key: c.key, bakedAt: c.createdAt, allocatedBytes: c.allocatedBytes,
                                note: c.note.isEmpty ? nil : c.note, fromSandbox: c.fromSandbox)
             row.agent = c.imageSpec?.name
+            row.fillStanding()                 // W32: "up to date" — never a bare dash
             rows.append(row)
         }
         return rows

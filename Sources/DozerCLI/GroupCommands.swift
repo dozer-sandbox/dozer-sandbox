@@ -31,7 +31,9 @@ struct ImageList: AsyncParsableCommand {
         for r in rows {
             let baked = r.baked ? (r.bakedAt.map { $0.formatted(date: .abbreviated, time: .shortened) } ?? "yes") : "no (prepared on first start, or doz onboard)"
             // 594: an agent image says its version, and a newer one available.
-            t.append([r.name, r.kind == "custom" ? "template" : (r.title ?? r.kind), r.status ?? "—", baked,
+            t.append([r.name, r.kind == "custom" ? "template" : (r.title ?? r.kind),
+                      // W32: in words — an older host's answer has no status; this doz works it out.
+                      r.status ?? r.computedStatus ?? "up to date", baked,
                       r.allocatedBytes.map(DozerImages.formatBytes) ?? "—",
                       [r.versionLine ?? r.note, r.fromSandbox.map { "from \($0)" }, r.dockerfile.map { "Dockerfile \(tildePath($0))" }, r.baseUpdate]
                         .compactMap { $0 }.joined(separator: " · ")])
@@ -108,17 +110,17 @@ struct ImageRemove: AsyncParsableCommand {
 }
 
 struct ImagePull: AsyncParsableCommand {
-    static let configuration = CommandConfiguration(commandName: "pull", abstract: "Pull an image from a registry (not yet — 584.B2).")
+    static let configuration = CommandConfiguration(commandName: "pull", abstract: "Pull an image from a registry (not yet).")
     @OptionGroup var g: GlobalOptions
     @Argument var image: String
-    func run() async throws { throw fail(HostError(.notImplemented, "image pull arrives with 584.B2 — for now images bake locally (doz image bake)"), g) }
+    func run() async throws { throw fail(HostError(.notImplemented, "image pull is not built yet — for now images are prepared locally (doz image bake)"), g) }
 }
 
 struct ImagePush: AsyncParsableCommand {
-    static let configuration = CommandConfiguration(commandName: "push", abstract: "Push an image to a registry (not yet — 584.B2).")
+    static let configuration = CommandConfiguration(commandName: "push", abstract: "Push an image to a registry (not yet).")
     @OptionGroup var g: GlobalOptions
     @Argument var image: String
-    func run() async throws { throw fail(HostError(.notImplemented, "image push arrives with 584.B2"), g) }
+    func run() async throws { throw fail(HostError(.notImplemented, "image push is not built yet"), g) }
 }
 
 // MARK: point
@@ -251,7 +253,7 @@ struct PointSaveImage: AsyncParsableCommand {
 // MARK: net
 
 struct NetCommand: AsyncParsableCommand {
-    static let configuration = CommandConfiguration(commandName: "net", abstract: "What a sandbox's agent may do (597: permissions), its raw policy and its connection log.",
+    static let configuration = CommandConfiguration(commandName: "net", abstract: "What a sandbox's agent may do (its permissions), its raw policy and its connection log.",
                                                     subcommands: [NetShow.self, NetAllow.self, NetDeny.self, NetPermissionsList.self, NetPolicyCommand.self, NetLog.self],
                                                     defaultSubcommand: NetShow.self)
 }
