@@ -39,7 +39,7 @@ minutes.
 
 | page | what it's for |
 |---|---|
-| **Sandboxes** | Every sandbox: state, RAM held, disk, network, account. **Quick add** (every default, started and opened — also the **+** beside **Sandboxes** in the sidebar; see [The quickest way](05-sandboxes-and-lifecycle.md#the-quickest-way-quick-add-and-doz-new)) and **New sandbox**. Under it in the sidebar, each sandbox has its own entry that opens **its page**. |
+| **Sandboxes** | Every sandbox: state, RAM held, disk, network, account. **Quick add** (every default, started and opened — also the **+** beside **Sandboxes** in the sidebar; see [The quickest way](05-sandboxes-and-lifecycle.md#the-quickest-way-quick-add-and-doz-new)) and **New sandbox** (a wizard: every choice, step by step, written to the project folder's `doz_project.yaml` — see [Projects](04-projects.md#in-the-dashboard)). Under it in the sidebar, each sandbox has its own entry that opens **its page**. |
 | **A sandbox's page** | A control bar (its state, image, RAM, network and refusals, account, the lifecycle buttons, **Open in Terminal**, **New shell**, **Terminal…**, **Split**, **Duplicate…**, **Save as template…**, **Boot log**) and its **terminals**, with a **details** panel beside them: sessions, restore points, **What the agent can do** and the connection log, keys and account, configuration. |
 | **All sessions** | A grid of live, read-only tiles: every session of every running sandbox. Click a tile to open it. |
 | **Images** | The images and templates, each image's agent version, what's out of date (**Rebuild**), disk shared and own, and the **Lineage** tree. |

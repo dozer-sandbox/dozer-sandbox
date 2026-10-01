@@ -594,6 +594,21 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
 - **`doz_project.yaml`** is parsed by hand on Yams's node tree with the parser kept alive (anchors are
   weak): a closed key set, errors with the line, anchors/aliases refused top-down (no alias expansion
   is ever walked), one document, 64 KiB. Yams only in `Sources/DozerCLI` (audit).
+- **599f: the New Sandbox wizard and `doz init` share ONE model** — `DozerHost/Project.swift`: `DozerProject`
+  (every key, `render`, `createOptions`, `problem(effectiveNetwork:)` the whole-project check, `dropDefaults`
+  — a pre-filled value equal to the setting's is left commented unless `explicit`, `lineDiff`, `find(in:)`
+  which reads `doz_project.yml` too and throws when BOTH exist) and `ProjectWizard.steps` (the 9 steps both
+  walk). READING stays in the CLI (`ProjectFile.swift`, `extension DozerProject { parse/load }`); `doz ui`
+  installs that parser into `WebProjectFiles` so the dashboard never imports Yams. The dashboard
+  (`WebProject.swift`): `POST /api/v1/project/open|preview|write` (CSRF, strict bodies) and the action
+  `project-create {folder}` → `.create` with `DozerProject.createOptions` (exactly `doz up`'s). The review is
+  `render()` READ BACK by the parser; a write replaces an existing file only when `replace` = SHA-256 of what
+  is there (the page showed the diff and the person confirmed), else 409. Key `permissions` (599f): the
+  `defaults.permissions` words, given to the host as `allow = ["standard"] + words` (a preset alone as is);
+  `permissions`/`github` with a network of bake/nat/none is refused. `agent_prompt` renders `|-` when it has
+  no final newline (exact round-trip). The page: `#/new` (`viewNew`, `nw*` in app.js; never re-rendered
+  by a live refresh); only `explicit` keys are sent. `make test-cli-projectwizard` drives an interactive
+  `doz init` through `script(1)` (the Asker needs a controlling terminal).
 - **`doz uninstall`** removes a store only if it looks like one, the settings dir only if named
   `dozer-sandbox`, and the installed doz only when THIS executable is `<prefix>/libexec/doz/doz` (the
   `bin/doz` link only if it resolves to it). Never the keychain; a running `doz ui` refuses it.

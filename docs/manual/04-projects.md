@@ -29,22 +29,40 @@ cd ~/code/my-app
 doz init
 ```
 
-On a terminal `doz init` asks for the sandbox's name (suggested from the folder's) and its image
-(suggested from the setting `defaults.image`); **Enter** takes the suggestion. It sets this Mac up
-first if it never was. Then it writes `doz_project.yaml`, listing every key — the ones you didn't set
-are commented out, showing their defaults.
+On a terminal `doz init` walks the same steps as the dashboard's **New sandbox** wizard, each saying
+`Step N of 9`:
+
+1. **Project folder** — the folder, and the sandbox's name (suggested from the folder's);
+2. **Agent and base** — the image (suggested from the setting `defaults.image`);
+3. **Account** — for an agent: `default` (the store's), `none`, or an account;
+4. **Access** — GitHub as you (`off`, `read` or `push`), and forwarding this Mac's SSH agent;
+5. **Permissions and network** — the network, and what the agent may do (`standard`, `locked`,
+   `open`, or changes like `+web,-error-reports`);
+6. **Resources** — CPUs and memory (the disk is the image's own; it isn't set per sandbox);
+7. **Bridges** — the clipboard, links in your browser, workspace files opened on the Mac;
+8. **Session** — tmux, and the agent's sudo;
+9. **Review** — the file it will write, and **Write?**
+
+Each question shows its default; **Enter** keeps it. It sets this Mac up first if it never was. The
+file lists every key: what you chose is set, and what you left at its default stays commented out — it
+follows your settings.
+
+In a folder that already has a project file, `doz init` on a terminal starts from that file, and
+replaces it only after showing what changes (`- ` the line there now, `+ ` the new one) and asking.
 
 ```sh
 doz init ~/code/other --name other --image python-claude-code --memory 4G --yes
-doz init --force            # rewrite an existing doz_project.yaml
+doz init ~/code/api --yes --network agent --permissions +web --github read --tmux
+doz init --force            # rewrite an existing doz_project.yaml without asking
 ```
 
 | option | what it does |
 |---|---|
 | `DIR` | The folder (default: the current one; made if missing). |
-| `--name` · `--image` · `--cpus` · `--memory` · `--network` · `--account` | Answer the questions up front. |
-| `--yes` | Ask nothing. `--json` and no terminal ask nothing too. |
-| `--force` | Rewrite an existing file. |
+| `--name` · `--image` · `--cpus` · `--memory` · `--network` · `--permissions` · `--account` | Answer those questions up front. |
+| `--github` · `--ssh-agent` · `--clipboard` · `--browser-bridge` · `--open-files` · `--tmux` · `--agent-sudo` | The same, for access, bridges and the session (`--no-tmux`, `--no-agent-sudo` too). |
+| `--yes` | Ask nothing: every default. `--json` and no terminal ask nothing too. |
+| `--force` | Rewrite an existing file without asking. |
 
 ## Use it
 
@@ -68,11 +86,28 @@ names the shortest way back — in the project folder that is just `doz up`.
 
 ### In the dashboard
 
-The dashboard has no project files of its own, but a project's sandbox is an ordinary sandbox there:
-it appears under **Sandboxes**, and its page shows its workspace folder. **New sandbox** makes the
-same kind of sandbox with a **Shared folder** of your choice (see [The dashboard](06-the-dashboard.md)).
+**Sandboxes** › **New sandbox** is a wizard with the same nine steps. It starts with the **project
+folder**: a new folder in your projects folder, or a folder you have (type it, or **Choose…** in your
+Mac's folder picker). If that folder has a project file, the wizard starts from it.
+
+- Every step is filled in from your settings (or from the file). **Back** and **Next** move between
+  steps, **Enter** is Next, **Alt+←** / **Alt+→** too, and **Skip to review** jumps to the end keeping
+  every default.
+- **Review** shows the exact `doz_project.yaml` it will write. **Write and create** writes it into the
+  folder, makes the sandbox from it — as `doz up` there would — starts it and opens its page with the
+  boot in a terminal. A folder that already has a file asks first, showing what changes.
+- **One-page form** (top right) is the old single form, for an isolated sandbox with no project file.
+  **Quick add** stays the no-questions way in ([The quickest way](05-sandboxes-and-lifecycle.md#the-quickest-way-quick-add-and-doz-new)).
+
+![The New sandbox wizard's review](images/new-sandbox-wizard.png)
+
+A project's sandbox is an ordinary sandbox there: it appears under **Sandboxes**, and its page shows
+its workspace folder.
 
 ## `doz_project.yaml` reference
+
+The file may also be called `doz_project.yml`. A folder with both is an error — `doz up`, `doz init`
+and the dashboard all say so; keep one.
 
 ```yaml
 version: 1
@@ -81,6 +116,7 @@ image: claude-code          # or: agent + base, or agent + dockerfile (below)
 cpus: 4
 memory: 4G
 network: agent              # agent, bake, locked, open, nat, none
+permissions: "+web"         # standard, locked, open, or changes on Standard
 account: default            # default, none, or an account name
 sessions:                   # what doz up starts; the first is attached
   - claude                  #   the image's own session
@@ -109,6 +145,7 @@ tmux: false                 # or true
 | `cpus` | 1–64 | `defaults.cpus` (2) | when made |
 | `memory` | `2G`, `512M` or MiB, 256 MiB – 256 GiB | per image (settings) | when made |
 | `network` | `agent`, `bake`, `locked`, `open`, `nat`, `none` | per image | `agent`/`bake`/`locked`/`open`: at the next `doz up`, live (unless you edited the sandbox's permissions since); `nat`/`none`: when made |
+| `permissions` | what the agent may do on a network with permissions (`agent`, `locked`, `open`): `standard`, `locked`, `open`, or changes on Standard like `+web,-error-reports` (or a list); see [What the agent can do](10-permissions-and-network.md) | `defaults.permissions` (standard) | when made (later: `doz net allow` / `doz net deny`) |
 | `account` | `default`, `none` or an account name | follow the store's default | run `doz account use NAME ACCOUNT` |
 | `sessions` | a list of session names, or `{name, command}` — at most 16 | the image's own session | every `doz up` |
 | `agent_prompt` | text, at most 16 KiB | — | the next session |
@@ -143,8 +180,9 @@ agent's history on the sandbox's state disk goes with the sandbox, so take a
 - One sandbox per project file. Several folders can each have their own.
 - The sandbox's name must be unique in the store. Two checkouts of the same project on one Mac need
   different `name`s.
-- `permissions` are not a project key yet: set them with `network` (a preset) or `doz net allow`
-  after the sandbox exists ([What the agent can do](10-permissions-and-network.md)).
+- `permissions` and `github` need a network with permissions (`agent`, `locked` or `open` — or an image
+  whose default network is one): with `bake`, `nat` or `none` the file is refused, and says why.
+- The disk is the image's own: there is no disk-size key.
 
 ## Troubleshooting
 

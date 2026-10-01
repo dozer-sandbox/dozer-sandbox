@@ -142,13 +142,24 @@ exact version. Which one is the setting `images.claude_code_version` (and `image
 ## Projects: `doz init` and `doz_project.yaml`
 
 ```bash
-doz init [DIR] [--name N] [--image I] [--cpus N] [--memory M] [--network …] [--account A] [--yes] [--force]
+doz init [DIR] [--name N] [--image I] [--cpus N] [--memory M] [--network …] [--permissions W] [--account A]
+         [--github off|read|push] [--ssh-agent on|off] [--clipboard write|off] [--browser-bridge on|off]
+         [--open-files on|off] [--[no-]tmux] [--[no-]agent-sudo] [--yes] [--force]
 cd DIR && doz up             # no name: this folder's sandbox
 ```
 
-`init` makes a folder (made when missing) a project: it writes `doz_project.yaml`, asking for the
-sandbox's name (from the folder's) and image (the settings' `defaults.image`); it onboards this Mac
-first if it never was. **`doz up` with no name**, in that folder, creates, starts or wakes exactly
+`init` makes a folder (made when missing) a project: it writes `doz_project.yaml`; it onboards this Mac
+first if it never was. **599f: on a terminal it walks the dashboard's New Sandbox wizard's nine steps**
+(`ProjectWizard.steps`, one list for both — "Step N of 9"): folder and name, agent and base, account,
+access (GitHub, SSH agent), permissions and network, resources (CPUs, memory — the disk is the image's),
+bridges, session (tmux, sudo), review (the file shown, then "Write?"). Each question's default is the
+setting's (Enter keeps it); a flag answers its question. Only what differs from the settings — or was set
+by a flag — is written; the rest stays commented. In a folder with a project file it starts from that file
+and replaces it only after printing the diff and a yes (`--force`: without asking; off a terminal without
+`--force`: refused). `--yes`, `--json` or no terminal: every default, no questions. `doz_project.yml` is
+read too; a folder with both is an error. The dashboard's **New sandbox** is the same wizard: its review
+shows the exact file (rendered and read back by this CLI's own parser, which `doz ui` hands it), writes it
+(an existing file only after its diff is confirmed), then makes the sandbox as `doz up` would and opens it. **`doz up` with no name**, in that folder, creates, starts or wakes exactly
 that sandbox — the folder is its `/workspace` — starts its `sessions` (the first is attached, the
 others detached) and keeps the sandbox's own agent prompt in step with the file (it applies from the
 next session). Options given to `up` win over the file's, for a new sandbox.
@@ -169,6 +180,7 @@ image: claude-code          # claude-code, pi, lab or a template (an image from 
 cpus: 4                     # optional, like the rest below (the settings' defaults otherwise)
 memory: 4G
 network: agent              # agent, bake, locked, open, nat, none
+permissions: "+web"         # standard, locked, open, or changes on Standard (a network with permissions only)
 account: default            # default, none, or an account name
 sessions:                   # what `doz up` starts; the first is attached
   - claude                  #   the image's own session

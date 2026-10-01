@@ -146,13 +146,17 @@ does all that without attaching. On an existing sandbox, create options are igno
 
 ## Create and start — in the dashboard
 
-1. **Sandboxes** › **New sandbox**.
-2. Name it; choose the **Agent** and the **Base** (or a **Template**); decide what the agent can do,
-   the account, CPUs and memory; choose a **Shared folder** (suggested:
-   `~/Developer/dozer-sandbox-projects/NAME`) or **Isolated**.
-3. **Create**. It is made off; **Start** boots it. With the setting `ui.boot_view_on_start` on (the
-   default), Start opens a terminal that shows the boot as it happens, then becomes the sandbox's own
-   session.
+1. **Sandboxes** › **New sandbox** — a wizard, step by step: the **project folder** (a new one in
+   your projects folder, or one you have), the **Agent** and the **Base** (or a **Template**), the
+   account, access (GitHub, SSH agent), what the agent can do, CPUs and memory, the bridges, and the
+   session. Each step is filled in from your settings; **Skip to review** keeps the rest.
+2. **Review** shows the `doz_project.yaml` it writes into the folder; **Write and create** writes it,
+   makes the sandbox from it, starts it and opens it with the boot in a terminal. See
+   [Projects](04-projects.md#in-the-dashboard).
+3. Or **One-page form** (in the wizard, top right): everything on one page, a **Shared folder** or
+   **Isolated**, and no project file. **Create** makes it off; **Start** boots it. With the setting
+   `ui.boot_view_on_start` on (the default), Start opens a terminal that shows the boot as it happens,
+   then becomes the sandbox's own session.
 
 ![New sandbox](images/new-sandbox.png)
 

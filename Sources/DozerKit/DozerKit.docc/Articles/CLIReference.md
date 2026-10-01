@@ -37,8 +37,10 @@ doz onboard [--images claude-code,pi,lab | --all-images | --no-images] [--accoun
             [--account-name NAME] [--plan PLAN] [--secret-stdin] [--force]
 doz onboard --status        # the onboarding record and the images; follows a preparation that runs
 doz onboard --cancel        # cancel the images being prepared
-doz init [DIR] [--name N] [--image I] [--cpus N] [--memory M] [--network …] [--account A] [--yes] [--force]
-doz up                      # in a folder with doz_project.yaml: that project's sandbox
+doz init [DIR] [--name N] [--image I] [--cpus N] [--memory M] [--network …] [--permissions W] [--account A]
+         [--github off|read|push] [--ssh-agent on|off] [--clipboard …] [--browser-bridge …] [--open-files …]
+         [--[no-]tmux] [--[no-]agent-sudo] [--yes] [--force]   # 599f: on a terminal, the wizard's 9 steps
+doz up                      # in a folder with doz_project.yaml (or .yml): that project's sandbox
 doz uninstall [--keep-store] [--keep-config] [--yes]
 ```
 
