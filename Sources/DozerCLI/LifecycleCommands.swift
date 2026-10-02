@@ -241,21 +241,30 @@ struct Create: AsyncParsableCommand {
     @Argument(help: "The sandbox's name: 1–40 characters of a-z 0-9 -.") var name: String
     @OptionGroup var create: CreateArguments
     @Flag(name: .long, help: "Start it too.") var start = false
+    @Flag(name: .long, help: "Prepare its image now (download and bake it once, with progress), so its first start does not wait; the sandbox stays off. Ctrl-C stops watching: the preparation goes on.")
+    var prepare = false
 
     func run() async throws {
         var r = HostRequest(.create, name: name)
         var o = try create.options()
+        if prepare { o.prepare = true }
         try preflightAgentAccount(&o, g)          // 594: pi needs an API-key account — before anything is made
         // 596 (B7, B9): a Dockerfile base — where it is built, and Apple's tool ready before a start builds it.
         if o.dockerfile != nil { try await builderPreflight(g, required: start) }
         let notice = try await chooseImage(&o, rebuild: create.rebuild, useCurrent: create.useCurrent, g)
         r.create = o
-        let v = try call(r, g)
+        let v = prepare
+            ? try followingCall(r, g, detached: "\(name) is created; its image's preparation goes on in the host — doz onboard --status watches it, doz onboard --cancel stops it")
+            : try call(r, g)
         var info = try decode(v, SandboxInfo.self, g)
         info.imageNotice = notice
         if !g.json {
             Out.stdout("created \(info.name): \(info.image), \(info.cpus) CPUs, \(Out.mib(info.memoryMiB)), network \(info.network)"
                        + (info.workspace.map { ", /workspace = \($0)" } ?? ", isolated") + "\n")
+        }
+        if !g.json, let p = info.imagePreparation {
+            Out.stdout(p == "prepared" ? "prepared its image (\(info.image)) — its first start boots at once\n"
+                                       : "its image (\(info.image)) is ready — nothing to prepare\n")
         }
         noteWorkspace(info, isolatedAsked: create.isolated, g)
         await noteWorkspaceRules(name, g)                                       // 599g

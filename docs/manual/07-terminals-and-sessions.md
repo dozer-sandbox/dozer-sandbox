@@ -35,6 +35,9 @@ doz exec my-app -- ls /workspace  # a one-off command: no terminal, output and e
   `/workspace`; `--user root` for root.
 - A paused or sleeping sandbox is woken first; a sandbox that is off is started by `run` and `exec`
   (`--no-wake` and `--no-start` refuse instead).
+- A program the sandbox does not have is said plainly — "`sudo` is not installed in this sandbox's
+  image (not on its PATH)" — and `doz` exits `125`. There is no `sudo` in the lab; it isn't needed
+  there: `exec` already runs as root unless `--user` names another user.
 
 ### Leaving: the Ctrl-] menu
 

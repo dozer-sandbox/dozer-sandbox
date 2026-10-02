@@ -145,6 +145,11 @@ exact version. Which one is the setting `images.claude_code_version` (and `image
   Sandbox form shows the same choice. `doz ls` and a sandbox's page name a sandbox made from an older
   doz's image; `doz reset NAME` (after a rebuild) moves it to the new one — it keeps the agent's own
   state (`~/.claude`, `~/.pi`) and `/workspace`, and drops everything else installed on its system disk.
+- **Preparing at create time:** `doz create NAME … --prepare` prepares what the sandbox's first start
+  would wait for — its image, downloaded and baked once, with the same progress `doz onboard` shows (a
+  preparation already running for that image is joined) — and leaves the sandbox off. With `--json`
+  the answer carries `"imagePreparation": "prepared"` (it ran, or was joined, to the end) or `"ready"`
+  (nothing to prepare). Ctrl-C stops watching; the preparation goes on in the host.
 - **Offline:** the registry not answering is noted in `host.log` and the image already prepared is
   used. `latest` with no network and **no image yet** fails, saying so — set an exact version
   (`doz config set images.claude_code_version 2.1.227`). An exact version this store knows (the

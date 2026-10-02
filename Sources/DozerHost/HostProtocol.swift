@@ -168,6 +168,9 @@ public struct CreateOptions: Codable, Equatable, Sendable {
     public var allow: [String]?
     /// 599: this sandbox's own values of per-sandbox settings (`DozerSettings.perSandbox` keys only).
     public var settings: [String: TOMLValue]?
+    /// `doz create --prepare`: prepare the image the sandbox's first start would wait for, now (started
+    /// or joined, its progress on the request's stream) — without booting the sandbox.
+    public var prepare: Bool?
 
     public init(image: String, cpus: Int? = nil, memoryMiB: UInt64? = nil, workspace: String? = nil,
                 network: String? = nil, subnet: String? = nil, account: String? = nil) {
@@ -517,6 +520,9 @@ public struct SandboxInfo: Codable, Equatable, Sendable {
     public var workspaceRules: WorkspaceRulesInfo? = nil
     /// 594 W28: a create that used an out-of-date image says so (the CLI fills it for --json).
     public var imageNotice: String? = nil
+    /// `create` with `prepare`: `prepared` (its image's preparation ran, or was joined, to the end) or
+    /// `ready` (nothing to prepare: prepared before, a kept disk, a custom image). nil otherwise.
+    public var imagePreparation: String? = nil
 
     /// 594 W28: the notice for `olderImage` (`doz ls`, the sandbox's page, create).
     public var olderImageLine: String? {
@@ -535,6 +541,7 @@ public struct SandboxInfo: Codable, Equatable, Sendable {
         case agent, credentialProblem, base, imageTitle, dockerfile, rebuildAvailable
         case olderImage, olderImageLine, imageNotice      // 594 W28
         case workspaceRules                               // 599g
+        case imagePreparation                             // create --prepare
     }
 
     public init(from decoder: Decoder) throws {
@@ -568,6 +575,7 @@ public struct SandboxInfo: Codable, Equatable, Sendable {
         olderImage = try c.decodeIfPresent([String].self, forKey: .olderImage)
         imageNotice = try c.decodeIfPresent(String.self, forKey: .imageNotice)
         workspaceRules = try c.decodeIfPresent(WorkspaceRulesInfo.self, forKey: .workspaceRules)
+        imagePreparation = try c.decodeIfPresent(String.self, forKey: .imagePreparation)
     }
 
     /// `workspace` is written even when null (with `isolated: true`), so a reader never has to guess.
@@ -604,6 +612,7 @@ public struct SandboxInfo: Codable, Equatable, Sendable {
         try c.encodeIfPresent(olderImage, forKey: .olderImage)
         try c.encodeIfPresent(olderImageLine, forKey: .olderImageLine)
         try c.encodeIfPresent(imageNotice, forKey: .imageNotice)
+        try c.encodeIfPresent(imagePreparation, forKey: .imagePreparation)
     }
 
     public init(name: String, image: String, phase: String, busy: Bool, cpus: Int, memoryMiB: UInt64, ramHeldMiB: UInt64,
