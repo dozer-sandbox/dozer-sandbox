@@ -31,6 +31,7 @@ both.
 | [GitHub as you](18-github.md) | let git and gh in a sandbox use your GitHub login — read-only or with push — without the token entering it |
 | [The tools layer](19-the-tools-layer.md) | know which tools Dozer puts in a sandbox for its settings (gh, the ssh client, tmux …) and check them |
 | [Workspace rules](20-workspace-rules.md) | keep the agent out of some files in your shared folder (`.dozignore`), or let it read but not change them (`.dozreadonly`) |
+| [The workspace view](21-the-workspace-view.md) | `dozview`, the small program in the sandbox that enforces those rules: what it does, its two processes, sleep and wake, how to look inside |
 | [Restore points, duplicates and templates](12-restore-points-duplicates-templates.md) | undo, copy a sandbox, make your own starting image |
 | [Resources and disk space](13-resources-and-disk-space.md) | see where the disk went and free some |
 | [Letting another agent drive Dozer](14-letting-another-agent-drive.md) | have the agent on your Mac run sandboxes for you |

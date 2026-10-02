@@ -142,7 +142,7 @@ it is looked up — so a file created later, on either side, is covered at once.
 metadata-heavy work: walking a tree of 2,000 files for the first time takes about 0.1 s more, reading
 everything about 1.8× as long as without rules; once looked at, it is close to the plain share — and
 hiding a big folder often makes a whole-tree walk faster than before. Without a rule file none of this
-runs.
+runs. [The workspace view](21-the-workspace-view.md) has the details.
 
 ## Troubleshooting
 
