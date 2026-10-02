@@ -70,6 +70,8 @@ let package = Package(
                 .copy("Resources/deckhold"),
                 // 580: the guest half of a proxied sandbox's network (Guest/doznet/).
                 .copy("Resources/doznet"),
+                // 599g: workspace rules' view of a share — a filtering FUSE daemon (Guest/dozview/).
+                .copy("Resources/dozview"),
             ]
         ),
         // 599g — the `.dozignore` matcher in C (Docker's patternmatcher + an RE2-subset engine + Unicode
