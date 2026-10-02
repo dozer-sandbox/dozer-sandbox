@@ -978,6 +978,13 @@ Task {
             // 594: only the onboarding part of `cli` (its stores are its own).
             let binary = args.firstIndex(of: "--doz").flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil } ?? ".build/debug/doz"
             await cliOnboardingSuite(binary: URL(fileURLWithPath: binary).standardizedFileURL.path)
+        case "spike-dozview":
+            // SPIKE (599g): the in-guest .dozignore view across every lifecycle transition (DozViewSpike.swift).
+            try await dozViewSpike(dozview: dzvBinaryArg())
+        case "spike-dozview-crash-save":
+            exit(try await dzvCrashSave(dozview: dzvBinaryArg()))
+        case "spike-dozview-crash-restore":
+            try await dzvCrashRestore(label: "crash2", thenQuit: true)
         case "lifecycle":
             try await lifecycleSuite()
         case "crash":
