@@ -141,6 +141,7 @@ public actor HostCore {
         let m = Managed(sandbox: sb, config: cfg)
         managed[cfg.name] = m
         sb.setAgentSudo(Self.agentSudo(cfg))
+        sb.setWorkspaceRuleMode(Self.ruleMode(cfg).mode)              // 599g
         if !readOnly { sb.setTimeZone(Self.guestTimeZone()) }
         if !readOnly {
             let name = cfg.name
@@ -387,6 +388,7 @@ public actor HostCore {
                            foreignCredentials: egress.map { $0.vault.foreignSightings.count }.flatMap { $0 == 0 ? nil : $0 })
         i.agent = m.sandbox.spec.imageSpec?.name
         i.credentialProblem = credentialProblem(m)
+        i.workspaceRules = workspaceRulesInfo(m, phase: phase)       // 599g: two stats when there are no rules
         // 594 W28: an image an older doz's recipe made (its disk lacks what this doz's has). 596: any
         // base × agent image.
         if let s = m.sandbox.spec.imageSpec, m.sandbox.spec.customImage == nil, ImageChoice.parse(s.name)?.name == s.name,
@@ -555,6 +557,7 @@ public actor HostCore {
         if let n = r.name, let m = managed[n] {
             m.sandbox.setAgentSudo(Self.agentSudo(m.config))
             m.sandbox.setTimeZone(Self.guestTimeZone())
+            m.sandbox.setWorkspaceRuleMode(Self.ruleMode(m.config).mode)   // 599g: read per request, like the rest
             // 599d: the setting sandbox.ssh_agent changed in the file since — follow it.
             if m.sandbox.egress != nil, (Self.sandboxValue(m.config, SettingKey.sshAgent) == .string("on")) != (m.sandbox.sshAgentSocket != nil) {
                 applyGitHub(m)
@@ -596,6 +599,8 @@ public actor HostCore {
             return try JSONValue(encoding: try await resourcesRemove(r, emit: emit))
         case .resourcesKernel:
             return try JSONValue(encoding: try await resourcesKernel(r))
+        case .workspaceRules:
+            return try JSONValue(encoding: try await workspaceRulesReport(r))
         case .tools, .toolsApply:
             let m = try get(r.name)
             let phase = await m.sandbox.status.phase
@@ -1280,6 +1285,9 @@ public actor HostCore {
     private func openSessionLocked(_ r: HostRequest) async throws -> SessionOpened {
         let m = try get(r.name)
         try await ensureRunning(m, wake: r.wake ?? true)
+        // 599g: a rule file that appeared since the boot gets its view before the program starts (nothing
+        // runs in the guest when nothing changed).
+        await m.sandbox.refreshWorkspaceViews()
         let list = try await m.sandbox.sessions()
         let live = Set(list.filter { !$0.isEnded }.map(\.name))
         let all = Set(list.map(\.name))

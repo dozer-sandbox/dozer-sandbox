@@ -297,8 +297,14 @@ public struct WebSandboxRow: Codable, Equatable, Sendable {
     public var imageTitle: String?
     public var dockerfile: String?
     public var rebuildAvailable: String?
+    /// 599g: the workspace's rules in one line (".dozignore: 3 patterns (lock) · .dozreadonly: 1 pattern — in
+    /// force"), and whether the guest serves them (`running`, `pending`, `stopped`). nil: no rule file.
+    public var workspaceRules: String?
+    public var workspaceRulesView: String?
 
     public init(_ i: SandboxInfo) {
+        workspaceRules = i.workspaceRules?.line
+        workspaceRulesView = i.workspaceRules?.view
         accountApplies = ["agent", "open", "custom"].contains(i.network)
         // 596: the AGENT (python-claude-code runs claude-code) — the page's account choice follows it.
         agent = i.agent.map { a in ImageChoice.parse(a).map { $0.agent == .none ? a : $0.agent.rawValue } ?? a }

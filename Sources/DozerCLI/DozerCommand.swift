@@ -47,7 +47,7 @@ public struct DozerCommand: AsyncParsableCommand {
             Onboard.self, Init.self, New.self, Create.self, Up.self, Start.self, Pause.self, Resume.self, SleepCommand.self, Hibernate.self, Wake.self,
             Shutdown.self, Reset.self, Remove.self,
             List.self, Inspect.self, Sessions.self, Attach.self, Run.self, Exec.self,
-            ImageCommand.self, BaseCommand.self, BuilderCommand.self, ResourcesCommand.self, TemplateCommand.self, Duplicate.self, PointCommand.self, NetCommand.self, KeyCommand.self, AccountCommand.self, AccessCommand.self, ToolsCommand.self,
+            ImageCommand.self, BaseCommand.self, BuilderCommand.self, ResourcesCommand.self, TemplateCommand.self, Duplicate.self, PointCommand.self, NetCommand.self, KeyCommand.self, AccountCommand.self, AccessCommand.self, ToolsCommand.self, IgnoreCommand.self,
             MetricsCommand.self, Doctor.self, HostCommand.self, Events.self, Console.self, UICommand.self, ConfigCommand.self,
             Uninstall.self,
         ]

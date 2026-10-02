@@ -35,6 +35,7 @@ struct Init: AsyncParsableCommand {
     @Option(name: .long, help: "on or off: xdg-open URLs open in the Mac's browser.") var browserBridge: String?
     @Option(name: .long, help: "on or off: xdg-open FILE opens a workspace document on the Mac.") var openFiles: String?
     @Flag(inversion: .prefixedNo, help: "Run its sessions inside tmux.") var tmux: Bool?
+    @Option(name: .long, help: "lock or hide: what a .dozignore in the folder does to the paths it lists.") var ignoreMode: String?
     @Flag(inversion: .prefixedNo, help: "The agent's passwordless sudo.") var agentSudo: Bool?
     @Flag(name: [.short, .long], help: "Accept every default; ask nothing.") var yes = false
     @Flag(name: .long, help: "Replace an existing project file without asking.") var force = false
@@ -278,6 +279,10 @@ struct Init: AsyncParsableCommand {
         step("session")
         try setting(&p, SettingKey.tmux, "tmux", flag: tmux.map { $0 ? "true" : "false" }, explicit: &explicit, asker: asker, settings: settings,
                     question: "Run its sessions inside tmux", options: ["false", "true"])
+        if let m = ignoreMode {      // a flag only: the walk asks nothing more (the file can say it)
+            try setting(&p, SettingKey.ignoreMode, "ignore_mode", flag: m, explicit: &explicit, asker: asker, settings: settings,
+                        question: "", options: ["lock", "hide"])
+        }
         if let s = agentSudo { p.agentSudo = s; explicit.insert("agent_sudo") }
         else if asker.interactive {
             p.agentSudo = asker.yesNo("The agent has passwordless sudo", default: p.agentSudo ?? settings.bool(SettingKey.agentSudo))

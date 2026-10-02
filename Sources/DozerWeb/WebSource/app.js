@@ -1644,7 +1644,8 @@ async function quickAdd(button) {
 // shows the EXACT file (rendered and read back by the CLI's parser), writes it (an existing one only after its
 // diff and a yes), then makes the sandbox as `doz up` would and opens it with the boot view, as Quick add does.
 const NW_FIELD = { cpus: 'cpus', memory: 'memory', network: 'network', permissions: 'permissions', account: 'account', github: 'github',
-                   agent_sudo: 'agentSudo', ssh_agent: 'sshAgent', clipboard: 'clipboard', browser_bridge: 'browserBridge', open_files: 'openFiles', tmux: 'tmux' };
+                   agent_sudo: 'agentSudo', ssh_agent: 'sshAgent', clipboard: 'clipboard', browser_bridge: 'browserBridge', open_files: 'openFiles', tmux: 'tmux',
+                   ignore_mode: 'ignoreMode' };
 function newSandboxWizard(start = {}) {
   state.nw = null;
   state.nwStart = start;
@@ -2060,7 +2061,9 @@ function nwBridges() {
       nwSelect('browser_bridge', 'Browser', [['on', 'on — links opened in the sandbox open in the Mac’s browser'], ['off', 'off']],
         f.browserBridge || setting('sandbox.browser_bridge', 'on')),
       nwSelect('open_files', 'Workspace files', [['on', 'on — documents opened in the sandbox open on the Mac, with a notice'], ['off', 'off']],
-        f.openFiles || setting('sandbox.open_files', 'on'))),
+        f.openFiles || setting('sandbox.open_files', 'on')),
+      nwSelect('ignore_mode', 'Paths a .dozignore lists', [['lock', 'lock — listed, but every read and write is refused'], ['hide', 'hide — not there at all']],
+        f.ignoreMode || setting('workspace.ignore_mode', 'lock'), 'Only when the folder has a .dozignore (Docker’s .dockerignore syntax). Not a security boundary.')),
   };
 }
 function nwSession() {
@@ -2544,7 +2547,10 @@ function sandboxParts(name, d, net, accounts) {
         h('span', null, (i.ramHeldMiB ? mib(i.ramHeldMiB) : '—') + ' of ' + mib(i.memoryMiB)),
         h('span', { class: i.deniedConnections ? 'st-warn' : null }, netText),
         i.accountApplies ? h('span', null, 'account ' + (i.account || '—')) : null,
-        i.workspace ? null : h('span', { class: 'badge-isolated', 'data-isolated': '', title: ISOLATED_NOTE }, withIcon('shield', 'isolated')))),
+        i.workspace ? null : h('span', { class: 'badge-isolated', 'data-isolated': '', title: ISOLATED_NOTE }, withIcon('shield', 'isolated')),
+        // 599g: the workspace's .dozignore / .dozreadonly (the details say how many patterns and whether in force).
+        i.workspaceRules ? h('span', { 'data-workspace-rules': i.workspaceRulesView || '', title: 'Workspace rules: ' + i.workspaceRules + ' — doz ignore show ' + name },
+          withIcon('shield', 'rules')) : null)),
     h('div', { class: 'sbx-actions' },
       lifecycleButtons(i, true),
       h('span', { class: 'sbx-sep', 'aria-hidden': 'true' }),
@@ -2581,6 +2587,8 @@ function sandboxParts(name, d, net, accounts) {
       card('Disk', bytes(i.diskBytes), d.snapshotBytes ? 'snapshot ' + bytes(d.snapshotBytes) : (d.hasRootDisk ? 'root disk kept' : 'no root disk yet')),
       card('CPUs', String(d.cpus))),
     h('div', { class: 'panel' }, h('div', { class: 'cmd' }, h('code', null, d.attachCommand), copy)),
+    i.workspaceRules ? h('p', { class: 'muted', 'data-workspace-rules-line': '' },
+      'Workspace rules: ' + i.workspaceRules + '. Which rule decides a path: doz ignore check ' + name + ' PATH. Not a security boundary.') : null,
     h('div', { class: 'head' }, h('h2', null, 'Sessions'), h('div', { class: 'actions' },
       gated(btn('Run detached…', () => dialog('Run a command in ' + name, 'A new session running the command — no shell in front (say bash -lc \'…\' for one). It runs inside the sandbox; attach to see it.',
         [{ name: 'session', label: 'Session name', placeholder: 'e.g. worker', required: true },

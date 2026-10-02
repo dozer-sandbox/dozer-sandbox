@@ -117,12 +117,16 @@ public enum HostOp: String, Codable, Sendable, CaseIterable {
     /// `apply`: apply it again now, shown as steps (the wizard's Retry, `doz tools NAME --apply`).
     case tools
     case toolsApply = "tools-apply"
+    /// 599g: a sandbox's workspace rules (`WorkspaceRulesReport`): `.dozignore` / `.dozreadonly` as the Mac
+    /// reads them, the mode, the warnings, and — from a host whose sandbox runs — what the guest's view does;
+    /// with `paths`, which rule decides each. Read-only (in-process when no host runs: no VM needed).
+    case workspaceRules = "workspace-rules"
 
     /// Operations that only read — answered from the store in-process when no host is running.
     public var isReadOnly: Bool {
         switch self {
         case .ping, .ls, .inspect, .pointList, .imageList, .keyList, .accountList, .imageTree, .prepareStatus, .sessionScreen, .terminalLayout, .bootLog, .resources,
-             .bases, .builderStatus, .netPermissions: true
+             .bases, .builderStatus, .netPermissions, .workspaceRules: true
         case .netPolicy: false        // decided per request (a change needs the host)
         default: false
         }
@@ -295,6 +299,10 @@ public struct HostRequest: Codable, Equatable, Sendable {
     /// 599e `access`: the choices to confirm instead of the settings' (`github`, `githubSource`, `ssh`) —
     /// the onboarding confirms before it writes them (its settings file is written only when missing).
     public var accessChoices: [String: String]?
+    /// 599g `workspace-rules`: the paths to decide (relative to the workspace, `/workspace/…`, or the Mac
+    /// path inside it), and whether to compute the warnings (git ls-files on the Mac; a moment on a big tree).
+    public var paths: [String]?
+    public var warnings: Bool?
 
     public init(_ op: HostOp, name: String? = nil) {
         v = HostProtocol.version
@@ -505,6 +513,8 @@ public struct SandboxInfo: Codable, Equatable, Sendable {
     /// 594 W28: its root disk comes from an image an older doz's recipe made — what that image lacks
     /// ("sudo", "package lists", …), for the notice. nil: this doz's image (or no agent image).
     public var olderImage: [String]? = nil
+    /// 599g: the workspace's rules (nil: no .dozignore / .dozreadonly in its folder, or isolated).
+    public var workspaceRules: WorkspaceRulesInfo? = nil
     /// 594 W28: a create that used an out-of-date image says so (the CLI fills it for --json).
     public var imageNotice: String? = nil
 
@@ -524,6 +534,7 @@ public struct SandboxInfo: Codable, Equatable, Sendable {
         case workspace, createdAt, diedWithHost, account, credentialState, credentialPolicy, foreignCredentials, workspaceCreated, isolated
         case agent, credentialProblem, base, imageTitle, dockerfile, rebuildAvailable
         case olderImage, olderImageLine, imageNotice      // 594 W28
+        case workspaceRules                               // 599g
     }
 
     public init(from decoder: Decoder) throws {
@@ -556,6 +567,7 @@ public struct SandboxInfo: Codable, Equatable, Sendable {
         rebuildAvailable = try c.decodeIfPresent(String.self, forKey: .rebuildAvailable)
         olderImage = try c.decodeIfPresent([String].self, forKey: .olderImage)
         imageNotice = try c.decodeIfPresent(String.self, forKey: .imageNotice)
+        workspaceRules = try c.decodeIfPresent(WorkspaceRulesInfo.self, forKey: .workspaceRules)
     }
 
     /// `workspace` is written even when null (with `isolated: true`), so a reader never has to guess.
@@ -588,6 +600,7 @@ public struct SandboxInfo: Codable, Equatable, Sendable {
         try c.encodeIfPresent(imageTitle, forKey: .imageTitle)
         try c.encodeIfPresent(dockerfile, forKey: .dockerfile)
         try c.encodeIfPresent(rebuildAvailable, forKey: .rebuildAvailable)
+        try c.encodeIfPresent(workspaceRules, forKey: .workspaceRules)
         try c.encodeIfPresent(olderImage, forKey: .olderImage)
         try c.encodeIfPresent(olderImageLine, forKey: .olderImageLine)
         try c.encodeIfPresent(imageNotice, forKey: .imageNotice)

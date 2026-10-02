@@ -65,6 +65,9 @@ struct CreateArguments: ParsableArguments {
     @Flag(inversion: .prefixedNo, help: "Run this sandbox's sessions inside tmux (its windows, panes, copy mode; Ctrl-b) — default: the setting sessions.tmux, off.")
     var tmux: Bool?
 
+    @Option(name: .long, help: "lock or hide: what a .dozignore in the workspace folder does to the paths it lists — lock (listed, every access refused) or hide (not there). Not a security boundary (default: the setting workspace.ignore_mode, lock).")
+    var ignoreMode: String?
+
     @Flag(name: .long, help: "When the image is out of date (an older doz's recipe, or a newer agent release): rebuild it first (~2 min, needs network; existing sandboxes are not affected).")
     var rebuild = false
 
@@ -156,6 +159,7 @@ struct CreateArguments: ParsableArguments {
         try take(SettingKey.openFiles, openFiles, "--open-files")
         try take(SettingKey.sshAgent, sshAgent, "--ssh-agent")
         if let tmux { s[SettingKey.tmux] = .bool(tmux) }
+        try take(SettingKey.ignoreMode, ignoreMode, "--ignore-mode")
         return s.isEmpty ? nil : s
     }
 
@@ -188,6 +192,7 @@ struct CreateArguments: ParsableArguments {
         image != nil || cpus != nil || memory != nil || workspace != nil || network != nil || subnet != nil || account != nil || agentPrompt != nil || isolated || agentSudo != nil
             || agent != nil || base != nil || dockerfile != nil || !allow.isEmpty
             || clipboard != nil || browserBridge != nil || openFiles != nil || tmux != nil || github != nil || sshAgent != nil
+            || ignoreMode != nil
     }
 }
 
@@ -253,6 +258,7 @@ struct Create: AsyncParsableCommand {
                        + (info.workspace.map { ", /workspace = \($0)" } ?? ", isolated") + "\n")
         }
         noteWorkspace(info, isolatedAsked: create.isolated, g)
+        await noteWorkspaceRules(name, g)                                       // 599g
         if start {
             let s = try decode(try call(HostRequest(.start, name: name), g), LifecycleResult.self, g)
             if let i = s.info { info = i }
@@ -358,7 +364,10 @@ struct Start: AsyncParsableCommand {
         abstract: "Boot a sandbox — or wake it, if it is asleep; resume it if paused.", aliases: ["cold-boot"])
     @OptionGroup var g: GlobalOptions
     @Argument var name: String
-    func run() async throws { _ = try lifecycle(.start, name, g) }
+    func run() async throws {
+        await noteWorkspaceRules(name, g)                                       // 599g
+        _ = try lifecycle(.start, name, g)
+    }
 }
 
 struct Pause: AsyncParsableCommand {
@@ -520,6 +529,7 @@ struct Up: AsyncParsableCommand {
             }
             if let project, let projectFile { try syncProject(project, file: projectFile, name: name) }
         }
+        await noteWorkspaceRules(name, g)                                       // 599g
         let started = try decode(try call(HostRequest(.start, name: name), g), LifecycleResult.self, g)
         var open = HostRequest(.openSession, name: name)
         open.session = session

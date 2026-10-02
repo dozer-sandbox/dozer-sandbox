@@ -77,6 +77,8 @@ public struct DozerProject: Equatable, Sendable {
          "# ssh_agent: off             # on: forward this Mac's SSH agent (keys stay on the Mac; github.com:22 only). Applies now"),
         ("tmux", SettingKey.tmux,
          "# tmux: false                # true: sessions run inside tmux (windows, panes, Ctrl-b). From the next session"),
+        ("ignore_mode", SettingKey.ignoreMode,
+         "# ignore_mode: lock          # what .dozignore does to the paths it lists: lock (listed, no access) or hide (not there). At the next start or wake"),
     ]
 
     /// The keys, in the order the file lists them, with what each says.
