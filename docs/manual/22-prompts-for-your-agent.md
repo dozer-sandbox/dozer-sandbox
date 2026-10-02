@@ -82,28 +82,49 @@ doz hibernate upgrade
 The changes land in your folder as they are made (`/workspace` is your project), so you review them with
 `git diff` — and `git checkout .` undoes them if you don't like them.
 
-### B. Try out code you don't trust
+### B. Jail an untrusted agent
 
-A repository someone sent you, an install script, a package you're not sure about: run it where it can't
-reach your files.
+An agent you don't trust yet — a new agent CLI, an unfamiliar model, a tool someone sent you, or code that
+runs on its own: run it in a sandbox that shares none of your folders, holds none of your logins, can't
+reach the Mac's clipboard, browser or files, and reaches the internet only where you allow it.
 
-> I want to try https://github.com/OWNER/REPO but I don't trust it. Make an **isolated** Dozer sandbox
-> (no folder of mine shared) called `trial` with the lab image, clone it inside, read its install
-> instructions and run them, then run its tests or its demo. Tell me what it did: what it installed, what
-> it tried to reach on the network (`doz net trial --json` shows refusals), and anything that looked
-> suspicious. Don't widen network permissions. When I say so, delete the sandbox with `doz rm trial --yes`.
+> I want to try the agent <AGENT> but I don't trust it. Jail it in a Dozer sandbox called `jail`:
+> **isolated** (no folder of mine shared), the lab image, network **locked**, no Claude account, no GitHub,
+> no SSH agent, and the clipboard, browser and file bridges off. Take a restore point, then install the
+> agent inside and start it detached on this task: <task>. Check on it every few minutes and tell me what
+> it is doing. When it is refused a website, show me `doz net jail --json` and what it wanted — I decide
+> what to allow, you never do. When I say so, copy out what it produced and delete the sandbox.
 
 What it will typically run:
 
 ```sh
-doz create trial --image lab --isolated --json
-doz exec trial --json --timeout 300 -- sh -c 'cd ~ && git clone https://github.com/OWNER/REPO && cd REPO && cat README*'
-doz exec trial --json --timeout 900 -- sh -c 'cd ~/REPO && ./install.sh'
-doz net trial --json
+doz create jail --image lab --isolated --network locked --account none --github off --ssh-agent off \
+  --clipboard off --browser-bridge off --open-files off --json
+doz point take jail before-agent
+doz exec jail --json --timeout 900 -- sh -c 'cd ~ && <install the agent>'
+doz run jail --detach -- <the agent's command>
+doz sessions jail --screen <session>
+doz net jail --json
 ```
 
-Nothing it does reaches your Mac's files; the network goes through Dozer's proxy, so every site it tried
-is on record.
+And what you run yourself, when you decide it may reach its model's API:
+
+```sh
+doz net allow jail site:api.example.com
+```
+
+What the jail gives you:
+
+| it cannot | because |
+|---|---|
+| read or change your files | `--isolated`: `/workspace` is the sandbox's own folder |
+| use your Claude login, GitHub or SSH keys | none are attached — and credentials never enter a sandbox anyway; the proxy holds them |
+| touch the Mac's clipboard, open pages or open files | the three bridges are off |
+| reach anything you did not allow | `locked`: every connection goes through the proxy and is refused unless allowed; each refusal is on record |
+| leave a mess you can't undo | the restore point: `doz point revert jail before-agent --yes`; `doz rm jail --yes` removes everything |
+
+Root inside the sandbox is still only root inside a virtual machine — that is the boundary, not the
+agent's good behaviour. See [Security model](16-security-model.md).
 
 ### C. Let an agent work on a project that holds secrets
 
