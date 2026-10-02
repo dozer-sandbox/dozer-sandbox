@@ -832,6 +832,25 @@ public actor HostCore {
              + (prepared?.created == true ? ", workspace \(cfg.workspace ?? "") created" : cfg.workspace == nil ? ", isolated" : "") + ")")
         var i = await info(m, sessions: false)
         i.workspaceCreated = prepared?.created == true ? true : nil
+        // `doz create --prepare`: what this sandbox's first start would wait for — its image's
+        // preparation (started, or joined when one runs) — now, with its progress; the sandbox stays off.
+        if o.prepare == true {
+            if let img = await imageToPrepare(m) {
+                let p = try preparation(for: img, requestedBy: "create \(name)")
+                let first = p.info.requestedBy.first ?? ""
+                emit(HostEvent(kind: .note, sandbox: name, text: first == "create \(name)"
+                               ? "\(img) is not prepared in this store yet — preparing it now (once: the kernel, the base image, the bake); \(name) stays off"
+                               : "\(img) is being prepared (\(first) started it) — joining it; \(name) stays off"))
+                do { try await follow(p, emit: emit) } catch {
+                    throw HostError(.failed, "\(name) was created, but preparing \(img) failed: \(HostError.from(error).message) — its first start tries again")
+                }
+                i = await info(managed[name] ?? m, sessions: false)
+                i.workspaceCreated = prepared?.created == true ? true : nil
+                i.imagePreparation = "prepared"
+            } else {
+                i.imagePreparation = "ready"          // the answer says it (the CLI's line, --json)
+            }
+        }
         return i
     }
 
@@ -1348,6 +1367,13 @@ public actor HostCore {
         }
         let size = TermSize(cols: r.cols ?? 120, rows: r.rows ?? 36)
         let workdir: String? = m.config.spec.imageSpec == nil && m.config.workspace != nil ? DozerImages.workspaceGuestPath : nil
+        // A command the caller named (doz run NAME -- CMD, the dashboard's "run a command"): a program the
+        // guest does not have is said plainly, before a session that could only end at once with 127.
+        if let a = r.argv, let program = a.first, !program.isEmpty,
+           let look = await m.sandbox.sessionFinds(program, environment: r.environment ?? [:], workingDirectory: r.workdir ?? workdir, user: r.user),
+           !look.found {
+            throw HostError(.notFound, Self.missingProgram(program, runsAs: look.runsAs, command: "doz run"))
+        }
         if inTmux { argv = GuestCommand.inTmux(session: session, argv: argv) }
         let t0 = ContinuousClock.now
         let started = Date()
@@ -1389,13 +1415,53 @@ public actor HostCore {
         let ctx = Self.execContext(config: m.config, environment: Self.withClaudePermissions(r.environment ?? [:], imageSpec: m.config.spec.imageSpec?.name),
                                    workdir: r.workdir, user: r.user)
         let t0 = ContinuousClock.now
-        let res = try await m.sandbox.exec(argv, environment: ctx.environment, workingDirectory: ctx.workdir, user: ctx.user,
+        let res: ExecResult
+        do {
+            res = try await m.sandbox.exec(argv, environment: ctx.environment, workingDirectory: ctx.workdir, user: ctx.user,
                                            timeoutSeconds: r.timeoutSeconds ?? 120)
+        } catch {
+            if let plain = Self.missingProgramMessage(error, argv: argv, runsAs: ctx.user) { throw HostError(.notFound, plain) }
+            throw error
+        }
         var out = ExecOutput(exitCode: res.exitCode, stdout: res.stdout, stderr: res.stderr, milliseconds: ms(since: t0))
         if first.started { out.started = true }
         if first.woke { out.woke = true }
         out.bootMilliseconds = first.milliseconds
         return out
+    }
+
+    /// A program the guest cannot find, said plainly. The guest agent's own words come wrapped three
+    /// deep (`failed to start process (cause: "internalError: "startProcess: … vmexec error: … failed to
+    /// find target executable sudo" (closed three times))`; a person needs only which program and what to do. nil: any
+    /// other error (passed on as it was). `runsAs`: the guest user it ran as (nil = root).
+    static func missingProgramMessage(_ error: Error, argv: [String], runsAs: String?) -> String? {
+        missingProgramMessage(String(describing: error) + " " + error.localizedDescription, argv: argv, runsAs: runsAs)
+    }
+
+    static func missingProgramMessage(_ text: String, argv: [String], runsAs: String?) -> String? {
+        let marker = "failed to find target executable"
+        guard let r = text.range(of: marker) else { return nil }
+        // The name the guest reports (up to a quote, space or bracket), else the command as given.
+        let rest = text[r.upperBound...].drop { $0 == " " }
+        // Stops: double quote, single quote, space, ")", "]", newline, backslash (as code points, so no
+        // escaped quote sits in a literal here).
+        let stops = Set([34, 39, 32, 41, 93, 10, 92].map { Character(UnicodeScalar(UInt8($0))) })
+        let reported = String(rest.prefix { !stops.contains($0) })
+        return missingProgram(reported.isEmpty ? (argv.first ?? "the program") : reported, runsAs: runsAs, command: "doz exec")
+    }
+
+    /// The sentence for `program` missing in the guest, run by `command` (doz exec / doz run) as
+    /// `runsAs` (nil = root).
+    static func missingProgram(_ program: String, runsAs: String?, command: String) -> String {
+        var s = program.contains("/")
+            ? "`\(program)` does not exist in this sandbox (or is not a program it can run)"
+            : "`\(program)` is not installed in this sandbox's image (not on its PATH)"
+        if (program as NSString).lastPathComponent == "sudo" {
+            s += runsAs == nil
+                ? " — and it is not needed: \(command) already runs as root unless --user names another user"
+                : " — \(command) runs this sandbox's commands as \(runsAs!); --user root runs one as root"
+        }
+        return s
     }
 
     // MARK: inspect

@@ -198,33 +198,88 @@ func fail(_ e: HostError, _ g: GlobalOptions, code: Int32? = nil) -> ExitCode {
 /// `ProgressTerminal`: a spinner on the step under way, a transfer's bar, the output's last lines,
 /// finished lines above — ticking on its own timer while the request blocks. Elsewhere plain lines,
 /// as before, plus each transfer's summary; the host's own lines (notes, phases) are kept as they were.
+///
+/// The hold ends at ONE second by the clock (`holdTimer`), not at the first event after it: a first
+/// `doz exec` on an image never prepared printed nothing for 18 s and then everything at once — the
+/// host's "not prepared" note and the first steps came in the first second and were held, and the
+/// next event only came when the (then silent) image pull ended. `ProgressHoldTests` keeps it.
 final class Progress: @unchecked Sendable {
     let verbose: Bool, quiet: Bool
     let started = Date()
     private let lock = NSLock()
     private var held: [String] = []
     private var flowing = false
+    private var received = false
     private let view: ProgressTerminal
     private var timer: DispatchSourceTimer?
+    private var holdTimer: DispatchSourceTimer?
+    private var finished = false
+    private let hold: TimeInterval
+    private let write: @Sendable (String) -> Void
+    private let measureWidth: Bool
 
     /// 594 W22: plain lines from the board (the view's own finished lines) rather than the host's
     /// per-event line, and nothing held back — `doz host stop`'s per-sandbox lines.
     private let boardLines: Bool
 
-    init(_ g: GlobalOptions, immediate: Bool = false) {
-        verbose = g.verbose || immediate
-        quiet = g.quiet
-        boardLines = immediate
-        view = ProgressTerminal(mode: g.progressMode, color: true, plainPrefix: "  · ")
+    convenience init(_ g: GlobalOptions, immediate: Bool = false) {
+        self.init(mode: g.progressMode, verbose: g.verbose || immediate, quiet: g.quiet, boardLines: immediate)
+    }
+
+    /// `write` receives everything the view prints (stderr; a test's buffer), `hold` the seconds a
+    /// quick operation stays silent.
+    init(mode: ProgressMode, verbose: Bool, quiet: Bool, boardLines: Bool = false, hold: TimeInterval = 1,
+         width: Int? = nil, write: @escaping @Sendable (String) -> Void = { Out.stderr($0) }) {
+        self.verbose = verbose
+        self.quiet = quiet
+        self.boardLines = boardLines
+        self.hold = hold
+        self.write = write
+        measureWidth = width == nil
+        view = ProgressTerminal(mode: mode, color: true, plainPrefix: "  · ")
+        if let width { view.width = width }
+        guard !quiet, !verbose else { return }
+        let t = DispatchSource.makeTimerSource(queue: .global())
+        t.schedule(deadline: .now() + hold)
+        t.setEventHandler { [weak self] in self?.holdEnded() }
+        t.resume()
+        holdTimer = t
     }
 
     func handle(_ e: HostEvent) {
         guard !quiet else { return }
         lock.withLock {
-            view.width = Self.terminalWidth()
+            guard !finished else { return }
+            received = true
+            if measureWidth { view.width = Self.terminalWidth() }
             if view.mode == .animated { animated(e) } else { plain(e) }
         }
     }
+
+    /// The first second is over: what was held is shown now, and an animated view starts ticking
+    /// (a step under way gets its spinner) — whether or not another event has come.
+    private func holdEnded() {
+        lock.withLock {
+            holdTimer = nil
+            guard !finished, !flowing, received else { return }
+            if measureWidth { view.width = Self.terminalWidth() }
+            startFlowing()
+        }
+    }
+
+    /// (lock held) Show what was held and, animated, start the tick.
+    private func startFlowing() {
+        flowing = true
+        if view.mode == .animated {
+            write(view.write(held.map { .raw($0) }))
+            startTimer()
+        } else {
+            for l in held { write(l + "\n") }
+        }
+        held = []
+    }
+
+    private var holding: Bool { !(verbose || flowing || Date().timeIntervalSince(started) > hold) }
 
     /// stderr's width in columns (80 when it is not a terminal or does not say).
     static func terminalWidth() -> Int {
@@ -251,13 +306,9 @@ final class Progress: @unchecked Sendable {
 
     private func emitLines(_ lines: [String]) {
         guard !lines.isEmpty else { return }
-        if verbose || flowing { for l in lines { Out.stderr(l + "\n") }; return }
+        if verbose || flowing { for l in lines { write(l + "\n") }; return }
         held += lines
-        if Date().timeIntervalSince(started) > 1 {
-            flowing = true
-            for l in held { Out.stderr(l + "\n") }
-            held = []
-        }
+        if !holding { startFlowing() }
     }
 
     /// Animated: nothing for the first second (a quick operation prints nothing but its result),
@@ -269,27 +320,24 @@ final class Progress: @unchecked Sendable {
         default: []
         }
         let out = finals + host
-        guard verbose || flowing || Date().timeIntervalSince(started) > 1 else {
+        guard !holding else {
             held += out.map { view.format($0) }
             return
         }
-        if !flowing {
-            flowing = true
-            Out.stderr(view.write(held.map { .raw($0) }))
-            held = []
-            startTimer()
-        }
-        Out.stderr(view.write(out))
+        if !flowing { startFlowing() }
+        write(view.write(out))
     }
 
     private func startTimer() {
+        guard timer == nil else { return }
         let t = DispatchSource.makeTimerSource(queue: .global())
         t.schedule(deadline: .now() + .milliseconds(100), repeating: .milliseconds(100))
         t.setEventHandler { [weak self] in
             guard let self else { return }
             self.lock.withLock {
-                self.view.width = Self.terminalWidth()
-                Out.stderr(self.view.tick())
+                guard !self.finished else { return }
+                if self.measureWidth { self.view.width = Self.terminalWidth() }
+                self.write(self.view.tick())
             }
         }
         t.resume()
@@ -299,13 +347,17 @@ final class Progress: @unchecked Sendable {
     /// The request ended: nothing stays live on the terminal.
     func finish() {
         lock.withLock {
+            guard !finished else { return }
+            finished = true
             timer?.cancel()
             timer = nil
+            holdTimer?.cancel()
+            holdTimer = nil
             guard !quiet else { return }
-            if view.mode == .animated, flowing { Out.stderr(view.finish()) }
+            if view.mode == .animated, flowing { write(view.finish()) }
             else if view.mode == .plain {
                 let s = view.finish()
-                if !s.isEmpty, flowing || verbose { Out.stderr(s.replacingOccurrences(of: "\r\n", with: "\n")) }
+                if !s.isEmpty, flowing || verbose { write(s.replacingOccurrences(of: "\r\n", with: "\n")) }
             }
         }
     }

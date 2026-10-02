@@ -101,7 +101,7 @@
 #define RENAME_EXCHANGE (1 << 1)
 #endif
 
-#define DOZVIEW_VERSION "1.0.0"
+#define DOZVIEW_VERSION "1.0.1"
 #define VIRTIOFS_MAGIC 0x65735546UL /* FUSE_SUPER_MAGIC — virtio-fs is a FUSE file system */
 #define PATHMAX 4096
 #define BUFSZ ((size_t)(1 << 20) + 8192)
@@ -109,6 +109,8 @@
 
 /* ------------------------------------------------------------------ configuration */
 static const char *raw_path, *mnt_path, *conf_path, *state_path, *pid_path, *log_path;
+/* The inode of the folder the view is mounted in: the ".." the root lists (read at start, outside the mount). */
+static uint64_t mnt_parent_ino = 1;
 static int nthreads = 6;
 static double tmo = 1.0;
 static int fusefd = -1;          /* the connection (inherited by the worker) */
@@ -1018,6 +1020,23 @@ static int dir_fill(uint64_t nodeid, dent_t **out, size_t *nout) {
         n++;
     }
     closedir(dp);
+    /* The view's ROOT: the share's own root listing has no ".." (virtio-fs answers "." only), so
+     * `ls -la /workspace` showed one entry where every subfolder shows two. A directory always lists
+     * both; ".." of a mount's root is the folder it is mounted in (its inode, read once at start —
+     * never through this mount). */
+    if (nodeid == FUSE_ROOT_ID) {
+        int have[2] = {0, 0};
+        for (size_t k = 0; k < n; k++) { if (!strcmp(v[k].name, ".")) have[0] = 1; else if (!strcmp(v[k].name, "..")) have[1] = 1; }
+        for (int w = 1; w >= 0; w--) {          /* "..", then "." in front of it: listed first, as usual */
+            if (have[w]) continue;
+            if (n == cap) { dent_t *x = realloc(v, sizeof *v * (cap + 2)); if (!x) break; v = x; cap += 2; }
+            char *name = strdup(w ? ".." : ".");
+            if (!name) break;
+            memmove(v + 1, v, sizeof *v * n);
+            v[0].name = name; v[0].ino = w ? mnt_parent_ino : 1; v[0].type = DT_DIR;
+            n++;
+        }
+    }
     /* filter: a hidden name is not listed */
     pthread_mutex_lock(&mu);
     node *p = node_by_id(nodeid); size_t w = 0;
@@ -1278,6 +1297,13 @@ static int worker_main(void) {
     basefd = open(raw_path, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
     if (basefd < 0 || !is_share(basefd)) { logm("worker: %s is not the virtio-fs share (%s) — exiting", raw_path, basefd < 0 ? strerror(errno) : "wrong file system"); return 2; }
     root_node.id = FUSE_ROOT_ID; root_node.mode = S_IFDIR; root_node.nlookup = 1; root_node.name = (char *)"";
+    if (mnt_path) {
+        char parent[PATHMAX]; struct stat pst;
+        snprintf(parent, sizeof parent, "%s", mnt_path);
+        char *slash = strrchr(parent, '/');
+        if (slash == parent) parent[1] = 0; else if (slash) *slash = 0;
+        if (slash && stat(parent, &pst) == 0) mnt_parent_ino = pst.st_ino;
+    }
     h_grow();
     reload("start");
     if (!R) { R = calloc(1, sizeof *R); if (!R) return 70; R->gen = ++rules_gen_counter; }

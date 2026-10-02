@@ -150,6 +150,13 @@ func ignoreParse(_ text: String) -> IgnoreResults {
 
 let EACCES = "Permission denied", ENOENT = "No such file", EROFS = "Read-only file system"
 
+/// `ls -a /workspace`'s names (space-separated) hold both "." and ".." (the share's root answered "."
+/// alone, so the view's root listed one where every subfolder lists two).
+func rootListsDots(_ out: String?) -> Bool {
+    let names = Set((out ?? "").split(separator: " ").map(String.init))
+    return names.contains(".") && names.contains("..")
+}
+
 func ignoreExpectLock(_ r: IgnoreResults, label: String, supervisor: String, share: URL) -> [(Bool, String)] {
     func has(_ k: String, _ s: String) -> Bool { r[k]?.out.contains(s) ?? false }
     func fail(_ k: String, _ s: String) -> Bool { (r[k]?.rc ?? 0) != 0 && has(k, s) }
@@ -167,6 +174,7 @@ func ignoreExpectLock(_ r: IgnoreResults, label: String, supervisor: String, sha
         (has("mount", "1") && has("sv", supervisor) && !supervisor.isEmpty, "the view is mounted at /workspace, the SAME supervisor \(supervisor) (got \(r["sv"]?.out ?? "?"))"),
         (has("ls", "secret.env") && has("ls", "lockdir") && has("ls", "logs") && has("ls", "plain.txt") && has("ls", ".dozignore"),
          "LOCK: selected names stay listed (\(r["ls"]?.out.prefix(160) ?? "?"))"),
+        (rootListsDots(r["ls"]?.out), "the view's root lists . and .. like every folder (\(r["ls"]?.out.prefix(40) ?? "?"))"),
         (has("lock_mode", "----------"), "LOCK: shown as ---------- (\(r["lock_mode"]?.out ?? "?"))"),
         (lock.0, "LOCK: read/write/append/rm/mv/chmod/link, a locked folder listed or read inside, **/*.key at depth, a new *.key, SECRET.ENV and LOCKDIR (case folded), café.env (NFC file, NFD rule) → EACCES as root" + lock.1),
         (fail("nobody_lock_cat", EACCES), "LOCK: EACCES as nobody too"),
@@ -196,6 +204,7 @@ func ignoreExpectHide(_ r: IgnoreResults) -> [(Bool, String)] {
     func fail(_ k: String, _ s: String) -> Bool { (r[k]?.rc ?? 0) != 0 && has(k, s) }
     let hidden = ["hide_cat", "hide_stat", "hide_case", "hide_dir", "hide_deep", "nobody_hide_cat"].filter { !fail($0, ENOENT) }
     return [
+        (rootListsDots(r["ls"]?.out), "HIDE: the view's root still lists . and .."),
         (!has("ls", "secret.env") && !has("ls", "lockdir") && has("ls", "plain.txt") && has("ls", "logs"), "HIDE: selected names are not listed (\(r["ls"]?.out.prefix(160) ?? "?"))"),
         (hidden.isEmpty, "HIDE: cat/stat (and SECRET.ENV), a hidden folder, **/*.key at depth → ENOENT, root and nobody" + (hidden.isEmpty ? "" : " — off: \(hidden.map { "\($0): \(r[$0]?.out ?? "?")" })")),
         (!has("hide_keys_ls", "b.key"), "HIDE: a hidden file is not listed in its folder (\(r["hide_keys_ls"]?.out ?? "?"))"),

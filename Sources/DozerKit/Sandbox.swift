@@ -1025,8 +1025,11 @@ public actor Sandbox {
                 golden = layout.golden(for: spec)
                 if !fm.fileExists(atPath: golden.path) {
                     let hadImage = (try? await store.get(reference: spec.image, pull: false)) != nil
+                    let broadcaster = self.broadcaster
+                    let reference = spec.image
                     let image = try await timed("\(spec.image) ready\(hadImage ? " (cached)" : " (pulled)")") {
-                        try await store.get(reference: spec.image, pull: true)
+                        if let cached = try? await store.get(reference: reference) { return cached }
+                        return try await ImageBaker.pull(reference, store: store) { broadcaster.yield($0) }
                     }
                     try await bake(image: image, kernel: kernel, store: store, into: golden)
                 }
@@ -1275,9 +1278,17 @@ public actor Sandbox {
         }
         let kernel = Kernel(path: kernelURL, platform: .linuxArm)
         let store = try ImageStore(path: spec.storeRoot)
-        let cached = FileManager.default.fileExists(atPath: layout.initfs.path)
-        try await timed("guest init image ready (vminit\(cached ? ", cached" : ": pulled + built its disk"))") {
-            _ = try await ContainerManager(kernel: kernel, initfsReference: spec.initfsReference, imageStore: store)
+        // The init image itself is fetched by ContainerManager even when its disk exists — silently and
+        // for every platform. Pull it here first (linux/arm64, metered) so the manager finds it;
+        // "cached" only when both the image and its disk are there.
+        let reference = spec.initfsReference
+        let haveImage = (try? await store.get(reference: reference)) != nil
+        let cached = haveImage && FileManager.default.fileExists(atPath: layout.initfs.path)
+        try await timed("guest init image ready (vminit\(cached ? ", cached" : haveImage ? ": built its disk" : ": pulled + built its disk"))") {
+            if !haveImage {
+                _ = try await ImageBaker.pull(reference, store: store, label: "pulling the guest init image") { broadcaster.yield($0) }
+            }
+            _ = try await ContainerManager(kernel: kernel, initfsReference: reference, imageStore: store)
         }
     }
 
@@ -1800,6 +1811,21 @@ public actor Sandbox {
         }
         lastSessionStart = ContinuousClock.now
         note("opened session \(name)\(runAs.map { " as \($0)" } ?? ""): \(argv.joined(separator: " "))")
+    }
+
+    /// Whether a session started with `program` (as `openSession` would: its environment, working
+    /// directory and user) would find it — `command -v` in the guest. nil: the guest could not be asked.
+    /// Returns the user it would run as (nil = root) beside the answer.
+    public func sessionFinds(_ program: String, environment: [String: String] = [:], workingDirectory: String? = nil,
+                             user: String? = nil) async -> (found: Bool, runsAs: String?)? {
+        // Only PATH decides: no credential is moved or placeholder minted for a lookup.
+        let (env, cwd, runAs) = Self.sessionContext(imageSpec: spec.imageSpec, environment: environment.filter { $0.key == "PATH" },
+                                                    workingDirectory: workingDirectory, user: user)
+        guard phase == .running,
+              let r = try? await execInContainer(["sh", "-c", "command -v \"$1\" >/dev/null 2>&1", "sh", program],
+                                                 environment: env, workingDirectory: cwd, privileged: false, timeout: 10, user: runAs)
+        else { return nil }
+        return (r.exitCode == 0, runAs)
     }
 
     /// The environment, working directory and user a session runs with (see `openSession`).
