@@ -501,11 +501,20 @@ final class WebTerminalHTTPTests: XCTestCase {
         do {
             let a = FakeAttachment(.attached(session: "shell"))
             let (ws, _, _) = try open(a)
-            // 18 × 60 KiB ≈ 1.05 MiB, over the 1 MiB burst (the refill in a few ms is ~KiB) — and
-            // nothing sent after the frame that trips it (so the close is not lost to a reset).
-            for _ in 0..<18 { try ws.sendBinary([UInt8](repeating: 0x61, count: 60 * 1024)) }
-            XCTAssertEqual(try ws.readClose(skipOther: true), 1008, "input over the budget")
-            XCTAssertLessThanOrEqual(a.sent.count, 1 << 20)
+            // A real flood: up to 64 × 60 KiB (3.75 MiB), stopping when the server closes. It used to
+            // send 18 × 60 KiB (≈ 1.05 MiB, 5% over the 1 MiB burst) — on a loaded CI runner the
+            // sends took long enough for the refill to cover that 5%, every frame reached the host
+            // (1,105,920 bytes) and the budget never tripped (2026-10-02). What matters: the flood is
+            // CUT OFF, and what got through is the burst plus at most a refill's slack.
+            let frame = 60 * 1024
+            var frames = 0
+            do { for _ in 0..<64 { try ws.sendBinary([UInt8](repeating: 0x61, count: frame)); frames += 1 } } catch {}
+            // 1008, or a reset when the close races the frames still in flight — either way it is gone.
+            let code = try? ws.readClose(skipOther: true)
+            XCTAssertTrue(code == 1008 || code == nil, "input over the budget: \(String(describing: code))")
+            XCTAssertThrowsError(try ws.readFrame(seconds: 2), "the connection is closed")
+            XCTAssertLessThan(a.sent.count, frames * frame, "the flood was cut off (\(a.sent.count) of \(frames * frame))")
+            XCTAssertLessThanOrEqual(a.sent.count, (1 << 20) + 512 * 1024, "the burst plus a refill's slack")
         }
     }
 
