@@ -158,6 +158,8 @@ public actor Sandbox {
         do {
             try await boot(restoring: nil)
             setPhase(.running)
+            // 599h: the tools layer — after the network is up; shown as steps the first time, quiet after; never fatal.
+            await applyToolsLayer()
             note(String(format: "ready in %.1f s total", seconds(since: t0)))
         } catch {
             note("start FAILED: \(error.localizedDescription)")
@@ -871,6 +873,8 @@ public actor Sandbox {
             } catch {
                 note("could not apply the guest fixes: \(error.localizedDescription) — the wake goes on")
             }
+            // 599h: the tools layer, re-checked quietly (a setting switched on while it slept arrives now).
+            await applyToolsLayer()
         case .remountShares:
             let tags = (identity?.shareTags ?? [:]).map { (tag: $0.value, guestPath: $0.key) }.sorted { $0.guestPath < $1.guestPath }
             guard !tags.isEmpty else { return }
@@ -1382,6 +1386,104 @@ public actor Sandbox {
     public nonisolated var gitSetup: GitGuestSetup { gitSetupBox.withLock { $0 } }
     public nonisolated func setGitSetup(_ s: GitGuestSetup) { gitSetupBox.withLock { $0 = s } }
     private nonisolated let gitSetupBox = LockedBox<GitGuestSetup>(.off)
+
+    // MARK: 599h — the tools layer
+
+    /// What the tools layer follows (the host sets it from the settings), and where gh comes from on the Mac
+    /// (the host's `ToolsCache` — it downloads once; nil: gh cannot be had).
+    /// nil (the default): no tools layer — an image's preparation VM, a helper; the host sets it for every
+    /// sandbox it manages, so a baked image never carries what the layer adds.
+    public nonisolated var toolInputs: ToolInputs? { toolInputsBox.withLock { $0 } }
+    public nonisolated func setToolInputs(_ i: ToolInputs?) { toolInputsBox.withLock { $0 = i } }
+    private nonisolated let toolInputsBox = LockedBox<ToolInputs?>(nil)
+    public typealias GhFetcher = @Sendable () async -> Result<URL, CheckFailure>
+    public nonisolated func setGhFetcher(_ f: GhFetcher?) { ghFetcherBox.withLock { $0 = f } }
+    private nonisolated let ghFetcherBox = LockedBox<GhFetcher?>(nil)
+    /// The last apply of the layer (nil until one ran in this process).
+    public nonisolated var lastToolsReport: ToolsReport? { toolsReportBox.withLock { $0 } }
+    private nonisolated let toolsReportBox = LockedBox<ToolsReport?>(nil)
+
+    /// Apply the tools layer to the running guest: check, copy gh in (from the Mac, never the guest's network),
+    /// install what is missing (apt/apk through the proxy), remove what a setting turned off. `loud`: each tool
+    /// as a step (the first apply in a sandbox, a retry); else quiet — one note, and the report says whether
+    /// something changed or failed. Never throws.
+    @discardableResult
+    public func applyToolsNow(loud: Bool) async -> ToolsReport? {
+        await acquire(); defer { release() }
+        return await applyToolsLayer(loud: loud)
+    }
+
+    @discardableResult
+    func applyToolsLayer(loud: Bool? = nil) async -> ToolsReport? {
+        guard phase == .running, container != nil, let inputs = toolInputs else { return nil }
+        let plan = ToolsLayer.plan(inputs)
+        let t0 = ContinuousClock.now
+        let state: ToolsLayer.GuestState
+        do {
+            let r = try await execInContainer(["sh", "-c", ToolsLayer.checkScript], privileged: true, timeout: 15)
+            state = .parse(r.output)
+        } catch {
+            note("tools layer: could not look at the guest (\(error.localizedDescription)) — next start or wake")
+            return nil
+        }
+        let shout = loud ?? state.first
+        // gh: from the Mac's cache (downloaded once), copied in only when the guest's copy is another version.
+        var ghCopied = false
+        var ghProblem: String?
+        if plan.items.contains(where: { $0.id == "gh" }), state.gh != ToolsLayer.ghVersion {
+            if let fetch = ghFetcherBox.withLock({ $0 }) {
+                let label = "tools: gh \(ToolsLayer.ghVersion) on this Mac (downloaded once, sha256 checked)"
+                let ft = ContinuousClock.now
+                if shout { broadcaster.yield(.stepStarted(label)) }
+                switch await fetch() {
+                case .success(let url):
+                    if shout { broadcaster.yield(.step(label, milliseconds: milliseconds(since: ft))) }
+                    do {
+                        try await container!.copyIn(from: url, to: URL(fileURLWithPath: ToolsLayer.guestGhPath + ".tmp"), mode: 0o755)
+                        ghCopied = true
+                    } catch {
+                        ghProblem = "could not copy gh into the guest: \(error.localizedDescription)"
+                    }
+                case .failure(let f):
+                    if shout { broadcaster.yield(.stepFailed(label, milliseconds: milliseconds(since: ft), error: f.reason)) }
+                    ghProblem = f.reason
+                }
+            } else {
+                ghProblem = "no gh on this Mac for it"
+            }
+        }
+        let script = ToolsLayer.applyScript(plan, state: state, ghCopied: ghCopied, ghProblem: ghProblem)
+        let missing = ToolsLayer.missingPackages(plan, state)
+        let installLabel = "tools: installing " + missing.map(\.title).joined(separator: ", ") + " with \(state.packageManager), through the proxy"
+        if shout && !missing.isEmpty { broadcaster.yield(.stepStarted(installLabel)) }
+        let it0 = ContinuousClock.now
+        let out: String
+        do {
+            let r = try await execInContainer(["sh", "-c", script], privileged: true, timeout: missing.isEmpty ? 30 : 300)
+            out = r.output
+        } catch {
+            out = ""
+            note("tools layer: \(error.localizedDescription)")
+        }
+        if shout && !missing.isEmpty {
+            let failedPkgs = missing.filter { item in !out.contains("doz-tool \(item.id) installed") }
+            if failedPkgs.isEmpty { broadcaster.yield(.step(installLabel, milliseconds: milliseconds(since: it0))) }
+            else { broadcaster.yield(.stepFailed(installLabel, milliseconds: milliseconds(since: it0), error: "not installed: " + failedPkgs.map(\.title).joined(separator: ", ") + " — see \(ToolsLayer.guestLog)")) }
+        }
+        let report = ToolsReport(results: ToolsLayer.results(out, plan: plan), first: state.first)
+        toolsReportBox.withLock { $0 = report }
+        let ms = milliseconds(since: t0)
+        if shout {
+            for r in report.results {
+                if r.ok { broadcaster.yield(.step(ToolsLayer.label(r) + " (\(r.detail))", milliseconds: 0)) }
+                else { broadcaster.yield(.stepFailed(ToolsLayer.label(r), milliseconds: 0, error: r.detail)) }
+            }
+            note(String(format: "tools layer: %@ (%.0f ms)", report.summary, ms))
+        } else {
+            note(String(format: "tools layer re-checked%@: %@ (%.0f ms)", report.changed || report.failed ? "" : " (no change)", report.summary, ms))
+        }
+        return report
+    }
 
     /// The Mac's agent socket while the SSH agent is forwarded (nil: not forwarded).
     public nonisolated var sshAgentSocket: String? { sshRelayBox.withLock { $0?.agentSocket } }
