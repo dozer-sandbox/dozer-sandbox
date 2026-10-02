@@ -209,13 +209,25 @@ public enum GuestCommand {
     /// accident from a `for d in /mnt/vfs/*` glob; without it the 578 suite's SECOND wake lost
     /// /work.) Each share is then listed, so a failure is loud. Idempotent across repeated wakes:
     /// the previous wake's fresh mount is detached first.
-    public static func remountShares(_ shares: [(tag: String, guestPath: String)]) -> String {
+    ///
+    /// Workspace rules (599g): a share whose guest runs a view (its conf exists — the GUEST's layout
+    /// decides, so a restore into a new process needs no record) is re-bound at its PRIVATE raw path,
+    /// never at its guest path, and its daemon is signalled in this same script
+    /// (`WorkspaceView.remountWithView`); a share the host now wants a view for (`views`, keyed by tag)
+    /// that has none yet gets one after its ordinary re-bind (`WorkspaceView.startScript`). Neither ever
+    /// fails the script: they print `doz-view TAG …` lines.
+    public static func remountShares(_ shares: [(tag: String, guestPath: String)], views: [String: WorkspaceViewConfig] = [:]) -> String {
         var s = "set -e; mkdir -p /run/dozer-vfs; umount -l /run/dozer-vfs 2>/dev/null || true; "
             + "mount -t virtiofs virtiofs /run/dozer-vfs; ls -a /run/dozer-vfs >/dev/null"
         for share in shares {
-            s += "; umount -l '\(share.guestPath)' 2>/dev/null || true"
+            let plain = "umount -l '\(share.guestPath)' 2>/dev/null || true"
                 + "; mount --bind '/run/dozer-vfs/\(share.tag)' '\(share.guestPath)'"
                 + "; ls -a '\(share.guestPath)' >/dev/null"
+            guard WorkspaceView.isSafe(share.tag), WorkspaceView.isSafe(share.guestPath) else { s += "; " + plain; continue }
+            let turnOn = views[share.tag].map { "; " + WorkspaceView.startScript($0) } ?? ""
+            s += "; if [ -f '\(WorkspaceView.confPath(share.tag))' ]; then "
+                + WorkspaceView.remountWithView(tag: share.tag, guestPath: share.guestPath, wanted: views[share.tag])
+                + "; else " + plain + turnOn + "; fi"
         }
         return s
     }
@@ -613,6 +625,10 @@ public enum GuestCommand {
     public static func prepareGuest(imageSpec: ImageSpec?, agentSudo: Bool = true, timeZone: GuestTimeZone? = nil,
                                     git: GitGuestSetup? = nil) -> String {
         var s = "set -e; rm -rf /run/deckhold; mkdir -p /run/deckhold; chmod 1777 /run/deckhold"
+        // 599g: /run is on the ROOT disk (Stop keeps it), so the last boot's view records would mislead the
+        // next wake — a fresh boot has no view yet. The raw mount points are only rmdir'ed (empty ones):
+        // never a recursive delete under a path a share is bound at.
+        s += "; rm -rf '\(WorkspaceView.viewDirectory)'; for d in '\(WorkspaceView.rawRoot)'/*; do [ -d \"$d\" ] && ! mountpoint -q \"$d\" && rmdir \"$d\" 2>/dev/null; done; true"
         // 599d: the SSH agent's guest half needs doznet, which a fresh boot installs after this (the boot starts it then).
         s += "; " + guestFixes(imageSpec: imageSpec, agentSudo: agentSudo, timeZone: timeZone, git: git, sshAgent: false)
         guard let r = imageSpec else { return s }

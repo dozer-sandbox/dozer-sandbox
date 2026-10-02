@@ -878,13 +878,19 @@ public actor Sandbox {
         case .remountShares:
             let tags = (identity?.shareTags ?? [:]).map { (tag: $0.value, guestPath: $0.key) }.sorted { $0.guestPath < $1.guestPath }
             guard !tags.isEmpty else { return }
-            try await timed("re-mounted \(tags.count) share(s) (virtio-fs does not survive a VM stop)") {
+            // 599g: a share with workspace rules is re-bound privately and its view's daemon signalled in
+            // the same script; a share that gained a rule file while asleep gets its view now.
+            let views = wantedViews(shareTags: identity?.shareTags ?? [:])
+            if views.keys.contains(where: { activeViews[$0] == nil }) { await copyViewBinary() }
+            let out = try await timed("re-mounted \(tags.count) share(s) (virtio-fs does not survive a VM stop)") {
                 // The re-mount script is idempotent (it unmounts before it mounts).
                 let r = try await retryingFirstGuestCall("re-mount the shares") {
-                    try await execInContainer(["sh", "-c", GuestCommand.remountShares(tags)], privileged: true, timeout: 30)
+                    try await execInContainer(["sh", "-c", GuestCommand.remountShares(tags, views: views)], privileged: true, timeout: 30)
                 }
                 if r.exitCode != 0 { throw SandboxError.commandFailed(command: "remount shares", exitCode: r.exitCode, output: r.output + r.errorOutput) }
+                return r.output
             }
+            recordViewStatus(out, wanted: views, guestPaths: Dictionary(tags.map { ($0.tag, $0.guestPath) }, uniquingKeysWith: { a, _ in a }))
         case .deleteSnapshot:
             if FileManager.default.fileExists(atPath: layout.snapshot.path) {
                 try? FileManager.default.removeItem(at: layout.snapshot)
@@ -1202,6 +1208,11 @@ public actor Sandbox {
                                              workingDirectory: "/", privileged: true, timeout: 15)
                 }
             }
+            // 599g: workspace rules — a share whose Mac folder holds .dozignore/.dozreadonly is served
+            // through the view. Never fatal: a failure is said (and the share is then EMPTY, not open).
+            setActiveViews([:])
+            let views = wantedViews(shareTags: identity.shareTags)
+            if !views.isEmpty { await startViews(views, on: c, quiet: false) }
         } else if let egress, egress.ca == nil {
             // Adopted after a crash: the guest still runs its shim and trusts this sandbox's CA.
             egress.ca = try? SandboxCA.loadOrCreate(in: layout.sandboxDirectory, sandbox: spec.name)
@@ -1545,6 +1556,114 @@ public actor Sandbox {
     public nonisolated var timeZone: GuestTimeZone? { timeZoneBox.withLock { $0 } }
     public nonisolated func setTimeZone(_ tz: GuestTimeZone?) { timeZoneBox.withLock { $0 = tz } }
     private nonisolated let timeZoneBox = LockedBox<GuestTimeZone?>(nil)
+
+    // MARK: 599g — workspace rules
+
+    /// What `.dozignore` does in this sandbox's view (the host sets it from `workspace.ignore_mode`).
+    public nonisolated var workspaceRuleMode: WorkspaceRuleMode { ruleModeBox.withLock { $0 } }
+    public nonisolated func setWorkspaceRuleMode(_ m: WorkspaceRuleMode) { ruleModeBox.withLock { $0 = m } }
+    private nonisolated let ruleModeBox = LockedBox<WorkspaceRuleMode>(.lock)
+
+    /// The views running in the guest, by share tag (as the last boot, wake or session start found them).
+    public nonisolated var activeViews: [String: WorkspaceViewConfig] { activeViewsBox.withLock { $0 } }
+    private nonisolated let activeViewsBox = LockedBox<[String: WorkspaceViewConfig]>([:])
+    private nonisolated func setActiveViews(_ v: [String: WorkspaceViewConfig]) { activeViewsBox.withLock { $0 = v } }
+    /// The guest paths (e.g. /workspace) that are served through a view right now.
+    public nonisolated var viewedGuestPaths: [String] { activeViews.values.map(\.guestPath).sorted() }
+
+    /// The views the host wants now: every share whose Mac folder holds a rule file (two `stat`s each).
+    nonisolated func wantedViews(shareTags: [String: String]) -> [String: WorkspaceViewConfig] {
+        var out: [String: WorkspaceViewConfig] = [:]
+        for share in spec.shares {
+            guard let tag = shareTags[share.guestPath] else { continue }
+            let folder = URL(fileURLWithPath: share.hostPath)
+            guard WorkspaceRules.present(in: folder) else { continue }
+            out[tag] = WorkspaceViewConfig(tag: tag, guestPath: share.guestPath, mode: workspaceRuleMode,
+                                           fold: WorkspaceRules.caseInsensitive(folder))
+        }
+        return out
+    }
+
+    private func copyViewBinary() async {
+        guard let container else { return }
+        guard let bin = DozviewBinary.locate() else { note("workspace rules: the dozview guest binary is missing from the resource bundle"); return }
+        do { try await container.copyIn(from: bin, to: URL(fileURLWithPath: WorkspaceView.binaryGuestPath), mode: 0o755) }
+        catch { note("workspace rules: could not copy the view into the guest: \(error.localizedDescription)") }
+    }
+
+    /// Copy the daemon in and turn the views on (a fresh boot, or a share that gained a rule file).
+    private func startViews(_ views: [String: WorkspaceViewConfig], on c: LinuxContainer, quiet: Bool) async {
+        guard let bin = DozviewBinary.locate() else {
+            note("workspace rules: the dozview guest binary is missing from the resource bundle — the shares are served without their rules")
+            return
+        }
+        let label = views.values.sorted { $0.guestPath < $1.guestPath }
+            .map { "\($0.guestPath) (\($0.mode.rawValue)\($0.fold ? ", case-insensitive" : ""))" }.joined(separator: ", ")
+        let work: () async throws -> String = {
+            try await c.copyIn(from: bin, to: URL(fileURLWithPath: WorkspaceView.binaryGuestPath), mode: 0o755)
+            let script = views.values.sorted { $0.guestPath < $1.guestPath }.map(WorkspaceView.startScript).joined(separator: "; ")
+            let r = try await Self.exec(on: c, ["sh", "-c", script], environment: [:], workingDirectory: "/", privileged: true, timeout: 30)
+            return r.output + r.errorOutput
+        }
+        do {
+            let out = quiet ? try await work() : try await timed("workspace rules: \(label) served through the view", work)
+            recordViewStatus(out, wanted: views, guestPaths: [:])
+        } catch {
+            note("workspace rules: the view could not start: \(error.localizedDescription)")
+        }
+    }
+
+    /// Fold a script's `doz-view` lines into `activeViews`; a failure is said.
+    private func recordViewStatus(_ output: String, wanted: [String: WorkspaceViewConfig], guestPaths: [String: String]) {
+        var active = activeViews
+        for st in WorkspaceView.parse(output) {
+            switch st.state {
+            case .running, .started, .restarted:
+                let gp = wanted[st.tag]?.guestPath ?? active[st.tag]?.guestPath ?? guestPaths[st.tag] ?? "?"
+                active[st.tag] = wanted[st.tag] ?? active[st.tag] ?? WorkspaceViewConfig(tag: st.tag, guestPath: gp, mode: workspaceRuleMode, fold: true)
+                if st.state == .restarted { note("workspace rules: the view of \(gp) was not running — started it again") }
+            case .failed:
+                let gp = wanted[st.tag]?.guestPath ?? guestPaths[st.tag] ?? st.tag
+                active[st.tag] = nil
+                note("workspace rules: the view of \(gp) could not start — \(gp) is EMPTY in the sandbox until it does (the next wake or start tries again)")
+            case .off:
+                active[st.tag] = nil
+            }
+        }
+        setActiveViews(active)
+    }
+
+    /// At a session start (the host's open-session): a share that gained a rule file gets its view now, and
+    /// a changed mode reaches a running view. Nothing runs in the guest when nothing changed. Never throws.
+    public func refreshWorkspaceViews() async {
+        await acquire(); defer { release() }
+        guard phase == .running, let c = container else { return }
+        let wanted = wantedViews(shareTags: identity?.shareTags ?? [:])
+        let active = activeViews
+        let new = wanted.filter { active[$0.key] == nil }
+        if !new.isEmpty {
+            note("workspace rules: a rule file appeared — serving \(new.values.map(\.guestPath).sorted().joined(separator: ", ")) through the view (a program already inside keeps what it has open until it changes directory)")
+            await startViews(new, on: c, quiet: true)
+        }
+        for (tag, w) in wanted where active[tag] != nil && active[tag] != w {
+            if let r = try? await Self.exec(on: c, ["sh", "-c", WorkspaceView.reloadScript(w)], environment: [:], workingDirectory: "/",
+                                             privileged: true, timeout: 15) {
+                recordViewStatus(r.output, wanted: [tag: w], guestPaths: [:])
+            }
+        }
+    }
+
+    /// What the guest says about each share's view, and its daemon's state (`doz ignore show`).
+    public func workspaceViewReport() async -> [(status: WorkspaceViewStatus, state: [String: String])] {
+        guard phase == .running, let c = container else { return [] }
+        let tags = (identity?.shareTags ?? [:]).values.sorted()
+        guard !tags.isEmpty, let r = try? await Self.exec(on: c, ["sh", "-c", WorkspaceView.statusScript(tags)], environment: [:],
+                                                          workingDirectory: "/", privileged: true, timeout: 15) else { return [] }
+        return WorkspaceView.parse(r.output).map { ($0, WorkspaceView.parseState(r.output, tag: $0.tag)) }
+    }
+
+    /// The guest path a share tag is mounted at.
+    public func guestPath(ofTag tag: String) -> String? { identity?.shareTags.first { $0.value == tag }?.key }
 
     final class LockedBox<T: Sendable>: @unchecked Sendable {
         private let lock = NSLock()
