@@ -510,6 +510,11 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   from a bake step (`OutputTail`): both ≤ 4 events/s; guest output is made inert (`InertText`: CSI,
   OSC/DCS/APC strings and every control character removed) in the library and again in the view.
   Digests are trimmed to 12 hex for people. Output lines are live-only: not in host.log or Activity.
+  **The CLI's one-second hold ends by the CLOCK** (`Progress.holdTimer`), never at the next event, and
+  **every pull is metered** (`ImageBaker.pull`: linux/arm64, `PullMeter`) — the lab's alpine and the guest
+  init image (pulled first in `prepareAssets`; ContainerManager would fetch it silently, every platform)
+  included. Together they made a first `doz exec` silent for 18 s (`ProgressHoldTests`, test-cli's
+  "first exec … shows its progress").
 - **Every button has an icon** (owner, 593): Lucide (`vendor/lucide-static/`, pinned like ghostty-web;
   `serve: icon`) compiled by `build-web-assets.swift` into ONE sprite of `<symbol>`s — the compiler
   admits an icon file only as geometry (path/circle/ellipse/line/polyline/polygon/rect with geometry

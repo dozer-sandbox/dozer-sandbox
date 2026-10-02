@@ -277,13 +277,7 @@ public struct ImageBaker: Sendable {
         let baseName = imageSpec.base.split(separator: "@").first.map(String.init) ?? imageSpec.base
         let image = try await timed(cachedImage != nil ? "base image \(baseName) (cached)" : "pulled the base image \(baseName)") {
             if let cachedImage { return cachedImage }
-            // 593: the pull's progress (bytes and layers), counted here and reported at most 4 times a second.
-            let meter = PullMeter(label: "pulling \(Self.shortReference(imageSpec.base))", events: events)
-            // linux/arm64 only: a nil platform pulls the layers of EVERY platform the index lists.
-            let img = try await store.pull(reference: imageSpec.base, platform: Platform(arch: "arm64", os: "linux"), progress: { batch in meter.add(batch) },
-                                           maxConcurrentDownloads: Self.pullConcurrency)
-            meter.finish()
-            return img
+            return try await Self.pull(imageSpec.base, store: store, events: events)
         }
         let id = "bake-\(imageSpec.name)"
         try? mgr.delete(id)

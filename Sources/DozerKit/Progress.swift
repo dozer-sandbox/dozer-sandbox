@@ -1,4 +1,6 @@
+import Containerization
 import ContainerizationExtras
+import ContainerizationOCI
 import Foundation
 
 // 593 (owner: "make these setup console outputs more interactive; add spinners when waiting and
@@ -153,6 +155,19 @@ public final class PullMeter: @unchecked Sendable {
 }
 
 extension ImageBaker {
+    /// Pull `reference` for linux/arm64 with its progress as `.transfer` events (bytes and layers, at
+    /// most 4 a second, and always the last). Every pull Dozer makes goes through here: a pull without a
+    /// meter is silent for as long as it takes (the lab's first boot and the guest init image were —
+    /// a first `doz exec` showed nothing for 18 s), and a nil platform downloads every platform's layers.
+    public static func pull(_ reference: String, store: ImageStore, label: String? = nil,
+                            events: @escaping @Sendable (SandboxEvent) -> Void) async throws -> Containerization.Image {
+        let meter = PullMeter(label: label ?? "pulling \(shortReference(reference))", events: events)
+        let img = try await store.pull(reference: reference, platform: Platform(arch: "arm64", os: "linux"), progress: { batch in meter.add(batch) },
+                                       maxConcurrentDownloads: pullConcurrency)
+        meter.finish()
+        return img
+    }
+
     /// `docker.io/library/node@sha256:<64 hex>` → `node@<12 hex>` (a person reads the name and a short digest).
     public static func shortReference(_ ref: String) -> String {
         var name = ref, digest: String?
