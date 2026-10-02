@@ -13,9 +13,10 @@ public struct DozerCommand: AsyncParsableCommand {
     /// release`, what Homebrew installs) carries it as `libexec/doz/VERSION` beside the executable,
     /// written from the tag it is built for, so it can never drift from the tag again (this constant
     /// was left behind at 0.5.0 through v0.7.0, and at 0.10.0 through v0.11.0). A build without that
-    /// file (`make cli`, `make install-cli`, the tests) reports `builtVersion`. The host and `doctor`
+    /// file reports `builtVersion` — since 602 only `swift build`/`swift run` and the tests do: `make cli` and
+    /// `make install-cli` stamp the repo's `VERSION` beside the binary as a release does. The host and `doctor`
     /// compare it to the running host's.
-    public static let builtVersion = "0.11.0"
+    public static let builtVersion = "0.23.1"
     public static let version: String = testVersion(ProcessInfo.processInfo.environment["DOZ_TEST_VERSION"])
         ?? ReleaseStamp.read() ?? builtVersion
 
