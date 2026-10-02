@@ -64,7 +64,7 @@ DOCC_OUT         ?= .docc-build
 DOCC_BASE_PATH   ?= /DozerKit/
 DOCC_PREVIEW_PORT ?= 8000
 
-.PHONY: help build test audit web-assets web-assets-check test-cli-onboarding test-cli-terminal test-cli-hoststop test-cli-agentsudo test-cli-points test-cli-timezone test-cli-images test-cli-bases test-cli-permissions test-cli-clipboard test-cli-browser test-cli-openfiles test-cli-github test-cli-access test-cli-quickadd test-cli-projectwizard test-cli-tmux pullbench test-vm test-vm-agents test-vm-network test-vm-hardening test-vm-lineage prev-cli test-vm-upgrade vmtest-host kernel deckhold deckhold-verify doznet doznet-verify cli install-cli test-cli test-vm-claude test-vm-templates docs docs-preview docs-drift-check release
+.PHONY: help build test audit web-assets web-assets-check test-cli-onboarding test-cli-terminal test-cli-hoststop test-cli-agentsudo test-cli-points test-cli-timezone test-cli-images test-cli-bases test-cli-permissions test-cli-clipboard test-cli-browser test-cli-openfiles test-cli-github test-cli-access test-cli-tools tools-fixture test-cli-quickadd test-cli-projectwizard test-cli-tmux pullbench test-vm test-vm-agents test-vm-network test-vm-hardening test-vm-lineage prev-cli test-vm-upgrade vmtest-host kernel deckhold deckhold-verify doznet doznet-verify cli install-cli test-cli test-vm-claude test-vm-templates docs docs-preview docs-drift-check release
 
 help: ## Show this help
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) | sed 's/:.*## /\t/' | expand -t 22
@@ -233,6 +233,17 @@ test-cli-github: cli vmtest-host ## 599d: GitHub as the user through SEAMS only 
 
 test-cli-projectwizard: cli vmtest-host ## 599f: doz init --yes (every choice a flag) then doz up in the folder makes exactly that sandbox; doz_project.yml; both spellings refused; an interactive doz init on a pseudo-terminal walks the 9 steps, and again replaces the file only after its diff and a yes
 	perl -e 'alarm shift; exec @ARGV' 1200 $(VMTEST_BIN) cli-projectwizard --doz $(CLI_BIN)
+
+tools-fixture: ## 599h: download gh's pinned linux-arm64 release ONCE into the vmtest store's fixtures (test-cli-tools serves it from a local server — tests never reach github.com)
+	@mkdir -p "$(VMTEST_STORE)/fixtures"
+	@f="$(VMTEST_STORE)/fixtures/gh_2.102.0_linux_arm64.tar.gz"; \
+	if [ "$$(shasum -a 256 "$$f" 2>/dev/null | cut -d' ' -f1)" = 7862c86c72f43df3a2d93ddde6f473285b4e2af61b494849846827e513ef6484 ]; then echo "ok $$f"; \
+	else curl -fsSL --max-time 300 -o "$$f.part" https://github.com/cli/cli/releases/download/v2.102.0/gh_2.102.0_linux_arm64.tar.gz \
+	  && [ "$$(shasum -a 256 "$$f.part" | cut -d' ' -f1)" = 7862c86c72f43df3a2d93ddde6f473285b4e2af61b494849846827e513ef6484 ] \
+	  && mv "$$f.part" "$$f" && echo "downloaded $$f (sha256 checked)"; fi
+
+test-cli-tools: cli vmtest-host tools-fixture ## 599h: the tools layer in real VMs through SEAMS only (a local download server for gh's tarball, a fake GitHub with its own CA, a fake gh, a throwaway ssh-agent): the first start's progress lines, a bad checksum refused (the boot goes on), --apply, gh auth status / gh repo view through the placeholder, the ssh client + github.com host keys, off/on across a hibernate+wake (quiet), lab + Debian + Alpine bases, no recipe change
+	perl -e 'alarm shift; exec @ARGV' 3600 $(VMTEST_BIN) cli-tools --doz $(CLI_BIN)
 
 test-cli-access: cli vmtest-host ## 599e: the Access step through SEAMS only (a fake GitHub API with its own CA, a fake gh, a throwaway ssh-agent; no VM): onboard --yes confirms GitHub (login + scopes) and SSH (N keys) and writes them as the defaults; a refused token and a missing agent are skipped with the reason (exit 0); doz access / access set (a fine-grained key: repositories it sees); no token anywhere
 	perl -e 'alarm shift; exec @ARGV' 600 $(VMTEST_BIN) cli-access --doz $(CLI_BIN)

@@ -927,6 +927,10 @@ Task {
             // 599d: GitHub as the user — a fake GitHub, a fake gh, a throwaway ssh-agent (seams only).
             let binary = args.firstIndex(of: "--doz").flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil } ?? ".build/debug/doz"
             await cliGitHubSuite(binary: URL(fileURLWithPath: binary).standardizedFileURL.path)
+        case "cli-tools":
+            // 599h: the tools layer — gh, the ssh client + host keys, packages; every base (seams only).
+            let binary = args.firstIndex(of: "--doz").flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil } ?? ".build/debug/doz"
+            await cliToolsSuite(binary: URL(fileURLWithPath: binary).standardizedFileURL.path)
         case "cli-access":
             // 599e: the Access step — onboarding confirms each credential, skips failures, never blocks (no VM).
             let binary = args.firstIndex(of: "--doz").flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil } ?? ".build/debug/doz"
