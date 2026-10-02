@@ -231,7 +231,9 @@ public enum Resources {
     static let storeRecords: Set<String> = ["accounts.json", "onboarded.json", "preparations.json", "agent-versions.json",
                                             "host.lock", "host.pid", "host.sock", "ui.lock", "ui.sock",
                                             // 596: the bases' resolved digests, the Dockerfiles and their builds.
-                                            "base-digests.json", "dockerfiles.json"]
+                                            "base-digests.json", "dockerfiles.json",
+                                            // 599e: the Access step's last checks (never a secret).
+                                            "access.json"]
     static let builtInImages = ["lab", "claude-code", "pi"]
     /// 596: an image a preparation makes again (any base × agent — a template is not).
     static func isPreparedImage(_ name: String) -> Bool { builtInImages.contains(name) || ImageChoice.parse(name)?.name == name }
@@ -315,6 +317,7 @@ public enum Resources {
             if trimLock(key).hasSuffix(".fsck") { return "helper:fsck" }
             return "image:lab@\(key)"
         case "content", "state.json": return "cache:downloads"
+        case "tools": return "cache:tools"                       // 599h: the tools layer's downloads (gh)
         case "initfs.ext4": return "initfs"
         case "kernels": return c.count >= 2 ? "kernel:\(kernelVersion(c[1]))" : "store"
         case "containers": return c.count >= 2 ? "leftover:\(c[1])" : "store"
@@ -485,6 +488,14 @@ public enum Resources {
                              sizeBytes: l.size, freedBytes: l.freed, usedBy: ["the next preparation"], deletable: true, refusal: preparingAny,
                              recreatable: true, later: "re-downloaded when an image is next prepared (needs network)", cleanable: preparingAny == nil,
                              path: "content, state.json"))
+        }
+        if byLeaf["cache:tools"] != nil {
+            // 599h: the tools layer's downloads — gh, pinned and sha256-checked, copied into sandboxes from here.
+            let l = leaf("cache:tools")
+            add(ResourceItem(id: "cache:tools", group: "caches", name: "tools layer",
+                             detail: "gh \(ToolsLayer.ghVersion) (linux-arm64, sha256 checked) — copied into sandboxes with GitHub as you",
+                             sizeBytes: l.size, freedBytes: l.freed, usedBy: [], deletable: true, recreatable: true,
+                             later: "downloaded again (once) when a sandbox with GitHub as you next starts or wakes", cleanable: true, path: "tools"))
         }
         for id in byLeaf.keys.filter({ $0.hasPrefix("base:") }).sorted() {
             let key = String(id.dropFirst(5))
@@ -730,6 +741,8 @@ public enum Resources {
                     try clearMetrics()
                 case "cache:downloads":
                     for n in ["content", "state.json"] { try removeIfPresent(root.appendingPathComponent(n)) }
+                case "cache:tools":
+                    try removeIfPresent(root.appendingPathComponent("tools"))
                 case "initfs":
                     try removeIfPresent(root.appendingPathComponent("initfs.ext4"))
                 default:

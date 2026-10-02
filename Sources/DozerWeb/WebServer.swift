@@ -512,6 +512,8 @@ public final class DozerWebServer: @unchecked Sendable {
             return json(try await data.sessions(name))
         case .sandboxNetwork(let name):
             return json(try await data.network(name))
+        case .sandboxTools(let name):
+            return json(try await data.tools(name))
         case .images:
             return json(try await data.images())
         case .imageTree:

@@ -1703,6 +1703,7 @@ function nwPayload() {
 }
 function nwNode() {
   const nw = state.nw;
+  if (nw.tools) return nwToolsNode(nw);
   const steps = nw.steps || [{ id: 'folder', title: 'Project folder' }];
   const stepper = h('ol', { class: 'wiz-steps', 'aria-label': 'Steps' }, steps.map((s, i) => {
     const can = nw.form && i <= Math.max(nw.reached, 8) && i !== nw.step;
@@ -1737,6 +1738,95 @@ function nwNode() {
     stepper, form);
   nw.node = node;
   return node;
+}
+// ── 599h: the wizard's last step — "Setting up tools" ───────────────────────
+// The sandbox starts here, and its TOOLS LAYER is set up with it (the host's start: gh for GitHub as you,
+// the ssh client + github.com's host keys for SSH forwarding, tmux, git/curl/ca-certificates): each tool with
+// its reason, the start's progress line, then ✓/✗. A failure never blocks: Retry (`tools-apply`) or Continue
+// anyway. "Open the sandbox" then opens it.
+function nwToolsNode(nw) {
+  const t = nw.tools, plan = t.plan;
+  const steps = (nw.steps || []).concat([{ id: 'tools', title: 'Setting up tools' }]);
+  const stepper = h('ol', { class: 'wiz-steps', 'aria-label': 'Steps' }, steps.map((s, i) =>
+    h('li', { class: i === steps.length - 1 ? 'current' : 'done', 'aria-current': i === steps.length - 1 ? 'step' : null, 'data-nw-step': s.id },
+      h('span', { class: 'wiz-n' }, String(i + 1)), s.title)));
+  const last = new Map(((plan && plan.last && plan.last.results) || []).map((r) => [r.id, r]));
+  const busy = t.phase === 'starting' || t.phase === 'retrying';
+  const rows = ((plan && plan.plan.items) || []).map((it) => {
+    const r = busy ? null : last.get(it.id);
+    const st = r ? (['ok', 'installed', 'removed'].includes(r.state) ? 'ok' : 'fail') : busy ? 'busy' : 'none';
+    return h('li', { class: 'tool-row tool-' + st, 'data-tool': it.id, 'data-tool-state': st },
+      h('span', { class: 'tool-mark', 'aria-hidden': 'true' }, st === 'busy' ? h('span', { class: 'mini-spin' }) : st === 'ok' ? '✓' : st === 'fail' ? '✗' : '·'),
+      h('span', { class: 'tool-title' }, it.title), h('span', { class: 'muted tool-reason' }, ' — ' + it.reason),
+      r ? h('div', { class: (st === 'fail' ? 'st-fail' : 'muted') + ' tool-detail' }, r.detail) : null);
+  });
+  const failed = !busy && ((plan && plan.last) ? plan.last.results.some((r) => !['ok', 'installed', 'removed'].includes(r.state)) : !!t.error);
+  // Open: its page with a live terminal on the image's own session (the boot already ran here).
+  const open = () => {
+    const name = t.name;
+    state.nw = null;
+    location.hash = '#/sandbox/' + name;
+    openDefaultTerminal(name);                       // the image's own session, started (it is running), then attached
+  };
+  const buttons = busy ? [] : failed
+    ? [btn('Retry', () => nwRetryTools(nw), { icon: 'refresh-cw', title: 'Set the tools up again now' }), btn('Continue anyway', open, { primary: true, icon: 'arrow-right' })]
+    : [btn('Open the sandbox', open, { primary: true, icon: 'box' })];
+  const node = h('div', { class: 'wizard nw', 'data-nw': 'tools' },
+    h('div', { class: 'head' }, h('h1', null, 'New sandbox')),
+    h('p', { class: 'sub' }, t.name + ' is made. Now it starts, and Dozer sets up the tools its settings call for — the tools layer, on any base, without rebuilding an image.'),
+    stepper,
+    h('section', { class: 'wiz-body panel', 'data-nw-tools': t.phase },
+      h('h2', null, 'Setting up tools'),
+      plan ? h('ul', { class: 'plain tool-list' }, rows) : h('p', { class: 'muted' }, 'Reading the tools layer…'),
+      h('p', { class: 'muted mono tools-progress', 'data-tools-progress': '', 'aria-live': 'polite' }, busy ? (t.progress || 'starting…') : ''),
+      t.error ? h('div', { class: 'notice bad', 'data-tools-error': '' }, t.error) : null,
+      failed ? h('p', { class: 'muted' }, 'Something could not be set up — the sandbox works without it. Retry, or continue; ', h('code', null, 'doz tools ' + t.name + ' --apply'), ' tries again later.') : null,
+      h('div', { class: 'wiz-buttons' }, h('span', { class: 'wiz-gap' }), buttons)));
+  nw.node = node;
+  return node;
+}
+async function nwFollow(nw, op) {
+  const t = nw.tools;
+  const tick = setInterval(() => {
+    const o = state.ops.get(op.id);
+    if (o && o.text && o.text !== t.progress) {
+      t.progress = o.text;
+      const p = $('view').querySelector('[data-tools-progress]');
+      if (p) p.textContent = o.text;
+    }
+  }, 300);
+  const end = await waitOp(op.id, 1800000);
+  clearInterval(tick);
+  return end;
+}
+async function nwToolsRead(nw) {
+  try { nw.tools.plan = await api('sandboxes/' + nw.tools.name + '/tools'); } catch (e) { nw.tools.error = nw.tools.error || (e.message || String(e)); }
+}
+async function nwRunTools(nw) {
+  const t = nw.tools;
+  await nwToolsRead(nw);
+  if (state.nw === nw) nwRender();
+  try {
+    const op = await actOrThrow({ action: 'start', sandbox: t.name });
+    const end = await nwFollow(nw, op);
+    if (!end || end.state !== 'done') t.error = 'The start did not finish: ' + (end ? end.text : 'no answer');
+  } catch (e) { t.error = e.message || String(e); }
+  await nwToolsRead(nw);
+  t.phase = 'done';
+  if (state.nw === nw) nwRender();
+}
+async function nwRetryTools(nw) {
+  const t = nw.tools;
+  t.phase = 'retrying'; t.error = ''; t.progress = '';
+  nwRender();
+  try {
+    const op = await actOrThrow({ action: 'tools-apply', sandbox: t.name });
+    const end = await nwFollow(nw, op);
+    if (!end || end.state !== 'done') t.error = end ? end.text : 'no answer';
+  } catch (e) { t.error = e.message || String(e); }
+  await nwToolsRead(nw);
+  t.phase = 'done';
+  if (state.nw === nw) nwRender();
 }
 async function nwGo(i) {
   const nw = state.nw;
@@ -2033,10 +2123,10 @@ async function nwCreate(button) {
       const op = await actOrThrow({ action: 'project-create', folder: w.folder });
       const end = await waitOp(op.id);
       if (!end || end.state !== 'done') { button.disabled = false; return; }
-      state.nw = null;
-      if (bootViewOnStart()) { await startWithBootView(nw.form.name); return; }
-      location.hash = '#/sandbox/' + nw.form.name;
-      act({ action: 'start', sandbox: nw.form.name });
+      // 599h: the last step — "Setting up tools": the start, with the sandbox's tools layer, before it opens.
+      nw.tools = { name: nw.form.name, plan: null, phase: 'starting', progress: '', error: '' };
+      nwRender();
+      await nwRunTools(nw);
     } catch (e) {
       button.disabled = false;
       const err = $('view').querySelector('[data-nw-error]');

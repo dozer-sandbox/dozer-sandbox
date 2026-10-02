@@ -92,6 +92,7 @@ extension HostCore {
     /// GitHub"), the source setting, its own key, `sandbox.ssh_agent` — and apply it to a running guest.
     /// Called when the sandbox is loaded or created, and whenever one of those changes.
     func applyGitHub(_ m: Managed) {
+        applyToolInputs(m)                                   // 599h: the tools layer follows the same settings
         guard !readOnly, let egress = m.sandbox.egress else { return }
         let name = m.name
         let env = ProcessInfo.processInfo.environment

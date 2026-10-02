@@ -196,6 +196,9 @@ final class WebOperations: @unchecked Sendable {
             return s?.state == "ready" ? "Apple's container services are running — Dockerfiles can be built" : (s?.note ?? "Apple's container services started")
         case .builderInstall:
             return "Apple's installer package was opened in macOS Installer — approve it there, then start its services"
+        case .toolsApply(let name):
+            let r = (try? v.decode(ToolsLayerReport.self))?.last
+            return "\(name): tools — " + (r?.summary ?? "set up")
         case .prepareCancel:
             let ps = (try? v.decode([PreparationInfo].self)) ?? []
             return ps.isEmpty ? "nothing was being prepared" : "cancelling the preparation of \(ps.map(\.image).joined(separator: ", "))"

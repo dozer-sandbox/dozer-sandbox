@@ -73,6 +73,7 @@ extension HostCore {
                 try m.config.write(store.configFile(m.name))
                 if key == SettingKey.agentSudo { m.sandbox.setAgentSudo(Self.agentSudo(m.config)) }
                 if key == SettingKey.sshAgent { applyGitHub(m) }          // 599d: on/off at once
+                if key == SettingKey.tmux { applyToolInputs(m) }         // 599h: tmux joins the tools layer
                 note(m.name, "\(changed ?? key) — \(d.applies.note)")
             }
         }

@@ -29,6 +29,7 @@ public enum WebRoute: Equatable, Sendable {
     case sandbox(String)           // GET /api/v1/sandboxes/{name}
     case sandboxSessions(String)   // GET /api/v1/sandboxes/{name}/sessions
     case sandboxNetwork(String)    // GET /api/v1/sandboxes/{name}/network
+    case sandboxTools(String)      // GET /api/v1/sandboxes/{name}/tools (599h: the tools layer — plan + last apply)
     case images                    // GET /api/v1/images
     case imageTree                 // GET /api/v1/images/tree   (593: the lineage, with sizes)
     case accounts                  // GET /api/v1/accounts
@@ -182,6 +183,7 @@ public enum WebRoute: Equatable, Sendable {
             switch rest[2] {
             case "sessions": return .sandboxSessions(rest[1])
             case "network": return .sandboxNetwork(rest[1])
+            case "tools": return .sandboxTools(rest[1])
             case "terminal-socket": return .terminalSocket(rest[1])
             case "layout": return .terminalLayout(rest[1])
             case "boots": return .bootLogs(rest[1])

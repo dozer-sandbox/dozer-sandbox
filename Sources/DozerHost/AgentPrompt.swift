@@ -198,16 +198,26 @@ public enum AgentPrompt {
                               timeZone: String? = nil, sudoMissingFromImage: String? = nil,
                               base: String? = nil, apk: Bool = false, clipboard: Bool = true,
                               browser: Bool = true, openFiles: Bool = true, openApps: [String] = [],
-                              github: GitHubAccess.Mode? = nil, sshAgent: Bool = false) -> [String: String] {
+                              github: GitHubAccess.Mode? = nil, sshAgent: Bool = false, tools: ToolsReport? = nil) -> [String: String] {
         var v: [String: String] = [:]
         // 599d: the user's GitHub login and SSH agent — one short facts line (none when both are off), the
-        // details in the skill.
-        let ssh = sshAgent ? "SSH to github.com uses the user's forwarded ssh-agent (their keys stay on the Mac)." : ""
+        // details in the skill. 599h: what the tools layer put in place, folded in (gh, the ssh client + host keys).
+        func tool(_ id: String) -> ToolResult? { tools?.results.first { $0.id == id } }
+        let sshReady = tool("ssh")?.ok != false && tool("github-known-hosts")?.ok != false
+        let ssh = sshAgent ? "SSH to github.com uses the user's forwarded ssh-agent (their keys stay on the Mac)"
+            + (tools != nil && sshReady ? "; the ssh client and github.com's host keys are installed." : ".") : ""
+        // gh: installed by Dozer (said only when the layer said so), or not there and why.
+        let gh: String
+        if let r = tool("gh"), !r.ok {
+            gh = "`git` is signed in as the user on github.com (`gh` is not installed: \(r.detail))"
+        } else {
+            gh = "`git` and `gh`" + (tool("gh")?.ok == true ? " (installed by Dozer)" : "") + " are signed in as the user on github.com"
+        }
         switch github {
         case .read?:
-            v["github.facts"] = "GitHub: `git` and `gh` are signed in as the user on github.com, read-only (clone, fetch, read issues and pull requests; a push or a change is refused — ask the user to turn on \"Push to GitHub\"). Use HTTPS remotes." + (ssh.isEmpty ? "" : " " + ssh)
+            v["github.facts"] = "GitHub: \(gh), read-only (clone, fetch, read issues and pull requests; a push or a change is refused — ask the user to turn on \"Push to GitHub\"). Use HTTPS remotes." + (ssh.isEmpty ? "" : " " + ssh)
         case .push?:
-            v["github.facts"] = "GitHub: `git` and `gh` are signed in as the user on github.com, with push — push and change things only as the user asked. Use HTTPS remotes." + (ssh.isEmpty ? "" : " " + ssh)
+            v["github.facts"] = "GitHub: \(gh), with push — push and change things only as the user asked. Use HTTPS remotes." + (ssh.isEmpty ? "" : " " + ssh)
         case nil:
             v["github.facts"] = ssh.isEmpty ? "" : "GitHub: " + ssh + " Use git@github.com: remotes for it."
         }
@@ -388,7 +398,7 @@ public enum AgentPrompt {
     /// The prompt and skill a sandbox gets at its next session. nil: its image runs no agent.
     public static func report(config: SandboxConfig, policy: NetworkPolicy?, account: String?, version: String,
                               settings: DozerSettings = .load(), hostname: String = macHostname(),
-                              credentialProblem: String? = nil, sudoInstalled: Bool? = nil) -> AgentPromptReport? {
+                              credentialProblem: String? = nil, sudoInstalled: Bool? = nil, tools: ToolsReport? = nil) -> AgentPromptReport? {
         guard let agent = agent(of: config.spec), let imageSpec = config.spec.imageSpec else { return nil }
         let network: NetworkMode = policy.map { .proxied($0) } ?? config.spec.network
         // 594 W28: sudo only when it is on AND the guest has it (a disk from an older image may not).
@@ -406,7 +416,8 @@ public enum AgentPrompt {
                           openFiles: HostCore.sandboxValue(config, SettingKey.openFiles, settings: settings) != .string("off"),
                           openApps: WorkspaceFiles.appNames(settings.string(SettingKey.openApps) ?? "") ?? [],
                           github: AgentPermissions.gitHubMode(policy?.permissions),
-                          sshAgent: policy != nil && HostCore.sandboxValue(config, SettingKey.sshAgent, settings: settings) == .string("on"))
+                          sshAgent: policy != nil && HostCore.sandboxValue(config, SettingKey.sshAgent, settings: settings) == .string("on"),
+                          tools: tools)
         var r = AgentPromptReport(enabled: settings.bool(SettingKey.agentPrompt), agent: agent, text: nil, error: nil, layers: [],
                                   skill: nil, promptPath: guestPromptPath,
                                   skillPath: skillDirectory(agent: agent, home: imageSpec.home) + "/SKILL.md")
@@ -472,7 +483,7 @@ extension HostCore {
     func agentPromptReport(_ m: Managed, sudoInstalled: Bool? = nil) -> AgentPromptReport? {
         AgentPrompt.report(config: m.config, policy: m.sandbox.egress?.policy,
                            account: m.sandbox.egress == nil ? nil : accountName(m), version: version,
-                           credentialProblem: credentialProblem(m), sudoInstalled: sudoInstalled)
+                           credentialProblem: credentialProblem(m), sudoInstalled: sudoInstalled, tools: m.sandbox.lastToolsReport)
     }
 
     /// Write (or, when off, remove) the facts file and the skill in the guest — a utility exec as

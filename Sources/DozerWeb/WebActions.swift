@@ -63,6 +63,8 @@ public enum WebAction: Equatable, Sendable {
     /// 596 (B7): install Apple's container tool on demand (`builder-install`: its signed package,
     /// pinned and sha256-checked, opened in macOS Installer — the person approves it there; never sudo).
     case builderInstall
+    /// 599h: set the sandbox's tools layer up again now (the New Sandbox wizard's Retry) — `tools-apply`.
+    case toolsApply(String)
 
     public static let lifecycleOps: [String: HostOp] = [
         "start": .start, "wake": .wake, "pause": .pause, "resume": .resume, "sleep": .sleep, "hibernate": .hibernate,
@@ -77,7 +79,7 @@ public enum WebAction: Equatable, Sendable {
         switch self {
         case .create(let n, _), .lifecycle(_, let n), .openSession(let n, _, _), .pointTake(let n, _, _), .pointRevert(let n, _),
              .pointFork(let n, _, _), .pointRemove(let n, _), .pointSaveImage(let n, _, _, _), .netPolicy(let n, _), .keyPolicy(let n, _),
-             .keyRemove(let n, _), .accountUse(let n, _), .templateCreate(let n, _, _, _), .duplicate(let n, _, _, _):
+             .keyRemove(let n, _), .accountUse(let n, _), .templateCreate(let n, _, _, _), .duplicate(let n, _, _, _), .toolsApply(let n):
             return n
         case .imageBake, .imageRemove, .accountDefault, .accountKeepalive, .accountVerify, .accountRemove, .onboard, .prepareCancel,
              .resourcesRemove, .resourcesClean, .resourcesKernel, .hostStart, .hostRestart, .builderStart, .builderInstall:
@@ -116,6 +118,7 @@ public enum WebAction: Equatable, Sendable {
         case .hostRestart: return "host-restart"
         case .builderStart: return "start Apple's container services"
         case .builderInstall: return "install Apple's container tool"
+        case .toolsApply(let n): return "set up the tools of \(n)"
         default: break
         }
         let r = hostRequest
@@ -243,6 +246,8 @@ public enum WebAction: Equatable, Sendable {
             var r = HostRequest(.builderInstall)
             r.requestedBy = "doz ui"
             return r
+        case .toolsApply(let n):
+            return HostRequest(.toolsApply, name: n)
         }
     }
 
@@ -284,6 +289,7 @@ public enum WebAction: Equatable, Sendable {
             "host-restart": [],
             "builder-start": [],
             "builder-install": [],
+            "tools-apply": ["sandbox"],
         ]
         for (verb, op) in lifecycleOps { f[verb] = [.reset, .rm].contains(op) ? ["sandbox", "confirm"] : ["sandbox"] }
         return f
@@ -409,6 +415,8 @@ public enum WebAction: Equatable, Sendable {
             a = .builderStart
         case "builder-install":
             a = .builderInstall
+        case "tools-apply":
+            a = .toolsApply(try f.sandbox("sandbox"))
         default:
             guard let op = lifecycleOps[verb] else { throw Invalid("unknown action") }
             a = .lifecycle(op, name: try f.sandbox("sandbox"))

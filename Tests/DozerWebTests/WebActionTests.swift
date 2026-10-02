@@ -49,6 +49,8 @@ final class WebActionTests: XCTestCase {
         // 596 (B7): Apple's container tool — start its services, install it (the page said what each does).
         "builder-start": #"{"action":"builder-start"}"#,
         "builder-install": #"{"action":"builder-install"}"#,
+        // 599h: the tools layer again (the wizard's Retry).
+        "tools-apply": #"{"action":"tools-apply","sandbox":"web"}"#,
     ]
 
     /// Everything the web layer may send to the host — and, as important, what it may never.
@@ -59,6 +61,8 @@ final class WebActionTests: XCTestCase {
         .templateCreate, .duplicate, .onboard, .prepareCancel, .resourcesRemove, .resourcesClean, .resourcesKernel, .ping,
         // 596 (B7): consented by the person's click on a button that said what it does.
         .builderStart, .builderInstall,
+        // 599h: set a sandbox's tools layer up again (it installs only what its settings already call for).
+        .toolsApply,
         // 594 W20: only as Restart host, which the data source refuses unless the host is OLDER.
         .hostStop,
     ]

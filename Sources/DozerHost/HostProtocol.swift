@@ -113,6 +113,10 @@ public enum HostOp: String, Codable, Sendable, CaseIterable {
     /// 599e: the default GitHub key (`github.credentials = key` without a sandbox's own): `secret` sets it
     /// (the login keychain, `doz-github`), `clearSetting` removes it. Never echoed.
     case accessGithubKey = "access-github-key"
+    /// 599h: the tools layer of a sandbox — its plan (each tool, why, from where) and the last apply; with
+    /// `apply`: apply it again now, shown as steps (the wizard's Retry, `doz tools NAME --apply`).
+    case tools
+    case toolsApply = "tools-apply"
 
     /// Operations that only read — answered from the store in-process when no host is running.
     public var isReadOnly: Bool {

@@ -76,9 +76,12 @@ public protocol DozerWebData: Sendable {
     func access(check: WebAccessCheck?) async throws -> AccessReport
     /// 599e: set or remove the default GitHub key (the host's `access-github-key`); never echoed.
     func setAccessGitHubKey(_ k: WebAccessGitHubKey) async throws -> AccessReport
+    /// 599h: a sandbox's tools layer — the plan and the last apply (the host's `tools`; a host must run).
+    func tools(_ name: String) async throws -> ToolsLayerReport
 }
 
 extension DozerWebData {
+    public func tools(_ name: String) async throws -> ToolsLayerReport { throw HostError(.notImplemented, "tools") }
     public func access(check: WebAccessCheck?) async throws -> AccessReport { throw HostError(.notImplemented, "access") }
     public func setAccessGitHubKey(_ k: WebAccessGitHubKey) async throws -> AccessReport { throw HostError(.notImplemented, "access") }
     public func bases() async throws -> WebBases { throw HostError(.notImplemented, "bases") }
@@ -226,6 +229,14 @@ public final class HostWebData: DozerWebData, @unchecked Sendable {
         let m = try await blocking { try HostClient.request(request, store: store, autostart: true) }
         guard m.ok == true else { throw m.error ?? HostError(.failed, "the host gave no reason") }
         return try (m.result ?? .null).decode(AccessReport.self)
+    }
+
+    public func tools(_ name: String) async throws -> ToolsLayerReport {
+        let store = self.store
+        guard store.hostIsRunning() else { throw HostError(.unavailable, "the host is not running — a sandbox's tools are set up when it starts") }
+        let m = try await blocking { try HostClient.request(HostRequest(.tools, name: name), store: store, autostart: false) }
+        guard m.ok == true else { throw m.error ?? HostError(.failed, "the host gave no reason") }
+        return try (m.result ?? .null).decode(ToolsLayerReport.self)
     }
 
     public func setAccessGitHubKey(_ k: WebAccessGitHubKey) async throws -> AccessReport {

@@ -36,6 +36,8 @@ public actor HostCore {
     /// 595: operations that touch the store's disks under way now (a deletion waits for none).
     var diskOpsInFlight = 0
     nonisolated let hub = HostEventHub()
+    /// 599h: the tools layer's downloads (gh), once per store.
+    public nonisolated var toolsCache: ToolsCache { ToolsCacheRegistry.cache(for: store.root.appendingPathComponent("tools")) }
     /// 588: the store's accounts (metadata only), the keychain / verifier / Claude probes (fakes in
     /// tests), and ONE watcher per Mac login in use.
     public nonisolated let accountStore: AccountStore
@@ -594,6 +596,13 @@ public actor HostCore {
             return try JSONValue(encoding: try await resourcesRemove(r, emit: emit))
         case .resourcesKernel:
             return try JSONValue(encoding: try await resourcesKernel(r))
+        case .tools, .toolsApply:
+            let m = try get(r.name)
+            let phase = await m.sandbox.status.phase
+            if r.op == .toolsApply, phase != .running {
+                throw HostError(.invalidPhase, "\(m.name) is \(PhaseName.label(phase)) — its tools are set up when it starts or wakes")
+            }
+            return try JSONValue(encoding: await tools(m, apply: r.op == .toolsApply, emit: emit))
         case .terminalLayout:
             let m = try get(r.name)
             guard let l = TerminalLayout.read(store, m.name) else { return .null }

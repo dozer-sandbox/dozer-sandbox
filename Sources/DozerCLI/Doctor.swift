@@ -87,6 +87,15 @@ struct Doctor: AsyncParsableCommand {
         } else {
             out.append(DoctorCheck(check: "kernel", status: .warn, detail: "not cached yet — the first start downloads it (~570 MiB, once)"))
         }
+        // 599h: the tools layer's downloads on this Mac (gh, for sandboxes with GitHub as you).
+        let toolsCache = ToolsCache(root: store.root.appendingPathComponent("tools"))
+        if let e = toolsCache.entries().first {
+            out.append(DoctorCheck(check: "tools layer", status: .ok,
+                                   detail: "\(e.id) \(e.version) cached (\(e.bytes / 1_048_576) MiB, sha256 checked) — copied into sandboxes with GitHub as you"))
+        } else {
+            out.append(DoctorCheck(check: "tools layer", status: .ok,
+                                   detail: "gh \(ToolsLayer.ghVersion) not downloaded yet — the first sandbox with GitHub as you fetches it (~14 MB, once)"))
+        }
         // 594 W28: an agent image an older doz made, or a newer agent release — said, never rebuilt by itself.
         let settings = DozerSettings.load()
         for image in ["claude-code", "pi"] {
