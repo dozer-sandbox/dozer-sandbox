@@ -1,7 +1,8 @@
-# DozerKit
+# Dozer Sandbox
 
-**Dozer Sandbox — fast, suspendable micro-VMs for your Mac.** DozerKit is its library, and `doz`
-its command-line tool.
+**Dozer Sandbox — fast, suspendable micro-VMs for your Mac.** This repo is the product: the `doz`
+command-line tool, its host and the `doz ui` dashboard, built on its engine, the DozerKit Swift
+package (which becomes a separate library in v2).
 
 DozerKit is a pausable Linux sandbox for macOS: one Linux container in its own VM,
 built on Apple's [Containerization](https://github.com/apple/containerization) framework, that

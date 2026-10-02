@@ -6,19 +6,23 @@ Guidance for Claude Code when working in this repo.
 `ROADMAP.md`, `BACKLOG.md`, and `CHANGELOG.md` are workspace-level and run from `deck-factory`,
 not from here. This file holds only the code rules specific to `DozerKit`.
 
-## This is a sovereign library — release discipline is different from an app
+## This is an APP — the Dozer Sandbox product (moved 2026-10-02)
 
-`DozerKit` ships by **semver tag**, not by app version bumps. `swift build && swift test`
-at the root is the whole story for a consumer.
+Owner ruling 2026-10-02: "move lib/DozerKit to repo/app/dozer-sandbox and refactor the library to
+lib/DozerKit for v2". This repo was `repo/lib/DozerKit` (GitHub `DozerKit-prelaunch`) until then; it is
+now **`repo/app/dozer-sandbox`** (GitHub **`johnoscott/dozer-sandbox-prelaunch`**), kind **app**.
 
-- **A library never depends on an app**, and never on anything under `repo/app/*`. It has no
-  sibling-library dependency at all (so no `lib()` helper and no prelaunch mirror here).
-- **A library never claims a fleet instance token.** A worktree of this library
-  (`.claude/worktrees/slot-<token>/DozerKit`) reuses the SAME token an app slot already
-  claimed.
-- **This package's directory basename and the last path component of its remote URL must both be
-  `DozerKit`.** SwiftPM derives package identity from them.
-- **A library's slot worktree is one level deeper than an app's** — ancestor-walk depth 3/7.
+- **It ships as an app:** its own `VERSION` (continued from the last library tag, 0.23.0, so
+  `doz --version` never goes backwards for Homebrew users); a feature bumps it (`/feature` claims it,
+  CI's `version-check` enforces VERSION strictly greater than `main`'s); `/ship` merges the PR, tags
+  `v<VERSION>` on the merged `main`, attaches `doz-<VERSION>-macos-arm64.tar.gz` to that release and
+  moves the Homebrew formula (`Scripts/ship` RELEASES → `dozer-sandbox`).
+- **The Swift package is still named `DozerKit`** (products `DozerKit` and `doz`) — the v2 split
+  graduates the engine (the `DozerKit` target, `Guest/`, the in-VM helpers) into a fresh
+  `repo/lib/DozerKit` via `docs/GRADUATION.md`; until then nothing else consumes it.
+- **SandboxLab** pins the last LIBRARY tag of this package and stays frozen there until v2 (an app never
+  depends on an app). Library tags `v0.10.0…v0.23.0` remain as history.
+- `make audit-resolved` exists for the ship's app gate: this repo pins no workspace library.
 
 ## Dependencies
 
