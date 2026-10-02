@@ -344,13 +344,15 @@ public struct DozerProject: Equatable, Sendable {
 
 /// 599f (owner: "a new wizard process for creating a purposeful sandbox that steps the user through all the
 /// choices, capturing the config in a doz_project.yml"): the steps the dashboard's New Sandbox wizard and
-/// `doz init` on a terminal walk, in order — one list for both.
+/// `doz init` on a terminal walk, in order — one list for both. 599g: "rules" (the folder's .dozignore /
+/// .dozreadonly and this sandbox's `ignore_mode`, `WorkspaceRulesGuide`).
 public enum ProjectWizard {
     public static let steps: [(id: String, title: String)] = [
         ("folder", "Project folder"),
         ("image", "Agent and base"),
         ("account", "Account"),
         ("access", "Access"),
+        ("rules", "Workspace rules"),
         ("permissions", "Permissions and network"),
         ("resources", "Resources"),
         ("bridges", "Bridges"),

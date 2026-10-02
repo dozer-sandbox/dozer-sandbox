@@ -8,7 +8,7 @@ import DozerHost
 //   1. `doz init DIR --yes` with flags writes the file (every choice in it), and `doz up -d` IN that folder makes
 //      exactly that sandbox — memory, network permissions, its own clipboard and tmux, the folder at /workspace;
 //   2. doz_project.yml is read too; both spellings in one folder is refused with a message;
-//   3. an interactive `doz init` on a pseudo-terminal walks the wizard's steps (Step N of 9), with defaults on
+//   3. an interactive `doz init` on a pseudo-terminal walks the wizard's steps (Step N of 10), with defaults on
 //      Enter, shows the file and writes it on a yes; run again in the same folder it starts from the file and
 //      replaces it only after showing the diff and a yes.
 // Lab sandboxes (512 MiB), a scratch store (`/tmp/dzo-PID-w`) and scratch project folders (`/tmp/dzo-PID-wp`).
@@ -102,19 +102,22 @@ func cliProjectWizardSuite(binary: String) async {
         answer("Image —", "", "Step 2: the image (Enter keeps the setting's, lab)")
         answer("GitHub as you — should git and gh in this sandbox", "", "Step 4: GitHub as you — onboarding's question, for this sandbox (Enter keeps off)")
         answer("SSH agent", "", "Step 4: the SSH agent")
-        answer("Network", "1", "Step 5: the network — 1 (agent)")
-        answer("What the agent may do", "+web", "Step 5: the permissions — +web")
-        answer("Virtual CPUs", "", "Step 6: CPUs (Enter keeps 2)")
-        answer("Memory", "768M", "Step 6: memory — 768M")
-        answer("Mac clipboard", "", "Step 7: the clipboard")
-        answer("Mac's browser", "", "Step 7: the browser")
-        answer("open on the Mac", "", "Step 7: workspace files")
-        answer("inside tmux", "", "Step 8: tmux")
-        answer("passwordless sudo", "", "Step 8: the agent's sudo")
-        answer("Write doz_project.yaml?", "", "Step 9: the file shown, then Write? (Enter: yes)")
+        answer("What should .dozignore do to the paths it lists?", "2", "Step 5: workspace rules — 2 (hide)")
+        answer("Network", "1", "Step 6: the network — 1 (agent)")
+        answer("What the agent may do", "+web", "Step 6: the permissions — +web")
+        answer("Virtual CPUs", "", "Step 7: CPUs (Enter keeps 2)")
+        answer("Memory", "768M", "Step 7: memory — 768M")
+        answer("Mac clipboard", "", "Step 8: the clipboard")
+        answer("Mac's browser", "", "Step 8: the browser")
+        answer("open on the Mac", "", "Step 8: workspace files")
+        answer("inside tmux", "", "Step 9: tmux")
+        answer("passwordless sudo", "", "Step 9: the agent's sudo")
+        answer("Write doz_project.yaml?", "", "Step 10: the file shown, then Write? (Enter: yes)")
         check(c.exited(within: 60) == 0, "doz init exits 0")
         let text = c.text
-        for i in 1...9 { check(text.contains("Step \(i) of 9") || (i == 9 && text.contains("— Review")), "it said Step \(i) of 9") }
+        for i in 1...10 { check(text.contains("Step \(i) of 10") || (i == 10 && text.contains("— Review")), "it said Step \(i) of 10") }
+        check(text.contains("Workspace rules") && text.contains("not a security boundary") && text.contains("This folder's rules: none — the folder is shared as is"),
+              "the rules step: what they do, what they are not, and that this folder has none")
         check(text.contains("# doz_project.yaml — a Dozer Sandbox project"), "it showed the file before writing it")
     } catch {
         check(false, "a pseudo-terminal for doz init: \(error)")
@@ -122,6 +125,7 @@ func cliProjectWizardSuite(binary: String) async {
     let g = file(gamma)
     check(g.contains("network: agent\n") && g.contains("permissions: \"+web\"\n") && g.contains("memory: 768M "), "the file: network agent, permissions +web, memory 768M")
     check(g.contains("# cpus: 2 ") && g.contains("# clipboard: write"), "what was left at its default stays commented (cpus, clipboard)")
+    check(g.contains("ignore_mode: hide\n"), "the rules step's answer is the file's ignore_mode: hide")
 
     // Again in the same folder: it starts from the file; the replacement is shown and asked.
     do {
@@ -132,7 +136,8 @@ func cliProjectWizardSuite(binary: String) async {
             c.type(text + "\r")
             usleep(200_000)
         }
-        for (p, a) in [("Sandbox name [gamma]", ""), ("Image —", ""), ("GitHub as you", ""), ("SSH agent", ""), ("Network", ""), ("What the agent may do", ""),
+        for (p, a) in [("Sandbox name [gamma]", ""), ("Image —", ""), ("GitHub as you", ""), ("SSH agent", ""), ("What should .dozignore do", ""),
+                       ("Network", ""), ("What the agent may do", ""),
                        ("Virtual CPUs", ""), ("MiB) [768M]", "1G")] { answer(p, a) }
         check(c.text.contains("MiB) [768M]"), "run again: the file's memory is the default (768M)")
         for p in ["Mac clipboard", "Mac's browser", "open on the Mac", "inside tmux", "passwordless sudo"] { answer(p, "") }

@@ -93,6 +93,12 @@ func cliOnboardingSuite(binary: String) async {
     check((try? String(contentsOf: toml, encoding: .utf8))?.contains("\nimage = \"claude-code\"\n") == true, "doz.toml written, with defaults.image set")
     check(FileManager.default.fileExists(atPath: xdg.appendingPathComponent("dozer-sandbox/agent-prompt.md").path), "agent-prompt.md written beside it")
     check(OnboardingRecord.read(DozerStore(root: a.store)) != nil, "onboarded.json recorded")
+    check(r.out.contains("3. Workspace rules") && r.out.contains("lock — unchanged"), "the Workspace rules step: said, nothing chosen off a terminal")
+    check((try? String(contentsOf: toml, encoding: .utf8))?.contains("\nignore_mode =") == false, "workspace.ignore_mode NOT written (only when chosen)")
+    r = a.run(["onboard", "--no-images", "--account", "later", "--ignore-mode", "hide", "--yes"], timeout: 120)
+    check(r.code == 0 && r.out.contains("Workspace rules: set workspace.ignore_mode = hide"), "--ignore-mode hide: chosen, so written (exit \(r.code))")
+    check((try? String(contentsOf: toml, encoding: .utf8))?.contains("\nignore_mode = \"hide\"\n") == true, "doz.toml says ignore_mode = hide")
+    check(a.run(["config", "set", "workspace.ignore_mode", "lock"]).code == 0, "back to lock")
     let tomlBefore = (try? String(contentsOf: toml, encoding: .utf8)) ?? ""
 
     print("cli: onboard takes a key the doz account add way (owner ruling; the memory keychain)")

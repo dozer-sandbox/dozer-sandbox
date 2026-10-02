@@ -185,4 +185,57 @@ final class WorkspaceRulesHostTests: XCTestCase {
         XCTAssertThrowsError(try HostCore.relativeWorkspacePath("/tmp", folder: f, guestPath: "/workspace"))
         XCTAssertThrowsError(try HostCore.relativeWorkspacePath("a/../b", folder: f, guestPath: "/workspace"))
     }
+
+    // MARK: the onboarding's and the New Sandbox wizard's step (owner A1/A2)
+
+    func testTheGuideSaysWhatItDoesAndWhatItIsNot() {
+        XCTAssertEqual(WorkspaceRulesGuide.modes.map(\.value), ["lock", "hide"], "the setting's own choices, in order")
+        XCTAssertEqual(WorkspaceRulesGuide.modes.filter(\.recommended).map(\.value), ["lock"])
+        XCTAssertEqual(WorkspaceRulesGuide.points.compactMap(\.term), [".dozignore", ".dozreadonly"])
+        let all = ([WorkspaceRulesGuide.intro, WorkspaceRulesGuide.question, WorkspaceRulesGuide.noRules, WorkspaceRulesGuide.howToAdd]
+                   + WorkspaceRulesGuide.points.map(\.text) + WorkspaceRulesGuide.modes.map(\.detail)).joined(separator: " ")
+        for words in ["not a security boundary", "without moving anything", "shared exactly as it is", "a little slower", "cannot be opened", "not there at all"] {
+            XCTAssertTrue(all.contains(words), "says: \(words)")
+        }
+        XCTAssertEqual(WebRulesGuide().modes.map(\.value), ["lock", "hide"], "the web serves the same words")
+        XCTAssertEqual(WebRulesGuide().intro, WorkspaceRulesGuide.intro)
+    }
+
+    func testAFoldersRuleFilesAsTheWizardShowsThem() throws {
+        XCTAssertEqual(WorkspaceRulesGuide.folderFiles(root.appendingPathComponent("not-made-yet")), [])
+        XCTAssertEqual(WorkspaceRulesGuide.folderFiles(root), [], "no rule file: none")
+        try write(".dozignore", "# secrets\nsecrets.env\n**/*.key\nlogs\n!logs/keep.txt\nbuild/*.tmp\n", in: root)
+        var f = WorkspaceRulesGuide.folderFiles(root)
+        XCTAssertEqual(f.map(\.name), [".dozignore"])
+        XCTAssertEqual(f[0].patterns, 5)
+        XCTAssertEqual(f[0].first, ["secrets.env", "**/*.key", "logs", "!logs/keep.txt"], "the first four, comments left out")
+        XCTAssertEqual(WorkspaceRulesGuide.count(f[0]), "5 patterns")
+        try write(".dozreadonly", "config\n", in: root)
+        f = WorkspaceRulesGuide.folderFiles(root)
+        XCTAssertEqual(f.map(\.name), [".dozignore", ".dozreadonly"])
+        XCTAssertEqual(f[1].patterns, 1, "the implicit read-only paths are not the file's")
+        XCTAssertEqual(WebRuleFile(f[1]).count, "1 pattern")
+        // A rule file may have been written from inside a sandbox: what is shown is inert.
+        try write(".dozignore", "a\u{1b}]52;c;eA==\u{07}b\u{1b}[31mred\n", in: root)
+        XCTAssertFalse(WorkspaceRulesGuide.folderFiles(root)[0].first.joined().unicodeScalars.contains { $0.value < 0x20 })
+    }
+
+    func testTheOnboardingWritesTheDefaultModeOnlyWhenChosen() throws {
+        let env = ["XDG_CONFIG_HOME": root.appendingPathComponent("xdg").path]
+        let file = root.appendingPathComponent("xdg/dozer-sandbox/doz.toml")
+        XCTAssertEqual(try Onboarding.writeIgnoreMode("hide", environment: env), ["workspace.ignore_mode = hide"])
+        XCTAssertEqual(DozerSettings.load(environment: env).string(SettingKey.ignoreMode), "hide")
+        let text = try String(contentsOf: file, encoding: .utf8)
+        XCTAssertEqual(try Onboarding.writeIgnoreMode("hide", environment: env), [], "the file already says so: untouched")
+        XCTAssertEqual(try String(contentsOf: file, encoding: .utf8), text)
+        XCTAssertEqual(try Onboarding.writeIgnoreMode("lock", environment: env), ["workspace.ignore_mode = lock"])
+        XCTAssertThrowsError(try Onboarding.writeIgnoreMode("open", environment: env))
+        // The dashboard's body: ignoreMode is optional, lock or hide, never anything else.
+        XCTAssertEqual(try WebOnboardingConfig.decode(Data(#"{"defaultImage":"lab","account":"later","ignoreMode":"hide"}"#.utf8)).ignoreMode, "hide")
+        XCTAssertNil(try WebOnboardingConfig.decode(Data(#"{"defaultImage":"lab","account":"later"}"#.utf8)).ignoreMode)
+        for bad in [#"{"defaultImage":"lab","account":"later","ignoreMode":"open"}"#, #"{"defaultImage":"lab","account":"later","ignoreMode":true}"#,
+                    #"{"defaultImage":"lab","ignoreMode":"lock"}"#, #"{"defaultImage":"lab","account":"later","ignore_mode":"lock"}"#] {
+            XCTAssertThrowsError(try WebOnboardingConfig.decode(Data(bad.utf8)), bad)
+        }
+    }
 }

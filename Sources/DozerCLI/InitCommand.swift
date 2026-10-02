@@ -14,7 +14,8 @@ struct Init: AsyncParsableCommand {
         abstract: "Make a folder a Dozer Sandbox project: write doz_project.yaml there (onboarding this Mac first if it never was). Then: doz up.",
         discussion: """
         The folder is shared at /workspace. On a terminal it walks the steps of the dashboard's New sandbox wizard — folder and \
-        name, agent and base, account, access (GitHub, SSH agent), permissions and network, resources, bridges, session — each \
+        name, agent and base, account, access (GitHub, SSH agent), workspace rules (.dozignore, .dozreadonly), permissions and \
+        network, resources, bridges, session — each \
         with its default (Enter keeps it), then shows the file before writing it. A folder that has a project file already starts \
         from it, and is replaced only after you have seen the difference. --yes, --json or no terminal ask nothing.
         """)
@@ -35,7 +36,7 @@ struct Init: AsyncParsableCommand {
     @Option(name: .long, help: "on or off: xdg-open URLs open in the Mac's browser.") var browserBridge: String?
     @Option(name: .long, help: "on or off: xdg-open FILE opens a workspace document on the Mac.") var openFiles: String?
     @Flag(inversion: .prefixedNo, help: "Run its sessions inside tmux.") var tmux: Bool?
-    @Option(name: .long, help: "lock or hide: what a .dozignore in the folder does to the paths it lists.") var ignoreMode: String?
+    @Option(name: .long, help: "lock or hide: what a .dozignore in the folder does to the paths it lists — lock: listed but unreadable; hide: not there.") var ignoreMode: String?
     @Flag(inversion: .prefixedNo, help: "The agent's passwordless sudo.") var agentSudo: Bool?
     @Flag(name: [.short, .long], help: "Accept every default; ask nothing.") var yes = false
     @Flag(name: .long, help: "Replace an existing project file without asking.") var force = false
@@ -215,7 +216,17 @@ struct Init: AsyncParsableCommand {
         if github != nil { explicit.insert("github") }
         if sshAgent != nil { explicit.insert("ssh_agent") }
 
-        // 5. Permissions and network.
+        // 5. Workspace rules (599g, owner A2): what .dozignore / .dozreadonly do, what this folder has, and this
+        // sandbox's mode (the flag, else asked on a terminal; Enter keeps the file's, else the setting's).
+        step("rules")
+        if let m = ignoreMode, !["lock", "hide"].contains(m) { throw invalid("--ignore-mode: lock or hide") }
+        let rulesCurrent = (p.settings[SettingKey.ignoreMode] ?? settings.resolve(SettingKey.ignoreMode).value).plain
+        if let m = RulesStep(asker: asker, talk: asker.interactive, flag: ignoreMode, current: rulesCurrent, folder: folder).run() {
+            p.settings[SettingKey.ignoreMode] = .string(m)
+            if ignoreMode != nil { explicit.insert("ignore_mode") }
+        }
+
+        // 6. Permissions and network.
         step("permissions")
         if let n = network {
             guard ["agent", "bake", "locked", "open", "nat", "none"].contains(n) else { throw invalid("--network: agent, bake, locked, open, nat or none") }
@@ -246,7 +257,7 @@ struct Init: AsyncParsableCommand {
             throw invalid("--permissions: for a network with permissions (agent, locked, open)")
         }
 
-        // 6. Resources.
+        // 7. Resources.
         step("resources")
         if let c = cpus { p.cpus = c; explicit.insert("cpus") }
         else if asker.interactive {
@@ -266,7 +277,7 @@ struct Init: AsyncParsableCommand {
         }
         if asker.interactive { Out.stdout("  disk: the image's own (it is not set per sandbox)\n") }
 
-        // 7. Bridges.
+        // 8. Bridges.
         step("bridges")
         try setting(&p, SettingKey.clipboard, "clipboard", flag: clipboard, explicit: &explicit, asker: asker, settings: settings,
                     question: "A copy in the sandbox reaches the Mac clipboard", options: ["write", "off"])
@@ -275,14 +286,10 @@ struct Init: AsyncParsableCommand {
         try setting(&p, SettingKey.openFiles, "open_files", flag: openFiles, explicit: &explicit, asker: asker, settings: settings,
                     question: "Workspace documents opened in the sandbox open on the Mac", options: ["on", "off"])
 
-        // 8. Session.
+        // 9. Session.
         step("session")
         try setting(&p, SettingKey.tmux, "tmux", flag: tmux.map { $0 ? "true" : "false" }, explicit: &explicit, asker: asker, settings: settings,
                     question: "Run its sessions inside tmux", options: ["false", "true"])
-        if let m = ignoreMode {      // a flag only: the walk asks nothing more (the file can say it)
-            try setting(&p, SettingKey.ignoreMode, "ignore_mode", flag: m, explicit: &explicit, asker: asker, settings: settings,
-                        question: "", options: ["lock", "hide"])
-        }
         if let s = agentSudo { p.agentSudo = s; explicit.insert("agent_sudo") }
         else if asker.interactive {
             p.agentSudo = asker.yesNo("The agent has passwordless sudo", default: p.agentSudo ?? settings.bool(SettingKey.agentSudo))
