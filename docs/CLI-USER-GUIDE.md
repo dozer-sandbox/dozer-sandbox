@@ -163,9 +163,10 @@ cd DIR && doz up             # no name: this folder's sandbox
 ```
 
 `init` makes a folder (made when missing) a project: it writes `doz_project.yaml`; it onboards this Mac
-first if it never was. **599f: on a terminal it walks the dashboard's New Sandbox wizard's nine steps**
-(`ProjectWizard.steps`, one list for both — "Step N of 9"): folder and name, agent and base, account,
-access (GitHub, SSH agent), permissions and network, resources (CPUs, memory — the disk is the image's),
+first if it never was. **599f: on a terminal it walks the dashboard's New Sandbox wizard's ten steps**
+(`ProjectWizard.steps`, one list for both — "Step N of 10"): folder and name, agent and base, account,
+access (GitHub, SSH agent), workspace rules (599g: the folder's .dozignore/.dozreadonly and `ignore_mode`),
+permissions and network, resources (CPUs, memory — the disk is the image's),
 bridges, session (tmux, sudo), review (the file shown, then "Write?"). Each question's default is the
 setting's (Enter keeps it); a flag answers its question. Only what differs from the settings — or was set
 by a flag — is written; the rest stays commented. In a folder with a project file it starts from that file

@@ -74,6 +74,11 @@ doz create my-app --workspace ~/code/app --ignore-mode hide
 
 or `ignore_mode: hide` in `doz_project.yaml` (`doz init --ignore-mode hide` writes it).
 
+Setting up this Mac asks the same question once — **Lock** (recommended) or **Hide** — for the default
+(`doz onboard --ignore-mode hide`, or the dashboard's setup wizard), and only writes the setting when you
+choose; the **New sandbox** wizard and `doz init` have a **Workspace rules** step that shows what the
+chosen folder already has and asks for that sandbox.
+
 | | **lock** (the default) | **hide** |
 |---|---|---|
 | `ls` | listed, as `----------` | not listed |
@@ -132,7 +137,9 @@ stop) when:
 - a root-anchored name also exists deeper (`node_modules` with a `web/node_modules`).
 
 In the dashboard, a sandbox with rules shows **rules** beside its name, and its details say how many
-patterns each file has and whether they are in force.
+patterns each file has and whether they are in force. A sandbox whose folder has no rule file says
+*Workspace rules: none — the folder is shared as is*; an isolated sandbox shares no folder, so says
+nothing.
 
 ## How it works
 

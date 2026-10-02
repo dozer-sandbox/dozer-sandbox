@@ -603,7 +603,7 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
 - **599f: the New Sandbox wizard and `doz init` share ONE model** — `DozerHost/Project.swift`: `DozerProject`
   (every key, `render`, `createOptions`, `problem(effectiveNetwork:)` the whole-project check, `dropDefaults`
   — a pre-filled value equal to the setting's is left commented unless `explicit`, `lineDiff`, `find(in:)`
-  which reads `doz_project.yml` too and throws when BOTH exist) and `ProjectWizard.steps` (the 9 steps both
+  which reads `doz_project.yml` too and throws when BOTH exist) and `ProjectWizard.steps` (the 10 steps both
   walk). READING stays in the CLI (`ProjectFile.swift`, `extension DozerProject { parse/load }`); `doz ui`
   installs that parser into `WebProjectFiles` so the dashboard never imports Yams. The dashboard
   (`WebProject.swift`): `POST /api/v1/project/open|preview|write` (CSRF, strict bodies) and the action
@@ -1008,6 +1008,13 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   Node ids and file handles carry the worker generation (a restarted worker never mistakes a dead one's).
 - **Not a security boundary** — said in the setting, `--help`, the manual and the facts. Root in the guest can
   kill the daemon or read through its fds; the view keeps an agent from stumbling into files.
+- **Explaining them** (owner A1–A3): ONE text, `WorkspaceRulesGuide` (DozerHost) — `doz onboard`'s step 3 and
+  `doz init`'s `rules` step (`RulesStep`, DozerCLI), the dashboard's onboarding (`wizStepRules`, steps named in
+  `WIZ`) and New Sandbox (`nwRules`), both drawn by `rulesStep()` in app.js from the served `rulesGuide`
+  (`GET onboarding`, `POST project/open` — which also lists the folder's `rules`, inert). The onboarding writes
+  `workspace.ignore_mode` ONLY when chosen (`Onboarding.writeIgnoreMode`, the Access rule; `--ignore-mode`,
+  `onboarding/config {ignoreMode}`). The sandbox page says "Workspace rules: none — the folder is shared as is"
+  for a workspace without a rule file (isolated: nothing).
 - **Tests**: `WorkspaceRulesTests`, `DozMatchCTests` (vectors, fold vectors, threads), `WorkspaceRulesHostTests`
   (setting, project key, facts, warnings, in-process op, projection); `make test-vm-ignore` (the spike's
   matrix through the library, live reload, folding, kills, rule files appearing, cost) — green twice.

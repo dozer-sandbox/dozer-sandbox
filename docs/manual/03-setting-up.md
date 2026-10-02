@@ -1,8 +1,9 @@
 # Setting up this Mac
 
 Setup — **onboarding** — is what you do once after installing: it checks your Mac, chooses and
-confirms what sandboxes may use as you (**Access**: a Claude account, GitHub, your SSH agent), writes
-your settings and prepares the images your sandboxes start from. You can do it in the
+confirms what sandboxes may use as you (**Access**: a Claude account, GitHub, your SSH agent), explains
+**workspace rules** and lets you choose what they do, writes your settings and prepares the images your
+sandboxes start from. You can do it in the
 terminal (`doz onboard`) or in the browser (the dashboard's setup wizard). Both do exactly the same
 thing, and both are safe to run again.
 
@@ -24,6 +25,10 @@ thing, and both are safe to run again.
   can't be confirmed can be **skipped**: the choice is kept, marked *not confirmed*, and setup goes on.
   The choices are the defaults for new sandboxes; `doz access` and **Settings** › **Access** check
   them again later.
+- **Workspace rules** are two small files you can put in a project folder: `.dozignore` (paths the agent
+  must not use) and `.dozreadonly` (paths it may read but not change). Setup explains them and asks one
+  question: should a `.dozignore` **lock** the paths it lists (still listed, but nothing can open them —
+  the default) or **hide** them (not there at all)? See [Workspace rules](20-workspace-rules.md).
 
 ## In the terminal
 
@@ -57,10 +62,18 @@ On a terminal it asks; **Enter** always accepts the recommended answer.
 
    A failure says why, and offers **Skip** (keep the choice, not confirmed — `doz access` checks
    again later), **Turn it off**, or **Check again**. Setup is never blocked by it.
-3. **Images** — Claude Code is prepared by default; pi and the lab shell are optional.
-4. **Settings** — `doz.toml` (every setting at its default, plus your answers) and `agent-prompt.md`
-   beside it, each written **only if it doesn't exist yet**.
-5. **Preparing** — the Linux kernel, a small boot disk, the base system download and the install.
+3. **Workspace rules** — what `.dozignore` and `.dozreadonly` do, in a few lines: the benefit (keep an
+   agent out of your secrets, or stop it changing some files, without moving anything), and the
+   consequences — **lock** keeps a path listed but unreadable, so the agent knows it exists; **hide**
+   removes it altogether; only a folder with one of the files changes, and nothing costs anything without
+   them; the first look through many files is a little slower when rules exist; and it is **not a security
+   boundary** (root in the sandbox can get round it). Then: *Lock* (recommended) or *Hide* — the default
+   for every sandbox (the setting `workspace.ignore_mode`; a sandbox can choose its own).
+4. **Images** — Claude Code is prepared by default; pi and the lab shell are optional.
+5. **Settings** — `doz.toml` (every setting at its default, plus your answers) and `agent-prompt.md`
+   beside it, each written **only if it doesn't exist yet**. Your Access and Workspace rules answers are
+   then set in it — only the ones you chose.
+6. **Preparing** — the Linux kernel, a small boot disk, the base system download and the install.
    Progress shows as steps (**Step 3 of 9**), with download bars and the last lines of the installer's
    output. Once this Mac has prepared an image, later preparations show time estimates.
 
@@ -81,14 +94,15 @@ doz onboard --all-images --yes            # claude-code, pi and lab (15 minutes 
 doz onboard --no-images --account later --yes
 doz onboard --account setup-token --account-name work --plan max --secret-stdin --yes < token.txt
 doz onboard --no-images --account mac --github read --ssh-agent on --yes
+doz onboard --no-images --account later --ignore-mode hide --yes
 doz onboard --no-images --account later --github push --github-key-stdin --yes < github-token.txt
 ```
 
 `--yes`, `--json`, or no terminal: nothing is asked and the defaults are taken. A key or token is
 read from standard input only with `--secret-stdin` (`--github-key-stdin` for a GitHub token); it is
 never a command-line argument. Each credential chosen is still confirmed; one that can't be is
-**skipped with a note** and the exit code stays 0. Without `--github` / `--ssh-agent`, `--yes` leaves
-those settings exactly as they are.
+**skipped with a note** and the exit code stays 0. Without `--github` / `--ssh-agent` / `--ignore-mode`,
+`--yes` leaves those settings exactly as they are.
 
 | option | what it does |
 |---|---|
@@ -99,6 +113,7 @@ those settings exactly as they are.
 | `--github off\|read\|push` | Answer "GitHub as you" (the setting `defaults.github`). |
 | `--github-source gh\|key` · `--github-key-stdin` | Where the GitHub token comes from: this Mac's `gh` login, or a token read from standard input (kept in the login keychain as `doz-github`). |
 | `--ssh-agent on\|off` | Answer "SSH agent forwarding" (the setting `sandbox.ssh_agent`). |
+| `--ignore-mode lock\|hide` | Answer the Workspace rules step (the setting `workspace.ignore_mode`). |
 | `--status` · `--cancel` | Follow · stop the preparation. |
 
 ## In the dashboard
@@ -118,14 +133,16 @@ A store that was never set up opens on the **setup wizard**:
    LOGIN* and the token's scopes, or how many repositories a fine-grained token can see; for SSH, how
    many keys the agent has), or *not confirmed* with the reason and **Skip** · **Turn it off** ·
    **Check again**. Skipping keeps the choice and moves on.
-4. **Images** — a checklist with each image's download size, time estimate and disk space.
-5. **Preparing** — a card per image with its progress. **Continue in the background** lets you use
+4. **Workspace rules** — the same description as in the terminal, and the same choice: **Lock**
+   (recommended) or **Hide**. It is saved with the settings when you leave the Images step.
+5. **Images** — a checklist with each image's download size, time estimate and disk space.
+6. **Preparing** — a card per image with its progress. **Continue in the background** lets you use
    the dashboard meanwhile (the preparation shows under **Operations**); **Cancel preparation** stops
    it.
-6. **First sandbox** (optional) — pick the agent; it suggests a name (`claude-sandbox`) and a project
+7. **First sandbox** (optional) — pick the agent; it suggests a name (`claude-sandbox`) and a project
    folder (`~/Developer/dozer-sandbox-projects/claude-sandbox`, made if it doesn't exist).
    **Choose…** opens the Mac's own folder picker. Or pick **Isolated** to share no folder.
-7. **Done** — what was written where, and your **projects folder**
+8. **Done** — what was written where, and your **projects folder**
    (`~/Developer/dozer-sandbox-projects`): each new sandbox from **Quick add**, **New sandbox** or
    `doz new` gets its own folder there. **Settings** › **Choose…** moves it.
 
@@ -168,6 +185,7 @@ again**; the choices themselves are the settings `defaults.github`, `github.cred
 | `defaults.github` | `off` | "GitHub as you" for new sandboxes: `off`, `read` or `push`. The Access step's choice. |
 | `github.credentials` | `gh` | Where the GitHub token comes from: `gh` (this Mac's login), `key` (a token you gave), `off`. |
 | `sandbox.ssh_agent` | `off` | Forward this Mac's ssh-agent into sandboxes (github.com only). |
+| `workspace.ignore_mode` | `lock` | What a `.dozignore` does to the paths it lists: `lock` or `hide`. The Workspace rules step's choice. |
 | `ui.allow_secret_entry` | `true` | The dashboard may take an API key or setup token in a masked field. `false`: it shows the `doz account add` command instead. The dashboard can turn this off, never on. |
 | `images.claude_code_version` · `images.pi_version` | `latest` | Which agent version an image is prepared with. See [Agents and accounts](09-agents-and-accounts.md#agent-versions). |
 

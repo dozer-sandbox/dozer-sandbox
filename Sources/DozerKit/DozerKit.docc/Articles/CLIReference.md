@@ -36,11 +36,12 @@ cannot be stapled: Gatekeeper checks a notarised `doz` online the first time it 
 doz onboard [--images claude-code,pi,lab | --all-images | --no-images] [--account mac|api-key|setup-token|later] [--yes]
             [--account-name NAME] [--plan PLAN] [--secret-stdin] [--force]
             [--github off|read|push] [--github-source gh|key] [--github-key-stdin] [--ssh-agent on|off]
+            [--ignore-mode lock|hide]   # the Workspace rules step: the default workspace.ignore_mode
 doz onboard --status        # the onboarding record and the images; follows a preparation that runs
 doz onboard --cancel        # cancel the images being prepared
 doz init [DIR] [--name N] [--image I] [--cpus N] [--memory M] [--network …] [--permissions W] [--account A]
-         [--github off|read|push] [--ssh-agent on|off] [--clipboard …] [--browser-bridge …] [--open-files …]
-         [--[no-]tmux] [--[no-]agent-sudo] [--yes] [--force]   # 599f: on a terminal, the wizard's 9 steps
+         [--github off|read|push] [--ssh-agent on|off] [--ignore-mode lock|hide] [--clipboard …] [--browser-bridge …]
+         [--open-files …] [--[no-]tmux] [--[no-]agent-sudo] [--yes] [--force]   # 599f: on a terminal, the wizard's 10 steps
 doz up                      # in a folder with doz_project.yaml (or .yml): that project's sandbox
 doz uninstall [--keep-store] [--keep-config] [--yes]
 ```
@@ -591,8 +592,8 @@ host as `doz key set` holds it). **Open in Terminal** runs
 `doz attach` in your default terminal app. The UI is a client of the host, like any other
 command, so it can't do anything the CLI can't.
 
-A store that was never onboarded opens on the **setup wizard** — Welcome, Checks, Claude account,
-Images, Preparing, First sandbox, Done — the same steps as `doz onboard` (always reachable again from
+A store that was never onboarded opens on the **setup wizard** — Welcome, Checks, Access, Workspace
+rules, Images, Preparing, First sandbox, Done — the same steps as `doz onboard` (always reachable again from
 **Onboarding** in the navigation — marked with a dot until the store is onboarded — or **Doctor ›
 Run onboarding again**). Preparing runs in the host: **Continue in the background** leaves
 it running, and **Operations** lists the host's image preparations whoever started them (the CLI
