@@ -64,7 +64,7 @@ DOCC_OUT         ?= .docc-build
 DOCC_BASE_PATH   ?= /DozerKit/
 DOCC_PREVIEW_PORT ?= 8000
 
-.PHONY: help build test audit audit-resolved web-assets web-assets-check test-cli-onboarding test-cli-terminal test-cli-hoststop test-cli-agentsudo test-cli-points test-cli-timezone test-cli-images test-cli-bases test-cli-permissions test-cli-clipboard test-cli-browser test-cli-openfiles test-cli-github test-cli-access test-cli-tools tools-fixture test-cli-quickadd test-cli-projectwizard test-cli-tmux pullbench test-vm test-vm-agents test-vm-network test-vm-hardening test-vm-lineage prev-cli test-vm-upgrade vmtest-host kernel deckhold deckhold-verify doznet doznet-verify cli install-cli test-cli test-vm-claude test-vm-templates docs docs-preview docs-drift-check release
+.PHONY: help build test audit audit-resolved web-assets web-assets-check test-cli-onboarding test-cli-terminal test-cli-hoststop test-cli-agentsudo test-cli-points test-cli-timezone test-cli-images test-cli-bases test-cli-permissions test-cli-clipboard test-cli-browser test-cli-openfiles test-cli-github test-cli-access test-cli-tools tools-fixture test-cli-quickadd test-cli-projectwizard test-cli-tmux pullbench test-vm test-vm-agents test-vm-network test-vm-hardening test-vm-lineage prev-cli test-vm-upgrade vmtest-host kernel deckhold deckhold-verify doznet doznet-verify cli install-cli test-cli test-vm-claude test-vm-templates docs docs-preview docs-drift-check release bump bump-minor
 
 help: ## Show this help
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) | sed 's/:.*## /\t/' | expand -t 22
@@ -153,6 +153,10 @@ test-vm: vmtest-host ## VM integration suite (entitled host, watchdog, scratch s
 cli: ## Build the doz CLI and sign it with the virtualization entitlement (.build/debug/doz)
 	swift build $(SWIFT_BUILD_SYSTEM) -j $(JOBS) --product doz
 	codesign --force --sign - --entitlements Scripts/doz.entitlements $(CLI_BIN)
+	@# 602: stamp the repo's VERSION beside the binary, exactly as a release carries it
+	@# (`ReleaseStamp` reads `VERSION` beside the resolved executable) — otherwise this build reports
+	@# `DozerCommand.builtVersion`, which no feature remembers to bump (0.11.0 at 0.23.0).
+	cp VERSION "$(dir $(CLI_BIN))VERSION"
 
 install-cli: ## Build doz (release), sign it, install into PREFIX (default ~/.local): bin/doz → libexec/doz/
 	swift build $(SWIFT_BUILD_SYSTEM) -j $(JOBS) -c release --product doz
@@ -161,6 +165,7 @@ install-cli: ## Build doz (release), sign it, install into PREFIX (default ~/.lo
 	rm -rf "$(PREFIX)/libexec/doz/DozerKit_DozerKit.bundle" "$(PREFIX)/libexec/doz/DozerKit_DozerWeb.bundle"
 	cp -R .build/release/DozerKit_DozerKit.bundle "$(PREFIX)/libexec/doz/"
 	cp -R .build/release/DozerKit_DozerWeb.bundle "$(PREFIX)/libexec/doz/"
+	cp VERSION "$(PREFIX)/libexec/doz/VERSION"   # 602: the stamp `doz --version` reads (see `cli`)
 	@# NEVER overwrite the executable in place: a running `doz host` executes that very file, and
 	@# rewriting it invalidates the running process's code signature — the Virtualization framework
 	@# then refuses every VM it asks for ("Internal Virtualization error", 591). Copy + sign under a
@@ -306,3 +311,17 @@ docs-preview: docs ## 589: build, then serve the docs site locally (127.0.0.1:DO
 
 audit-resolved: ## (app gate) this repo pins no workspace library — the ship's app gate calls it
 	@echo "ok audit-resolved: dozer-sandbox pins no workspace library"
+
+# ── Version (602) ────────────────────────────────────────────────────────────
+# The app's VERSION file is what a feature claims (workspace `Scripts/feature-bump` runs `make bump`)
+# and what `make cli` / `install-cli` stamp beside the binary; `make release VERSION=X.Y.Z` is given the
+# release's version explicitly by the ship.
+bump: ## Bump the patch version in VERSION (0.23.0 → 0.23.1)
+	@V=$$(cat VERSION); \
+	MAJOR=$$(echo $$V | cut -d. -f1); MINOR=$$(echo $$V | cut -d. -f2); PATCH=$$(echo $$V | cut -d. -f3); \
+	NEW="$$MAJOR.$$MINOR.$$((PATCH + 1))"; echo "$$NEW" > VERSION; echo "  doz $$V → $$NEW"
+
+bump-minor: ## Bump the minor version in VERSION (0.23.1 → 0.24.0)
+	@V=$$(cat VERSION); \
+	MAJOR=$$(echo $$V | cut -d. -f1); MINOR=$$(echo $$V | cut -d. -f2); \
+	NEW="$$MAJOR.$$((MINOR + 1)).0"; echo "$$NEW" > VERSION; echo "  doz $$V → $$NEW"
