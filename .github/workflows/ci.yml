@@ -35,6 +35,29 @@ permissions:
   contents: read
 
 jobs:
+  version-check:
+    name: version-check
+    if: github.event_name == 'pull_request'
+    runs-on: [self-hosted, deck-mac]
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          set-safe-directory: false
+      - name: VERSION strictly greater than the base branch's
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch -q --depth=1 origin "$GITHUB_BASE_REF"
+          HEAD_V=$(cat VERSION)
+          BASE_V=$(git show "origin/$GITHUB_BASE_REF:VERSION" 2>/dev/null || echo "")
+          echo "head $HEAD_V · base ${BASE_V:-none}"
+          if [ -n "$BASE_V" ]; then
+            [ "$HEAD_V" != "$BASE_V" ] && [ "$(printf '%s\n%s\n' "$BASE_V" "$HEAD_V" | sort -V | tail -1)" = "$HEAD_V" ] \
+              || { echo "x VERSION $HEAD_V must be strictly greater than $BASE_V" >&2; exit 1; }
+          fi
+          echo "ok version-check"
+
   package:
     name: Swift package (Mac runner)
     runs-on: [self-hosted, deck-mac]
