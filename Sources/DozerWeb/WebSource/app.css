@@ -461,7 +461,12 @@ nav a > .icon { width: 17px; height: 17px; opacity: 0.85; }
 
 /* 591: Settings */
 .settings { padding: 0; }
-.setting { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 14px; align-items: center; padding: 12px 16px; border-top: 1px solid var(--line); }
+.setting { display: grid; grid-template-columns: minmax(16em, 1fr) auto; gap: 14px; align-items: center; padding: 12px 16px; border-top: 1px solid var(--line); }
+/* 602: a block control (the permissions checklist) sits under its text, full width; the text column's
+   16em floor keeps any other wide control from squeezing a description to one word per line. */
+.setting-wide { grid-template-columns: minmax(0, 1fr); align-items: start; }
+.setting-wide .setting-control { justify-content: flex-start; }
+.setting-main { min-width: 0; }
 .setting:first-child { border-top: 0; }
 .setting-name { margin-bottom: 2px; }
 .setting-name code { font-weight: 600; }

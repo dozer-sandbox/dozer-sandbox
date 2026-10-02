@@ -891,7 +891,9 @@ function settingRow(r) {
     r.source === 'env' ? 'env ' + r.environment : r.source);
   const reset = r.editable && r.source === 'file'
     ? btn('Default', () => changeSetting(r.key, null), { small: true, title: 'Comment it out in the file: the default (' + shownValue(r.defaultValue, r.type) + ') applies' }) : null;
-  return h('div', { class: 'setting', 'data-key': r.key },
+  // 602: a control that is a block of its own (the permissions checklist) goes UNDER the text, full
+  // width — beside it, its max-content width squeezed the description to one word per line.
+  return h('div', { class: r.type === 'permissions' ? 'setting setting-wide' : 'setting', 'data-key': r.key },
     h('div', { class: 'setting-main' },
       h('div', { class: 'setting-name' }, h('code', null, r.name), ' ', source),
       h('div', null, r.description),
@@ -3771,12 +3773,31 @@ function wizardNode() {
     stepper, h('section', { class: 'wiz-body panel' }, body));
 }
 function wizStep0(d) {
+  // 602 (owner: "detect if onboarding has already ran (i ran it in the cli) and show that and give the
+  // option to run the onboarding again"): a store with its record opens on what was set up, not on the
+  // welcome — the record is the host's, written by `doz onboard` and this wizard alike.
+  if (d.onboarded) {
+    const o = d.onboarded;
+    return [
+      h('h2', null, statusPill('ok'), ' Already set up'),
+      h('p', null, 'Onboarding finished on ', h('strong', null, full(o.date)), ' with doz ', h('code', null, o.dozVersion),
+        '. It is the same whether it ran here or as ', h('code', null, 'doz onboard'), ' in a terminal.'),
+      table(['', ''], [
+        h('tr', null, h('td', null, 'Images prepared'), h('td', { 'data-onboarded-images': '' },
+          o.images.length ? o.images.join(', ') : 'none chosen')),
+        h('tr', null, h('td', null, 'Store'), h('td', null, h('code', null, $('store-path').textContent))),
+      ]),
+      h('p', { class: 'sub' }, 'Running it again checks this Mac again, lets you change the Access choices and which images are '
+        + 'prepared, and prepares only what is missing — nothing already prepared is rebuilt, and your sandboxes are not touched.'),
+      wizButtons(
+        btn('Run onboarding again', () => wizGo(1), { primary: true, icon: 'rotate-ccw' }),
+        btn('Go to Sandboxes', () => { location.hash = '#/overview'; }, { icon: 'box' })),
+    ];
+  }
   return [
     h('h2', null, 'Welcome'),
     h('p', null, 'Dozer Sandbox runs each project in its own small Linux virtual machine on this Mac — an agent like Claude Code works there, not on your Mac. A sandbox pauses in a millisecond, hibernates to disk and wakes in a third of a second.'),
     h('p', null, 'Setting up takes a few minutes, once: this Mac is checked, you choose how sandboxes reach Claude, the settings file is written, and the images you pick are downloaded and prepared — in the background, so the first sandbox starts in seconds instead of minutes.'),
-    d.onboarded ? h('div', { class: 'notice' }, 'This store was set up on ' + full(d.onboarded.date) + ' (doz ' + d.onboarded.dozVersion + ')' +
-      (d.onboarded.images.length ? ', with ' + d.onboarded.images.join(', ') : '') + '. Running it again checks again and prepares only what is missing.') : null,
     wizButtons(btn('Get started', () => wizGo(1), { primary: true })),
   ];
 }
