@@ -27,7 +27,8 @@ doz resources --json
 
 The groups: **Sandboxes** (each one's system disk, state disk, sleep snapshot, restore points, saved
 screens and boot logs), **Images & templates**, **Caches** (the download cache, base disks, the boot
-disk, kernels, preparation leftovers), **Logs & metrics**, **Stray files**, Dozer's own records — and
+disk, kernels, preparation leftovers, and the **tools layer** — `gh`, downloaded once for sandboxes with
+GitHub as you; see [The tools layer](19-the-tools-layer.md)), **Logs & metrics**, **Stray files**, Dozer's own records — and
 **Outside the store**: your settings file, keychain entries by name, the `doz` program, project
 folders and Apple's `container` storage. Those outside rows are shown, never deleted here.
 
@@ -40,7 +41,7 @@ doz resources rm cache:downloads kernel:6.12.1 --dry-run
 doz resources rm point:web/3           # by id, as doz resources lists them
 ```
 
-- **Clean up** deletes what is **re-creatable and unused**: the download cache, base disks, kernels
+- **Clean up** deletes what is **re-creatable and unused**: the download cache, the tools layer's cache, base disks, kernels
   nothing needs, images no sandbox was made from in the last `resources.clean_unused_days` (30) days,
   and leftovers. It **never** deletes templates, sandboxes, restore points, settings or keys; logs and
   metrics are kept too (select them yourself to clear them).

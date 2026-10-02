@@ -466,6 +466,17 @@ doz-open --app Typora notes.md       # a named app — only one listed in bridge
   `open_files: off` in `doz_project.yaml`), more than 3 files in 10 seconds. The shim refuses what it
   can tell itself first, so the program (or agent) hears why too.
 
+### The tools layer
+
+`doz tools NAME` lists the tools Dozer manages in a sandbox because of its settings — `gh` (GitHub as you;
+pinned, downloaded once to the store's `tools/` with its sha256 checked, copied in over the host→guest
+path, removed when off), an ssh client + github.com's published host keys (SSH agent forwarding), tmux
+(`sessions.tmux`), and always git, curl and ca-certificates (apt/apk through the proxy when missing) — each
+with why and its state; `--apply` sets them up again now. On every base, no image rebuild; the first start
+shows each as a progress line (`tools: gh 2.102.0 — for GitHub as you`), later starts and wakes re-check
+quietly, a failure is never fatal. The New Sandbox wizard's last step, **Setting up tools**, shows the same
+(Retry · Continue anyway).
+
 ### GitHub as you
 
 Off until you choose it — for new sandboxes (the onboarding's Access step, `doz access set --github

@@ -33,6 +33,26 @@ set --github read`), or for one sandbox — and **read-only** until you also all
 - **Your identity** — your `user.name` and `user.email` from the Mac's global git config are copied
   into the sandbox's git config (they're not secrets), so the agent's commits are yours. They're gone
   when you turn the permission off.
+- **`gh` is installed for you** — part of the [tools layer](19-the-tools-layer.md): while GitHub as you is
+  on, Dozer copies the GitHub CLI into the sandbox (downloaded once to your Mac, a pinned version whose
+  sha256 is checked; on any base, without the sandbox's network). It is removed when you turn the
+  permission off.
+
+## gh in the sandbox
+
+`gh` needs no login of its own: it reads `GH_TOKEN`, the placeholder, and the proxy does the rest.
+
+```sh
+gh auth status          # ✓ Logged in to github.com account you (GH_TOKEN)
+gh repo view OWNER/REPO
+gh pr list
+gh issue view 12        # reads work; creating or commenting needs Push to GitHub
+```
+
+Its git protocol is HTTPS (the default), so `gh repo clone` uses the same login as `git`. The first start
+shows `tools: gh 2.102.0 — for GitHub as you`; `doz tools NAME` shows it later. If it could not be set up
+(an offline Mac on the first use), the start goes on without it and the next start or wake tries again —
+or `doz tools NAME --apply`.
 
 ## For every new sandbox: the Access step
 
@@ -116,10 +136,26 @@ over SSH. You're told the first time it's used. Your Mac needs a running ssh-age
 (`ssh-add -l` on the Mac). For every new sandbox: the Access step, or `doz access set --ssh-agent on`
 — it's confirmed by asking your agent for its keys ("the ssh-agent has 2 keys").
 
+The [tools layer](19-the-tools-layer.md) makes SSH work on any base:
+
+- an **ssh client** is installed (`openssh-client`, with `apt` or `apk` through the proxy) when the image
+  has none;
+- **github.com's host keys** — the ones GitHub publishes, built into Dozer — are written to
+  `/etc/ssh/ssh_known_hosts`, so the first `ssh -T git@github.com` or `git clone git@github.com:…` never
+  asks "Are you sure you want to continue connecting?" and never trusts a key it was handed. Both go
+  again when forwarding is turned off (the keys file keeps anything else in it).
+
+```sh
+ssh -T git@github.com     # Hi you! You've successfully authenticated…
+git clone git@github.com:OWNER/REPO.git
+```
+
 ## What the agent is told
 
 One line in its facts — that `git` and `gh` are signed in as you, read-only or with push, and to use
-HTTPS remotes (and SSH, when the agent is forwarded) — and the details in its `dozer` skill.
+HTTPS remotes (and SSH, when the agent is forwarded) — and the details in its `dozer` skill. The line says
+when `gh` was installed by Dozer (or, if it could not be, why), and that the ssh client and github.com's
+host keys are in place.
 
 ## Troubleshooting
 
@@ -130,6 +166,7 @@ HTTPS remotes (and SSH, when the agent is forwarded) — and the details in its 
 | git asks for a username and password | The session started before the permission was on: start a new session. Is the remote HTTPS (`https://github.com/…`)? |
 | `ssh -T git@github.com` fails | Is `sandbox.ssh_agent` on, and does `ssh-add -l` on the Mac list a key? |
 | `doz access` says *GitHub refused the token (401)* | The token was revoked or expired: `gh auth login` again, or paste a new one (`doz access set --github-key`). |
+| `gh: not found` | Is GitHub as you on? `doz tools NAME` says whether gh was set up and why not; `doz tools NAME --apply` tries again. |
 | A new sandbox didn't get your login | Is `defaults.github` `read` or `push` (`doz access`)? Naming a network (`--network locked`) or exact permissions takes exactly those. |
 
 ## Settings
@@ -140,4 +177,4 @@ HTTPS remotes (and SSH, when the agent is forwarded) — and the details in its 
 | `github.credentials` | `gh` | Where your GitHub login comes from: `gh`, `key` or `off`. |
 | `sandbox.ssh_agent` | `off` | Forward your Mac's ssh-agent (github.com:22 only). Per sandbox too. |
 
-See also: [What the agent can do](10-permissions-and-network.md), [Security model](16-security-model.md).
+See also: [The tools layer](19-the-tools-layer.md), [What the agent can do](10-permissions-and-network.md), [Security model](16-security-model.md).

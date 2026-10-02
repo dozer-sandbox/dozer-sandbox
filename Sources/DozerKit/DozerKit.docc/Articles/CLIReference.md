@@ -335,6 +335,23 @@ counts only for the choice it was given for. The default GitHub key is in the lo
 differ (`doz create --github off|read|push`, `--allow`/`--network`, `doz net allow|deny NAME
 github:as-you`, `doz config set --sandbox NAME sandbox.ssh_agent on`).
 
+### The tools layer
+
+```bash
+doz tools NAME             # the tools Dozer manages in NAME from its settings: each one, why, its state
+doz tools NAME --apply     # set them up again now (NAME must be running), shown as steps
+```
+
+The **tools layer** — tools a sandbox gets because of its settings, on every base, with no image
+rebuild: `gh` for "Use GitHub as you" (a pinned linux-arm64 release, downloaded ONCE to the store's
+`tools/` and accepted only with its pinned sha256, then copied in — no guest network; at
+`/usr/local/lib/doz/bin/gh`, linked as `/usr/local/bin/gh` when free; removed when the setting is off), an
+ssh client and github.com's published host keys (`/etc/ssh/ssh_known_hosts`, a managed block) for SSH
+agent forwarding, tmux for `sessions.tmux`, and always git, curl and ca-certificates — packages from
+apt/apk through the proxy, only when missing. A sandbox's first start shows each tool as a progress step
+(`tools: gh 2.102.0 — for GitHub as you`); later starts and wakes re-check quietly (a setting turned on
+while it slept is delivered then); never fatal. An image's preparation never runs it.
+
 ### A credential the guest brings itself
 
 ```bash

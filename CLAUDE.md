@@ -967,6 +967,32 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   CA), `DOZ_TEST_SSH_AUTH_SOCK` (a throwaway agent), `GIT_CONFIG_GLOBAL` (a scratch identity).
   `make test-cli-github` runs a python3 `git http-backend` over TLS as the fake GitHub.
 
+### The tools layer (599h) — tools follow settings, on every base, no rebuild
+
+- **One model** (`ToolsLayer.swift`): `ToolInputs` (github, ssh, tmux — from the settings) → `ToolPlan`
+  (`ToolItem`: id, title, reason, kind binary|package|file, source; plus `removals`) → a guest check script →
+  `applyScript` (one `doz-tool ID STATE DETAIL` line per tool) → `ToolsReport`. Pins: gh 2.102.0 + its tarball
+  sha256; GitHub's three published SSH host keys (`ToolsLayerTests` checks them against the published
+  fingerprints).
+- **gh** comes from `ToolsCache` (`<store>/tools/gh/<ver>/gh`, one download per store, sha256 or refused;
+  seam `DOZ_TEST_TOOLS_URL=http://127.0.0.1:PORT`) and is COPIED in (`copyIn`, no guest network) to
+  `/usr/local/lib/doz/bin/gh`, linked `/usr/local/bin/gh` only when free; REMOVED when off (only Dozer's copy
+  and link). Packages (openssh-client, tmux, git, curl, ca-certificates) — apt/apk through the proxy, only
+  when missing. github.com's keys — a managed block in `/etc/ssh/ssh_known_hosts`.
+- **When**: `Sandbox.start()` after the boot, and `applyGuestFixes` (wakes); the FIRST apply in a sandbox (no
+  `/var/lib/doz/tools`) is loud (`tools: …` steps), later ones quiet (a note; the host tells viewers on a
+  change/failure). Never fatal. `toolInputs == nil` (the default) = no layer: preparation VMs and helpers
+  never run it — the host sets inputs for every managed sandbox (`applyToolInputs`, beside `applyGitHub`;
+  a live change on a running sandbox applies at once). Recipes untouched (`ToolsLayerTests` pins bake keys).
+- **Surfaces**: `doz tools NAME [--apply]` (host ops `tools`, `tools-apply`), `GET /api/v1/sandboxes/{n}/tools`,
+  the web action `tools-apply`, the New Sandbox wizard's last step "Setting up tools" (`nwToolsNode`: start →
+  ✓/✗ → Retry · Continue anyway → Open the sandbox), doctor's "tools layer" line, Resources' `cache:tools`.
+  The facts' GitHub line says "(installed by Dozer)" / why gh is not there, and that the ssh client + host
+  keys are in place.
+- **Tests**: `ToolsLayerTests`, `ToolsHostTests`, `make test-cli-tools` (needs `make tools-fixture` once: the
+  real tarball in the vmtest store; a local server serves it — tests never reach github.com), the workspace
+  probe `probes/599h-*/run-wizard-probe.sh`.
+
 ### Access (599e) — every credential a purposeful choice, each confirmed
 
 - **One step, three places**: `doz onboard`'s "2. Access" (`AccessStep` in `AccessCommands.swift`, shared with

@@ -70,6 +70,7 @@ account/keepalive
 access
 access/show
 access/set
+tools
 host/start
 host/stop
 host/status
