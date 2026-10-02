@@ -165,6 +165,6 @@ $STRAY"
 printf 'ok audit: DozerKit imports only its allowlist (Foundation/Security/Virtualization/Containerization/NIO/X509),\n'
 printf '          depends only on apple/containerization (exact) + the apple/* packages it already resolves\n'
 printf '          (TLS; ArgumentParser for the CLI targets only) and Yams (exact; the CLI'"'"'s project file only),\n'
-printf '          carries no host brand, deckhold + doznet match their provenance,\n'
+printf '          carries no host brand, deckhold + doznet + dozview match their provenance (no libfuse),\n'
 printf '          the web UI (NIOHTTP1, confined) ships exactly the assets its sources build,\n'
 printf '          and no file carries the pre-592 product name\n'

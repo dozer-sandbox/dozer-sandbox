@@ -335,6 +335,22 @@ counts only for the choice it was given for. The default GitHub key is in the lo
 differ (`doz create --github off|read|push`, `--allow`/`--network`, `doz net allow|deny NAME
 github:as-you`, `doz config set --sandbox NAME sandbox.ssh_agent on`).
 
+### Workspace rules
+
+```bash
+doz ignore check NAME PATH…  # what each path is in the sandbox (locked, hidden, read-only, visible) and which line decides
+doz ignore show NAME         # every rule with its line, the mode, warnings, whether the rules are in force now
+```
+
+A `.dozignore` at the root of a sandbox's workspace folder (Docker's `.dockerignore` syntax and
+`docker build`'s semantics: anchored at the root, `**` for any depth, `!` exceptions, the last match wins)
+selects paths the agent must not use — `workspace.ignore_mode` `lock` (the default: listed with no
+permissions, every access refused, root too) or `hide` (not there). A `.dozreadonly` (same syntax) makes
+paths read-only; `doz_project.yaml`, `.git/hooks` and the two rule files are read-only too. Names are
+compared without case or Unicode form on a case-insensitive Mac volume. Served by a filtering view
+inside the sandbox; no rule file, no view. `doz create`/`up`/`start` warn when a rule locks `.git` or
+git-tracked files. Not a security boundary: root in the sandbox can get around it.
+
 ### The tools layer
 
 ```bash

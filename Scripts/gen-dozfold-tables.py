@@ -187,7 +187,9 @@ assert len(ddata) < 65536
 def swift_hex(vals, per=24):
     lines = []
     for i in range(0, len(vals), per):
-        lines.append("        " + ",".join("%x" % v for v in vals[i:i + per]))
+        # Fixed width: a short hex value like 583 would read as a standalone number to the user-text check
+        # (which keeps internal numbers out of what people read); %06x never stands alone.
+        lines.append("        " + ",".join("%06x" % v for v in vals[i:i + per]))
     return '"""\n' + ",\n".join(lines) + '\n        """'
 
 

@@ -128,7 +128,10 @@ fully resolved path.
 
 ## What Dozer can't protect
 
-- **Your shared folder.** It's the agent's to change. Commit often.
+- **Your shared folder.** It's the agent's to change. Commit often. [Workspace rules](20-workspace-rules.md)
+  (`.dozignore`, `.dozreadonly`) keep an agent from stumbling into files there, but they are a convenience,
+  not a boundary: root in the sandbox can get around them. A secret that must not reach a sandbox does
+  not belong in the folder it shares.
 - **What you allow.** A permission or a site you allow is reachable; data can go there.
 - **What you paste or open.** Read clipboard, browser and file notices, and don't run what an agent put
   on your clipboard without looking.

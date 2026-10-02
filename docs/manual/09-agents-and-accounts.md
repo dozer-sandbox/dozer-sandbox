@@ -167,7 +167,7 @@ doz config set agent.prompt false    # off: the next session start removes both
 own (`doz create --agent-prompt FILE`, or `agent_prompt` in `doz_project.yaml`), appended or
 replacing (`--agent-prompt-mode replace`). Your text may use `{{variables}}` from a fixed list —
 `sandbox.name`, `sandbox.image`, `sandbox.base`, `sandbox.cpus`, `sandbox.memory`,
-`workspace.shared`, `workspace.host_path`, `workspace.guest_path`, `workspace.description`,
+`workspace.shared`, `workspace.host_path`, `workspace.guest_path`, `workspace.description`, `workspace.rules`,
 `network.mode`, `network.allowed_hosts`, `network.description`, `network.permissions`,
 `account.name`, `credentials.description`, `sandbox.sudo`, `sandbox.timezone`, `sudo.description`,
 `clipboard.description`, `browser.description`, `files.description`, `mac.open`, `github.facts`, `github.description`, `mac.hostname`, `dozer.version` (the template

@@ -71,6 +71,9 @@ access
 access/show
 access/set
 tools
+ignore
+ignore/check
+ignore/show
 host/start
 host/stop
 host/status
