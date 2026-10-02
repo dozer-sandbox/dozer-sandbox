@@ -105,11 +105,12 @@ public enum WorkspaceView {
         return s
     }
 
-    /// Root shell: what each view is doing (`doz-view TAG running PID` / `off`), and its state file.
+    /// Root shell: what each view is doing (`doz-view TAG running PID` / `off`), and its state file (rewritten
+    /// first: SIGUSR2 makes the worker write it now).
     public static func statusScript(_ tags: [String]) -> String {
         aliveFunction + "; " + tags.filter(isSafe).map { t in
             "if [ -f '\(confPath(t))' ] && dzv_alive '\(pidPath(t))'"
-                + "; then echo \"doz-view \(t) running $(cat '\(pidPath(t))')\"; sed 's/^/doz-state \(t) /' '\(statePath(t))' 2>/dev/null; "
+                + "; then kill -USR2 \"$(cat '\(pidPath(t))')\"; sleep 0.2; echo \"doz-view \(t) running $(cat '\(pidPath(t))')\"; sed 's/^/doz-state \(t) /' '\(statePath(t))' 2>/dev/null; "
                 + "elif [ -f '\(confPath(t))' ]; then echo 'doz-view \(t) failed: the view is not running'; else echo 'doz-view \(t) off'; fi"
         }.joined(separator: "; ")
     }
