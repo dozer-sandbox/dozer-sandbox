@@ -101,6 +101,7 @@ const ICON_EXACT = {
   'get started': 'rocket', 'run onboarding again': 'rocket', 'check again': 'refresh-cw', 'next': 'arrow-right', 'back': 'arrow-left',
   'continue in the background': 'layers', 'skip': 'skip-forward', 'open sandboxes': 'box', 'prepare and continue': 'flame',
   'cancel preparation': 'x', 'create sandbox': 'plus', 'try again': 'refresh-cw', 'continue': 'arrow-right',
+  'look again': 'refresh-cw',
 };
 const ICON_WORD = {
   start: 'play', pause: 'pause', resume: 'play', sleep: ICON_SLEEP, hibernate: ICON_HIBERNATE, wake: 'sun', reset: 'rotate-ccw', remove: 'trash-2', delete: 'trash-2',
@@ -1637,8 +1638,8 @@ async function quickAdd(button) {
 
 // ── 599f: the New Sandbox wizard (owner: "a new wizard process for creating a purposeful sandbox that steps
 // the user through all the choices, capturing the config in a doz_project.yml in the project / working dir").
-// #/new: project folder → agent and base → account → access → permissions and network → resources →
-// bridges → session → review. The steps are the host's list (`ProjectWizard.steps`, the same `doz init` walks);
+// #/new: project folder → agent and base → account → access → workspace rules (599g) → permissions and network →
+// resources → bridges → session → review. The steps are the host's list (`ProjectWizard.steps`, the same `doz init` walks);
 // every value is pre-filled from the settings, or from the folder's existing project file; only what the
 // person sets (or the file set) is written — the rest stays commented and follows the settings. The review
 // shows the EXACT file (rendered and read back by the CLI's parser), writes it (an existing one only after its
@@ -1709,14 +1710,14 @@ function nwNode() {
   if (nw.tools) return nwToolsNode(nw);
   const steps = nw.steps || [{ id: 'folder', title: 'Project folder' }];
   const stepper = h('ol', { class: 'wiz-steps', 'aria-label': 'Steps' }, steps.map((s, i) => {
-    const can = nw.form && i <= Math.max(nw.reached, 8) && i !== nw.step;
+    const can = nw.form && i <= Math.max(nw.reached, steps.length - 1) && i !== nw.step;
     return h('li', { class: i === nw.step ? 'current' : i < nw.step ? 'done' : null, 'aria-current': i === nw.step ? 'step' : null, 'data-nw-step': s.id },
       h('span', { class: 'wiz-n' }, String(i + 1)), can ? h('a', { href: '#/new', on: { click: (ev) => { ev.preventDefault(); nwGo(i); } } }, s.title) : s.title);
   }));
   const ids = steps.map((s) => s.id);
   const id = ids[nw.step] || 'folder';
-  const step = { folder: nwFolder, image: nwImage, account: nwAccount, access: nwAccess, permissions: nwPermissions, resources: nwResources,
-                 bridges: nwBridges, session: nwSession, review: nwReview }[id]();
+  const step = { folder: nwFolder, image: nwImage, account: nwAccount, access: nwAccess, rules: nwRules, permissions: nwPermissions,
+                 resources: nwResources, bridges: nwBridges, session: nwSession, review: nwReview }[id]();
   nw.collect = step.collect || (() => {});
   const error = h('div', { class: 'dlg-error', role: 'alert', 'data-nw-error': '' }, nw.error || '');
   const last = id === 'review';
@@ -1968,6 +1969,26 @@ function nwAccess() {
     },
   };
 }
+/// 599g (owner A2): the Workspace rules step — the onboarding's description, what the chosen folder already has
+/// (its .dozignore / .dozreadonly, from project/open; Look again reads them again), and THIS sandbox's mode
+/// (`ignore_mode` in its file — written only when it differs from the setting, or the file set it).
+function nwRules() {
+  const nw = state.nw, f = nw.form;
+  const look = async () => {
+    try {
+      const r = await api('project/open', { method: 'POST', json: { folder: nw.open.folder } });
+      nw.open.rules = r.rules || [];
+      nw.open.exists = r.exists;
+      nwRender();
+    } catch (e) { toast(e.message || String(e), true); }
+  };
+  return {
+    el: h('div', { class: 'nw-fields' },
+      rulesStep({ mode: 'sandbox', guide: nw.open.rulesGuide, value: f.ignoreMode || setting('workspace.ignore_mode', 'lock'),
+                  folder: nw.open, onLookAgain: look,
+                  onPick: (v) => { if (v !== (f.ignoreMode || setting('workspace.ignore_mode', 'lock')) || nw.explicit.has('ignore_mode')) nwSet('ignore_mode', v); } })),
+  };
+}
 function nwPermissions() {
   const nw = state.nw, f = nw.form, b = nw.bases;
   const nets = [['', 'default for this image (' + setting('images.' + nwSection(f) + '.network', nwSection(f) === 'lab' ? 'bake' : 'agent') + ')'],
@@ -2061,9 +2082,7 @@ function nwBridges() {
       nwSelect('browser_bridge', 'Browser', [['on', 'on — links opened in the sandbox open in the Mac’s browser'], ['off', 'off']],
         f.browserBridge || setting('sandbox.browser_bridge', 'on')),
       nwSelect('open_files', 'Workspace files', [['on', 'on — documents opened in the sandbox open on the Mac, with a notice'], ['off', 'off']],
-        f.openFiles || setting('sandbox.open_files', 'on')),
-      nwSelect('ignore_mode', 'Paths a .dozignore lists', [['lock', 'lock — listed, but every read and write is refused'], ['hide', 'hide — not there at all']],
-        f.ignoreMode || setting('workspace.ignore_mode', 'lock'), 'Only when the folder has a .dozignore (Docker’s .dockerignore syntax). Not a security boundary.')),
+        f.openFiles || setting('sandbox.open_files', 'on'))),
   };
 }
 function nwSession() {
@@ -2588,7 +2607,10 @@ function sandboxParts(name, d, net, accounts) {
       card('CPUs', String(d.cpus))),
     h('div', { class: 'panel' }, h('div', { class: 'cmd' }, h('code', null, d.attachCommand), copy)),
     i.workspaceRules ? h('p', { class: 'muted', 'data-workspace-rules-line': '' },
-      'Workspace rules: ' + i.workspaceRules + '. Which rule decides a path: doz ignore check ' + name + ' PATH. Not a security boundary.') : null,
+      'Workspace rules: ' + i.workspaceRules + '. Which rule decides a path: doz ignore check ' + name + ' PATH. Not a security boundary.')
+      // 599g (owner A3): a shared folder with no rule file says so, rather than nothing (isolated: nothing to say).
+      : i.workspace ? h('p', { class: 'muted', 'data-workspace-rules-none': '' },
+        'Workspace rules: none — the folder is shared as is. A .dozignore or .dozreadonly in it keeps the agent away from some files.') : null,
     h('div', { class: 'head' }, h('h2', null, 'Sessions'), h('div', { class: 'actions' },
       gated(btn('Run detached…', () => dialog('Run a command in ' + name, 'A new session running the command — no shell in front (say bash -lc \'…\' for one). It runs inside the sandbox; attach to see it.',
         [{ name: 'session', label: 'Session name', placeholder: 'e.g. worker', required: true },
@@ -3712,22 +3734,67 @@ function renderAccessStep(container, opts = {}) {
   return ctl;
 }
 
+// ── workspace rules: the onboarding's and the New Sandbox wizard's step (599g) ──────────────────────
+// ONE component (owner: the same human description in both): what .dozignore and .dozreadonly do, the mode
+// (onboarding: the default workspace.ignore_mode; sandbox: this sandbox's ignore_mode) and, in the wizard, what
+// the chosen folder already has. Its words are the host's (`rulesGuide` — WorkspaceRulesGuide, the same
+// doz onboard and doz init print). It writes nothing: the caller keeps the choice (onPick).
+//   rulesStep({ mode: 'onboarding'|'sandbox', guide, value, onPick(value), folder: {rules: [...]}, onLookAgain })
+function rulesStep(opts) {
+  const g = opts.guide, mode = opts.mode || 'onboarding';
+  const points = h('ul', { class: 'rules-points' }, g.points.map((p) =>
+    h('li', null, p.term ? [h('code', null, p.term), ' — ' + p.text] : p.text)));
+  let folder = null;
+  if (mode === 'sandbox') {
+    const files = (opts.folder && opts.folder.rules) || [];
+    const found = files.map((r) => h('div', { class: 'rules-file', 'data-rules-file': r.name },
+      h('div', null, h('code', null, r.name), ' — ' + r.count),
+      r.first.length ? h('pre', { class: 'rules-lines' }, r.first.join('\n') + (r.patterns > r.first.length ? '\n…' : '')) : null));
+    folder = h('div', { class: 'rules-folder', 'data-rules-folder': files.length ? 'found' : 'none' },
+      h('div', { class: 'rules-folder-head' }, icon('folder'), h('strong', null, 'This folder’s rules'),
+        opts.onLookAgain ? btn('Look again', opts.onLookAgain, { small: true, title: 'Read the folder again — after you add or change a rule file' }) : null),
+      files.length ? found : [h('p', { 'data-rules-none': '' }, g.noRules.charAt(0).toUpperCase() + g.noRules.slice(1) + '.'),
+                              h('p', { class: 'muted' }, g.howToAdd)]);
+  }
+  const labels = [];
+  const radios = g.modes.map((m) => {
+    const input = h('input', { type: 'radio', name: 'rules-mode-' + mode, value: m.value });
+    input.checked = m.value === opts.value;
+    const label = h('label', { class: 'wiz-choice' + (input.checked ? ' chosen' : ''), 'data-rules-mode': m.value }, input,
+      h('span', null, h('strong', null, m.label), m.recommended ? h('span', { class: 'tag' }, 'recommended') : null,
+        h('div', { class: 'muted' }, m.detail)));
+    input.addEventListener('change', () => {
+      if (!input.checked) return;
+      for (const l of labels) l.classList.toggle('chosen', l === label);
+      opts.onPick(m.value);
+    });
+    labels.push(label);
+    return label;
+  });
+  return h('div', { class: 'rules-step', 'data-rules-step': mode },
+    h('p', null, g.intro), points, folder,
+    h('fieldset', { class: 'wiz-choices' }, h('legend', null, g.question), radios),
+    h('p', { class: 'muted' }, mode === 'sandbox' ? g.sandboxScope : g.defaultScope));
+}
+
 // ── onboarding (594) ────────────────────────────────────────────────────────
-// The wizard (D11): Welcome → Checks → Claude account → Images → Preparing → First sandbox → Done.
+// The wizard (D11): Welcome → Checks → Access → Workspace rules (599g) → Images → Preparing → First sandbox → Done.
 // The same model as every page: facts from GET /api/v1/onboarding; changes through the typed actions
 // (account-default, onboard, prepare-cancel, create) and ONE typed route for the settings file and
 // the prompt template (POST /api/v1/onboarding/config — each written only when missing, never
 // overwritten). A key or a setup token: the masked field (accountForm) while ui.allow_secret_entry,
 // else the CLI command. The preparation runs in the HOST: "Continue in the background" leaves it
 // running (Operations shows it), and closing this tab changes nothing.
-const WIZ_STEPS = ['Welcome', 'Checks', 'Access', 'Images', 'Preparing', 'First sandbox', 'Done'];
+const WIZ_STEPS = ['Welcome', 'Checks', 'Access', 'Workspace rules', 'Images', 'Preparing', 'First sandbox', 'Done'];
+// The steps by name (599g put Workspace rules between Access and Images).
+const WIZ = { welcome: 0, checks: 1, access: 2, rules: 3, images: 4, preparing: 5, first: 6, done: 7 };
 const WIZ_ORDER = ['claude-code', 'pi', 'lab'];
 let wizTimer = null;
 function wizardStopPolling() { clearInterval(wizTimer); wizTimer = null; }
 function wizardPoll() {
   if (wizTimer) return;
   wizTimer = setInterval(async () => {
-    if (state.view !== 'onboarding' || !state.wiz || state.wiz.step !== 4) { wizardStopPolling(); return; }
+    if (state.view !== 'onboarding' || !state.wiz || state.wiz.step !== WIZ.preparing) { wizardStopPolling(); return; }
     try { state.preps = await api('preparations'); } catch (_) { return; }
     renderOps();
     renderWizard();
@@ -3737,21 +3804,21 @@ async function viewOnboarding() {
   if (!state.wiz) state.wiz = { step: 0, data: null, account: null, images: null, config: null, created: null, busy: false };
   const w = state.wiz;
   if (!w.data || w.step <= 1) w.data = await api('onboarding');
-  if (w.step === 4) { await loadPreparations(); wizardPoll(); }
+  if (w.step === WIZ.preparing) { await loadPreparations(); wizardPoll(); }
   return wizardNode();
 }
 /// Re-render in place (a preparation's progress; a step change). The first-sandbox form is never
 /// re-rendered under the person typing in it.
 function renderWizard(force) {
   if (state.view !== 'onboarding' || !state.wiz) return;
-  if (!force && state.wiz.step !== 4) return;
+  if (!force && state.wiz.step !== WIZ.preparing) return;
   $('view').replaceChildren(wizardNode());
 }
 function wizGo(step) {
   const w = state.wiz;
   w.step = step;
-  if (step === 4) { loadPreparations().then(() => renderWizard(true)); wizardPoll(); } else wizardStopPolling();
-  if (step >= 5) refreshNav();          // the nav's Onboarding dot goes once the record is written
+  if (step === WIZ.preparing) { loadPreparations().then(() => renderWizard(true)); wizardPoll(); } else wizardStopPolling();
+  if (step >= WIZ.first) refreshNav();          // the nav's Onboarding dot goes once the record is written
   renderWizard(true);
   $('main').scrollTop = 0;
 }
@@ -3774,7 +3841,7 @@ function wizardNode() {
   if (!w.basesAsked) { w.basesAsked = true; api('bases').then((b) => { w.bases = b; }).catch(() => { w.bases = null; }); }
   const stepper = h('ol', { class: 'wiz-steps', 'aria-label': 'Steps' }, WIZ_STEPS.map((s, i) =>
     h('li', { class: i === w.step ? 'current' : i < w.step ? 'done' : null, 'aria-current': i === w.step ? 'step' : null }, h('span', { class: 'wiz-n' }, String(i + 1)), s)));
-  const body = [wizStep0, wizStep1, wizStep2, wizStep3, wizStep4, wizStep5, wizStep6][w.step](d, w);
+  const body = [wizStep0, wizStep1, wizStep2, wizStepRules, wizStep3, wizStep4, wizStep5, wizStep6][w.step](d, w);
   return h('div', { class: 'wizard', 'data-step': String(w.step) },
     h('h1', null, 'Set up Dozer Sandbox'),
     h('p', { class: 'sub' }, 'Once for this Mac (store ', h('code', null, $('store-path').textContent), '). The same as ', h('code', null, 'doz onboard'), ' in a terminal.'),
@@ -3878,10 +3945,20 @@ function wizStep2(d, w) {
       try {
         if (w.account === 'mac' && d.defaultAccount !== 'mac') { await actOrThrow({ action: 'account-default', account: 'mac' }); d.defaultAccount = 'mac'; }
         // Confirm what is not yet; a failure stays on this step with its reason and Skip — never a dead end.
-        if (await access.confirm()) wizGo(3);
+        if (await access.confirm()) wizGo(WIZ.rules);
         else { toast('Not everything is confirmed — Skip it, turn it off, or check again', true); b.disabled = false; }
       } catch (e) { toast(e.message || String(e), true); b.disabled = false; }
     }, { primary: true })),
+  ];
+}
+/// 599g (owner A1): what .dozignore / .dozreadonly do, and the default mode for every sandbox — sent with the
+/// settings (POST onboarding/config {ignoreMode}) and written only then, as the Access choices are.
+function wizStepRules(d, w) {
+  if (!w.ignoreMode) w.ignoreMode = setting('workspace.ignore_mode', 'lock');
+  return [
+    h('h2', null, d.rulesGuide.title),
+    rulesStep({ mode: 'onboarding', guide: d.rulesGuide, value: w.ignoreMode, onPick: (v) => { w.ignoreMode = v; } }),
+    wizButtons(btn('Back', () => wizGo(WIZ.access)), btn('Next', () => wizGo(WIZ.images), { primary: true })),
   ];
 }
 function wizStep3(d, w) {
@@ -3906,10 +3983,12 @@ function wizStep3(d, w) {
     try {
       const config = { defaultImage: chosen[0] || 'claude-code', account: w.account || d.preferredAccount };
       if (w.access && w.access.choices) config.access = { ...w.access.choices };     // 599e: the defaults for new sandboxes
+      if (w.ignoreMode) config.ignoreMode = w.ignoreMode;                             // 599g: chosen in the Workspace rules step
       w.config = await api('onboarding/config', { method: 'POST', json: config });
+      await loadSettings();               // what was just written (Access, Workspace rules) is what New sandbox starts from
       await actOrThrow({ action: 'onboard', images: chosen });
       w.prepImages = todo;
-      wizGo(todo.length ? 4 : 5);
+      wizGo(todo.length ? WIZ.preparing : WIZ.first);
     } catch (e) { toast(e.message || String(e), true); b.disabled = false; }
   }, { primary: true });
   if (short) go.disabled = true;
@@ -3919,7 +3998,7 @@ function wizStep3(d, w) {
     h('div', { class: 'wiz-choices' }, items),
     h('p', { class: short ? 'st-fail' : 'muted', 'data-disk': '1' }, need ? 'About ' + bytes(need) + ' of disk needed (with room for a first sandbox)' +
       (d.freeBytes != null ? '; ' + bytes(d.freeBytes) + ' free' : '') + (short ? ' — free some space or choose fewer images.' : '.') : 'Nothing to download.'),
-    wizButtons(btn('Back', () => wizGo(2)), go),
+    wizButtons(btn('Back', () => wizGo(WIZ.rules)), go),
   ];
 }
 /// 594 (owner: "more progress detail"): ONE card for a host preparation — the wizard's Preparing step and
@@ -3991,7 +4070,7 @@ function wizStep4(d, w) {
   const ours = preps.filter((p) => mine.includes(p.image));
   const running = ours.some(prepRunning);
   const failed = ours.filter((p) => !prepRunning(p) && p.state !== 'done');
-  const next = btn('Next', () => wizGo(5), { primary: true });
+  const next = btn('Next', () => wizGo(WIZ.first), { primary: true });
   if (running || failed.length) next.disabled = true;
   return [
     h('h2', null, 'Preparing'),
@@ -4002,7 +4081,7 @@ function wizStep4(d, w) {
       failed.length ? btn('Try again', async () => {
         try { await actOrThrow({ action: 'onboard', images: failed.map((p) => p.image) }); await loadPreparations(); renderWizard(true); } catch (e) { toast(e.message || String(e), true); }
       }) : null,
-      running ? btn('Continue in the background', () => { toast('It goes on in the host — Operations shows it.'); wizGo(5); }) : null,
+      running ? btn('Continue in the background', () => { toast('It goes on in the host — Operations shows it.'); wizGo(WIZ.first); }) : null,
       next),
   ];
 }
@@ -4023,7 +4102,7 @@ function wizStep5(d, w) {
   if (w.firstName) name.dispatchEvent(new Event('input'));
   const error = h('div', { class: 'dlg-error', role: 'alert' });
   // 594: the agent's credential prerequisite — only accounts it can use; pi with none: the key here.
-  if (!w.accounts) api('accounts').then((a) => { w.accounts = a; if (w.step === 5) renderWizard(true); }).catch(() => { w.accounts = { accounts: [] }; });
+  if (!w.accounts) api('accounts').then((a) => { w.accounts = a; if (w.step === WIZ.first) renderWizard(true); }).catch(() => { w.accounts = { accounts: [] }; });
   let acct = null;
   const create = btn('Create sandbox', async (ev) => {
     const b = ev.currentTarget;
@@ -4044,7 +4123,7 @@ function wizStep5(d, w) {
       const df = picker.dockerfile();
       await actOrThrow({ action: 'create', sandbox: n, image: image.value, ...ws, ...(account ? { account } : {}), ...(df ? { dockerfile: df } : {}) });
       w.created = n;
-      wizGo(6);
+      wizGo(WIZ.done);
     } catch (e) { error.textContent = e.message || String(e); b.disabled = false; }
   }, { primary: true });
   if (w.accounts) {
@@ -4061,7 +4140,7 @@ function wizStep5(d, w) {
     chooser.el,
     error,
     h('p', { class: 'muted' }, 'In a terminal the same is: doz init in the project folder, then doz up.'),
-    wizButtons(btn('Skip', () => wizGo(6)), create),
+    wizButtons(btn('Skip', () => wizGo(WIZ.done)), create),
   ];
 }
 function wizStep6(d, w) {
@@ -4082,6 +4161,8 @@ function wizStep6(d, w) {
         (w.access.choices.github !== 'off' ? ' (' + (w.access.choices.githubSource === 'key' ? 'your key' : 'the Mac’s gh login') + ')' : '') +
         ', SSH agent ' + w.access.choices.ssh +
         (w.access.skipped && w.access.skipped.size ? ' — not confirmed: ' + [...w.access.skipped].map((id) => ACCESS_TITLES[id]).join(', ') + ' (Settings › Access checks again)' : '')) : null,
+      w.ignoreMode ? h('li', { 'data-rules-summary': '' }, 'Workspace rules: ' + w.ignoreMode + ' — what a .dozignore does to the paths it lists, for every sandbox' +
+        (c && c.rulesSet && !c.rulesSet.length ? ' (the settings already said so)' : '')) : null,
       c ? fileLine('Settings', c.settings, c.settingsPath) : null,
       c ? fileLine('Your environment prompt template', c.promptTemplate, c.promptTemplatePath) : null,
       // 599c: where Quick add, New sandbox and doz new put each sandbox's workspace folder.

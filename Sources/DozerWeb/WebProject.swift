@@ -8,7 +8,7 @@ import DozerHost
 //
 //   · `POST /api/v1/project/open` {folder} — changes nothing: the folder (normalized; whether it exists),
 //     its project file (doz_project.yaml or .yml — both is an error) read into the wizard's form, or the
-//     defaults; the steps (`ProjectWizard.steps`, the same list `doz init` walks).
+//     defaults; the steps (`ProjectWizard.steps`, the same list `doz init` walks); 599g: its rule files.
 //   · `POST /api/v1/project/preview` {folder, form, explicit} — changes nothing: the EXACT file the wizard
 //     will write (`DozerProject.render`, read back by the CLI's own parser — one validator), the file there
 //     now and the line diff, and the digest a write must name to replace it.
@@ -159,6 +159,10 @@ public struct WebProjectOpen: Codable, Equatable, Sendable {
     public var steps: [Step]
     /// `defaults.projects_dir`, expanded.
     public var projectsDir: String
+    /// 599g: the folder's .dozignore / .dozreadonly (empty: none, or a folder not made yet), and the words of the
+    /// Workspace rules step.
+    public var rules: [WebRuleFile] = []
+    public var rulesGuide = WebRulesGuide()
 }
 
 /// What `preview` and `write` answer.
@@ -233,6 +237,7 @@ enum WebProject {
         if let why = Workspace.refusal(folder, store: DozerStore(root: URL(fileURLWithPath: store))) { out.error = why; return out }
         var isDir: ObjCBool = false
         out.exists = FileManager.default.fileExists(atPath: folder, isDirectory: &isDir) && isDir.boolValue
+        if out.exists { out.rules = WorkspaceRulesGuide.folderFiles(URL(fileURLWithPath: folder)).map(WebRuleFile.init) }
         do {
             guard let (url, text) = try WebProjectFiles.existing(folder) else { return out }
             out.file = url.lastPathComponent

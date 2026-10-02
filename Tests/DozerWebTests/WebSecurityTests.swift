@@ -371,7 +371,10 @@ final class WebSecurityTests: XCTestCase {
                                            seconds: 1, error: nil, step: "s", stepSeconds: 1,
                                            transfer: PreparationTransfer(label: "pulling", completedBytes: 1, totalBytes: 2, completedItems: 1,
                                                                          totalItems: 2, line: "l"), output: ["o"], lines: ["l"])),
-            WebOnboardingConfigResult(settings: "written", settingsPath: "/x", promptTemplate: "kept", promptTemplatePath: "/y"),
+            WebOnboardingConfigResult(settings: "written", settingsPath: "/x", promptTemplate: "kept", promptTemplatePath: "/y", rulesSet: ["workspace.ignore_mode = lock"]),
+            // 599g
+            WebRulesGuide(),
+            WebRuleFile(WorkspaceRulesGuide.FolderFile(name: ".dozignore", patterns: 2, first: ["secrets.env"], skipped: 0)),
         ]
         let forbidden = ["secret", "token", "password", "apikey", "api_key", "bearer", "authorization", "cookie", "csrf", "credentialvalue"]
         for v in values {

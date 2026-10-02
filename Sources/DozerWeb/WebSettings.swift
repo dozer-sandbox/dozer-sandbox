@@ -135,7 +135,11 @@ public final class WebSettingsStore: @unchecked Sendable {
                     accessSet = try Access.write(github: a.github, githubSource: a.github == "off" ? nil : a.githubSource, ssh: a.ssh, environment: environment)
                 } catch { throw HostError(.invalid, "\(error)") }
             }
-            return WebOnboardingConfigResult(settings: s.rawValue, settingsPath: sp, promptTemplate: t.rawValue, promptTemplatePath: tp, accessSet: accessSet)
+            // 599g: the Workspace rules step's default mode (chosen in the step), likewise.
+            var rulesSet: [String]?
+            if let m = c.ignoreMode, s != .unavailable { rulesSet = try Onboarding.writeIgnoreMode(m, environment: environment) }
+            return WebOnboardingConfigResult(settings: s.rawValue, settingsPath: sp, promptTemplate: t.rawValue, promptTemplatePath: tp, accessSet: accessSet,
+                                             rulesSet: rulesSet)
         } catch let e as SettingsError {
             throw HostError(.failed, e.message)
         }
@@ -322,18 +326,20 @@ public struct WebAccessGitHubKey: Equatable, Sendable, CustomStringConvertible, 
 }
 
 /// 594: `POST /api/v1/onboarding/config`, decoded strictly: exactly {defaultImage, account} — and (599e)
-/// optionally `access` (the Access step's choices, written as the defaults for new sandboxes).
+/// optionally `access` (the Access step's choices, written as the defaults for new sandboxes), and (599g)
+/// `ignoreMode` (the Workspace rules step's: `lock` or `hide`, the default `workspace.ignore_mode`).
 public struct WebOnboardingConfig: Equatable, Sendable {
     public let defaultImage: String
     public let account: String
     public var access: WebAccessChoices? = nil
+    public var ignoreMode: String? = nil
 
     public static func decode(_ body: Data) throws -> WebOnboardingConfig {
         guard let obj = try? JSONSerialization.jsonObject(with: body), let d = obj as? [String: Any] else {
             throw WebAction.Invalid("the body must be a JSON object")
         }
-        guard Set(d.keys) == ["defaultImage", "account"] || Set(d.keys) == ["defaultImage", "account", "access"] else {
-            throw WebAction.Invalid("exactly defaultImage and account (and access)")
+        guard Set(d.keys).isSuperset(of: ["defaultImage", "account"]), Set(d.keys).isSubset(of: ["defaultImage", "account", "access", "ignoreMode"]) else {
+            throw WebAction.Invalid("exactly defaultImage and account (and access, ignoreMode)")
         }
         guard let i = d["defaultImage"] as? String, ["lab", "claude-code", "pi"].contains(i) else {
             throw WebAction.Invalid("defaultImage: lab, claude-code or pi")
@@ -343,6 +349,10 @@ public struct WebOnboardingConfig: Equatable, Sendable {
         }
         var c = WebOnboardingConfig(defaultImage: i, account: a)
         if d["access"] != nil { c.access = try WebAccessChoices.decode(d["access"]) }
+        if let m = d["ignoreMode"] {
+            guard let v = m as? String, ["lock", "hide"].contains(v) else { throw WebAction.Invalid("ignoreMode: lock or hide") }
+            c.ignoreMode = v
+        }
         return c
     }
 }

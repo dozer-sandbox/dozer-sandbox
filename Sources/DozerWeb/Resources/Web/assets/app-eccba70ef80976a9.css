@@ -725,3 +725,15 @@ nav a.active + .nav-quick:hover { background: color-mix(in srgb, var(--bg) 22%, 
 .nw-diff .del { color: var(--fail); }
 .nw-diff .same { color: var(--muted); }
 .wiz-steps li a { color: inherit; }
+
+/* 599g: the Workspace rules step (onboarding and New Sandbox) */
+.rules-step { display: flex; flex-direction: column; gap: 12px; max-width: 760px; }
+.rules-step p { margin: 0; }
+.rules-points { margin: 0; padding: 0 0 0 18px; display: flex; flex-direction: column; gap: 4px; }
+.rules-points code { white-space: nowrap; }
+.rules-folder { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.rules-folder-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.rules-folder-head .btn { margin-left: auto; }
+.rules-file { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.rules-lines { margin: 0; white-space: pre-wrap; word-break: break-all; background: var(--code); border-radius: 6px; padding: 6px 10px;
+  font-family: var(--mono); font-size: 12.5px; max-height: 10em; overflow: auto; }

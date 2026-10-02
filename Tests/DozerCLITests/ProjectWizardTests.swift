@@ -150,7 +150,9 @@ final class ProjectWizardTests: XCTestCase {
         XCTAssertFalse(o.exists)
         XCTAssertEqual(o.form.name, "my-app")
         XCTAssertEqual(o.form.image, "claude-code")
-        XCTAssertEqual(o.steps.map(\.id), ["folder", "image", "account", "access", "permissions", "resources", "bridges", "session", "review"])
+        XCTAssertEqual(o.steps.map(\.id), ["folder", "image", "account", "access", "rules", "permissions", "resources", "bridges", "session", "review"])
+        XCTAssertEqual(o.rules, [], "a folder not made yet has no rules")
+        XCTAssertEqual(o.rulesGuide, WebRulesGuide())
 
         var q = WebProjectRequest(folder: folder)
         var form = o.form
@@ -177,6 +179,12 @@ final class ProjectWizardTests: XCTestCase {
         XCTAssertEqual(o.form.github, "read")
         XCTAssertEqual(o.form.permissions, "+web")
         XCTAssertEqual(Set(o.explicit), ["github", "permissions"])
+        XCTAssertEqual(o.rules, [], "no rule file: the folder is shared as is")
+        try "secrets.env\n".write(toFile: folder + "/.dozignore", atomically: true, encoding: .utf8)
+        o = WebProject.open(WebProjectRequest(folder: folder), settings: settings, store: "/tmp/fake-store")
+        XCTAssertEqual(o.rules.map(\.name), [".dozignore"], "the Workspace rules step shows the folder's rule files")
+        XCTAssertEqual(o.rules.first?.first, ["secrets.env"])
+        try FileManager.default.removeItem(atPath: folder + "/.dozignore")
 
         // Replacing it: only with the digest of what is there (the page showed the diff).
         var q2 = q
