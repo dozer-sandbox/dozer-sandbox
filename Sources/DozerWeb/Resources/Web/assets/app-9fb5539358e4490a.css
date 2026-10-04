@@ -521,19 +521,19 @@ ul.plain { margin: 0; padding: 12px 16px 12px 32px; }
 
 @media (max-width: 760px) { .setting { grid-template-columns: minmax(0, 1fr); } .setting-control { justify-content: flex-start; } }
 /* 594: the onboarding wizard, host preparations, the environment prompt. */
-.wizard { max-width: 860px; }
-.wiz-steps { list-style: none; display: flex; flex-wrap: wrap; gap: 6px 14px; padding: 0; margin: 14px 0 18px; font-size: var(--fs-md); color: var(--muted); }
-.wiz-steps li { display: flex; align-items: center; gap: 6px; }
-.wiz-n { width: 20px; height: 20px; border-radius: 50%; border: 1px solid var(--line); display: grid; place-items: center; font-size: var(--fs-xs); }
-.wiz-steps li.done { color: var(--ink); }
-.wiz-steps li.done .wiz-n { background: var(--line); }
-.wiz-steps li.current { color: var(--ink); font-weight: var(--fw-strong); }
-.wiz-steps li.current .wiz-n { background: var(--ink); color: var(--bg); border-color: var(--ink); }
-.wiz-body { padding: 18px 20px; display: flex; flex-direction: column; gap: 12px; }
-.wiz-body h2 { margin: 0; }
-.wiz-body p { margin: 0; }
-.wiz-body table { margin: 4px 0; }
-.wiz-buttons { display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap; margin-top: 6px; }
+
+
+
+
+
+
+
+
+
+
+
+
+
 .wiz-choices { display: flex; flex-direction: column; gap: 8px; border: 0; padding: 0; margin: 0; }
 .wiz-choices legend { font-weight: var(--fw-strong); margin-bottom: 6px; padding: 0; }
 
@@ -565,9 +565,9 @@ ul.plain { margin: 0; padding: 12px 16px 12px 32px; }
 .wiz-cmds pre, .prompt-text { margin: 6px 0 0; white-space: pre-wrap; word-break: break-word; background: var(--code); border-radius: 6px; padding: 8px 10px; font-family: var(--mono); font-size: var(--fs-mono); }
 .wiz-summary { padding-left: 20px; }
 .prep-cards { display: flex; flex-direction: column; gap: 10px; }
-.prep-card { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
-.prep-card.prep-done { border-color: color-mix(in srgb, var(--run) 50%, var(--line)); }
-.prep-card.prep-failed { border-color: var(--fail); }
+
+
+
 .prep-head { display: flex; align-items: center; gap: 8px; }
 .prep-head .op-state { color: var(--run); }
 .prep-failed .prep-head .op-state, .prep-cancelled .prep-head .op-state { color: var(--fail); }
@@ -575,8 +575,8 @@ ul.plain { margin: 0; padding: 12px 16px 12px 32px; }
 .prep-transfer, .prep-output { font-size: var(--fs-sm); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .prep-lines summary { cursor: pointer; color: var(--muted); font-size: var(--fs-sm); }
 .prep-lines .mono { font-size: var(--fs-mono); max-height: 220px; overflow: auto; padding: 6px 0; }
-.wiz-bar { height: 6px; border-radius: 3px; background: var(--bar); overflow: hidden; position: relative; }
-.wiz-bar > span { display: block; height: 100%; background: var(--bar-strong); transition: width 0.4s; }
+
+
 .wiz-bar.indeterminate > span { width: 30%; position: absolute; animation: wiz-slide 1.4s ease-in-out infinite; }
 @keyframes wiz-slide { from { left: -30%; } to { left: 100%; } }
 @media (prefers-reduced-motion: reduce) { .wiz-bar.indeterminate > span { animation: none; left: 0; width: 100%; opacity: 0.4; } }
@@ -587,9 +587,9 @@ ul.plain { margin: 0; padding: 12px 16px 12px 32px; }
 .prep-current { display: flex; flex-direction: column; gap: 4px; }
 .prep-step { display: block; line-height: 1.45; }
 .prep-step .mini-spin { display: inline-block; vertical-align: -1px; margin-right: 2px; }
-.wiz-bar.prep-step-bar { height: 3px; }
+
 .prep-transfer-block { display: flex; flex-direction: column; gap: 3px; }
-.prep-output { font-size: var(--fs-xs); color: var(--muted); background: var(--code); border-radius: 6px; padding: 6px 8px; overflow: hidden; }
+
 .prep-output > div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 ul.prep-steps { list-style: none; margin: 6px 0 0; padding: 0; font-size: var(--fs-sm); display: flex; flex-direction: column; gap: 3px; }
 ul.prep-steps .op-state { color: var(--run); display: inline-block; width: 1em; }
@@ -740,7 +740,7 @@ dialog.dlg:has(.image-picker) { width: min(780px, calc(100vw - 32px)); }
 
 .path-setting { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 /* 599f: the New Sandbox wizard (#/new). */
-.nw .wiz-buttons .wiz-gap { flex: 1; }
+
 .nw-fields { display: flex; flex-direction: column; gap: 12px; }
 .nw-sub { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
 .nw-sub .row, .nw .perm-field .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
@@ -750,7 +750,7 @@ dialog.dlg:has(.image-picker) { width: min(780px, calc(100vw - 32px)); }
 .nw-diff .add { color: var(--run); }
 .nw-diff .del { color: var(--fail); }
 .nw-diff .same { color: var(--muted); }
-.wiz-steps li a { color: inherit; }
+
 
 /* 599g: the Workspace rules step (onboarding and New Sandbox) */
 .rules-step { display: flex; flex-direction: column; gap: 12px; max-width: 760px; }
@@ -1219,3 +1219,57 @@ td.row-acts-cell .row-acts { justify-content: flex-end; flex-wrap: nowrap; }
 /* Images below 1100 px: the bar says own and shared; their figure columns (and the note) step aside. */
 @media (max-width: 1100px) { .images-t th:nth-child(6), .images-t td:nth-child(6), .images-t th:nth-child(7), .images-t td:nth-child(7),
   .images-t th:nth-child(10), .images-t td:nth-child(10) { display: none; } }
+
+/* ── 603 step 8: the wizards — a vertical stepper (done: a check and the step's answer · current: the accent
+   circle · later), the step in a card whose actions sit in a footer that never leaves the screen; below 760 px
+   "Step N of M" with a bar. ── */
+.wizard { max-width: 1060px; }
+.wiz { display: grid; grid-template-columns: 210px minmax(0, 1fr); gap: 16px; align-items: start; margin-top: 14px; }
+ol.stepper { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; position: sticky; top: 12px; }
+.stepper li { display: grid; grid-template-columns: 22px minmax(0, 1fr); column-gap: var(--sp-3); align-items: center; min-height: 30px; padding: 3px 8px;
+  border-radius: var(--r-md); color: var(--ink-2); }
+.stepper li a { color: inherit; text-decoration: none; }
+.stepper li a:hover { text-decoration: underline; }
+.stepper .n { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font: var(--fw-strong) var(--fs-xs)/1 var(--font);
+  box-shadow: inset 0 0 0 1px var(--line-strong); }
+.stepper .n .icon { width: 13px; height: 13px; stroke-width: 2.5; }
+.stepper li.done { color: var(--ink); }
+.stepper li.done .n { background: var(--ok-tint); color: var(--ok); box-shadow: none; }
+.stepper li.current { background: var(--surface-2); color: var(--ink); font-weight: var(--fw-strong); }
+.stepper li.current .n { background: var(--accent); color: var(--on-accent); box-shadow: none; }
+.stepper li.problem .n { background: var(--bad-tint); color: var(--bad); box-shadow: none; }
+.stepper li .s-note { grid-column: 2; font-size: var(--fs-sm); font-weight: var(--fw-regular); color: var(--ink-2); margin-top: -2px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.step-compact { display: none; gap: 6px; }
+.step-compact .line { display: flex; align-items: baseline; gap: var(--sp-3); }
+.wiz-card { background: var(--surface); border: var(--bw) solid var(--line); border-radius: var(--r-lg); display: flex; flex-direction: column; min-width: 0; }
+.wiz-card .w-body { padding: 16px 18px; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.wiz-card .w-body h2 { margin: 0; font-size: var(--fs-xl); }
+.wiz-card .w-body h3 { margin: 6px 0 0; font-size: var(--fs-lg); }
+.wiz-card .w-body > p, .wiz-card .rules-step > p { font-size: var(--fs-lg); line-height: var(--lh-prose); margin: 0; }
+.wiz-card .w-body > p.sub, .wiz-card .w-body > p.muted { font-size: var(--fs-md); }
+.wiz-card .w-foot { position: sticky; bottom: 0; z-index: var(--z-sticky); display: flex; gap: 8px; align-items: center; justify-content: flex-end; flex-wrap: wrap;
+  padding: 10px 18px; margin: 0; border-top: var(--bw) solid var(--line); background: var(--surface); border-radius: 0 0 var(--r-lg) var(--r-lg); }
+.wiz-card .w-foot .wiz-gap { flex: 1; }
+.wiz-buttons { display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap; margin-top: 6px; }
+.wiz-card .wiz-buttons.w-foot { margin-top: 0; }
+.wiz-body table { margin: 4px 0; }
+details.disclosure > summary { cursor: pointer; color: var(--ink-2); font-size: var(--fs-sm); list-style: none; display: inline-flex; align-items: center; gap: 4px; min-height: var(--ctl-sm); }
+details.disclosure > summary::-webkit-details-marker { display: none; }
+details.disclosure > summary .icon { width: 14px; height: 14px; transform: rotate(-90deg); transition: transform var(--dur-1) var(--ease); }
+details.disclosure[open] > summary .icon { transform: none; }
+details.disclosure > :not(summary) { margin-top: 6px; }
+.nw-review dl.facts { margin: 0; }
+@media (max-width: 760px) {
+  .wiz { grid-template-columns: minmax(0, 1fr); }
+  .wiz ol.stepper { display: none; }
+  .step-compact { display: grid; }
+}
+/* Progress — a 4 px bar (determinate or indeterminate) and the 12 px spinner; a preparation card keeps its shape. */
+.wiz-bar { height: 4px; border-radius: 2px; background: var(--surface-3); overflow: hidden; position: relative; }
+.wiz-bar > span { display: block; height: 100%; background: var(--accent); border-radius: 2px; transition: width var(--dur-2) var(--ease); }
+.wiz-bar.prep-step-bar { height: 3px; }
+.prep-card { background: var(--surface); border: var(--bw) solid var(--line); border-radius: var(--r-lg); padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+.prep-card.prep-done { border-color: color-mix(in srgb, var(--ok) 40%, var(--line)); }
+.prep-card.prep-failed { border-color: color-mix(in srgb, var(--bad) 55%, var(--line)); }
+.prep-output { font: var(--fs-xs)/1.5 var(--mono); color: var(--ink-2); background: var(--surface-2); border-radius: var(--r-sm); padding: 6px 8px; overflow: hidden; }

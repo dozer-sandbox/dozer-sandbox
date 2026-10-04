@@ -318,7 +318,7 @@ function callout(tone, opts = {}) {
   }
   el.append(opts.glyph || icon(opts.icon || TONE_ICON[tone]),
     h('div', { class: 'c-body' + (opts.bodyCls ? ' ' + opts.bodyCls : '') }, opts.title ? h('div', { class: 'c-title' }, opts.title) : null, opts.body),
-    acts.length ? h('div', { class: 'c-acts' }, acts) : null);
+    ...(acts.length ? [h('div', { class: 'c-acts' }, acts)] : []));   // (append writes a null as the text "null")
   return el;
 }
 /// The page notices (#notice, at the top of main, sticky): a failure with no closer home, or one whose home
@@ -1967,15 +1967,50 @@ function nwPayload() {
   for (const [key, field] of Object.entries(NW_FIELD)) if (nw.explicit.has(key) && f[field] !== undefined && f[field] !== null) out[field] = f[field];
   return { folder: nw.open.folder, form: out, explicit: [...nw.explicit] };
 }
+/// 603 (E15): the wizards' stepper — vertical: done (a check, and the step's answer under it), current (the accent
+/// circle), later; a done or reachable step is a link back. Below 760 px it becomes "Step N of M" with a bar.
+function stepperNode(steps, current, opts = {}) {
+  const list = h('ol', { class: 'stepper wiz-steps', 'aria-label': 'Steps' }, steps.map((s, i) => {
+    const state_ = i === current ? 'current' : (opts.done ? opts.done(i) : i < current) ? 'done' : null;
+    const go = opts.go && opts.go(i);
+    const attrs = { class: state_, 'aria-current': i === current ? 'step' : null };
+    if (opts.data) attrs[opts.data] = s.id;
+    const note = state_ === 'done' && opts.note ? opts.note(s, i) : null;
+    return h('li', attrs, h('span', { class: 'n wiz-n' }, state_ === 'done' ? icon('check') : String(i + 1)),
+      go ? h('a', { href: opts.href || '#', on: { click: (ev) => { ev.preventDefault(); go(); } } }, s.title) : h('span', null, s.title),
+      note ? h('span', { class: 's-note' }, note) : null);
+  }));
+  const frac = steps.length ? (current + 1) / steps.length : 0;
+  const compact = h('div', { class: 'step-compact', 'aria-hidden': 'true' },
+    h('div', { class: 'line' }, h('b', null, 'Step ' + (current + 1) + ' of ' + steps.length), h('span', { class: 'muted' }, (steps[current] || {}).title || '')),
+    determinate(frac, '', 'steps'));
+  return { list, compact };
+}
+/// A done New Sandbox step's answer, under its name in the stepper.
+function nwAnswer(id) {
+  const nw = state.nw, f = nw.form;
+  if (!f) return null;
+  const home = (p) => String(p || '').replace(/^\/Users\/[^/]+/, '~');
+  switch (id) {
+    case 'folder': return nw.open ? home(nw.open.folder) : null;
+    case 'image': return f.name + ' · ' + (f.dockerfile ? 'Dockerfile' : f.image);
+    case 'account': { const a = nwAgent(f); return a ? (f.account && f.account !== 'default' ? f.account : 'the store default') : 'none needed'; }
+    case 'access': { const g = f.github || setting('defaults.github', 'off'), ssh = f.sshAgent || setting('sandbox.ssh_agent', 'off');
+      return 'GitHub ' + ({ off: 'off', read: 'read-only', push: 'read and push' }[g] || g) + ' · SSH ' + ssh; }
+    case 'rules': return f.ignoreMode || setting('workspace.ignore_mode', 'lock');
+    case 'permissions': return nwNetwork(f) + (nwPermissionNet(nwNetwork(f)) ? ' · ' + (f.permissions || setting('defaults.permissions', 'standard')) : '');
+    case 'resources': return (f.cpus || setting('defaults.cpus', 2)) + ' CPUs · ' + (f.memory || 'default memory');
+    case 'bridges': return 'clipboard ' + (f.clipboard || setting('sandbox.clipboard', 'write')) + ' · browser ' + (f.browserBridge || setting('sandbox.browser_bridge', 'on'));
+    case 'session': return (f.tmux ?? setting('sessions.tmux', false)) ? 'in tmux' : 'no tmux';
+    default: return null;
+  }
+}
 function nwNode() {
   const nw = state.nw;
   if (nw.tools) return nwToolsNode(nw);
   const steps = nw.steps || [{ id: 'folder', title: 'Project folder' }];
-  const stepper = h('ol', { class: 'wiz-steps', 'aria-label': 'Steps' }, steps.map((s, i) => {
-    const can = nw.form && i <= Math.max(nw.reached, steps.length - 1) && i !== nw.step;
-    return h('li', { class: i === nw.step ? 'current' : i < nw.step ? 'done' : null, 'aria-current': i === nw.step ? 'step' : null, 'data-nw-step': s.id },
-      h('span', { class: 'wiz-n' }, String(i + 1)), can ? h('a', { href: '#/new', on: { click: (ev) => { ev.preventDefault(); nwGo(i); } } }, s.title) : s.title);
-  }));
+  const { list: stepper, compact } = stepperNode(steps, nw.step, { data: 'data-nw-step', href: '#/new', note: (s) => nwAnswer(s.id),
+    go: (i) => (nw.form && i <= Math.max(nw.reached, steps.length - 1) && i !== nw.step ? () => nwGo(i) : null) });
   const ids = steps.map((s) => s.id);
   const id = ids[nw.step] || 'folder';
   const step = { folder: nwFolder, image: nwImage, account: nwAccount, access: nwAccess, rules: nwRules, permissions: nwPermissions,
@@ -1984,12 +2019,13 @@ function nwNode() {
   const error = h('div', { class: 'dlg-error', role: 'alert', 'data-nw-error': '' }, nw.error || '');
   const last = id === 'review';
   const back = nw.step > 0 ? btn('Back', () => nwGo(nw.step - 1)) : null;
-  const skip = nw.form && !last ? btn('Skip to review', () => nwGo(ids.length - 1), { icon: 'skip-forward', title: 'Everything not chosen yet keeps its default' }) : null;
+  const skip = nw.form && !last ? btn('Skip to review', () => nwGo(ids.length - 1), { quiet: true, icon: 'skip-forward', title: 'Everything not chosen yet keeps its default' }) : null;
   if (skip) skip.dataset.nwSkip = '';
-  const next = last ? null : h('button', { type: 'submit', class: 'btn primary', 'data-nw-next': '' }, withIcon('arrow-right', 'Next'));
-  const form = h('form', { class: 'wiz-body panel', 'data-nw-body': id, novalidate: '' },
-    h('h2', null, (steps[nw.step] || { title: 'Project folder' }).title), step.el, error,
-    h('div', { class: 'wiz-buttons' }, back, h('span', { class: 'wiz-gap' }), skip, step.extra || null, next));
+  // Next: the step's one primary — a trailing arrow (forward); the actions in a footer that never leaves the screen.
+  const next = last ? null : h('button', { type: 'submit', class: 'btn lg primary', 'data-nw-next': '' }, h('span', { class: 'btn-label' }, 'Next'), icon('arrow-right'));
+  const form = h('form', { class: 'wiz-card', 'data-nw-body': id, novalidate: '' },
+    h('div', { class: 'w-body' }, compact, h('h2', null, (steps[nw.step] || { title: 'Project folder' }).title), step.el, error),
+    h('div', { class: 'w-foot wiz-buttons' }, back, h('span', { class: 'wiz-gap' }), skip, step.extra || null, next));
   form.addEventListener('submit', (ev) => { ev.preventDefault(); if (!last) nwGo(nw.step + 1); });
   form.addEventListener('keydown', (ev) => {
     // Alt+← / Alt+→: Back / Next (Enter in a field is Next; a textarea keeps its Enter).
@@ -1998,10 +2034,10 @@ function nwNode() {
   });
   const node = h('div', { class: 'wizard nw', 'data-nw': id },
     h('div', { class: 'head' }, h('h1', null, 'New sandbox'),
-      h('div', { class: 'actions' }, btn('One-page form', () => createDialog(), { small: true, icon: 'table', title: 'All choices on one page (an isolated sandbox, no project file)' }))),
+      h('div', { class: 'actions' }, btn('One-page form', () => createDialog(), { quiet: true, icon: 'list-checks', title: 'All choices on one page (an isolated sandbox, no project file)' }))),
     h('p', { class: 'sub' }, 'Step by step; your choices are written to the project folder’s ', h('code', null, 'doz_project.yaml'),
       ' — ', h('code', null, 'doz up'), ' there makes the same sandbox. The same as ', h('code', null, 'doz init'), ' in a terminal.'),
-    stepper, form);
+    h('div', { class: 'wiz' }, stepper, form));
   nw.node = node;
   return node;
 }
@@ -2013,9 +2049,7 @@ function nwNode() {
 function nwToolsNode(nw) {
   const t = nw.tools, plan = t.plan;
   const steps = (nw.steps || []).concat([{ id: 'tools', title: 'Setting up tools' }]);
-  const stepper = h('ol', { class: 'wiz-steps', 'aria-label': 'Steps' }, steps.map((s, i) =>
-    h('li', { class: i === steps.length - 1 ? 'current' : 'done', 'aria-current': i === steps.length - 1 ? 'step' : null, 'data-nw-step': s.id },
-      h('span', { class: 'wiz-n' }, String(i + 1)), s.title)));
+  const { list: stepper, compact } = stepperNode(steps, steps.length - 1, { data: 'data-nw-step', note: (s) => nwAnswer(s.id) });
   const last = new Map(((plan && plan.last && plan.last.results) || []).map((r) => [r.id, r]));
   const busy = t.phase === 'starting' || t.phase === 'retrying';
   const rows = ((plan && plan.plan.items) || []).map((it) => {
@@ -2040,14 +2074,15 @@ function nwToolsNode(nw) {
   const node = h('div', { class: 'wizard nw', 'data-nw': 'tools' },
     h('div', { class: 'head' }, h('h1', null, 'New sandbox')),
     h('p', { class: 'sub' }, t.name + ' is made. Now it starts, and Dozer sets up the tools its settings call for — the tools layer, on any base, without rebuilding an image.'),
-    stepper,
-    h('section', { class: 'wiz-body panel', 'data-nw-tools': t.phase },
-      h('h2', null, 'Setting up tools'),
-      plan ? h('ul', { class: 'plain tool-list' }, rows) : h('p', { class: 'muted' }, 'Reading the tools layer…'),
-      h('p', { class: 'muted mono tools-progress', 'data-tools-progress': '', 'aria-live': 'polite' }, busy ? (t.progress || 'starting…') : ''),
-      t.error ? callout('bad', { cls: 'notice', attrs: { 'data-tools-error': '' }, body: t.error }) : null,
-      failed ? h('p', { class: 'muted' }, 'Something could not be set up — the sandbox works without it. Retry, or continue; ', h('code', null, 'doz tools ' + t.name + ' --apply'), ' tries again later.') : null,
-      h('div', { class: 'wiz-buttons' }, h('span', { class: 'wiz-gap' }), buttons)));
+    h('div', { class: 'wiz' }, stepper,
+      h('section', { class: 'wiz-card', 'data-nw-tools': t.phase },
+        h('div', { class: 'w-body' }, compact,
+          h('h2', null, 'Setting up tools'),
+          plan ? h('ul', { class: 'plain tool-list' }, rows) : h('p', { class: 'muted' }, 'Reading the tools layer…'),
+          h('p', { class: 'muted mono tools-progress', 'data-tools-progress': '', 'aria-live': 'polite' }, busy ? (t.progress || 'starting…') : ''),
+          t.error ? callout('bad', { cls: 'notice', attrs: { 'data-tools-error': '' }, body: t.error }) : null,
+          failed ? h('p', { class: 'muted' }, 'Something could not be set up — the sandbox works without it. Retry, or continue; ', h('code', null, 'doz tools ' + t.name + ' --apply'), ' tries again later.') : null),
+        h('div', { class: 'w-foot wiz-buttons' }, h('span', { class: 'wiz-gap' }), buttons))));
   nw.node = node;
   return node;
 }
@@ -2372,7 +2407,7 @@ function nwReview() {
   const pre = h('pre', { class: 'nw-yaml', 'data-nw-yaml': '' }, nw.preview ? nw.preview.text : 'Reading…');
   const where = h('div', { class: 'muted mono', 'data-nw-file': '' }, nw.preview ? nw.preview.path : '');
   const diffBox = h('div', { 'data-nw-diff-box': '' });
-  const go = btn(nw.open && nw.open.file ? 'Replace the file and create' : 'Write and create', () => nwCreate(go), { primary: true, icon: 'rocket' });
+  const go = btn(nw.open && nw.open.file ? 'Replace the file and create' : 'Write and create', () => nwCreate(go), { primary: true, lg: true, icon: 'rocket' });
   go.dataset.nwCreate = '';
   go.disabled = !nw.preview;
   const paint = () => {
@@ -2385,12 +2420,33 @@ function nwReview() {
   };
   if (nw.preview) setTimeout(paint, 0);
   else {
-    api('project/preview', { method: 'POST', json: nwPayload() }).then((p) => { nw.preview = p; if (state.view === 'new' && state.nw === nw) paint(); })
+    api('project/preview', { method: 'POST', json: nwPayload() }).then((p) => { nw.preview = p; if (state.view === 'new' && state.nw === nw) { paint(); pre.dispatchEvent(new Event('nw-preview')); } })
       .catch((e) => { pre.textContent = ''; const err = $('view').querySelector('[data-nw-error]'); if (err) err.textContent = e.message || String(e); });
   }
+  // 603 (E15, owner decision 11): what will happen first — the choices as facts, then the steps — and the file,
+  // exactly as written, one click away (the replace diff still comes before an existing file is replaced).
+  const f = nw.form, fact = (k, v) => (v ? [h('dt', null, k), h('dd', null, v)] : null);
+  const img = nw.images.find((x) => x.name === f.image);
+  const willPrepare = !f.dockerfile && img && !img.baked;
+  const lines = h('span', { 'data-nw-lines': '' }, '');
+  const disclosure = h('details', { class: 'disclosure nw-file' }, h('summary', null, icon('chevron-down'), 'The file, exactly as written', lines), where, pre);
+  const lineCount = () => { lines.textContent = nw.preview ? ' (' + plural(nw.preview.text.split('\n').filter((l, i, a) => i < a.length - 1 || l).length, 'line', 'lines') + ')' : ''; };
+  if (nw.preview) setTimeout(lineCount, 0);
+  else pre.addEventListener('nw-preview', lineCount);
   return {
-    el: h('div', { class: 'nw-fields' }, h('p', null, 'The project file — exactly what is written:'), where, pre, diffBox,
-      h('small', { class: 'muted' }, 'Then the sandbox is made from it (as ', h('code', null, 'doz up'), ' there would), started, and opened.')),
+    el: h('div', { class: 'nw-fields nw-review' },
+      h('dl', { class: 'facts' },
+        fact('Folder', [h('code', null, nwAnswer('folder')), nw.open && nw.open.file ? ' — ' + nw.open.file + ' is there' : ' — doz_project.yaml is new']),
+        fact('Sandbox', f.name + ' · ' + (f.dockerfile ? 'your Dockerfile' : f.image) + ' · ' + nwAnswer('resources')),
+        fact('Account', nwAnswer('account')),
+        fact('Network', nwAnswer('permissions')),
+        fact('Access', nwAnswer('access')),
+        fact('Workspace rules', nwAnswer('rules')),
+        fact('Bridges', nwAnswer('bridges') + ' · files ' + (f.openFiles || setting('sandbox.open_files', 'on'))),
+        fact('Session', nwAnswer('session') + ' · sudo ' + ((f.agentSudo ?? setting('sandbox.agent_sudo', true)) ? 'yes' : 'no'))),
+      callout('info', { compact: true, attrs: { 'data-nw-what': '' }, body: ['Writing the file, then making the sandbox as ', h('code', null, 'doz up'),
+        ' would there, starting it and setting up its tools; then it opens.', willPrepare ? ' The first start prepares the ' + f.image + ' image (minutes, needs network).' : ''] }),
+      diffBox, disclosure),
     extra: go,
   };
 }
@@ -2905,7 +2961,7 @@ function sandboxParts(name, d, net, accounts) {
     h('div', { class: 'sbx-title' },
       h('h1', null, name), sandboxPill(i),
       h('span', { class: 'chips sbx-meta' },
-        chip('Image', i.imageTitle || i.image, { title: i.image + (i.dockerfile ? ' — Dockerfile ' + i.dockerfile : ''), data: { 'data-image-title': '' } }),
+        chip('Image', h('span', { 'data-image-title': '' }, i.imageTitle || i.image), { title: i.image + (i.dockerfile ? ' — Dockerfile ' + i.dockerfile : '') }),
         chip('RAM', (i.ramHeldMiB ? mib(i.ramHeldMiB) : '—') + ' of ' + mib(i.memoryMiB)),
         chip('Network', [i.network, i.deniedConnections ? h('span', { class: 'tag warn' }, i.deniedConnections + ' denied') : null, icon('panel-right')],
           { onClick: showTab('network'), title: 'Its network — the Network tab', data: { 'data-network-chip': '' } }),
@@ -4159,7 +4215,8 @@ function rulesStep(opts) {
     return label;
   });
   return h('div', { class: 'rules-step', 'data-rules-step': mode },
-    h('p', null, g.intro), points, folder,
+    h('p', null, g.intro),
+    h('details', { class: 'disclosure' }, h('summary', null, icon('chevron-down'), 'How they work, and what they are not'), points), folder,
     h('fieldset', { class: 'wiz-choices' }, h('legend', null, g.question), radios),
     h('p', { class: 'muted' }, mode === 'sandbox' ? g.sandboxScope : g.defaultScope));
 }
@@ -4233,14 +4290,19 @@ function wizardNode() {
   const w = state.wiz, d = w.data;
   // 596: the base catalogue for the First sandbox step, read early (a late answer never re-renders a typed form).
   if (!w.basesAsked) { w.basesAsked = true; api('bases').then((b) => { w.bases = b; }).catch(() => { w.bases = null; }); }
-  const stepper = h('ol', { class: 'wiz-steps', 'aria-label': 'Steps' }, WIZ_STEPS.map((s, i) =>
-    h('li', { class: i === w.step ? 'current' : i < w.step ? 'done' : null, 'aria-current': i === w.step ? 'step' : null }, h('span', { class: 'wiz-n' }, String(i + 1)), s)));
+  // 603: the same vertical stepper as New sandbox (a done step can be gone back to before Preparing).
+  const { list: stepper, compact } = stepperNode(WIZ_STEPS.map((title, i) => ({ id: String(i), title })), w.step,
+    { go: (i) => (i < w.step && w.step < WIZ.preparing && i > 0 ? () => wizGo(i) : null) });
   const body = [wizStep0, wizStep1, wizStep2, wizStepRules, wizStep3, wizStep4, wizStep5, wizStep6][w.step](d, w);
+  // The step's buttons (its last part) become the card's footer, which never leaves the screen.
+  const last = body[body.length - 1];
+  const foot = last && last.classList && last.classList.contains('wiz-buttons') ? body.pop() : null;
+  if (foot) foot.classList.add('w-foot');
   return h('div', { class: 'wizard', 'data-step': String(w.step) },
     h('h1', null, 'Set up Dozer Sandbox'),
     h('p', { class: 'sub' }, 'Once for this Mac (store ', h('code', null, $('store-path').textContent), '). The same as ', h('code', null, 'doz onboard'), ' in a terminal.'),
-    stepper, h('section', { class: 'wiz-body panel' }, body,
-      w.error ? callout('bad', { compact: true, body: w.error, attrs: { 'data-wiz-error': '' }, dismiss: () => { w.error = null; renderWizard(true); } }) : null));
+    h('div', { class: 'wiz' }, stepper, h('section', { class: 'wiz-card wiz-body' }, h('div', { class: 'w-body' }, compact, body,
+      w.error ? callout('bad', { compact: true, body: w.error, attrs: { 'data-wiz-error': '' }, dismiss: () => { w.error = null; renderWizard(true); } }) : null), foot)));
 }
 function wizStep0(d) {
   // 602 (owner: "detect if onboarding has already ran (i ran it in the cli) and show that and give the
@@ -5600,7 +5662,7 @@ function paintTile(tile, w) {
     tile.note.hidden = false;
     tile.note.className = 'tile-note static';
     tile.note.replaceChildren(
-      !w.none && PHASE_GLYPH[s.phase] ? h('div', { class: 'tc-glyph' }, icon(PHASE_GLYPH[s.phase])) : null,
+      ...(!w.none && PHASE_GLYPH[s.phase] ? [h('div', { class: 'tc-glyph' }, icon(PHASE_GLYPH[s.phase]))] : []),   // (no null: replaceChildren writes it as text)
       h('div', { class: 'tile-note-head' }, w.none ? 'No sessions running' : s.phaseLabel),
       h('div', null, w.none ? 'Open one from its page.' : s.phase === 'off' ? 'Starting boots it fresh — new sessions.'
         : known.length ? 'Sessions when it last ran: ' + known.map((x) => x.name).join(', ') : 'Its sessions are listed while it runs.'));
