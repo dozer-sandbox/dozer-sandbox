@@ -196,6 +196,8 @@ final class ImageSpecTests: XCTestCase {
         XCTAssertTrue(s.contains("mountpoint -q '/home/agent/.pi/agent' ||"), "idempotent")
         XCTAssertTrue(s.contains("chown agent:agent '/state/home_agent_.pi_agent'"))
         XCTAssertEqual(GuestCommand.prepareGuest(imageSpec: nil), "set -e; rm -rf /run/deckhold; mkdir -p /run/deckhold; chmod 1777 /run/deckhold; "
+                       // 599g: the last boot's view records go (/run is on the root disk)
+                       + "rm -rf '/run/doz/view'; for d in '/run/doz/raw'/*; do [ -d \"$d\" ] && ! mountpoint -q \"$d\" && rmdir \"$d\" 2>/dev/null; done; true; "
                        + GuestCommand.ownHostnameScript + "; " + GuestCommand.debconfNoninteractiveScript + "; " + GuestCommand.openShimInstall
                        // 599d: git's helper, the (empty) Dozer git config, no SSH agent.
                        + "; " + GuestCommand.gitCredentialInstall + "; " + GuestCommand.gitConfigScript(.off) + "; " + GuestCommand.sshAgentScript(on: false),

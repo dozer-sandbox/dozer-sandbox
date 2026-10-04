@@ -79,6 +79,7 @@ func runIn(_ h: CLIHarness, _ cwd: URL, _ args: [String], timeout: Double = 300)
 }
 
 func cliOnboardingSuite(binary: String) async {
+    cliFirstExecProgressChecks(binary: binary)
     // ── A: the lab, from nothing prepared: onboard + a joining start; init + up; D17 ─────────────
     let a = onboardingHarness(binary, "a", seed: ["kernels", "content", "state.json", "initfs.ext4"])
     let xdg = URL(fileURLWithPath: a.env["XDG_CONFIG_HOME"]!)
@@ -93,6 +94,12 @@ func cliOnboardingSuite(binary: String) async {
     check((try? String(contentsOf: toml, encoding: .utf8))?.contains("\nimage = \"claude-code\"\n") == true, "doz.toml written, with defaults.image set")
     check(FileManager.default.fileExists(atPath: xdg.appendingPathComponent("dozer-sandbox/agent-prompt.md").path), "agent-prompt.md written beside it")
     check(OnboardingRecord.read(DozerStore(root: a.store)) != nil, "onboarded.json recorded")
+    check(r.out.contains("3. Workspace rules") && r.out.contains("lock — unchanged"), "the Workspace rules step: said, nothing chosen off a terminal")
+    check((try? String(contentsOf: toml, encoding: .utf8))?.contains("\nignore_mode =") == false, "workspace.ignore_mode NOT written (only when chosen)")
+    r = a.run(["onboard", "--no-images", "--account", "later", "--ignore-mode", "hide", "--yes"], timeout: 120)
+    check(r.code == 0 && r.out.contains("Workspace rules: set workspace.ignore_mode = hide"), "--ignore-mode hide: chosen, so written (exit \(r.code))")
+    check((try? String(contentsOf: toml, encoding: .utf8))?.contains("\nignore_mode = \"hide\"\n") == true, "doz.toml says ignore_mode = hide")
+    check(a.run(["config", "set", "workspace.ignore_mode", "lock"]).code == 0, "back to lock")
     let tomlBefore = (try? String(contentsOf: toml, encoding: .utf8)) ?? ""
 
     print("cli: onboard takes a key the doz account add way (owner ruling; the memory keychain)")
@@ -380,4 +387,52 @@ func cliOnboardingSuite(binary: String) async {
           "the installed doz and its link are gone")
     check(FileManager.default.fileExists(atPath: config.appendingPathComponent("doz.toml").path), "--keep-config: the settings stay")
     try? FileManager.default.removeItem(at: u)
+}
+
+/// The first `doz exec` on a lab never prepared (only the kernel cached): its progress is SHOWN while
+/// it happens — the host's "not prepared" note within about a second, and both pulls (the guest init
+/// image, alpine) drawn with their bytes before they end. (It printed nothing for 18 s, then
+/// everything at once: the CLI held its lines until an event came after the first second, and both
+/// pulls sent none.) On a pseudo-terminal, as a person sees it.
+func cliFirstExecProgressChecks(binary: String) {
+    print("cli: a first exec on a lab never prepared shows its progress as it happens")
+    let h = onboardingHarness(binary, "p", seed: ["kernels"])
+    defer {
+        h.run(["host", "stop"])
+        try? FileManager.default.removeItem(at: h.store)
+        try? FileManager.default.removeItem(atPath: h.store.path + "-ws")
+    }
+    let ws = URL(fileURLWithPath: h.store.path + "-ws")             // never inside the store (refused)
+    guard h.run(["create", "q1", "--image", "lab", "--workspace", ws.path]).code == 0 else { check(false, "create q1 (lab)"); return }
+    h.run(["host", "stop"])
+    let p = Process()
+    p.executableURL = URL(fileURLWithPath: "/usr/bin/script")
+    p.arguments = ["-q", "/dev/null", h.binary, "exec", "q1", "--", "true"]
+    p.environment = h.env
+    let o = Pipe()
+    p.standardOutput = o
+    p.standardError = o
+    p.standardInput = FileHandle.nullDevice
+    let t0 = Date()
+    do { try p.run() } catch { check(false, "script(1) runs: \(error)"); return }
+    let c = PipeCollector(o.fileHandleForReading)
+    var firstNote: Double?, initBar: Double?, initDone: Double?, alpineBar: Double?, alpineDone: Double?
+    let deadline = t0.addingTimeInterval(600)
+    while p.isRunning && Date() < deadline {
+        let t = c.text, now = Date().timeIntervalSince(t0)
+        if firstNote == nil, t.contains("is not prepared in this store yet") { firstNote = now }
+        if initBar == nil, t.contains("pulling the guest init image") { initBar = now }
+        if initDone == nil, t.contains("pulled the guest init image") { initDone = now }
+        if alpineBar == nil, t.contains("pulling alpine") { alpineBar = now }
+        if alpineDone == nil, t.contains("pulled alpine") { alpineDone = now }
+        usleep(50_000)
+    }
+    if p.isRunning { p.terminate() }
+    p.waitUntilExit()
+    c.wait(5)
+    func s(_ v: Double?) -> String { v.map { String(format: "%.1f s", $0) } ?? "never" }
+    check(p.terminationStatus == 0, "doz exec q1 -- true on a pseudo-terminal exits 0 (\(p.terminationStatus))")
+    check((firstNote ?? 99) < 3, "the host's note that the lab is not prepared appears within about a second (\(s(firstNote)), the host's own start included)")
+    check(initBar != nil && initBar! < (initDone ?? 0), "the guest init image's pull is drawn while it runs (bar \(s(initBar)), done \(s(initDone)))")
+    check(alpineBar != nil && alpineBar! < (alpineDone ?? 0), "alpine's pull is drawn while it runs (bar \(s(alpineBar)), done \(s(alpineDone)))")
 }

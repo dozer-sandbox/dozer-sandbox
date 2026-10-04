@@ -60,6 +60,7 @@ public enum AgentPrompt {
         ("workspace.host_path", "the Mac folder shared at /workspace, or (none)"),
         ("workspace.guest_path", "/workspace"),
         ("workspace.description", "a sentence: where /workspace comes from, or that it is not shared"),
+        ("workspace.rules", "one short line: the user's .dozignore / .dozreadonly rules shaping /workspace (locked or hidden paths, read-only ones) — empty when none apply"),
         ("network.mode", "agent, bake, locked, open, custom (proxied), nat or none"),
         ("network.allowed_hosts", "the hosts the policy allows (proxied), comma-separated"),
         ("network.description", "a sentence: how the sandbox reaches the network and what to do when refused"),
@@ -85,6 +86,7 @@ public enum AgentPrompt {
     # Where you are running: a Dozer Sandbox
     - You are in `{{sandbox.name}}`, a Dozer Sandbox: a Linux virtual machine (not a container) on the user's Mac ({{mac.hostname}}), run by Apple's Virtualization framework — image {{sandbox.image}} (base: {{sandbox.base}}), {{sandbox.cpus}} CPUs, {{sandbox.memory}}.
     - {{workspace.description}}
+    - {{workspace.rules}}
     - Network: {{network.description}}
     - Credentials: {{credentials.description}}
     - System: {{sudo.description}}
@@ -110,6 +112,7 @@ public enum AgentPrompt {
     ## Your files and the user's Mac
 
     - {{workspace.description}}
+    - {{workspace.rules}}
     - Everything else is on this VM's own disks, invisible from the Mac's Finder.
 
     ## What persists
@@ -198,8 +201,18 @@ public enum AgentPrompt {
                               timeZone: String? = nil, sudoMissingFromImage: String? = nil,
                               base: String? = nil, apk: Bool = false, clipboard: Bool = true,
                               browser: Bool = true, openFiles: Bool = true, openApps: [String] = [],
-                              github: GitHubAccess.Mode? = nil, sshAgent: Bool = false, tools: ToolsReport? = nil) -> [String: String] {
+                              github: GitHubAccess.Mode? = nil, sshAgent: Bool = false, tools: ToolsReport? = nil,
+                              workspaceRules: WorkspaceRuleMode? = nil) -> [String: String] {
         var v: [String: String] = [:]
+        // 599g: only while a view serves the user's rules (it is the guest's state, not the Mac's files).
+        switch workspaceRules {
+        case .lock?:
+            v["workspace.rules"] = "Workspace rules: the user's .dozignore blocks some paths in /workspace — they are listed with no permissions (`----------`) and every read or write of them is refused; do not try to read, overwrite or recreate them. Paths in .dozreadonly (and doz_project.yaml, .git/hooks, .dozignore, .dozreadonly) are read-only. These are the user's choice, not errors to work around — ask the user if you need one (`doz ignore check` on their Mac says why)."
+        case .hide?:
+            v["workspace.rules"] = "Workspace rules: the user's .dozignore hides some paths in /workspace — they are not there for you; do not recreate them (creating such a name is refused). Paths in .dozreadonly (and doz_project.yaml, .git/hooks, .dozignore, .dozreadonly) are read-only. These are the user's choice, not errors to work around — ask the user if you need one."
+        case nil:
+            v["workspace.rules"] = ""
+        }
         // 599d: the user's GitHub login and SSH agent — one short facts line (none when both are off), the
         // details in the skill. 599h: what the tools layer put in place, folded in (gh, the ssh client + host keys).
         func tool(_ id: String) -> ToolResult? { tools?.results.first { $0.id == id } }
@@ -398,7 +411,8 @@ public enum AgentPrompt {
     /// The prompt and skill a sandbox gets at its next session. nil: its image runs no agent.
     public static func report(config: SandboxConfig, policy: NetworkPolicy?, account: String?, version: String,
                               settings: DozerSettings = .load(), hostname: String = macHostname(),
-                              credentialProblem: String? = nil, sudoInstalled: Bool? = nil, tools: ToolsReport? = nil) -> AgentPromptReport? {
+                              credentialProblem: String? = nil, sudoInstalled: Bool? = nil, tools: ToolsReport? = nil,
+                              workspaceRules: WorkspaceRuleMode? = nil) -> AgentPromptReport? {
         guard let agent = agent(of: config.spec), let imageSpec = config.spec.imageSpec else { return nil }
         let network: NetworkMode = policy.map { .proxied($0) } ?? config.spec.network
         // 594 W28: sudo only when it is on AND the guest has it (a disk from an older image may not).
@@ -417,7 +431,7 @@ public enum AgentPrompt {
                           openApps: WorkspaceFiles.appNames(settings.string(SettingKey.openApps) ?? "") ?? [],
                           github: AgentPermissions.gitHubMode(policy?.permissions),
                           sshAgent: policy != nil && HostCore.sandboxValue(config, SettingKey.sshAgent, settings: settings) == .string("on"),
-                          tools: tools)
+                          tools: tools, workspaceRules: workspaceRules)
         var r = AgentPromptReport(enabled: settings.bool(SettingKey.agentPrompt), agent: agent, text: nil, error: nil, layers: [],
                                   skill: nil, promptPath: guestPromptPath,
                                   skillPath: skillDirectory(agent: agent, home: imageSpec.home) + "/SKILL.md")
@@ -483,7 +497,8 @@ extension HostCore {
     func agentPromptReport(_ m: Managed, sudoInstalled: Bool? = nil) -> AgentPromptReport? {
         AgentPrompt.report(config: m.config, policy: m.sandbox.egress?.policy,
                            account: m.sandbox.egress == nil ? nil : accountName(m), version: version,
-                           credentialProblem: credentialProblem(m), sudoInstalled: sudoInstalled, tools: m.sandbox.lastToolsReport)
+                           credentialProblem: credentialProblem(m), sudoInstalled: sudoInstalled, tools: m.sandbox.lastToolsReport,
+                           workspaceRules: m.sandbox.activeViews.values.first?.mode)
     }
 
     /// Write (or, when off, remove) the facts file and the skill in the guest — a utility exec as

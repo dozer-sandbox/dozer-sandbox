@@ -30,7 +30,7 @@ doz init
 ```
 
 On a terminal `doz init` walks the same steps as the dashboard's **New sandbox** wizard, each saying
-`Step N of 9`:
+`Step N of 10`:
 
 1. **Project folder** — the folder, and the sandbox's name (suggested from the folder's);
 2. **Agent and base** — the image (suggested from the setting `defaults.image`);
@@ -40,12 +40,16 @@ On a terminal `doz init` walks the same steps as the dashboard's **New sandbox**
    turn on is confirmed live (as `doz access` does); one that can't be confirmed can be skipped — kept,
    not confirmed — turned off, or checked again. Where the GitHub token comes from is this Mac's choice
    (`doz access set`), not the project's;
-5. **Permissions and network** — the network, and what the agent may do (`standard`, `locked`,
+5. **Workspace rules** — onboarding's description of `.dozignore` and `.dozreadonly`, what the folder
+   already has (each rule file, how many patterns and its first lines — or *none — the folder is shared
+   as is*, with how to add one), and this sandbox's choice: **Lock** or **Hide** (`ignore_mode` in the
+   file; the default is the setting `workspace.ignore_mode`). See [Workspace rules](20-workspace-rules.md);
+6. **Permissions and network** — the network, and what the agent may do (`standard`, `locked`,
    `open`, or changes like `+web,-error-reports`);
-6. **Resources** — CPUs and memory (the disk is the image's own; it isn't set per sandbox);
-7. **Bridges** — the clipboard, links in your browser, workspace files opened on the Mac;
-8. **Session** — tmux, and the agent's sudo;
-9. **Review** — the file it will write, and **Write?**
+7. **Resources** — CPUs and memory (the disk is the image's own; it isn't set per sandbox);
+8. **Bridges** — the clipboard, links in your browser, workspace files opened on the Mac;
+9. **Session** — tmux, and the agent's sudo;
+10. **Review** — the file it will write, and **Write?**
 
 Each question shows its default; **Enter** keeps it. It sets this Mac up first if it never was. The
 file lists every key: what you chose is set, and what you left at its default stays commented out — it
@@ -64,7 +68,7 @@ doz init --force            # rewrite an existing doz_project.yaml without askin
 |---|---|
 | `DIR` | The folder (default: the current one; made if missing). |
 | `--name` · `--image` · `--cpus` · `--memory` · `--network` · `--permissions` · `--account` | Answer those questions up front. |
-| `--github` · `--ssh-agent` · `--clipboard` · `--browser-bridge` · `--open-files` · `--tmux` · `--agent-sudo` | The same, for access, bridges and the session (`--no-tmux`, `--no-agent-sudo` too). |
+| `--github` · `--ssh-agent` · `--ignore-mode` · `--clipboard` · `--browser-bridge` · `--open-files` · `--tmux` · `--agent-sudo` | The same, for access, workspace rules, bridges and the session (`--no-tmux`, `--no-agent-sudo` too). |
 | `--yes` | Ask nothing: every default. `--json` and no terminal ask nothing too. |
 | `--force` | Rewrite an existing file without asking. |
 
@@ -90,13 +94,15 @@ names the shortest way back — in the project folder that is just `doz up`.
 
 ### In the dashboard
 
-**Sandboxes** › **New sandbox** is a wizard with the same nine steps. It starts with the **project
+**Sandboxes** › **New sandbox** is a wizard with the same ten steps. It starts with the **project
 folder**: a new folder in your projects folder, or a folder you have (type it, or **Choose…** in your
 Mac's folder picker). If that folder has a project file, the wizard starts from it.
 
 - Every step is filled in from your settings (or from the file). **Back** and **Next** move between
   steps, **Enter** is Next, **Alt+←** / **Alt+→** too, and **Skip to review** jumps to the end keeping
   every default.
+- **Workspace rules** lists the folder's `.dozignore` / `.dozreadonly` as they are now; add or edit one on
+  the Mac and press **Look again**.
 - **Review** shows the exact `doz_project.yaml` it will write. **Write and create** writes it into the
   folder, makes the sandbox from it — as `doz up` there would — starts it and opens its page with the
   boot in a terminal. A folder that already has a file asks first, showing what changes.

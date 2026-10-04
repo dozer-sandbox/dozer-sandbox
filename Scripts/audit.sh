@@ -13,7 +13,7 @@
 #      and (585) swift-argument-parser for the `doz` CLI — imported only by its command targets.
 #   4. No app-brand literal (a bundle id, a product or storage directory name) survives.
 #   5. The committed deckhold binary is the one Guest/deckhold/PROVENANCE.md records.
-#   6. The committed doznet binary is the one Guest/doznet/PROVENANCE.md records.
+#   6. The committed doznet binary is the one Guest/doznet/PROVENANCE.md records (6b: dozview's, and no libfuse).
 #   7. (590) The web UI's committed assets are exactly what Sources/DozerWeb/WebSource builds, and
 #      its modules stay where they belong (NIOHTTP1 in DozerWeb; LaunchServices in `doz ui`).
 #   8. (592) The product's OLD name is gone: no file in the repo (sources, tests, scripts, docs, CI)
@@ -139,6 +139,15 @@ NSHA=$(shasum -a 256 "$NBIN" | awk '{print $1}')
 grep -qF "| sha256 (auto) | \`$NSHA\` |" "$PACKAGE/Guest/doznet/PROVENANCE.md" \
     || fail "Resources/doznet ($NSHA) is not the binary Guest/doznet/PROVENANCE.md records — run make doznet"
 
+# ── 6b. (599g) The committed dozview binary matches its provenance ───────────
+VBIN="$PACKAGE/Sources/DozerKit/Resources/dozview"
+[[ -f "$VBIN" ]] || fail "missing the committed dozview binary ($VBIN)"
+VSHA=$(shasum -a 256 "$VBIN" | awk '{print $1}')
+grep -qF "| sha256 (auto) | \`$VSHA\` |" "$PACKAGE/Guest/dozview/PROVENANCE.md" \
+    || fail "Resources/dozview ($VSHA) is not the binary Guest/dozview/PROVENANCE.md records — run make dozview"
+# 599g: no libfuse in the guest view (LGPL-2.1): the raw /dev/fuse protocol only.
+grep -rqE '#include[[:space:]]*[<"]fuse(_lowlevel)?\.h[>"]|-lfuse' "$PACKAGE/Guest/dozview" && fail "Guest/dozview must not use libfuse (LGPL) — the raw /dev/fuse protocol only"
+
 # ── 7. (590) The web UI's committed assets match their sources ───────────────
 swift "$PACKAGE/Scripts/build-web-assets.swift" --check >/dev/null || fail "Sources/DozerWeb/Resources/Web is stale — run make web-assets and commit it"
 
@@ -156,6 +165,6 @@ $STRAY"
 printf 'ok audit: DozerKit imports only its allowlist (Foundation/Security/Virtualization/Containerization/NIO/X509),\n'
 printf '          depends only on apple/containerization (exact) + the apple/* packages it already resolves\n'
 printf '          (TLS; ArgumentParser for the CLI targets only) and Yams (exact; the CLI'"'"'s project file only),\n'
-printf '          carries no host brand, deckhold + doznet match their provenance,\n'
+printf '          carries no host brand, deckhold + doznet + dozview match their provenance (no libfuse),\n'
 printf '          the web UI (NIOHTTP1, confined) ships exactly the assets its sources build,\n'
 printf '          and no file carries the pre-592 product name\n'

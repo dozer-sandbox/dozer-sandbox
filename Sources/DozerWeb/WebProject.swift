@@ -8,7 +8,7 @@ import DozerHost
 //
 //   · `POST /api/v1/project/open` {folder} — changes nothing: the folder (normalized; whether it exists),
 //     its project file (doz_project.yaml or .yml — both is an error) read into the wizard's form, or the
-//     defaults; the steps (`ProjectWizard.steps`, the same list `doz init` walks).
+//     defaults; the steps (`ProjectWizard.steps`, the same list `doz init` walks); 599g: its rule files.
 //   · `POST /api/v1/project/preview` {folder, form, explicit} — changes nothing: the EXACT file the wizard
 //     will write (`DozerProject.render`, read back by the CLI's own parser — one validator), the file there
 //     now and the line diff, and the digest a write must name to replace it.
@@ -71,6 +71,7 @@ public struct WebProjectForm: Codable, Equatable, Sendable {
     public var browserBridge: String?
     public var openFiles: String?
     public var tmux: Bool?
+    public var ignoreMode: String?
     public var agentSudo: Bool?
     public var agentPrompt: String?
     public var agentPromptMode: String?
@@ -78,7 +79,7 @@ public struct WebProjectForm: Codable, Equatable, Sendable {
 
     static let settingFields: [(field: String, setting: String)] = [
         ("sshAgent", SettingKey.sshAgent), ("clipboard", SettingKey.clipboard), ("browserBridge", SettingKey.browserBridge),
-        ("openFiles", SettingKey.openFiles), ("tmux", SettingKey.tmux),
+        ("openFiles", SettingKey.openFiles), ("tmux", SettingKey.tmux), ("ignoreMode", SettingKey.ignoreMode),
     ]
 
     public init(_ p: DozerProject) {
@@ -98,6 +99,7 @@ public struct WebProjectForm: Codable, Equatable, Sendable {
         browserBridge = p.settings[SettingKey.browserBridge]?.plain
         openFiles = p.settings[SettingKey.openFiles]?.plain
         if case .bool(let b)? = p.settings[SettingKey.tmux] { tmux = b }
+        ignoreMode = p.settings[SettingKey.ignoreMode]?.plain
         agentSudo = p.agentSudo
         agentPrompt = p.agentPrompt
         agentPromptMode = p.agentPromptMode
@@ -126,7 +128,8 @@ public struct WebProjectForm: Codable, Equatable, Sendable {
             guard let v = DozerImages.parseMemory(m) else { throw invalid("memory: a size like 2G or 512M") }
             p.memoryMiB = v
         }
-        for (field, key) in [("sshAgent", sshAgent), ("clipboard", clipboard), ("browserBridge", browserBridge), ("openFiles", openFiles)] {
+        for (field, key) in [("sshAgent", sshAgent), ("clipboard", clipboard), ("browserBridge", browserBridge), ("openFiles", openFiles),
+                             ("ignoreMode", ignoreMode)] {
             guard let v = key, let s = Self.settingFields.first(where: { $0.field == field }), let d = DozerSettings.definition(s.setting) else { continue }
             do { p.settings[s.setting] = try d.parse(v) } catch let e as SettingsError { throw invalid("\(field): \(e.message)") }
         }
@@ -156,6 +159,10 @@ public struct WebProjectOpen: Codable, Equatable, Sendable {
     public var steps: [Step]
     /// `defaults.projects_dir`, expanded.
     public var projectsDir: String
+    /// 599g: the folder's .dozignore / .dozreadonly (empty: none, or a folder not made yet), and the words of the
+    /// Workspace rules step.
+    public var rules: [WebRuleFile] = []
+    public var rulesGuide = WebRulesGuide()
 }
 
 /// What `preview` and `write` answer.
@@ -193,7 +200,7 @@ struct WebProjectRequest {
         if let form = d["form"] {
             guard let fd = form as? [String: Any] else { throw WebAction.Invalid("form: an object") }
             let known: Set<String> = ["name", "image", "agent", "base", "dockerfile", "account", "github", "sshAgent", "network", "permissions", "cpus",
-                                      "memory", "clipboard", "browserBridge", "openFiles", "tmux", "agentSudo", "agentPrompt", "agentPromptMode", "sessions"]
+                                      "memory", "clipboard", "browserBridge", "openFiles", "tmux", "ignoreMode", "agentSudo", "agentPrompt", "agentPromptMode", "sessions"]
             let unknown = Set(fd.keys).subtracting(known)
             guard unknown.isEmpty else { throw WebAction.Invalid("form: no \(unknown.sorted().joined(separator: ", "))") }
             do { r.form = try JSONDecoder().decode(WebProjectForm.self, from: JSONSerialization.data(withJSONObject: fd)) } catch {
@@ -230,6 +237,7 @@ enum WebProject {
         if let why = Workspace.refusal(folder, store: DozerStore(root: URL(fileURLWithPath: store))) { out.error = why; return out }
         var isDir: ObjCBool = false
         out.exists = FileManager.default.fileExists(atPath: folder, isDirectory: &isDir) && isDir.boolValue
+        if out.exists { out.rules = WorkspaceRulesGuide.folderFiles(URL(fileURLWithPath: folder)).map(WebRuleFile.init) }
         do {
             guard let (url, text) = try WebProjectFiles.existing(folder) else { return out }
             out.file = url.lastPathComponent

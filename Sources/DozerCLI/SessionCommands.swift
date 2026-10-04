@@ -178,7 +178,13 @@ struct Run: AsyncParsableCommand {
         let size = terminalSize()
         r.cols = size.cols
         r.rows = size.rows
-        let opened = try decode(try call(r, g), SessionOpened.self, g)
+        // A program the sandbox does not have is doz's failure, not the program's: 125, like exec.
+        let m = try rawCall(r, g)
+        guard m.ok == true else {
+            let e = m.error ?? HostError(.failed, "the host gave no reason")
+            throw fail(e, g, code: e.code == .notFound && r.argv != nil ? DozerExit.dozerFailed : nil)
+        }
+        let opened = try decode(m.result ?? .null, SessionOpened.self, g)
         if !g.json, let n = opened.notice { Out.stderr("[doz] \(n)\n") }
         if detach || g.json {
             if g.json { Out.json(opened) } else {

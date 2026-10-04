@@ -145,6 +145,11 @@ exact version. Which one is the setting `images.claude_code_version` (and `image
   Sandbox form shows the same choice. `doz ls` and a sandbox's page name a sandbox made from an older
   doz's image; `doz reset NAME` (after a rebuild) moves it to the new one — it keeps the agent's own
   state (`~/.claude`, `~/.pi`) and `/workspace`, and drops everything else installed on its system disk.
+- **Preparing at create time:** `doz create NAME … --prepare` prepares what the sandbox's first start
+  would wait for — its image, downloaded and baked once, with the same progress `doz onboard` shows (a
+  preparation already running for that image is joined) — and leaves the sandbox off. With `--json`
+  the answer carries `"imagePreparation": "prepared"` (it ran, or was joined, to the end) or `"ready"`
+  (nothing to prepare). Ctrl-C stops watching; the preparation goes on in the host.
 - **Offline:** the registry not answering is noted in `host.log` and the image already prepared is
   used. `latest` with no network and **no image yet** fails, saying so — set an exact version
   (`doz config set images.claude_code_version 2.1.227`). An exact version this store knows (the
@@ -163,9 +168,10 @@ cd DIR && doz up             # no name: this folder's sandbox
 ```
 
 `init` makes a folder (made when missing) a project: it writes `doz_project.yaml`; it onboards this Mac
-first if it never was. **599f: on a terminal it walks the dashboard's New Sandbox wizard's nine steps**
-(`ProjectWizard.steps`, one list for both — "Step N of 9"): folder and name, agent and base, account,
-access (GitHub, SSH agent), permissions and network, resources (CPUs, memory — the disk is the image's),
+first if it never was. **599f: on a terminal it walks the dashboard's New Sandbox wizard's ten steps**
+(`ProjectWizard.steps`, one list for both — "Step N of 10"): folder and name, agent and base, account,
+access (GitHub, SSH agent), workspace rules (599g: the folder's .dozignore/.dozreadonly and `ignore_mode`),
+permissions and network, resources (CPUs, memory — the disk is the image's),
 bridges, session (tmux, sudo), review (the file shown, then "Write?"). Each question's default is the
 setting's (Enter keeps it); a flag answers its question. Only what differs from the settings — or was set
 by a flag — is written; the rest stays commented. In a folder with a project file it starts from that file

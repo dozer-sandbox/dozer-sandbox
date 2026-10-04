@@ -141,6 +141,7 @@ public actor HostCore {
         let m = Managed(sandbox: sb, config: cfg)
         managed[cfg.name] = m
         sb.setAgentSudo(Self.agentSudo(cfg))
+        sb.setWorkspaceRuleMode(Self.ruleMode(cfg).mode)              // 599g
         if !readOnly { sb.setTimeZone(Self.guestTimeZone()) }
         if !readOnly {
             let name = cfg.name
@@ -387,6 +388,7 @@ public actor HostCore {
                            foreignCredentials: egress.map { $0.vault.foreignSightings.count }.flatMap { $0 == 0 ? nil : $0 })
         i.agent = m.sandbox.spec.imageSpec?.name
         i.credentialProblem = credentialProblem(m)
+        i.workspaceRules = workspaceRulesInfo(m, phase: phase)       // 599g: two stats when there are no rules
         // 594 W28: an image an older doz's recipe made (its disk lacks what this doz's has). 596: any
         // base × agent image.
         if let s = m.sandbox.spec.imageSpec, m.sandbox.spec.customImage == nil, ImageChoice.parse(s.name)?.name == s.name,
@@ -555,6 +557,7 @@ public actor HostCore {
         if let n = r.name, let m = managed[n] {
             m.sandbox.setAgentSudo(Self.agentSudo(m.config))
             m.sandbox.setTimeZone(Self.guestTimeZone())
+            m.sandbox.setWorkspaceRuleMode(Self.ruleMode(m.config).mode)   // 599g: read per request, like the rest
             // 599d: the setting sandbox.ssh_agent changed in the file since — follow it.
             if m.sandbox.egress != nil, (Self.sandboxValue(m.config, SettingKey.sshAgent) == .string("on")) != (m.sandbox.sshAgentSocket != nil) {
                 applyGitHub(m)
@@ -596,6 +599,8 @@ public actor HostCore {
             return try JSONValue(encoding: try await resourcesRemove(r, emit: emit))
         case .resourcesKernel:
             return try JSONValue(encoding: try await resourcesKernel(r))
+        case .workspaceRules:
+            return try JSONValue(encoding: try await workspaceRulesReport(r))
         case .tools, .toolsApply:
             let m = try get(r.name)
             let phase = await m.sandbox.status.phase
@@ -827,6 +832,25 @@ public actor HostCore {
              + (prepared?.created == true ? ", workspace \(cfg.workspace ?? "") created" : cfg.workspace == nil ? ", isolated" : "") + ")")
         var i = await info(m, sessions: false)
         i.workspaceCreated = prepared?.created == true ? true : nil
+        // `doz create --prepare`: what this sandbox's first start would wait for — its image's
+        // preparation (started, or joined when one runs) — now, with its progress; the sandbox stays off.
+        if o.prepare == true {
+            if let img = await imageToPrepare(m) {
+                let p = try preparation(for: img, requestedBy: "create \(name)")
+                let first = p.info.requestedBy.first ?? ""
+                emit(HostEvent(kind: .note, sandbox: name, text: first == "create \(name)"
+                               ? "\(img) is not prepared in this store yet — preparing it now (once: the kernel, the base image, the bake); \(name) stays off"
+                               : "\(img) is being prepared (\(first) started it) — joining it; \(name) stays off"))
+                do { try await follow(p, emit: emit) } catch {
+                    throw HostError(.failed, "\(name) was created, but preparing \(img) failed: \(HostError.from(error).message) — its first start tries again")
+                }
+                i = await info(managed[name] ?? m, sessions: false)
+                i.workspaceCreated = prepared?.created == true ? true : nil
+                i.imagePreparation = "prepared"
+            } else {
+                i.imagePreparation = "ready"          // the answer says it (the CLI's line, --json)
+            }
+        }
         return i
     }
 
@@ -1280,6 +1304,9 @@ public actor HostCore {
     private func openSessionLocked(_ r: HostRequest) async throws -> SessionOpened {
         let m = try get(r.name)
         try await ensureRunning(m, wake: r.wake ?? true)
+        // 599g: a rule file that appeared since the boot gets its view before the program starts (nothing
+        // runs in the guest when nothing changed).
+        await m.sandbox.refreshWorkspaceViews()
         let list = try await m.sandbox.sessions()
         let live = Set(list.filter { !$0.isEnded }.map(\.name))
         let all = Set(list.map(\.name))
@@ -1340,6 +1367,13 @@ public actor HostCore {
         }
         let size = TermSize(cols: r.cols ?? 120, rows: r.rows ?? 36)
         let workdir: String? = m.config.spec.imageSpec == nil && m.config.workspace != nil ? DozerImages.workspaceGuestPath : nil
+        // A command the caller named (doz run NAME -- CMD, the dashboard's "run a command"): a program the
+        // guest does not have is said plainly, before a session that could only end at once with 127.
+        if let a = r.argv, let program = a.first, !program.isEmpty,
+           let look = await m.sandbox.sessionFinds(program, environment: r.environment ?? [:], workingDirectory: r.workdir ?? workdir, user: r.user),
+           !look.found {
+            throw HostError(.notFound, Self.missingProgram(program, runsAs: look.runsAs, command: "doz run"))
+        }
         if inTmux { argv = GuestCommand.inTmux(session: session, argv: argv) }
         let t0 = ContinuousClock.now
         let started = Date()
@@ -1381,13 +1415,53 @@ public actor HostCore {
         let ctx = Self.execContext(config: m.config, environment: Self.withClaudePermissions(r.environment ?? [:], imageSpec: m.config.spec.imageSpec?.name),
                                    workdir: r.workdir, user: r.user)
         let t0 = ContinuousClock.now
-        let res = try await m.sandbox.exec(argv, environment: ctx.environment, workingDirectory: ctx.workdir, user: ctx.user,
+        let res: ExecResult
+        do {
+            res = try await m.sandbox.exec(argv, environment: ctx.environment, workingDirectory: ctx.workdir, user: ctx.user,
                                            timeoutSeconds: r.timeoutSeconds ?? 120)
+        } catch {
+            if let plain = Self.missingProgramMessage(error, argv: argv, runsAs: ctx.user) { throw HostError(.notFound, plain) }
+            throw error
+        }
         var out = ExecOutput(exitCode: res.exitCode, stdout: res.stdout, stderr: res.stderr, milliseconds: ms(since: t0))
         if first.started { out.started = true }
         if first.woke { out.woke = true }
         out.bootMilliseconds = first.milliseconds
         return out
+    }
+
+    /// A program the guest cannot find, said plainly. The guest agent's own words come wrapped three
+    /// deep (`failed to start process (cause: "internalError: "startProcess: … vmexec error: … failed to
+    /// find target executable sudo" (closed three times))`; a person needs only which program and what to do. nil: any
+    /// other error (passed on as it was). `runsAs`: the guest user it ran as (nil = root).
+    static func missingProgramMessage(_ error: Error, argv: [String], runsAs: String?) -> String? {
+        missingProgramMessage(String(describing: error) + " " + error.localizedDescription, argv: argv, runsAs: runsAs)
+    }
+
+    static func missingProgramMessage(_ text: String, argv: [String], runsAs: String?) -> String? {
+        let marker = "failed to find target executable"
+        guard let r = text.range(of: marker) else { return nil }
+        // The name the guest reports (up to a quote, space or bracket), else the command as given.
+        let rest = text[r.upperBound...].drop { $0 == " " }
+        // Stops: double quote, single quote, space, ")", "]", newline, backslash (as code points, so no
+        // escaped quote sits in a literal here).
+        let stops = Set([34, 39, 32, 41, 93, 10, 92].map { Character(UnicodeScalar(UInt8($0))) })
+        let reported = String(rest.prefix { !stops.contains($0) })
+        return missingProgram(reported.isEmpty ? (argv.first ?? "the program") : reported, runsAs: runsAs, command: "doz exec")
+    }
+
+    /// The sentence for `program` missing in the guest, run by `command` (doz exec / doz run) as
+    /// `runsAs` (nil = root).
+    static func missingProgram(_ program: String, runsAs: String?, command: String) -> String {
+        var s = program.contains("/")
+            ? "`\(program)` does not exist in this sandbox (or is not a program it can run)"
+            : "`\(program)` is not installed in this sandbox's image (not on its PATH)"
+        if (program as NSString).lastPathComponent == "sudo" {
+            s += runsAs == nil
+                ? " — and it is not needed: \(command) already runs as root unless --user names another user"
+                : " — \(command) runs this sandbox's commands as \(runsAs!); --user root runs one as root"
+        }
+        return s
     }
 
     // MARK: inspect

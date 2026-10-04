@@ -77,6 +77,8 @@ public struct DozerProject: Equatable, Sendable {
          "# ssh_agent: off             # on: forward this Mac's SSH agent (keys stay on the Mac; github.com:22 only). Applies now"),
         ("tmux", SettingKey.tmux,
          "# tmux: false                # true: sessions run inside tmux (windows, panes, Ctrl-b). From the next session"),
+        ("ignore_mode", SettingKey.ignoreMode,
+         "# ignore_mode: lock          # what .dozignore does to the paths it lists: lock (listed, no access) or hide (not there). At the next start or wake"),
     ]
 
     /// The keys, in the order the file lists them, with what each says.
@@ -342,13 +344,15 @@ public struct DozerProject: Equatable, Sendable {
 
 /// 599f (owner: "a new wizard process for creating a purposeful sandbox that steps the user through all the
 /// choices, capturing the config in a doz_project.yml"): the steps the dashboard's New Sandbox wizard and
-/// `doz init` on a terminal walk, in order — one list for both.
+/// `doz init` on a terminal walk, in order — one list for both. 599g: "rules" (the folder's .dozignore /
+/// .dozreadonly and this sandbox's `ignore_mode`, `WorkspaceRulesGuide`).
 public enum ProjectWizard {
     public static let steps: [(id: String, title: String)] = [
         ("folder", "Project folder"),
         ("image", "Agent and base"),
         ("account", "Account"),
         ("access", "Access"),
+        ("rules", "Workspace rules"),
         ("permissions", "Permissions and network"),
         ("resources", "Resources"),
         ("bridges", "Bridges"),

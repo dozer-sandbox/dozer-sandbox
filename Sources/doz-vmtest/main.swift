@@ -978,6 +978,13 @@ Task {
             // 594: only the onboarding part of `cli` (its stores are its own).
             let binary = args.firstIndex(of: "--doz").flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil } ?? ".build/debug/doz"
             await cliOnboardingSuite(binary: URL(fileURLWithPath: binary).standardizedFileURL.path)
+        case "ignore":
+            // 599g: workspace rules (.dozignore / .dozreadonly) — IgnoreSuite.swift (`make test-vm-ignore`).
+            try await ignoreSuite()
+        case "ignore-crash-save":
+            exit(try await ignoreCrashSave())
+        case "ignore-crash-restore":
+            try await ignoreCrashRestore(label: "crash2", thenQuit: true)
         case "lifecycle":
             try await lifecycleSuite()
         case "crash":

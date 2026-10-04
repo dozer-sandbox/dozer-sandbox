@@ -161,6 +161,12 @@ This table is generated from `doz config show` and checked against it on every b
 |---|---|---|---|---|---|
 | `bridges.open_apps` | `""` | app names, comma-separated, like "Typora, Visual Studio Code" ("" = none) | at once | — | The Mac apps a sandbox may name to open a workspace file in (doz-open --app NAME FILE, or open -a NAME FILE in the sandbox), comma-separated — e.g. "Typora, Visual Studio Code". Empty: a file opens only in its default app, and naming an app is refused. Never a path, only an app's name. For every sandbox. |
 
+### `[workspace]`
+
+| key | default | values | applies | overridden by | what it does |
+|---|---|---|---|---|---|
+| `workspace.ignore_mode` | `lock` | lock \| hide | next start or wake | `doz create --ignore-mode lock\|hide` | What a .dozignore at the root of a sandbox's workspace folder does to the paths it lists (Docker's .dockerignore syntax): lock (they stay listed, shown with no permissions, and every read, write, rename or delete of them is refused — so a program that bumps into one by name sees why) or hide (they are not there at all). A .dozreadonly beside it (same syntax) makes paths visible but read-only; doz_project.yaml, .git/hooks and the two rule files are read-only too. Without either file the folder is shared as it is. A convenience mask, not a security boundary: root in the sandbox can get around it. A sandbox's own choice (doz create --ignore-mode, ignore_mode in doz_project.yaml, doz config set --sandbox NAME) wins over this. |
+
 ### `[github]`
 
 | key | default | values | applies | overridden by | what it does |

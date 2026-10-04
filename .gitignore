@@ -5,6 +5,7 @@
 Guest/deckhold/out/
 /*.xcodeproj
 Guest/doznet/out/
+Guest/dozview/out/
 
 # 589: the built docs site — reproducible from DozerKit.docc + source in under two
 # minutes (`make docs`); not committed. See changes/589-*/589.01-PLAN.md

@@ -297,8 +297,14 @@ public struct WebSandboxRow: Codable, Equatable, Sendable {
     public var imageTitle: String?
     public var dockerfile: String?
     public var rebuildAvailable: String?
+    /// 599g: the workspace's rules in one line (".dozignore: 3 patterns (lock) · .dozreadonly: 1 pattern — in
+    /// force"), and whether the guest serves them (`running`, `pending`, `stopped`). nil: no rule file.
+    public var workspaceRules: String?
+    public var workspaceRulesView: String?
 
     public init(_ i: SandboxInfo) {
+        workspaceRules = i.workspaceRules?.line
+        workspaceRulesView = i.workspaceRules?.view
         accountApplies = ["agent", "open", "custom"].contains(i.network)
         // 596: the AGENT (python-claude-code runs claude-code) — the page's account choice follows it.
         agent = i.agent.map { a in ImageChoice.parse(a).map { $0.agent == .none ? a : $0.agent.rawValue } ?? a }
@@ -711,6 +717,8 @@ public struct WebOnboarding: Codable, Equatable, Sendable {
     public var promptTemplateExists: Bool
     /// The settings' defaults.image.
     public var defaultImage: String
+    /// 599g: the Workspace rules step's words (the same `doz onboard` prints).
+    public var rulesGuide = WebRulesGuide()
 
     public init(status: PrepareStatus, checks: [OnboardingCheck], freeBytes: Int64?, macSignedIn: Bool, defaultAccount: String,
                 versions: [String: String] = [:]) {
@@ -750,6 +758,42 @@ public struct WebOnboardingConfigResult: Codable, Equatable, Sendable {
     public var promptTemplatePath: String?
     /// 599e: the Access settings written (`key = value`), when the wizard sent its choices.
     public var accessSet: [String]? = nil
+    /// 599g: the Workspace rules step's setting written (`key = value`; empty: the file already said so).
+    public var rulesSet: [String]? = nil
+}
+
+/// 599g (owner A1/A2): workspace rules explained — `WorkspaceRulesGuide`, the words `doz onboard` and `doz init`
+/// print, for the onboarding's and the New Sandbox wizard's step. Static text, no value from anywhere else.
+public struct WebRulesGuide: Codable, Equatable, Sendable {
+    public struct Point: Codable, Equatable, Sendable { public var term: String?; public var text: String }
+    public struct Mode: Codable, Equatable, Sendable { public var value: String; public var label: String; public var detail: String; public var recommended: Bool }
+    public var title = WorkspaceRulesGuide.title
+    public var intro = WorkspaceRulesGuide.intro
+    public var points = WorkspaceRulesGuide.points.map { Point(term: $0.term, text: $0.text) }
+    public var question = WorkspaceRulesGuide.question
+    public var modes = WorkspaceRulesGuide.modes.map { Mode(value: $0.value, label: $0.label, detail: $0.detail, recommended: $0.recommended) }
+    public var defaultScope = WorkspaceRulesGuide.defaultScope
+    public var sandboxScope = WorkspaceRulesGuide.sandboxScope
+    public var noRules = WorkspaceRulesGuide.noRules
+    public var howToAdd = WorkspaceRulesGuide.howToAdd
+    public init() {}
+}
+
+/// 599g: a rule file found in a project folder — its name, how many usable patterns, the first few (inert), the
+/// lines skipped.
+public struct WebRuleFile: Codable, Equatable, Sendable {
+    public var name: String
+    public var patterns: Int
+    public var count: String
+    public var first: [String]
+    public var skipped: Int
+    public init(_ f: WorkspaceRulesGuide.FolderFile) {
+        name = f.name
+        patterns = f.patterns
+        count = WorkspaceRulesGuide.count(f)
+        first = f.first
+        skipped = f.skipped
+    }
 }
 
 public struct WebConnection: Codable, Equatable, Sendable {

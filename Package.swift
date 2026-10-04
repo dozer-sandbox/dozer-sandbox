@@ -70,8 +70,13 @@ let package = Package(
                 .copy("Resources/deckhold"),
                 // 580: the guest half of a proxied sandbox's network (Guest/doznet/).
                 .copy("Resources/doznet"),
+                // 599g: workspace rules' view of a share — a filtering FUSE daemon (Guest/dozview/).
+                .copy("Resources/dozview"),
             ]
         ),
+        // 599g — the `.dozignore` matcher in C (Docker's patternmatcher + an RE2-subset engine + Unicode
+        // folding), compiled into the guest's dozview and tested here against the same vectors as Swift.
+        .target(name: "DozMatch", path: "Guest/dozview/match"),
         // The ENTITLED test host. `swift test` binaries cannot carry
         // `com.apple.security.virtualization`, so the VM integration tests live in this small
         // executable, which `make test-vm` builds, ad-hoc signs with
@@ -134,7 +139,7 @@ let package = Package(
         ),
         .testTarget(
             name: "DozerKitTests",
-            dependencies: ["DozerKit",
+            dependencies: ["DozerKit", "DozMatch",
                            // 587: real ext4 disks, made on the host, for the EXT4Inspector / accounting tests.
                            .product(name: "ContainerizationEXT4", package: "containerization"),
                            .product(name: "ContainerizationArchive", package: "containerization"),

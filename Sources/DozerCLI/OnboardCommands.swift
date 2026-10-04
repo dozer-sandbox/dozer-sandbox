@@ -22,6 +22,8 @@ struct OnboardReport: Encodable {
     var images: [String]
     /// 599e: the Access step — each credential's choice and whether it was confirmed.
     var access: [AccessItem]
+    /// 599g: the Workspace rules step — the default `workspace.ignore_mode` chosen (nil: not chosen, unchanged).
+    var ignoreMode: String?
     var result: PrepareResult?
 }
 
@@ -44,6 +46,8 @@ struct OnboardingFlow {
     var githubSourceFlag: String? = nil
     var sshFlag: String? = nil
     var githubKeyStdin = false
+    /// 599g: the Workspace rules step's flag (nil: asked on a terminal, else the settings are left as they are).
+    var ignoreModeFlag: String? = nil
 
     func say(_ s: String) { if talk { Out.stdout(s + "\n") } }
 
@@ -105,8 +109,14 @@ struct OnboardingFlow {
         // Written only when CHOSEN (a flag, or answered on a terminal): `--yes` alone changes nothing.
         let accessChosen = asker.interactive || githubFlag != nil || sshFlag != nil || githubSourceFlag != nil || step.githubKey != nil
 
-        // 3. Images (D2): claude-code ticked; lab and pi opt-in.
-        say("\n3. Images")
+        // 3. Workspace rules (599g, owner A1): what .dozignore / .dozreadonly do, and the default mode — written
+        //    only when CHOSEN (a flag or an answer), as the Access choices are.
+        say("\n3. \(WorkspaceRulesGuide.title) — .dozignore and .dozreadonly")
+        let ignoreMode = RulesStep(asker: asker, talk: talk, flag: ignoreModeFlag,
+                                   current: DozerSettings.load().string(SettingKey.ignoreMode) ?? "lock", folder: nil).run()
+
+        // 4. Images (D2): claude-code ticked; lab and pi opt-in.
+        say("\n4. Images")
         if imagesFlag == nil {
             let settings = DozerSettings.load()
             let versions = Dictionary(uniqueKeysWithValues: ["claude-code", "pi"].compactMap { i in
@@ -121,8 +131,8 @@ struct OnboardingFlow {
         }
         say(chosen.isEmpty ? "  none now — each image is prepared by its first start" : "  " + chosen.joined(separator: ", "))
 
-        // 4. Settings (D7): written only when missing; the user's prompt template beside them (D16).
-        say("\n4. Settings")
+        // 5. Settings (D7): written only when missing; the user's prompt template beside them (D16).
+        say("\n5. Settings")
         let (settings, settingsPath) = try settingsOutcome {
             try Onboarding.writeSettingsIfMissing(defaultImage: chosen.first ?? "claude-code", account: Onboarding.defaultAccount(for: choice))
         }
@@ -141,6 +151,13 @@ struct OnboardingFlow {
             say(set.isEmpty ? "  Access: the settings already say so (defaults.github = \(access.github), sandbox.ssh_agent = \(access.ssh))"
                             : "  Access: set " + set.joined(separator: ", ") + " — new sandboxes follow them (doz access set changes them)")
         }
+        // 599g: the rules' default mode, when chosen (into a file that was kept too).
+        if let m = ignoreMode, settings != .unavailable {
+            let set: [String]
+            do { set = try Onboarding.writeIgnoreMode(m) } catch { throw fail(HostError(.failed, "\(error)"), g) }
+            say(set.isEmpty ? "  Workspace rules: the settings already say so (workspace.ignore_mode = \(m))"
+                            : "  Workspace rules: set " + set.joined(separator: ", ") + " — doz config set workspace.ignore_mode changes it")
+        }
         let (template, templatePath) = try settingsOutcome { try Onboarding.writePromptTemplateIfMissing() }
         switch template {
         case .written: say("  wrote \(templatePath ?? AgentPrompt.userTemplateName) — your own environment prompt for agents (all commented out: the built-in one applies)")
@@ -151,17 +168,17 @@ struct OnboardingFlow {
         let projects = (Workspace.defaultPath(name: "x") as NSString).deletingLastPathComponent
         say("  new sandboxes' workspace folders: \(projects)/<name> (defaults.projects_dir — doz config set defaults.projects_dir DIR moves it)")
 
-        // 5. The preparation (D3): in the host; Ctrl-C detaches.
+        // 6. The preparation (D3): in the host; Ctrl-C detaches.
         var result: PrepareResult?
         let todo = chosen.filter { !prepared.contains($0) }
         if chosen.isEmpty || todo.isEmpty {
-            if !chosen.isEmpty { say("\n5. \(chosen.joined(separator: ", ")) already prepared in this store — nothing to do") }
+            if !chosen.isEmpty { say("\n6. \(chosen.joined(separator: ", ")) already prepared in this store — nothing to do") }
             var r = HostRequest(.onboard)
             r.images = chosen
             r.requestedBy = "doz onboard"
             result = try decode(try call(r, g), PrepareResult.self, g)
         } else {
-            say("\n5. Preparing \(chosen.joined(separator: ", ")) in the host — Ctrl-C detaches (it goes on): doz onboard --status watches it, --cancel stops it")
+            say("\n6. Preparing \(chosen.joined(separator: ", ")) in the host — Ctrl-C detaches (it goes on): doz onboard --status watches it, --cancel stops it")
             var r = HostRequest(.onboard)
             r.images = chosen
             r.requestedBy = "doz onboard"
@@ -174,7 +191,7 @@ struct OnboardingFlow {
         return OnboardReport(store: store.root.path, checks: checks, account: choice.rawValue, accountAdded: added,
                              accountCommands: added == nil ? Onboarding.accountCommands(choice) : [],
                              settings: settings.rawValue, settingsPath: settingsPath, promptTemplate: template.rawValue,
-                             promptTemplatePath: templatePath, images: chosen, access: accessReport.items, result: result)
+                             promptTemplatePath: templatePath, images: chosen, access: accessReport.items, ignoreMode: ignoreMode, result: result)
     }
 
     /// A key or a setup token, added exactly as `doz account add` adds it, then made the store default.
@@ -266,7 +283,7 @@ func followingCall(_ r: HostRequest, _ g: GlobalOptions,
 
 struct Onboard: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
-        abstract: "Set up this Mac for Dozer Sandbox (once): check it, choose and confirm Access (the Claude account, GitHub, the SSH agent), write the settings, prepare images in the background.",
+        abstract: "Set up this Mac for Dozer Sandbox (once): check it, choose and confirm Access (the Claude account, GitHub, the SSH agent), choose what workspace rules do, write the settings, prepare images in the background.",
         discussion: """
         Re-running is safe: it checks again, leaves existing settings alone and prepares only what is \
         missing. The images are prepared by the host: Ctrl-C detaches (the preparation goes on), \
@@ -289,15 +306,17 @@ struct Onboard: AsyncParsableCommand {
     @Option(name: .long, help: "Where the GitHub token comes from: gh (this Mac's gh login) or key (--github-key-stdin).") var githubSource: String?
     @Flag(name: .long, help: "Read a GitHub token from stdin as the default key (implies --github-source key).") var githubKeyStdin = false
     @Option(name: .long, help: "The Access step's SSH choice without asking: on or off (forward this Mac's ssh-agent, github.com only).") var sshAgent: String?
+    @Option(name: .long, help: "The Workspace rules step without asking: lock or hide — what a .dozignore in a sandbox's folder does to the paths it lists, by default (the setting workspace.ignore_mode). Lock: listed but unreadable; hide: not there.") var ignoreMode: String?
     @Flag(name: [.short, .long], help: "Accept every default; ask nothing. A credential that cannot be confirmed is skipped with a note (exit 0).") var yes = false
 
     func validate() throws {
         if let v = github, !["off", "read", "push"].contains(v) { throw ValidationError("--github: off, read or push") }
         if let v = githubSource, !["gh", "key"].contains(v) { throw ValidationError("--github-source: gh or key") }
         if let v = sshAgent, !["on", "off"].contains(v) { throw ValidationError("--ssh-agent: on or off") }
+        if let v = ignoreMode, !["lock", "hide"].contains(v) { throw ValidationError("--ignore-mode: lock or hide") }
         if githubKeyStdin && secretStdin { throw ValidationError("--github-key-stdin and --secret-stdin both read stdin — add one later (doz access set --github-key / doz account add)") }
         if githubKeyStdin && githubSource == "gh" { throw ValidationError("--github-key-stdin goes with --github-source key") }
-        if [status, cancel].filter({ $0 }).count + ((images != nil || allImages || noImages || account != nil) ? 1 : 0) > 1 {
+        if [status, cancel].filter({ $0 }).count + ((images != nil || allImages || noImages || account != nil || ignoreMode != nil) ? 1 : 0) > 1 {
             throw ValidationError("--status and --cancel stand alone")
         }
         if [images != nil, allImages, noImages].filter({ $0 }).count > 1 { throw ValidationError("one of --images, --all-images, --no-images") }
@@ -331,6 +350,7 @@ struct Onboard: AsyncParsableCommand {
         flow.githubSourceFlag = githubKeyStdin ? "key" : githubSource
         flow.sshFlag = sshAgent
         flow.githubKeyStdin = githubKeyStdin
+        flow.ignoreModeFlag = ignoreMode
         flow.force = force
         let report = try await flow.run()
         if g.json { Out.json(report) }

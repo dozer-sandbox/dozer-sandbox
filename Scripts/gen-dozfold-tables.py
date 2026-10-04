@@ -1,0 +1,382 @@
+#!/usr/bin/env python3
+"""gen-dozfold-tables.py — the Unicode folding tables for `.dozignore` matching on a case-insensitive volume.
+
+Generates, from Python's own `unicodedata` (stdlib only; the Unicode version is recorded in each output):
+  Guest/dozview/match/dozfold_tables.h   the C tables (sorted uint32 arrays, binary-searched by dozfold.c)
+  Sources/DozerKit/DozFoldTables.swift   the SAME data for Swift (compact hex string literals, decoded once)
+                                         + DozFold.fold / DozFold.foldPattern (the same algorithm)
+  Tests/Fixtures/dozfold-vectors.json    [{"in", "out"[, "pattern": true]}], `out` computed HERE
+
+The fold (identical in C, Swift and this file): for each scalar
+  1. full canonical decomposition (recursively expanded; Hangul syllables U+AC00-D7A3 algorithmically),
+  2. each resulting scalar mapped by SIMPLE case folding,
+  3. each result fully decomposed again,
+then canonical ordering over the whole output: each maximal run of scalars with ccc > 0 is stably
+sorted by ccc. fold_pattern is the same except that the scalar after each backslash is copied
+unchanged and is a reordering barrier (an escape letter keeps its meaning: \\A is not \\a).
+
+Simple case folding from Python: cf = chr(c).casefold(); when cf is ONE scalar, c -> cf if it differs
+(else no mapping); when casefold expands (CaseFolding.txt status F), the simple form is approximated by
+lower() when that is one differing scalar (ẞ -> ß, ᾈ -> ᾀ). Note: lower() is deliberately NOT consulted
+when casefold() is the identity — Cherokee capitals (U+13A0..) fold to themselves while their
+lowercase forms fold TO them; consulting lower() there would swap the two cases instead of folding.
+
+Run: python3 Scripts/gen-dozfold-tables.py   (from anywhere; paths are relative to the package)
+"""
+import json
+import os
+import random
+import unicodedata
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+C_OUT = os.path.join(ROOT, "Guest/dozview/match/dozfold_tables.h")
+SWIFT_OUT = os.path.join(ROOT, "Sources/DozerKit/DozFoldTables.swift")
+VEC_OUT = os.path.join(ROOT, "Tests/Fixtures/dozfold-vectors.json")
+
+S_BASE, L_BASE, V_BASE, T_BASE = 0xAC00, 0x1100, 0x1161, 0x11A7
+T_COUNT, N_COUNT, S_COUNT = 28, 588, 11172
+
+
+def scalars():
+    for c in range(0x110000):
+        if 0xD800 <= c <= 0xDFFF:
+            continue
+        yield c
+
+
+def is_hangul(c):
+    return S_BASE <= c < S_BASE + S_COUNT
+
+
+# ---- tables -------------------------------------------------------------------------------------
+
+RAW = {}
+for c in scalars():
+    if is_hangul(c):
+        continue
+    d = unicodedata.decomposition(chr(c))
+    if d and not d.startswith("<"):
+        RAW[c] = [int(x, 16) for x in d.split()]
+
+
+def full_decomp(c):
+    if is_hangul(c):
+        s = c - S_BASE
+        out = [L_BASE + s // N_COUNT, V_BASE + (s % N_COUNT) // T_COUNT]
+        if s % T_COUNT:
+            out.append(T_BASE + s % T_COUNT)
+        return out
+    if c in RAW:
+        out = []
+        for x in RAW[c]:
+            out += full_decomp(x)
+        return out
+    return [c]
+
+
+DECOMP = {c: full_decomp(c) for c in sorted(RAW)}
+
+FOLD = {}
+for c in scalars():
+    ch = chr(c)
+    cf = ch.casefold()
+    if len(cf) == 1:
+        if cf != ch:
+            FOLD[c] = ord(cf)
+    else:
+        lo = ch.lower()
+        if len(lo) == 1 and lo != ch:
+            FOLD[c] = ord(lo)
+
+CCC = {}
+for c in scalars():
+    k = unicodedata.combining(chr(c))
+    if k:
+        CCC[c] = k
+
+
+# ---- the algorithm (reference) ------------------------------------------------------------------
+
+def fold_scalar(c):
+    out = []
+    for d in full_decomp(c):
+        out += full_decomp(FOLD.get(d, d))
+    return out
+
+
+def reorder(units):
+    """units: list of (scalar, barrier). Stable-sort each maximal run of ccc > 0 (non-barrier) by ccc."""
+    i, n = 0, len(units)
+    while i < n:
+        c, bar = units[i]
+        if bar or CCC.get(c, 0) == 0:
+            i += 1
+            continue
+        j = i
+        while j < n and not units[j][1] and CCC.get(units[j][0], 0) > 0:
+            j += 1
+        units[i:j] = sorted(units[i:j], key=lambda u: CCC[u[0]])
+        i = j
+    return units
+
+
+def fold(s, pattern=False):
+    units = []
+    cps = [ord(x) for x in s]
+    i = 0
+    while i < len(cps):
+        c = cps[i]
+        i += 1
+        units += [(x, False) for x in fold_scalar(c)]
+        if pattern and c == 0x5C and i < len(cps):
+            units.append((cps[i], True))
+            i += 1
+    return "".join(chr(u[0]) for u in reorder(units))
+
+
+MAX_EXPANSION = max(len(fold_scalar(c)) for c in scalars())
+
+# ---- emit C -------------------------------------------------------------------------------------
+
+dkeys = list(DECOMP)
+doffs, dlens, ddata = [], [], []
+for k in dkeys:
+    doffs.append(len(ddata))
+    dlens.append(len(DECOMP[k]))
+    ddata += DECOMP[k]
+fkeys = sorted(FOLD)
+fvals = [FOLD[k] for k in fkeys]
+ckeys = sorted(CCC)
+cvals = [CCC[k] for k in ckeys]
+
+HEADER_NOTE = (
+    "GENERATED by Scripts/gen-dozfold-tables.py from Python %s unicodedata (Unicode %s) — DO NOT EDIT.\n"
+    % (".".join(map(str, __import__("sys").version_info[:3])), unicodedata.unidata_version)
+)
+
+
+def c_array(ctype, name, vals, per=12):
+    lines = []
+    for i in range(0, len(vals), per):
+        lines.append("    " + ", ".join("0x%X" % v for v in vals[i:i + per]) + ",")
+    return "static const %s %s[%d] = {\n%s\n};\n" % (ctype, name, len(vals), "\n".join(lines))
+
+
+with open(C_OUT, "w") as f:
+    f.write("/* dozfold_tables.h — " + HEADER_NOTE)
+    f.write(" * Included ONLY by dozfold.c. Canonical full decompositions (Hangul syllables excluded: done\n")
+    f.write(" * algorithmically), simple case folding, canonical combining classes. Keys sorted ascending. */\n")
+    f.write("#ifndef DOZFOLD_TABLES_H\n#define DOZFOLD_TABLES_H\n#include <stdint.h>\n\n")
+    f.write('#define DMF_UNICODE_VERSION "%s"\n' % unicodedata.unidata_version)
+    f.write("#define DMF_MAX_EXPANSION %d /* most scalars one input scalar can fold into */\n" % MAX_EXPANSION)
+    f.write("#define DMF_DECOMP_N %d\n#define DMF_FOLD_N %d\n#define DMF_CCC_N %d\n\n" % (len(dkeys), len(fkeys), len(ckeys)))
+    f.write(c_array("uint32_t", "dmf_decomp_keys", dkeys))
+    f.write(c_array("uint16_t", "dmf_decomp_offs", doffs))
+    f.write(c_array("uint8_t", "dmf_decomp_lens", dlens))
+    f.write(c_array("uint32_t", "dmf_decomp_data", ddata))
+    f.write(c_array("uint32_t", "dmf_fold_keys", fkeys))
+    f.write(c_array("uint32_t", "dmf_fold_vals", fvals))
+    f.write(c_array("uint32_t", "dmf_ccc_keys", ckeys))
+    f.write(c_array("uint8_t", "dmf_ccc_vals", cvals))
+    f.write("\n#endif\n")
+assert len(ddata) < 65536
+
+# ---- emit Swift ---------------------------------------------------------------------------------
+
+
+def swift_hex(vals, per=24):
+    lines = []
+    for i in range(0, len(vals), per):
+        # Fixed width: a short hex value like 583 would read as a standalone number to the user-text check
+        # (which keeps internal numbers out of what people read); %06x never stands alone.
+        lines.append("        " + ",".join("%06x" % v for v in vals[i:i + per]))
+    return '"""\n' + ",\n".join(lines) + '\n        """'
+
+
+SWIFT = '''// DozFoldTables.swift — %(note)s//
+// The Unicode folding used for `.dozignore` / `.dozreadonly` matching on a case-insensitive volume
+// (owner decision D2: a path is excluded when EITHER the plain or the folded evaluation excludes it).
+// The SAME tables and algorithm as the guest's C (Guest/dozview/match/dozfold.c + dozfold_tables.h);
+// both are checked against Tests/Fixtures/dozfold-vectors.json (computed by the generator itself).
+//
+// fold: per scalar, full canonical decomposition (Hangul algorithmic) -> simple case folding -> full
+// decomposition again; then canonical ordering (stable sort of each maximal run of ccc > 0 by ccc).
+// foldPattern: the same, but the scalar after each backslash is copied unchanged and is a reordering
+// barrier (an escape letter keeps its meaning: \\A is not \\a).
+//
+// The tables are compact hex string literals decoded once on first use — a giant array literal makes
+// swiftc slow.
+
+enum DozFoldTables {
+    static let unicodeVersion = "%(uver)s"
+    static let decompKeys: [UInt32] = decode(%(dkeys)s)
+    static let decompOffsets: [UInt32] = decode(%(doffs)s)
+    static let decompLengths: [UInt32] = decode(%(dlens)s)
+    static let decompData: [UInt32] = decode(%(ddata)s)
+    static let foldKeys: [UInt32] = decode(%(fkeys)s)
+    static let foldValues: [UInt32] = decode(%(fvals)s)
+    static let cccKeys: [UInt32] = decode(%(ckeys)s)
+    static let cccValues: [UInt32] = decode(%(cvals)s)
+
+    /// Comma/newline-separated lowercase hex -> [UInt32].
+    static func decode(_ s: String) -> [UInt32] {
+        var out: [UInt32] = []
+        var v: UInt32 = 0, have = false
+        for b in s.utf8 {
+            switch b {
+            case 0x30...0x39: v = v << 4 | UInt32(b - 0x30); have = true
+            case 0x61...0x66: v = v << 4 | UInt32(b - 0x57); have = true
+            default: if have { out.append(v); v = 0; have = false }
+            }
+        }
+        if have { out.append(v) }
+        return out
+    }
+
+    /// Index of `key` in the sorted `keys`, or nil.
+    static func find(_ keys: [UInt32], _ key: UInt32) -> Int? {
+        var lo = 0, hi = keys.count
+        while lo < hi {
+            let mid = (lo + hi) / 2
+            if keys[mid] < key { lo = mid + 1 } else { hi = mid }
+        }
+        return lo < keys.count && keys[lo] == key ? lo : nil
+    }
+}
+
+enum DozFold {
+    /// Fold a path (see the file header).
+    static func fold(_ s: String) -> String { run(s, pattern: false) }
+
+    /// Fold a pattern: like `fold`, but the scalar after each backslash is kept unchanged.
+    static func foldPattern(_ p: String) -> String { run(p, pattern: true) }
+
+    static func ccc(_ c: UInt32) -> UInt32 {
+        DozFoldTables.find(DozFoldTables.cccKeys, c).map { DozFoldTables.cccValues[$0] } ?? 0
+    }
+
+    static func decompose(_ c: UInt32, into out: inout [(UInt32, Bool)]) {
+        if c >= 0xAC00 && c < 0xAC00 + 11172 {
+            let s = c - 0xAC00
+            out.append((0x1100 + s / 588, false))
+            out.append((0x1161 + (s %% 588) / 28, false))
+            if s %% 28 != 0 { out.append((0x11A7 + s %% 28, false)) }
+        } else if let i = DozFoldTables.find(DozFoldTables.decompKeys, c) {
+            let off = Int(DozFoldTables.decompOffsets[i]), n = Int(DozFoldTables.decompLengths[i])
+            for k in off..<(off + n) { out.append((DozFoldTables.decompData[k], false)) }
+        } else {
+            out.append((c, false))
+        }
+    }
+
+    static func foldScalar(_ c: UInt32, into out: inout [(UInt32, Bool)]) {
+        var first: [(UInt32, Bool)] = []
+        decompose(c, into: &first)
+        for (d, _) in first {
+            let f = DozFoldTables.find(DozFoldTables.foldKeys, d).map { DozFoldTables.foldValues[$0] } ?? d
+            decompose(f, into: &out)
+        }
+    }
+
+    private static func run(_ s: String, pattern: Bool) -> String {
+        var units: [(UInt32, Bool)] = []   // (scalar, reordering barrier)
+        var it = s.unicodeScalars.makeIterator()
+        while let u = it.next() {
+            foldScalar(u.value, into: &units)
+            if pattern && u.value == 0x5C, let e = it.next() { units.append((e.value, true)) }
+        }
+        // canonical ordering
+        var i = 0
+        while i < units.count {
+            if units[i].1 || ccc(units[i].0) == 0 { i += 1; continue }
+            var j = i
+            while j < units.count && !units[j].1 && ccc(units[j].0) > 0 { j += 1 }
+            // stable insertion sort by ccc (runs are short)
+            if j - i > 1 {
+                for a in (i + 1)..<j {
+                    let x = units[a], kx = ccc(x.0)
+                    var b = a
+                    while b > i && ccc(units[b - 1].0) > kx { units[b] = units[b - 1]; b -= 1 }
+                    units[b] = x
+                }
+            }
+            i = j
+        }
+        var view = String.UnicodeScalarView()
+        for (c, _) in units { if let sc = Unicode.Scalar(c) { view.append(sc) } }
+        return String(view)
+    }
+}
+''' % dict(note=HEADER_NOTE, uver=unicodedata.unidata_version,
+           dkeys=swift_hex(dkeys), doffs=swift_hex(doffs), dlens=swift_hex(dlens), ddata=swift_hex(ddata),
+           fkeys=swift_hex(fkeys), fvals=swift_hex(fvals), ckeys=swift_hex(ckeys), cvals=swift_hex(cvals))
+
+with open(SWIFT_OUT, "w") as f:
+    f.write(SWIFT)
+
+# ---- vectors ------------------------------------------------------------------------------------
+
+CURATED = [
+    "", "a", "Hello", "SECRET.ENV", "secret.env", ".Env", "README.md", "Makefile", "DIR/Sub/FILE.TXT",
+    "\u00e9", "e\u0301", "CAF\u00c9", "Cafe\u0301", "\u00c5", "\u212b", "A\u030a", "\u212a", "\u2126",
+    "\u03a3\u0391\u03a3", "\u03c2", "\u03c3", "\u00df", "\u1e9e", "\u0130", "\u0131", "\ufb01", "\u01c4", "\u01c5",
+    "\u1f88", "\u0390", "\u13a0", "\uab70", "\U00010400", "\U00010428", "\U0001f600", "\u0345", "a\u0345\u0301",
+    "\ud55c\uad6d\uc5b4", "\u1100\u1161\u11a8", "\uac00", "\ud7a3", "\uac01\u0301",
+    "a\u0323\u0302", "a\u0302\u0323", "\u1ec7", "q\u0307\u0323", "\u1e69", "s\u0323\u0307",
+    "src/Caf\u00e9/\u00c9T\u00c9.TXT", "DIR/sub/\u00dcn\u00efc\u00f6d\u00e9", "x\u0301/\u0323y", "\u0301\u0323",
+    "\uf900", "\u2000\u3000", "\u0344", "\u0f73", "\u0958", "\u2adc", "\U0001d15e", "\U0002f800",
+]
+CURATED_PAT = [
+    "*.TXT", "\\A*.TXT", "\\\u00c9", "foo\\\\Bar", "[A-Z]\\D", "\\", "a\\", "\\\u0301x\u0323\u0301",
+    "**/SECRET.*", "\\Q\u00c9\\E", "[\u00c0-\u00dd]", "\\\\\u00c9", "\u00c9\\", "x\\\u212b\u212b",
+]
+
+
+def pool():
+    p = [ord(c) for c in "abcxyzABCXYZ019/._-*?[]\\ "]
+    p += list(range(0xC0, 0x180))
+    p += list(range(0x300, 0x370))
+    p += list(range(0x370, 0x400))
+    p += list(range(0x400, 0x460))
+    p += list(range(0x591, 0x5C8))
+    p += list(range(0x1DC0, 0x1E00))
+    p += list(range(0x1E00, 0x1F00, 3))
+    p += list(range(0x1F00, 0x2000))
+    p += list(range(0x1100, 0x1113)) + list(range(0x1161, 0x1176)) + list(range(0x11A8, 0x11C3))
+    p += [0x212A, 0x212B, 0x2126, 0x0130, 0x0131, 0x00DF, 0x1E9E, 0x03C2, 0x0345, 0x13A0, 0xAB70, 0x10400, 0x1F600]
+    p += [c for c in range(0xF900, 0xFB00) if c in DECOMP]
+    p = [c for c in p if c not in range(0xD800, 0xE000)]
+    return p
+
+
+rng = random.Random(599)
+P = pool()
+dk, fk = list(DECOMP), list(FOLD)
+vecs = [{"in": s, "out": fold(s)} for s in CURATED]
+vecs += [{"in": s, "out": fold(s, True), "pattern": True} for s in CURATED + CURATED_PAT]
+for i in range(400):
+    n = 1 + rng.randrange(12)
+    cps = []
+    for _ in range(n):
+        r = rng.random()
+        if r < 0.15:
+            cps.append(rng.choice(dk))
+        elif r < 0.25:
+            cps.append(rng.choice(fk))
+        elif r < 0.32:
+            cps.append(S_BASE + rng.randrange(S_COUNT))
+        else:
+            cps.append(rng.choice(P))
+    s = "".join(chr(c) for c in cps)
+    if i % 4 == 3:
+        vecs.append({"in": s, "out": fold(s, True), "pattern": True})
+    else:
+        vecs.append({"in": s, "out": fold(s)})
+
+with open(VEC_OUT, "w", encoding="utf-8") as f:
+    f.write("[\n")
+    f.write(",\n".join(json.dumps(v, ensure_ascii=False) for v in vecs))
+    f.write("\n]\n")
+
+print("decomp %d (data %d), fold %d, ccc %d, max expansion %d, vectors %d — Unicode %s" % (
+    len(dkeys), len(ddata), len(fkeys), len(ckeys), MAX_EXPANSION, len(vecs), unicodedata.unidata_version))

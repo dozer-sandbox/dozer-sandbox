@@ -126,6 +126,7 @@ New sandboxes from Quick add, **New sandbox** and `doz new` use it; existing one
 doz create my-box --image lab --isolated            # made, and off
 doz start my-box
 doz create my-app --image claude-code --workspace ~/code/my-app --start
+doz create my-pi --image pi --workspace ~/code/my-pi --prepare   # made and off, its image ready
 doz up my-app                                        # create if missing, start or wake, attach
 ```
 
@@ -138,6 +139,7 @@ doz up my-app                                        # create if missing, start 
 | `--network` · `--allow` | What the agent may reach ([What the agent can do](10-permissions-and-network.md)). |
 | `--account` | Which Claude account it uses ([Agents and accounts](09-agents-and-accounts.md)). |
 | `--start` | Start it straight away. |
+| `--prepare` | Prepare its image now — download and bake it once, with its progress — so the first start does not wait; the sandbox stays off. If that image is already being prepared, it joins that preparation. Ctrl-C stops watching; the preparation goes on (`doz onboard --status` follows it). |
 | `--rebuild` · `--use-current` | When the image is out of date: rebuild it first, or use it as it is. |
 
 `doz up` is the everyday command, like `vagrant up` or `docker compose up`: create if missing, start

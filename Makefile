@@ -36,6 +36,9 @@ DECKHOLD_RES := Sources/DozerKit/Resources/deckhold
 DOZNET_OUT := Guest/doznet/out/doznet
 DOZNET_RES := Sources/DozerKit/Resources/doznet
 
+DOZVIEW_OUT := Guest/dozview/out/dozview
+DOZVIEW_RES := Sources/DozerKit/Resources/dozview
+
 # ── The doz CLI (585) ──────────────────────────────────────────────────────
 # `make cli` builds the debug binary and signs it with the virtualization entitlement (an unsigned
 # doz runs every command but cannot boot a VM). `make install-cli PREFIX=~/.local` builds
@@ -64,7 +67,7 @@ DOCC_OUT         ?= .docc-build
 DOCC_BASE_PATH   ?= /DozerKit/
 DOCC_PREVIEW_PORT ?= 8000
 
-.PHONY: help build test audit audit-resolved web-assets web-assets-check test-cli-onboarding test-cli-terminal test-cli-hoststop test-cli-agentsudo test-cli-points test-cli-timezone test-cli-images test-cli-bases test-cli-permissions test-cli-clipboard test-cli-browser test-cli-openfiles test-cli-github test-cli-access test-cli-tools tools-fixture test-cli-quickadd test-cli-projectwizard test-cli-tmux pullbench test-vm test-vm-agents test-vm-network test-vm-hardening test-vm-lineage prev-cli test-vm-upgrade vmtest-host kernel deckhold deckhold-verify doznet doznet-verify cli install-cli test-cli test-vm-claude test-vm-templates docs docs-preview docs-drift-check release bump bump-minor
+.PHONY: help build test audit audit-resolved web-assets web-assets-check test-cli-onboarding test-cli-terminal test-cli-hoststop test-cli-agentsudo test-cli-points test-cli-timezone test-cli-images test-cli-bases test-cli-permissions test-cli-clipboard test-cli-browser test-cli-openfiles test-cli-github test-cli-access test-cli-tools tools-fixture test-cli-quickadd test-cli-projectwizard test-cli-tmux pullbench test-vm test-vm-agents test-vm-network test-vm-hardening test-vm-lineage prev-cli test-vm-upgrade vmtest-host kernel deckhold deckhold-verify doznet doznet-verify dozview dozview-verify test-vm-ignore cli install-cli test-cli test-vm-claude test-vm-templates docs docs-preview docs-drift-check release bump bump-minor
 
 help: ## Show this help
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) | sed 's/:.*## /\t/' | expand -t 22
@@ -75,7 +78,7 @@ build: ## Build every product (and the VM test host)
 # 591: the settings file (doz.toml under XDG_CONFIG_HOME) of every test run is a scratch one — the
 # owner's own ~/.config never shapes a test (the CLI suites set their own, under their scratch store).
 TEST_XDG ?= $(or $(TMPDIR),/tmp/)doz-unit-xdg
-test test-vm test-vm-agents test-vm-network test-vm-hardening test-vm-lineage test-vm-upgrade test-cli test-vm-claude test-vm-templates kernel: export XDG_CONFIG_HOME := $(TEST_XDG)
+test test-vm test-vm-ignore test-vm-agents test-vm-network test-vm-hardening test-vm-lineage test-vm-upgrade test-cli test-vm-claude test-vm-templates kernel: export XDG_CONFIG_HOME := $(TEST_XDG)
 
 test: web-assets-check ## Unit tests — no VM, no entitlement (never --parallel); first, the web assets' drift check
 	swift test $(SWIFT_BUILD_SYSTEM) -j $(JOBS)
@@ -146,6 +149,9 @@ test-vm-upgrade: cli vmtest-host prev-cli ## 591 upgrade: the previous DozerKit 
 
 kernel: vmtest-host ## Fetch + verify the pinned Linux kernel into the cache (KERNEL_CACHE=dir; no VM)
 	perl -e 'alarm shift; exec @ARGV' 900 $(VMTEST_BIN) kernel --store "$(VMTEST_STORE)"
+
+test-vm-ignore: vmtest-host ## 599g workspace rules: .dozignore lock/hide + .dozreadonly through the guest view across boot, pause, sleep, hibernate and a three-process restore; live reload, case folding, a killed daemon, no rule file = no daemon, a rule file appearing, the cost
+	perl -e 'alarm shift; exec @ARGV' 1800 $(VMTEST_BIN) ignore --store "$(VMTEST_STORE)"
 
 test-vm: vmtest-host ## VM integration suite (entitled host, watchdog, scratch store; VMTEST_ARGS=lifecycle|crash)
 	perl -e 'alarm shift; exec @ARGV' $(VMTEST_TIMEOUT) $(VMTEST_BIN) $(VMTEST_ARGS) --store "$(VMTEST_STORE)"
@@ -285,6 +291,15 @@ doznet: ## Rebuild the doznet guest binary (580), install it as the committed re
 doznet-verify: ## Rebuild doznet from scratch and check the committed bytes match
 	FORCE=1 Guest/doznet/build.sh
 	@cmp $(DOZNET_OUT) $(DOZNET_RES) && echo "ok doznet: the committed binary is exactly what the pinned source builds"
+
+dozview: ## Rebuild the dozview guest binary (599g: the workspace rules' view), install it as the committed resource, refresh PROVENANCE.md
+	Guest/dozview/build.sh
+	cp $(DOZVIEW_OUT) $(DOZVIEW_RES)
+	@Scripts/dozview-provenance.sh
+
+dozview-verify: ## Rebuild dozview from scratch and check the committed bytes match
+	FORCE=1 Guest/dozview/build.sh
+	@cmp $(DOZVIEW_OUT) $(DOZVIEW_RES) && echo "ok dozview: the committed binary is exactly what the pinned source builds"
 
 docs-drift-check: ## 589: the CLI reference's documented command names vs real `doz --help` (cheap; names only); the user manual's commands, flags, settings and links (docs/manual)
 	@JOBS=$(JOBS) Scripts/docs-drift-check.sh
