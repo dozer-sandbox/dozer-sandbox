@@ -146,15 +146,14 @@ nav a.active { background: var(--ink); color: var(--bg); }
 .live.stale #host-text { color: var(--muted); font-style: italic; }
 .live.stale .dot { opacity: 0.45; }
 /* 594 W18: the host's and doz ui's transitions, above every page (the terminal pages too). */
-.banners { display: flex; flex-direction: column; gap: 8px; }
-.banners:not(:empty) { margin-bottom: 14px; }
-.banner { display: flex; align-items: flex-start; gap: 12px; background: var(--panel); border: 1px solid var(--line);
-          border-left: 4px solid var(--accent); padding: 9px 12px; border-radius: var(--radius); flex: none; }
-.banner.bad { border-left-color: var(--fail); }
-.banner.warn { border-left-color: var(--pause); }
-.banner .b-text { flex: 1; min-width: 0; }
-.banner .b-text a { margin-right: 6px; }
-.banner .b-acts { display: flex; gap: 8px; align-items: center; flex: none; }
+
+
+
+
+
+
+
+
 
 
 /* 594 W22: an operation's finished parts (Restart host: each sandbox's hibernation). */
@@ -162,21 +161,17 @@ nav a.active { background: var(--ink); color: var(--bg); }
 .op-lines li { font-variant-numeric: tabular-nums; }
 /* 594 W21: doz ui is gone — the page is paused under an overlay; the banner strip stays IN FRONT of it
    (and outside the inert parts), pinned to the top of the viewport. */
-.ui-overlay { position: fixed; inset: 0; z-index: var(--z-overlay); background: var(--scrim); display: flex;
-              align-items: center; justify-content: center; padding: 16px; }
-.ui-overlay[hidden] { display: none; }
-.ui-overlay:focus { outline: none; }
+
+
+
 body.ui-paused #banners { position: sticky; top: 12px; z-index: var(--z-banner-paused); }
 body.ui-paused .toasts { z-index: var(--z-toast-paused); }
-.ui-ov-card { background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: 12px; padding: 22px 24px;
-              max-width: 520px; width: 100%; box-shadow: var(--shadow-3); }
-.ui-ov-head { display: flex; align-items: center; gap: 12px; }
-.ui-ov-head h2 { margin: 0; font-size: var(--fs-xl); }
-.ui-ov-card p { margin: 10px 0 0; }
-.ui-ov-acts { margin-top: 18px; display: flex; justify-content: flex-end; }
-.ui-ov-spin { width: 18px; height: 18px; flex: none; border-radius: 50%; border: 2.5px solid var(--accent); border-top-color: transparent;
-              animation: spin 0.9s linear infinite; }
-@media (prefers-reduced-motion: reduce) { .ui-ov-spin { animation-duration: 3s; } }
+
+
+
+
+
+
 .version { font-variant-numeric: tabular-nums; }
 
 
@@ -186,8 +181,8 @@ h1 { font-size: var(--fs-2xl); font-weight: var(--fw-strong); line-height: var(-
 h2 { font-size: var(--fs-lg); font-weight: var(--fw-strong); margin: 28px 0 10px; letter-spacing: -0.005em; }
 h3 { font-size: var(--fs-md); font-weight: var(--fw-strong); }
 .sub { color: var(--ink-2); margin: 0 0 18px; max-width: 92ch; }
-.notice { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--pause); padding: 10px 14px; border-radius: var(--radius); margin-bottom: 18px; }
-.notice.bad { border-left-color: var(--fail); }
+
+
 
 .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; margin-bottom: 8px; }
 .card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; }
@@ -249,15 +244,15 @@ tr.click:hover td { background: var(--bg); }
 .toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 0 0 10px; color: var(--muted); font-size: var(--fs-sm); }
 .toolbar select { font: inherit; }
 
-.row-op { font-size: var(--fs-sm); color: var(--muted); max-width: 320px; }
+
 /* The sandbox page's operation line: prominent while something runs, gone when nothing has lately. */
-.op-banner { border: 1px solid var(--line); border-left: 4px solid var(--accent); background: var(--panel); border-radius: var(--radius); padding: 9px 14px; margin: 0 0 16px; font-variant-numeric: tabular-nums; }
-.op-banner.op-done { border-left-color: var(--run); }
-.op-banner.op-failed { border-left-color: var(--fail); color: var(--fail); }
-.op-banner.empty-op { display: none; }
-.row-op.op-running { color: var(--accent); }
-.row-op.op-done { color: var(--run); }
-.row-op.op-failed { color: var(--fail); }
+
+
+
+
+
+
+
 .ops { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 8px 12px; margin-bottom: 16px; font-size: var(--fs-sm); }
 .ops-title { font-weight: var(--fw-medium); color: var(--ink-2); font-size: var(--fs-sm); margin-bottom: 4px; }
 .op { display: grid; grid-template-columns: 18px minmax(120px, 200px) minmax(0, 1fr); gap: 8px; padding: 2px 0; }
@@ -266,14 +261,6 @@ tr.click:hover td { background: var(--bg); }
 .op-failed .op-state, .op-failed .op-text { color: var(--fail); }
 .op-text { word-break: break-word; }
 
-.toasts { position: fixed; right: 16px; bottom: 16px; display: flex; flex-direction: column; gap: 8px; z-index: var(--z-toast); max-width: min(420px, calc(100vw - 32px)); }
-.toast { background: var(--ink); color: var(--bg); padding: 9px 14px; border-radius: 8px; box-shadow: var(--shadow-2); }
-.toast.bad { background: var(--fail); color: var(--on-danger); }
-
-dialog.dlg { border: 1px solid var(--line); border-radius: 12px; background: var(--panel); color: var(--ink); padding: 0; width: min(520px, calc(100vw - 32px)); }
-dialog.dlg::backdrop { background: var(--scrim); }
-dialog.dlg form { padding: 18px 20px; display: flex; flex-direction: column; gap: 10px; }
-dialog.dlg h2 { margin: 0; }
 
 
 
@@ -281,8 +268,16 @@ dialog.dlg h2 { margin: 0; }
 
 
 
-.dlg-buttons { display: flex; gap: 8px; justify-content: flex-end; margin-top: 6px; }
-.dlg-error { color: var(--fail); min-height: 0; }
+
+
+
+
+
+
+
+
+
+
 .diff { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font-family: var(--mono); font-size: var(--fs-mono); }
 .diff .add { color: var(--run); }
 .diff .del { color: var(--fail); }
@@ -331,7 +326,7 @@ main.main-terms { padding: 14px 20px 14px; display: flex; flex-direction: column
 .sbx-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .sbx-actions .actions { justify-content: flex-start; }
 .sbx-sep { width: 1px; height: 18px; background: var(--line); margin: 0 4px; }
-.sbx-bar .op-banner { margin: 0; padding: 6px 12px; }
+
 .sbx-body { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 440px; gap: 12px; }
 .sbx-body.details-closed { grid-template-columns: minmax(0, 1fr); }
 .sbx-body.details-closed .sbx-details { display: none; }
@@ -530,7 +525,7 @@ nav a > .icon { width: 17px; height: 17px; opacity: 0.85; }
 
 
 ul.plain { margin: 0; padding: 12px 16px 12px 32px; }
-.notice ul.plain { padding: 0 0 0 18px; }
+
 @media (max-width: 760px) { .setting { grid-template-columns: minmax(0, 1fr); } .setting-control { justify-content: flex-start; } }
 /* 594: the onboarding wizard, host preparations, the environment prompt. */
 .wizard { max-width: 860px; }
@@ -616,23 +611,19 @@ ul.prep-steps .prep-done-transfer { color: var(--muted); }
 .prompt-panel { padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; font-size: var(--fs-md); }
 .no-ws { font-size: var(--fs-sm); }
 /* 594: an agent's credential prerequisite — in a create form, and an existing sandbox's banner. */
-.acct-need { border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent); border-radius: 8px; padding: 10px 12px;
-  display: flex; flex-direction: column; gap: 6px; background: color-mix(in srgb, var(--accent) 7%, transparent); }
-.acct-need-title { font-weight: var(--fw-strong); display: flex; align-items: center; gap: 6px; }
-.acct-need .acct-form { padding: 0; border: 0; background: none; }
-.cred-banner { grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 8px;
-  padding: 8px 12px; border-radius: 8px; border: 1px solid color-mix(in srgb, var(--fail) 45%, transparent);
-  background: color-mix(in srgb, var(--fail) 8%, transparent); }
-.cred-banner-text { display: flex; align-items: center; gap: 6px; font-weight: var(--fw-medium); }
+
+
+
+
+
 /* 594 W28: out-of-date images — never rebuilt by themselves; said here. */
-.cred-banner.img-banner { border-color: color-mix(in srgb, var(--pause) 45%, transparent); background: color-mix(in srgb, var(--pause) 8%, transparent); }
-.img-banner .cred-banner-text { font-weight: var(--fw-regular); }
+
+
 
 .img-standing { font-size: var(--fs-sm); margin-top: 3px; max-width: 46ch; }
-.img-choice { border: 1px solid color-mix(in srgb, var(--pause) 45%, transparent); background: color-mix(in srgb, var(--pause) 8%, transparent);
-  border-radius: 8px; padding: 8px 12px; margin: 6px 0 10px; display: flex; flex-direction: column; gap: 6px; }
-.img-choice[hidden] { display: none; }
-.img-choice-note { margin: 0; }
+
+
+
 
 /* 594: the workspace chooser — Shared folder | Isolated; the path, Choose…, what the host says. */
 .ws-field .segmented { align-self: flex-start; }
@@ -713,15 +704,14 @@ dialog.dlg:has(.image-picker) { width: min(780px, calc(100vw - 32px)); }
 .base-card .base-prepared:empty { display: none; }
 .base-card.soon { cursor: not-allowed; opacity: .6; margin-top: 4px; }
 .df-panel, .tpl-panel { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
-.df-policy { border: 1px solid var(--line); border-left: 4px solid var(--pause); border-radius: 8px; padding: 8px 10px; font-size: var(--fs-sm);
-             background: color-mix(in srgb, var(--pause) 8%, var(--panel)); }
-.df-policy .icon, .df-state .icon { width: 14px; height: 14px; vertical-align: -2px; }
+
+
 .df-builder { display: flex; flex-direction: column; gap: 4px; font-size: var(--fs-sm); }
 .df-builder p { margin: 0; }
 .df-state[data-builder-state="ready"] { color: var(--run); }
 .image-summary { margin-top: 2px; }
-.dlg-why { color: var(--muted); font-size: var(--fs-sm); text-align: right; }
-.dlg-why:empty { display: none; }
+
+
 /* 597: what the agent can do. */
 .perm-panel { padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; }
 .perm-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
@@ -738,9 +728,8 @@ dialog.dlg:has(.image-picker) { width: min(780px, calc(100vw - 32px)); }
 .perm-hosts { margin-left: 38px; font-size: var(--fs-xs); }
 .perm-hosts summary { cursor: pointer; color: var(--muted); }
 .perm-suggestions { display: flex; flex-direction: column; gap: 6px; }
-.perm-suggest { border: 1px solid var(--line); border-left: 4px solid var(--pause); border-radius: 8px; padding: 6px 10px; font-size: var(--fs-sm);
-                display: flex; align-items: center; gap: 4px; flex-wrap: wrap; background: color-mix(in srgb, var(--pause) 7%, var(--panel)); }
-.perm-suggest .icon { width: 14px; height: 14px; }
+
+
 .perm-sites { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: var(--fs-sm); }
 
 .net-rules summary { cursor: pointer; color: var(--muted); margin: 6px 0; }
@@ -756,7 +745,7 @@ nav { position: relative; }
 nav a.active + .nav-quick { color: var(--bg); }
 nav a.active + .nav-quick:hover { background: color-mix(in srgb, var(--bg) 22%, transparent); color: var(--bg); }
 .nav-quick:disabled { opacity: .45; cursor: default; }
-.quick-why { margin: 0 0 12px; }
+
 .path-setting { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 /* 599f: the New Sandbox wizard (#/new). */
 .nw .wiz-buttons .wiz-gap { flex: 1; }
@@ -953,3 +942,77 @@ input[type="checkbox"][role="switch"]:disabled { opacity: 0.5; cursor: not-allow
 .res-toggle .icon { transition: transform var(--dur-1) var(--ease); transform: rotate(-90deg); }
 .res-toggle.open .icon { transform: none; }
 .perm-sites input { width: 200px; }
+
+/* ── 603 step 4: the callout — the ONE notice surface; the page notices; toasts; dialogs; the paused overlay ── */
+.callout { --tone: var(--info); --tone-t: var(--info-tint);
+  display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; column-gap: 10px; row-gap: 2px; align-items: start;
+  padding: 9px 12px; border-radius: var(--r-md); background: var(--tone-t); border: var(--bw) solid color-mix(in srgb, var(--tone) 30%, var(--surface)); color: var(--ink); }
+.callout[hidden] { display: none; }
+.callout > .icon, .callout > .icon-pair { color: var(--tone); margin-top: 1px; grid-column: 1; }
+.callout .c-body { grid-column: 2; min-width: 0; overflow-wrap: anywhere; }
+.callout .c-body > p { margin: 0; }
+.callout .c-title { font-weight: var(--fw-strong); }
+.callout .c-acts { grid-column: 3; grid-row: 1 / span 2; display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+.callout .c-acts .btn.quiet { color: var(--ink-2); }
+.callout.ok { --tone: var(--ok); --tone-t: var(--ok-tint); }
+.callout.warn { --tone: var(--warn); --tone-t: var(--warn-tint); }
+.callout.bad { --tone: var(--bad); --tone-t: var(--bad-tint); }
+.callout.banner { background: var(--surface); border-color: var(--line); box-shadow: inset 3px 0 0 var(--tone); }
+.callout.compact { padding: 5px 10px; font-size: var(--fs-sm); }
+.callout.compact > .icon { width: 14px; height: 14px; margin-top: 1px; }
+.callout .c-body ul.plain { padding: 0 0 0 18px; margin: 0; }
+.callout .b-text a { margin-right: 6px; }
+.callout .acct-form { padding: 0; border: 0; background: none; margin-top: 6px; }
+.callout.img-choice { margin: 6px 0 10px; }
+.callout.img-choice .c-body { display: flex; flex-direction: column; gap: 6px; }
+.callout.img-choice label { display: flex; gap: var(--sp-3); align-items: center; }
+.banners { display: flex; flex-direction: column; gap: var(--sp-3); }
+.banners:not(:empty) { margin-bottom: 14px; }
+/* The page notices: a failure with no closer home — at the top of main, sticky while the page scrolls. */
+.page-notices { position: sticky; top: 0; z-index: var(--z-sticky); display: flex; flex-direction: column; gap: var(--sp-2); margin: -4px 0 14px; }
+.page-notices[hidden] { display: none; }
+.page-notices .callout { box-shadow: var(--shadow-1); }
+/* A sandbox's status line: a quiet line while an operation runs, a callout when it ended. */
+.row-op { font-size: var(--fs-sm); color: var(--ink-2); max-width: 320px; }
+.row-op.op-running { color: var(--accent); }
+.row-op.op-done { color: var(--ok); }
+.row-op.op-failed { color: var(--bad); }
+.op-banner { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; font-size: var(--fs-sm); color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.op-banner.empty-op { display: none; }
+.op-banner .op-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.op-banner .callout { flex: 1; }
+/* Toasts — success and progress acknowledgements only (a failure is said where it happened). */
+.toasts { position: fixed; right: 16px; bottom: 16px; display: flex; flex-direction: column; gap: var(--sp-3); z-index: var(--z-toast); max-width: min(420px, calc(100vw - 32px)); }
+.toast { display: flex; align-items: center; gap: var(--sp-3); padding: 8px 12px; border-radius: var(--r-md); background: var(--ink); color: var(--bg); box-shadow: var(--shadow-2); }
+.toast .icon { color: inherit; }
+/* Dialogs — title (and close), a sentence of consequence, the fields, then the footer: why at the left,
+   Cancel (quiet) and the action at the right. A destructive one asks for the name; errors stay inside. */
+dialog.dlg { border: var(--bw) solid var(--line); border-radius: var(--r-xl); background: var(--surface); color: var(--ink); padding: 0;
+  width: min(520px, calc(100vw - 32px)); box-shadow: var(--shadow-3); overflow: hidden; }
+dialog.dlg::backdrop { background: var(--scrim); }
+dialog.dlg form { display: flex; flex-direction: column; max-height: calc(100vh - 48px); }
+.dlg-head { display: flex; align-items: center; gap: var(--sp-3); padding: 14px 16px 0; }
+.dlg-head .h-title, dialog.dlg h2.h-title { font-size: var(--fs-xl); font-weight: var(--fw-strong); margin: 0 auto 0 0; min-width: 0; }
+.dlg-body { padding: 8px 16px 16px; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; min-height: 0; }
+.dlg-body > p.sub { margin: 0; }
+.dlg-foot { display: flex; gap: var(--sp-3); justify-content: flex-end; align-items: center; padding: 12px 16px; border-top: var(--bw) solid var(--line); background: var(--bg); }
+.dlg-foot .why { margin-right: auto; font-size: var(--fs-sm); color: var(--ink-2); }
+.dlg-foot .why:empty, .dlg-foot .why[hidden] { display: none; }
+.dlg-foot .why:empty + .btn { margin-left: auto; }
+.dlg-error:empty { display: none; }
+.dlg-error:not(:empty) { padding: 5px 10px; border-radius: var(--r-md); font-size: var(--fs-sm); color: var(--bad); background: var(--bad-tint);
+  border: var(--bw) solid color-mix(in srgb, var(--bad) 30%, var(--surface)); }
+/* The paused overlay (doz ui gone): a scrim, the card, one Try now. */
+.ui-overlay { position: fixed; inset: 0; z-index: var(--z-overlay); background: var(--scrim); display: flex; align-items: center; justify-content: center; padding: 16px; }
+.ui-overlay[hidden] { display: none; }
+.ui-overlay:focus { outline: none; }
+.ui-ov-card { background: var(--surface); color: var(--ink); border-radius: var(--r-xl); padding: 18px 20px; max-width: 460px; width: 100%; box-shadow: var(--shadow-3); }
+.ui-ov-head { display: flex; align-items: center; gap: 10px; }
+.ui-ov-head h2 { margin: 0; font-size: var(--fs-xl); }
+.ui-ov-card p { margin: 8px 0 0; color: var(--ink-2); }
+.ui-ov-card #ui-ov-desc > p:first-child { color: var(--ink); }
+.ui-ov-acts { margin-top: 14px; display: flex; justify-content: flex-end; }
+.ui-ov-spin { color: var(--accent); }
+@media (max-width: 760px) { .callout .c-acts { grid-column: 2; grid-row: auto; justify-content: flex-start; margin-top: 4px; } }
+.df-state .icon { width: 14px; height: 14px; vertical-align: -2px; }
+.quick-why { margin: 0; }

@@ -207,7 +207,7 @@ async function act(body) {
     return op;
   } catch (e) {
     endTransition(body.sandbox, body.action);
-    toast(e.message || String(e), true);
+    failureFor(body.sandbox, e.message || String(e));
     return null;
   }
 }
@@ -281,7 +281,7 @@ function trackOp(op) {
   if (!before && op.state === 'running' && op.action !== 'rm') refresh(false);
   if (op.state !== 'running' && (!before || before.state === 'running')) {
     endTransition(op.sandbox, op.action, op.state === 'failed');
-    if (op.state === 'failed') toast(op.label + ': ' + op.text, true);
+    if (op.state === 'failed') opFailed(op);
     refreshNav();
     // 595: an operation's end may have changed the disks — measure again (the nav's total too).
     remeasure();
@@ -291,11 +291,60 @@ function trackOp(op) {
     refresh(false);
   }
 }
-function toast(text, bad) {
-  const t = h('div', { class: 'toast' + (bad ? ' bad' : ''), role: 'status' }, text);
+/// 603 (E7): a toast acknowledges a success (or says something worth knowing) and goes after 4 s. A FAILURE is
+/// never only a toast: it is said where the action was started and stays until dismissed or fixed — in its
+/// dialog (which stays open), its sandbox's status line (the sandbox page's bar, the Sandboxes row), the
+/// step's own error slot, or the page notices at the top of the page. `toast(text, true)` is that last one.
+function toast(text, bad, iconName) {
+  if (bad) { pageFailure(text); return h('div'); }
+  const t = h('div', { class: 'toast', role: 'status' }, icon(iconName || 'check'), h('span', null, text));
   $('toasts').append(t);
-  setTimeout(() => t.remove(), bad ? 9000 : 4000);
+  setTimeout(() => t.remove(), 4000);
   return t;
+}
+// ── 603: the callout — the ONE notice surface (info · ok · warn · bad; inline, compact, or the page's banner
+// strip). An icon, an optional title, the body, actions at the right, an optional dismiss.
+const TONE_ICON = { info: 'info', ok: 'circle-check', warn: 'triangle-alert', bad: 'circle-x' };
+function callout(tone, opts = {}) {
+  tone = tone || 'info';
+  const el = h('div', { class: ['callout', tone, opts.compact ? 'compact' : '', opts.banner ? 'banner' : '', opts.cls || ''].filter(Boolean).join(' '),
+                         role: opts.role || (tone === 'bad' ? 'alert' : 'status'), ...(opts.attrs || {}) });
+  const acts = [...(opts.actions || [])].filter(Boolean);
+  if (opts.dismiss) {
+    acts.push(h('button', { type: 'button', class: 'btn sm quiet icon-only b-x', title: 'Dismiss', 'aria-label': 'Dismiss',
+      on: { click: (ev) => { ev.stopPropagation(); if (typeof opts.dismiss === 'function') opts.dismiss(el); else el.remove(); } } }, icon('x')));
+  }
+  el.append(opts.glyph || icon(opts.icon || TONE_ICON[tone]),
+    h('div', { class: 'c-body' + (opts.bodyCls ? ' ' + opts.bodyCls : '') }, opts.title ? h('div', { class: 'c-title' }, opts.title) : null, opts.body),
+    acts.length ? h('div', { class: 'c-acts' }, acts) : null);
+  return el;
+}
+/// The page notices (#notice, at the top of main, sticky): a failure with no closer home, or one whose home
+/// is not on screen. Each stays until dismissed; at most the newest five.
+state.failures = new Map();
+function pageFailure(text, opts = {}) {
+  const key = opts.key || String(text);
+  state.failures.delete(key);
+  state.failures.set(key, { text: String(text), tone: opts.tone || 'bad', title: opts.title || null });
+  while (state.failures.size > 5) state.failures.delete(state.failures.keys().next().value);
+  paintFailures();
+}
+function paintFailures() {
+  const box = $('notice');
+  box.hidden = state.failures.size === 0;
+  box.replaceChildren(...[...state.failures.entries()].map(([key, f]) => callout(f.tone, { compact: true, title: f.title, body: f.text,
+    attrs: { 'data-failure': key }, dismiss: () => { state.failures.delete(key); paintFailures(); } })));
+}
+/// A failure about a sandbox: its status line when one is on screen (it stays there until dismissed, or until
+/// the next operation on it), else the page notices.
+state.sbxFail = new Map();
+function statusSlotShown(name) { return !!name && [...document.querySelectorAll('[data-op-for]')].some((el) => el.dataset.opFor === name && el.getClientRects().length > 0); }
+function failureFor(name, text) {
+  if (statusSlotShown(name)) { state.sbxFail.set(name, { text: String(text), at: Date.now() }); paintRowOps(); }
+  else pageFailure(name ? name + ': ' + text : text);
+}
+function opFailed(op) {
+  if (!statusSlotShown(op.sandbox)) pageFailure(op.label + ': ' + op.text, { key: 'op:' + op.id });
 }
 // 599 (594.B1/B2): what a session bridge did — "hello copied 42 chars", "hello opened https://… in your
 // browser". Shown every time (a copy is the one thing an agent can hand the person unasked); two views of
@@ -306,7 +355,8 @@ function bridgeNotice(kind, text) {
   for (const [key, at] of recentBridgeNotices) if (now - at > 2000) recentBridgeNotices.delete(key);
   if (recentBridgeNotices.has(k + '\n' + s)) return;
   recentBridgeNotices.set(k + '\n' + s, now);
-  const t = toast(s, /-(refused|off)$/.test(k));
+  if (/-(refused|off)$/.test(k)) { pageFailure(s, { tone: 'warn', key: 'bridge:' + k + ':' + s }); return; }
+  const t = toast(s, false, 'info');
   t.classList.add('bridge');
   t.dataset.bridge = k;
 }
@@ -399,6 +449,9 @@ async function loadPreparations() {
 /// The newest operation of each sandbox, shown under its name in the list (live, without a refetch).
 /// A running operation counts its seconds, so a two-minute first start (pull, flatten, bake) is
 /// visibly alive; the text is the host's latest step.
+/// 603: a failure stays (until dismissed, or the next operation on the sandbox); a success shows for a minute.
+state.acked = new Set();
+state.pageAt = Date.now();      // a failure from before this page loaded shows only as long as a success would
 function paintRowOps() {
   for (const el of document.querySelectorAll('[data-op-for]')) {
     const name = el.dataset.opFor;
@@ -406,13 +459,39 @@ function paintRowOps() {
     // While something runs, the OLDEST running operation (a start that others wait behind) — its
     // steps are the news; otherwise the newest outcome.
     const running = ops.filter((o) => o.state === 'running');
-    const o = running.length ? running[0] : ops[ops.length - 1];
-    const fresh = o && (o.state === 'running' || Date.now() - new Date(o.startedAt).getTime() < 60000);
-    const secs = o ? Math.max(0, Math.round((Date.now() - new Date(o.startedAt).getTime()) / 1000)) : 0;
-    const more = running.length > 1 ? ' · then ' + running.slice(1).map((x) => x.action).join(', ') : '';
-    const text = !fresh ? '' : o.state === 'running' ? '… ' + o.action + ' · ' + secs + ' s — ' + o.text + more : (o.state === 'done' ? '✓ ' : '✕ ') + o.text;
-    el.textContent = text;
-    el.className = (el.dataset.banner ? 'op-banner' : 'row-op') + (fresh ? ' op-' + o.state : '') + (fresh ? '' : ' empty-op');
+    let o = running.length ? running[0] : ops[ops.length - 1];
+    const fail = state.sbxFail.get(name);
+    const oAt = o ? opEnded(o) : 0;
+    let kind = 'none', text = '';
+    if (o && o.state === 'running') {
+      const secs = Math.max(0, Math.round((Date.now() - new Date(o.startedAt).getTime()) / 1000));
+      const more = running.length > 1 ? ' · then ' + running.slice(1).map((x) => x.action).join(', ') : '';
+      kind = 'running'; text = o.action + ' · ' + secs + ' s — ' + o.text + more;
+    } else if (fail && (!o || fail.at >= oAt)) {
+      kind = 'failed'; text = fail.text; o = null;
+    } else if (o && o.state === 'failed' && !state.acked.has(o.id) && (oAt >= state.pageAt || Date.now() - oAt < 60000)) {
+      kind = 'failed'; text = o.text;
+    } else if (o && o.state === 'done' && Date.now() - oAt < 60000) {
+      kind = 'done'; text = o.text;
+    }
+    const key = kind + '|' + text;
+    if (el.dataset.painted === key) continue;
+    el.dataset.painted = key;
+    if (!el.dataset.banner) {
+      el.textContent = kind === 'none' ? '' : (kind === 'running' ? '… ' : kind === 'done' ? '✓ ' : '✕ ') + text;
+      el.className = 'row-op' + (kind === 'none' ? ' empty-op' : ' op-' + kind);
+      continue;
+    }
+    // The sandbox page's status slot: a quiet line while it runs, a callout when it ended.
+    el.className = 'op-banner' + (kind === 'none' ? ' empty-op' : ' op-' + kind);
+    if (kind === 'none') { el.replaceChildren(); continue; }
+    if (kind === 'running') { el.replaceChildren(h('span', { class: 'mini-spin', 'aria-hidden': 'true' }), h('span', { class: 'op-text' }, text)); continue; }
+    const opId = o ? o.id : null;
+    el.replaceChildren(callout(kind === 'done' ? 'ok' : 'bad', { compact: true, body: text, dismiss: kind === 'failed' ? () => {
+      if (opId) state.acked.add(opId); else state.sbxFail.delete(name);
+      el.dataset.painted = '';
+      paintRowOps();
+    } : null }));
   }
 }
 function opRunningFor(name) { return [...state.ops.values()].some((o) => o.sandbox === name && o.state === 'running'); }
@@ -452,16 +531,21 @@ function dialog(title, intro, fields, submitLabel, onSubmit, opts = {}) {
   });
   const extra = h('div', { class: 'dlg-extra' });
   const submit = h('button', { type: 'submit', class: 'btn primary' + (opts.danger ? ' danger' : '') }, withIcon(opts.icon || iconFor(submitLabel), submitLabel));
-  const cancel = h('button', { type: 'button', class: 'btn', on: { click: () => d.close() } }, withIcon('x', 'Cancel'));
+  const cancel = h('button', { type: 'button', class: 'btn quiet', on: { click: () => d.close() } }, withIcon('x', 'Cancel'));
+  const close = h('button', { type: 'button', class: 'btn sm quiet icon-only', title: 'Close', 'aria-label': 'Close', on: { click: () => d.close() } }, icon('x'));
+  // The action's own error: in the dialog, which stays open (603 E7).
   const error = h('div', { class: 'dlg-error', role: 'alert' });
-  form.append(h('h2', null, title), intro ? h('p', { class: 'sub' }, intro) : null, ...rows, extra, error,
-    h('div', { class: 'dlg-buttons' }, cancel, submit));
+  const why = h('span', { class: 'why' });
+  form.append(h('div', { class: 'dlg-head' }, h('h2', { class: 'h-title' }, title), close),
+    h('div', { class: 'dlg-body' }, intro ? h('p', { class: 'sub' }, intro) : null, ...rows, extra, error),
+    h('div', { class: 'dlg-foot dlg-buttons' }, why, cancel, submit));
   if (opts.confirmName) {
     submit.disabled = true;
-    const typed = h('input', { type: 'text', autocomplete: 'off', spellcheck: 'false', 'aria-label': 'type the name to confirm' });
-    typed.addEventListener('input', () => { submit.disabled = typed.value !== opts.confirmName; });
+    why.textContent = 'Type the name to ' + submitLabel.split(' ')[0].toLowerCase() + ' it';
+    const typed = h('input', { type: 'text', class: 'mono', autocomplete: 'off', spellcheck: 'false', 'aria-label': 'type the name to confirm' });
+    typed.addEventListener('input', () => { submit.disabled = typed.value !== opts.confirmName; why.hidden = !submit.disabled; });
     inputs.__confirm = typed;
-    form.insertBefore(h('label', { class: 'field' }, h('span', null, 'Type ', h('code', null, opts.confirmName), ' to confirm'), typed), extra);
+    extra.before(h('label', { class: 'field' }, h('span', null, 'Type ', h('code', null, opts.confirmName), ' to confirm'), typed));
   }
   form.addEventListener('submit', async (ev) => {
     ev.preventDefault();
@@ -485,7 +569,7 @@ function dialog(title, intro, fields, submitLabel, onSubmit, opts = {}) {
   d.showModal();
   const first = form.querySelector('input,select,textarea');
   if (first) first.focus();
-  return Object.assign(d, { inputs });
+  return Object.assign(d, { inputs, why });
 }
 
 // ── 594: the workspace of a new sandbox ─────────────────────────────────────
@@ -557,7 +641,7 @@ function workspaceChooser({ nameInput = null, image = () => null, name = null, i
     try {
       const r = await api('workspace/choose', { method: 'POST', json: path.value.trim() ? { start: path.value.trim() } : {} });
       if (r && r.path) { path.value = r.path; pathEdited = true; autoPath = null; await check({ path: r.path }); }
-    } catch (e) { toast(e.message || String(e), true); } finally { choose.disabled = false; }
+    } catch (e) { say({ error: e.message || String(e) }); } finally { choose.disabled = false; }
   });
   setMode(mode);
   if (pathEdited) check({ path: path.value.trim() }); else check();
@@ -650,12 +734,14 @@ function imagePicker({ images = [], bases = null, value = 'claude-code', dockerf
   dfPath.value = dockerfile;
   const dfChoose = h('button', { type: 'button', class: 'btn small', 'data-dockerfile-choose': '', title: 'Opens the Mac’s file picker' },
     withIcon('folder', 'Choose Dockerfile…'));
-  const policyNote = h('div', { class: 'df-policy', role: 'note', 'data-dockerfile-policy': '' }, icon('shield'), ' ', bases ? bases.outsidePolicy : '');
+  const policyNote = callout('warn', { compact: true, cls: 'df-policy', icon: 'shield', role: 'note', attrs: { 'data-dockerfile-policy': '' }, body: bases ? bases.outsidePolicy : '' });
   const builderBox = h('div', { class: 'df-builder', 'data-builder': '' });
+  const dfError = h('div', { class: 'dlg-error', role: 'alert', 'data-dockerfile-error': '' });
+  const dfFail = (e) => { dfError.textContent = e ? e.message || String(e) : ''; };
   const dfPanel = h('div', { class: 'df-panel' },
     h('div', { class: 'ws-row' }, dfPath, dfChoose),
     h('small', { class: 'muted' }, 'Dozer builds it with Apple’s container build, then adds the developer baseline and the agent — your Dockerfile need not install Claude Code. Its folder is the build context, and the workspace unless you set one.'),
-    policyNote, builderBox);
+    policyNote, builderBox, dfError);
   const dfTell = () => { onDockerfile(dfPath.value.trim() ? dfPath.value.trim().replace(/\/[^/]*$/, '') || '/' : ''); };
   dfPath.addEventListener('input', () => { onChange(); });
   dfPath.addEventListener('change', dfTell);
@@ -664,7 +750,8 @@ function imagePicker({ images = [], bases = null, value = 'claude-code', dockerf
     try {
       const r = await api('dockerfile/choose', { method: 'POST', json: dfPath.value.trim() ? { start: dfPath.value.trim() } : {} });
       if (r && r.path) { dfPath.value = r.path; onDockerfile(r.folder); onChange(); }
-    } catch (e) { toast(e.message || String(e), true); } finally { dfChoose.disabled = false; }
+      dfFail(null);
+    } catch (e) { dfFail(e); } finally { dfChoose.disabled = false; }
   });
   async function refreshBuilder() {
     try { const b = await api('bases'); builder = b.builder; } catch (_) { /* keep */ }
@@ -679,13 +766,13 @@ function imagePicker({ images = [], bases = null, value = 'claude-code', dockerf
     } else if (s === 'stopped') {
       kids.push(h('p', { class: 'muted' }, builder.startNote),
         h('div', { class: 'actions' },
-          btn('Start its services', async () => { try { await actOrThrow({ action: 'builder-start' }); await waitOps(); } catch (e) { toast(e.message || String(e), true); } refreshBuilder(); },
+          btn('Start its services', async () => { try { dfFail(null); await actOrThrow({ action: 'builder-start' }); await waitOps(); } catch (e) { dfFail(e); } refreshBuilder(); },
             { small: true, primary: true, icon: 'play' }),
           btn('Not now', () => { notNow = true; paint(); onChange(); }, { small: true, icon: 'x' })));
     } else if (s !== 'ready') {
       kids.push(h('p', { class: 'muted' }, builder.installNote),
         h('div', { class: 'actions' },
-          btn('Install Apple’s container tool…', async () => { try { await actOrThrow({ action: 'builder-install' }); } catch (e) { toast(e.message || String(e), true); } setTimeout(refreshBuilder, 1500); },
+          btn('Install Apple’s container tool…', async () => { try { dfFail(null); await actOrThrow({ action: 'builder-install' }); } catch (e) { dfFail(e); } setTimeout(refreshBuilder, 1500); },
             { small: true, primary: true, icon: 'download' }),
           btn('Not now', () => { notNow = true; paint(); onChange(); }, { small: true, icon: 'x' })));
     }
@@ -885,8 +972,8 @@ async function viewSettings() {
     h('p', { class: 'sub' }, 'Written to ', h('code', null, rep.path || 'no file (neither XDG_CONFIG_HOME nor HOME is set)'),
       rep.exists ? '' : ' — not written yet: the first change writes it, with every setting listed at its default',
       '. A command-line flag wins, then the environment, then this file, then the default; ', h('code', null, 'doz config show'), ' prints the same.'),
-    rep.error ? h('div', { class: 'notice bad' }, rep.error + ' — nothing in it applies, and the UI will not overwrite it. Fix it (or remove it) first.') : null,
-    warnings.length ? h('div', { class: 'notice' }, h('ul', { class: 'plain' }, warnings.map((w) => h('li', null, w)))) : null,
+    rep.error ? callout('bad', { cls: 'notice', title: 'The settings file does not read', body: rep.error + ' — nothing in it applies, and the UI will not overwrite it. Fix it (or remove it) first.' }) : null,
+    warnings.length ? callout('warn', { cls: 'notice', body: h('ul', { class: 'plain' }, warnings.map((w) => h('li', null, w))) }) : null,
     h('h2', { id: 'access' }, 'Access'),
     h('p', { class: 'sub' }, 'What sandboxes may use as you. Change a choice in the settings below (',
       h('code', null, 'defaults.github'), ', ', h('code', null, 'github.credentials'), ', ', h('code', null, 'sandbox.ssh_agent'),
@@ -906,13 +993,15 @@ function settingRow(r) {
     ? btn('Default', () => changeSetting(r.key, null), { small: true, title: 'Comment it out in the file: the default (' + shownValue(r.defaultValue, r.type) + ') applies' }) : null;
   // 602: a control that is a block of its own (the permissions checklist) goes UNDER the text, full
   // width — beside it, its max-content width squeezed the description to one word per line.
-  return h('div', { class: r.type === 'permissions' ? 'setting setting-wide' : 'setting', 'data-key': r.key },
+  const row = h('div', { class: r.type === 'permissions' ? 'setting setting-wide' : 'setting', 'data-key': r.key },
     h('div', { class: 'setting-main' },
       h('div', { class: 'setting-name' }, h('code', null, r.name), ' ', source),
       h('div', null, r.description),
       h('div', { class: 'muted setting-meta' }, 'default ', h('code', null, shownValue(r.defaultValue, r.type)), ' · ', r.appliesNote,
         r.note ? h('div', null, r.note) : null)),
     h('div', { class: 'setting-control' }, settingControl(r), reset));
+  if (state.settingErr.has(r.key)) paintSettingError(row, r.key);
+  return row;
 }
 function settingControl(r) {
   // 599c: the projects folder — chosen in the Mac's own folder picker (the server writes what was chosen;
@@ -966,7 +1055,7 @@ function settingControl(r) {
     input.value = String(r.value);
     input.addEventListener('change', () => {
       const n = Number(input.value);
-      if (!isInt(n, r.min, r.max)) { toast(r.key + ' is a whole number, ' + r.min + '–' + r.max, true); input.value = String(r.value); return; }
+      if (!isInt(n, r.min, r.max)) { settingFailed(r.key, r.key + ' is a whole number, ' + r.min + '–' + r.max); input.value = String(r.value); return; }
       changeSetting(r.key, n);
     });
   } else {
@@ -978,23 +1067,38 @@ function settingControl(r) {
   }
   return input;
 }
+/// 603: a setting that could not be changed says so in its own row (kept across the page's re-render).
+state.settingErr = new Map();
+function settingFailed(key, text) {
+  state.settingErr.set(key, text);
+  const row = document.querySelector('.setting[data-key="' + CSS.escape(key) + '"]');
+  if (row) paintSettingError(row, key); else pageFailure(text);
+}
+function paintSettingError(row, key) {
+  row.querySelector('.setting-error')?.remove();
+  const text = state.settingErr.get(key);
+  if (text) row.querySelector('.setting-main').append(callout('bad', { compact: true, cls: 'setting-error', body: text,
+    dismiss: () => { state.settingErr.delete(key); paintSettingError(row, key); } }));
+}
 async function chooseProjectsDir() {
   try {
     const c = await api('settings/projects-dir/choose', { method: 'POST', json: {} });
     if (c.cancelled) return;
     adoptSettings(c.report);
+    state.settingErr.delete('defaults.projects_dir');
     toast('defaults.projects_dir saved: ' + c.path, false);
   } catch (e) {
-    toast(e.message || String(e), true);
+    settingFailed('defaults.projects_dir', e.message || String(e));
   }
   refresh(false);
 }
 async function changeSetting(key, value) {
   try {
     if (value === null) await resetSetting(key); else await saveSetting(key, value);
+    state.settingErr.delete(key);
     toast(key + (value === null ? ' is the default again' : ' saved'), false);
   } catch (e) {
-    toast(e.message || String(e), true);
+    settingFailed(key, e.message || String(e));
   }
   refresh(false);
 }
@@ -1049,10 +1153,9 @@ function setLive(kind, text) {
 // sandboxes shut down), came back as another build; doz ui stopped (the page retries on its own).
 function banner(key, kind, parts, actions = []) {
   const box = $('banners');
-  const el = h('div', { class: 'banner' + (kind ? ' ' + kind : ''), 'data-banner': key, role: kind === 'bad' ? 'alert' : 'status' },
-    h('div', { class: 'b-text' }, parts),
-    h('div', { class: 'b-acts' }, ...actions,
-      h('button', { type: 'button', class: 'btn sm quiet icon-only b-x', title: 'Dismiss', 'aria-label': 'Dismiss', on: { click: () => el.remove() } }, icon('x'))));
+  // 603: a banner is the callout's banner variant (a surface with the tone's edge), dismissible.
+  const el = callout(kind || 'info', { banner: true, cls: 'b-' + (kind || 'info'), bodyCls: 'b-text', body: parts, actions, dismiss: true,
+    attrs: { 'data-banner': key }, role: kind === 'bad' ? 'alert' : 'status' });
   const old = box.querySelector('[data-banner="' + key + '"]');
   if (old) old.replaceWith(el); else box.append(el);
   return el;
@@ -1244,10 +1347,10 @@ function showUiOverlay() {
 function buildUiOverlay() {
   const o = $('ui-overlay');
   if (o.querySelector('#ui-try-now')) return;
-  const tryNow = h('button', { type: 'button', class: 'btn primary', id: 'ui-try-now', on: { click: () => { updateUiOverlay('trying…'); uiRetryTick(); } } },
+  const tryNow = h('button', { type: 'button', class: 'btn lg primary', id: 'ui-try-now', on: { click: () => { updateUiOverlay('trying…'); uiRetryTick(); } } },
     withIcon('refresh-cw', 'Try now'));
   o.replaceChildren(h('div', { class: 'ui-ov-card' },
-    h('div', { class: 'ui-ov-head' }, h('span', { class: 'ui-ov-spin', 'aria-hidden': 'true' }),
+    h('div', { class: 'ui-ov-head' }, h('span', { class: 'ui-ov-spin spin lg', 'aria-hidden': 'true' }),
       h('h2', { id: 'ui-ov-title' }, 'Paused — reconnecting to doz ui…')),
     h('div', { id: 'ui-ov-desc' },
       h('p', null, 'Nothing on this page works until it reconnects. Run ', h('code', null, 'doz ui'),
@@ -1310,7 +1413,7 @@ function connect() {
     liveRefresh();
   });
   // 594 W19: a line from doz ui itself ("doz ui restarted — 0.12.0-rc.4").
-  es.addEventListener('notice', (ev) => { try { toast(JSON.parse(ev.data).text, false); } catch (_) { /* */ } });
+  es.addEventListener('notice', (ev) => { try { toast(JSON.parse(ev.data).text, false, 'info'); } catch (_) { /* */ } });
   es.addEventListener('host', (ev) => { try { hostChanged(JSON.parse(ev.data)); } catch (_) { /* ignore a malformed line */ } });
   // 594: the host's image preparations, while any runs (and once when the last ends).
   es.addEventListener('preparations', (ev) => {
@@ -1344,13 +1447,6 @@ function connect() {
     if (state.signedOut || state.es !== es) return;
     uiLost(false);
   };
-}
-function notice(text, bad) {
-  const n = $('notice');
-  if (!text) { n.hidden = true; return; }
-  n.hidden = false;
-  n.className = 'notice' + (bad ? ' bad' : '');
-  n.textContent = text;
 }
 
 // ── the nav: a child per sandbox (593) ──────────────────────────────────────
@@ -1431,7 +1527,7 @@ async function refresh(scrollTop) {
   } catch (e) {
     if (!state.signedOut) {
       if (e.status === 404 && state.view === 'sandbox') { location.hash = '#/overview'; return; }
-      $('view').replaceChildren(h('div', { class: 'notice bad' }, e.message || String(e)));
+      $('view').replaceChildren(callout('bad', { cls: 'notice', title: 'This page could not be read', body: e.message || String(e) }));
     }
   } finally {
     refreshing = false;
@@ -1625,7 +1721,7 @@ function confirmShutdown(name) {
   dialog('Shut down ' + name + '?', DESTRUCTIVE.shutdown + ' Start cold-boots the same disk.', [
     { name: 'dontAsk', label: 'Don’t ask again', type: 'checkbox', help: 'Sets ui.confirm_shutdown = false in the settings (Settings turns it back on).' },
   ], 'Shut down', async (v) => {
-    if (v.dontAsk) await saveSetting('ui.confirm_shutdown', false).catch((e) => toast('The setting was not saved: ' + (e.message || e), true));
+    if (v.dontAsk) await saveSetting('ui.confirm_shutdown', false).catch((e) => pageFailure('ui.confirm_shutdown was not saved: ' + (e.message || e)));
     return await actOrThrow(body);
   }, { danger: true });
 }
@@ -1767,7 +1863,7 @@ async function quickAdd(button) {
       if (s && s.state === 'done' && state.view === 'sandbox' && state.param === p.name) openTerminal(p.name, null, 'interactive');
     }
   } catch (e) {
-    toast(e.message || String(e), true);
+    pageFailure('Quick add: ' + (e.message || String(e)), { key: 'quick-add' });
   } finally {
     state.quickAdding = false;
     for (const b of document.querySelectorAll('[data-quick-add]')) b.disabled = false;
@@ -1922,7 +2018,7 @@ function nwToolsNode(nw) {
       h('h2', null, 'Setting up tools'),
       plan ? h('ul', { class: 'plain tool-list' }, rows) : h('p', { class: 'muted' }, 'Reading the tools layer…'),
       h('p', { class: 'muted mono tools-progress', 'data-tools-progress': '', 'aria-live': 'polite' }, busy ? (t.progress || 'starting…') : ''),
-      t.error ? h('div', { class: 'notice bad', 'data-tools-error': '' }, t.error) : null,
+      t.error ? callout('bad', { cls: 'notice', attrs: { 'data-tools-error': '' }, body: t.error }) : null,
       failed ? h('p', { class: 'muted' }, 'Something could not be set up — the sandbox works without it. Retry, or continue; ', h('code', null, 'doz tools ' + t.name + ' --apply'), ' tries again later.') : null,
       h('div', { class: 'wiz-buttons' }, h('span', { class: 'wiz-gap' }), buttons)));
   nw.node = node;
@@ -2012,12 +2108,12 @@ function nwFolder() {
       if (r.cancelled) return;
       nw.path = r.path; nw.mode = 'existing'; nw.open = null; nw.form = null;
       nwRender();
-    } catch (e) { toast(e.message || String(e), true); }
+    } catch (e) { nw.error = e.message || String(e); nwRender(); }
   }, { small: true, icon: 'folder', title: 'This Mac’s folder picker' });
   choose.dataset.nwChoose = '';
   const found = nw.open && nw.open.file
-    ? h('div', { class: 'notice', 'data-nw-found': nw.open.file }, icon('layout-template'), ' This folder has ', h('code', null, nw.open.file),
-        ' — the wizard starts from it; the review shows what changes before anything is written.') : null;
+    ? callout('info', { cls: 'notice', icon: 'layout-template', attrs: { 'data-nw-found': nw.open.file }, body: ['This folder has ', h('code', null, nw.open.file),
+        ' — the wizard starts from it; the review shows what changes before anything is written.'] }) : null;
   const el = h('div', { class: 'wiz-choices' },
     radio('new', 'A new folder in your projects folder', h('div', { class: 'nw-sub' }, h('label', { class: 'field' }, h('span', null, 'Folder name'), name), where)),
     radio('existing', 'A folder you have (your project)', h('div', { class: 'nw-sub' }, h('label', { class: 'field' }, h('span', null, 'Folder'), h('div', { class: 'row' }, path, choose)),
@@ -2093,8 +2189,8 @@ function nwAccess() {
     if (c.ssh !== (f.sshAgent || setting('sandbox.ssh_agent', 'off'))) nwSet('ssh_agent', c.ssh);
   } });
   const note = nwPermissionNet(net) ? null
-    : h('p', { class: 'notice', 'data-nw-github-net': net }, 'GitHub as you needs a network with permissions (agent, locked or open) — this sandbox’s is ' + net +
-      '. Choose it under Permissions and network, or leave GitHub off.');
+    : callout('warn', { cls: 'notice', attrs: { 'data-nw-github-net': net }, body: 'GitHub as you needs a network with permissions (agent, locked or open) — this sandbox’s is ' + net +
+      '. Choose it under Permissions and network, or leave GitHub off.' });
   return {
     el: h('div', { class: 'nw-fields' }, note, box),
     async collect(forward) {
@@ -2119,7 +2215,7 @@ function nwRules() {
       nw.open.rules = r.rules || [];
       nw.open.exists = r.exists;
       nwRender();
-    } catch (e) { toast(e.message || String(e), true); }
+    } catch (e) { nw.error = e.message || String(e); nwRender(); }
   };
   return {
     el: h('div', { class: 'nw-fields' },
@@ -2293,13 +2389,13 @@ async function nwCreate(button) {
     } catch (e) {
       button.disabled = false;
       const err = $('view').querySelector('[data-nw-error]');
-      if (err) err.textContent = e.message || String(e); else toast(e.message || String(e), true);
+      if (err) err.textContent = e.message || String(e); else pageFailure(e.message || String(e));
     }
   };
   if (p.existing !== undefined && p.existing !== null && p.existing !== p.text) {
     const d = dialog('Replace ' + p.path.split('/').pop() + '?', 'The folder has a project file. These lines change (− there now, + to be written):',
       [], 'Replace it', async () => { await run(p.replace); }, { danger: true });
-    d.querySelector('form > p.sub').after(nwDiffNode(p.diff.filter((l) => !l.startsWith('  '))));
+    d.querySelector('.dlg-body > p.sub').after(nwDiffNode(p.diff.filter((l) => !l.startsWith('  '))));
     d.dataset.nwConfirm = '';
     return;
   }
@@ -2314,7 +2410,7 @@ async function createDialog(quick = null) {
   let perms = { value: () => null };
   // 594 W28 (owner: "i dont think we should rebuild images without the user agreeing … better to warn"):
   // an out-of-date image is said here, with the choice — use it as it is (the default), or rebuild first.
-  const imgNote = h('div', { class: 'img-choice', 'data-image-choice': '', hidden: true });
+  const imgNote = h('div', { class: 'callout warn compact img-choice', role: 'group', 'data-image-choice': '', hidden: true });
   let imgChoice = 'current';
   const renderImgNote = (name) => {
     const i = images.find((x) => x.name === name);
@@ -2327,10 +2423,10 @@ async function createDialog(quick = null) {
       r.addEventListener('change', () => { if (r.checked) imgChoice = value; });
       return h('label', { class: 'check' }, r, ' ', label);
     };
-    imgNote.replaceChildren(
-      h('p', { class: 'img-choice-note' }, icon('flame'), ' The ' + name + ' image is out of date: ' + i.standing.replace(/ — rebuild when ready: .*$/, '') + '.'),
+    imgNote.replaceChildren(icon('flame'), h('div', { class: 'c-body' },
+      h('p', { class: 'img-choice-note c-title' }, 'The ' + name + ' image is out of date: ' + i.standing.replace(/ — rebuild when ready: .*$/, '') + '.'),
       radio('current', 'Use the current image' + missing, true),
-      radio('rebuild', 'Rebuild it first (~2 min, needs network; existing sandboxes are NOT affected)', false));
+      radio('rebuild', 'Rebuild it first (~2 min, needs network; existing sandboxes are NOT affected)', false)));
     imgNote.hidden = false;
   };
   const dlg = dialog('New sandbox','It is created off; Start boots it (the first start of an image not yet prepared prepares it — minutes, needs network).', [
@@ -2371,14 +2467,15 @@ async function createDialog(quick = null) {
   let chooser = null, acct = null;
   // 599c: Quick add could not decide this one — said at the top; the form below is pre-filled with its defaults.
   if (quick && quick.why) {
-    const sub = dlg.querySelector('form > p.sub');
-    const note = h('div', { class: 'notice quick-why', role: 'note', 'data-quick-why': quick.kind || '' },
-      icon(quick.kind === 'account' ? 'key-round' : 'flame'), ' Quick add needs your choice: ' + quick.why);
-    if (sub) sub.after(note); else dlg.querySelector('form').prepend(note);
+    const sub = dlg.querySelector('.dlg-body > p.sub');
+    const note = callout('warn', { cls: 'notice quick-why', role: 'note', attrs: { 'data-quick-why': quick.kind || '' },
+      icon: quick.kind === 'account' ? 'key-round' : 'flame', title: 'Quick add needs your choice', body: quick.why });
+    if (sub) sub.after(note); else dlg.querySelector('.dlg-body').prepend(note);
   }
   const submit = dlg.querySelector('button[type="submit"]');
-  const why = h('small', { class: 'dlg-why', 'data-create-why': '', 'aria-live': 'polite' });
-  submit.parentElement.before(why);
+  const why = dlg.why;
+  why.dataset.createWhy = '';
+  why.setAttribute('aria-live', 'polite');
   const gate = () => {
     const w = picker.blocked();
     why.textContent = w || '';
@@ -2495,7 +2592,7 @@ async function refreshSandbox() {
     }
   } catch (e) {
     if (e.status === 404) { if (state.view === 'sandbox' && state.param === name) location.hash = '#/overview'; return; }
-    if (!state.signedOut) toast(e.message || String(e), true);
+    if (!state.signedOut) failureFor(name, e.message || String(e));
   } finally {
     sbxRefreshing = false;
     if (sbxAgain) { sbxAgain = false; refreshSandbox(); }
@@ -2518,7 +2615,7 @@ async function sandboxArrived(name, want) {
     if (have) { const v = sview(name); v.selected[have.pane] = have.id; v.focusedPane = have.pane; renderTerminals(); if (!have.saved) focusTerm(have); }
     else if (running && live.includes(want)) openTerminal(name, want, 'interactive');
     else if (!running && (await savedRows(name)).some((r) => r.name === want)) openSavedTerminal(name, (await savedRows(name)).find((r) => r.name === want));
-    else toast('Session ' + want + ' is not running in ' + name, true);
+    else failureFor(name, 'Session ' + want + ' is not running in ' + name);
     return;
   }
   if (!pageTerminals(name).length && running && live.includes(s.d.defaultSession) && setting('ui.terminals', true) && !sview(name).restoredAny) {
@@ -2647,7 +2744,7 @@ function sandboxParts(name, d, net, accounts) {
     try {
       const r = await api('sandboxes/' + name + '/terminal', { method: 'POST', json: session ? { session } : {} });
       toast(r.message);
-    } catch (e) { toast(e.message, true); }
+    } catch (e) { failureFor(name, e.message); }
   };
   // 593 §9: paused, asleep or hibernated — the sessions as last saved, each can be shown (its saved
   // screen). A shut-down sandbox has none (owner, 2026-09-30).
@@ -2713,7 +2810,7 @@ function sandboxParts(name, d, net, accounts) {
       lifecycleButtons(i, true),
       h('span', { class: 'sbx-sep', 'aria-hidden': 'true' }),
       gated(btn('Open in Terminal', terminal(null), { small: true, title: 'Your terminal app attaches to the ' + d.defaultSession + ' session (waking the sandbox if it sleeps)' })),
-      gated(btn('New shell', () => newShellTerminal(name).catch((e) => toast(e.message || String(e), true)),
+      gated(btn('New shell', () => newShellTerminal(name).catch((e) => failureFor(name, e.message || String(e))),
         { small: true, title: 'A new shell session (shell-2, shell-3, …) in a browser terminal' })),
       ((b) => { if (busy) b.disabled = true; return b; })(btn('Terminal…', () => newTerminalDialog(name), { small: true, title: 'A NEW session: a shell, or one running a command (a running session opens from Details › Sessions)' })),
       termUI.splitBtn || null,
@@ -2726,19 +2823,17 @@ function sandboxParts(name, d, net, accounts) {
       btn(detailsOpen ? 'Hide details' : 'Details', () => {
         const open = !setting('ui.details_open', true);
         $('sbx-body').classList.toggle('details-closed', !open);
-        saveSetting('ui.details_open', open).then(() => refreshSandbox()).catch((e) => toast('The setting was not saved: ' + (e.message || e), true));
+        saveSetting('ui.details_open', open).then(() => refreshSandbox()).catch((e) => pageFailure('ui.details_open was not saved: ' + (e.message || e)));
       }, { small: true, title: 'The sessions, restore points, network and keys panel (remembered: ui.details_open)' })),
     h('div', { 'data-op-for': name, 'data-banner': '1', role: 'status' }),
     i.credentialProblem ? credentialBanner(name, i, accounts) : null,
     // 594 W28: its system disk came from an image an older doz made.
-    i.olderImage ? h('div', { class: 'cred-banner img-banner', role: 'status', 'data-older-image': name },
-      h('div', { class: 'cred-banner-text' }, icon('flame'), ' ' + name + ' was ' + i.olderImage + '.')) : null,
+    i.olderImage ? callout('warn', { compact: true, cls: 'cred-banner img-banner', icon: 'flame', attrs: { 'data-older-image': name }, body: name + ' was ' + i.olderImage + '.' }) : null,
     // 596 (B8): its Dockerfile changed (or was built again) — offered, never rebuilt by itself.
-    i.rebuildAvailable ? h('div', { class: 'cred-banner img-banner', role: 'status', 'data-rebuild-available': name },
-      h('div', { class: 'cred-banner-text' }, icon('flame'), ' ' + i.rebuildAvailable + '.'),
-      h('div', { class: 'actions' }, btn('Rebuild the image', () => dialog('Rebuild ' + i.image + '?',
+    i.rebuildAvailable ? callout('warn', { compact: true, cls: 'cred-banner img-banner', icon: 'flame', attrs: { 'data-rebuild-available': name }, body: i.rebuildAvailable + '.',
+      actions: [btn('Rebuild the image', () => dialog('Rebuild ' + i.image + '?',
         'Runs container build again (seconds when nothing changed: its cache), then bakes only if the built image changed. ' + DOCKERFILE_POLICY_NOTE + ' This sandbox keeps its disk until you reset it.',
-        [], 'Rebuild', async () => { await actOrThrow({ action: 'image-bake', image: i.image }); }, { icon: 'flame' }), { small: true, icon: 'flame' }))) : null);
+        [], 'Rebuild', async () => { await actOrThrow({ action: 'image-bake', image: i.image }); }, { icon: 'flame' }), { small: true, icon: 'flame' })] }) : null);
   const details = h('div', { class: 'sbx-details-inner' },
     h('div', { class: 'cards small-cards' },
       card('RAM held', mib(i.ramHeldMiB), 'of ' + mib(i.memoryMiB) + (i.memoryReturnedMiB ? ' · balloon returned ' + mib(i.memoryReturnedMiB) : '')),
@@ -2804,7 +2899,7 @@ function promptPanel(d) {
   return h('div', { class: 'panel prompt-panel' },
     h('div', { class: 'muted' }, 'Written at every session start, from this sandbox’s current facts — ', how, '. Layers: ', p.layers.join(' + '),
       '. The dozer skill: ', h('code', null, p.skillPath), ' (' + p.skillLines + ' lines).'),
-    p.error ? h('div', { class: 'notice bad' }, 'It does not render, so sessions do not start: ' + p.error)
+    p.error ? callout('bad', { cls: 'notice', body: 'It does not render, so sessions do not start: ' + p.error })
             : h('pre', { class: 'prompt-text' }, p.text || ''),
     h('div', { class: 'muted' }, 'Your own template: agent-prompt.md beside doz.toml · this sandbox’s own lines: agent_prompt in doz_project.yaml, or doz create --agent-prompt FILE.'));
 }
@@ -2959,11 +3054,15 @@ function confirmGitHub(id, then) {
       : 'git and gh in this sandbox use your GitHub login (your Mac\'s gh login, or a token you gave it) — read-only: the agent can read everything your login can. The token never enters the sandbox; switching this off revokes it at once.',
     [], push ? 'Allow pushing' : 'Use my GitHub login', async () => { await then(); }, { danger: push, icon: 'check' });
 }
+state.permErr = new Map();
 function permissionsPanel(name, net) {
   const p = net.permissions;
   if (!p) return null;
   const on = new Set(p.rows.filter((r) => r.on).map((r) => r.id));
-  const send = async (body) => { try { await actOrThrow({ action: 'net-policy', sandbox: name, ...body }); } catch (e) { toast(e.message || String(e), true); } };
+  const send = async (body) => {
+    try { state.permErr.delete(name); await actOrThrow({ action: 'net-policy', sandbox: name, ...body }); }
+    catch (e) { state.permErr.set(name, e.message || String(e)); refreshSandbox(); }
+  };
   const change = (id, v) => {
     if (id === 'web' && v) return confirmWeb(() => send({ grant: ['web'] }));
     if ((id === 'github:as-you' || id === 'github:push') && v) return confirmGitHub(id, () => send({ grant: [id] }));
@@ -2975,11 +3074,11 @@ function permissionsPanel(name, net) {
     b.addEventListener('click', () => { if (id === 'open') confirmWeb(() => send({ preset: 'open' })); else send({ preset: id }); });
     return b;
   };
-  const suggestions = p.suggestions.map((s) => h('div', { class: 'perm-suggest', 'data-suggest': s.grant },
-    icon('shield'), ' The agent tried to ', h('strong', null, s.permission ? s.what : 'reach ' + s.what),
-    ' (' + s.hosts.join(', ') + ', ' + s.count + ' time' + (s.count === 1 ? '' : 's') + ') ',
-    btn(s.permission ? 'Allow' : 'Allow this site', () => (s.permission === 'web' ? confirmWeb(() => send({ grant: [s.grant] })) : send({ grant: [s.grant] })),
-      { small: true, icon: 'check' })));
+  const suggestions = p.suggestions.map((s) => callout('warn', { compact: true, cls: 'perm-suggest', icon: 'shield', attrs: { 'data-suggest': s.grant },
+    body: ['The agent tried to ', h('strong', null, s.permission ? s.what : 'reach ' + s.what),
+      h('div', { class: 'muted' }, s.hosts.join(', ') + ' · ' + s.count + ' time' + (s.count === 1 ? '' : 's'))],
+    actions: [btn(s.permission ? 'Allow' : 'Allow this site', () => (s.permission === 'web' ? confirmWeb(() => send({ grant: [s.grant] })) : send({ grant: [s.grant] })),
+      { small: true, icon: 'check' })] }));
   const sites = p.sites.map((host) => h('span', { class: 'tag perm-site', 'data-site': host }, host, ' ',
     h('button', { type: 'button', class: 'btn sm quiet icon-only', title: 'Deny ' + host, 'aria-label': 'Deny ' + host, on: { click: () => send({ revoke: ['site:' + host] }) } }, icon('x'))));
   const siteInput = h('input', { type: 'text', placeholder: 'api.example.com', 'aria-label': 'A site to allow', 'data-site-input': '', spellcheck: 'false' });
@@ -2988,6 +3087,8 @@ function permissionsPanel(name, net) {
       h('div', { class: 'segmented', role: 'group', 'aria-label': 'Preset' }, presetBtn('locked'), presetBtn('agent'), presetBtn('open')),
       p.preset ? null : h('span', { class: 'tag', 'data-perm-custom': '' }, 'Custom'),
       p.inferred ? h('span', { class: 'muted' }, ' an older policy, shown as permissions (stored as names at its first change)') : null),
+    state.permErr.has(name) ? callout('bad', { compact: true, body: state.permErr.get(name), attrs: { 'data-perm-error': '' },
+      dismiss: () => { state.permErr.delete(name); refreshSandbox(); } }) : null,
     suggestions.length ? h('div', { class: 'perm-suggestions' }, suggestions) : null,
     permissionSwitches(p.rows, on, change),
     h('div', { class: 'perm-sites' }, h('span', null, 'Other sites: '), sites.length ? sites : h('span', { class: 'muted' }, 'none'), ' ', siteInput,
@@ -3359,9 +3460,10 @@ async function resDelete(ids, clean) {
   if (!clean && !ids.length) return;
   let plan;
   try { plan = await api('resources/preview', { method: 'POST', json: clean ? { clean: true } : { ids } }); }
-  catch (e) { toast(e.message || String(e), true); return; }
+  catch (e) { pageFailure(e.message || String(e), { key: 'resources' }); return; }
   if (!plan.items.length) {
-    toast(clean ? 'Nothing to clean up — everything re-creatable is in use or already gone.' : 'Nothing can be deleted: ' + (plan.refused[0] ? plan.refused[0].reason : 'no such item'), !clean);
+    if (clean) toast('Nothing to clean up — everything re-creatable is in use or already gone.', false, 'info');
+    else pageFailure('Nothing can be deleted: ' + (plan.refused[0] ? plan.refused[0].reason : 'no such item'), { key: 'resources' });
     return;
   }
   const n = plan.items.length;
@@ -3497,13 +3599,12 @@ function accountChooser({ accounts, agent, same = null, defaultValue = '', value
         + (s.needs ? ' — never a Claude subscription' : '')));
     }
     if (missing) {
-      parts.push(h('div', { class: 'acct-need', 'data-acct-need': current },
-        h('div', { class: 'acct-need-title' }, icon('key-round'), ' ' + name + ' needs an Anthropic API key'),
-        h('small', null, 'Add one now — it is stored as `doz account add` stores it (the login keychain), and this sandbox uses it.'),
-        secretEntryAllowed()
-          ? accountForm({ kind: 'api-key', name: acc.accounts.some((x) => x.name === 'anthropic') ? 'anthropic-2' : 'anthropic',
-              onAdded: (r, n) => { acc = r; chosen = n; toast('account ' + n + ' added'); render(); onChange(); } })
-          : accountCommandsNode('api-key')));
+      parts.push(callout('warn', { cls: 'acct-need', icon: 'key-round', attrs: { 'data-acct-need': current }, title: name + ' needs an Anthropic API key',
+        body: [h('small', null, 'Add one now — it is stored as `doz account add` stores it (the login keychain), and this sandbox uses it.'),
+          secretEntryAllowed()
+            ? accountForm({ kind: 'api-key', name: acc.accounts.some((x) => x.name === 'anthropic') ? 'anthropic-2' : 'anthropic',
+                onAdded: (r, n) => { acc = r; chosen = n; toast('account ' + n + ' added'); render(); onChange(); } })
+            : accountCommandsNode('api-key')] }));
     }
     el.replaceChildren(...parts);
   }
@@ -3539,10 +3640,8 @@ function accountDialog(name, i, accounts) {
 /// 594: an existing sandbox whose account does not fit its agent — "pi can't use the account mac —
 /// choose an API-key account" — with the accounts that fit (or the key field) right there.
 function credentialBanner(name, i, accounts) {
-  return h('div', { class: 'cred-banner', role: 'alert', 'data-cred-banner': name },
-    h('div', { class: 'cred-banner-text' }, icon('key-round'), ' ' + i.credentialProblem),
-    h('div', { class: 'actions' },
-      btn('Choose an account…', () => accountDialog(name, i, accounts), { small: true, primary: true, icon: 'key-round' })));
+  return callout('bad', { compact: true, cls: 'cred-banner', icon: 'key-round', attrs: { 'data-cred-banner': name }, body: i.credentialProblem,
+    actions: [btn('Choose an account…', () => accountDialog(name, i, accounts), { small: true, primary: true, icon: 'key-round' })] });
 }
 
 /// 594 (owner ruling: sandbox keys in the browser too): a sandbox's own Anthropic key — what `doz key set
@@ -3768,10 +3867,10 @@ function renderAccessStep(container, opts = {}) {
   function keyNode() {
     if (st.report.githubKeySet) {
       const rm = btn('Remove key', async () => {
-        try { st.report = await api('access/github-key', { method: 'POST', json: { remove: true } }); delete st.results.github; render(); }
-        catch (e) { toast(e.message || String(e), true); }
+        try { st.error = null; st.report = await api('access/github-key', { method: 'POST', json: { remove: true } }); delete st.results.github; render(); }
+        catch (e) { st.error = e.message || String(e); render(); }
       }, { small: true, icon: 'trash-2' });
-      return h('div', { class: 'notice', 'data-access-key': 'set' }, 'A GitHub key is set (in the login keychain as doz-github — never in a sandbox). ', rm);
+      return callout('ok', { cls: 'notice', icon: 'key-round', attrs: { 'data-access-key': 'set' }, body: 'A GitHub key is set (in the login keychain as doz-github — never in a sandbox).', actions: [rm] });
     }
     if (!secretEntryAllowed()) {
       return h('div', { class: 'panel wiz-cmds', 'data-access-key': 'commands' },
@@ -3829,7 +3928,7 @@ function renderAccessStep(container, opts = {}) {
           }
           if (mode === 'settings') for (const it of r.items) st.results[it.id] = it;
           render();
-        }).catch((e) => { container.replaceChildren(h('div', { class: 'notice bad' }, e.message || String(e))); })
+        }).catch((e) => { container.replaceChildren(callout('bad', { cls: 'notice', body: e.message || String(e) })); })
           .finally(() => { st.loading = false; });
       }
       return ctl;
@@ -3866,6 +3965,7 @@ function renderAccessStep(container, opts = {}) {
       h('h3', null, mode === 'settings' ? 'Each credential, as last confirmed' : 'Confirmed?'),
       ids().map(statusRow),
       h('div', { class: 'wiz-buttons' }, st.busy ? h('span', { class: 'muted' }, h('span', { class: 'mini-spin', 'aria-hidden': 'true' }), ' checking…') : null, confirmBtn)));
+    if (st.error) parts.push(callout('bad', { compact: true, body: st.error, dismiss: () => { st.error = null; render(); } }));
     container.replaceChildren(h('div', { class: 'access-step', 'data-access-mode': mode }, parts));
     return ctl;
   }
@@ -3953,9 +4053,16 @@ function renderWizard(force) {
   if (!force && state.wiz.step !== WIZ.preparing) return;
   $('view').replaceChildren(wizardNode());
 }
+/// 603: a step's failure is said in the step (above its buttons) and stays until the next try or step.
+function wizFail(text) {
+  if (!state.wiz) { pageFailure(text); return; }
+  state.wiz.error = text;
+  renderWizard(true);
+}
 function wizGo(step) {
   const w = state.wiz;
   w.step = step;
+  w.error = null;
   if (step === WIZ.preparing) { loadPreparations().then(() => renderWizard(true)); wizardPoll(); } else wizardStopPolling();
   if (step >= WIZ.first) refreshNav();          // the nav's Onboarding dot goes once the record is written
   renderWizard(true);
@@ -3984,7 +4091,8 @@ function wizardNode() {
   return h('div', { class: 'wizard', 'data-step': String(w.step) },
     h('h1', null, 'Set up Dozer Sandbox'),
     h('p', { class: 'sub' }, 'Once for this Mac (store ', h('code', null, $('store-path').textContent), '). The same as ', h('code', null, 'doz onboard'), ' in a terminal.'),
-    stepper, h('section', { class: 'wiz-body panel' }, body));
+    stepper, h('section', { class: 'wiz-body panel' }, body,
+      w.error ? callout('bad', { compact: true, body: w.error, attrs: { 'data-wiz-error': '' }, dismiss: () => { w.error = null; renderWizard(true); } }) : null));
 }
 function wizStep0(d) {
   // 602 (owner: "detect if onboarding has already ran (i ran it in the cli) and show that and give the
@@ -4026,7 +4134,7 @@ function wizStep1(d, w) {
     h('h2', null, 'Checks'),
     h('p', { class: 'sub' }, 'The doctor’s checks. A required one that fails stops the setup; the others only say what will not work yet (Claude Code missing or signed out: add an account later; vmnet: only --network nat needs it).'),
     table(['', 'Check', 'Detail'], rows),
-    d.blocked ? h('div', { class: 'notice bad' }, 'A required check failed — fix it, then Check again.') : null,
+    d.blocked ? callout('bad', { cls: 'notice', body: 'A required check failed — fix it, then Check again.' }) : null,
     wizButtons(btn('Back', () => wizGo(0)), btn('Check again', async () => { w.data = await api('onboarding'); renderWizard(true); }), next),
   ];
 }
@@ -4042,12 +4150,12 @@ function wizStep2(d, w) {
   const keyed = w.account === 'api-key' || w.account === 'setup-token';
   let entry = null;
   if (keyed && w.added) {
-    entry = h('div', { class: 'notice', 'data-added': w.added.name }, 'Account ', h('strong', null, w.added.name), ' added (' + w.added.kind +
-      (w.added.verification ? ', ' + w.added.verification : '') + ') — the store’s default account. Its secret is in the login keychain, not in this page.');
+    entry = callout('ok', { cls: 'notice', attrs: { 'data-added': w.added.name }, body: ['Account ', h('strong', null, w.added.name), ' added (' + w.added.kind +
+      (w.added.verification ? ', ' + w.added.verification : '') + ') — the store’s default account. Its secret is in the login keychain, not in this page.'] });
   } else if (keyed && secretEntryAllowed()) {
     entry = accountForm({ kind: w.account, name: 'work', onAdded: async (r, name) => {
       const row = r.accounts.find((x) => x.name === name) || { kind: w.account };
-      try { await actOrThrow({ action: 'account-default', account: name }); } catch (e) { toast(e.message || String(e), true); }
+      try { await actOrThrow({ action: 'account-default', account: name }); } catch (e) { w.error = e.message || String(e); }
       w.added = { name, kind: row.kind, verification: row.verification };
       renderWizard(true);
     } });
@@ -4085,8 +4193,8 @@ function wizStep2(d, w) {
         if (w.account === 'mac' && d.defaultAccount !== 'mac') { await actOrThrow({ action: 'account-default', account: 'mac' }); d.defaultAccount = 'mac'; }
         // Confirm what is not yet; a failure stays on this step with its reason and Skip — never a dead end.
         if (await access.confirm()) wizGo(WIZ.rules);
-        else { toast('Not everything is confirmed — Skip it, turn it off, or check again', true); b.disabled = false; }
-      } catch (e) { toast(e.message || String(e), true); b.disabled = false; }
+        else { wizFail('Not everything is confirmed — Skip it, turn it off, or check again.'); }
+      } catch (e) { wizFail(e.message || String(e)); }
     }, { primary: true })),
   ];
 }
@@ -4128,7 +4236,7 @@ function wizStep3(d, w) {
       await actOrThrow({ action: 'onboard', images: chosen });
       w.prepImages = todo;
       wizGo(todo.length ? WIZ.preparing : WIZ.first);
-    } catch (e) { toast(e.message || String(e), true); b.disabled = false; }
+    } catch (e) { wizFail(e.message || String(e)); }
   }, { primary: true });
   if (short) go.disabled = true;
   return [
@@ -4197,7 +4305,7 @@ function prepCard(p, opts = {}) {
     h('div', { class: 'prep-head' }, running ? h('span', { class: 'mini-spin', 'aria-hidden': 'true' }) : h('span', { class: 'op-state' }, p.state === 'done' ? '✓' : '✕'),
       h('strong', null, p.image), h('span', { class: 'muted' }, ' · ' + (running ? dur(p.seconds) + ' so far' : p.state + ' in ' + dur(p.seconds)) + ' · asked by ' + p.requestedBy.join(', '))),
     overall, current, transfer, tail,
-    p.error && p.state !== 'cancelled' ? h('div', { class: 'notice bad' }, p.error) : null,
+    p.error && p.state !== 'cancelled' ? callout('bad', { compact: true, cls: 'notice', body: p.error }) : null,
     running && p.estimateBasis && p.remainingSeconds == null && !m ? h('div', { class: 'muted' }, p.estimateBasis) : null,
     details);
 }
@@ -4218,7 +4326,7 @@ function wizStep4(d, w) {
     wizButtons(
       running ? btn('Cancel preparation', () => act({ action: 'prepare-cancel', images: mine }), { danger: true }) : null,
       failed.length ? btn('Try again', async () => {
-        try { await actOrThrow({ action: 'onboard', images: failed.map((p) => p.image) }); await loadPreparations(); renderWizard(true); } catch (e) { toast(e.message || String(e), true); }
+        try { await actOrThrow({ action: 'onboard', images: failed.map((p) => p.image) }); await loadPreparations(); renderWizard(true); } catch (e) { wizFail(e.message || String(e)); }
       }) : null,
       running ? btn('Continue in the background', () => { toast('It goes on in the host — Operations shows it.'); wizGo(WIZ.first); }) : null,
       next),
@@ -4390,7 +4498,7 @@ window.addEventListener('message', (ev) => {
       break;
     case 'title': t.title = m.s.slice(0, 120); paintTabs(); break;
     case 'paste': safePaste(t, m.text, m.bracketed); break;
-    case 'paste-too-big': toast('That paste is too big — a terminal takes at most 1 MiB at once', true); break;
+    case 'paste-too-big': failureFor(t.sandbox, 'That paste is too big — a terminal takes at most 1 MiB at once'); break;
     case 'key': savedKey(t); break;
   }
 });
@@ -4416,7 +4524,7 @@ async function waitForOp(op, seconds = 300) {
 /// The setting ui.terminals: off, the UI opens no browser terminal (and the server refuses a ticket).
 function terminalsAllowed() {
   if (setting('ui.terminals', true)) return true;
-  toast('Browser terminals are off (Settings → ui.terminals). Open in Terminal still works.', true);
+  pageFailure('Browser terminals are off (Settings → ui.terminals). Open in Terminal still works.', { tone: 'warn', key: 'terminals-off' });
   return false;
 }
 
@@ -4615,7 +4723,7 @@ function encodePaste(raw) {
 function safePaste(t, raw, bracketed) {
   if (t.mode !== 'interactive' || !t.frame) return;
   const size = utf8.encode(raw).length;
-  if (size > PASTE_MAX_BYTES) { toast('That paste is ' + bytes(size) + ' — a terminal takes at most 1 MiB at once', true); return; }
+  if (size > PASTE_MAX_BYTES) { failureFor(t.sandbox, 'That paste is ' + bytes(size) + ' — a terminal takes at most 1 MiB at once'); return; }
   const { text, replaced } = encodePaste(raw);
   const reasons = [];
   if (replaced) reasons.push(replaced + ' control character' + (replaced === 1 ? ' was' : 's were') + ' replaced with spaces.');
@@ -4625,14 +4733,14 @@ function safePaste(t, raw, bracketed) {
   const lines = text.split('\r');
   const d = h('dialog', { class: 'dlg paste-dialog' });
   const ok = h('button', { type: 'button', class: 'btn primary' }, withIcon('clipboard-paste', 'Paste'));
-  const cancel = h('button', { type: 'button', class: 'btn' }, withIcon('x', 'Cancel'));
+  const cancel = h('button', { type: 'button', class: 'btn quiet' }, withIcon('x', 'Cancel'));
   ok.addEventListener('click', () => { d.close(); toFrame(t, { t: 'paste', text }); focusTerm(t); });
   cancel.addEventListener('click', () => { d.close(); focusTerm(t); });
   d.append(h('form', { method: 'dialog' },
-    h('h2', null, 'Paste ' + lines.length + ' line' + (lines.length === 1 ? '' : 's') + ' (' + bytes(size) + ') into ' + t.sandbox + '?'),
-    ...reasons.map((r) => h('p', { class: 'sub' }, r)),
-    h('pre', { class: 'paste-preview' }, lines.slice(0, 5).join('\n').slice(0, 2000) + (lines.length > 5 ? '\n…' : '')),
-    h('div', { class: 'dlg-buttons' }, cancel, ok)));
+    h('div', { class: 'dlg-head' }, h('h2', { class: 'h-title' }, 'Paste ' + lines.length + ' line' + (lines.length === 1 ? '' : 's') + ' (' + bytes(size) + ') into ' + t.sandbox + '?')),
+    h('div', { class: 'dlg-body' }, ...reasons.map((r) => h('p', { class: 'sub' }, r)),
+      h('pre', { class: 'paste-preview' }, lines.slice(0, 5).join('\n').slice(0, 2000) + (lines.length > 5 ? '\n…' : ''))),
+    h('div', { class: 'dlg-foot dlg-buttons' }, cancel, ok)));
   d.addEventListener('close', () => d.remove());
   document.body.append(d);
   d.showModal();
@@ -4809,13 +4917,13 @@ function bootLabel(b) {
 }
 async function bootLogDialog(name) {
   let boots;
-  try { boots = (await api('sandboxes/' + name + '/boots')).boots; } catch (e) { toast(e.message || String(e), true); return; }
+  try { boots = (await api('sandboxes/' + name + '/boots')).boots; } catch (e) { failureFor(name, e.message || String(e)); return; }
   const d = h('dialog', { class: 'dlg bootlog-dialog', 'data-sandbox': name });
   const picker = h('select', { 'aria-label': 'Which boot', class: 'bootlog-picker' },
     boots.map((b) => h('option', { value: String(b.number), 'data-result': b.result }, bootLabel(b))));
   const area = h('div', { class: 'bootlog-area' });
   const why = h('div', { class: 'bootlog-error', role: 'status' });
-  const close = h('button', { type: 'button', class: 'btn' }, withIcon('x', 'Close'));
+  const close = h('button', { type: 'button', class: 'btn quiet' }, withIcon('x', 'Close'));
   d.append(h('div', { class: 'bootlog-head' }, h('h2', null, 'Boot log — ' + name), picker, close),
     h('p', { class: 'sub' }, 'Each start and wake of ' + name + ': Dozer’s steps as the boot view showed them, then the kernel console. The last '
       + setting('host.boot_logs_kept', 5) + ' are kept (Settings › host.boot_logs_kept); doz console ' + name + ' --list shows them too.'),
@@ -4905,7 +5013,7 @@ function renderTerminals() {
     };
     termUI.splitMain = btn('Split', () => {
       if (sview(state.param).split) unsplit();
-      else splitWith(termUI.splitKind).catch((e) => toast(e.message || String(e), true));
+      else splitWith(termUI.splitKind).catch((e) => failureFor(state.param, e.message || String(e)));
     }, { small: true, title: 'Two terminals side by side — the right one is a ' + SPLIT_KINDS[termUI.splitKind] });
     // 603: the caret is a menuButton (kept on screen; the old menu opened off the left edge and its items
     // ended in a literal "null" — replaceChildren writes a null as text, h() skips it).
@@ -5007,7 +5115,7 @@ function paintTermEmpty() {
             title: 'Start the image’s own session (' + s.d.defaultSession + ')' + (i.phase === 'running' ? '' : ' — it wakes the sandbox') }),
         ...live.filter((x) => x.name !== s.d.defaultSession && !x.saved).slice(0, 8).map((x) => btn('Open ' + x.name, () => openTerminal(s.name, x.name, 'interactive'), { icon: 'terminal' })),
         ...saved.slice(0, 8).map((x) => btn('Show ' + x.name, () => openSavedTerminal(s.name, x), { icon: 'eye', title: 'Its last saved screen (read-only)' })),
-        btn('New shell', () => newShellTerminal(s.name).catch((e) => toast(e.message || String(e), true)), { title: 'A NEW shell session (shell-2, shell-3, …)' })));
+        btn('New shell', () => newShellTerminal(s.name).catch((e) => failureFor(s.name, e.message || String(e))), { title: 'A NEW shell session (shell-2, shell-3, …)' })));
   }
   p.empty.replaceChildren(box);
 }
@@ -5059,9 +5167,9 @@ function paintSplitButton() {
     onSelect: () => {
       termUI.splitKind = kind;
       // The choice is the setting ui.split_default (doz.toml), not this browser's.
-      if (setting('ui.split_default', 'shell') !== kind) saveSetting('ui.split_default', kind).catch((e) => toast('The setting was not saved: ' + (e.message || e), true));
+      if (setting('ui.split_default', 'shell') !== kind) saveSetting('ui.split_default', kind).catch((e) => pageFailure('ui.split_default was not saved: ' + (e.message || e)));
       paintSplitButton();
-      splitWith(kind).catch((e) => toast(e.message || String(e), true));
+      splitWith(kind).catch((e) => failureFor(state.param, e.message || String(e)));
     },
   })));
 }
@@ -5086,7 +5194,7 @@ async function splitWith(kind) {
 
 async function newTerminalDialog(sandbox) {
   const names = [sandbox || state.param].filter(Boolean);
-  if (!names.length) { toast('Open a sandbox first', true); return; }
+  if (!names.length) { pageFailure('Open a sandbox first'); return; }
   const first = names[0];
   // What to open: ALWAYS a new session (593 §9 S4, owner — after "New terminal" attached to a session that
   // already ran): a new shell, or a new session running a command. A running session is reached through
@@ -5170,7 +5278,7 @@ function gridBuild() {
   phaseSel.addEventListener('change', () => { grid.phase = phaseSel.value; gridRender(); });
   sizeSel.addEventListener('change', () => {
     gridApplySize(sizeSel.value);
-    saveSetting('ui.grid_tile_size', sizeSel.value).catch((e) => toast('The setting was not saved: ' + (e.message || e), true));
+    saveSetting('ui.grid_tile_size', sizeSel.value).catch((e) => pageFailure('ui.grid_tile_size was not saved: ' + (e.message || e)));
   });
   grid.status = h('span', { class: 'grid-status', role: 'status' });
   grid.body = h('div', { class: 'tiles' });
@@ -5214,7 +5322,7 @@ async function gridRefresh(force) {
   }
   grid.lastList = Date.now();
   let o;
-  try { o = await api('overview'); } catch (e) { toast(e.message || String(e), true); return; }
+  try { o = await api('overview'); } catch (e) { pageFailure(e.message || String(e), { key: 'grid' }); return; }
   state.overview = o;
   renderNavSandboxes();
   // A running sandbox's sessions come from its guest; any other's from its saved screens (593 §9 — S3:
