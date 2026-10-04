@@ -1,0 +1,5 @@
+/* doz ui — the terminal frame (591): the engine alone, filling its sandboxed iframe. Its own document,
+   so its one colour is its own token — the page's --term-bg (603). */
+:root { --term-bg: #16171c; }
+html, body { margin: 0; height: 100%; background: var(--term-bg); overflow: hidden; }
+.term-host { position: absolute; inset: 6px 0 0 8px; overflow: hidden; outline: none; }
