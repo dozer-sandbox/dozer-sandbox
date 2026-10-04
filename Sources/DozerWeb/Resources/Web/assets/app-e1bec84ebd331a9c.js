@@ -1553,7 +1553,8 @@ async function refresh(scrollTop) {
 }
 
 // ── building blocks ─────────────────────────────────────────────────────────
-function card(k, v, n) { return h('div', { class: 'card' }, h('div', { class: 'k' }, k), h('div', { class: 'v' }, v), n ? h('div', { class: 'n' }, n) : null); }
+/// 603: a figure in a stats strip (one band, not separate cards).
+function card(k, v, n) { return h('div', { class: 'stat' }, h('div', { class: 'k' }, k), h('div', { class: 'v' }, v), n ? h('div', { class: 'n', title: typeof n === 'string' ? n : null }, n) : null); }
 function table(head, rows, numeric = []) {
   if (!rows.length) return null;
   return h('table', null,
@@ -1770,17 +1771,21 @@ async function startWithBootView(name) {
   }
   await act({ action: 'start', sandbox: name });
 }
-function lifecycleButtons(s, all) {
+/// 603 (E4): a Sandboxes row's actions — the one likely next verb (Start, Resume, Wake, Pause) as a quiet button,
+/// the phase's other verbs in ⋯ (each with what it does). In a transition: the set shown when asked, disabled.
+const NEXT_VERB = { off: 'start', failed: 'start', paused: 'resume', asleep: 'wake', hibernated: 'wake', running: 'pause' };
+function rowLifecycle(s) {
   const tr = transitionOf(s.name);
   const busy = s.busy || s.phase === 'booting' || opRunningFor(s.name) || !!tr;
-  // In a transition this page started, the buttons it showed when asked — disabled, never swapped.
   const verbs = tr && tr.verbs ? tr.verbs : verbsFor(s.phase);
-  const extra = all ? ['reset', 'rm'] : [];
-  return h('div', { class: 'actions', 'data-lifecycle-for': s.name }, [...verbs, ...extra].map((v) => {
-    const b = btn(VERBS[v][0], () => lifecycle(v, s.name), { small: true, title: tr ? TRANSITION_LABEL[tr.action] : VERBS[v][1], danger: !!DESTRUCTIVE[v] });
-    if (busy) b.disabled = true;
-    return b;
-  }));
+  const next = verbs.includes(NEXT_VERB[s.phase]) ? NEXT_VERB[s.phase] : verbs[0];
+  const why = tr ? TRANSITION_LABEL[tr.action] : 'Wait until it settles';
+  const b = next ? btn(VERBS[next][0], () => lifecycle(next, s.name), { small: true, quiet: true, title: busy ? why : VERBS[next][1] }) : null;
+  if (b && busy) b.disabled = true;
+  const rest = verbs.filter((v) => v !== next);
+  const more = rest.length ? moreMenu('More for ' + s.name, rest.map((v) => ({ label: VERBS[v][0] + (DESTRUCTIVE[v] ? '…' : ''), icon: iconFor(VERBS[v][0]),
+    desc: VERBS[v][1], danger: !!DESTRUCTIVE[v], disabled: busy, why, onSelect: () => lifecycle(v, s.name) })), { small: true }) : null;
+  return h('div', { class: 'row-acts', 'data-lifecycle-for': s.name }, b, more ? more.el : null);
 }
 /// The phase pill — or, in a transition, what is under way.
 function sandboxPill(s) {
@@ -1798,7 +1803,7 @@ function hostCard(host) {
   }
   // 594 W18: every action starts a host on demand (as the CLI does); this starts one on its own.
   const c = card('Host', 'not running', host.recoveryPending.length ? 'recovery pending: ' + host.recoveryPending.join(', ') : 'nothing is running — shown from the store');
-  c.append(h('div', { class: 'n' }, startHostButton()));
+  c.append(h('div', { class: 'n-act' }, startHostButton()));
   return c;
 }
 
@@ -1807,19 +1812,19 @@ async function viewOverview() {
   const o = await api('overview');
   state.overview = o;
   renderNavSandboxes();
-  const rows = o.sandboxes.map((s) => h('tr', { class: 'click', on: { click: () => { location.hash = '#/sandbox/' + s.name; } } },
-    h('td', null, h('a', { href: '#/sandbox/' + s.name }, s.name), h('div', { class: 'muted' }, s.image),
-      s.workspace ? null : h('div', { class: 'muted no-ws', 'data-isolated': '', title: ISOLATED_NOTE }, 'isolated'),
+  const rows = o.sandboxes.map((s) => h('tr', { class: 'click', 'data-sandbox-row': s.name, on: { click: () => { location.hash = '#/sandbox/' + s.name; } } },
+    h('td', null, h('a', { class: 'name', href: '#/sandbox/' + s.name }, s.name),
+      h('div', { class: 'sub2' }, s.image, s.workspace ? null : h('span', { class: 'no-ws', 'data-isolated': '', title: ISOLATED_NOTE }, ' · isolated')),
       h('div', { 'data-op-for': s.name })),
-    h('td', null, sandboxPill(s), s.diedWithHost ? h('div', { class: 'st-warn' }, 'died with its host') : null),
-    h('td', { class: 'num' }, h('div', null, s.ramHeldMiB ? mib(s.ramHeldMiB) : '—'), h('div', { class: 'muted' }, 'of ' + mib(s.memoryMiB)), meter(s.ramHeldMiB, s.memoryMiB)),
+    h('td', null, sandboxPill(s), s.diedWithHost ? h('div', { class: 'st-warn sub2' }, 'died with its host') : null),
+    h('td', { class: 'num' }, h('div', null, s.ramHeldMiB ? mib(s.ramHeldMiB) : '—'), h('div', { class: 'sub2' }, 'of ' + mib(s.memoryMiB)), meter(s.ramHeldMiB, s.memoryMiB)),
     h('td', { class: 'num' }, bytes(s.diskBytes)),
-    h('td', null, s.network, s.deniedConnections ? h('div', { class: 'st-warn' }, s.deniedConnections + ' denied') : null),
+    h('td', null, s.network, s.deniedConnections ? [' ', h('span', { class: 'tag warn' }, s.deniedConnections + ' denied')] : null),
     s.accountApplies
-      ? h('td', null, s.account || '—', s.credentialState ? h('div', { class: s.credentialState === 'ok' ? 'st-ok' : 'st-warn' }, s.credentialState) : null,
-        s.foreignCredentials ? h('div', { class: 'st-warn' }, s.foreignCredentials + ' own credential(s)') : null)
+      ? h('td', null, s.account || '—', s.credentialState ? h('div', { class: (s.credentialState === 'ok' ? 'st-ok' : 'st-warn') + ' sub2' }, s.credentialState) : null,
+        s.foreignCredentials ? h('div', { class: 'st-warn sub2' }, s.foreignCredentials + ' own credential(s)') : null)
       : h('td', { class: 'muted', title: 'its network cannot reach an account’s API' }, 'n/a'),
-    h('td', null, lifecycleButtons(s, false))));
+    h('td', { class: 'row-acts-cell' }, rowLifecycle(s))));
   return h('div', null,
     h('div', { class: 'head' }, h('h1', null, 'Sandboxes'),
       h('div', { class: 'actions' }, quickAddButton(), (() => {
@@ -1828,7 +1833,7 @@ async function viewOverview() {
         return b;
       })())),
     h('p', { class: 'sub' }, o.source === 'host' ? 'Live from the host.' : 'No host is running: read from the store (nothing is live). An action starts the host.'),
-    h('div', { class: 'cards' },
+    h('div', { class: 'stats' },
       hostCard(o.host),
       card('Sandboxes', String(o.totals.sandboxes), o.totals.live + ' with a VM'),
       card('RAM held', mib(o.totals.ramHeldMiB), 'charged to this Mac now'),
@@ -1836,8 +1841,10 @@ async function viewOverview() {
     h('h2', null, 'All sandboxes'),
     // No session column: counting sessions asks every session's holder in the guest, and this list
     // is kept live — sessions are on each sandbox's page (590 bug 3).
-    panel(table(['Sandbox', 'Phase', 'RAM held', 'Disk', 'Network', 'Account', ''], rows, [2, 3]),
-      'No sandboxes yet — New sandbox, or doz create NAME --image lab'));
+    o.sandboxes.length ? panel(table(['Sandbox', 'Phase', 'RAM held', 'Disk', 'Network', 'Account', h('span', { class: 'sr-only' }, 'Actions')], rows, [2, 3]))
+      : h('div', { class: 'panel' }, h('div', { class: 'empty-big' }, icon('box'), h('div', { class: 'e-title' }, 'No sandboxes yet'),
+        h('p', null, 'A sandbox is a small Linux VM for one project. Quick add makes one with every default; New sandbox walks through each choice. In a terminal: doz new, or doz init then doz up.'),
+        h('div', { class: 'actions center' }, quickAddButton()))));
 }
 
 // ── 599c: Quick add (owner: "a "Quick Add" sandbox that picks defaults for workspace name etc and opens
@@ -3312,15 +3319,17 @@ async function viewImages() {
     // Shared: with the disk it was made from (none for a disk with no parent — the lab's prepared disk).
     const own = n ? n.uniqueBytes : null, shared = n ? n.sharedWithParentBytes ?? null : null;
     return h('tr', { 'data-image': r.name, 'data-status': r.status || '' },
-    h('td', null, r.name, r.kind === 'custom' ? h('span', { class: 'tag tpl' }, 'template') : null,
+    h('td', null, h('span', { class: 'nm' }, r.name), ' ', r.kind === 'custom' ? h('span', { class: 'tag tpl' }, 'template') : null,
       // 594 W28: out of date — a badge, and the line that says why (never rebuilt by itself).
       r.status === 'older recipe' || r.status === 'update available' ? h('span', { class: 'tag img-status st-' + r.status.replace(/ /g, '-'), 'data-image-badge': r.status }, r.status) : null,
-      r.standing ? h('div', { class: 'muted img-standing', 'data-image-standing': '' }, r.standing) : null),
+      r.standing ? h('div', { class: 'muted img-standing', 'data-image-standing': '' }, r.standing) : null,
+      // 603 (E17): the key is rarely read — in the row's details, truncated (the whole of it as the tooltip).
+      r.key ? h('div', { class: 'sub2 mono trunc img-key', title: 'key ' + r.key }, r.key) : null),
     // 596 (B1): base × agent ("Python · Claude Code").
     h('td', { 'data-image-base': r.base || '' }, r.kind === 'custom' ? 'template' : (r.title || r.kind)),
     // W32: what the image's state means, in words — never a bare dash.
     h('td', { 'data-image-status-cell': '' }, h('span', { class: r.status === 'up to date' ? 'muted' : '' }, r.status || 'up to date')),
-    h('td', null, r.baked ? (r.bakedAt ? full(r.bakedAt) : 'yes') : h('span', { class: 'muted' }, 'no — bakes on first start')),
+    h('td', { title: r.bakedAt ? full(r.bakedAt) : null }, r.baked ? (r.bakedAt ? when(r.bakedAt) : 'yes') : h('span', { class: 'muted' }, 'no — bakes on first start')),
     h('td', { class: 'num' }, r.allocatedBytes ? bytes(r.allocatedBytes) : '—'),
     h('td', { class: 'num', 'data-own-cell': '' }, n ? sizePart(own, size) : '—'),
     h('td', { class: 'num', 'data-shared-cell': '' }, n ? sizePart(shared, size) : '—'),
@@ -3338,24 +3347,25 @@ async function viewImages() {
       ] : '—'),
     h('td', null, [r.versionSetting ? null : r.note, r.fromSandbox ? 'from ' + r.fromSandbox : null, r.dockerfile ? 'Dockerfile ' + r.dockerfile : null,
       r.baseUpdate].filter(Boolean).join(' · ') || '—'),
-    h('td', { class: 'mono muted' }, r.key ? r.key.slice(0, 16) : ''),
-    h('td', null, h('div', { class: 'actions' },
-      // 594 W28: rebuilding is one explained step.
+    h('td', { class: 'row-acts-cell' }, h('div', { class: 'row-acts' },
+      // 594 W28: rebuilding is one explained step. 603: the row's next verb; Remove… in ⋯.
       r.kind === 'builtin' ? (r.baked
         ? btn('Rebuild', () => dialog('Rebuild the ' + r.name + ' image?',
             'About 2 minutes, needs network. Existing sandboxes keep their disks — nothing in them changes. New sandboxes, and Reset, use the new image (a reset keeps the agent’s own state and /workspace, and drops other system changes).',
             [], 'Rebuild', async () => { await actOrThrow({ action: 'image-bake', image: r.name }); }, { icon: 'flame' }),
-          { small: true, primary: !!r.standing, icon: 'flame', title: 'Minutes, needs network' })
-        : btn('Bake', () => act({ action: 'image-bake', image: r.name }), { small: true, title: 'Minutes, needs network' })) : null,
-      r.baked || r.kind === 'custom' ? btn('Remove', () => confirmAction('Remove ' + (r.kind === 'custom' ? 'template ' : 'image ') + r.name,
-        r.kind === 'custom' ? 'The template is deleted; sandboxes created from it keep working.' : 'Its baked disk is deleted (it is baked again when next needed); sandboxes cloned from it keep working.',
-        r.name, { action: 'image-rm', image: r.name }), { small: true, danger: true }) : null)));
+          { small: true, primary: !!r.standing, quiet: !r.standing, icon: 'flame', title: 'Minutes, needs network' })
+        : btn('Bake', () => act({ action: 'image-bake', image: r.name }), { small: true, quiet: true, title: 'Minutes, needs network' })) : null,
+      r.baked || r.kind === 'custom' ? moreMenu('More for ' + r.name, [{ label: 'Remove…', icon: 'trash-2', danger: true,
+        desc: r.kind === 'custom' ? 'The template; sandboxes made from it keep working' : 'Its baked disk; baked again when next needed',
+        onSelect: () => confirmAction('Remove ' + (r.kind === 'custom' ? 'template ' : 'image ') + r.name,
+          r.kind === 'custom' ? 'The template is deleted; sandboxes created from it keep working.' : 'Its baked disk is deleted (it is baked again when next needed); sandboxes cloned from it keep working.',
+          r.name, { action: 'image-rm', image: r.name }) }], { small: true }).el : null)));
   });
   return h('div', null, h('div', { class: 'head' }, h('h1', null, 'Images'),
       h('div', { class: 'actions' }, btn('Refresh', () => { remeasure(); refresh(false); }, { small: true, title: 'Measure again' }), imagesToggle())),
     h('p', { class: 'sub' }, 'Built-in images, and templates saved from sandboxes (a sandbox’s root disk — never its state disk). Own is what only this image holds (what removing it frees); shared is what it reuses from the disk it was made from. Progress of a bake shows under Operations. Everything Dozer uses: ',
       h('a', { href: '#/resources' }, 'Resources'), '.'),
-    panel(table(['Image', 'Base · Agent', 'Status', 'Baked', 'Size', 'Own', 'Shared', barLegend(), 'Version', 'Note', 'Key', ''], rows, [4, 5, 6])));
+    panel(((t) => { if (t) t.classList.add('images-t'); return t; })(table(['Image', 'Base · Agent', 'Status', 'Baked', 'Size', 'Own', 'Shared', barLegend(), 'Version', 'Note', h('span', { class: 'sr-only' }, 'Actions')], rows, [4, 5, 6]))));
 }
 async function viewLineage() {
   const t = await measured('tree', 'images/tree');
@@ -3820,19 +3830,29 @@ async function viewAccounts() {
     h('td', null, x.expiresAt ? full(x.expiresAt) : '—', x.expiresAt ? h('div', { class: 'muted' }, when(x.expiresAt)) : null),
     h('td', { class: 'mono' }, x.fingerprint || '—', x.keychainService ? h('div', { class: 'muted' }, 'keychain: ' + x.keychainService) : null),
     h('td', null, x.usedBy.length ? x.usedBy.join(', ') : '—'),
-    h('td', null, h('div', { class: 'actions' },
-      x.isDefault ? null : btn('Make default', () => act({ action: 'account-default', account: x.name }), { small: true }),
-      x.kind === 'mac' ? null : btn('Verify', () => act({ action: 'account-verify', account: x.name }), { small: true, title: 'One tiny request to the API with it' }),
-      x.name === 'mac' ? null : btn('Remove', () => confirmAction('Remove account ' + x.name, 'Its keychain item is deleted' + (x.usedBy.length ? '; sandboxes pinned to it must move first (' + x.usedBy.join(', ') + ')' : '') + '.',
-        x.name, { action: 'account-rm', account: x.name }), { small: true, danger: true })))));
+    h('td', { class: 'row-acts-cell' }, (() => {
+      const items = [
+        x.isDefault ? null : { label: 'Make default', icon: 'star', desc: 'Sandboxes that follow the store default use it', onSelect: () => act({ action: 'account-default', account: x.name }) },
+        x.kind === 'mac' || x.isDefault ? null : { label: 'Verify', icon: 'badge-check', desc: 'One tiny request to the API with it', onSelect: () => act({ action: 'account-verify', account: x.name }) },
+        x.name === 'mac' ? null : { sep: true },
+        x.name === 'mac' ? null : { label: 'Remove…', icon: 'trash-2', danger: true, desc: 'Its keychain item is deleted', onSelect: () => confirmAction('Remove account ' + x.name,
+          'Its keychain item is deleted' + (x.usedBy.length ? '; sandboxes pinned to it must move first (' + x.usedBy.join(', ') + ')' : '') + '.', x.name, { action: 'account-rm', account: x.name }) },
+      ].filter(Boolean);
+      // The next verb: Verify for a key or a token, else Make default; the rest in ⋯.
+      const next = x.kind !== 'mac' ? btn('Verify', () => act({ action: 'account-verify', account: x.name }), { small: true, quiet: true, title: 'One tiny request to the API with it' })
+        : x.isDefault ? null : btn('Make default', () => act({ action: 'account-default', account: x.name }), { small: true, quiet: true });
+      const rest = items.filter((it) => it.sep || !next || it.label !== next.textContent.trim());
+      while (rest.length && rest[0].sep) rest.shift();
+      return h('div', { class: 'row-acts' }, next, rest.length ? moreMenu('More for ' + x.name, rest, { small: true }).el : null);
+    })())));
   const keep = h('input', { type: 'checkbox', role: 'switch', id: 'keepalive' });
   keep.checked = a.keepalive;
   keep.addEventListener('change', () => act({ action: 'account-keepalive', enabled: keep.checked }));
   return h('div', null, h('h1', null, 'Accounts & keys'),
     h('p', { class: 'sub' }, 'Anthropic credentials the host holds for sandboxes. Never a secret: states, keychain item names and fingerprints only.'),
-    h('div', { class: 'cards' },
+    h('div', { class: 'stats' },
       card('Default account', a.defaultAccount, a.defaultAccount === 'none' ? 'sandboxes that follow it get none' : ''),
-      h('div', { class: 'card' }, h('div', { class: 'k' }, 'Keep-alive'), h('label', { class: 'v switch-row' }, keep, a.keepalive ? 'on' : 'off'),
+      h('div', { class: 'stat' }, h('div', { class: 'k' }, 'Keep-alive'), h('label', { class: 'v switch-row' }, keep, a.keepalive ? 'on' : 'off'),
         h('div', { class: 'n' }, 'runs the Mac’s own claude -p near expiry while a sandbox uses the login'))),
     h('div', { class: 'head' }, h('h2', null, 'Accounts'), btn('Set the default to none', () => act({ action: 'account-default', account: 'none' }), { small: true })),
     panel(table(['Account', 'Kind', 'Identity', 'State', 'Expires', 'Fingerprint', 'Used by', ''], rows)),
@@ -3886,7 +3906,7 @@ async function viewMetrics() {
   return h('div', null, h('h1', null, 'Metrics'),
     h('p', { class: 'sub' }, 'Lifecycle timings the host recorded.'),
     toolbar,
-    h('div', { class: 'cards' }, card('Host runs', String(m.runs)), card('Rows', String(m.rows)), card('Sessions', String(m.sessions)), card('Network minutes', String(m.networkMinutes))),
+    h('div', { class: 'stats' }, card('Host runs', String(m.runs)), card('Rows', String(m.rows)), card('Sessions', String(m.sessions)), card('Network minutes', String(m.networkMinutes))),
     h('h2', null, 'Per action'),
     panel(h('div', { class: 'bars' }, table(['Action', 'Count', 'Median', 'P90', 'Min', 'Max', 'Failed', ''], rows, [1, 2, 3, 4, 5, 6])), 'Nothing recorded for this filter.'));
 }

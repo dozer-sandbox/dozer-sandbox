@@ -184,21 +184,21 @@ h3 { font-size: var(--fs-md); font-weight: var(--fw-strong); }
 
 
 
-.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; margin-bottom: 8px; }
-.card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; }
-.card .k { color: var(--muted); font-size: var(--fs-sm); }
-.card .v { font-size: 18px; font-weight: var(--fw-strong); margin-top: 2px; font-variant-numeric: tabular-nums; }
-.card .n { color: var(--muted); font-size: var(--fs-sm); margin-top: 2px; }
 
-.panel { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); overflow-x: auto; }
-table { width: 100%; border-collapse: collapse; }
-th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
-th { font-size: var(--fs-sm); color: var(--ink-2); font-weight: var(--fw-medium); white-space: nowrap; }
-tr:last-child td { border-bottom: 0; }
-td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
-tr.click { cursor: pointer; }
-tr.click:hover td { background: var(--bg); }
-.empty { padding: 18px; color: var(--muted); }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -220,8 +220,6 @@ tr.click:hover td { background: var(--bg); }
 
 
 /* In a right-aligned (numeric) cell: a block pushed to the right edge, under its own figures. */
-.meter { width: 90px; max-width: 100%; height: 6px; background: var(--bar); border-radius: 3px; overflow: hidden; margin: 4px 0 0 auto; }
-.meter > span { display: block; height: 100%; background: var(--bar-strong); }
 
 
 
@@ -238,9 +236,11 @@ tr.click:hover td { background: var(--bg); }
 
 
 
-.head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
-.head h1, .head h2 { margin: 0; }
-.head:has(h2) { margin: 28px 0 10px; }
+
+
+
+
+
 .toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 0 0 10px; color: var(--muted); font-size: var(--fs-sm); }
 .toolbar select { font: inherit; }
 
@@ -602,7 +602,7 @@ ul.prep-steps .prep-done-transfer { color: var(--muted); }
 .ops-preps { margin-bottom: 26px; }
 .ops-preps td.op-action { white-space: nowrap; }
 .prompt-panel { padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; font-size: var(--fs-md); }
-.no-ws { font-size: var(--fs-sm); }
+
 /* 594: an agent's credential prerequisite — in a create form, and an existing sandbox's banner. */
 
 
@@ -1186,3 +1186,36 @@ dl.facts dd { margin: 0; overflow-wrap: anywhere; }
 .ipanel[data-insp="sessions"] th:nth-child(1) { width: 44%; }
 .ipanel[data-insp="keys"] th:nth-child(4) { width: 76px; }
 .ipanel td { overflow-wrap: anywhere; }
+
+/* ── 603 step 7: tables — sentence-case headers in ink-2 (32 px), rows 36 px, numbers right and tabular; a row that
+   opens something is a link in its first cell and clickable as a whole; its actions: the one likely next verb as a
+   quiet button, the rest in ⋯ — one line. Long identifiers truncate (the whole of it as the tooltip). ── */
+.panel { background: var(--surface); border: var(--bw) solid var(--line); border-radius: var(--r-lg); overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: var(--fs-md); }
+th, td { text-align: left; padding: 7px 10px; border-bottom: var(--bw) solid var(--line); vertical-align: middle; }
+th { height: 32px; padding-top: 0; padding-bottom: 0; font: var(--fw-medium) var(--fs-sm)/1.2 var(--font); color: var(--ink-2); white-space: nowrap; background: var(--surface); }
+tr:last-child td { border-bottom: 0; }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+tr.click { cursor: pointer; }
+tr.click:hover td { background: color-mix(in srgb, var(--surface-2) 70%, var(--surface)); }
+a.name { font-weight: var(--fw-medium); color: var(--ink); text-decoration: none; }
+a.name:hover { text-decoration: underline; }
+td.row-acts-cell { width: 1%; white-space: nowrap; text-align: right; }
+td.row-acts-cell .row-acts { justify-content: flex-end; flex-wrap: nowrap; }
+.trunc { max-width: 22ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+.empty { padding: 14px 12px; color: var(--ink-2); display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; }
+.empty-big { padding: 40px 16px; display: grid; justify-items: center; gap: var(--sp-2); text-align: center; }
+.empty-big > .icon { width: 24px; height: 24px; color: var(--ink-3); }
+.empty-big .e-title { font-size: var(--fs-lg); font-weight: var(--fw-strong); }
+.empty-big p { margin: 0 0 var(--sp-2); color: var(--ink-2); max-width: 46ch; }
+.meter { width: 90px; max-width: 100%; height: 4px; border-radius: 2px; background: var(--data-free); overflow: hidden; margin: 4px 0 0 auto; }
+.meter > span { display: block; height: 100%; background: var(--data-own); }
+.stats { margin-bottom: 8px; }
+.stat .n-act { margin-top: 4px; }
+.head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.head h1, .head h2 { margin: 0; }
+.head:has(h2) { margin: 24px 0 8px; }
+/* Images below 1100 px: the bar says own and shared; their figure columns (and the note) step aside. */
+@media (max-width: 1100px) { .images-t th:nth-child(6), .images-t td:nth-child(6), .images-t th:nth-child(7), .images-t td:nth-child(7),
+  .images-t th:nth-child(10), .images-t td:nth-child(10) { display: none; } }
