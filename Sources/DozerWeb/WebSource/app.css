@@ -1273,3 +1273,21 @@ details.disclosure > :not(summary) { margin-top: 6px; }
 .prep-card.prep-done { border-color: color-mix(in srgb, var(--ok) 40%, var(--line)); }
 .prep-card.prep-failed { border-color: color-mix(in srgb, var(--bad) 55%, var(--line)); }
 .prep-output { font: var(--fs-xs)/1.5 var(--mono); color: var(--ink-2); background: var(--surface-2); border-radius: var(--r-sm); padding: 6px 8px; overflow: hidden; }
+
+/* ── 603 step 9: long pages — a sticky index of the page's sections (with a figure each on Resources), groups
+   that fold (Resources, kept in this browser), and the Settings filter. ── */
+.page-index { position: sticky; top: 0; z-index: var(--z-sticky); display: flex; flex-wrap: wrap; gap: 2px 4px; padding: 6px 0; margin: 8px 0 4px;
+  background: var(--bg); border-bottom: var(--bw) solid var(--line); }
+.page-index a { display: inline-flex; align-items: center; gap: 4px; min-height: var(--ctl-sm); padding: 0 8px; border-radius: var(--r-sm); color: var(--ink);
+  text-decoration: none; font-size: var(--fs-sm); white-space: nowrap; }
+.page-index a:hover { background: var(--surface-2); }
+.page-index a .muted { font-variant-numeric: tabular-nums; }
+.page-tools { display: flex; flex-direction: column; gap: 6px; margin: 4px 0 8px; position: sticky; top: 0; z-index: var(--z-sticky); background: var(--bg); }
+.page-tools .page-index { position: static; margin: 0; }
+.filter-field { display: flex; align-items: center; gap: 6px; max-width: 420px; position: relative; }
+.filter-field .icon { position: absolute; left: 8px; color: var(--ink-2); pointer-events: none; }
+.filter-field input { flex: 1; padding-left: 30px; }
+.set-head, .res-group { scroll-margin-top: 96px; }
+.res-head h2 { display: inline-flex; align-items: center; gap: 4px; }
+.res-head .res-toggle { margin-left: -4px; }
+.filter-none[hidden], .setting[hidden], .set-head[hidden], .panel[hidden] { display: none; }

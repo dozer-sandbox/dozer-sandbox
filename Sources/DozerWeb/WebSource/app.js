@@ -953,6 +953,7 @@ async function resetSetting(key) { adoptSettings(await api('settings', { method:
 const SETTING_SECTIONS = {
   ui: 'This UI', host: 'The host', store: 'The store', claude: 'Claude Code', defaults: 'New sandboxes', agent: 'The agent', sandbox: 'Inside every sandbox',
   'images.lab': 'New lab sandboxes', 'images.claude-code': 'New claude-code sandboxes', 'images.pi': 'New pi sandboxes', kernel: 'The kernel',
+  resources: 'Resources', sessions: 'Sessions', bridges: 'Bridges', workspace: 'Workspace rules', github: 'GitHub', images: 'Images',
 };
 // An empty app list means none (default apps only), not "automatic".
 function shownValue(v, type) { return typeof v === 'string' ? (v === '' ? (type === 'apps' ? '""  (none)' : '""  (automatic)') : v) : String(v); }
@@ -970,23 +971,63 @@ async function viewSettings() {
   // below: defaults.github, github.credentials, sandbox.ssh_agent; the Claude account: Accounts).
   const accessBox = h('div', { class: 'panel access-panel', 'data-settings-access': '' });
   renderAccessStep(accessBox, { mode: 'settings', claude: true });
-  return h('div', null, h('h1', null, 'Settings'),
+  // 603 (E13): a filter over what the page already has (a key, a name, a description) and an index of the
+  // sections; Access stays first.
+  const filter = h('input', { type: 'search', class: 'page-filter', 'data-settings-filter': '', placeholder: 'Filter — a key like ui.theme, or a word',
+    'aria-label': 'Filter the settings', autocomplete: 'off', spellcheck: 'false' });
+  filter.value = state.settingsFilter || '';
+  const secId = (name) => 'set-' + name.replace(/[^a-z0-9]+/gi, '-');
+  const index = pageIndex([['access', 'Access'], ...sections.map((sec) => [secId(sec.name), SETTING_SECTIONS[sec.name] || sec.name])]);
+  const node = h('div', { class: 'settings-page' }, h('h1', null, 'Settings'),
     h('p', { class: 'sub' }, 'Written to ', h('code', null, rep.path || 'no file (neither XDG_CONFIG_HOME nor HOME is set)'),
       rep.exists ? '' : ' — not written yet: the first change writes it, with every setting listed at its default',
       '. A command-line flag wins, then the environment, then this file, then the default; ', h('code', null, 'doz config show'), ' prints the same.'),
     rep.error ? callout('bad', { cls: 'notice', title: 'The settings file does not read', body: rep.error + ' — nothing in it applies, and the UI will not overwrite it. Fix it (or remove it) first.' }) : null,
     warnings.length ? callout('warn', { cls: 'notice', body: h('ul', { class: 'plain' }, warnings.map((w) => h('li', null, w))) }) : null,
-    h('h2', { id: 'access' }, 'Access'),
+    h('div', { class: 'page-tools' }, h('label', { class: 'filter-field' }, icon('search'), filter), index),
+    h('p', { class: 'muted filter-none', 'data-filter-none': '', hidden: true }, 'No setting matches.'),
+    h('h2', { id: 'access', class: 'set-head' }, 'Access'),
     h('p', { class: 'sub' }, 'What sandboxes may use as you. Change a choice in the settings below (',
       h('code', null, 'defaults.github'), ', ', h('code', null, 'github.credentials'), ', ', h('code', null, 'sandbox.ssh_agent'),
       ') or with ', h('code', null, 'doz access set'), '; the Claude account on the Accounts page.'),
     accessBox,
     sections.flatMap((sec) => [
-      h('h2', null, SETTING_SECTIONS[sec.name] || sec.name, ' ', h('code', { class: 'muted' }, '[' + sec.name + ']')),
-      h('div', { class: 'panel settings' }, sec.rows.map(settingRow)),
+      h('h2', { id: secId(sec.name), class: 'set-head', 'data-section': sec.name }, SETTING_SECTIONS[sec.name] || sec.name, ' ', h('code', { class: 'muted' }, '[' + sec.name + ']')),
+      h('div', { class: 'panel settings', 'data-section': sec.name }, sec.rows.map(settingRow)),
     ]),
-    h('h2', null, 'Not settable, by design'),
-    panel(h('ul', { class: 'plain' }, rep.notSettable.map((n) => h('li', null, n)))));
+    h('h2', { class: 'set-head', 'data-section': 'not-settable' }, 'Not settable, by design'),
+    h('div', { class: 'panel', 'data-section': 'not-settable' }, h('ul', { class: 'plain' }, rep.notSettable.map((n) => h('li', null, n)))));
+  const apply = () => {
+    const q = filter.value.trim().toLowerCase();
+    state.settingsFilter = filter.value;
+    let any = false;
+    for (const row of node.querySelectorAll('.setting[data-key]')) {
+      const r = state.settings.byKey[row.dataset.key];
+      const hit = !q || [r.key, r.name, r.description, r.section].some((t) => String(t || '').toLowerCase().includes(q));
+      row.hidden = !hit;
+      any = any || hit;
+    }
+    for (const el of node.querySelectorAll('[data-section]')) {
+      const box = node.querySelector('.panel.settings[data-section="' + el.dataset.section + '"]');
+      el.hidden = !!q && (!box || ![...box.querySelectorAll('.setting')].some((x) => !x.hidden));
+    }
+    // Access and the index stand aside while filtering (the matching rows are the page).
+    for (const el of node.querySelectorAll('#access, [data-settings-access], #access + .sub')) el.hidden = !!q;
+    node.querySelector('[data-filter-none]').hidden = !q || any;
+  };
+  filter.addEventListener('input', apply);
+  filter.addEventListener('keydown', (ev) => { if (ev.key === 'Escape' && filter.value) { ev.stopPropagation(); filter.value = ''; apply(); } });
+  apply();
+  return node;
+}
+/// 603 (E13): a long page's index — a sticky strip of its sections (with a figure each when given); a link scrolls.
+function pageIndex(items) {
+  return h('nav', { class: 'page-index', 'aria-label': 'On this page' }, items.map(([id, label, figure]) =>
+    h('a', { href: '#' + (location.hash.slice(1) || '/'), 'data-index': id, on: { click: (ev) => {
+      ev.preventDefault();
+      const t = document.getElementById(id);
+      if (t) { t.scrollIntoView({ block: 'start', behavior: 'smooth' }); }
+    } } }, label, figure ? h('span', { class: 'muted' }, ' ' + figure) : null)));
 }
 function settingRow(r) {
   const source = h('span', { class: 'tag src src-' + r.source, title: r.source === 'file' ? 'set in the file' : r.source === 'default' ? 'not set: the default' : (r.note || '') },
@@ -3538,9 +3579,27 @@ function resGroupPanel(r, group, title) {
     rows.push(resRow(p, kids.length));
     if (kids.length && resOpen(p)) for (const k of kids) rows.push(resRow(k, 0));
   }
-  return h('section', { class: 'res-group', 'data-res-group': group },
-    h('div', { class: 'head' }, h('h2', null, title), h('span', { class: 'muted' }, group === 'outside' ? 'shown, never deleted here' : bytes(total))),
+  return resSection(group, title, group === 'outside' ? 'shown, never deleted here' : bytes(total),
     panel(table(['', 'Item', 'Size', 'Freed if deleted', 'Used by', 'Notes', 'Managed in'], rows, [2, 3])));
+}
+/// 603 (E13): a Resources group — its heading opens and closes it (the state kept in this browser).
+function resClosed() { try { return new Set(JSON.parse(localStorage.getItem('doz.resClosed') || '[]')); } catch (_) { return new Set(); } }
+function resSection(group, title, figure, body) {
+  const closed = resClosed().has(group);
+  const toggle = h('button', { type: 'button', class: 'res-toggle' + (closed ? '' : ' open'), 'aria-expanded': closed ? 'false' : 'true',
+    'aria-controls': 'res-body-' + group, title: (closed ? 'Show ' : 'Hide ') + title }, icon('chevron-down'));
+  const wrap = h('div', { id: 'res-body-' + group, hidden: closed }, body);
+  toggle.addEventListener('click', () => {
+    const set = resClosed();
+    const nowClosed = !wrap.hidden;
+    if (nowClosed) set.add(group); else set.delete(group);
+    try { localStorage.setItem('doz.resClosed', JSON.stringify([...set])); } catch (_) { /* this page only */ }
+    wrap.hidden = nowClosed;
+    toggle.classList.toggle('open', !nowClosed);
+    toggle.setAttribute('aria-expanded', nowClosed ? 'false' : 'true');
+  });
+  return h('section', { class: 'res-group', 'data-res-group': group, id: 'res-' + group },
+    h('div', { class: 'head res-head' }, h('h2', null, toggle, title), h('span', { class: 'muted' }, figure)), wrap);
 }
 /// The top bar is Dozer's own split only (owner, 595): what stays, what Clean up frees, and what `du`
 /// counts again for blocks APFS clones share — the whole is Dozer's total. The volume's free space is
@@ -3576,8 +3635,7 @@ function resMemoryPanel(r) {
     h('td', { class: 'num' }, bytes(m.heldBytes), m.allocationBytes ? meter(m.heldBytes, m.allocationBytes) : null),
     h('td', { class: 'num' }, m.allocationBytes ? bytes(m.allocationBytes) : '—'),
     h('td', { class: 'num' }, m.cpus ?? '—')));
-  return h('section', { class: 'res-group', 'data-res-group': 'memory' },
-    h('div', { class: 'head' }, h('h2', null, 'Memory and CPUs'), h('span', { class: 'muted' }, bytes(held) + ' held · ' + r.allocatedCPUs + ' of ' + r.machineCPUs + ' CPUs given to sandboxes')),
+  return resSection('memory', 'Memory and CPUs', bytes(held) + ' held · ' + r.allocatedCPUs + ' of ' + r.machineCPUs + ' CPUs given to sandboxes',
     panel(table(['What', 'Phase', 'Held now', 'Allocation', 'CPUs'], rows, [2, 3, 4]), 'No sandbox has a VM, and no host is running.'));
 }
 function resNetworkPanel(r) {
@@ -3585,8 +3643,7 @@ function resNetworkPanel(r) {
     h('td', null, h('a', { href: '#/sandbox/' + n.sandbox }, n.sandbox)),
     h('td', { class: 'num' }, bytes(n.upToday)), h('td', { class: 'num' }, bytes(n.downToday)),
     h('td', { class: 'num' }, bytes(n.upTotal)), h('td', { class: 'num' }, bytes(n.downTotal)), h('td', { class: 'num' }, n.connectionsTotal)));
-  return h('section', { class: 'res-group', 'data-res-group': 'network' },
-    h('div', { class: 'head' }, h('h2', null, 'Network'), h('span', { class: 'muted' }, 'through each sandbox’s proxy, from the metrics')),
+  return resSection('network', 'Network', 'through each sandbox’s proxy, from the metrics',
     panel(table(['Sandbox', 'Up today', 'Down today', 'Up in all', 'Down in all', 'Connections'], rows, [1, 2, 3, 4, 5]), 'No proxied traffic recorded yet.'));
 }
 function resKernelsPanel(r) {
@@ -3598,8 +3655,7 @@ function resKernelsPanel(r) {
     h('td', null, k.usedBy.length ? k.usedBy.join(', ') : h('span', { class: 'muted' }, 'none')),
     h('td', null, k.current ? h('span', { class: 'muted' }, 'new sandboxes boot it')
       : btn('Use this kernel', () => act({ action: 'resources-kernel', kernel: k.id }), { small: true, title: 'New sandboxes boot it; existing ones keep theirs (a wake keeps its snapshot’s kernel)' }))));
-  return h('section', { class: 'res-group', 'data-res-group': 'kernels' },
-    h('div', { class: 'head' }, h('h2', null, 'Kernels'), h('span', { class: 'muted' }, '“Use this kernel” is for sandboxes created from now on')),
+  return resSection('kernels', 'Kernels', '“Use this kernel” is for sandboxes created from now on',
     panel(table(['Version', 'sha256', 'Size', 'Needed by', ''], rows, [2]), 'No kernel yet — the first start fetches it.'));
 }
 function paintResSelection() {
@@ -3638,6 +3694,9 @@ function resourcesNode(r) {
     h('p', { class: 'sub' }, 'Everything Dozer uses. Images are managed on ', h('a', { href: '#/images' }, 'Images'), ', a sandbox on its page, accounts on ',
       h('a', { href: '#/accounts' }, 'Accounts & keys'), ' — the rows link there. Deleting here is for what has no other home. Measured in ' + Math.round(r.milliseconds) + ' ms.'),
     resTotalBar(r),
+    pageIndex([...RES_GROUPS.filter(([g]) => r.items.some((i) => i.group === g)).map(([g, t]) => ['res-' + g, t,
+      g === 'outside' ? null : bytes(r.items.filter((i) => i.group === g && !i.parent).reduce((a, i) => a + (i.sizeBytes || 0), 0))]),
+      ['res-memory', 'Memory and CPUs'], ['res-network', 'Network'], ['res-kernels', 'Kernels']]),
     h('div', { class: 'res-toolbar' }, selAll, clear, del),
     RES_GROUPS.map(([g, t]) => resGroupPanel(r, g, t)),
     h('p', { class: 'res-sum', 'data-res-sum': '' }, 'The rows add up to ' + bytes(r.attributedBytes) + ' of the ' + bytes(r.totalBytes) + ' measured — unattributed: ',
@@ -5715,6 +5774,37 @@ function detachTile(tile) {
   tile.term = null;
   closeTerminal(t.id);                                   // the socket closes; the frame and its engine go
 }
+
+// ── 603: page shortcuts (owner decision 10 — only the guide's): g then s → Sandboxes, / → the Settings filter,
+// ? → this list. Never while a terminal has the focus (its frame), nor in a field, a menu or a dialog.
+const SHORTCUTS = [['g s', 'Sandboxes'], ['/', 'The Settings filter'], ['?', 'These shortcuts'], ['Esc', 'Close a menu or a dialog']];
+let gPending = 0;
+function shortcutsDialog() {
+  const d = h('dialog', { class: 'dlg', 'aria-labelledby': 'sc-title' });
+  const close = h('button', { type: 'button', class: 'btn quiet', on: { click: () => d.close() } }, withIcon('x', 'Close'));
+  d.append(h('div', { class: 'dlg-head' }, h('h2', { class: 'h-title', id: 'sc-title' }, 'Keyboard shortcuts')),
+    h('div', { class: 'dlg-body' }, h('dl', { class: 'facts' }, SHORTCUTS.flatMap(([k, what]) => [h('dt', null, k.split(' ').map((x) => h('kbd', null, x))), h('dd', null, what)])),
+      h('p', { class: 'sub' }, 'Not while a terminal has the focus — there every key is the terminal’s. Tab moves between controls; arrow keys move within tabs, segmented controls and menus.')),
+    h('div', { class: 'dlg-foot' }, close));
+  d.addEventListener('close', () => d.remove());
+  document.body.append(d);
+  d.showModal();
+  close.focus();
+}
+document.addEventListener('keydown', (ev) => {
+  if (ev.defaultPrevented || ev.metaKey || ev.ctrlKey || ev.altKey || state.signedOut) return;
+  const a = document.activeElement;
+  if (a && (a.tagName === 'IFRAME' || a.closest('input, textarea, select, [contenteditable], dialog, .menu'))) return;
+  if (document.querySelector('dialog[open]') || document.body.classList.contains('ui-paused')) return;
+  if (ev.key === 'g') { gPending = Date.now(); return; }
+  if (ev.key === 's' && Date.now() - gPending < 1200) { gPending = 0; ev.preventDefault(); location.hash = '#/overview'; return; }
+  gPending = 0;
+  if (ev.key === '/') {
+    ev.preventDefault();
+    const focusFilter = () => { const f = document.querySelector('[data-settings-filter]'); if (f) { f.focus(); f.select(); return true; } return false; };
+    if (!focusFilter()) { location.hash = '#/settings'; const t0 = Date.now(); const tick = () => { if (!focusFilter() && Date.now() - t0 < 4000) setTimeout(tick, 100); }; setTimeout(tick, 100); }
+  } else if (ev.key === '?') { ev.preventDefault(); shortcutsDialog(); }
+});
 
 // ── start ───────────────────────────────────────────────────────────────────
 // The static page's own controls get their icons here (index.html holds no SVG).
