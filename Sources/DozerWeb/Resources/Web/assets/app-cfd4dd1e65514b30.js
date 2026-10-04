@@ -263,6 +263,8 @@ function paintTransition(name) {
     if (el.dataset.lifecycleFor !== name) continue;
     for (const b of el.querySelectorAll('button')) { b.disabled = true; b.title = TRANSITION_LABEL[t.action]; }
   }
+  // 603: the ⋯ menu's Reset… and Remove… too.
+  for (const b of document.querySelectorAll('[data-lifecycle-item]')) if (b.dataset.lifecycleItem === name) b.disabled = true;
   for (const el of document.querySelectorAll('[data-pill-for]')) if (el.dataset.pillFor === name) el.replaceWith(transitionPill(t, name));
   for (const x of terminals.values()) if (x.sandbox === name && x.saved) paintCover(x);
   if (state.view === 'sandbox' && state.param === name) paintTermEmpty();
@@ -1594,9 +1596,12 @@ function menuItemsNodes(items, close) {
     if (it.heading) return h('div', { class: 'menu-label' }, it.heading);
     const attrs = { type: 'button', role: 'menuitem', tabindex: '-1', class: 'menu-item' + (it.danger ? ' danger' : '') };
     for (const [k, v] of Object.entries(it.data || {})) attrs['data-' + k] = v;
+    // The one-line description (or why it is disabled) is drawn by CSS from data-desc, so an item's text is
+    // exactly its label; assistive tech gets it as the description.
+    const desc = (it.disabled ? it.why : null) || it.desc || null;
+    if (desc) { attrs['data-desc'] = desc; attrs['aria-description'] = desc; }
     const b = h('button', attrs, icon(it.icon || iconFor(it.label)), h('span', { class: 'mi-label' }, it.label),
-      it.check ? h('span', { class: 'menu-check', 'aria-hidden': 'true' }, icon('check')) : null,
-      (it.disabled ? it.why : null) || it.desc ? h('span', { class: 'desc' }, (it.disabled ? it.why : null) || it.desc) : null);
+      it.check ? h('span', { class: 'menu-check', 'aria-hidden': 'true' }, icon('check')) : null);
     if (it.check) b.setAttribute('aria-checked', 'true');
     if (it.disabled) b.disabled = true;
     b.addEventListener('click', (ev) => { ev.stopPropagation(); if (b.disabled) return; close(true); it.onSelect && it.onSelect(ev); });
@@ -2590,12 +2595,14 @@ async function refreshSandbox() {
     // A transition began or ended while this was read: what it read may be the phase before — read again.
     if (gen !== state.trGen) { sbxAgain = true; return; }
     state.sbx = { name, d, net, accounts };
+    if ($('sbx-bar').querySelector('.menu:not([hidden])') || $('sbx-details').querySelector('.menu:not([hidden])')) { state.sbxHeld = true; return; }
     const parts = sandboxParts(name, d, net, accounts);
     $('sbx-bar').replaceChildren(parts.bar);
     $('sbx-details').replaceChildren(parts.details);
     $('sbx-body').classList.toggle('details-closed', !setting('ui.details_open', true));
     paintRowOps();
     paintTermEmpty();
+    paintStripActs();
     // 593 §9: saved panes go live once it runs (their sessions listed by the detail), or repaint.
     promoteSaved(name, d.info.phase === 'running' && !d.info.busy && d.sessions ? d.sessions.filter((x) => !x.ended).map((x) => x.name) : null);
     paintTabs();
@@ -2741,106 +2748,171 @@ async function restorePanes(name) {
     if (state.view === 'sandbox' && state.param === name) renderTerminals();
   }
 }
+/// 603: a sandbox's terminal in the user's own terminal app (doz attach), from the bar, the strip or a session row.
+async function openInTerminal(name, session) {
+  try {
+    const r = await api('sandboxes/' + name + '/terminal', { method: 'POST', json: session ? { session } : {} });
+    toast(r.message, false, 'square-terminal');
+  } catch (e) { failureFor(name, e.message); }
+}
+function runDetachedDialog(name) {
+  dialog('Run a command in ' + name, 'A new session running the command — no shell in front (say bash -lc \'…\' for one). It runs inside the sandbox; attach to see it.',
+    [{ name: 'session', label: 'Session name', placeholder: 'e.g. worker', required: true },
+     { name: 'command', label: 'Command', placeholder: 'sleep 600', required: true }], 'Run', async (v) => {
+      const argv = splitArgs(v.command);
+      if (!argv.length) throw new Error('the command is empty');
+      await actOrThrow({ action: 'open-session', sandbox: name, session: v.session, argv });
+    });
+}
+function takePointDialog(name, running) {
+  dialog('Take a restore point of ' + name, running ? 'A running sandbox pauses for the clone (milliseconds); its copy gets e2fsck on the first boot from it.' : 'An instant APFS clone of the disks.',
+    [{ name: 'point', label: 'Name', placeholder: 'default point-N' }, { name: 'note', label: 'Note' }], 'Take', async (v) => {
+      const b = { action: 'point-take', sandbox: name };
+      if (v.point) b.point = v.point;
+      if (v.note) b.note = v.note;
+      await actOrThrow(b);
+    });
+}
+/// Sessions need a VM: running, or one a session request wakes (paused, asleep, hibernated) — never while off,
+/// failed, booting, busy or while another operation on it runs (590 bug 2). Null: ready; else why not.
+function sessionsWhyNot(name, i) {
+  const ready = ['running', 'paused', 'asleep', 'hibernated'].includes(i.phase) && !i.busy && !opRunningFor(name) && !transitionOf(name);
+  return ready ? null : i.phase === 'off' || i.phase === 'failed' ? 'Start it first' : 'Wait until it is running';
+}
+/// 603: the bar's lifecycle — the phase's verbs as ONE group (led by the primary for an off, failed, paused,
+/// asleep or hibernated sandbox: Start, Resume or Wake; a running one has none) and Shut down apart, in red.
+/// In a transition this page started: the buttons it showed when asked — disabled, never swapped.
+const PRIMARY_VERB = { off: 'start', failed: 'start', paused: 'resume', asleep: 'wake', hibernated: 'wake' };
+function lifecycleBar(s) {
+  const tr = transitionOf(s.name);
+  const busy = s.busy || s.phase === 'booting' || opRunningFor(s.name) || !!tr;
+  const verbs = tr && tr.verbs ? tr.verbs : verbsFor(s.phase);
+  const mk = (v) => {
+    const b = btn(VERBS[v][0], () => lifecycle(v, s.name), { primary: !busy && PRIMARY_VERB[s.phase] === v, danger: v === 'shutdown',
+      title: tr ? TRANSITION_LABEL[tr.action] : VERBS[v][1] });
+    if (busy) b.disabled = true;
+    return b;
+  };
+  const group = verbs.filter((v) => v !== 'shutdown');
+  return h('span', { class: 'sbx-life', 'data-lifecycle-for': s.name },
+    group.length ? h('span', { class: 'btn-group', role: 'group', 'aria-label': 'Lifecycle' }, group.map(mk)) : null,
+    verbs.includes('shutdown') ? mk('shutdown') : null);
+}
+function chip(k, v, attrs = {}) {
+  return h(attrs.onClick ? 'button' : 'span', { class: 'chip-kv', type: attrs.onClick ? 'button' : null, title: attrs.title || null, ...(attrs.data || {}),
+    on: attrs.onClick ? { click: attrs.onClick } : null }, h('span', { class: 'k' }, k), v);
+}
+/// 603: the inspector's tabs — the selected one is kept per sandbox in this page (owner decision 4).
+const INSP_TABS = [['overview', 'Overview', 'Overview', 'info'], ['sessions', 'Sessions', 'Sessions', 'terminal'], ['points', 'Points', 'Restore points', 'history'],
+                   ['network', 'Network', 'Network', 'shield'], ['keys', 'Keys', 'Keys & account', 'key-round'], ['config', 'Config', 'Configuration', 'settings']];
+function inspShow(name, tab) {
+  sview(name).inspTab = tab;
+  const root = $('sbx-details');
+  for (const b of root.querySelectorAll('.itab')) b.setAttribute('aria-selected', b.dataset.inspTab === tab ? 'true' : 'false');
+  for (const p of root.querySelectorAll('.ipanel')) p.hidden = p.dataset.insp !== tab;
+  root.scrollTop = 0;
+}
 function sandboxParts(name, d, net, accounts) {
   const i = d.info;
   const running = i.phase === 'running';
-  // Sessions need a VM: running, or one a session request wakes (paused, asleep, hibernated) — never
-  // while off, failed, booting, busy or while another operation on it runs (590 bug 2).
-  const sessionsReady = ['running', 'paused', 'asleep', 'hibernated'].includes(i.phase) && !i.busy && !opRunningFor(name) && !transitionOf(name);
-  const whyNot = sessionsReady ? null : i.phase === 'off' || i.phase === 'failed' ? 'Start it first' : 'Wait until it is running';
-  const gated = (b) => { if (!sessionsReady) { b.disabled = true; b.title = whyNot; } return b; };
-  const fact = (k, v) => h('div', null, h('div', { class: 'k' }, k), h('div', { class: 'v' }, v));
-  const copy = btn('Copy', async (ev) => {
+  const whyNot = sessionsWhyNot(name, i);
+  const gated = (b) => { if (whyNot) { b.disabled = true; b.title = whyNot; } return b; };
+  const fact = (k, v) => [h('dt', null, k), h('dd', null, v)];
+  const copy = btn('Copy the command', async (ev) => {
     const b = ev.currentTarget;
-    try { await navigator.clipboard.writeText(d.attachCommand); setButton(b, 'Copied'); } catch (_) { setButton(b, 'Select and copy'); }
-    setTimeout(() => { setButton(b, 'Copy'); }, 1500);
-  });
-  const terminal = (session) => async () => {
-    try {
-      const r = await api('sandboxes/' + name + '/terminal', { method: 'POST', json: session ? { session } : {} });
-      toast(r.message);
-    } catch (e) { failureFor(name, e.message); }
-  };
+    try { await navigator.clipboard.writeText(d.attachCommand); setButton(b, 'Copied', 'check'); } catch (_) { setButton(b, 'Select and copy', 'clipboard'); }
+    setTimeout(() => { setButton(b, 'Copy the command', 'copy'); }, 1500);
+  }, { small: true, quiet: true, iconOnly: true, icon: 'copy' });
   // 593 §9: paused, asleep or hibernated — the sessions as last saved, each can be shown (its saved
   // screen). A shut-down sandbox has none (owner, 2026-09-30).
   const savedState = (s) => 'screen saved ' + when(s.savedAt) + (s.savedReason ? ' (' + s.savedReason + ')' : '');
+  const live = (d.sessions || []).filter((s) => !s.ended && !s.saved);
   const sessions = (d.sessions || []).map((s) => h('tr', { 'data-session': s.name },
-    h('td', null, s.name, s.name === d.defaultSession ? h('span', { class: 'tag' }, 'default') : null),
-    h('td', null, s.saved ? h('span', { class: 'muted' }, savedState(s)) : s.ended ? h('span', { class: 'muted' }, 'ended (exit ' + s.exitCode + ')') : 'running'),
-    h('td', { class: 'mono' }, s.command),
-    h('td', { class: 'num' }, s.cols ? s.cols + '×' + s.rows : '—'),
-    h('td', { class: 'num' }, s.saved ? '—' : String(s.clients)),
-    h('td', null, s.saved ? h('div', { class: 'actions' },
-      btn('Show', () => openSavedTerminal(name, s), { small: true, icon: 'eye', title: 'Its last saved screen in a tab (read-only; it goes live when the sandbox runs)' }))
-    : s.ended ? null : h('div', { class: 'actions' },
-      btn('Open', () => openTerminal(name, s.name, 'interactive'), { small: true, title: 'A terminal on this session, here in the browser' }),
-      btn('Watch', () => openTerminal(name, s.name, 'watch'), { small: true, title: 'Watch only: nothing you type reaches the session, and it never resizes it' }),
-      gated(btn('Open in Terminal', terminal(s.name), { small: true }))))));
+    h('td', null, h('div', { class: 'cell-name' }, h('span', { class: 'dot ph-' + (s.saved ? i.phase : s.ended ? 'off' : 'running'), 'aria-hidden': 'true' }),
+        h('span', { class: 'nm' }, s.name), s.name === d.defaultSession ? h('span', { class: 'tag' }, 'default') : null),
+      h('div', { class: 'sub2' }, s.saved ? savedState(s) : s.ended ? 'ended (exit ' + s.exitCode + ')' : 'running' + (s.cols ? ' · ' + s.cols + '×' + s.rows : '') + ' · ' + plural(s.clients, 'viewer', 'viewers'))),
+    h('td', { class: 'mono trunc', title: s.command }, s.command),
+    h('td', { class: 'row-acts' }, s.saved
+      ? btn('Show', () => openSavedTerminal(name, s), { small: true, quiet: true, icon: 'eye', title: 'Its last saved screen in a tab (read-only; it goes live when the sandbox runs)' })
+      : s.ended ? null : [
+        btn('Open', () => openTerminal(name, s.name, 'interactive'), { small: true, quiet: true, title: 'A terminal on this session, here in the browser' }),
+        moreMenu('More for ' + s.name, [
+          { label: 'Watch', icon: 'eye', desc: 'Read-only: nothing you type reaches it, it never resizes', onSelect: () => openTerminal(name, s.name, 'watch') },
+          { label: 'Open in Terminal', icon: 'square-terminal', desc: 'In your terminal app (doz attach)', disabled: !!whyNot, why: whyNot, onSelect: () => openInTerminal(name, s.name) },
+        ], { small: true, onClose: sbxMenuClosed }).el])));
+  const pointMenu = (p) => moreMenu('More for ' + p.name, [
+    { label: 'Fork…', icon: 'git-fork', desc: 'A new sandbox whose disks are this point’s', onSelect: () => dialog('Fork ' + p.name, 'A new sandbox whose disks are this point’s (it cold-boots on start).',
+      [{ name: 'newName', label: 'New sandbox name', required: true }], 'Fork', async (v) => { await actOrThrow({ action: 'point-fork', sandbox: name, point: p.id, newName: v.newName }); }) },
+    { label: 'Save as template…', icon: 'layout-template', desc: 'Its root disk becomes a template (never its state disk)', onSelect: () => templateDialog(name, d, p.id) },
+    { label: 'Duplicate…', icon: 'copy', desc: 'A new sandbox from this point', onSelect: () => duplicateDialog(name, d, accounts, p.id) },
+    { sep: true },
+    { label: 'Delete…', icon: 'trash-2', danger: true, desc: 'Only this restore point', onSelect: () => confirmAction('Delete ' + p.name, 'Delete the restore point “' + p.name + '” of ' + name + '.', name,
+      { action: 'point-rm', sandbox: name, point: p.id }) },
+  ], { small: true, onClose: sbxMenuClosed });
   const points = d.restorePoints.map((p) => h('tr', null,
-    h('td', null, p.name, h('div', { class: 'muted mono' }, p.id)),
-    h('td', null, full(p.createdAt), h('div', { class: 'muted' }, when(p.createdAt))),
-    h('td', null, p.takenWhile + (p.automatic ? ' (auto)' : ''), p.needsFsck ? h('div', { class: 'st-warn' }, 'e2fsck on next boot') : null),
-    h('td', null, p.note || '—'),
-    h('td', null, h('div', { class: 'actions' },
+    h('td', null, h('div', { class: 'nm' }, p.name), h('div', { class: 'sub2 mono trunc', title: p.id }, p.id)),
+    h('td', { title: full(p.createdAt) }, when(p.createdAt), h('div', { class: 'sub2' }, p.takenWhile + (p.automatic ? ' (auto)' : '')),
+      p.needsFsck ? h('div', { class: 'st-warn sub2' }, 'e2fsck on next boot') : null, p.note ? h('div', { class: 'sub2' }, p.note) : null),
+    h('td', { class: 'row-acts' },
       btn('Revert', () => confirmAction('Revert ' + name, 'Revert to “' + p.name + '”: it shuts down (running programs end); the current disk is kept as a restore point first. Start boots it.', name,
-        { action: 'point-revert', sandbox: name, point: p.id }), { small: true, danger: true }),
-      btn('Fork', () => dialog('Fork ' + p.name, 'A new sandbox whose disks are this point’s (it cold-boots on start).',
-        [{ name: 'newName', label: 'New sandbox name', required: true }], 'Fork', async (v) => { await actOrThrow({ action: 'point-fork', sandbox: name, point: p.id, newName: v.newName }); }), { small: true }),
-      btn('Save as template…', () => templateDialog(name, d, p.id), { small: true, title: 'Its root disk becomes a template (never its state disk)' }),
-      btn('Duplicate…', () => duplicateDialog(name, d, accounts, p.id), { small: true, title: 'A new sandbox from this point, with a new workspace, CPUs, memory, network' }),
-      btn('Delete', () => confirmAction('Delete ' + p.name, 'Delete the restore point “' + p.name + '” of ' + name + '.', name,
-        { action: 'point-rm', sandbox: name, point: p.id }), { small: true, danger: true })))));
+        { action: 'point-revert', sandbox: name, point: p.id }), { small: true, quiet: true, danger: true }),
+      pointMenu(p).el)));
   const creds = d.credentials.map((c) => h('tr', null,
-    h('td', null, c.binding, h('div', { class: 'muted' }, c.hosts.join(', '))),
-    h('td', null, c.set ? 'set' : 'not set'),
-    h('td', null, c.source || '—', c.account ? h('div', { class: 'muted' }, 'account ' + c.account) : null),
-    h('td', null, c.state || '—', c.expiresAt ? h('div', { class: 'muted' }, 'expires ' + when(c.expiresAt)) : null),
-    h('td', null, c.policy || '—'),
-    h('td', null, c.set && c.source && !c.source.startsWith('account:')
-      ? btn('Remove', () => act({ action: 'key-rm', sandbox: name, binding: c.binding }), { small: true }) : null)));
+    h('td', null, c.binding, h('div', { class: 'sub2' }, c.hosts.join(', '))),
+    h('td', null, c.set ? 'set' : 'not set', h('div', { class: 'sub2' }, [c.source || '—', c.account ? 'account ' + c.account : null].filter(Boolean).join(' · '))),
+    h('td', null, c.state || '—', c.expiresAt ? h('div', { class: 'sub2' }, 'expires ' + when(c.expiresAt)) : null, c.policy ? h('div', { class: 'sub2' }, 'policy ' + c.policy) : null),
+    h('td', { class: 'row-acts' }, c.set && c.source && !c.source.startsWith('account:')
+      ? btn('Remove', () => act({ action: 'key-rm', sandbox: name, binding: c.binding }), { small: true, quiet: true }) : null)));
   const foreign = d.credentials.flatMap((c) => c.foreign).map((f) => h('tr', null,
-    h('td', null, f.kind + (f.matches ? ' (= ' + f.matches + ')' : '')),
-    h('td', { class: 'mono' }, f.prefix + '…'),
-    h('td', { class: 'mono' }, f.fingerprint),
-    h('td', null, f.header),
-    h('td', { class: 'num' }, String(f.requests)),
-    h('td', null, when(f.lastSeen))));
+    h('td', null, f.kind + (f.matches ? ' (= ' + f.matches + ')' : ''), h('div', { class: 'sub2 mono' }, f.prefix + '…')),
+    h('td', { class: 'mono trunc', title: f.fingerprint }, f.fingerprint),
+    h('td', null, f.header, h('div', { class: 'sub2' }, plural(f.requests, 'request', 'requests') + ' · ' + when(f.lastSeen)))));
   const proxied = net.proxied;
   const busy = i.busy || i.phase === 'booting' || opRunningFor(name) || !!transitionOf(name);
   const detailsOpen = setting('ui.details_open', true);
-  const netText = i.network + (i.deniedConnections ? ' (' + i.deniedConnections + ' denied)' : '');
+  const noDisk = !d.hasRootDisk;
+  const holdWhy = busy ? 'Wait until it settles' : noDisk ? 'It has no disk yet — start it once' : null;
+  const showTab = (tab) => () => {
+    if (!setting('ui.details_open', true)) { $('sbx-body').classList.remove('details-closed'); saveSetting('ui.details_open', true).then(() => refreshSandbox()).catch(() => {}); }
+    inspShow(name, tab);
+  };
+  // ── the bar: title row (name, phase, labelled chips) · toolbar (lifecycle, Shut down, ⋯ | status, details) ──
+  const more = moreMenu('More: duplicate, save as template, boot log, reset, remove', [
+    { label: 'Duplicate…', icon: 'copy', desc: 'A new sandbox from this disk', disabled: !!holdWhy, why: holdWhy, onSelect: () => duplicateDialog(name, d, accounts, null) },
+    { label: 'Save as template…', icon: 'layout-template', desc: 'Its root disk becomes an image (never its state disk)', disabled: !!holdWhy, why: holdWhy, onSelect: () => templateDialog(name, d, null) },
+    { label: 'Boot log', icon: 'history', desc: 'Its last boots: the steps and the kernel console', onSelect: () => bootLogDialog(name) },
+    { sep: true },
+    { label: 'Reset…', icon: 'rotate-ccw', danger: true, desc: 'Discard the disk — back to the image', disabled: busy, why: 'Wait until it settles', data: { 'lifecycle-item': name }, onSelect: () => lifecycle('reset', name) },
+    { label: 'Remove…', icon: 'trash-2', danger: true, desc: 'The sandbox, its disks and restore points', disabled: busy, why: 'Wait until it settles', data: { 'lifecycle-item': name }, onSelect: () => lifecycle('rm', name) },
+  ], { data: { sbxMore: name }, onClose: sbxMenuClosed });
+  more.button.dataset.lifecycleMore = name;
+  const detailsBtn = btn(detailsOpen ? 'Hide details' : 'Details', () => {
+    const open = !setting('ui.details_open', true);
+    $('sbx-body').classList.toggle('details-closed', !open);
+    saveSetting('ui.details_open', open).then(() => refreshSandbox()).catch((e) => pageFailure('ui.details_open was not saved: ' + (e.message || e)));
+  }, { quiet: true, iconOnly: true, icon: 'panel-right', title: (detailsOpen ? 'Hide' : 'Show') + ' the details: sessions, restore points, network, keys (remembered: ui.details_open)' });
+  detailsBtn.setAttribute('aria-pressed', detailsOpen ? 'true' : 'false');
+  const suggestions = net.permissions ? net.permissions.suggestions : [];
+  const refused = suggestions.reduce((n, s) => n + s.count, 0);
   const bar = h('div', { class: 'sbx-bar-inner' },
     h('div', { class: 'sbx-title' },
       h('h1', null, name), sandboxPill(i),
-      h('span', { class: 'sbx-meta' },
-        h('span', { title: i.image + (i.dockerfile ? ' — Dockerfile ' + i.dockerfile : ''), 'data-image-title': '' }, i.imageTitle || i.image),
-        h('span', null, (i.ramHeldMiB ? mib(i.ramHeldMiB) : '—') + ' of ' + mib(i.memoryMiB)),
-        h('span', { class: i.deniedConnections ? 'st-warn' : null }, netText),
-        i.accountApplies ? h('span', null, 'account ' + (i.account || '—')) : null,
+      h('span', { class: 'chips sbx-meta' },
+        chip('Image', i.imageTitle || i.image, { title: i.image + (i.dockerfile ? ' — Dockerfile ' + i.dockerfile : ''), data: { 'data-image-title': '' } }),
+        chip('RAM', (i.ramHeldMiB ? mib(i.ramHeldMiB) : '—') + ' of ' + mib(i.memoryMiB)),
+        chip('Network', [i.network, i.deniedConnections ? h('span', { class: 'tag warn' }, i.deniedConnections + ' denied') : null, icon('panel-right')],
+          { onClick: showTab('network'), title: 'Its network — the Network tab', data: { 'data-network-chip': '' } }),
+        i.accountApplies ? chip('Account', i.account || '—') : null,
         i.workspace ? null : h('span', { class: 'tag outline badge-isolated', 'data-isolated': '', title: ISOLATED_NOTE }, withIcon('shield', 'isolated')),
         // 599g: the workspace's .dozignore / .dozreadonly (the details say how many patterns and whether in force).
         i.workspaceRules ? h('span', { class: 'tag outline', 'data-workspace-rules': i.workspaceRulesView || '', title: 'Workspace rules: ' + i.workspaceRules + ' — doz ignore show ' + name },
           withIcon('shield', 'rules')) : null)),
-    h('div', { class: 'sbx-actions' },
-      lifecycleButtons(i, true),
-      h('span', { class: 'sbx-sep', 'aria-hidden': 'true' }),
-      gated(btn('Open in Terminal', terminal(null), { small: true, title: 'Your terminal app attaches to the ' + d.defaultSession + ' session (waking the sandbox if it sleeps)' })),
-      gated(btn('New shell', () => newShellTerminal(name).catch((e) => failureFor(name, e.message || String(e))),
-        { small: true, title: 'A new shell session (shell-2, shell-3, …) in a browser terminal' })),
-      ((b) => { if (busy) b.disabled = true; return b; })(btn('Terminal…', () => newTerminalDialog(name), { small: true, title: 'A NEW session: a shell, or one running a command (a running session opens from Details › Sessions)' })),
-      termUI.splitBtn || null,
-      h('span', { class: 'sbx-sep', 'aria-hidden': 'true' }),
-      ((b) => { if (busy || !d.hasRootDisk) { b.disabled = true; b.title = d.hasRootDisk ? 'Wait until it settles' : 'It has no disk yet — start it once'; } return b; })(
-        btn('Duplicate…', () => duplicateDialog(name, d, accounts, null), { small: true, title: 'A new sandbox from this one’s disk: a new workspace, CPUs, memory, network, account' })),
-      ((b) => { if (busy || !d.hasRootDisk) { b.disabled = true; b.title = d.hasRootDisk ? 'Wait until it settles' : 'It has no disk yet — start it once'; } return b; })(
-        btn('Save as template…', () => templateDialog(name, d, null), { small: true, title: 'Its root disk becomes an image other sandboxes are created from (never its state disk)' })),
-      btn('Boot log', () => bootLogDialog(name), { small: true, icon: 'history', title: 'Its last boots — the steps and the kernel console, as the boot view showed them (any phase)' }),
-      btn(detailsOpen ? 'Hide details' : 'Details', () => {
-        const open = !setting('ui.details_open', true);
-        $('sbx-body').classList.toggle('details-closed', !open);
-        saveSetting('ui.details_open', open).then(() => refreshSandbox()).catch((e) => pageFailure('ui.details_open was not saved: ' + (e.message || e)));
-      }, { small: true, title: 'The sessions, restore points, network and keys panel (remembered: ui.details_open)' })),
-    h('div', { 'data-op-for': name, 'data-banner': '1', role: 'status' }),
+    h('div', { class: 'sbx-actions toolbar', role: 'toolbar', 'aria-label': name },
+      lifecycleBar(i), more.el,
+      h('span', { class: 'spacer' }),
+      // The status slot: the operation under way (a quiet line), or how it ended (a callout that stays on failure).
+      h('div', { 'data-op-for': name, 'data-banner': '1', role: 'status' }),
+      detailsBtn),
     i.credentialProblem ? credentialBanner(name, i, accounts) : null,
     // 594 W28: its system disk came from an image an older doz made.
     i.olderImage ? callout('warn', { compact: true, cls: 'cred-banner img-banner', icon: 'flame', attrs: { 'data-older-image': name }, body: name + ' was ' + i.olderImage + '.' }) : null,
@@ -2848,62 +2920,103 @@ function sandboxParts(name, d, net, accounts) {
     i.rebuildAvailable ? callout('warn', { compact: true, cls: 'cred-banner img-banner', icon: 'flame', attrs: { 'data-rebuild-available': name }, body: i.rebuildAvailable + '.',
       actions: [btn('Rebuild the image', () => dialog('Rebuild ' + i.image + '?',
         'Runs container build again (seconds when nothing changed: its cache), then bakes only if the built image changed. ' + DOCKERFILE_POLICY_NOTE + ' This sandbox keeps its disk until you reset it.',
-        [], 'Rebuild', async () => { await actOrThrow({ action: 'image-bake', image: i.image }); }, { icon: 'flame' }), { small: true, icon: 'flame' })] }) : null);
-  const details = h('div', { class: 'sbx-details-inner' },
-    h('div', { class: 'cards small-cards' },
-      card('RAM held', mib(i.ramHeldMiB), 'of ' + mib(i.memoryMiB) + (i.memoryReturnedMiB ? ' · balloon returned ' + mib(i.memoryReturnedMiB) : '')),
-      card('Disk', bytes(i.diskBytes), d.snapshotBytes ? 'snapshot ' + bytes(d.snapshotBytes) : (d.hasRootDisk ? 'root disk kept' : 'no root disk yet')),
-      card('CPUs', String(d.cpus))),
-    h('div', { class: 'panel' }, h('div', { class: 'cmd' }, h('code', null, d.attachCommand), copy)),
-    i.workspaceRules ? h('p', { class: 'muted', 'data-workspace-rules-line': '' },
-      'Workspace rules: ' + i.workspaceRules + '. Which rule decides a path: doz ignore check ' + name + ' PATH. Not a security boundary.')
-      // 599g (owner A3): a shared folder with no rule file says so, rather than nothing (isolated: nothing to say).
-      : i.workspace ? h('p', { class: 'muted', 'data-workspace-rules-none': '' },
-        'Workspace rules: none — the folder is shared as is. A .dozignore or .dozreadonly in it keeps the agent away from some files.') : null,
-    h('div', { class: 'head' }, h('h2', null, 'Sessions'), h('div', { class: 'actions' },
-      gated(btn('Run detached…', () => dialog('Run a command in ' + name, 'A new session running the command — no shell in front (say bash -lc \'…\' for one). It runs inside the sandbox; attach to see it.',
-        [{ name: 'session', label: 'Session name', placeholder: 'e.g. worker', required: true },
-         { name: 'command', label: 'Command', placeholder: 'sleep 600', required: true }], 'Run', async (v) => {
-          const argv = splitArgs(v.command);
-          if (!argv.length) throw new Error('the command is empty');
-          await actOrThrow({ action: 'open-session', sandbox: name, session: v.session, argv });
-        }), { small: true })))),
-    panel(table(['Session', 'State', 'Command', 'Size', 'Viewers', ''], sessions, [3, 4]),
-      running ? 'No sessions.' : i.phase === 'off' || i.phase === 'failed' ? 'No sessions — ' + (i.phase === 'off' ? 'shut down' : 'failed') + '. Start boots it fresh, with new sessions.'
-        : 'No saved screens — sessions are listed while it runs, and saved when it pauses, sleeps or hibernates.'),
-    h('div', { class: 'head' }, h('h2', null, 'Restore points'), h('div', { class: 'actions' },
-      btn('Take a restore point…', () => dialog('Take a restore point of ' + name, running ? 'A running sandbox pauses for the clone (milliseconds); its copy gets e2fsck on the first boot from it.' : 'An instant APFS clone of the disks.',
-        [{ name: 'point', label: 'Name', placeholder: 'default point-N' }, { name: 'note', label: 'Note' }], 'Take', async (v) => {
-          const b = { action: 'point-take', sandbox: name };
-          if (v.point) b.point = v.point;
-          if (v.note) b.note = v.note;
-          await actOrThrow(b);
-        }), { small: true }))),
-    panel(table(['Point', 'Taken', 'While', 'Note', ''], points), 'No restore points.'),
-    h('div', { class: 'head' }, h('h2', null, 'Network'), proxied ? btn('Edit policy…', () => policyDialog(name, net.policy), { small: true }) : null),
-    networkPanel(net),
-    h('div', { class: 'head' }, h('h2', null, 'Keys & account'), h('div', { class: 'actions' },
-      proxied ? btn('Key policy…', () => dialog('Key policy of ' + name, 'What the proxy does with a credential the guest brings itself. auto: strict when the account is not the Mac login, allow otherwise.',
-        [{ name: 'policy', label: 'Policy', type: 'select', options: ['auto', 'allow', 'strict'], value: 'auto' }], 'Set', async (v) => {
-          await actOrThrow({ action: 'key-policy', sandbox: name, policy: v.policy });
-        }), { small: true }) : null,
-      proxied ? btn('Account…', () => accountDialog(name, i, accounts), { small: true }) : null)),
-    panel(table(['Key', 'Set', 'Source', 'State', 'Policy', ''], creds), 'No keys — the sandbox uses none.'),
-    keyEntry(name, proxied),
-    foreign.length ? h('h2', null, 'Credentials the guest brought itself (fingerprints only)') : null,
-    foreign.length ? panel(table(['Kind', 'Prefix', 'Fingerprint', 'Header', 'Requests', 'Last seen'], foreign, [4])) : null,
-    h('h2', null, 'Configuration'),
-    h('div', { class: 'panel' }, h('div', { class: 'facts' },
-      fact('Memory', mib(d.memoryMiB)), fact('Root disk', mib(d.rootfsMiB)), fact('State disk', mib(d.stateDiskMiB)),
-      fact('Journal', d.journalMiB ? mib(d.journalMiB) : 'none'), fact('Network', d.networkMode + (d.subnet ? ' · ' + d.subnet : '')),
-      fact('Account', i.accountApplies ? (i.account || '—') : 'n/a'),
-      fact('Workspace', i.workspace ? i.workspace + ' → /workspace (live)' : 'isolated — ' + ISOLATED_NOTE),
-      fact('Shares', d.shares.length ? d.shares.map((s) => s.hostPath + ' → ' + s.guestPath).join(', ') : 'none'),
-      d.project ? fact('Project', d.project) : null,
-      fact('Directory', d.directory))),
-    h('h2', null, 'Environment prompt'),
-    promptPanel(d));
+        [], 'Rebuild', async () => { await actOrThrow({ action: 'image-bake', image: i.image }); }, { icon: 'flame' }), { small: true, icon: 'flame' })] }) : null,
+    // 597: what the agent was refused, said once here with the way to decide (the Network tab).
+    refused ? callout('warn', { compact: true, attrs: { 'data-refused': name }, body: ['The agent was refused ' + plural(refused, 'time', 'times') + ' — ',
+      ...suggestions.slice(0, 3).flatMap((s, n) => [n ? ', ' : '', h('strong', null, s.permission ? s.what : s.what), ' (' + s.count + ')']), '.'],
+      actions: [btn('Review in Network', showTab('network'), { small: true, icon: 'shield' })] }) : null);
+  // ── the inspector: six tabs instead of nine stacked sections ──
+  const tab = sview(name).inspTab || 'overview';
+  const counts = { sessions: live.length ? h('span', { class: 'count' }, String(live.length)) : null,
+                   network: i.deniedConnections ? h('span', { class: 'count warn' }, String(i.deniedConnections)) : null };
+  const tabs = h('div', { class: 'itabs', role: 'tablist', 'aria-label': 'Details of ' + name },
+    INSP_TABS.map(([id, label, title, ic]) => h('button', { type: 'button', role: 'tab', class: 'itab', id: 'itab-' + id, 'data-insp-tab': id, 'aria-controls': 'ipanel-' + id,
+      'aria-selected': id === tab ? 'true' : 'false', title, on: { click: () => inspShow(name, id) } }, icon(ic), h('span', { class: 'itab-l' }, label), counts[id] || null)));
+  const panel_ = (id, ...kids) => h('section', { class: 'ipanel', role: 'tabpanel', id: 'ipanel-' + id, 'data-insp': id, 'aria-labelledby': 'itab-' + id, hidden: id !== tab }, ...kids);
+  const head = (title, ...acts) => h('div', { class: 'head' }, h('h2', null, title), acts.length ? h('div', { class: 'actions' }, acts) : null);
+  const last = d.restorePoints.length ? d.restorePoints[d.restorePoints.length - 1] : null;
+  const details = h('div', { class: 'sbx-details-inner' }, tabs,
+    panel_('overview',
+      h('div', { class: 'stats' },
+        stat('RAM held', mib(i.ramHeldMiB), 'of ' + mib(i.memoryMiB) + (i.memoryReturnedMiB ? ' · balloon returned ' + mib(i.memoryReturnedMiB) : '')),
+        stat('Disk', bytes(i.diskBytes), d.snapshotBytes ? 'snapshot ' + bytes(d.snapshotBytes) : (d.hasRootDisk ? 'root disk kept' : 'no root disk yet')),
+        stat('CPUs', String(d.cpus))),
+      h('div', null, h('div', { class: 'insp-lbl' }, 'Attach from a terminal'), h('div', { class: 'cmd' }, h('code', null, d.attachCommand), copy)),
+      h('div', null, h('div', { class: 'insp-lbl' }, 'Workspace'),
+        h('div', { class: i.workspace ? null : 'muted' }, i.workspace ? [h('code', null, i.workspace), ' → /workspace (live)'] : 'Isolated — ' + ISOLATED_NOTE),
+        i.workspaceRules ? h('p', { class: 'muted', 'data-workspace-rules-line': '' },
+          'Workspace rules: ' + i.workspaceRules + '. Which rule decides a path: doz ignore check ' + name + ' PATH. Not a security boundary.')
+          // 599g (owner A3): a shared folder with no rule file says so, rather than nothing (isolated: nothing to say).
+          : i.workspace ? h('p', { class: 'muted', 'data-workspace-rules-none': '' },
+            'Workspace rules: none — the folder is shared as is. A .dozignore or .dozreadonly in it keeps the agent away from some files.') : null),
+      h('div', null, h('div', { class: 'insp-lbl' }, 'Sessions'),
+        live.length ? h('div', null, live.map((s) => s.name).join(', '), ' ', h('a', { href: '#/sandbox/' + name, on: { click: (ev) => { ev.preventDefault(); inspShow(name, 'sessions'); } } }, 'All sessions'))
+          : h('div', { class: 'muted' }, running ? 'None running.' : 'None running — it is ' + (PHASE_WORD[i.phase] || i.phase) + '.')),
+      h('div', null, h('div', { class: 'insp-lbl' }, 'Last restore point'),
+        last ? h('div', null, last.name + ' · ' + when(last.createdAt) + ' ', h('a', { href: '#/sandbox/' + name, on: { click: (ev) => { ev.preventDefault(); inspShow(name, 'points'); } } }, 'All points'))
+          : h('div', { class: 'muted' }, 'None yet.'))),
+    panel_('sessions',
+      head('Sessions', gated(btn('Run detached…', () => runDetachedDialog(name), { small: true }))),
+      panel(table(['Session', 'Command', ''], sessions),
+        running ? 'No sessions.' : i.phase === 'off' || i.phase === 'failed' ? 'No sessions — ' + (i.phase === 'off' ? 'shut down' : 'failed') + '. Start boots it fresh, with new sessions.'
+          : 'No saved screens — sessions are listed while it runs, and saved when it pauses, sleeps or hibernates.')),
+    panel_('points',
+      head('Restore points', btn('Take a restore point…', () => takePointDialog(name, running), { small: true })),
+      panel(table(['Point', 'Taken', ''], points), 'No restore points yet.')),
+    panel_('network',
+      head('Network', proxied ? btn('Edit policy…', () => policyDialog(name, net.policy), { small: true }) : null),
+      networkPanel(net)),
+    panel_('keys',
+      head('Keys & account',
+        proxied ? btn('Key policy…', () => dialog('Key policy of ' + name, 'What the proxy does with a credential the guest brings itself. auto: strict when the account is not the Mac login, allow otherwise.',
+          [{ name: 'policy', label: 'Policy', type: 'select', options: ['auto', 'allow', 'strict'], value: 'auto' }], 'Set', async (v) => {
+            await actOrThrow({ action: 'key-policy', sandbox: name, policy: v.policy });
+          }), { small: true }) : null,
+        proxied ? btn('Account…', () => accountDialog(name, i, accounts), { small: true }) : null),
+      panel(table(['Key', 'Set', 'State', ''], creds), 'No keys — the sandbox uses none.'),
+      keyEntry(name, proxied),
+      foreign.length ? h('h2', null, 'Credentials the guest brought itself (fingerprints only)') : null,
+      foreign.length ? panel(table(['Kind', 'Fingerprint', 'Header'], foreign)) : null),
+    panel_('config',
+      head('Configuration'),
+      h('div', { class: 'panel' }, h('div', { class: 'panel-body' }, h('dl', { class: 'facts' },
+        fact('Memory', mib(d.memoryMiB)), fact('Root disk', mib(d.rootfsMiB)), fact('State disk', mib(d.stateDiskMiB)),
+        fact('Journal', d.journalMiB ? mib(d.journalMiB) : 'none'), fact('Network', d.networkMode + (d.subnet ? ' · ' + d.subnet : '')),
+        fact('Account', i.accountApplies ? (i.account || '—') : 'n/a'),
+        fact('Workspace', i.workspace ? i.workspace + ' → /workspace (live)' : 'isolated — ' + ISOLATED_NOTE),
+        fact('Shares', d.shares.length ? d.shares.map((s) => s.hostPath + ' → ' + s.guestPath).join(', ') : 'none'),
+        d.project ? fact('Project', d.project) : null,
+        fact('Directory', d.directory)))),
+      h('h2', null, 'Environment prompt'),
+      promptPanel(d)),
+    h('div', { class: 'insp-resize', role: 'separator', 'aria-orientation': 'vertical', 'aria-label': 'Resize the details', title: 'Drag to resize the details (320–560 px)',
+      on: { pointerdown: inspResizeStart } }));
   return { bar, details };
+}
+/// A stat in a strip (it replaces separate cards).
+function stat(k, v, n) { return h('div', { class: 'stat' }, h('div', { class: 'k' }, k), h('div', { class: 'v' }, v), n ? h('div', { class: 'n', title: n }, n) : null); }
+/// A menu on the sandbox page closed: a re-render it held back runs now.
+function sbxMenuClosed() { if (state.sbxHeld) { state.sbxHeld = false; refreshSandbox(); } }
+/// 603: the inspector's width — dragged between 300 and 560 px, kept in this browser (a layout convenience).
+function inspWidth(w) {
+  const px = Math.max(320, Math.min(560, Math.round(w)));
+  $('sbx-body').style.setProperty('--insp-w', px + 'px');
+  return px;
+}
+(() => { try { const w = Number(localStorage.getItem('doz.inspectorWidth')); if (w) inspWidth(w); } catch (_) { /* no storage: the default */ } })();
+function inspResizeStart(ev) {
+  ev.preventDefault();
+  const body = $('sbx-body'), right = body.getBoundingClientRect().right;
+  let px = 0;
+  const move = (e) => { px = inspWidth(right - e.clientX); };
+  const up = () => {
+    document.removeEventListener('pointermove', move); document.removeEventListener('pointerup', up);
+    document.body.classList.remove('resizing');
+    if (px) { try { localStorage.setItem('doz.inspectorWidth', String(px)); } catch (_) { /* */ } }
+  };
+  document.body.classList.add('resizing');
+  document.addEventListener('pointermove', move);
+  document.addEventListener('pointerup', up);
 }
 /// 594 (D15/D16): what the agent is told about where it runs, as its NEXT session gets it.
 function promptPanel(d) {
@@ -5029,23 +5142,32 @@ function renderTerminals() {
     termUI.splitMain = btn('Split', () => {
       if (sview(state.param).split) unsplit();
       else splitWith(termUI.splitKind).catch((e) => failureFor(state.param, e.message || String(e)));
-    }, { small: true, title: 'Two terminals side by side — the right one is a ' + SPLIT_KINDS[termUI.splitKind] });
+    }, { small: true, quiet: true, iconOnly: true, icon: 'columns-2', title: 'Two terminals side by side — the right one is a ' + SPLIT_KINDS[termUI.splitKind] });
     // 603: the caret is a menuButton (kept on screen; the old menu opened off the left edge and its items
     // ended in a literal "null" — replaceChildren writes a null as text, h() skips it).
-    const caret = h('button', { type: 'button', class: 'btn sm split-caret caret', title: 'What the split adds', 'aria-label': 'What the split adds' },
+    const caret = h('button', { type: 'button', class: 'btn sm quiet split-caret caret', title: 'What the split adds', 'aria-label': 'What the split adds' },
       icon('chevron-down'));
     termUI.splitBtn = h('div', { class: 'btn-group split-button', role: 'group', 'aria-label': 'Split' }, termUI.splitMain, caret);
     termUI.splitCtl = menuButton(caret, [], { wrap: termUI.splitBtn, label: 'What the split adds' });
     termUI.splitMenu = termUI.splitCtl.menu;
+    // 603 (E3): what makes or arranges terminals sits on the tab strip it changes.
+    termUI.newShell = btn('New shell', () => { const n = state.param; newShellTerminal(n).catch((e) => failureFor(n, e.message || String(e))); },
+      { small: true, quiet: true, title: 'A new shell session (shell-2, shell-3, …) in a browser terminal' });
+    const nsCaret = h('button', { type: 'button', class: 'btn sm quiet caret', title: 'Other terminals', 'aria-label': 'Other terminals' }, icon('chevron-down'));
+    const nsGroup = h('div', { class: 'btn-group', role: 'group', 'aria-label': 'New terminal' }, termUI.newShell, nsCaret);
+    termUI.nsCtl = menuButton(nsCaret, [], { wrap: nsGroup, label: 'Other terminals' });
+    termUI.openTerm = btn('Open in Terminal', () => openInTerminal(state.param, null), { small: true, quiet: true, iconOnly: true, icon: 'square-terminal' });
+    termUI.acts = h('div', { class: 'strip-acts', role: 'toolbar', 'aria-label': 'Terminals' }, nsGroup, termUI.splitBtn, termUI.openTerm);
     termUI.panes = [0, 1].map((i) => {
-      const strip = h('div', { class: 'tabs', role: 'tablist' });
+      const strip = h('div', { class: 'tabs', role: 'tablist', 'aria-label': 'Terminals' });
+      const head = h('div', { class: 'term-strip' }, strip);
       const body = h('div', { class: 'term-body' });
       const empty = h('div', { class: 'term-empty' });
-      const pane = h('div', { class: 'term-pane', 'data-pane': String(i) }, strip, body);
+      const pane = h('div', { class: 'term-pane', 'data-pane': String(i) }, head, body);
       body.append(empty);
       pane.addEventListener('focusin', () => { if (state.param) sview(state.param).focusedPane = i; });
       pane.addEventListener('mousedown', () => { if (state.param) sview(state.param).focusedPane = i; });
-      return { root: pane, strip, body, empty };
+      return { root: pane, strip, head, body, empty };
     });
     termUI.grid = h('div', { class: 'term-grid' }, termUI.panes[0].root, termUI.panes[1].root);
     root.replaceChildren(termUI.grid);
@@ -5076,6 +5198,10 @@ function renderTerminals() {
     }
   });
   paintTermEmpty();
+  // The strip's actions on the rightmost pane shown.
+  const host = (v.split ? termUI.panes[1] : termUI.panes[0]).head;
+  if (termUI.acts.parentNode !== host) host.append(termUI.acts);
+  paintStripActs();
   if (name) persistLayout(name);
   // The URL names the session shown (replaceState: no route).
   const sel = name && terminals.get(v.selected[v.focusedPane] ?? v.selected[0]);
@@ -5083,6 +5209,24 @@ function renderTerminals() {
     state.session = sel.session;
     history.replaceState(null, '', location.pathname + '#/sandbox/' + name + '/' + sel.session);
   }
+}
+/// The strip's actions follow the sandbox: a session needs a VM (New shell, Run detached, Open in Terminal); a new
+/// terminal waits while something is under way.
+function paintStripActs() {
+  if (!termUI.acts) return;
+  const name = state.param, s = state.sbx;
+  const i = s && s.name === name && s.d ? s.d.info : null;
+  const why = i ? sessionsWhyNot(name, i) : 'Loading…';
+  const busy = !i || i.busy || i.phase === 'booting' || opRunningFor(name) || !!transitionOf(name);
+  termUI.newShell.disabled = !!why;
+  termUI.newShell.title = why || 'A new shell session (shell-2, shell-3, …) in a browser terminal';
+  termUI.openTerm.disabled = !!why;
+  termUI.openTerm.title = why || 'Open in Terminal — your terminal app attaches to the ' + (s && s.d ? s.d.defaultSession : 'default') + ' session';
+  if (termUI.nsCtl.isOpen()) return;
+  termUI.nsCtl.setItems([
+    { label: 'Terminal…', icon: 'terminal', desc: 'A new session: a shell, or a command', disabled: busy, why: 'Wait until it settles', onSelect: () => newTerminalDialog(name) },
+    { label: 'Run detached…', icon: 'play', desc: 'A new session running a command, not opened here', disabled: !!why, why, onSelect: () => runDetachedDialog(name) },
+  ]);
 }
 /// A pane's tab strip scrolls sideways when its tabs overflow; the selected tab is always in view
 /// (orchestrator ruling, 593 follow-up).
@@ -5114,7 +5258,8 @@ function paintTermEmpty() {
     box.append(h('div', { class: 'term-empty-head' }, i.phase === 'off' ? 'Shut down' : s.name + ' failed to start'),
       h('div', { class: 'term-empty-note' }, 'Starting boots it fresh — new sessions.'),
       h('div', { class: 'actions center' },
-        btn('Start', () => lifecycle('start', s.name), { primary: true, title: bootViewOnStart() ? 'Boot it, and watch it boot here' : 'Boot it' })));
+        // The bar's Start is the page's one primary; here it is the terminal's own button, as on the covers.
+        ((b) => { b.classList.add('tc-act'); return b; })(btn('Start', () => lifecycle('start', s.name), { small: true, title: bootViewOnStart() ? 'Boot it, and watch it boot here' : 'Boot it' }))));
   } else {
     // 593 §9 (S4): "New shell" always makes a NEW session; a running session is opened by its own name
     // (the sessions list). The image's own session is offered by name: opened when it runs, started when not.
@@ -5124,9 +5269,9 @@ function paintTermEmpty() {
     box.append(h('div', { class: 'term-empty-head' }, 'No terminal open'),
       h('div', { class: 'actions center' },
         defaultSaved ? null : defaultRuns
-          ? btn('Open ' + s.d.defaultSession, () => openTerminal(s.name, s.d.defaultSession, 'interactive'), { primary: true, icon: 'terminal',
+          ? btn('Open ' + s.d.defaultSession, () => openTerminal(s.name, s.d.defaultSession, 'interactive'), { icon: 'terminal',
             title: 'A terminal on the running ' + s.d.defaultSession + ' session' })
-          : btn('Start ' + s.d.defaultSession, () => openDefaultTerminal(s.name), { primary: true, icon: 'play',
+          : btn('Start ' + s.d.defaultSession, () => openDefaultTerminal(s.name), { icon: 'play',
             title: 'Start the image’s own session (' + s.d.defaultSession + ')' + (i.phase === 'running' ? '' : ' — it wakes the sandbox') }),
         ...live.filter((x) => x.name !== s.d.defaultSession && !x.saved).slice(0, 8).map((x) => btn('Open ' + x.name, () => openTerminal(s.name, x.name, 'interactive'), { icon: 'terminal' })),
         ...saved.slice(0, 8).map((x) => btn('Show ' + x.name, () => openSavedTerminal(s.name, x), { icon: 'eye', title: 'Its last saved screen (read-only)' })),
