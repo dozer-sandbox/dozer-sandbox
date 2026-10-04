@@ -1464,16 +1464,31 @@ function renderNavSandboxes() {
   if (state.overview) $('onb-dot').hidden = state.overview.onboarded !== false;
   renderHostFoot();
   const list = state.overview ? state.overview.sandboxes.slice().sort((a, b) => a.name.localeCompare(b.name)) : [];
-  $('nav-sandboxes').replaceChildren(...list.map((s) => h('a', {
-    href: '#/sandbox/' + s.name, class: 'nav-child' + (state.view === 'sandbox' && state.param === s.name ? ' active' : ''),
-    role: 'listitem', 'data-sandbox': s.name, title: s.name + ' — ' + s.phaseLabel },
-    h('span', { class: 'ph-dot ph-' + s.phase, 'aria-hidden': 'true' }), h('span', { class: 'nav-name' }, s.name))));
+  $('nav-count').textContent = state.overview ? String(list.length) : '';
+  // 603: each sandbox under "All sandboxes", its phase as a dot whose shape says whether it holds RAM (and
+  // its word for assistive tech and the tooltip); the one shown is the page's current item.
+  $('nav-sandboxes').replaceChildren(...list.map((s) => {
+    const here = state.view === 'sandbox' && state.param === s.name;
+    return h('a', { href: '#/sandbox/' + s.name, class: 'nav-child child' + (here ? ' active' : ''), 'aria-current': here ? 'page' : null,
+      role: 'listitem', 'data-sandbox': s.name, title: s.name + ' — ' + s.phaseLabel },
+      h('span', { class: 'ph-dot ph-' + s.phase, role: 'img', 'aria-label': s.phaseLabel }), h('span', { class: 'nav-name' }, s.name));
+  }));
 }
 function paintNav() {
   for (const a of document.querySelectorAll('#nav > a')) {
-    a.classList.toggle('active', a.dataset.view === state.view || ((state.view === 'sandbox' || state.view === 'new') && a.dataset.view === 'overview'));
+    // A sandbox's own page marks its child entry; New sandbox belongs to All sandboxes.
+    const on = a.dataset.view === state.view || (state.view === 'new' && a.dataset.view === 'overview');
+    a.classList.toggle('active', on);
+    if (on) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
   }
   renderNavSandboxes();
+  navRail(false);
+}
+/// 603: below 980 px the sidebar is an icon rail; its toggle shows the whole sidebar over the page.
+function navRail(open) {
+  document.body.classList.toggle('nav-open', !!open);
+  $('nav-toggle').setAttribute('aria-expanded', open ? 'true' : 'false');
+  $('nav-toggle').setAttribute('aria-label', open ? 'Hide the menu' : 'Show the menu');
 }
 
 // ── routing ─────────────────────────────────────────────────────────────────
@@ -5478,8 +5493,15 @@ function detachTile(tile) {
 // The static page's own controls get their icons here (index.html holds no SVG).
 const NAV_ICONS = { overview: 'box', sessions: 'layout-grid', images: 'layers', resources: 'cylinder', operations: 'list-checks', accounts: 'key-round',
                     metrics: 'chart-line', activity: 'activity', onboarding: 'rocket', doctor: 'stethoscope', settings: 'settings' };
-for (const a of document.querySelectorAll('#nav > a[data-view]')) if (NAV_ICONS[a.dataset.view]) a.prepend(icon(NAV_ICONS[a.dataset.view]));
+for (const a of document.querySelectorAll('#nav > a[data-view]')) {
+  if (NAV_ICONS[a.dataset.view]) a.prepend(icon(NAV_ICONS[a.dataset.view]));
+  a.title = a.querySelector('.lbl').textContent;       // the rail's tooltip (the label stays readable to assistive tech)
+}
 setButton($('sign-out'), 'Sign out');
+$('nav-toggle').replaceChildren(icon('panel-right'));
+$('nav-toggle').addEventListener('click', (ev) => { ev.stopPropagation(); navRail(!document.body.classList.contains('nav-open')); });
+document.addEventListener('click', (ev) => { if (document.body.classList.contains('nav-open') && !ev.target.closest('.side')) navRail(false); });
+document.addEventListener('keydown', (ev) => { if (ev.key === 'Escape' && document.body.classList.contains('nav-open')) navRail(false); });
 
 (async () => {
   if (await bootstrap()) {

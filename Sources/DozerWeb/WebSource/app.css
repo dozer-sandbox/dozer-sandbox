@@ -122,29 +122,29 @@ code, kbd, .mono { font-family: var(--mono); font-size: var(--fs-mono); }
 input:focus-visible, select:focus-visible, textarea:focus-visible { outline-offset: 0; border-color: var(--focus); }
 .num, td.num { font-variant-numeric: tabular-nums; }
 
-.shell { display: grid; grid-template-columns: 220px minmax(0, 1fr); min-height: 100vh; }
-.side { border-right: 1px solid var(--line); padding: 18px 14px; display: flex; flex-direction: column; gap: 18px; position: sticky; top: 0; height: 100vh; }
-.brand { display: flex; gap: 10px; align-items: center; }
-.brand-mark { width: 30px; height: 30px; border-radius: 8px; background: var(--ink); color: var(--bg); display: grid; place-items: center; font-weight: 700; font-style: italic; }
-.brand-name { font-weight: var(--fw-strong); }
-.brand > div { min-width: 0; }
-/* One line, ellipsized; the full path is its title (hover). */
-.brand-store { color: var(--muted); font-size: var(--fs-xs); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 150px; }
-nav { display: flex; flex-direction: column; gap: 2px; }
-nav a { color: var(--ink); text-decoration: none; padding: 7px 10px; border-radius: 7px; }
-nav a:hover { background: var(--line); }
-nav a.active { background: var(--ink); color: var(--bg); }
-.side-foot { margin-top: auto; display: flex; flex-direction: column; gap: 8px; font-size: var(--fs-sm); color: var(--muted); }
-.live { display: flex; align-items: center; gap: 7px; }
 
-.live.on .dot { background: var(--run); }
-.live.bad .dot { background: var(--fail); }
-.live.warn .dot { background: var(--pause); }
-.live .dot { flex: none; }
-.live .foot-k { min-width: 42px; flex: none; color: var(--muted); }
-.live #live-text, .live #host-text { color: var(--ink); min-width: 0; overflow-wrap: anywhere; }
-.live.stale #host-text { color: var(--muted); font-style: italic; }
-.live.stale .dot { opacity: 0.45; }
+
+
+
+
+
+/* One line, ellipsized; the full path is its title (hover). */
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 /* 594 W18: the host's and doz ui's transitions, above every page (the terminal pages too). */
 
 
@@ -172,7 +172,7 @@ body.ui-paused .toasts { z-index: var(--z-toast-paused); }
 
 
 
-.version { font-variant-numeric: tabular-nums; }
+
 
 
 main { padding: 26px 32px 60px; min-width: 0; }
@@ -298,9 +298,6 @@ tr.click:hover td { background: var(--bg); }
 .signed-out code { background: var(--code); padding: 2px 6px; border-radius: 5px; }
 
 @media (max-width: 760px) {
-  .shell { grid-template-columns: minmax(0, 1fr); }
-  .side { position: static; height: auto; border-right: 0; border-bottom: 1px solid var(--line); }
-  nav { flex-direction: row; flex-wrap: wrap; }
   main { padding: 18px 16px 40px; }
   .feed li { grid-template-columns: 70px minmax(0, 1fr); }
   .feed li .who { display: none; }
@@ -359,13 +356,13 @@ dialog.dlg.bootlog-dialog { width: min(1100px, calc(100vw - 32px)); max-width: n
 }
 
 /* ── 593: the nav — a child per sandbox; the Operations badge ── */
-.nav-children { display: flex; flex-direction: column; gap: 1px; margin: 0 0 4px 10px; padding-left: 8px; border-left: 1px solid var(--line); }
-.nav-children:empty { display: none; }
-a.nav-child { display: flex; align-items: center; gap: 7px; padding: 4px 8px; font-size: var(--fs-md); }
-.nav-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 
-#nav-operations { display: flex; align-items: center; gap: 6px; }
+
+
+
+
+
 
 
 
@@ -491,8 +488,8 @@ td.bar-cell { min-width: 110px; vertical-align: middle; }
 .tc-glyph .icon { width: 22px; height: 22px; }
 td.op-action { display: flex; align-items: center; gap: 6px; }
 
-nav a { display: flex; align-items: center; gap: 9px; }
-nav a > .icon { width: 17px; height: 17px; opacity: 0.85; }
+
+
 .tab .icon { width: 13px; height: 13px; }
 
 
@@ -643,10 +640,10 @@ ul.prep-steps .prep-done-transfer { color: var(--muted); }
   .term-grid.split { grid-template-columns: minmax(0, 1fr); grid-template-rows: 1fr 1fr; }
 }
 /* 595: Resources — the nav's total, the volume bar, the grouped account, the confirmation's list. */
-.nav-size { margin-left: auto; font-size: var(--fs-xs); font-variant-numeric: tabular-nums; color: var(--muted); }
-nav a.active .nav-size { color: inherit; opacity: .8; }
-.nav-size.bad { color: var(--fail); }
-.nav-size[hidden] { display: none; }
+
+
+
+
 .res-total { margin: 0 0 14px; }
 .res-total-line { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
 .res-bar { flex: 1 1 320px; display: flex; height: 12px; border-radius: 6px; overflow: hidden; background: var(--free); }
@@ -737,14 +734,13 @@ dialog.dlg:has(.image-picker) { width: min(780px, calc(100vw - 32px)); }
 .perm-field[hidden] { display: none; }
 .perm-setting { display: flex; flex-direction: column; gap: 6px; min-width: 320px; }
 /* 599c: Quick add — in the sidebar, at the right end of the Sandboxes row; the projects folder's Choose…. */
-nav { position: relative; }
-.nav-quick { position: absolute; top: 4px; right: 4px; width: 26px; height: 26px; display: grid; place-items: center; padding: 0;
-  border: 0; border-radius: 6px; background: transparent; color: var(--muted); cursor: pointer; }
-.nav-quick:hover { background: var(--line); color: var(--ink); }
-.nav-quick:focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; }
-nav a.active + .nav-quick { color: var(--bg); }
-nav a.active + .nav-quick:hover { background: color-mix(in srgb, var(--bg) 22%, transparent); color: var(--bg); }
-.nav-quick:disabled { opacity: .45; cursor: default; }
+
+
+
+
+
+
+
 
 .path-setting { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 /* 599f: the New Sandbox wizard (#/new). */
@@ -1016,3 +1012,86 @@ dialog.dlg form { display: flex; flex-direction: column; max-height: calc(100vh 
 @media (max-width: 760px) { .callout .c-acts { grid-column: 2; grid-row: auto; justify-content: flex-start; margin-top: 4px; } }
 .df-state .icon { width: 14px; height: 14px; vertical-align: -2px; }
 .quick-why { margin: 0; }
+
+/* ── 603 step 5: the sidebar — four groups (Sandboxes · Store · Activity · Setup); the current page is a RAISED
+   item with an accent icon (never the ink fill a primary button had); counts and alerts at the right edge;
+   below 980 px an icon rail (labels kept for assistive tech and as tooltips) whose toggle shows it all. ── */
+.shell { display: grid; grid-template-columns: 220px minmax(0, 1fr); min-height: 100vh; }
+.side { background: var(--bg); border-right: var(--bw) solid var(--line); padding: 12px 10px; display: flex; flex-direction: column; gap: 14px;
+  position: sticky; top: 0; height: 100vh; overflow-y: auto; min-width: 0; z-index: var(--z-sticky); }
+.brand { display: flex; gap: 9px; align-items: center; padding: 0 4px; }
+.brand-mark { width: 26px; height: 26px; border-radius: var(--r-md); background: var(--ink); color: var(--bg); display: grid; place-items: center;
+  font-weight: 700; font-style: italic; font-size: var(--fs-md); flex: none; }
+.brand > div { min-width: 0; flex: 1; }
+.brand-name { font-weight: var(--fw-strong); }
+.brand-store { font-size: var(--fs-xs); color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.nav-toggle { display: none; }
+.nav-toggle .icon { transform: scaleX(-1); }
+#nav { display: flex; flex-direction: column; gap: 1px; }
+.nav-group { display: flex; align-items: center; min-height: 26px; padding: 10px 8px 3px; font: var(--fw-medium) var(--fs-xs)/1 var(--font); color: var(--ink-2); }
+.nav-group:first-child { padding-top: 2px; }
+.nav-group .nav-quick { margin: -6px -2px -6px auto; }
+#nav > a { display: flex; align-items: center; gap: 9px; height: 30px; padding: 0 8px; border-radius: var(--r-md); color: var(--ink); text-decoration: none;
+  position: relative; min-width: 0; flex: none; }
+#nav > a > .icon { color: var(--ink-2); }
+#nav > a .lbl { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#nav > a:hover, a.nav-child:hover { background: var(--surface-2); color: var(--ink); }
+#nav > a.active, a.nav-child.active { background: var(--surface); box-shadow: 0 0 0 1px var(--line), var(--shadow-1); font-weight: var(--fw-medium); }
+#nav > a.active > .icon { color: var(--accent); }
+#nav .trail { margin-left: auto; display: flex; align-items: center; gap: 5px; font-size: var(--fs-xs); color: var(--ink-2); font-variant-numeric: tabular-nums; }
+#nav .trail:empty { display: none; }
+.nav-size { font-size: var(--fs-xs); font-variant-numeric: tabular-nums; color: var(--ink-2); }
+.nav-size.bad { color: var(--bad); }
+.nav-size[hidden] { display: none; }
+.nav-children { display: flex; flex-direction: column; gap: 1px; margin: 0 0 2px 12px; }
+.nav-children:empty { display: none; }
+a.nav-child { display: flex; align-items: center; gap: 9px; height: 26px; padding: 0 8px 0 12px; border-radius: var(--r-md); color: var(--ink);
+  text-decoration: none; font-size: var(--fs-md); position: relative; min-width: 0; }
+a.nav-child::before { content: ""; position: absolute; left: -2px; top: 0; bottom: 0; width: 1px; background: var(--line); }
+.nav-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.side-foot { margin-top: auto; display: grid; gap: 4px; font-size: var(--fs-sm); color: var(--ink-2); padding: 0 4px; }
+.live { display: grid; grid-template-columns: 8px 44px minmax(0, 1fr); gap: 7px; align-items: center; }
+.live.on .dot { background: var(--ok); }
+.live.bad .dot { background: var(--bad); }
+.live.warn .dot { background: var(--warn); }
+.live .foot-k { color: var(--ink-2); }
+.live #live-text, .live #host-text { color: var(--ink); min-width: 0; overflow-wrap: anywhere; }
+.live.stale #host-text { color: var(--ink-2); font-style: italic; }
+.live.stale .dot { opacity: 0.45; }
+.version { font-variant-numeric: tabular-nums; }
+.side-foot .sign-out { justify-self: start; margin-left: -8px; }
+@media (max-width: 980px) {
+  .shell { grid-template-columns: 52px minmax(0, 1fr); }
+  .shell > main { grid-column: 2; }
+  .side { padding: 12px 8px; align-items: stretch; overflow-x: hidden; }
+  .brand { flex-direction: column; padding: 0; gap: 6px; }
+  .brand > div, .nav-group .ng-label, .nav-group .nav-quick, #nav .trail, .nav-children, .version { display: none; }
+  .nav-toggle { display: inline-flex; }
+  .nav-group { padding: 0; min-height: 0; border-top: var(--bw) solid var(--line); margin: 6px 0; }
+  .nav-group:first-child { display: none; }
+  #nav > a { justify-content: center; padding: 0; }
+  #nav > a .lbl { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  #nav-operations .trail, #nav-onboarding .trail { display: flex; position: absolute; top: 3px; right: 3px; }
+  #nav-operations .trail .nav-badge { display: none; }
+  .side-foot { padding: 0; justify-items: center; }
+  .live { grid-template-columns: 8px; justify-content: center; }
+  .live .foot-k, .live #live-text, .live #host-text { display: none; }
+  .side-foot .sign-out { margin: 0; width: var(--ctl-sm); padding: 0; }
+  .side-foot .sign-out .btn-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  /* The toggle: the whole sidebar over the page, until a link, Escape or a click outside closes it. */
+  body.nav-open .side { position: fixed; left: 0; top: 0; width: 232px; z-index: var(--z-menu); background: var(--surface); box-shadow: var(--shadow-3); padding: 12px 10px; }
+  body.nav-open .brand { flex-direction: row; padding: 0 4px; }
+  body.nav-open .brand > div, body.nav-open .nav-group .ng-label, body.nav-open .nav-group .nav-quick, body.nav-open #nav .trail, body.nav-open .nav-children { display: flex; }
+  body.nav-open .brand > div { display: block; }
+  body.nav-open .nav-group { border-top: 0; margin: 0; padding: 10px 8px 3px; min-height: 26px; }
+  body.nav-open .nav-group:first-child { display: flex; padding-top: 2px; }
+  body.nav-open #nav > a { justify-content: flex-start; padding: 0 8px; }
+  body.nav-open #nav > a .lbl { position: static; width: auto; height: auto; clip: auto; }
+  body.nav-open #nav-operations .trail, body.nav-open #nav-onboarding .trail { position: static; }
+  body.nav-open #nav-operations .trail .nav-badge:not([hidden]) { display: inline-flex; }
+  body.nav-open .side-foot { justify-items: stretch; padding: 0 4px; }
+  body.nav-open .live { grid-template-columns: 8px 44px minmax(0, 1fr); justify-content: stretch; }
+  body.nav-open .live .foot-k, body.nav-open .live #live-text, body.nav-open .live #host-text { display: inline; }
+  body.nav-open .side-foot .sign-out { width: auto; padding: 0 8px; margin-left: -8px; }
+  body.nav-open .side-foot .sign-out .btn-label { position: static; width: auto; height: auto; clip: auto; }
+}
