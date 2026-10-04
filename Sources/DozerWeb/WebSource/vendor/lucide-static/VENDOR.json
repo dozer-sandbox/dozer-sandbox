@@ -349,6 +349,42 @@
       "serve": "icon"
     },
     {
+      "file": "ellipsis.svg",
+      "fromTarball": "package/icons/ellipsis.svg",
+      "sha256": "75622b4c6d2c42393aabdc07d997d4b0c61798ec3e582c40a47ac8ee16358f8f",
+      "serve": "icon"
+    },
+    {
+      "file": "search.svg",
+      "fromTarball": "package/icons/search.svg",
+      "sha256": "4c9a79296cd8835fd7ec8a33083f9f8f3166b27754ef65a9edbbc0eaa4e2d76a",
+      "serve": "icon"
+    },
+    {
+      "file": "info.svg",
+      "fromTarball": "package/icons/info.svg",
+      "sha256": "af880f5f1040830c149e539600fa62aee9d78ea231b03f9fb2eef78eaddb1d74",
+      "serve": "icon"
+    },
+    {
+      "file": "triangle-alert.svg",
+      "fromTarball": "package/icons/triangle-alert.svg",
+      "sha256": "1635aa7fa1b680d238da60d3d770a10cc8d3e5f32486a7c83ded62aaefe1ee37",
+      "serve": "icon"
+    },
+    {
+      "file": "circle-check.svg",
+      "fromTarball": "package/icons/circle-check.svg",
+      "sha256": "e89cf92a3e173a9e9b23d424d124e75a4ad5c2af91cd47c22ca661ab8a4ba29c",
+      "serve": "icon"
+    },
+    {
+      "file": "circle-x.svg",
+      "fromTarball": "package/icons/circle-x.svg",
+      "sha256": "427a018b280f1e023e16f6400232735373971a06952b9deffeef6f104e12a8d5",
+      "serve": "icon"
+    },
+    {
       "file": "LICENSE",
       "fromTarball": "package/LICENSE",
       "sha256": "b495047bd93a9b06913511076f504daba17d5bbeb3e0650f3bb53a4220329c57",

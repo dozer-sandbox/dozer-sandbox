@@ -116,8 +116,11 @@ function iconFor(label) {
 }
 /// A button's label with its icon in front (the label stays text).
 function withIcon(name, label) { return [icon(name), h('span', { class: 'btn-label' }, label)]; }
-/// Put (or replace) the icon of an existing button, keeping its text.
-function setButton(b, label, name) { b.replaceChildren(...withIcon(name || iconFor(label), label)); }
+/// Put (or replace) the icon of an existing button, keeping its text (an icon-only button: its aria-label).
+function setButton(b, label, name) {
+  if (b.classList.contains('icon-only')) { b.replaceChildren(icon(name || iconFor(label))); b.setAttribute('aria-label', label); b.title = b.title || label; return; }
+  b.replaceChildren(...withIcon(name || iconFor(label), label));
+}
 
 // ── formatting ──────────────────────────────────────────────────────────────
 function bytes(n) {
@@ -150,10 +153,19 @@ function when(iso) {
 }
 function clock(iso) { return iso ? new Date(iso).toLocaleTimeString() : '—'; }
 function full(iso) { return iso ? new Date(iso).toLocaleString() : '—'; }
-function phasePill(phase, label, busy) {
-  return h('span', { class: 'pill ph-' + phase }, (label || phase) + (busy ? ' …' : ''));
+/// 603: a pill is a state — tinted, a glyph and the word (never colour alone); the glyph is the phase's own
+/// (a dot while it runs, a spinner while under way).
+function phaseGlyph(phase, busy) {
+  if (busy || phase === 'booting') return h('span', { class: 'mini-spin', 'aria-hidden': 'true' });
+  if (phase === 'running') return h('span', { class: 'dot ph-running', 'aria-hidden': 'true' });
+  const g = phase === 'failed' ? 'x' : PHASE_GLYPH[phase];
+  return g ? icon(g) : null;
 }
-function statusPill(s) { return h('span', { class: 'pill st-' + s }, s); }
+function phasePill(phase, label, busy) {
+  return h('span', { class: 'pill ph-' + phase }, phaseGlyph(phase, busy), (label || phase) + (busy ? ' …' : ''));
+}
+const STATUS_GLYPH = { ok: 'check', warn: 'triangle-alert', fail: 'x', off: 'power' };
+function statusPill(s) { return h('span', { class: 'pill st-' + s }, STATUS_GLYPH[s] ? icon(STATUS_GLYPH[s]) : null, s); }
 
 // ── HTTP ────────────────────────────────────────────────────────────────────
 class HttpError extends Error {
@@ -888,7 +900,7 @@ async function viewSettings() {
     panel(h('ul', { class: 'plain' }, rep.notSettable.map((n) => h('li', null, n)))));
 }
 function settingRow(r) {
-  const source = h('span', { class: 'pill src src-' + r.source, title: r.source === 'file' ? 'set in the file' : r.source === 'default' ? 'not set: the default' : (r.note || '') },
+  const source = h('span', { class: 'tag src src-' + r.source, title: r.source === 'file' ? 'set in the file' : r.source === 'default' ? 'not set: the default' : (r.note || '') },
     r.source === 'env' ? 'env ' + r.environment : r.source);
   const reset = r.editable && r.source === 'file'
     ? btn('Default', () => changeSetting(r.key, null), { small: true, title: 'Comment it out in the file: the default (' + shownValue(r.defaultValue, r.type) + ') applies' }) : null;
@@ -913,7 +925,7 @@ function settingControl(r) {
   if (!r.editable) return h('code', { class: 'setting-value', title: r.note || '' }, shownValue(r.value, r.type));
   let input;
   if (r.type === 'bool') {
-    input = h('input', { type: 'checkbox', 'aria-label': r.key });
+    input = h('input', { type: 'checkbox', role: 'switch', 'aria-label': r.key });
     input.checked = r.value === true;
     input.addEventListener('change', () => changeSetting(r.key, input.checked));
   } else if (r.type === 'choice') {
@@ -1040,7 +1052,7 @@ function banner(key, kind, parts, actions = []) {
   const el = h('div', { class: 'banner' + (kind ? ' ' + kind : ''), 'data-banner': key, role: kind === 'bad' ? 'alert' : 'status' },
     h('div', { class: 'b-text' }, parts),
     h('div', { class: 'b-acts' }, ...actions,
-      h('button', { type: 'button', class: 'b-x', title: 'Dismiss', 'aria-label': 'Dismiss', on: { click: () => el.remove() } }, '×')));
+      h('button', { type: 'button', class: 'btn sm quiet icon-only b-x', title: 'Dismiss', 'aria-label': 'Dismiss', on: { click: () => el.remove() } }, icon('x'))));
   const old = box.querySelector('[data-banner="' + key + '"]');
   if (old) old.replaceWith(el); else box.append(el);
   return el;
@@ -1442,12 +1454,139 @@ function meter(part, whole) {
   bar.style.width = pct.toFixed(1) + '%';
   return h('div', { class: 'meter', title: pct.toFixed(0) + '% of the allocation' }, bar);
 }
-/// A button: its icon (opts.icon, else the label's — `iconFor`) and its text label.
+/// A button: its icon (opts.icon, else the label's — `iconFor`) and its text label. 603: one family —
+/// opts.primary (one per view), quiet (dense places), danger; small (24 px) or lg (32 px); iconOnly (the
+/// label becomes its aria-label and tooltip — only where the icon is unambiguous).
 function btn(label, onClick, opts = {}) {
-  return h('button', { type: 'button', class: 'btn' + (opts.danger ? ' danger' : '') + (opts.primary ? ' primary' : '') + (opts.small ? ' small' : ''),
-                       title: opts.title || null, on: { click: (ev) => { ev.stopPropagation(); onClick(ev); } } },
-    withIcon(opts.icon || iconFor(label), label));
+  const cls = ['btn'];
+  if (opts.primary) cls.push('primary');
+  if (opts.danger) cls.push('danger');
+  if (opts.quiet) cls.push('quiet');
+  if (opts.small) cls.push('sm');
+  if (opts.lg) cls.push('lg');
+  if (opts.iconOnly) cls.push('icon-only');
+  return h('button', { type: 'button', class: cls.join(' '), title: opts.title || (opts.iconOnly ? label : null), 'aria-label': opts.iconOnly ? label : null,
+                       on: { click: (ev) => { ev.stopPropagation(); onClick(ev); } } },
+    opts.iconOnly ? icon(opts.icon || iconFor(label)) : withIcon(opts.icon || iconFor(label), label));
 }
+
+// ── 603: menus — a button that opens a menu (⋯ overflow, a split button's caret). The menu is in the DOM
+// (hidden) beside its button, so what it holds is findable; open, it is fixed to the viewport, placed below
+// (or above) the button and kept on screen. Arrow keys, Home/End move; Escape (or Tab) closes and gives the
+// focus back; a click outside closes. Items:
+//   { label, icon, desc, danger, disabled, why, check, data: {k: v}, onSelect }  ·  { sep: true }  ·  { heading }
+// A disabled item stays visible and says why (its `why` is its description line).
+const menus = new Set();
+function menuItemsNodes(items, close) {
+  return items.filter(Boolean).map((it) => {
+    if (it.sep) return h('div', { class: 'menu-sep', role: 'separator' });
+    if (it.heading) return h('div', { class: 'menu-label' }, it.heading);
+    const attrs = { type: 'button', role: 'menuitem', tabindex: '-1', class: 'menu-item' + (it.danger ? ' danger' : '') };
+    for (const [k, v] of Object.entries(it.data || {})) attrs['data-' + k] = v;
+    const b = h('button', attrs, icon(it.icon || iconFor(it.label)), h('span', { class: 'mi-label' }, it.label),
+      it.check ? h('span', { class: 'menu-check', 'aria-hidden': 'true' }, icon('check')) : null,
+      (it.disabled ? it.why : null) || it.desc ? h('span', { class: 'desc' }, (it.disabled ? it.why : null) || it.desc) : null);
+    if (it.check) b.setAttribute('aria-checked', 'true');
+    if (it.disabled) b.disabled = true;
+    b.addEventListener('click', (ev) => { ev.stopPropagation(); if (b.disabled) return; close(true); it.onSelect && it.onSelect(ev); });
+    return b;
+  });
+}
+function menuButton(trigger, items, opts = {}) {
+  const menu = h('div', { class: 'menu', role: 'menu', hidden: true, 'aria-label': opts.label || trigger.getAttribute('aria-label') || trigger.textContent.trim() });
+  const wrap = opts.wrap || h('span', { class: 'menu-wrap' });
+  trigger.setAttribute('aria-haspopup', 'menu');
+  trigger.setAttribute('aria-expanded', 'false');
+  const ctl = { el: wrap, button: trigger, menu, open, close, setItems, isOpen: () => !menu.hidden };
+  function place() {
+    const r = trigger.getBoundingClientRect(), m = 8;
+    menu.style.left = '0px'; menu.style.top = '0px';
+    const w = menu.offsetWidth, hgt = menu.offsetHeight;
+    let left = opts.align === 'end' ? r.right - w : r.left;
+    if (left + w > innerWidth - m) left = r.right - w;
+    left = Math.max(m, Math.min(left, innerWidth - w - m));
+    let top = r.bottom + 4;
+    if (top + hgt > innerHeight - m && r.top - 4 - hgt >= m) top = r.top - 4 - hgt;
+    top = Math.max(m, Math.min(top, innerHeight - hgt - m));
+    menu.style.left = Math.round(left) + 'px'; menu.style.top = Math.round(top) + 'px';
+  }
+  function items_() { return [...menu.querySelectorAll('.menu-item:not(:disabled)')]; }
+  function open(focusFirst) {
+    for (const o of menus) if (o !== ctl) o.close();
+    menu.hidden = false;
+    trigger.setAttribute('aria-expanded', 'true');
+    place();
+    if (focusFirst) { const f = items_()[0]; if (f) f.focus(); }
+    if (opts.onOpen) opts.onOpen();
+  }
+  function close(refocus) {
+    if (menu.hidden) return;
+    menu.hidden = true;
+    trigger.setAttribute('aria-expanded', 'false');
+    if (refocus && trigger.isConnected) trigger.focus();
+    if (opts.onClose) opts.onClose();
+  }
+  function setItems(list) { menu.replaceChildren(...menuItemsNodes(list, close)); if (!menu.hidden) place(); }
+  trigger.addEventListener('click', (ev) => { ev.stopPropagation(); if (menu.hidden) open(ev.detail === 0); else close(false); });
+  trigger.addEventListener('keydown', (ev) => { if (ev.key === 'ArrowDown') { ev.preventDefault(); open(true); } });
+  menu.addEventListener('keydown', (ev) => {
+    const list = items_(), i = list.indexOf(document.activeElement);
+    if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') { ev.preventDefault(); const n = list.length; if (n) list[(i + (ev.key === 'ArrowDown' ? 1 : n - 1) + (i < 0 ? 1 : 0)) % n].focus(); }
+    else if (ev.key === 'Home' || ev.key === 'End') { ev.preventDefault(); const f = ev.key === 'Home' ? list[0] : list[list.length - 1]; if (f) f.focus(); }
+    else if (ev.key === 'Escape') { ev.preventDefault(); ev.stopPropagation(); close(true); }
+    else if (ev.key === 'Tab') close(false);
+  });
+  menu.addEventListener('click', (ev) => ev.stopPropagation());
+  setItems(items);
+  if (!opts.wrap) wrap.append(trigger);
+  wrap.append(menu);
+  menus.add(ctl);
+  return ctl;
+}
+/// The ⋯ button: an icon-only quiet button that opens `items`.
+function moreMenu(label, items, opts = {}) {
+  const b = h('button', { type: 'button', class: 'btn quiet icon-only' + (opts.small ? ' sm' : ''), 'aria-label': label, title: label }, icon('ellipsis'));
+  if (opts.data) for (const [k, v] of Object.entries(opts.data)) b.dataset[k] = v;
+  return menuButton(b, items, { align: 'end', ...opts });
+}
+document.addEventListener('click', () => { for (const m of menus) { if (!m.el.isConnected) menus.delete(m); else m.close(false); } });
+window.addEventListener('resize', () => { for (const m of menus) m.close(false); });
+document.addEventListener('scroll', (ev) => { for (const m of menus) if (!m.menu.contains(ev.target)) m.close(false); }, true);
+
+// ── 603: keyboard — arrow keys inside segmented controls and tab lists move the focus (roving tabindex:
+// the chosen one is the group's one Tab stop); Enter/Space chooses.
+function rove(group) {
+  const items = [...group.querySelectorAll(':scope > button, :scope > .tab-wrap > button.tab')].filter((b) => !b.hidden);
+  if (!items.length) return;
+  const cur = items.find((b) => b.getAttribute('aria-pressed') === 'true' || b.getAttribute('aria-selected') === 'true' || b.classList.contains('active')) || items[0];
+  for (const b of items) b.tabIndex = b === cur ? 0 : -1;
+}
+function roveAll(root) { for (const g of root.querySelectorAll('.segmented, [role="tablist"]')) rove(g); }
+new MutationObserver((list) => {
+  const seen = new Set();
+  for (const m of list) {
+    const t = m.target instanceof Element ? m.target : m.target.parentElement;
+    if (!t) continue;
+    const g = t.closest('.segmented, [role="tablist"]');
+    if (g) seen.add(g);
+    for (const n of m.addedNodes) if (n instanceof Element) { if (n.matches('.segmented, [role="tablist"]')) seen.add(n); for (const x of n.querySelectorAll('.segmented, [role="tablist"]')) seen.add(x); }
+  }
+  for (const g of seen) rove(g);
+}).observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['aria-pressed', 'aria-selected', 'class'] });
+document.addEventListener('keydown', (ev) => {
+  const t = ev.target;
+  if (!(t instanceof HTMLElement) || !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(ev.key) || ev.altKey || ev.metaKey || ev.ctrlKey) return;
+  const g = t.closest('.segmented, [role="tablist"]');
+  if (!g || !t.matches('button')) return;
+  const items = [...g.querySelectorAll(':scope > button, :scope > .tab-wrap > button.tab')].filter((b) => !b.hidden && !b.disabled);
+  const i = items.indexOf(t);
+  if (i < 0) return;
+  ev.preventDefault();
+  const n = items.length;
+  const next = ev.key === 'Home' ? items[0] : ev.key === 'End' ? items[n - 1] : items[(i + (ev.key === 'ArrowRight' ? 1 : n - 1)) % n];
+  for (const b of items) b.tabIndex = b === next ? 0 : -1;
+  next.focus();
+});
 
 // The owner's vocabulary (2026-09-25); aliases in the tooltips.
 const VERBS = {
@@ -2566,9 +2705,9 @@ function sandboxParts(name, d, net, accounts) {
         h('span', null, (i.ramHeldMiB ? mib(i.ramHeldMiB) : '—') + ' of ' + mib(i.memoryMiB)),
         h('span', { class: i.deniedConnections ? 'st-warn' : null }, netText),
         i.accountApplies ? h('span', null, 'account ' + (i.account || '—')) : null,
-        i.workspace ? null : h('span', { class: 'badge-isolated', 'data-isolated': '', title: ISOLATED_NOTE }, withIcon('shield', 'isolated')),
+        i.workspace ? null : h('span', { class: 'tag outline badge-isolated', 'data-isolated': '', title: ISOLATED_NOTE }, withIcon('shield', 'isolated')),
         // 599g: the workspace's .dozignore / .dozreadonly (the details say how many patterns and whether in force).
-        i.workspaceRules ? h('span', { 'data-workspace-rules': i.workspaceRulesView || '', title: 'Workspace rules: ' + i.workspaceRules + ' — doz ignore show ' + name },
+        i.workspaceRules ? h('span', { class: 'tag outline', 'data-workspace-rules': i.workspaceRulesView || '', title: 'Workspace rules: ' + i.workspaceRules + ' — doz ignore show ' + name },
           withIcon('shield', 'rules')) : null)),
     h('div', { class: 'sbx-actions' },
       lifecycleButtons(i, true),
@@ -2842,7 +2981,7 @@ function permissionsPanel(name, net) {
     btn(s.permission ? 'Allow' : 'Allow this site', () => (s.permission === 'web' ? confirmWeb(() => send({ grant: [s.grant] })) : send({ grant: [s.grant] })),
       { small: true, icon: 'check' })));
   const sites = p.sites.map((host) => h('span', { class: 'tag perm-site', 'data-site': host }, host, ' ',
-    h('button', { type: 'button', class: 'link-button', title: 'Deny ' + host, on: { click: () => send({ revoke: ['site:' + host] }) } }, '×')));
+    h('button', { type: 'button', class: 'btn sm quiet icon-only', title: 'Deny ' + host, 'aria-label': 'Deny ' + host, on: { click: () => send({ revoke: ['site:' + host] }) } }, icon('x'))));
   const siteInput = h('input', { type: 'text', placeholder: 'api.example.com', 'aria-label': 'A site to allow', 'data-site-input': '', spellcheck: 'false' });
   return h('div', { class: 'panel perm-panel', 'data-perm-panel': name },
     h('div', { class: 'perm-head' }, h('strong', null, 'What the agent can do'),
@@ -3459,14 +3598,14 @@ async function viewAccounts() {
       x.kind === 'mac' ? null : btn('Verify', () => act({ action: 'account-verify', account: x.name }), { small: true, title: 'One tiny request to the API with it' }),
       x.name === 'mac' ? null : btn('Remove', () => confirmAction('Remove account ' + x.name, 'Its keychain item is deleted' + (x.usedBy.length ? '; sandboxes pinned to it must move first (' + x.usedBy.join(', ') + ')' : '') + '.',
         x.name, { action: 'account-rm', account: x.name }), { small: true, danger: true })))));
-  const keep = h('input', { type: 'checkbox', id: 'keepalive' });
+  const keep = h('input', { type: 'checkbox', role: 'switch', id: 'keepalive' });
   keep.checked = a.keepalive;
   keep.addEventListener('change', () => act({ action: 'account-keepalive', enabled: keep.checked }));
   return h('div', null, h('h1', null, 'Accounts & keys'),
     h('p', { class: 'sub' }, 'Anthropic credentials the host holds for sandboxes. Never a secret: states, keychain item names and fingerprints only.'),
     h('div', { class: 'cards' },
       card('Default account', a.defaultAccount, a.defaultAccount === 'none' ? 'sandboxes that follow it get none' : ''),
-      h('div', { class: 'card' }, h('div', { class: 'k' }, 'Keep-alive'), h('label', { class: 'v switch' }, keep, ' ', a.keepalive ? 'on' : 'off'),
+      h('div', { class: 'card' }, h('div', { class: 'k' }, 'Keep-alive'), h('label', { class: 'v switch-row' }, keep, a.keepalive ? 'on' : 'off'),
         h('div', { class: 'n' }, 'runs the Mac’s own claude -p near expiry while a sandbox uses the login'))),
     h('div', { class: 'head' }, h('h2', null, 'Accounts'), btn('Set the default to none', () => act({ action: 'account-default', account: 'none' }), { small: true })),
     panel(table(['Account', 'Kind', 'Identity', 'State', 'Expires', 'Fingerprint', 'Used by', ''], rows)),
@@ -4768,22 +4907,13 @@ function renderTerminals() {
       if (sview(state.param).split) unsplit();
       else splitWith(termUI.splitKind).catch((e) => toast(e.message || String(e), true));
     }, { small: true, title: 'Two terminals side by side — the right one is a ' + SPLIT_KINDS[termUI.splitKind] });
-    termUI.splitMenu = h('div', { class: 'menu', role: 'menu', hidden: true },
-      Object.entries(SPLIT_KINDS).map(([kind, label]) => h('button', { type: 'button', role: 'menuitem', class: 'menu-item', 'data-kind': kind,
-        on: { click: (ev) => {
-          ev.stopPropagation();
-          termUI.splitMenu.hidden = true;
-          termUI.splitKind = kind;
-          // The choice is the setting ui.split_default (doz.toml), not this browser's.
-          if (setting('ui.split_default', 'shell') !== kind) saveSetting('ui.split_default', kind).catch((e) => toast('The setting was not saved: ' + (e.message || e), true));
-          paintSplitButton();
-          splitWith(kind).catch((e) => toast(e.message || String(e), true));
-        } } }, label)));
-    const caret = h('button', { type: 'button', class: 'btn small split-caret', title: 'What the split adds', 'aria-haspopup': 'menu',
-      'aria-label': 'What the split adds', on: { click: (ev) => { ev.stopPropagation(); termUI.splitMenu.hidden = !termUI.splitMenu.hidden; } } },
+    // 603: the caret is a menuButton (kept on screen; the old menu opened off the left edge and its items
+    // ended in a literal "null" — replaceChildren writes a null as text, h() skips it).
+    const caret = h('button', { type: 'button', class: 'btn sm split-caret caret', title: 'What the split adds', 'aria-label': 'What the split adds' },
       icon('chevron-down'));
-    document.addEventListener('click', () => { termUI.splitMenu.hidden = true; });
-    termUI.splitBtn = h('div', { class: 'split-button' }, termUI.splitMain, caret, termUI.splitMenu);
+    termUI.splitBtn = h('div', { class: 'btn-group split-button', role: 'group', 'aria-label': 'Split' }, termUI.splitMain, caret);
+    termUI.splitCtl = menuButton(caret, [], { wrap: termUI.splitBtn, label: 'What the split adds' });
+    termUI.splitMenu = termUI.splitCtl.menu;
     termUI.panes = [0, 1].map((i) => {
       const strip = h('div', { class: 'tabs', role: 'tablist' });
       const body = h('div', { class: 'term-body' });
@@ -4923,11 +5053,17 @@ function paintSplitButton() {
   setButton(termUI.splitMain, split ? 'Unsplit' : 'Split', 'columns-2');
   termUI.splitMain.title = split ? 'Back to one pane (the right pane’s terminals move left)'
                                  : 'Two terminals side by side — the right one is a ' + SPLIT_KINDS[termUI.splitKind];
-  for (const item of termUI.splitMenu.children) {
-    item.replaceChildren(icon(SPLIT_ICONS[item.dataset.kind]), h('span', { class: 'btn-label' },
-      (split ? 'Add a ' : 'Split with a ') + SPLIT_KINDS[item.dataset.kind]),
-      item.dataset.kind === termUI.splitKind ? h('span', { class: 'menu-check', title: 'the default (ui.split_default)' }, icon('check')) : null);
-  }
+  termUI.splitCtl.setItems(Object.entries(SPLIT_KINDS).map(([kind, label]) => ({
+    label: (split ? 'Add a ' : 'Split with a ') + label, icon: SPLIT_ICONS[kind], check: kind === termUI.splitKind, data: { kind },
+    desc: kind === termUI.splitKind ? 'the default (ui.split_default)' : null,
+    onSelect: () => {
+      termUI.splitKind = kind;
+      // The choice is the setting ui.split_default (doz.toml), not this browser's.
+      if (setting('ui.split_default', 'shell') !== kind) saveSetting('ui.split_default', kind).catch((e) => toast('The setting was not saved: ' + (e.message || e), true));
+      paintSplitButton();
+      splitWith(kind).catch((e) => toast(e.message || String(e), true));
+    },
+  })));
 }
 /// Split (if needed) and fill the right pane with `kind` — so a split always creates something.
 /// With no terminal on the left there is nothing to watch, attach to or put a shell beside: the
