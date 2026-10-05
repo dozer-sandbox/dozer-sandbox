@@ -473,7 +473,10 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
     children; the rail below 980 px). The sandbox page: `lifecycleBar` (the group + Shut down) + ⋯ + the status
     slot + the details toggle; the terminal strip's actions (`termUI.acts`, `paintStripActs`) on the rightmost
     pane; the inspector's tabs `INSP_TABS`, the chosen tab per sandbox in `sview(name).inspTab` (page memory, no
-    setting); its width in this browser's storage. The wizards share `stepperNode()`. Long pages: `pageIndex()`;
+    setting); its width in this browser's storage. The wizards (`#/new`, `#/onboarding`) are a MODAL over the page
+    (owner on rc.1): `state.modal` is the wizard, `state.view`/`state.bgHash` stay the page under it, which is never
+    re-rendered or torn down by opening or closing (inert meanwhile); `wizHead()` (title, ✕, the horizontal
+    `stepperNode()` strip) + `wizMount()`; ✕/Escape ask before losing choices (`wizDirty`), Back keeps them. Long pages: `pageIndex()`;
     Settings' filter; Resources' folding groups (browser storage). Page shortcuts (owner decision 10) only `g s`,
     `/`, `?` — never while a terminal (its iframe), a field, a menu or a dialog has the focus.
 - **Edit `WebSource/`, then `make web-assets`, and commit `Resources/Web`.** `make web-assets-check`

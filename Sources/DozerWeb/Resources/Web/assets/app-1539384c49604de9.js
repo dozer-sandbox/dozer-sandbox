@@ -1431,9 +1431,10 @@ function uiBack() {
   if (!state.uiOverlay) return;
   state.uiOverlay = false;
   for (const el of pausedParts()) el.inert = false;
+  if (state.modal) modalInert(true);                   // 603: a wizard's modal keeps the page under it inert
   document.body.classList.remove('ui-paused');
   $('ui-overlay').hidden = true;
-  $('main').focus();
+  (state.modal ? $('wm-box') : $('main')).focus();
 }
 
 function connect() {
@@ -1462,7 +1463,7 @@ function connect() {
   es.addEventListener('preparations', (ev) => {
     try { state.preps = JSON.parse(ev.data); } catch (_) { return; }
     renderOps();
-    if (state.view === 'onboarding') renderWizard();
+    if (state.modal === 'onboarding') renderWizard();
   });
   es.addEventListener('op', (ev) => { try { trackOp(JSON.parse(ev.data)); } catch (_) { /* */ } });
   es.addEventListener('activity', (ev) => {
@@ -1511,7 +1512,7 @@ function renderNavSandboxes() {
   // 603: each sandbox under "All sandboxes", its phase as a dot whose shape says whether it holds RAM (and
   // its word for assistive tech and the tooltip); the one shown is the page's current item.
   $('nav-sandboxes').replaceChildren(...list.map((s) => {
-    const here = state.view === 'sandbox' && state.param === s.name;
+    const here = !state.modal && state.view === 'sandbox' && state.param === s.name;
     return h('a', { href: '#/sandbox/' + s.name, class: 'nav-child child' + (here ? ' active' : ''), 'aria-current': here ? 'page' : null,
       role: 'listitem', 'data-sandbox': s.name, title: s.name + ' — ' + s.phaseLabel },
       h('span', { class: 'ph-dot ph-' + s.phase, role: 'img', 'aria-label': s.phaseLabel }), h('span', { class: 'nav-name' }, s.name));
@@ -1520,7 +1521,9 @@ function renderNavSandboxes() {
 function paintNav() {
   for (const a of document.querySelectorAll('#nav > a')) {
     // A sandbox's own page marks its child entry; New sandbox belongs to All sandboxes.
-    const on = a.dataset.view === state.view || (state.view === 'new' && a.dataset.view === 'overview');
+    // (603: an open wizard's entry — Onboarding, or All sandboxes for New sandbox — marks the nav under its modal.)
+    const cur = state.modal === 'onboarding' ? 'onboarding' : state.modal === 'new' ? 'overview' : state.view;
+    const on = a.dataset.view === cur;
     a.classList.toggle('active', on);
     if (on) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
   }
@@ -1536,13 +1539,32 @@ function navRail(open) {
 
 // ── routing ─────────────────────────────────────────────────────────────────
 // #/VIEW, #/sandbox/NAME and #/sandbox/NAME/SESSION (a session addressed: its tab opened or selected).
+// 603 (owner, on rc.1): #/new and #/onboarding are MODALS over the page under them — that page (state.view, its
+// hash state.bgHash) is never re-rendered or torn down by opening or closing one (the sandbox page's terminals
+// stay as they are). A deep link opens the modal over Sandboxes.
+const MODAL_VIEWS = new Set(['new', 'onboarding']);
 function route() {
   const m = /^#\/([a-z]+)(?:\/([a-z0-9-]{1,40})(?:\/([A-Za-z0-9_-][A-Za-z0-9._-]{0,63}))?)?$/.exec(location.hash);
   if (m && m[1] === 'terminals') { location.replace('#/sessions'); return; }      // 591's name for the grid's place
-  state.view = m ? m[1] : 'overview';
+  const v = m ? m[1] : 'overview';
+  if (MODAL_VIEWS.has(v) && !m[2]) {
+    const first = !state.bgHash;
+    if (first) { state.view = 'overview'; state.param = null; state.session = null; state.bgHash = '#/overview'; routePage(); }
+    openWizardModal(v, !first);
+    return;
+  }
+  if (state.modal) {
+    closeWizardModal();
+    if (location.hash === state.bgHash) return;                   // back to the page under it, as it was
+  }
+  state.view = v;
   state.param = m && m[2] ? m[2] : null;
   state.session = m && m[3] ? m[3] : null;
   if (state.view === 'sandbox' && !state.param) state.view = 'overview';
+  state.bgHash = location.hash;
+  routePage();
+}
+function routePage() {
   paintNav();
   // 591: the terminals live in their own section, never re-rendered by refresh() (a live update
   // must not steal a terminal's focus or reparent its canvas). 593: that section is the sandbox
@@ -1555,13 +1577,127 @@ function route() {
   if (!onGrid) gridLeave();
   if (state.view !== 'operations') state.opsBox = null;
   if (state.view === 'operations') { acknowledgeOps(); loadPreparations(); }
-  if (state.view !== 'onboarding') wizardStopPolling();
+  if (state.modal !== 'onboarding') wizardStopPolling();
   if (state.view === 'images' || state.view === 'resources') remeasure();   // 595: measured on arrival, Refresh, an op's end
   if (onSbx) { showSandbox(); return; }
   if (onGrid) { gridEnter(); return; }
   refresh(true);
 }
 window.addEventListener('hashchange', () => { if (!state.signedOut) route(); });
+
+// ── 603: the wizards' modal ─────────────────────────────────────────────────
+// A real dialog (role=dialog, aria-modal, labelled by the wizard's title): the rest of the page is inert while it
+// is open, focus moves in and is kept there (Tab wraps), and returns to what opened it. ✕ or Escape (not inside a
+// field or a list) closes it — after asking, when the person has made choices; the browser's Back closes it and
+// KEEPS the choices (Forward, or the wizard's entry, resumes them).
+const MODAL_INERT = ['side', 'banners', 'notice', 'view', 'sbx', 'grid'];
+function modalInert(on) {
+  if (!on && state.uiOverlay) return;                  // the "doz ui stopped" overlay keeps everything inert
+  for (const id of MODAL_INERT) { const el = id === 'side' ? document.querySelector('.side') : $(id); if (el) el.inert = on; }
+}
+function openWizardModal(v, fromPage) {
+  const was = state.modal;
+  state.modal = v;
+  if (!was) {
+    const a = document.activeElement;
+    state.modalOpener = a && a !== document.body && !$('wiz-modal').contains(a) ? a : null;
+    // A live update may re-render the opener's section meanwhile: then its successor (same place, same name) gets focus.
+    state.modalOpenerKey = state.modalOpener ? { sec: state.modalOpener.closest('section[id], aside[id], nav[id], .side'), name: accName(state.modalOpener) } : null;
+    state.modalBack = !!fromPage;          // opened from a page of this tab: closing goes back in the history
+    modalInert(true);
+    $('wiz-modal').hidden = false;
+    document.body.classList.add('modal-open');
+  }
+  paintNav();
+  if (was !== v || !$('wm-box').firstChild) renderModal(true);
+}
+function closeWizardModal() {
+  if (!state.modal) return;
+  if (state.modal === 'onboarding') wizardStopPolling();
+  state.modal = null;
+  $('wiz-modal').hidden = true;
+  $('wm-box').replaceChildren();
+  document.body.classList.remove('modal-open');
+  modalInert(false);
+  paintNav();
+  const o = state.modalOpener, k = state.modalOpenerKey;
+  state.modalOpener = null; state.modalOpenerKey = null;
+  const usable = (e) => e && e.isConnected && !e.closest('[inert]') && e.getClientRects().length > 0;
+  const heir = !usable(o) && k && k.sec && k.sec.isConnected && k.name
+    ? [...k.sec.querySelectorAll('button, a[href], [tabindex]')].find((e) => usable(e) && accName(e) === k.name) : null;
+  (usable(o) ? o : heir || $('main')).focus();
+}
+function accName(e) { return (e.getAttribute('aria-label') || e.textContent || '').replace(/\s+/g, ' ').trim(); }
+async function renderModal(first) {
+  const v = state.modal;
+  if (!v) return;
+  let node;
+  try { node = v === 'new' ? await viewNew() : await viewOnboarding(); } catch (e) {
+    node = h('div', { class: 'wizard' }, wizHead(v === 'new' ? 'New sandbox' : 'Set up Dozer Sandbox', null, [], null),
+      h('div', { class: 'wiz-card' }, h('div', { class: 'w-body' }, callout('bad', { cls: 'notice', title: 'This could not be read', body: e.message || String(e) }))));
+  }
+  if (state.modal !== v || state.signedOut) return;
+  wizMount(node, first);
+}
+/// Put a wizard's node in the modal: the current step scrolled into the strip's view; focus on the step's first
+/// field (or the dialog itself) when it opens or the step changes.
+function wizMount(node, focus) {
+  const box = $('wm-box');
+  box.replaceChildren(node);
+  const strip = box.querySelector('.wm-steps ol');
+  const cur = strip && strip.querySelector('li.current');
+  if (cur) strip.scrollLeft = Math.max(0, cur.offsetLeft - (strip.clientWidth - cur.offsetWidth) / 2);
+  if (!focus) return;
+  const f = box.querySelector('.w-body input:not([type=hidden]):not([disabled]):not([type=radio]), .w-body select, .w-body textarea, .w-body button.base-card');
+  (f || box).focus();
+}
+/// The modal's header: the title (its label), what the wizard offers there, ✕; the step strip under it.
+function wizHead(title, sub, actions, steps) {
+  return h('header', { class: 'wm-head' },
+    h('div', { class: 'wm-title-row' }, h('h1', { id: 'wm-title' }, title), h('span', { class: 'wm-gap' }), ...actions,
+      ((b) => { b.dataset.wmClose = ''; return b; })(btn('Close', () => wizardCloseRequest(), { quiet: true, iconOnly: true, icon: 'x', title: 'Close (Esc)' }))),
+    sub ? h('p', { class: 'sub wm-sub' }, sub) : null,
+    steps ? h('nav', { class: 'wm-steps', 'aria-label': 'Steps' }, steps.compact, steps.list) : null);
+}
+/// Has the person chosen anything a close would lose? (A made sandbox, or a store already prepared, loses nothing.)
+function wizDirty() {
+  if (state.modal === 'new') {
+    const nw = state.nw;
+    return !!nw && !nw.tools && (nw.step > 0 || !!nw.form || nw.explicit.size > 0 || nw.path !== nw.initPath || nw.newName !== nw.initName || nw.mode !== nw.initMode);
+  }
+  if (state.modal === 'onboarding') { const w = state.wiz; return !!w && w.step > WIZ.checks && w.step < WIZ.preparing; }
+  return false;
+}
+function wizardCloseRequest() {
+  if (!state.modal) return;
+  const leave = () => {
+    if (state.modal === 'new') state.nw = null; else if (state.modal === 'onboarding') state.wiz = null;
+    if (state.modalBack) history.back(); else location.replace(state.bgHash && !MODAL_VIEWS.has(state.bgHash.slice(2)) ? state.bgHash : '#/overview');
+  };
+  if (!wizDirty()) { leave(); return; }
+  dialog(state.modal === 'new' ? 'Discard this new sandbox?' : 'Stop setting up?',
+    state.modal === 'new' ? 'Nothing is written yet: closing forgets the choices made so far.'
+      : 'Nothing is written yet: closing forgets the choices made so far. Onboarding can be run again from the sidebar.',
+    [], 'Discard', async () => { leave(); }, { danger: true, icon: 'x' });
+}
+// Keyboard: Escape closes (asking first when needed) — never from inside a field, a list or a menu; Tab wraps.
+$('wm-box').addEventListener('keydown', (ev) => {
+  if (ev.key === 'Escape') {
+    if (ev.defaultPrevented || ev.target.closest('input, select, textarea, [contenteditable], .menu')) return;
+    ev.preventDefault();
+    wizardCloseRequest();
+    return;
+  }
+  if (ev.key !== 'Tab') return;
+  const box = $('wm-box');
+  const f = [...box.querySelectorAll('a[href], button:not([disabled]), input:not([disabled]):not([type=hidden]), select:not([disabled]), textarea:not([disabled]), summary, [tabindex]:not([tabindex="-1"])')]
+    .filter((e) => e.getClientRects().length > 0);
+  if (!f.length) { ev.preventDefault(); box.focus(); return; }
+  const first = f[0], last = f[f.length - 1], a = document.activeElement;
+  if (ev.shiftKey && (a === first || a === box)) { ev.preventDefault(); last.focus(); }
+  else if (!ev.shiftKey && a === last) { ev.preventDefault(); first.focus(); }
+});
+$('wm-scrim').addEventListener('click', () => { const b = $('wm-box'); (b.querySelector('[data-wm-close]') || b).focus(); });
 
 let refreshing = false, again = false;
 async function refresh(scrollTop) {
@@ -1572,9 +1708,7 @@ async function refresh(scrollTop) {
   refreshing = true;
   try {
     const views = { overview: viewOverview, images: viewImages, resources: viewResources, operations: viewOperations, accounts: viewAccounts,
-                    metrics: viewMetrics, activity: viewActivity, doctor: viewDoctor, settings: viewSettings, onboarding: viewOnboarding, new: viewNew };
-    // 599f: the wizard is never re-rendered under the person choosing (a live update); it re-renders itself.
-    if (state.view === 'new' && !scrollTop && state.nw && state.nw.node && $('view').contains(state.nw.node)) return;
+                    metrics: viewMetrics, activity: viewActivity, doctor: viewDoctor, settings: viewSettings };
     const fn = views[state.view] || viewOverview;
     const node = await fn();
     if (node && !state.signedOut) {
@@ -1951,9 +2085,13 @@ const NW_FIELD = { cpus: 'cpus', memory: 'memory', network: 'network', permissio
                    agent_sudo: 'agentSudo', ssh_agent: 'sshAgent', clipboard: 'clipboard', browser_bridge: 'browserBridge', open_files: 'openFiles', tmux: 'tmux',
                    ignore_mode: 'ignoreMode' };
 function newSandboxWizard(start = {}) {
-  state.nw = null;
-  state.nwStart = start;
-  if (location.hash === '#/new') refresh(true); else location.hash = '#/new';
+  // 603: a draft left by the browser's Back is resumed, never silently replaced (a new start asks first).
+  const go = () => { if (location.hash === '#/new') renderModal(true); else location.hash = '#/new'; };
+  const draft = state.nw && !state.nw.tools && (state.nw.step > 0 || !!state.nw.form || state.nw.explicit.size > 0);
+  if (draft && !start.folder) { go(); return; }
+  const fresh = () => { state.nw = null; state.nwStart = start; go(); };
+  if (!draft) { fresh(); return; }
+  dialog('Discard the unfinished new sandbox?', 'A New sandbox wizard was left part-way; starting again forgets its choices.', [], 'Discard', async () => { fresh(); }, { danger: true, icon: 'x' });
 }
 async function viewNew() {
   if (!state.nw) {
@@ -1966,14 +2104,13 @@ async function viewNew() {
     try { steps = (await api('project/open', { method: 'POST', json: { folder: projectsDir + '/' + newName } })).steps; } catch (_) { /* shown after the folder */ }
     state.nw = { step: 0, images, accounts, bases, projectsDir, newName, mode: start.folder ? 'existing' : 'new', path: start.folder || '',
                  open: null, form: null, explicit: new Set(), preview: null, error: '', steps, reached: 0 };
+    Object.assign(state.nw, { initName: newName, initMode: state.nw.mode, initPath: state.nw.path });
   }
   return nwNode();
 }
 function nwRender() {
-  if (state.view !== 'new' || !state.nw) return;
-  $('view').replaceChildren(nwNode());
-  const first = $('view').querySelector('[data-nw-body] input:not([type=hidden]):not([disabled]), [data-nw-body] select, [data-nw-body] textarea, [data-nw-body] button.base-card');
-  if (first) first.focus();
+  if (state.modal !== 'new' || !state.nw) return;
+  wizMount(nwNode(), true);
 }
 function nwSection(form) {
   const img = form.image || '';
@@ -2008,23 +2145,22 @@ function nwPayload() {
   for (const [key, field] of Object.entries(NW_FIELD)) if (nw.explicit.has(key) && f[field] !== undefined && f[field] !== null) out[field] = f[field];
   return { folder: nw.open.folder, form: out, explicit: [...nw.explicit] };
 }
-/// 603 (E15): the wizards' stepper — vertical: done (a check, and the step's answer under it), current (the accent
-/// circle), later; a done or reachable step is a link back. Below 760 px it becomes "Step N of M" with a bar.
+/// 603 (E15; owner on rc.1: horizontal, in the modal's header): the wizards' step strip — done (a check; the step's
+/// answer as its tooltip), current (the accent circle), later; a done or reachable step is a link back. One row of
+/// equal columns, never two; in a narrow window the circles only, with "Step N of M · its name" above.
 function stepperNode(steps, current, opts = {}) {
-  const list = h('ol', { class: 'stepper wiz-steps', 'aria-label': 'Steps' }, steps.map((s, i) => {
+  const list = h('ol', { class: 'stepper wiz-steps' }, steps.map((s, i) => {
     const state_ = i === current ? 'current' : (opts.done ? opts.done(i) : i < current) ? 'done' : null;
     const go = opts.go && opts.go(i);
-    const attrs = { class: state_, 'aria-current': i === current ? 'step' : null };
-    if (opts.data) attrs[opts.data] = s.id;
     const note = state_ === 'done' && opts.note ? opts.note(s, i) : null;
-    return h('li', attrs, h('span', { class: 'n wiz-n' }, state_ === 'done' ? icon('check') : String(i + 1)),
-      go ? h('a', { href: opts.href || '#', on: { click: (ev) => { ev.preventDefault(); go(); } } }, s.title) : h('span', null, s.title),
+    const attrs = { class: state_, 'aria-current': i === current ? 'step' : null, title: s.title + (note ? ' — ' + note : '') };
+    if (opts.data) attrs[opts.data] = s.id;
+    return h('li', attrs, h('span', { class: 'n wiz-n', 'aria-hidden': state_ === 'done' ? null : 'true' }, state_ === 'done' ? icon('check') : String(i + 1)),
+      go ? h('a', { class: 's-label', href: opts.href || '#', on: { click: (ev) => { ev.preventDefault(); go(); } } }, s.title) : h('span', { class: 's-label' }, s.title),
       note ? h('span', { class: 's-note' }, note) : null);
   }));
-  const frac = steps.length ? (current + 1) / steps.length : 0;
   const compact = h('div', { class: 'step-compact', 'aria-hidden': 'true' },
-    h('div', { class: 'line' }, h('b', null, 'Step ' + (current + 1) + ' of ' + steps.length), h('span', { class: 'muted' }, (steps[current] || {}).title || '')),
-    determinate(frac, '', 'steps'));
+    h('b', null, 'Step ' + (current + 1) + ' of ' + steps.length), ' · ', h('span', null, (steps[current] || {}).title || ''));
   return { list, compact };
 }
 /// A done New Sandbox step's answer, under its name in the stepper.
@@ -2065,7 +2201,7 @@ function nwNode() {
   // Next: the step's one primary — a trailing arrow (forward); the actions in a footer that never leaves the screen.
   const next = last ? null : h('button', { type: 'submit', class: 'btn lg primary', 'data-nw-next': '' }, h('span', { class: 'btn-label' }, 'Next'), icon('arrow-right'));
   const form = h('form', { class: 'wiz-card', 'data-nw-body': id, novalidate: '' },
-    h('div', { class: 'w-body' }, compact, h('h2', null, (steps[nw.step] || { title: 'Project folder' }).title), step.el, error),
+    h('div', { class: 'w-body' }, h('h2', null, (steps[nw.step] || { title: 'Project folder' }).title), step.el, error),
     h('div', { class: 'w-foot wiz-buttons' }, back, h('span', { class: 'wiz-gap' }), skip, step.extra || null, next));
   form.addEventListener('submit', (ev) => { ev.preventDefault(); if (!last) nwGo(nw.step + 1); });
   form.addEventListener('keydown', (ev) => {
@@ -2074,11 +2210,11 @@ function nwNode() {
     if (ev.altKey && ev.key === 'ArrowRight' && !last) { ev.preventDefault(); nwGo(nw.step + 1); }
   });
   const node = h('div', { class: 'wizard nw', 'data-nw': id },
-    h('div', { class: 'head' }, h('h1', null, 'New sandbox'),
-      h('div', { class: 'actions' }, btn('One-page form', () => createDialog(), { quiet: true, icon: 'list-checks', title: 'All choices on one page (an isolated sandbox, no project file)' }))),
-    h('p', { class: 'sub' }, 'Step by step; your choices are written to the project folder’s ', h('code', null, 'doz_project.yaml'),
-      ' — ', h('code', null, 'doz up'), ' there makes the same sandbox. The same as ', h('code', null, 'doz init'), ' in a terminal.'),
-    h('div', { class: 'wiz' }, stepper, form));
+    wizHead('New sandbox', ['Step by step; your choices are written to the project folder’s ', h('code', null, 'doz_project.yaml'),
+      ' — ', h('code', null, 'doz up'), ' there makes the same sandbox. The same as ', h('code', null, 'doz init'), ' in a terminal.'],
+      [btn('One-page form', () => createDialog(), { quiet: true, small: true, icon: 'list-checks', title: 'All choices on one page (an isolated sandbox, no project file)' })],
+      { list: stepper, compact }),
+    form);
   nw.node = node;
   return node;
 }
@@ -2113,17 +2249,16 @@ function nwToolsNode(nw) {
     ? [btn('Retry', () => nwRetryTools(nw), { icon: 'refresh-cw', title: 'Set the tools up again now' }), btn('Continue anyway', open, { primary: true, icon: 'arrow-right' })]
     : [btn('Open the sandbox', open, { primary: true, icon: 'box' })];
   const node = h('div', { class: 'wizard nw', 'data-nw': 'tools' },
-    h('div', { class: 'head' }, h('h1', null, 'New sandbox')),
-    h('p', { class: 'sub' }, t.name + ' is made. Now it starts, and Dozer sets up the tools its settings call for — the tools layer, on any base, without rebuilding an image.'),
-    h('div', { class: 'wiz' }, stepper,
+    wizHead('New sandbox', t.name + ' is made. Now it starts, and Dozer sets up the tools its settings call for — the tools layer, on any base, without rebuilding an image.',
+      [], { list: stepper, compact }),
       h('section', { class: 'wiz-card', 'data-nw-tools': t.phase },
-        h('div', { class: 'w-body' }, compact,
+        h('div', { class: 'w-body' },
           h('h2', null, 'Setting up tools'),
           plan ? h('ul', { class: 'plain tool-list' }, rows) : h('p', { class: 'muted' }, 'Reading the tools layer…'),
           h('p', { class: 'muted mono tools-progress', 'data-tools-progress': '', 'aria-live': 'polite' }, busy ? (t.progress || 'starting…') : ''),
           t.error ? callout('bad', { cls: 'notice', attrs: { 'data-tools-error': '' }, body: t.error }) : null,
           failed ? h('p', { class: 'muted' }, 'Something could not be set up — the sandbox works without it. Retry, or continue; ', h('code', null, 'doz tools ' + t.name + ' --apply'), ' tries again later.') : null),
-        h('div', { class: 'w-foot wiz-buttons' }, h('span', { class: 'wiz-gap' }), buttons))));
+        h('div', { class: 'w-foot wiz-buttons' }, h('span', { class: 'wiz-gap' }), buttons)));
   nw.node = node;
   return node;
 }
@@ -2133,7 +2268,7 @@ async function nwFollow(nw, op) {
     const o = state.ops.get(op.id);
     if (o && o.text && o.text !== t.progress) {
       t.progress = o.text;
-      const p = $('view').querySelector('[data-tools-progress]');
+      const p = $('wm-box').querySelector('[data-tools-progress]');
       if (p) p.textContent = o.text;
     }
   }, 300);
@@ -2187,7 +2322,6 @@ async function nwGo(i) {
   nw.step = Math.max(0, Math.min(i, nw.steps.length - 1));
   nw.reached = Math.max(nw.reached, nw.step);
   nwRender();
-  $('main').scrollTop = 0;
 }
 
 function nwFolder() {
@@ -2461,8 +2595,8 @@ function nwReview() {
   };
   if (nw.preview) setTimeout(paint, 0);
   else {
-    api('project/preview', { method: 'POST', json: nwPayload() }).then((p) => { nw.preview = p; if (state.view === 'new' && state.nw === nw) { paint(); pre.dispatchEvent(new Event('nw-preview')); } })
-      .catch((e) => { pre.textContent = ''; const err = $('view').querySelector('[data-nw-error]'); if (err) err.textContent = e.message || String(e); });
+    api('project/preview', { method: 'POST', json: nwPayload() }).then((p) => { nw.preview = p; if (state.modal === 'new' && state.nw === nw) { paint(); pre.dispatchEvent(new Event('nw-preview')); } })
+      .catch((e) => { pre.textContent = ''; const err = $('wm-box').querySelector('[data-nw-error]'); if (err) err.textContent = e.message || String(e); });
   }
   // 603 (E15, owner decision 11): what will happen first — the choices as facts, then the steps — and the file,
   // exactly as written, one click away (the replace diff still comes before an existing file is replaced).
@@ -2512,7 +2646,7 @@ async function nwCreate(button) {
       await nwRunTools(nw);
     } catch (e) {
       button.disabled = false;
-      const err = $('view').querySelector('[data-nw-error]');
+      const err = $('wm-box').querySelector('[data-nw-error]');
       if (err) err.textContent = e.message || String(e); else pageFailure(e.message || String(e));
     }
   };
@@ -4297,7 +4431,7 @@ function wizardStopPolling() { clearInterval(wizTimer); wizTimer = null; }
 function wizardPoll() {
   if (wizTimer) return;
   wizTimer = setInterval(async () => {
-    if (state.view !== 'onboarding' || !state.wiz || state.wiz.step !== WIZ.preparing) { wizardStopPolling(); return; }
+    if (state.modal !== 'onboarding' || !state.wiz || state.wiz.step !== WIZ.preparing) { wizardStopPolling(); return; }
     try { state.preps = await api('preparations'); } catch (_) { return; }
     renderOps();
     renderWizard();
@@ -4313,9 +4447,12 @@ async function viewOnboarding() {
 /// Re-render in place (a preparation's progress; a step change). The first-sandbox form is never
 /// re-rendered under the person typing in it.
 function renderWizard(force) {
-  if (state.view !== 'onboarding' || !state.wiz) return;
+  if (state.modal !== 'onboarding' || !state.wiz) return;
   if (!force && state.wiz.step !== WIZ.preparing) return;
-  $('view').replaceChildren(wizardNode());
+  // A step change moves focus in; a preparation's tick does not (it would pull focus from the button in use).
+  const before = state.wizShown;
+  state.wizShown = state.wiz.step;
+  wizMount(wizardNode(), !!force && before !== state.wiz.step);
 }
 /// 603: a step's failure is said in the step (above its buttons) and stays until the next try or step.
 function wizFail(text) {
@@ -4330,7 +4467,6 @@ function wizGo(step) {
   if (step === WIZ.preparing) { loadPreparations().then(() => renderWizard(true)); wizardPoll(); } else wizardStopPolling();
   if (step >= WIZ.first) refreshNav();          // the nav's Onboarding dot goes once the record is written
   renderWizard(true);
-  $('main').scrollTop = 0;
 }
 function wizButtons(...buttons) { return h('div', { class: 'wiz-buttons' }, buttons); }
 function wizChosenImages() {
@@ -4358,10 +4494,10 @@ function wizardNode() {
   const foot = last && last.classList && last.classList.contains('wiz-buttons') ? body.pop() : null;
   if (foot) foot.classList.add('w-foot');
   return h('div', { class: 'wizard', 'data-step': String(w.step) },
-    h('h1', null, 'Set up Dozer Sandbox'),
-    h('p', { class: 'sub' }, 'Once for this Mac (store ', h('code', null, $('store-path').textContent), '). The same as ', h('code', null, 'doz onboard'), ' in a terminal.'),
-    h('div', { class: 'wiz' }, stepper, h('section', { class: 'wiz-card wiz-body' }, h('div', { class: 'w-body' }, compact, body,
-      w.error ? callout('bad', { compact: true, body: w.error, attrs: { 'data-wiz-error': '' }, dismiss: () => { w.error = null; renderWizard(true); } }) : null), foot)));
+    wizHead('Set up Dozer Sandbox', ['Once for this Mac (store ', h('code', null, $('store-path').textContent), '). The same as ', h('code', null, 'doz onboard'), ' in a terminal.'],
+      [], { list: stepper, compact }),
+    h('section', { class: 'wiz-card wiz-body' }, h('div', { class: 'w-body' }, body,
+      w.error ? callout('bad', { compact: true, body: w.error, attrs: { 'data-wiz-error': '' }, dismiss: () => { w.error = null; renderWizard(true); } }) : null), foot));
 }
 function wizStep0(d) {
   // 602 (owner: "detect if onboarding has already ran (i ran it in the cli) and show that and give the
@@ -5346,9 +5482,11 @@ function renderTerminals() {
   if (name) persistLayout(name);
   // The URL names the session shown (replaceState: no route).
   const sel = name && terminals.get(v.selected[v.focusedPane] ?? v.selected[0]);
-  if (sel && sel.session && state.session !== sel.session) {
+  // (603: never under a wizard's modal — its URL is #/new or #/onboarding; the page's hash follows.)
+  if (sel && sel.session && state.session !== sel.session && !state.modal) {
     state.session = sel.session;
     history.replaceState(null, '', location.pathname + '#/sandbox/' + name + '/' + sel.session);
+    state.bgHash = location.hash;
   }
 }
 /// The strip's actions follow the sandbox: a session needs a VM (New shell, Run detached, Open in Terminal); a new
@@ -5795,7 +5933,7 @@ document.addEventListener('keydown', (ev) => {
   if (ev.defaultPrevented || ev.metaKey || ev.ctrlKey || ev.altKey || state.signedOut) return;
   const a = document.activeElement;
   if (a && (a.tagName === 'IFRAME' || a.closest('input, textarea, select, [contenteditable], dialog, .menu'))) return;
-  if (document.querySelector('dialog[open]') || document.body.classList.contains('ui-paused')) return;
+  if (document.querySelector('dialog[open]') || state.modal || document.body.classList.contains('ui-paused')) return;
   if (ev.key === 'g') { gPending = Date.now(); return; }
   if (ev.key === 's' && Date.now() - gPending < 1200) { gPending = 0; ev.preventDefault(); location.hash = '#/overview'; return; }
   gPending = 0;

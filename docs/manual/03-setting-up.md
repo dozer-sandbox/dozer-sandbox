@@ -122,7 +122,8 @@ never a command-line argument. Each credential chosen is still confirmed; one th
 doz ui
 ```
 
-A store that was never set up opens on the **setup wizard**:
+A store that was never set up opens on the **setup wizard**, in a window over the dashboard (its steps
+across the top; **✕** or **Escape** closes it, asking first once you have chosen something):
 
 1. **Welcome**
 2. **Checks** — updating live; a failing required check stops here, with **Check again**.

@@ -85,7 +85,8 @@
   --scrim: light-dark(rgb(20 20 18 / 0.32), rgb(0 0 0 / 0.6));
 
   /* layers, bottom to top */
-  --z-sticky: 5; --z-menu: 20; --z-toast: 30; --z-overlay: 50; --z-banner-paused: 60; --z-toast-paused: 70;
+  --z-sticky: 5; --z-menu: 20; --z-modal: 25; --z-toast: 30; --z-overlay: 50; --z-banner-paused: 60; --z-toast-paused: 70;
+  --wm-max: 1080px; --wm-h: 860px;   /* the wizards' modal: at most this wide and tall (less the gutters) */
 
   /* motion */
   --dur-1: 120ms; --dur-2: 200ms; --ease: cubic-bezier(0.2, 0, 0, 1);
@@ -1205,51 +1206,74 @@ td.row-acts-cell .row-acts { justify-content: flex-end; flex-wrap: nowrap; }
 @media (max-width: 1100px) { .images-t th:nth-child(6), .images-t td:nth-child(6), .images-t th:nth-child(7), .images-t td:nth-child(7),
   .images-t th:nth-child(10), .images-t td:nth-child(10) { display: none; } }
 
-/* ── 603 step 8: the wizards — a vertical stepper (done: a check and the step's answer · current: the accent
-   circle · later), the step in a card whose actions sit in a footer that never leaves the screen; below 760 px
-   "Step N of M" with a bar. ── */
-.wizard { max-width: 1060px; }
-.wiz { display: grid; grid-template-columns: 210px minmax(0, 1fr); gap: 16px; align-items: start; margin-top: 14px; }
-ol.stepper { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; position: sticky; top: 12px; }
-.stepper li { display: grid; grid-template-columns: 22px minmax(0, 1fr); column-gap: var(--sp-3); align-items: center; min-height: 30px; padding: 3px 8px;
-  border-radius: var(--r-md); color: var(--ink-2); }
+/* ── 603: the wizards (New sandbox, onboarding) — a modal over the page, the full width of the window up to
+   --wm-max; its header (title, ✕, the step strip) and footer (the actions) stay put while the body scrolls.
+   The step strip is one row of equal columns — the circle (done: a check · current: the accent · later: its
+   number) joined by a line, the name under it; below 720 px the circles only, with "Step N of M · name" above. ── */
+.wiz-modal { position: fixed; inset: 0; z-index: var(--z-modal); display: flex; align-items: center; justify-content: center;
+  padding: var(--sp-6) var(--sp-7); }
+.wiz-modal[hidden] { display: none; }
+.wm-scrim { position: absolute; inset: 0; background: var(--scrim); }
+.wm-box { position: relative; display: flex; flex-direction: column; width: min(var(--wm-max), 100%); height: min(var(--wm-h), 100%);
+  background: var(--surface); color: var(--ink); border-radius: var(--r-xl); box-shadow: var(--shadow-3); overflow: hidden; }
+.wm-box:focus { outline: none; }
+.wm-box > .wizard { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.wm-head { flex: none; padding: 14px 20px 0; border-bottom: var(--bw) solid var(--line); display: flex; flex-direction: column; gap: 4px; }
+.wm-title-row { display: flex; align-items: center; gap: var(--sp-3); min-height: var(--ctl-md); }
+.wm-title-row h1 { margin: 0; font-size: var(--fs-2xl); }
+.wm-gap { flex: 1; }
+.wm-sub { margin: 0; color: var(--ink-2); font-size: var(--fs-sm); }
+.wm-steps { display: flex; flex-direction: column; gap: 6px; padding: 10px 0 12px; min-width: 0; }
+ol.stepper { list-style: none; margin: 0; padding: 0; display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); }
+.stepper li { position: relative; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 0 4px;
+  color: var(--ink-2); font-size: var(--fs-sm); line-height: var(--lh-tight); text-align: center; min-width: 0; }
+.stepper li + li::before { content: ""; position: absolute; top: 11px; left: calc(-50% + 16px); right: calc(50% + 16px); height: var(--bw);
+  background: var(--line-strong); }
+.stepper li.done + li::before { background: var(--ok); }
 .stepper li a { color: inherit; text-decoration: none; }
 .stepper li a:hover { text-decoration: underline; }
-.stepper .n { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font: var(--fw-strong) var(--fs-xs)/1 var(--font);
-  box-shadow: inset 0 0 0 1px var(--line-strong); }
+.stepper .s-label { overflow-wrap: anywhere; }
+.stepper .n { width: 22px; height: 22px; flex: none; border-radius: 50%; display: grid; place-items: center; font: var(--fw-strong) var(--fs-xs)/1 var(--font);
+  box-shadow: inset 0 0 0 1px var(--line-strong); background: var(--surface); }
 .stepper .n .icon { width: 13px; height: 13px; stroke-width: 2.5; }
 .stepper li.done { color: var(--ink); }
 .stepper li.done .n { background: var(--ok-tint); color: var(--ok); box-shadow: none; }
-.stepper li.current { background: var(--surface-2); color: var(--ink); font-weight: var(--fw-strong); }
-.stepper li.current .n { background: var(--accent); color: var(--on-accent); box-shadow: none; }
+.stepper li.current { color: var(--ink); font-weight: var(--fw-strong); }
+.stepper li.current .n { background: var(--accent); color: var(--on-accent); box-shadow: 0 0 0 3px var(--accent-tint); }
 .stepper li.problem .n { background: var(--bad-tint); color: var(--bad); box-shadow: none; }
-.stepper li .s-note { grid-column: 2; font-size: var(--fs-sm); font-weight: var(--fw-regular); color: var(--ink-2); margin-top: -2px;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.step-compact { display: none; gap: 6px; }
-.step-compact .line { display: flex; align-items: baseline; gap: var(--sp-3); }
-.wiz-card { background: var(--surface); border: var(--bw) solid var(--line); border-radius: var(--r-lg); display: flex; flex-direction: column; min-width: 0; }
-.wiz-card .w-body { padding: 16px 18px; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.stepper .s-note { display: none; }
+.step-compact { display: none; font-size: var(--fs-sm); color: var(--ink-2); }
+.step-compact b { color: var(--ink); }
+.wm-box .wiz-card { flex: 1; min-height: 0; display: flex; flex-direction: column; min-width: 0; margin: 0; }
+.wiz-card .w-body { flex: 1; min-height: 0; overflow-y: auto; padding: 18px 20px; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.wiz-card .w-body > * { flex: none; }
 .wiz-card .w-body h2 { margin: 0; font-size: var(--fs-xl); }
 .wiz-card .w-body h3 { margin: 6px 0 0; font-size: var(--fs-lg); }
 .wiz-card .w-body > p, .wiz-card .rules-step > p { font-size: var(--fs-lg); line-height: var(--lh-prose); margin: 0; }
 .wiz-card .w-body > p.sub, .wiz-card .w-body > p.muted { font-size: var(--fs-md); }
-.wiz-card .w-foot { position: sticky; bottom: 0; z-index: var(--z-sticky); display: flex; gap: 8px; align-items: center; justify-content: flex-end; flex-wrap: wrap;
-  padding: 10px 18px; margin: 0; border-top: var(--bw) solid var(--line); background: var(--surface); border-radius: 0 0 var(--r-lg) var(--r-lg); }
+.wiz-card .w-foot { flex: none; display: flex; gap: 8px; align-items: center; justify-content: flex-end; flex-wrap: wrap;
+  padding: 10px 20px; margin: 0; border-top: var(--bw) solid var(--line); background: var(--surface); }
 .wiz-card .w-foot .wiz-gap { flex: 1; }
 .wiz-buttons { display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap; margin-top: 6px; }
 .wiz-card .wiz-buttons.w-foot { margin-top: 0; }
 .wiz-body table { margin: 4px 0; }
+@media (max-width: 1000px) { .wiz-modal { padding: var(--sp-5); } }
+@media (max-width: 720px) {
+  .stepper .s-label { display: none; }
+  .step-compact { display: block; }
+}
+@media (max-width: 640px) {
+  .wiz-modal { padding: 0; }
+  .wm-box { width: 100%; height: 100%; border-radius: 0; }
+  .wm-sub { display: none; }
+}
+@media (max-height: 640px) { .wiz-modal { padding-top: var(--sp-3); padding-bottom: var(--sp-3); } .wm-sub { display: none; } }
 details.disclosure > summary { cursor: pointer; color: var(--ink-2); font-size: var(--fs-sm); list-style: none; display: inline-flex; align-items: center; gap: 4px; min-height: var(--ctl-sm); }
 details.disclosure > summary::-webkit-details-marker { display: none; }
 details.disclosure > summary .icon { width: 14px; height: 14px; transform: rotate(-90deg); transition: transform var(--dur-1) var(--ease); }
 details.disclosure[open] > summary .icon { transform: none; }
 details.disclosure > :not(summary) { margin-top: 6px; }
 .nw-review dl.facts { margin: 0; }
-@media (max-width: 760px) {
-  .wiz { grid-template-columns: minmax(0, 1fr); }
-  .wiz ol.stepper { display: none; }
-  .step-compact { display: grid; }
-}
 /* Progress — a 4 px bar (determinate or indeterminate) and the 12 px spinner; a preparation card keeps its shape. */
 .wiz-bar { height: 4px; border-radius: var(--r-xs); background: var(--surface-3); overflow: hidden; position: relative; }
 .wiz-bar > span { display: block; height: 100%; background: var(--accent); border-radius: var(--r-xs); transition: width var(--dur-2) var(--ease); }

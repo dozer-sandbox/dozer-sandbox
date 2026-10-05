@@ -54,7 +54,7 @@ top shows the whole sidebar over the page.
 | **Accounts & keys** | Your Claude accounts: add, verify, make default, remove (under **⋯**), keep-alive. |
 | **Metrics** | How long each kind of action takes (count, median, p90…), filtered by image and time; download as CSV. |
 | **Activity** | What the host is doing, live. |
-| **Onboarding** | The setup wizard, again. |
+| **Onboarding** | The setup wizard, again (in a window over the page, as **New sandbox** is). |
 | **Doctor** | `doz doctor`'s checks, with **Run onboarding again**. |
 | **Settings** | Every setting, its value, default and description, and where its value came from; change it in place. **Filter** finds a setting by its key (`ui.theme`), its name or a word of its description; the strip under it jumps to a section, **Access** first. Folders on your Mac are never typed here: the projects folder has **Choose…**, your Mac's own folder picker; the others are set with `doz config set`. |
 

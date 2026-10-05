@@ -94,14 +94,17 @@ names the shortest way back — in the project folder that is just `doz up`.
 
 ### In the dashboard
 
-**Sandboxes** › **New sandbox** is a wizard with the same ten steps. It starts with the **project
+**Sandboxes** › **New sandbox** is a wizard with the same ten steps, in a window over the dashboard. It starts with the **project
 folder**: a new folder in your projects folder, or a folder you have (type it, or **Choose…** in your
 Mac's folder picker). If that folder has a project file, the wizard starts from it.
 
-- Every step is filled in from your settings (or from the file). The steps are listed down the left,
-  each done one with your answer under it — click one to go back to it. **Back** and **Next** (at the
-  bottom, always in view) move between steps, **Enter** is Next, **Alt+←** / **Alt+→** too, and **Skip
-  to review** jumps to the end keeping every default.
+- Every step is filled in from your settings (or from the file). The steps run across the top, a
+  check on each one done (hover it for your answer) — click one to go back to it. **Back** and **Next**
+  (at the bottom, always in view) move between steps, **Enter** is Next, **Alt+←** / **Alt+→** too, and
+  **Skip to review** jumps to the end keeping every default.
+- **✕** or **Escape** closes the wizard; once you have chosen something it asks first. The browser's
+  **Back** closes it too and keeps your choices — **Forward**, or **New sandbox** again, picks up where
+  you were.
 - **Workspace rules** lists the folder's `.dozignore` / `.dozreadonly` as they are now; add or edit one on
   the Mac and press **Look again**.
 - **Review** lists your choices and says what will happen; **The file, exactly as written** unfolds the
