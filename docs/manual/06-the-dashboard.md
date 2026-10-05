@@ -37,27 +37,68 @@ minutes.
 
 ![The Sandboxes page](images/dashboard-sandboxes.png)
 
+The sidebar groups the pages under four headings — **Sandboxes** (All sandboxes, each sandbox, All
+sessions), **Store** (Images, Resources), **Activity** (Operations, Activity, Metrics) and **Setup**
+(Accounts & keys, Settings, Doctor, Onboarding). The page you are on is the raised entry. In a window
+narrower than about 980 px the sidebar is a column of icons (hover one for its name); the button at its
+top shows the whole sidebar over the page.
+
 | page | what it's for |
 |---|---|
-| **Sandboxes** | Every sandbox: state, RAM held, disk, network, account. **Quick add** (every default, started and opened — also the **+** beside **Sandboxes** in the sidebar; see [The quickest way](05-sandboxes-and-lifecycle.md#the-quickest-way-quick-add-and-doz-new)) and **New sandbox** (a wizard: every choice, step by step, written to the project folder's `doz_project.yaml` — see [Projects](04-projects.md#in-the-dashboard)). Under it in the sidebar, each sandbox has its own entry that opens **its page**. |
-| **A sandbox's page** | A control bar (its state, image, RAM, network and refusals, account, the lifecycle buttons, **Open in Terminal**, **New shell**, **Terminal…**, **Split**, **Duplicate…**, **Save as template…**, **Boot log**) and its **terminals**, with a **details** panel beside them: sessions, restore points, **What the agent can do** and the connection log, keys and account, configuration. |
+| **All sandboxes** | Every sandbox: state, RAM held, disk, network, account. Each row has the one likely next action (**Start**, **Resume**, **Wake** or **Pause**) and **⋯** for the state's other actions; click a row to open the sandbox. **Quick add** (every default, started and opened — also the **+** beside the **Sandboxes** heading in the sidebar; see [The quickest way](05-sandboxes-and-lifecycle.md#the-quickest-way-quick-add-and-doz-new)) and **New sandbox** (a wizard: every choice, step by step, written to the project folder's `doz_project.yaml` — see [Projects](04-projects.md#in-the-dashboard)). Under it in the sidebar, each sandbox has its own entry that opens **its page**; its dot is filled while the sandbox holds memory (running, paused, asleep), a ring when it holds none (hibernated, shut down), a square when it failed. |
+| **A sandbox's page** | See [A sandbox's page](#a-sandboxs-page) below. |
 | **All sessions** | A grid of live, read-only tiles: every session of every running sandbox. Click a tile to open it. |
-| **Images** | The images and templates, each image's agent version, what's out of date (**Rebuild**), disk shared and own, and the **Lineage** tree. |
-| **Resources** | Every byte Dozer uses, and deleting what can go. See [Resources and disk space](13-resources-and-disk-space.md). |
+| **Images** | The images and templates, each image's agent version, what's out of date (**Rebuild** — **Remove…** is under **⋯**), disk shared and own, and the **Lineage** tree. |
+| **Resources** | Every byte Dozer uses, and deleting what can go. A strip under the total jumps to each group (with its size); a group's heading folds it. See [Resources and disk space](13-resources-and-disk-space.md). |
 | **Operations** | Every action the dashboard (or a preparation) started: live progress, time taken, result. A spinner shows while any runs, and a red dot when one failed since you last looked. |
-| **Accounts & keys** | Your Claude accounts: add, verify, make default, remove, keep-alive. |
+| **Accounts & keys** | Your Claude accounts: add, verify, make default, remove (under **⋯**), keep-alive. |
 | **Metrics** | How long each kind of action takes (count, median, p90…), filtered by image and time; download as CSV. |
 | **Activity** | What the host is doing, live. |
 | **Onboarding** | The setup wizard, again. |
 | **Doctor** | `doz doctor`'s checks, with **Run onboarding again**. |
-| **Settings** | Every setting, its value, default and description, and where its value came from; change it in place. Folders on your Mac are never typed here: the projects folder has **Choose…**, your Mac's own folder picker; the others are set with `doz config set`. |
+| **Settings** | Every setting, its value, default and description, and where its value came from; change it in place. **Filter** finds a setting by its key (`ui.theme`), its name or a word of its description; the strip under it jumps to a section, **Access** first. Folders on your Mac are never typed here: the projects folder has **Choose…**, your Mac's own folder picker; the others are set with `doz config set`. |
+
+### A sandbox's page
 
 ![A sandbox's page](images/sandbox-page.png)
+
+- **The title row**: the name, its state, and labelled facts — **Image**, **RAM**, **Network** (with
+  how many connections were refused; click it for the **Network** tab), **Account** — and *isolated*
+  or *rules* when they apply.
+- **The toolbar**: the state's actions as one group — led, for a sandbox that is shut down, paused,
+  asleep or hibernated, by the action that brings it back (**Start**, **Resume**, **Wake**); **Shut
+  down** apart, in red; **⋯** for **Duplicate…**, **Save as template…**, **Boot log**, then **Reset…**
+  and **Remove…**. At its right: what is under way (or how the last action ended), and the button that
+  shows or hides the details.
+- **The terminals**, whose tab strip carries what makes or arranges them: **New shell** (its **▾**:
+  **Terminal…**, **Run detached…**), **Split** (its **▾** picks what a split adds) and **Open in
+  Terminal**.
+- **The details**, beside them in tabs: **Overview** (RAM, disk, CPUs, the attach command, the
+  workspace and its rules, its sessions and last restore point), **Sessions**, **Points** (restore
+  points), **Network** (**What the agent can do**, the rules, the connection log), **Keys** (keys and
+  account) and **Config** (its configuration and the agent's environment prompt). The tab you chose is
+  kept for each sandbox while the page is open; drag the details' left edge to widen them (320–560 px).
+  Below about 760 px they move under the terminals.
 
 ### Safety catches
 
 **Reset**, **Remove**, **Revert** and every delete ask you to type the name first. **Shut down**
 asks with a plain confirmation. Clicking an action again while it runs does nothing more.
+
+### When something fails
+
+A failure is said where you started it, and stays until you dismiss it or it is put right: in the
+dialog (which stays open), on the sandbox's toolbar or its row on **All sandboxes**, in the step of a
+wizard, in the setting's row — or, when it has no place on the page you are on, at the top of the page.
+The brief messages at the bottom right only ever say that something worked. **Operations** keeps
+every action's result either way.
+
+### Keyboard
+
+Every control shows a ring when it has the keyboard's focus. Arrow keys move within tabs, segmented
+choices and menus; **Escape** closes a menu or a dialog. Three page shortcuts: **g** then **s** opens
+**All sandboxes**, **/** the Settings filter, **?** the list of shortcuts. None of them works while a
+terminal has the focus — there every key is the terminal's.
 
 ## The host, watched
 
@@ -83,9 +124,10 @@ new link: run `doz ui link`.
 
 ## Terminals in the browser
 
-On a sandbox's page, **Open** attaches to a session, **Watch** shows it read-only, **New shell**
-starts a new shell (`shell-2`, `shell-3`, …) and **Terminal…** attaches to any session or starts one
-running a command. Terminals are tabs; **Split** shows two side by side. Closing a tab only closes the
+On a sandbox's page, a session's **Open** (in the empty terminal area, or the details' **Sessions** tab)
+attaches to it and **Watch** (its **⋯**) shows it read-only; on the terminals' tab strip **New shell**
+starts a new shell (`shell-2`, `shell-3`, …) and its **▾** › **Terminal…** starts a new session — a shell
+or one running a command. Terminals are tabs; **Split** shows two side by side. Closing a tab only closes the
 view — the session keeps running. Each tab is titled like `1 · my-app · claude · 14:05` (the setting
 `ui.terminal_title`). Details, including the mouse, paste and the clipboard, in
 [Terminals and sessions](07-terminals-and-sessions.md#in-the-browser).
@@ -111,7 +153,7 @@ dashboard can switch this off but never on.
 | `ui.terminal_font_size` | `13` | Font size of a browser terminal (9–32). |
 | `ui.terminal_title` | `{sandbox} · {session} · {time}` | A terminal tab's title (and your terminal's, in `doz attach`). |
 | `ui.split_default` | `shell` | What **Split** opens: `shell`, `watch`, `attach` or `dialog`. |
-| `ui.details_open` | `true` | A sandbox's page shows its details panel. |
+| `ui.details_open` | `true` | A sandbox's page shows its details (the tabs beside its terminals). |
 | `ui.boot_view_on_start` | `true` | **Start** opens a terminal on the boot. |
 | `ui.confirm_shutdown` | `true` | **Shut down** asks first. |
 | `ui.grid_live_tiles` | `8` | All sessions: at most this many tiles live at once (1–12). |

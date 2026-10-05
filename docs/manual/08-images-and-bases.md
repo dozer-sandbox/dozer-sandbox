@@ -109,7 +109,8 @@ doz image bake claude-code     # prepare (or rebuild) now rather than at the fir
 doz image rm python-pi         # remove an image's prepared disk (sandboxes made from it keep working)
 ```
 
-In the dashboard, **Images** shows the same with **Bake**, **Rebuild** and **Remove**, each image's
+In the dashboard, **Images** shows the same with **Bake** or **Rebuild** on each row and **Remove…**
+under its **⋯**, each image's
 own and shared disk space as a bar, and **Lineage**, the tree.
 
 ![The Images page](images/images.png)

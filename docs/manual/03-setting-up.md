@@ -148,7 +148,7 @@ A store that was never set up opens on the **setup wizard**:
 
 ![The wizard's checks](images/wizard-checks.png)
 
-You can run the wizard again at any time: **Onboarding** in the sidebar (with a dot beside it until
+You can run the wizard again at any time: **Onboarding** under **Setup** in the sidebar (with a dot beside it until
 the store is set up), or **Doctor** › **Run onboarding again**.
 
 ## Checking access again

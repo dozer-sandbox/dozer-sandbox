@@ -591,7 +591,7 @@ function workspaceChooser({ nameInput = null, image = () => null, name = null, i
                             autocomplete: 'off', spellcheck: 'false', 'aria-label': 'Workspace folder' });
   path.value = initialPath;
   const note = h('small', { class: 'ws-note', 'data-ws-note': '', 'aria-live': 'polite' });
-  const choose = h('button', { type: 'button', class: 'btn small', 'data-ws-choose': '', title: 'Opens the Mac’s folder picker (New Folder allowed)' },
+  const choose = h('button', { type: 'button', class: 'btn sm', 'data-ws-choose': '', title: 'Opens the Mac’s folder picker (New Folder allowed)' },
     withIcon('folder', 'Choose…'));
   const segs = {};
   const seg = (m, label, icon) => (segs[m] = h('button', { type: 'button', class: 'seg', 'data-ws-seg': m, on: { click: () => setMode(m) } }, withIcon(icon, label)));
@@ -734,7 +734,7 @@ function imagePicker({ images = [], bases = null, value = 'claude-code', dockerf
   const dfPath = h('input', { type: 'text', name: 'dockerfile', 'data-dockerfile-path': '', placeholder: '~/code/app/Dockerfile', autocomplete: 'off',
                               spellcheck: 'false', 'aria-label': 'Dockerfile' });
   dfPath.value = dockerfile;
-  const dfChoose = h('button', { type: 'button', class: 'btn small', 'data-dockerfile-choose': '', title: 'Opens the Mac’s file picker' },
+  const dfChoose = h('button', { type: 'button', class: 'btn sm', 'data-dockerfile-choose': '', title: 'Opens the Mac’s file picker' },
     withIcon('folder', 'Choose Dockerfile…'));
   const policyNote = callout('warn', { compact: true, cls: 'df-policy', icon: 'shield', role: 'note', attrs: { 'data-dockerfile-policy': '' }, body: bases ? bases.outsidePolicy : '' });
   const builderBox = h('div', { class: 'df-builder', 'data-builder': '' });
@@ -2936,14 +2936,14 @@ function sandboxParts(name, d, net, accounts) {
         h('span', { class: 'nm' }, s.name), s.name === d.defaultSession ? h('span', { class: 'tag' }, 'default') : null),
       h('div', { class: 'sub2' }, s.saved ? savedState(s) : s.ended ? 'ended (exit ' + s.exitCode + ')' : 'running' + (s.cols ? ' · ' + s.cols + '×' + s.rows : '') + ' · ' + plural(s.clients, 'viewer', 'viewers'))),
     h('td', { class: 'mono trunc', title: s.command }, s.command),
-    h('td', { class: 'row-acts' }, s.saved
+    h('td', { class: 'row-acts-cell' }, h('div', { class: 'row-acts' }, s.saved
       ? btn('Show', () => openSavedTerminal(name, s), { small: true, quiet: true, icon: 'eye', title: 'Its last saved screen in a tab (read-only; it goes live when the sandbox runs)' })
       : s.ended ? null : [
         btn('Open', () => openTerminal(name, s.name, 'interactive'), { small: true, quiet: true, title: 'A terminal on this session, here in the browser' }),
         moreMenu('More for ' + s.name, [
           { label: 'Watch', icon: 'eye', desc: 'Read-only: nothing you type reaches it, it never resizes', onSelect: () => openTerminal(name, s.name, 'watch') },
           { label: 'Open in Terminal', icon: 'square-terminal', desc: 'In your terminal app (doz attach)', disabled: !!whyNot, why: whyNot, onSelect: () => openInTerminal(name, s.name) },
-        ], { small: true, onClose: sbxMenuClosed }).el])));
+        ], { small: true, onClose: sbxMenuClosed }).el]))));
   const pointMenu = (p) => moreMenu('More for ' + p.name, [
     { label: 'Fork…', icon: 'git-fork', desc: 'A new sandbox whose disks are this point’s', onSelect: () => dialog('Fork ' + p.name, 'A new sandbox whose disks are this point’s (it cold-boots on start).',
       [{ name: 'newName', label: 'New sandbox name', required: true }], 'Fork', async (v) => { await actOrThrow({ action: 'point-fork', sandbox: name, point: p.id, newName: v.newName }); }) },
@@ -2957,15 +2957,15 @@ function sandboxParts(name, d, net, accounts) {
     h('td', null, h('div', { class: 'nm' }, p.name), h('div', { class: 'sub2 mono trunc', title: p.id }, p.id)),
     h('td', { title: full(p.createdAt) }, when(p.createdAt), h('div', { class: 'sub2' }, p.takenWhile + (p.automatic ? ' (auto)' : '')),
       p.needsFsck ? h('div', { class: 'st-warn sub2' }, 'e2fsck on next boot') : null, p.note ? h('div', { class: 'sub2' }, p.note) : null),
-    h('td', { class: 'row-acts' },
+    h('td', { class: 'row-acts-cell' }, h('div', { class: 'row-acts' },
       btn('Revert', () => confirmAction('Revert ' + name, 'Revert to “' + p.name + '”: it shuts down (running programs end); the current disk is kept as a restore point first. Start boots it.', name,
         { action: 'point-revert', sandbox: name, point: p.id }), { small: true, quiet: true, danger: true }),
-      pointMenu(p).el)));
+      pointMenu(p).el))));
   const creds = d.credentials.map((c) => h('tr', null,
-    h('td', null, c.binding, h('div', { class: 'sub2' }, c.hosts.join(', '))),
-    h('td', null, c.set ? 'set' : 'not set', h('div', { class: 'sub2' }, [c.source || '—', c.account ? 'account ' + c.account : null].filter(Boolean).join(' · '))),
+    h('td', null, c.binding, h('div', { class: 'sub2 trunc', title: c.hosts.join(', ') }, c.hosts.join(', '))),
+    h('td', null, c.set ? 'set' : 'not set', ((t) => h('div', { class: 'sub2 trunc', title: t }, t))([c.source || '—', c.account ? 'account ' + c.account : null].filter(Boolean).join(' · '))),
     h('td', null, c.state || '—', c.expiresAt ? h('div', { class: 'sub2' }, 'expires ' + when(c.expiresAt)) : null, c.policy ? h('div', { class: 'sub2' }, 'policy ' + c.policy) : null),
-    h('td', { class: 'row-acts' }, c.set && c.source && !c.source.startsWith('account:')
+    h('td', { class: 'row-acts-cell' }, c.set && c.source && !c.source.startsWith('account:')
       ? btn('Remove', () => act({ action: 'key-rm', sandbox: name, binding: c.binding }), { small: true, quiet: true }) : null)));
   const foreign = d.credentials.flatMap((c) => c.foreign).map((f) => h('tr', null,
     h('td', null, f.kind + (f.matches ? ' (= ' + f.matches + ')' : ''), h('div', { class: 'sub2 mono' }, f.prefix + '…')),
@@ -4005,7 +4005,7 @@ async function viewMetrics() {
   for (const el of [imageSel, daysSel, steps]) {
     el.addEventListener('change', () => { state.metricsFilter = { image: imageSel.value, days: daysSel.value, steps: steps.checked }; refresh(false); });
   }
-  const csv = h('a', { class: 'btn small', href: '/api/v1/metrics.csv?' + qs, download: 'dozer-metrics.csv' }, withIcon('download', 'Download CSV'));
+  const csv = h('a', { class: 'btn sm', href: '/api/v1/metrics.csv?' + qs, download: 'dozer-metrics.csv' }, withIcon('download', 'Download CSV'));
   const toolbar = h('div', { class: 'toolbar' }, imageSel, daysSel, h('label', null, steps, ' steps inside actions'), csv);
   if (!m.available) return h('div', null, h('h1', null, 'Metrics'), toolbar, panel(null, 'No metrics yet — the host records every action it times.'));
   const max = Math.max(1, ...m.summary.map((r) => r.p90Ms || r.medianMs || 0));
@@ -4968,7 +4968,7 @@ function terminalElements(t) {
   const glyph = h('div', { class: 'tc-glyph', hidden: true });
   const head = h('div', { class: 'tc-head' });
   const detail = h('div', { class: 'tc-detail' });
-  const action = h('button', { type: 'button', class: 'btn small tc-act' });
+  const action = h('button', { type: 'button', class: 'btn sm tc-act' });
   action.addEventListener('click', (ev) => { ev.stopPropagation(); coverAction(t); });
   const cover = h('div', { class: 'term-cover', role: 'status', 'aria-live': 'polite' }, h('div', { class: 'tc-box' }, spin, glyph, head, detail, action));
   const wrap = h('div', { class: 'term-wrap', 'data-terminal': String(t.id) }, host, cover, note);

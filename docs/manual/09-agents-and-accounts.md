@@ -63,8 +63,9 @@ your Mac once, and every sandbox can use your subscription with nothing to paste
 ## Accounts — in the dashboard
 
 **Accounts & keys** lists your accounts with their state and expiry: **Add account** (a masked field
-for a key or token, with the plan for a token), **Verify**, **Make default**, **Remove**, and
-keep-alive on or off. A sandbox's page shows its account, with **Account…** to change it; New sandbox
+for a key or token, with the plan for a token), **Verify** (or **Make default**) on each row with the
+rest — **Remove…** too — under its **⋯**, and keep-alive on or off. A sandbox's page shows its account,
+with **Account…** (the details' **Keys** tab) to change it; New sandbox
 offers only the accounts its agent can use.
 
 ## How the Mac login stays fresh

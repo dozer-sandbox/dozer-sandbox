@@ -61,7 +61,7 @@ doz create my-app --allow install:rust,site:api.example.com,-error-reports
 
 ## Change it — in the dashboard
 
-On a sandbox's page, **Details** › **What the agent can do** shows the presets (**Locked** ·
+On a sandbox's page, the details' **Network** tab › **What the agent can do** shows the presets (**Locked** ·
 **Standard** · **Open**) and the permissions as switches, with its sites below. Flip a switch and it
 applies at once; each permission's **hosts** unfold beneath it. When the agent was refused something, a line
 says so — "The agent tried to install Python packages (PyPI)" — with **Allow** (or **Allow this
