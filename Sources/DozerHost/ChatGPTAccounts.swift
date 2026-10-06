@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import DozerKit
 
@@ -27,8 +28,9 @@ public enum OpenAISeam {
     }
 }
 
-/// One ChatGPT account's sign-in in the host: the tokens (from the keychain), their renewal, and what
-/// the proxy needs — the access token for a request, Codex's renewal answer, the guest's id_token.
+/// One ChatGPT account's sign-in in the host: what the keychain keeps (`ChatGPTRecord`: the refresh token, the
+/// kept claims), the access token in MEMORY only, their renewal, and what the proxy needs — the access token for
+/// a request, Codex's renewal answer, the guest's id_token.
 public final class ChatGPTSession: @unchecked Sendable {
     public enum State: Equatable, Sendable {
         case unknown, ok
@@ -62,12 +64,16 @@ public final class ChatGPTSession: @unchecked Sendable {
     private let lock = NSLock()
     /// Held while a refresh runs: one at a time (a second caller waits, then sees the renewed tokens).
     private let refreshing = NSLock()
-    private var tokens: ChatGPTTokens?
+    private var record: ChatGPTRecord?
+    /// The access token — memory only, never written anywhere.
+    private var access: String?
     private var _state: State = .unknown
     private var stale = false
     private var lastFailure: Date?
     private var _generation = 0
     private var _lastRefresh: Date?
+    /// The keychain could not keep the rotated refresh token (the item was removed rather than left stale).
+    private var _notKept = false
     /// Notes for the host log / viewers (never a token).
     public var onNote: (@Sendable (String) -> Void)?
 
@@ -83,20 +89,41 @@ public final class ChatGPTSession: @unchecked Sendable {
     /// Changes whenever the tokens do (the vault drops its cached read at once).
     public var generation: Int { lock.withLock { _generation } }
     public var lastRefresh: Date? { lock.withLock { _lastRefresh } }
-    public var accessExpiry: Date? { lock.withLock { tokens.flatMap { OpenAIAccess.expiry($0.accessToken) } } }
-    public var accountID: String? { lock.withLock { tokens?.accountID } }
-    /// The id_token the GUEST gets: the real claims, not the signature.
-    public var guestIDToken: String? { lock.withLock { tokens.flatMap { OpenAIAccess.guestIDToken($0.idToken) } } }
+    public var accessExpiry: Date? { lock.withLock { access.flatMap { OpenAIAccess.expiry($0) } } }
+    public var accountID: String? { lock.withLock { record?.accountID } }
+    public var notKept: Bool { lock.withLock { _notKept } }
+    /// The id_token the GUEST gets: the kept claims, not a signature.
+    public var guestIDToken: String? { lock.withLock { record?.idToken } }
 
-    /// (Re-)read the keychain item. Called when the account is applied and after it was added again.
+    /// A sign-in just made (`account add`): the access token in memory, the record as kept.
+    public func adopt(_ t: ChatGPTTokens) {
+        lock.withLock {
+            record = ChatGPTRecord(t)
+            access = t.accessToken
+            _state = .ok
+            stale = false
+            lastFailure = nil
+            _notKept = false
+            _generation += 1
+        }
+    }
+
+    /// (Re-)read the keychain item. The access token in memory is kept when the refresh token is the same
+    /// (a re-read changes nothing); otherwise the next use renews it.
     public func load() {
-        let r = keychain.read(service: service, account: Keychain.user)
+        let r = KeychainChunks.read(keychain, service: service)
         lock.withLock {
             switch r {
             case .found(let s):
-                if let t = ChatGPTTokens.parse(s) { tokens = t; _state = .ok } else { tokens = nil; _state = .signedOut("the keychain item holds no sign-in") }
-            case .locked: _state = tokens == nil ? .locked : _state
-            case .absent, .failed: tokens = nil; _state = .missing
+                if let rec = ChatGPTRecord.parse(s) {
+                    if rec.refreshToken != record?.refreshToken { access = nil }
+                    record = rec
+                    _state = .ok
+                } else { record = nil; access = nil; _state = .signedOut("the keychain item holds no sign-in") }
+            case .locked: if record == nil { _state = .locked }
+            case .absent, .failed:
+                // Kept in memory after a failed rotation write: still usable until the host stops.
+                if !_notKept { record = nil; access = nil; _state = .missing }
             }
             stale = false
             lastFailure = nil
@@ -111,56 +138,64 @@ public final class ChatGPTSession: @unchecked Sendable {
     public func problem(_ name: String? = nil) -> String? {
         let n = name ?? account
         switch state {
-        case .unknown, .ok, .unavailable: return lock.withLock { tokens == nil } ? "the ChatGPT sign-in of account \(n) is not loaded" : nil
+        case .unknown, .ok, .unavailable: return lock.withLock { record == nil } ? "the ChatGPT sign-in of account \(n) is not loaded" : nil
         case .missing: return "the keychain item \(service) of account \(n) is missing — sign in again on this Mac: doz account add \(n) --chatgpt --force"
         case .locked: return "the login keychain is locked — unlock it on this Mac (account \(n))"
         case .signedOut(let why): return "the ChatGPT sign-in of account \(n) has ended (\(why)) — sign in again on this Mac: doz account add \(n) --chatgpt --force"
         }
     }
 
-    /// Renew when the access token is about to expire or was refused (`force`: now). Blocking — it runs on a
-    /// proxy thread or a detached task, never on the host actor. Returns the problem, nil when usable.
+    /// Renew when there is no access token (a new host), it is about to expire, or it was refused (`force`: now).
+    /// Blocking — a proxy thread or a detached task, never the host actor. Returns the problem, nil when usable.
     @discardableResult
     public func ensureFresh(now: Date = Date(), force: Bool = false) -> String? {
         func needs() -> Bool {
             lock.withLock {
-                guard let t = tokens, case .ok = _state else {
-                    if case .unavailable = _state, tokens != nil { return lastFailure.map { now.timeIntervalSince($0) >= Self.retryAfter } ?? true }
-                    return false
+                guard record != nil else { return false }
+                switch _state {
+                case .ok: break
+                case .unavailable: return lastFailure.map { now.timeIntervalSince($0) >= Self.retryAfter } ?? true
+                default: return false
                 }
+                guard let a = access else { return true }
                 if force || stale { return true }
-                guard let exp = OpenAIAccess.expiry(t.accessToken) else { return false }
+                guard let exp = OpenAIAccess.expiry(a) else { return false }
                 return exp.timeIntervalSince(now) < Self.refreshWindow
             }
         }
         guard needs() else { return problem() }
         refreshing.lock()
         defer { refreshing.unlock() }
-        guard needs(), let current = lock.withLock({ tokens }) else { return problem() }   // another caller renewed it meanwhile
+        guard needs(), let rec = lock.withLock({ record }) else { return problem() }   // another caller renewed it meanwhile
+        let current = ChatGPTTokens(idToken: rec.idToken, accessToken: lock.withLock { access } ?? "", refreshToken: rec.refreshToken, accountID: rec.accountID)
         switch refresher(current) {
         case .renewed(let n):
-            // The ROTATED refresh token is kept before the new access token is used: the old one is spent.
-            var kept = true
-            do { try keychain.write(service: service, account: Keychain.user, secret: n.json) } catch { kept = false }
+            // The ROTATED refresh token is kept before the new access token is used: the old one is spent. A
+            // write that fails leaves NO item (never a spent token to try later): the sign-in then lives in this
+            // host's memory only, and the next host asks to sign in again.
+            let kept = ChatGPTRecord(n)
+            var ok = true
+            do { try KeychainChunks.write(keychain, service: service, secret: kept.json) } catch { ok = false; KeychainChunks.remove(keychain, service: service) }
             lock.withLock {
-                tokens = n
+                record = kept
+                access = n.accessToken
                 _state = .ok
                 stale = false
                 lastFailure = nil
                 _lastRefresh = now
+                _notKept = !ok
                 _generation += 1
             }
             onNote?("the ChatGPT sign-in of account \(account) was renewed on this Mac"
-                    + (kept ? "" : " — but the keychain could not keep the new refresh token (it is held in memory until the host stops)"))
+                    + (ok ? "" : " — but the keychain could not keep the new refresh token: it is held in memory until the host stops (then: doz account add \(account) --chatgpt --force)"))
             return nil
         case .signedOut(let why):
-            lock.withLock { _state = .signedOut(why); _generation += 1 }
+            lock.withLock { _state = .signedOut(why); access = nil; _generation += 1 }
             onNote?("the ChatGPT sign-in of account \(account) has ended (\(why)) — doz account add \(account) --chatgpt --force")
             return problem()
         case .unavailable(let why):
             lock.withLock { _state = .unavailable(why); lastFailure = now }
             onNote?("could not renew the ChatGPT sign-in of account \(account) (\(why)) — retrying on the next request")
-            // An access token that has not expired still works.
             if let exp = accessExpiry, exp > now { return nil }
             return "the ChatGPT sign-in of account \(account) could not be renewed (\(why)) — check this Mac's network; Dozer tries again on the next request"
         }
@@ -169,15 +204,15 @@ public final class ChatGPTSession: @unchecked Sendable {
     /// The access token for a request now (the vault's provider read): renewed first when needed.
     public func read(now: Date = Date()) -> CredentialVault.SecretRead {
         if let p = ensureFresh(now: now) { return (nil, "Dozer: " + p) }
-        guard let t = lock.withLock({ tokens }) else { return (nil, "Dozer: " + (problem() ?? "no ChatGPT sign-in")) }
-        if let exp = OpenAIAccess.expiry(t.accessToken), exp <= now {
+        guard let a = lock.withLock({ access }) else { return (nil, "Dozer: " + (problem() ?? "no ChatGPT sign-in")) }
+        if let exp = OpenAIAccess.expiry(a), exp <= now {
             return (nil, "Dozer: the ChatGPT sign-in of account \(account) expired and could not be renewed — check this Mac's network")
         }
-        return (t.accessToken, nil)
+        return (a, nil)
     }
 
     /// The proxy's answer to Codex's own renewal (its refresh token is a placeholder): renew on the Mac if
-    /// needed, then the same placeholder back with the id_token's claims — or 401 with why.
+    /// needed, then the same placeholder back with the kept claims — or 401 with why.
     public func renewalAnswer(placeholder: String, now: Date = Date()) -> [UInt8] {
         let p = ensureFresh(now: now)
         return OpenAIAccess.refreshAnswer(placeholder: placeholder, guestIDToken: guestIDToken, problem: p)
@@ -309,4 +344,112 @@ extension HostCore {
             note(m.name, "could not write Codex's credentials: \(error.localizedDescription)")
         }
     }
+}
+
+// MARK: - what the keychain keeps of a sign-in (599i rc.2)
+
+/// A secret longer than one keychain item can hold (`Keychain.maximumSecretBytes`), kept as numbered items:
+/// `SERVICE#1…#n` hold the parts and `SERVICE` itself a header `doz-chunks:n:<sha256 hex>`, written LAST — so a
+/// reader never takes a half-written set for a secret (the digest must match the joined parts). A secret that
+/// fits is one item, as before. Any failed write removes everything it may have touched: never a partial secret.
+public enum KeychainChunks {
+    public static let headerPrefix = "doz-chunks:"
+    public static let maximumParts = 8
+
+    static func part(_ service: String, _ i: Int) -> String { "\(service)#\(i)" }
+
+    static func digest(_ s: String) -> String { SHA256Hex.of(s) }
+
+    public static func write(_ k: KeychainAccess, service: String, secret: String) throws {
+        let bytes = Array(secret.utf8)
+        if bytes.count <= Keychain.maximumSecretBytes, !secret.hasPrefix(headerPrefix) {
+            do { try k.write(service: service, account: Keychain.user, secret: secret) } catch { remove(k, service: service); throw error }
+            for i in 1...maximumParts { try? k.delete(service: part(service, i), account: Keychain.user) }
+            return
+        }
+        let size = Keychain.maximumSecretBytes
+        let n = (bytes.count + size - 1) / size
+        guard n <= maximumParts else {
+            throw HostError(.invalid, "the secret for \(service) is \(bytes.count) bytes — more than \(maximumParts) keychain items can hold; nothing written")
+        }
+        do {
+            for i in 0..<n {
+                let slice = String(decoding: bytes[(i * size)..<min(bytes.count, (i + 1) * size)], as: UTF8.self)
+                try k.write(service: part(service, i + 1), account: Keychain.user, secret: slice)
+            }
+            for i in (n + 1)...maximumParts where n < maximumParts { try? k.delete(service: part(service, i), account: Keychain.user) }
+            try k.write(service: service, account: Keychain.user, secret: "\(headerPrefix)\(n):\(digest(secret))")
+        } catch {
+            remove(k, service: service)
+            throw error
+        }
+    }
+
+    public static func read(_ k: KeychainAccess, service: String) -> KeychainRead {
+        let head = k.read(service: service, account: Keychain.user)
+        guard case .found(let h) = head, h.hasPrefix(headerPrefix) else { return head }
+        let fields = h.dropFirst(headerPrefix.count).split(separator: ":")
+        guard fields.count == 2, let n = Int(fields[0]), (1...maximumParts).contains(n) else { return .failed }
+        var joined = ""
+        for i in 1...n {
+            switch k.read(service: part(service, i), account: Keychain.user) {
+            case .found(let p): joined += p
+            case .locked: return .locked
+            default: return .failed
+            }
+        }
+        return digest(joined) == String(fields[1]) ? .found(joined) : .failed
+    }
+
+    /// The item and every part.
+    public static func remove(_ k: KeychainAccess, service: String) {
+        try? k.delete(service: service, account: Keychain.user)
+        for i in 1...maximumParts { try? k.delete(service: part(service, i), account: Keychain.user) }
+    }
+}
+
+enum SHA256Hex {
+    static func of(_ s: String) -> String { SHA256.hash(data: Data(s.utf8)).map { String(format: "%02x", $0) }.joined() }
+}
+
+/// What Dozer KEEPS of a ChatGPT sign-in (`doz-chatgpt:NAME`): the refresh token (it rotates — written after
+/// every renewal), the account id, and the few id_token claims the guest's auth.json needs. The access token
+/// lives only in the host's memory (renewed on a host's first use and near expiry); the signed id_token is
+/// never kept. Small by design (a real sign-in's tokens are ~4 KB; this is a few hundred bytes plus the
+/// refresh token) — and chunked by `KeychainChunks` if a refresh token is ever long.
+public struct ChatGPTRecord: Codable, Equatable, Sendable, CustomStringConvertible {
+    public var version = 2
+    public var refreshToken: String
+    public var accountID: String?
+    /// The kept claims as base64url JSON (`OpenAIAccess.keptClaims`).
+    public var claims: String
+
+    enum CodingKeys: String, CodingKey { case version = "v", refreshToken = "refresh_token", accountID = "account_id", claims }
+
+    public init(refreshToken: String, accountID: String?, claims: String) {
+        self.refreshToken = refreshToken
+        self.accountID = accountID
+        self.claims = claims
+    }
+
+    public init(_ t: ChatGPTTokens) {
+        self.init(refreshToken: t.refreshToken, accountID: t.accountID, claims: OpenAIAccess.keptClaims(idToken: t.idToken))
+    }
+
+    public var description: String { "ChatGPTRecord(<redacted>, account \(accountID ?? "?"))" }
+
+    public var json: String {
+        let enc = JSONEncoder()
+        enc.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        return (try? enc.encode(self)).map { String(decoding: $0, as: UTF8.self) } ?? ""
+    }
+
+    /// The kept record — or (an rc.1 item) the whole tokens, slimmed.
+    public static func parse(_ s: String) -> ChatGPTRecord? {
+        if let d = s.data(using: .utf8), let r = try? JSONDecoder().decode(ChatGPTRecord.self, from: d), !r.refreshToken.isEmpty { return r }
+        return ChatGPTTokens.parse(s).map(ChatGPTRecord.init)
+    }
+
+    /// An id_token carrying only the kept claims (an unsigned stand-in — for the guest and as a refresh's previous).
+    public var idToken: String { OpenAIAccess.idToken(claims: claims) }
 }

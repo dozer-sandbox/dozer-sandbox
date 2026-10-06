@@ -26,7 +26,11 @@ final class FakeKeychain: KeychainAccess, @unchecked Sendable {
         if lockedServices.contains(service) { return .locked }
         return items[service].map(KeychainRead.found) ?? .absent
     }
+    /// 599i: the real keychain's per-item limit — a too-long secret fails here as on a Mac.
+    var failWrites: Set<String> = []
     func write(service: String, account: String, secret: String) throws {
+        try Keychain.checkSecretSize(secret, service: service)
+        if lock.withLock({ failWrites.contains(service) }) { throw HostError(.failed, "could not write the keychain item \(service)") }
         lock.lock(); items[service] = secret; _writes.append(service); lock.unlock()
     }
     func delete(service: String, account: String) throws { lock.lock(); items[service] = nil; lock.unlock() }

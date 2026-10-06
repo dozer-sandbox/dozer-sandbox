@@ -13,10 +13,17 @@ func fakeJWT(_ payload: [String: Any], signature: String = "c2ln") -> String {
     return "\(h).\(p).\(signature)"
 }
 
+/// Realistically sized (599i rc.2: a real sign-in is ~4 KB — ~2 KB access token, ~1 KB id token with its
+/// organizations, a long signature), so a store that cannot hold it fails here as it did on the owner's Mac.
 func fakeChatGPTTokens(access: String = "ACCESS-1", refresh: String = "RT-1", expiresIn: TimeInterval = 3600, now: Date = Date()) -> ChatGPTTokens {
-    let id = fakeJWT(["email": "person@example.invalid", "https://api.openai.com/auth": ["chatgpt_plan_type": "pro", "chatgpt_account_id": "acct-9"]],
-                     signature: "UkVBTC1JRC1TSUc")
-    let at = fakeJWT(["exp": Int(now.addingTimeInterval(expiresIn).timeIntervalSince1970), "jti": access])
+    let sig = String(repeating: "S", count: 342)
+    let orgs = (0..<6).map { ["id": "org-\($0)-" + String(repeating: "o", count: 24), "title": "Org \($0)", "role": "owner", "is_default": $0 == 0] as [String: Any] }
+    let id = fakeJWT(["email": "person@example.invalid", "exp": Int(now.addingTimeInterval(3600).timeIntervalSince1970),
+                      "https://api.openai.com/auth": ["chatgpt_plan_type": "pro", "chatgpt_account_id": "acct-9", "chatgpt_user_id": "user-9",
+                                                      "organizations": orgs]],
+                     signature: "UkVBTC1JRC1TSUc" + sig)
+    let at = fakeJWT(["exp": Int(now.addingTimeInterval(expiresIn).timeIntervalSince1970), "jti": access, "scp": ["openid", "profile", "email", "offline_access"],
+                      "pad": String(repeating: "p", count: 1200)], signature: sig)
     return ChatGPTTokens(idToken: id, accessToken: at, refreshToken: refresh)
 }
 
@@ -110,8 +117,14 @@ final class CodexHostTests: XCTestCase {
         let t = fakeChatGPTTokens()
         var m = await add(c, "plan", .chatgpt, t.json)
         XCTAssertNil(m.error, m.error?.message ?? "")
-        XCTAssertEqual(keychain.writes, ["doz-chatgpt:plan"])
-        XCTAssertEqual(ChatGPTTokens.parse(keychain.get("doz-chatgpt:plan") ?? ""), t)
+        XCTAssertGreaterThan(t.json.utf8.count, 3500, "a realistic sign-in is ~4 KB — more than one item holds")
+        XCTAssertEqual(keychain.writes, ["doz-chatgpt:plan"], "only what must persist — one item")
+        let kept = try XCTUnwrap(ChatGPTRecord.parse(keychain.get("doz-chatgpt:plan") ?? ""))
+        XCTAssertEqual(kept.refreshToken, "RT-1")
+        XCTAssertEqual(kept.accountID, "acct-9")
+        XCTAssertFalse((keychain.get("doz-chatgpt:plan") ?? "").contains(t.accessToken), "the access token is never kept")
+        XCTAssertFalse((keychain.get("doz-chatgpt:plan") ?? "").contains("UkVBTC1JRC1TSUc"), "nor the id_token's signature")
+        XCTAssertLessThan((keychain.get("doz-chatgpt:plan") ?? "").utf8.count, 600)
         let file = try String(contentsOf: root.appendingPathComponent("accounts.json"), encoding: .utf8)
         XCTAssertFalse(file.contains("RT-1") || file.contains(t.accessToken) || file.contains("UkVBTC1JRC1TSUc"), "no token in accounts.json")
         XCTAssertTrue(file.contains("acct-9") && file.contains("person@example.invalid"), "the claims that are not secrets")
@@ -266,30 +279,34 @@ final class CodexHostTests: XCTestCase {
 
     func testTheSessionRenewsOnTheMacKeepsTheRotatedTokenFirstAndNeverFallsBack() throws {
         let fake = FakeRefresh()
-        keychain.put("doz-chatgpt:plan", fakeChatGPTTokens(expiresIn: 3600).json)
+        keychain.put("doz-chatgpt:plan", ChatGPTRecord(fakeChatGPTTokens(expiresIn: 3600)).json)
         let s = ChatGPTSession(account: "plan", service: "doz-chatgpt:plan", keychain: keychain, refresher: { fake.run($0) })
         s.load()
-        // Fresh: the token as it is, no refresh.
+        // A new host: no access token in memory — the first use renews (the refresh token rotates).
+        let (a0, _) = s.read()
+        XCTAssertEqual(OpenAIAccess.claims(a0 ?? "")?["jti"] as? String, "ACCESS-2")
+        XCTAssertEqual(fake.calls, 1)
+        // Signed in just now (adopt): the token as it is, no refresh.
+        s.adopt(fakeChatGPTTokens(expiresIn: 3600))
         let (a1, n1) = s.read()
         XCTAssertNotNil(a1)
         XCTAssertNil(n1)
-        XCTAssertEqual(fake.calls, 0)
+        XCTAssertEqual(fake.calls, 1)
         // An upstream 401 marks it stale: the next read renews, keeps the ROTATED refresh token in the keychain.
         let g = s.generation
         s.markStale()
         XCTAssertGreaterThan(s.generation, g, "the vault re-reads at once")
         let (a2, _) = s.read()
-        XCTAssertEqual(fake.calls, 1)
+        XCTAssertEqual(fake.calls, 2)
         XCTAssertEqual(OpenAIAccess.claims(a2 ?? "")?["jti"] as? String, "ACCESS-2")
-        XCTAssertEqual(ChatGPTTokens.parse(keychain.get("doz-chatgpt:plan") ?? "")?.refreshToken, "RT-2")
+        XCTAssertEqual(ChatGPTRecord.parse(keychain.get("doz-chatgpt:plan") ?? "")?.refreshToken, "RT-2")
         // Many requests at once near expiry: ONE refresh.
         fake.answer = { _ in .renewed(fakeChatGPTTokens(access: "ACCESS-3", refresh: "RT-3", expiresIn: 3600)) }
-        keychain.put("doz-chatgpt:plan", fakeChatGPTTokens(access: "ACCESS-2", refresh: "RT-2", expiresIn: 60).json)
-        s.load()
+        s.adopt(fakeChatGPTTokens(access: "ACCESS-2", refresh: "RT-2", expiresIn: 60))
         let group = DispatchGroup()
         for _ in 0..<8 { group.enter(); DispatchQueue.global().async { _ = s.read(); group.leave() } }
         group.wait()
-        XCTAssertEqual(fake.calls, 2)
+        XCTAssertEqual(fake.calls, 3, "one refresh for eight requests")
         // Signed out: every read and the guest's renewal say what to do — no token, no other account.
         fake.answer = { _ in .signedOut("refresh_token_reused") }
         s.markStale()
@@ -302,9 +319,10 @@ final class CodexHostTests: XCTestCase {
         // A network failure with an unexpired access token: it keeps working, and says nothing yet.
         let net = FakeRefresh()
         net.answer = { _ in .unavailable("offline") }
-        keychain.put("doz-chatgpt:n", fakeChatGPTTokens(expiresIn: 3600).json)
+        keychain.put("doz-chatgpt:n", ChatGPTRecord(fakeChatGPTTokens(expiresIn: 3600)).json)
         let s2 = ChatGPTSession(account: "n", service: "doz-chatgpt:n", keychain: keychain, refresher: { net.run($0) })
         s2.load()
+        s2.adopt(fakeChatGPTTokens(expiresIn: 3600))
         s2.markStale()
         XCTAssertNotNil(s2.read().secret)
         // The keychain item gone: missing, with the command.
@@ -312,6 +330,92 @@ final class CodexHostTests: XCTestCase {
         s3.load()
         XCTAssertEqual(s3.state, .missing)
         XCTAssertTrue(s3.read().notice?.contains("doz account add gone --chatgpt --force") == true)
+    }
+
+    // MARK: the keychain's limit (rc.2: a 4 KB sign-in was stored truncated on a real Mac)
+
+    func testTheStoresRefuseWhatOneItemCannotHold() throws {
+        let big = String(repeating: "x", count: Keychain.maximumSecretBytes + 1)
+        XCTAssertThrowsError(try MemoryKeychain().write(service: "s", account: "u", secret: big))
+        XCTAssertThrowsError(try keychain.write(service: "s", account: "u", secret: big))
+        XCTAssertNil(keychain.get("s"), "nothing written")
+        XCTAssertNoThrow(try MemoryKeychain().write(service: "s", account: "u", secret: String(big.dropLast())))
+        // The real tool's line: the largest secret still fits a `security -i` line (hex + the command).
+        let line = "add-generic-password -U -a \"\(String(repeating: "u", count: 64))\" -s \"doz-chatgpt:\(String(repeating: "n", count: 40))#8\" -X \"\(String(repeating: "ab", count: Keychain.maximumSecretBytes))\"\n"
+        XCTAssertLessThanOrEqual(line.utf8.count, Keychain.maximumLineBytes)
+        XCTAssertLessThan(Keychain.maximumLineBytes, 4096)
+    }
+
+    func testChunksRoundTripAndNeverLeaveAPartialSecret() throws {
+        let k = MemoryKeychain()
+        let small = "short-secret"
+        try KeychainChunks.write(k, service: "doz-chatgpt:a", secret: small)
+        XCTAssertEqual(KeychainChunks.read(k, service: "doz-chatgpt:a"), .found(small))
+        XCTAssertEqual(k.items(servicePrefix: "doz-chatgpt:a").map(\.service), ["doz-chatgpt:a"], "one item when it fits")
+        let long = (0..<4500).map { _ in "abcdefghij".randomElement()! }.map(String.init).joined()
+        try KeychainChunks.write(k, service: "doz-chatgpt:a", secret: long)
+        XCTAssertEqual(KeychainChunks.read(k, service: "doz-chatgpt:a"), .found(long), "parts joined back")
+        XCTAssertEqual(k.items(servicePrefix: "doz-chatgpt:a").count, 4, "a header and three parts")
+        try KeychainChunks.write(k, service: "doz-chatgpt:a", secret: small)
+        XCTAssertEqual(k.items(servicePrefix: "doz-chatgpt:a").map(\.service), ["doz-chatgpt:a"], "back to one: the old parts removed")
+        // A damaged part: the digest refuses it (never a wrong secret).
+        try KeychainChunks.write(k, service: "doz-chatgpt:a", secret: long)
+        try k.write(service: "doz-chatgpt:a#2", account: "u", secret: "tampered")
+        XCTAssertEqual(KeychainChunks.read(k, service: "doz-chatgpt:a"), .failed)
+        // A part that cannot be written: nothing is left at all.
+        keychain.failWrites = ["doz-chatgpt:b#2"]
+        XCTAssertThrowsError(try KeychainChunks.write(keychain, service: "doz-chatgpt:b", secret: long))
+        XCTAssertTrue(keychain.items(servicePrefix: "doz-chatgpt:b").isEmpty, "no partial secret")
+        XCTAssertThrowsError(try KeychainChunks.write(k, service: "doz-chatgpt:c", secret: String(repeating: "z", count: Keychain.maximumSecretBytes * 9)))
+        XCTAssertTrue(k.items(servicePrefix: "doz-chatgpt:c").isEmpty)
+    }
+
+    func testAFailedAddExitsWithAnErrorAndLeavesNoItem() async throws {
+        keychain.failWrites = ["doz-chatgpt:plan"]
+        let c = await core()
+        let m = await add(c, "plan", .chatgpt, fakeChatGPTTokens().json)
+        XCTAssertEqual(m.error?.code, .failed, "\(String(describing: m.error))")
+        XCTAssertNil(keychain.get("doz-chatgpt:plan"))
+        XCTAssertFalse(AccountStore(store: DozerStore(root: root)).load().accounts.contains { $0.name == "plan" }, "not registered")
+    }
+
+    func testARotationThatCannotBeKeptLeavesNoSpentToken() throws {
+        let fake = FakeRefresh()
+        keychain.put("doz-chatgpt:r", ChatGPTRecord(fakeChatGPTTokens(refresh: "RT-OLD")).json)
+        let s = ChatGPTSession(account: "r", service: "doz-chatgpt:r", keychain: keychain, refresher: { fake.run($0) })
+        s.load()
+        keychain.failWrites = ["doz-chatgpt:r"]
+        let (a, n) = s.read()
+        XCTAssertNotNil(a, "the renewed access token is used (memory)")
+        XCTAssertNil(n)
+        XCTAssertNil(keychain.get("doz-chatgpt:r"), "the spent refresh token is not left behind")
+        XCTAssertTrue(s.notKept)
+        s.load()
+        XCTAssertNotNil(s.read().secret, "still usable in this host")
+        // A long refresh token is chunked, and the rotation rewrites the parts.
+        keychain.failWrites = []
+        fake.answer = { _ in .renewed(fakeChatGPTTokens(access: "ACCESS-L", refresh: "RT-" + String(repeating: "L", count: 2500))) }
+        s.markStale()
+        _ = s.read()
+        XCTAssertTrue(keychain.get("doz-chatgpt:r")?.hasPrefix(KeychainChunks.headerPrefix) == true, "kept in parts")
+        let s2 = ChatGPTSession(account: "r", service: "doz-chatgpt:r", keychain: keychain, refresher: { fake.run($0) })
+        s2.load()
+        XCTAssertEqual(s2.state, .ok)
+        XCTAssertNotNil(s2.guestIDToken)
+    }
+
+    func testTheKeptClaimsAreWhatCodexReads() throws {
+        let t = fakeChatGPTTokens()
+        let r = ChatGPTRecord(t)
+        let g = r.idToken
+        XCTAssertTrue(g.hasSuffix("." + OpenAIAccess.guestSignature))
+        XCTAssertEqual(OpenAIAccess.accountID(idToken: g), "acct-9")
+        XCTAssertEqual(OpenAIAccess.planType(idToken: g), "pro")
+        XCTAssertEqual(OpenAIAccess.email(idToken: g), "person@example.invalid")
+        XCTAssertNil((OpenAIAccess.claims(g)?[OpenAIAccess.authClaim] as? [String: Any])?["organizations"], "the rest is dropped")
+        XCTAssertLessThan(r.json.utf8.count, 600)
+        // An rc.1 item (the whole tokens) still reads, slimmed.
+        XCTAssertEqual(ChatGPTRecord.parse(t.json)?.refreshToken, "RT-1")
     }
 
     // MARK: versions
@@ -379,4 +483,27 @@ final class CodexHostTests: XCTestCase {
 extension HostCore {
     /// Tests: the auth.json script a session start of `name` would run.
     func codexAuthScriptForTests(_ name: String) -> String? { managed[name].flatMap { codexAuthScript($0) } }
+}
+
+/// 599i rc.2: the REAL login keychain's per-item behaviour through `SystemKeychain` — run only on purpose
+/// (`DOZ_TEST_REAL_KEYCHAIN=1`), with a throwaway service `doz-test-limit-<uuid>` that is always deleted.
+final class RealKeychainLimitTests: XCTestCase {
+    func testTheRealKeychainTakesTheLimitWholeAndRefusesMoreWithoutAPartialItem() throws {
+        guard ProcessInfo.processInfo.environment["DOZ_TEST_REAL_KEYCHAIN"] == "1" else { throw XCTSkip("DOZ_TEST_REAL_KEYCHAIN=1 runs it") }
+        let k = SystemKeychain()
+        let svc = "doz-test-limit-" + UUID().uuidString.prefix(8).lowercased()
+        defer { try? k.delete(service: svc, account: Keychain.user) }
+        let max = String((0..<Keychain.maximumSecretBytes).map { _ in "abcdefghijklmnopqrstuvwxyz0123456789".randomElement()! })
+        try k.write(service: svc, account: Keychain.user, secret: max)
+        XCTAssertEqual(k.read(service: svc, account: Keychain.user).value, max, "the largest secret allowed is stored whole")
+        XCTAssertThrowsError(try k.write(service: svc, account: Keychain.user, secret: max + max))
+        XCTAssertEqual(k.read(service: svc, account: Keychain.user).value, max, "a refused write changes nothing (refused before security runs)")
+        // Chunked: a 4.5 KB secret through parts, read back whole, then removed with every part.
+        let big = String((0..<4500).map { _ in "ABCDEFGHIJ".randomElement()! })
+        try KeychainChunks.write(k, service: svc, secret: big)
+        XCTAssertEqual(KeychainChunks.read(k, service: svc), .found(big))
+        KeychainChunks.remove(k, service: svc)
+        XCTAssertEqual(k.read(service: svc, account: Keychain.user), .absent)
+        XCTAssertEqual(k.read(service: svc + "#1", account: Keychain.user), .absent)
+    }
 }

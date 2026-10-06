@@ -67,6 +67,30 @@ public enum OpenAIAccess {
     }
     public static let guestSignature = "ZG96LXVuc2lnbmVk"   // base64url("doz-unsigned")
 
+    /// 599i rc.2: the claims Codex 0.160.1 reads from an id_token (`login/src/token_data.rs` IdClaims,
+    /// AccountUserClaims, exp) — everything else (organizations, …) dropped — as base64url JSON. What Dozer
+    /// keeps of a sign-in (small), and what the guest's id_token carries.
+    public static func keptClaims(idToken: String) -> String {
+        let c = claims(idToken) ?? [:]
+        var out: [String: Any] = [:]
+        if let e = c["email"] as? String { out["email"] = e } else if let e = (c["https://api.openai.com/profile"] as? [String: Any])?["email"] as? String { out["email"] = e }
+        if let x = c["exp"] { out["exp"] = x }
+        if let a = c[authClaim] as? [String: Any] {
+            var k: [String: Any] = [:]
+            for key in ["chatgpt_plan_type", "chatgpt_user_id", "user_id", "chatgpt_account_id", "chatgpt_account_is_fedramp", "chatgpt_account_user_id"] {
+                if let v = a[key] { k[key] = v }
+            }
+            out[authClaim] = k
+        }
+        let d = (try? JSONSerialization.data(withJSONObject: out, options: [.sortedKeys, .withoutEscapingSlashes])) ?? Data("{}".utf8)
+        return base64URL(d)
+    }
+
+    /// An id_token made of kept claims and the `doz-unsigned` signature.
+    public static func idToken(claims: String) -> String {
+        base64URL(Data(#"{"alg":"none","typ":"JWT"}"#.utf8)) + "." + claims + "." + guestSignature
+    }
+
     public static func base64URLDecode(_ s: String) -> Data? {
         var b = s.replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/")
         let r = b.count % 4

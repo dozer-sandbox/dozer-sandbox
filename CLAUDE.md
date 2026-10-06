@@ -366,6 +366,12 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
 - **The attach relay adopts the session BEFORE it answers**, and the client sends what was typed
   ahead of its first connection once it reads that answer (keys typed right after `up` were lost
   otherwise — the first `test-cli` run). After that, keys for a held (sleeping) sandbox are dropped, never queued for a frozen guest.
+- **One keychain item holds at most `Keychain.maximumSecretBytes` (1800)** (599i rc.2: `security -i` cuts an input line at
+  ~4096 bytes; a 4.2 KB ChatGPT sign-in was stored TRUNCATED with rc 1 on the owner's Mac). `SystemKeychain.write` refuses
+  more before `security` runs, reads the item back and deletes it unless it is the secret whole — never a partial item; the
+  in-memory test keychains (`MemoryKeychain`, the tests' `FakeKeychain`) enforce the same limit. Store less, or use
+  `KeychainChunks`. `RealKeychainLimitTests` checks the real keychain (`DOZ_TEST_REAL_KEYCHAIN=1`, a throwaway
+  `doz-test-limit-*` item, always deleted); the fake OpenAI issues real-sized tokens (~6 KB with a 2.1 KB refresh token).
 - **Dozer never holds, uses or writes Claude Code's refresh token, and never writes a
   `Claude Code-credentials*` item** (588). It reads the Mac login's ACCESS token only; the Mac's
   Claude Code is the one writer of that token family (a second holder forks it — codecks 488
@@ -1154,14 +1160,18 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   PKCE S256, Codex's public client id, its scopes and parameters, a loopback listener on **127.0.0.1:1455, else 1457**,
   `redirect_uri=http://127.0.0.1:PORT/auth/callback`, the browser opened by `BrowserBridge.open` — then the code is
   exchanged (FORM post) over `HTTPSOnce` (the proxy's `TLSUpstream` leg). NO token exchange for an API key. The tokens go
-  to the host in `account-add` (`ChatGPTTokens.json`), are ONE keychain item `doz-chatgpt:NAME`; `accounts.json` gets
-  plan/email/account id/fingerprint, never a token. **Dozer never reads or writes the Mac's `~/.codex`**
+  to the host in `account-add` (`ChatGPTTokens.json`); the keychain keeps ONLY `ChatGPTRecord` (the refresh token, the
+  account id, the id_token claims Codex reads — `OpenAIAccess.keptClaims`) in `doz-chatgpt:NAME`, through `KeychainChunks`
+  (parts `NAME#1…#8` + a `doz-chunks:n:<sha256>` header written last, only when it does not fit one item); the ACCESS
+  token lives in the host's memory only (a new host renews on first use). `accounts.json` gets plan/email/account
+  id/fingerprint, never a token. **Dozer never reads or writes the Mac's `~/.codex`**
   (`testDozerNeverTouchesTheMacsCodexHome` scans DozerHost/CLI/Web).
 - **The refresh is the host's** (`ChatGPTSession`, ONE per account in `HostCore.chatgptSessions`): the vault's provider
   (`setProvider(.chatgpt, ttl: 60, version: generation)`) reads the access token; it renews when its JWT `exp` is
   within 5 minutes or after an upstream 401 (`vault.onStale` → `markStale`, which bumps the generation so the vault re-reads
   at once); one refresh at a time; the ROTATED refresh token is written to the keychain BEFORE the new access token is
-  used. A permanent refusal (401, `refresh_token_reused|expired|invalidated`, `invalid_grant`) = signed out → every read
+  used — a write that fails REMOVES the item (never a spent token left to try later): the sign-in then lives in that host's
+  memory only, said in the log. A permanent refusal (401, `refresh_token_reused|expired|invalidated`, `invalid_grant`) = signed out → every read
   and renewal answer is a notice naming `doz account add NAME --chatgpt --force`. A network failure keeps an unexpired
   token working and retries after 30 s. **No silent fallback** — never another account's token or a key.
 - **The proxy** (`OpenAIAccess`, `EgressProxy`): bindings `.openai` (Bearer, `api.openai.com`, `OPENAI_API_KEY`) and

@@ -27,8 +27,12 @@ ACCOUNT = "acct-fake-599i"
 
 def b64u(b): return base64.urlsafe_b64encode(b).rstrip(b"=").decode()
 
-def jwt(payload, sig="RkFLRS1PUEVOQUktU0lHTkFUVVJF"):   # "FAKE-OPENAI-SIGNATURE"
-    return b64u(b'{"alg":"RS256","typ":"JWT"}') + "." + b64u(json.dumps(payload, sort_keys=True).encode()) + "." + sig
+SIG = "RkFLRS1PUEVOQUktU0lHTkFUVVJF" + "s" * 314           # an RS256 signature's length (342 base64url chars)
+REFRESH_LEN = int(os.environ.get("FAKE_REFRESH_LEN", "2100"))  # long enough that Dozer must keep it in parts
+
+def jwt(payload, sig=SIG):
+    # Realistic sizes (a real sign-in is ~4 KB: ~2 KB access token, ~1 KB id token).
+    return b64u(b'{"alg":"RS256","kid":"fake-key-1","typ":"JWT"}') + "." + b64u(json.dumps(payload, sort_keys=True).encode()) + "." + sig
 
 def load():
     try: return json.load(open(statef))
@@ -43,10 +47,14 @@ def issue(s):
     s["n"] += 1
     n = s["n"]
     now = int(time.time())
-    idt = jwt({"email": "person@example.invalid", "exp": now + 3600, "iat": now,
-               "https://api.openai.com/auth": {"chatgpt_plan_type": "plus", "chatgpt_account_id": ACCOUNT, "chatgpt_user_id": "user-fake"}})
-    at = jwt({"exp": now + ACCESS_TTL, "iat": now, "jti": "ACCESS-%d" % n, "https://api.openai.com/auth": {"chatgpt_account_id": ACCOUNT}})
+    orgs = [{"id": "org-%d-%s" % (i, "o" * 24), "title": "Organisation %d" % i, "role": "owner", "is_default": i == 0} for i in range(6)]
+    idt = jwt({"email": "person@example.invalid", "exp": now + 3600, "iat": now, "aud": ["app_EMoamEEZ73f0CkXaXp7hrann"], "iss": "https://auth.openai.com",
+               "https://api.openai.com/auth": {"chatgpt_plan_type": "plus", "chatgpt_account_id": ACCOUNT, "chatgpt_user_id": "user-fake",
+                                               "organizations": orgs}})
+    at = jwt({"exp": now + ACCESS_TTL, "iat": now, "jti": "ACCESS-%d" % n, "scp": ["openid", "profile", "email", "offline_access"],
+              "https://api.openai.com/auth": {"chatgpt_account_id": ACCOUNT}, "pad": "p" * 1300})
     rt = "rt_FAKE599i_%d_%s" % (n, b64u(os.urandom(12)))
+    rt += "_" + "r" * max(0, REFRESH_LEN - len(rt) - 1)
     s["access"].append(at); s["refresh"].append(rt); s["issued"] += [idt, at, rt]
     return {"id_token": idt, "access_token": at, "refresh_token": rt, "token_type": "Bearer", "expires_in": ACCESS_TTL}
 
@@ -248,10 +256,14 @@ func cliCodexSuite(binary: String) async {
         // Sandboxes of an earlier run go; the prepared images stay.
         for n in ["cx", "ax"] { _ = d(["rm", n, "--yes"], timeout: 120) }
     }
-    _ = d(["host", "start"], timeout: 60)
     let seamLine = "go to 127.0.0.1:\(port), trusting only its CA"
-    var seamed = false
-    for _ in 0..<50 where !seamed { seamed = hostLog(t).components(separatedBy: "doz host ").last?.contains(seamLine) == true; if !seamed { usleep(100_000) } }
+    func startHostWithFake() -> Bool {
+        _ = d(["host", "start"], timeout: 60)
+        var seamed = false
+        for _ in 0..<50 where !seamed { seamed = hostLog(t).components(separatedBy: "doz host ").last?.contains(seamLine) == true; if !seamed { usleep(100_000) } }
+        return seamed
+    }
+    let seamed = startHostWithFake()
     check(seamed, "the host runs with the fake OpenAI (its log says so) — nothing goes to the real OpenAI")
     guard seamed else { info("aborted: the host has no fake OpenAI"); return }
     check(d(["onboard", "--no-images", "--account", "later", "--yes"], timeout: 120).code == 0, "a scratch store, onboarded")
@@ -273,6 +285,8 @@ func cliCodexSuite(binary: String) async {
           "doz account ls: plan · chatgpt · plus · person@example.invalid")
     let accountsFile = (try? String(contentsOf: t.store.appendingPathComponent("accounts.json"), encoding: .utf8)) ?? ""
     check(!realTokens().isEmpty && !realTokens().contains { accountsFile.contains($0) }, "accounts.json holds no token")
+    let firstThree = realTokens().prefix(3).map(\.utf8.count)
+    check(firstThree.reduce(0, +) > 4000, "the fake's sign-in is real-sized: id \(firstThree.first ?? 0) B, access \(firstThree.dropFirst().first ?? 0) B, refresh \(firstThree.last ?? 0) B (kept in parts by Dozer)")
     check(d(["account", "default", "plan"]).out.contains("the default OpenAI account (Codex) is plan"), "doz account default plan → the OpenAI default")
 
     // ── 2. A Codex sandbox — the real Codex answers through the proxy ────────────────────────────────
@@ -336,8 +350,10 @@ func cliCodexSuite(binary: String) async {
     check(!requests().contains { $0["refresh_token"] as? String == ph }, "…and never reached OpenAI")
     r = d(["exec", "cx", "--", "sh", "-c", "curl -sS --max-time 20 https://auth.openai.com/oauth/authorize -o /dev/null -w 'HTTP=%{http_code}'"], timeout: 60)
     check(r.out.contains("HTTP=403"), "any other request to auth.openai.com follows the policy (refused: \(r.out))")
-    let rotated = requests().filter { $0["grant"] as? String == "refresh_token" }.count
     noTokenInGuest("after the renewal")
+    // (A new host renewing from the kept record is a unit test — `CodexHostTests`: this suite's keychain lives in the
+    // host's memory, DOZ_TEST_CREDENTIALS=memory, so a restarted host has no sign-in at all.)
+    let rotated = requests().filter { $0["grant"] as? String == "refresh_token" }.count
 
     // ── 5. No silent fallback ─────────────────────────────────────────────────────────────────────────
     check(d(["account", "use", "cx", "none"]).code == 0, "doz account use cx none")

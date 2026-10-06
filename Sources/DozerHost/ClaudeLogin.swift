@@ -57,11 +57,24 @@ public struct SystemKeychain: KeychainAccess {
         }
     }
 
+    /// The secret goes on `security -i`'s STDIN as ONE command line (hex) — never an argument. `security -i`
+    /// cuts input lines at ~4096 bytes (599i: a 4.2 KB ChatGPT sign-in was stored truncated, rc 1), so a
+    /// secret longer than `Keychain.maximumSecretBytes` (or a line over `Keychain.maximumLineBytes`) is REFUSED
+    /// before `security` runs. After writing, the item is read back: anything but the exact secret (a failed
+    /// or partial write) deletes the item and throws — no partial item is ever left.
     public func write(service: String, account: String, secret: String) throws {
         try Self.checkName(service); try Self.checkName(account)
+        try Keychain.checkSecretSize(secret, service: service)
         let hex = Data(secret.utf8).map { String(format: "%02x", $0) }.joined()
         let line = "add-generic-password -U -a \"\(account)\" -s \"\(service)\" -X \"\(hex)\"\n"
-        guard let r = Self.run(["-i"], stdin: Data(line.utf8), timeout: timeout), r.status == 0 else {
+        guard line.utf8.count <= Keychain.maximumLineBytes else {
+            throw HostError(.invalid, "the keychain item \(service) would be too long for the keychain tool (\(line.utf8.count) bytes) — nothing written")
+        }
+        let r = Self.run(["-i"], stdin: Data(line.utf8), timeout: timeout)
+        // (`find-generic-password -w` prints a non-ASCII secret as hex — either form is the secret whole.)
+        let back = r?.status == 0 ? read(service: service, account: account).value : nil
+        guard let back, back == secret.trimmingCharacters(in: .whitespacesAndNewlines) || back == hex else {
+            try? delete(service: service, account: account)          // never a partial item
             throw HostError(.failed, "could not write the keychain item \(service) (is the login keychain unlocked?)")
         }
     }
@@ -140,6 +153,17 @@ final class DataBox: @unchecked Sendable { var data = Data() }
 
 /// Reads a generic password the USER stored (`doz key set NAME --anthropic --keychain SERVICE`).
 public enum Keychain {
+    /// 599i: the most one keychain item may hold through `security -i` (hex doubles it; the tool cuts a line
+    /// at ~4096 bytes). Larger secrets are refused (`checkSecretSize`) — or chunked (`KeychainChunks`).
+    public static let maximumSecretBytes = 1800
+    public static let maximumLineBytes = 4000
+
+    public static func checkSecretSize(_ secret: String, service: String) throws {
+        guard secret.utf8.count <= maximumSecretBytes else {
+            throw HostError(.invalid, "the secret for the keychain item \(service) is \(secret.utf8.count) bytes — over the \(maximumSecretBytes) one item can hold; nothing written")
+        }
+    }
+
     public static func read(service: String, timeout: TimeInterval = 5) -> String? {
         var k = SystemKeychain()
         k.timeout = timeout

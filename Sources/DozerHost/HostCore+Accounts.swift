@@ -52,7 +52,11 @@ public final class MemoryKeychain: KeychainAccess, @unchecked Sendable {
     public func read(service: String, account: String?) -> KeychainRead {
         lock.withLock { items[service].map(KeychainRead.found) ?? .absent }
     }
-    public func write(service: String, account: String, secret: String) throws { lock.withLock { items[service] = secret } }
+    /// The real keychain's per-item limit (599i), so a too-long secret fails in tests as on a Mac.
+    public func write(service: String, account: String, secret: String) throws {
+        try Keychain.checkSecretSize(secret, service: service)
+        lock.withLock { items[service] = secret }
+    }
     public func delete(service: String, account: String) throws { lock.withLock { items[service] = nil } }
     public func items(servicePrefix: String) -> [KeychainItemInfo] {
         lock.withLock { items.keys.filter { $0.hasPrefix(servicePrefix) }.sorted().map { KeychainItemInfo(service: $0, account: Keychain.user, modified: nil) } }
@@ -465,6 +469,7 @@ extension HostCore {
         }
         var rec = AccountRecord(name: name, kind: kind, plan: r.plan.map { $0.lowercased() })
         var verifySecret: String?
+        var chatgptTokens: ChatGPTTokens?
         switch kind {
         case .mac:
             guard let dir = r.configDir, !dir.isEmpty else {
@@ -533,7 +538,10 @@ extension HostCore {
             rec.fingerprint = CredentialFingerprint.of(t.accessToken)
             rec.verifiedAt = Date()
             rec.verification = "verified (signed in on this Mac)"
-            try services.keychain.write(service: AccountStore.chatgptPrefix + name, account: Keychain.user, secret: t.json)
+            // Only what must persist (the refresh token, the kept claims) — the access token stays in memory.
+            // A write that fails leaves no item and fails the add.
+            try KeychainChunks.write(services.keychain, service: AccountStore.chatgptPrefix + name, secret: ChatGPTRecord(t).json)
+            chatgptTokens = t
         }
         if let secret = verifySecret {
             if r.verify != false {
@@ -559,7 +567,7 @@ extension HostCore {
         try accountStore.save(file)
         note(nil, "account \(name) added (\(kind.rawValue)\(rec.verification.map { ", \($0)" } ?? ""))")
         // 599i: a sign-in made again replaces the session's tokens (its sandboxes switch on their next request).
-        if kind == .chatgpt { chatgptSessions[name]?.load() } else { chatgptSessions[name] = nil }
+        if let t = chatgptTokens { chatgptSession(file.accounts.last!).adopt(t) } else { chatgptSessions[name] = nil }
         for m in sandboxesUsing(name, file) { applyAccount(m) }
         return await accountRows()
     }
@@ -582,7 +590,8 @@ extension HostCore {
         try accountStore.save(file)
         if rec.adopted != true, rec.kind != .mac, let svc = rec.keychainService,
            [AccountStore.setupTokenPrefix, AccountStore.apiKeyPrefix, AccountStore.openaiKeyPrefix, AccountStore.chatgptPrefix].contains(where: svc.hasPrefix) {
-            try services.keychain.delete(service: svc, account: Keychain.user)
+            if rec.kind == .chatgpt { KeychainChunks.remove(services.keychain, service: svc) }      // and its parts
+            else { try services.keychain.delete(service: svc, account: Keychain.user) }
         }
         if let w = watchers[name] { w.stop(); watchers[name] = nil }
         chatgptSessions[name] = nil

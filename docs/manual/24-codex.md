@@ -53,8 +53,9 @@ subcommands run as they are.
 
 `doz account add NAME --chatgpt` signs **Dozer** in to ChatGPT — the same browser sign-in `codex login`
 does, on your Mac. It is Dozer's own sign-in, separate from your Mac's: Dozer never reads or changes
-your Mac's `~/.codex`. The tokens are kept in your login keychain (`doz-chatgpt:NAME`); `doz account ls`
-shows the account's plan and email, never a token.
+your Mac's `~/.codex`. What must last is kept in your login keychain (`doz-chatgpt:NAME`): the refresh token
+and the few account details Codex reads. The short-lived access token is kept only in Dozer's memory (a new
+Dozer host renews it on first use). `doz account ls` shows the account's plan and email, never a token.
 
 - **In the sandbox**, Codex's `~/.codex/auth.json` holds only **placeholders** (`doz_cred_…`) where the
   tokens go, written at every session start. The id_token's details Codex reads (your plan, account id)
