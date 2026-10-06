@@ -15,7 +15,7 @@ Then, depending on what's wrong:
 | to see | run |
 |---|---|
 | What the host is doing, live | `doz events` (or `doz events NAME`), or the dashboard's **Activity** |
-| How a start or wake went | `doz console NAME --list`, then `doz console NAME --steps` — or **Boot log** on the sandbox's page |
+| How a start or wake went | `doz console NAME --list`, then `doz console NAME --steps` — or **⋯** › **Boot log** on the sandbox's page |
 | What the agent was refused | `doz net NAME` (the suggestions), `doz net log NAME --denied` |
 | Everything about a sandbox | `doz inspect NAME` |
 | What the agent is told | `doz inspect NAME --prompt` |

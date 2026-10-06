@@ -57,7 +57,8 @@ doz resources rm point:web/3           # by id, as doz resources lists them
 
 **Resources** in the sidebar (its total is shown beside it). The bar on top splits Dozer's total into
 what it keeps, what **Clean up** would free and the blocks clones share, with the disk's free space
-beside it. Below it, the rows, each linking to where it's managed: an image to **Images**, a
+beside it; under it, a strip that jumps to each group (with its size) — a group's heading folds it, and
+the dashboard remembers which you folded. Then the rows, each linking to where it's managed: an image to **Images**, a
 sandbox's parts to **its page**, accounts to **Accounts & keys**.
 
 1. Tick what should go, or **Select all re-creatable**.

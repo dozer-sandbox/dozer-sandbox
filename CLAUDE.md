@@ -448,6 +448,37 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
 - **The page renders with `textContent` only.** Hostnames, paths, session commands and notes come
   from inside a sandbox, which is untrusted. The asset compiler refuses `innerHTML`, inline script or
   style, event-handler attributes and external URLs (the CSP would refuse them anyway).
+- **The look is the 603 style guide** (workspace `changes/603-*/603.01-DESIGN.html`; the owner's decisions in
+  603.02-PLAN.md). Keep to it when adding UI:
+  - **Tokens** only (`app.css` `:root`): every colour once, with `light-dark()` — `color-scheme` IS the theme
+    (`ui.theme` sets `data-theme`); never a literal colour outside `:root` (the terminal chrome is `--term-*`;
+    `frame.css` has its own `--term-bg`). Type `--fs-*` (13 px is THE UI size), space `--sp-*`, radii `--r-*`,
+    elevations `--shadow-*`, layers `--z-*`. A comment in a stylesheet never contains `*/` (a path like
+    `changes/603-*/…` closed one and dropped the whole token block).
+  - **One button family**: `btn(label, fn, {primary, quiet, danger, small, lg, iconOnly, icon})` — ONE primary per
+    view (the verb that moves things forward: Start/Wake/Resume, Next, Create; a running sandbox has none);
+    icon-only only where the icon is unambiguous (it gets aria-label + title). Menus: `menuButton(trigger, items)`
+    / `moreMenu(label, items)` (⋯) — in the DOM beside the button, fixed and kept on screen; an item's text is
+    exactly its label (its description is drawn from `data-desc`), destructive items last, a disabled one says
+    why. Rows: one next verb + ⋯.
+  - **One notice surface**: `callout(tone, {title, body, actions, dismiss, compact, banner, cls, attrs})`; the old
+    classes stay on elements as hooks. **A failure is never only a toast** (owner decision 9): it is said where
+    the action was started and stays until dismissed or fixed — the dialog's `.dlg-error`, the sandbox's status
+    line (`[data-op-for]`, `failureFor(name, text)`, `opFailed`), a step's/row's own slot (`wizFail`,
+    `settingFailed`, `state.permErr`), else the page notices (`pageFailure` → `#notice`). `toast()` is for
+    successes; `toast(text, true)` routes to the page notices.
+  - **Never `append`/`replaceChildren` a `null`** — the DOM writes it as the text "null" (the Split menu's bug);
+    `h()` skips nulls, those do not.
+  - **Structure**: the sidebar's four groups are static markup in `index.html` (`#nav > a[data-view]` stay direct
+    children; the rail below 980 px). The sandbox page: `lifecycleBar` (the group + Shut down) + ⋯ + the status
+    slot + the details toggle; the terminal strip's actions (`termUI.acts`, `paintStripActs`) on the rightmost
+    pane; the inspector's tabs `INSP_TABS`, the chosen tab per sandbox in `sview(name).inspTab` (page memory, no
+    setting); its width in this browser's storage. The wizards (`#/new`, `#/onboarding`) are a MODAL over the page
+    (owner on rc.1): `state.modal` is the wizard, `state.view`/`state.bgHash` stay the page under it, which is never
+    re-rendered or torn down by opening or closing (inert meanwhile); `wizHead()` (title, ✕, the horizontal
+    `stepperNode()` strip) + `wizMount()`; ✕/Escape ask before losing choices (`wizDirty`), Back keeps them. Long pages: `pageIndex()`;
+    Settings' filter; Resources' folding groups (browser storage). Page shortcuts (owner decision 10) only `g s`,
+    `/`, `?` — never while a terminal (its iframe), a field, a menu or a dialog has the focus.
 - **Edit `WebSource/`, then `make web-assets`, and commit `Resources/Web`.** `make web-assets-check`
   (run by `make test` and `Scripts/audit.sh`) fails on drift; `WebAssets` refuses to start on a
   digest mismatch. `make install-cli` copies `DozerKit_DozerWeb.bundle` beside the binary.
@@ -484,7 +515,7 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
 
 - **The page is built around the sandbox.** The nav has a child per sandbox (from the overview —
   `ls` without session counts, re-read on `hello`, `changed` and an operation's end). A sandbox's page
-  is a PERSISTENT section (`#sbx`): the control bar and the details panel re-render; `#terminals` never
+  is a PERSISTENT section (`#sbx`): the control bar (`#sbx-bar`) and the inspector (`#sbx-details`, 603's tabs) re-render; `#terminals` never
   does (591's rule). Terminals are per sandbox (`termUI.by[name]`: split, selected, focused pane); another
   sandbox's stay open, hidden (the 16-per-UI cap is the server's, unchanged). Arriving attaches to the
   sandbox's own session ONLY when the sandbox runs and that session runs — never a session opened, never a
@@ -515,7 +546,8 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   init image (pulled first in `prepareAssets`; ContainerManager would fetch it silently, every platform)
   included. Together they made a first `doz exec` silent for 18 s (`ProgressHoldTests`, test-cli's
   "first exec … shows its progress").
-- **Every button has an icon** (owner, 593): Lucide (`vendor/lucide-static/`, pinned like ghostty-web;
+- **Every button has an icon** (owner, 593 — the 593 sandbox-pages probe audits every visible `<button>`, menu
+  items, inspector tabs and the Network chip included; an in-panel jump is a link, not a button): Lucide (`vendor/lucide-static/`, pinned like ghostty-web;
   `serve: icon`) compiled by `build-web-assets.swift` into ONE sprite of `<symbol>`s — the compiler
   admits an icon file only as geometry (path/circle/ellipse/line/polyline/polygon/rect with geometry
   attributes, `fill` only currentColor/none), never script, style, links or handlers; the page names the
@@ -680,8 +712,8 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   attach's SNAPSHOT). A saved pane holds no socket, so it keeps no host alive (T3).
 - **New is new (S4)**: New shell (shell-N, the next free name — saved names count as taken) and the
   Terminal… dialog (a new shell, or a new session running a command) never attach to a running
-  session; a running one is reached through its pane, the empty area's "Open NAME" or Details ›
-  Sessions. Split's watch/attach kinds stay: they name the left pane's session explicitly.
+  session; a running one is reached through its pane, the empty area's "Open NAME" or the inspector's
+  Sessions tab. Split's watch/attach kinds stay: they name the left pane's session explicitly.
 
 ### Boot logs (593, owner 2026-09-30 — "where is the bootup terminal output stored…")
 

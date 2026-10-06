@@ -31,9 +31,9 @@ doz point rm my-app before-refactor
 - Commands that ask first (`revert`, `rm`) check the point exists before asking, and the question
   names it, its id and when it was taken.
 
-**In the dashboard:** a sandbox's **Details** › **Restore points** has **Take a restore point…**,
-and per point **Revert**, **Fork**, **Save as template…** and **Delete** (revert and delete ask you
-to type the name).
+**In the dashboard:** a sandbox's details › **Points** has **Take a restore point…**, and per point
+**Revert**, and under its **⋯** **Fork…**, **Save as template…**, **Duplicate…** and **Delete…** (revert
+and delete ask you to type the name).
 
 ## Duplicates
 
@@ -49,7 +49,7 @@ doz duplicate my-app my-app-4 --copy-state        # the agent's logins and histo
 - The agent's **state disk starts fresh** unless `--copy-state`.
 - Keys given with `doz key set` are not copied; the account follows `--account` or the source's.
 
-**In the dashboard:** **Duplicate…** on the sandbox's page (or from a restore point): new name, from
+**In the dashboard:** **⋯** › **Duplicate…** on the sandbox's page (or from a restore point): new name, from
 the current disk or a point, workspace, CPUs, memory, network, account, and "Copy the agent's state
 disk too".
 
@@ -70,7 +70,7 @@ doz template rm node-tools                                           # sandboxes
   A sandbox made from a template starts with a fresh state disk.
 - A sandbox from a template gets the agent and settings of the image the template came from.
 
-**In the dashboard:** **Save as template…** on a sandbox's page (now, or from a restore point); New
+**In the dashboard:** **⋯** › **Save as template…** on a sandbox's page (now, or from a restore point); New
 sandbox › **Base** › **Template** uses one; **Images** lists templates and removes them.
 
 ## Seeing the family tree

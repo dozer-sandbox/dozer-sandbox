@@ -116,8 +116,11 @@ function iconFor(label) {
 }
 /// A button's label with its icon in front (the label stays text).
 function withIcon(name, label) { return [icon(name), h('span', { class: 'btn-label' }, label)]; }
-/// Put (or replace) the icon of an existing button, keeping its text.
-function setButton(b, label, name) { b.replaceChildren(...withIcon(name || iconFor(label), label)); }
+/// Put (or replace) the icon of an existing button, keeping its text (an icon-only button: its aria-label).
+function setButton(b, label, name) {
+  if (b.classList.contains('icon-only')) { b.replaceChildren(icon(name || iconFor(label))); b.setAttribute('aria-label', label); b.title = b.title || label; return; }
+  b.replaceChildren(...withIcon(name || iconFor(label), label));
+}
 
 // ── formatting ──────────────────────────────────────────────────────────────
 function bytes(n) {
@@ -150,10 +153,19 @@ function when(iso) {
 }
 function clock(iso) { return iso ? new Date(iso).toLocaleTimeString() : '—'; }
 function full(iso) { return iso ? new Date(iso).toLocaleString() : '—'; }
-function phasePill(phase, label, busy) {
-  return h('span', { class: 'pill ph-' + phase }, (label || phase) + (busy ? ' …' : ''));
+/// 603: a pill is a state — tinted, a glyph and the word (never colour alone); the glyph is the phase's own
+/// (a dot while it runs, a spinner while under way).
+function phaseGlyph(phase, busy) {
+  if (busy || phase === 'booting') return h('span', { class: 'mini-spin', 'aria-hidden': 'true' });
+  if (phase === 'running') return h('span', { class: 'dot ph-running', 'aria-hidden': 'true' });
+  const g = phase === 'failed' ? 'x' : PHASE_GLYPH[phase];
+  return g ? icon(g) : null;
 }
-function statusPill(s) { return h('span', { class: 'pill st-' + s }, s); }
+function phasePill(phase, label, busy) {
+  return h('span', { class: 'pill ph-' + phase }, phaseGlyph(phase, busy), (label || phase) + (busy ? ' …' : ''));
+}
+const STATUS_GLYPH = { ok: 'check', warn: 'triangle-alert', fail: 'x', off: 'power' };
+function statusPill(s) { return h('span', { class: 'pill st-' + s }, STATUS_GLYPH[s] ? icon(STATUS_GLYPH[s]) : null, s); }
 
 // ── HTTP ────────────────────────────────────────────────────────────────────
 class HttpError extends Error {
@@ -195,7 +207,7 @@ async function act(body) {
     return op;
   } catch (e) {
     endTransition(body.sandbox, body.action);
-    toast(e.message || String(e), true);
+    failureFor(body.sandbox, e.message || String(e));
     return null;
   }
 }
@@ -251,6 +263,8 @@ function paintTransition(name) {
     if (el.dataset.lifecycleFor !== name) continue;
     for (const b of el.querySelectorAll('button')) { b.disabled = true; b.title = TRANSITION_LABEL[t.action]; }
   }
+  // 603: the ⋯ menu's Reset… and Remove… too.
+  for (const b of document.querySelectorAll('[data-lifecycle-item]')) if (b.dataset.lifecycleItem === name) b.disabled = true;
   for (const el of document.querySelectorAll('[data-pill-for]')) if (el.dataset.pillFor === name) el.replaceWith(transitionPill(t, name));
   for (const x of terminals.values()) if (x.sandbox === name && x.saved) paintCover(x);
   if (state.view === 'sandbox' && state.param === name) paintTermEmpty();
@@ -269,7 +283,7 @@ function trackOp(op) {
   if (!before && op.state === 'running' && op.action !== 'rm') refresh(false);
   if (op.state !== 'running' && (!before || before.state === 'running')) {
     endTransition(op.sandbox, op.action, op.state === 'failed');
-    if (op.state === 'failed') toast(op.label + ': ' + op.text, true);
+    if (op.state === 'failed') opFailed(op);
     refreshNav();
     // 595: an operation's end may have changed the disks — measure again (the nav's total too).
     remeasure();
@@ -279,11 +293,60 @@ function trackOp(op) {
     refresh(false);
   }
 }
-function toast(text, bad) {
-  const t = h('div', { class: 'toast' + (bad ? ' bad' : ''), role: 'status' }, text);
+/// 603 (E7): a toast acknowledges a success (or says something worth knowing) and goes after 4 s. A FAILURE is
+/// never only a toast: it is said where the action was started and stays until dismissed or fixed — in its
+/// dialog (which stays open), its sandbox's status line (the sandbox page's bar, the Sandboxes row), the
+/// step's own error slot, or the page notices at the top of the page. `toast(text, true)` is that last one.
+function toast(text, bad, iconName) {
+  if (bad) { pageFailure(text); return h('div'); }
+  const t = h('div', { class: 'toast', role: 'status' }, icon(iconName || 'check'), h('span', null, text));
   $('toasts').append(t);
-  setTimeout(() => t.remove(), bad ? 9000 : 4000);
+  setTimeout(() => t.remove(), 4000);
   return t;
+}
+// ── 603: the callout — the ONE notice surface (info · ok · warn · bad; inline, compact, or the page's banner
+// strip). An icon, an optional title, the body, actions at the right, an optional dismiss.
+const TONE_ICON = { info: 'info', ok: 'circle-check', warn: 'triangle-alert', bad: 'circle-x' };
+function callout(tone, opts = {}) {
+  tone = tone || 'info';
+  const el = h('div', { class: ['callout', tone, opts.compact ? 'compact' : '', opts.banner ? 'banner' : '', opts.cls || ''].filter(Boolean).join(' '),
+                         role: opts.role || (tone === 'bad' ? 'alert' : 'status'), ...(opts.attrs || {}) });
+  const acts = [...(opts.actions || [])].filter(Boolean);
+  if (opts.dismiss) {
+    acts.push(h('button', { type: 'button', class: 'btn sm quiet icon-only b-x', title: 'Dismiss', 'aria-label': 'Dismiss',
+      on: { click: (ev) => { ev.stopPropagation(); if (typeof opts.dismiss === 'function') opts.dismiss(el); else el.remove(); } } }, icon('x')));
+  }
+  el.append(opts.glyph || icon(opts.icon || TONE_ICON[tone]),
+    h('div', { class: 'c-body' + (opts.bodyCls ? ' ' + opts.bodyCls : '') }, opts.title ? h('div', { class: 'c-title' }, opts.title) : null, opts.body),
+    ...(acts.length ? [h('div', { class: 'c-acts' }, acts)] : []));   // (append writes a null as the text "null")
+  return el;
+}
+/// The page notices (#notice, at the top of main, sticky): a failure with no closer home, or one whose home
+/// is not on screen. Each stays until dismissed; at most the newest five.
+state.failures = new Map();
+function pageFailure(text, opts = {}) {
+  const key = opts.key || String(text);
+  state.failures.delete(key);
+  state.failures.set(key, { text: String(text), tone: opts.tone || 'bad', title: opts.title || null });
+  while (state.failures.size > 5) state.failures.delete(state.failures.keys().next().value);
+  paintFailures();
+}
+function paintFailures() {
+  const box = $('notice');
+  box.hidden = state.failures.size === 0;
+  box.replaceChildren(...[...state.failures.entries()].map(([key, f]) => callout(f.tone, { compact: true, title: f.title, body: f.text,
+    attrs: { 'data-failure': key }, dismiss: () => { state.failures.delete(key); paintFailures(); } })));
+}
+/// A failure about a sandbox: its status line when one is on screen (it stays there until dismissed, or until
+/// the next operation on it), else the page notices.
+state.sbxFail = new Map();
+function statusSlotShown(name) { return !!name && [...document.querySelectorAll('[data-op-for]')].some((el) => el.dataset.opFor === name && el.getClientRects().length > 0); }
+function failureFor(name, text) {
+  if (statusSlotShown(name)) { state.sbxFail.set(name, { text: String(text), at: Date.now() }); paintRowOps(); }
+  else pageFailure(name ? name + ': ' + text : text);
+}
+function opFailed(op) {
+  if (!statusSlotShown(op.sandbox)) pageFailure(op.label + ': ' + op.text, { key: 'op:' + op.id });
 }
 // 599 (594.B1/B2): what a session bridge did — "hello copied 42 chars", "hello opened https://… in your
 // browser". Shown every time (a copy is the one thing an agent can hand the person unasked); two views of
@@ -294,7 +357,8 @@ function bridgeNotice(kind, text) {
   for (const [key, at] of recentBridgeNotices) if (now - at > 2000) recentBridgeNotices.delete(key);
   if (recentBridgeNotices.has(k + '\n' + s)) return;
   recentBridgeNotices.set(k + '\n' + s, now);
-  const t = toast(s, /-(refused|off)$/.test(k));
+  if (/-(refused|off)$/.test(k)) { pageFailure(s, { tone: 'warn', key: 'bridge:' + k + ':' + s }); return; }
+  const t = toast(s, false, 'info');
   t.classList.add('bridge');
   t.dataset.bridge = k;
 }
@@ -387,6 +451,9 @@ async function loadPreparations() {
 /// The newest operation of each sandbox, shown under its name in the list (live, without a refetch).
 /// A running operation counts its seconds, so a two-minute first start (pull, flatten, bake) is
 /// visibly alive; the text is the host's latest step.
+/// 603: a failure stays (until dismissed, or the next operation on the sandbox); a success shows for a minute.
+state.acked = new Set();
+state.pageAt = Date.now();      // a failure from before this page loaded shows only as long as a success would
 function paintRowOps() {
   for (const el of document.querySelectorAll('[data-op-for]')) {
     const name = el.dataset.opFor;
@@ -394,13 +461,39 @@ function paintRowOps() {
     // While something runs, the OLDEST running operation (a start that others wait behind) — its
     // steps are the news; otherwise the newest outcome.
     const running = ops.filter((o) => o.state === 'running');
-    const o = running.length ? running[0] : ops[ops.length - 1];
-    const fresh = o && (o.state === 'running' || Date.now() - new Date(o.startedAt).getTime() < 60000);
-    const secs = o ? Math.max(0, Math.round((Date.now() - new Date(o.startedAt).getTime()) / 1000)) : 0;
-    const more = running.length > 1 ? ' · then ' + running.slice(1).map((x) => x.action).join(', ') : '';
-    const text = !fresh ? '' : o.state === 'running' ? '… ' + o.action + ' · ' + secs + ' s — ' + o.text + more : (o.state === 'done' ? '✓ ' : '✕ ') + o.text;
-    el.textContent = text;
-    el.className = (el.dataset.banner ? 'op-banner' : 'row-op') + (fresh ? ' op-' + o.state : '') + (fresh ? '' : ' empty-op');
+    let o = running.length ? running[0] : ops[ops.length - 1];
+    const fail = state.sbxFail.get(name);
+    const oAt = o ? opEnded(o) : 0;
+    let kind = 'none', text = '';
+    if (o && o.state === 'running') {
+      const secs = Math.max(0, Math.round((Date.now() - new Date(o.startedAt).getTime()) / 1000));
+      const more = running.length > 1 ? ' · then ' + running.slice(1).map((x) => x.action).join(', ') : '';
+      kind = 'running'; text = o.action + ' · ' + secs + ' s — ' + o.text + more;
+    } else if (fail && (!o || fail.at >= oAt)) {
+      kind = 'failed'; text = fail.text; o = null;
+    } else if (o && o.state === 'failed' && !state.acked.has(o.id) && (oAt >= state.pageAt || Date.now() - oAt < 60000)) {
+      kind = 'failed'; text = o.text;
+    } else if (o && o.state === 'done' && Date.now() - oAt < 60000) {
+      kind = 'done'; text = o.text;
+    }
+    const key = kind + '|' + text;
+    if (el.dataset.painted === key) continue;
+    el.dataset.painted = key;
+    if (!el.dataset.banner) {
+      el.textContent = kind === 'none' ? '' : (kind === 'running' ? '… ' : kind === 'done' ? '✓ ' : '✕ ') + text;
+      el.className = 'row-op' + (kind === 'none' ? ' empty-op' : ' op-' + kind);
+      continue;
+    }
+    // The sandbox page's status slot: a quiet line while it runs, a callout when it ended.
+    el.className = 'op-banner' + (kind === 'none' ? ' empty-op' : ' op-' + kind);
+    if (kind === 'none') { el.replaceChildren(); continue; }
+    if (kind === 'running') { el.replaceChildren(h('span', { class: 'mini-spin', 'aria-hidden': 'true' }), h('span', { class: 'op-text' }, text)); continue; }
+    const opId = o ? o.id : null;
+    el.replaceChildren(callout(kind === 'done' ? 'ok' : 'bad', { compact: true, body: text, dismiss: kind === 'failed' ? () => {
+      if (opId) state.acked.add(opId); else state.sbxFail.delete(name);
+      el.dataset.painted = '';
+      paintRowOps();
+    } : null }));
   }
 }
 function opRunningFor(name) { return [...state.ops.values()].some((o) => o.sandbox === name && o.state === 'running'); }
@@ -440,16 +533,21 @@ function dialog(title, intro, fields, submitLabel, onSubmit, opts = {}) {
   });
   const extra = h('div', { class: 'dlg-extra' });
   const submit = h('button', { type: 'submit', class: 'btn primary' + (opts.danger ? ' danger' : '') }, withIcon(opts.icon || iconFor(submitLabel), submitLabel));
-  const cancel = h('button', { type: 'button', class: 'btn', on: { click: () => d.close() } }, withIcon('x', 'Cancel'));
+  const cancel = h('button', { type: 'button', class: 'btn quiet', on: { click: () => d.close() } }, withIcon('x', 'Cancel'));
+  const close = h('button', { type: 'button', class: 'btn sm quiet icon-only', title: 'Close', 'aria-label': 'Close', on: { click: () => d.close() } }, icon('x'));
+  // The action's own error: in the dialog, which stays open (603 E7).
   const error = h('div', { class: 'dlg-error', role: 'alert' });
-  form.append(h('h2', null, title), intro ? h('p', { class: 'sub' }, intro) : null, ...rows, extra, error,
-    h('div', { class: 'dlg-buttons' }, cancel, submit));
+  const why = h('span', { class: 'why' });
+  form.append(h('div', { class: 'dlg-head' }, h('h2', { class: 'h-title' }, title), close),
+    h('div', { class: 'dlg-body' }, intro ? h('p', { class: 'sub' }, intro) : null, ...rows, extra, error),
+    h('div', { class: 'dlg-foot dlg-buttons' }, why, cancel, submit));
   if (opts.confirmName) {
     submit.disabled = true;
-    const typed = h('input', { type: 'text', autocomplete: 'off', spellcheck: 'false', 'aria-label': 'type the name to confirm' });
-    typed.addEventListener('input', () => { submit.disabled = typed.value !== opts.confirmName; });
+    why.textContent = 'Type the name to ' + submitLabel.split(' ')[0].toLowerCase() + ' it';
+    const typed = h('input', { type: 'text', class: 'mono', autocomplete: 'off', spellcheck: 'false', 'aria-label': 'type the name to confirm' });
+    typed.addEventListener('input', () => { submit.disabled = typed.value !== opts.confirmName; why.hidden = !submit.disabled; });
     inputs.__confirm = typed;
-    form.insertBefore(h('label', { class: 'field' }, h('span', null, 'Type ', h('code', null, opts.confirmName), ' to confirm'), typed), extra);
+    extra.before(h('label', { class: 'field' }, h('span', null, 'Type ', h('code', null, opts.confirmName), ' to confirm'), typed));
   }
   form.addEventListener('submit', async (ev) => {
     ev.preventDefault();
@@ -473,7 +571,7 @@ function dialog(title, intro, fields, submitLabel, onSubmit, opts = {}) {
   d.showModal();
   const first = form.querySelector('input,select,textarea');
   if (first) first.focus();
-  return Object.assign(d, { inputs });
+  return Object.assign(d, { inputs, why });
 }
 
 // ── 594: the workspace of a new sandbox ─────────────────────────────────────
@@ -493,7 +591,7 @@ function workspaceChooser({ nameInput = null, image = () => null, name = null, i
                             autocomplete: 'off', spellcheck: 'false', 'aria-label': 'Workspace folder' });
   path.value = initialPath;
   const note = h('small', { class: 'ws-note', 'data-ws-note': '', 'aria-live': 'polite' });
-  const choose = h('button', { type: 'button', class: 'btn small', 'data-ws-choose': '', title: 'Opens the Mac’s folder picker (New Folder allowed)' },
+  const choose = h('button', { type: 'button', class: 'btn sm', 'data-ws-choose': '', title: 'Opens the Mac’s folder picker (New Folder allowed)' },
     withIcon('folder', 'Choose…'));
   const segs = {};
   const seg = (m, label, icon) => (segs[m] = h('button', { type: 'button', class: 'seg', 'data-ws-seg': m, on: { click: () => setMode(m) } }, withIcon(icon, label)));
@@ -545,7 +643,7 @@ function workspaceChooser({ nameInput = null, image = () => null, name = null, i
     try {
       const r = await api('workspace/choose', { method: 'POST', json: path.value.trim() ? { start: path.value.trim() } : {} });
       if (r && r.path) { path.value = r.path; pathEdited = true; autoPath = null; await check({ path: r.path }); }
-    } catch (e) { toast(e.message || String(e), true); } finally { choose.disabled = false; }
+    } catch (e) { say({ error: e.message || String(e) }); } finally { choose.disabled = false; }
   });
   setMode(mode);
   if (pathEdited) check({ path: path.value.trim() }); else check();
@@ -636,14 +734,16 @@ function imagePicker({ images = [], bases = null, value = 'claude-code', dockerf
   const dfPath = h('input', { type: 'text', name: 'dockerfile', 'data-dockerfile-path': '', placeholder: '~/code/app/Dockerfile', autocomplete: 'off',
                               spellcheck: 'false', 'aria-label': 'Dockerfile' });
   dfPath.value = dockerfile;
-  const dfChoose = h('button', { type: 'button', class: 'btn small', 'data-dockerfile-choose': '', title: 'Opens the Mac’s file picker' },
+  const dfChoose = h('button', { type: 'button', class: 'btn sm', 'data-dockerfile-choose': '', title: 'Opens the Mac’s file picker' },
     withIcon('folder', 'Choose Dockerfile…'));
-  const policyNote = h('div', { class: 'df-policy', role: 'note', 'data-dockerfile-policy': '' }, icon('shield'), ' ', bases ? bases.outsidePolicy : '');
+  const policyNote = callout('warn', { compact: true, cls: 'df-policy', icon: 'shield', role: 'note', attrs: { 'data-dockerfile-policy': '' }, body: bases ? bases.outsidePolicy : '' });
   const builderBox = h('div', { class: 'df-builder', 'data-builder': '' });
+  const dfError = h('div', { class: 'dlg-error', role: 'alert', 'data-dockerfile-error': '' });
+  const dfFail = (e) => { dfError.textContent = e ? e.message || String(e) : ''; };
   const dfPanel = h('div', { class: 'df-panel' },
     h('div', { class: 'ws-row' }, dfPath, dfChoose),
     h('small', { class: 'muted' }, 'Dozer builds it with Apple’s container build, then adds the developer baseline and the agent — your Dockerfile need not install Claude Code. Its folder is the build context, and the workspace unless you set one.'),
-    policyNote, builderBox);
+    policyNote, builderBox, dfError);
   const dfTell = () => { onDockerfile(dfPath.value.trim() ? dfPath.value.trim().replace(/\/[^/]*$/, '') || '/' : ''); };
   dfPath.addEventListener('input', () => { onChange(); });
   dfPath.addEventListener('change', dfTell);
@@ -652,7 +752,8 @@ function imagePicker({ images = [], bases = null, value = 'claude-code', dockerf
     try {
       const r = await api('dockerfile/choose', { method: 'POST', json: dfPath.value.trim() ? { start: dfPath.value.trim() } : {} });
       if (r && r.path) { dfPath.value = r.path; onDockerfile(r.folder); onChange(); }
-    } catch (e) { toast(e.message || String(e), true); } finally { dfChoose.disabled = false; }
+      dfFail(null);
+    } catch (e) { dfFail(e); } finally { dfChoose.disabled = false; }
   });
   async function refreshBuilder() {
     try { const b = await api('bases'); builder = b.builder; } catch (_) { /* keep */ }
@@ -667,13 +768,13 @@ function imagePicker({ images = [], bases = null, value = 'claude-code', dockerf
     } else if (s === 'stopped') {
       kids.push(h('p', { class: 'muted' }, builder.startNote),
         h('div', { class: 'actions' },
-          btn('Start its services', async () => { try { await actOrThrow({ action: 'builder-start' }); await waitOps(); } catch (e) { toast(e.message || String(e), true); } refreshBuilder(); },
+          btn('Start its services', async () => { try { dfFail(null); await actOrThrow({ action: 'builder-start' }); await waitOps(); } catch (e) { dfFail(e); } refreshBuilder(); },
             { small: true, primary: true, icon: 'play' }),
           btn('Not now', () => { notNow = true; paint(); onChange(); }, { small: true, icon: 'x' })));
     } else if (s !== 'ready') {
       kids.push(h('p', { class: 'muted' }, builder.installNote),
         h('div', { class: 'actions' },
-          btn('Install Apple’s container tool…', async () => { try { await actOrThrow({ action: 'builder-install' }); } catch (e) { toast(e.message || String(e), true); } setTimeout(refreshBuilder, 1500); },
+          btn('Install Apple’s container tool…', async () => { try { dfFail(null); await actOrThrow({ action: 'builder-install' }); } catch (e) { dfFail(e); } setTimeout(refreshBuilder, 1500); },
             { small: true, primary: true, icon: 'download' }),
           btn('Not now', () => { notNow = true; paint(); onChange(); }, { small: true, icon: 'x' })));
     }
@@ -852,6 +953,7 @@ async function resetSetting(key) { adoptSettings(await api('settings', { method:
 const SETTING_SECTIONS = {
   ui: 'This UI', host: 'The host', store: 'The store', claude: 'Claude Code', defaults: 'New sandboxes', agent: 'The agent', sandbox: 'Inside every sandbox',
   'images.lab': 'New lab sandboxes', 'images.claude-code': 'New claude-code sandboxes', 'images.pi': 'New pi sandboxes', kernel: 'The kernel',
+  resources: 'Resources', sessions: 'Sessions', bridges: 'Bridges', workspace: 'Workspace rules', github: 'GitHub', images: 'Images',
 };
 // An empty app list means none (default apps only), not "automatic".
 function shownValue(v, type) { return typeof v === 'string' ? (v === '' ? (type === 'apps' ? '""  (none)' : '""  (automatic)') : v) : String(v); }
@@ -869,38 +971,80 @@ async function viewSettings() {
   // below: defaults.github, github.credentials, sandbox.ssh_agent; the Claude account: Accounts).
   const accessBox = h('div', { class: 'panel access-panel', 'data-settings-access': '' });
   renderAccessStep(accessBox, { mode: 'settings', claude: true });
-  return h('div', null, h('h1', null, 'Settings'),
+  // 603 (E13): a filter over what the page already has (a key, a name, a description) and an index of the
+  // sections; Access stays first.
+  const filter = h('input', { type: 'search', class: 'page-filter', 'data-settings-filter': '', placeholder: 'Filter — a key like ui.theme, or a word',
+    'aria-label': 'Filter the settings', autocomplete: 'off', spellcheck: 'false' });
+  filter.value = state.settingsFilter || '';
+  const secId = (name) => 'set-' + name.replace(/[^a-z0-9]+/gi, '-');
+  const index = pageIndex([['access', 'Access'], ...sections.map((sec) => [secId(sec.name), SETTING_SECTIONS[sec.name] || sec.name])]);
+  const node = h('div', { class: 'settings-page' }, h('h1', null, 'Settings'),
     h('p', { class: 'sub' }, 'Written to ', h('code', null, rep.path || 'no file (neither XDG_CONFIG_HOME nor HOME is set)'),
       rep.exists ? '' : ' — not written yet: the first change writes it, with every setting listed at its default',
       '. A command-line flag wins, then the environment, then this file, then the default; ', h('code', null, 'doz config show'), ' prints the same.'),
-    rep.error ? h('div', { class: 'notice bad' }, rep.error + ' — nothing in it applies, and the UI will not overwrite it. Fix it (or remove it) first.') : null,
-    warnings.length ? h('div', { class: 'notice' }, h('ul', { class: 'plain' }, warnings.map((w) => h('li', null, w)))) : null,
-    h('h2', { id: 'access' }, 'Access'),
+    rep.error ? callout('bad', { cls: 'notice', title: 'The settings file does not read', body: rep.error + ' — nothing in it applies, and the UI will not overwrite it. Fix it (or remove it) first.' }) : null,
+    warnings.length ? callout('warn', { cls: 'notice', body: h('ul', { class: 'plain' }, warnings.map((w) => h('li', null, w))) }) : null,
+    h('div', { class: 'page-tools' }, h('label', { class: 'filter-field' }, icon('search'), filter), index),
+    h('p', { class: 'muted filter-none', 'data-filter-none': '', hidden: true }, 'No setting matches.'),
+    h('h2', { id: 'access', class: 'set-head' }, 'Access'),
     h('p', { class: 'sub' }, 'What sandboxes may use as you. Change a choice in the settings below (',
       h('code', null, 'defaults.github'), ', ', h('code', null, 'github.credentials'), ', ', h('code', null, 'sandbox.ssh_agent'),
       ') or with ', h('code', null, 'doz access set'), '; the Claude account on the Accounts page.'),
     accessBox,
     sections.flatMap((sec) => [
-      h('h2', null, SETTING_SECTIONS[sec.name] || sec.name, ' ', h('code', { class: 'muted' }, '[' + sec.name + ']')),
-      h('div', { class: 'panel settings' }, sec.rows.map(settingRow)),
+      h('h2', { id: secId(sec.name), class: 'set-head', 'data-section': sec.name }, SETTING_SECTIONS[sec.name] || sec.name, ' ', h('code', { class: 'muted' }, '[' + sec.name + ']')),
+      h('div', { class: 'panel settings', 'data-section': sec.name }, sec.rows.map(settingRow)),
     ]),
-    h('h2', null, 'Not settable, by design'),
-    panel(h('ul', { class: 'plain' }, rep.notSettable.map((n) => h('li', null, n)))));
+    h('h2', { class: 'set-head', 'data-section': 'not-settable' }, 'Not settable, by design'),
+    h('div', { class: 'panel', 'data-section': 'not-settable' }, h('ul', { class: 'plain' }, rep.notSettable.map((n) => h('li', null, n)))));
+  const apply = () => {
+    const q = filter.value.trim().toLowerCase();
+    state.settingsFilter = filter.value;
+    let any = false;
+    for (const row of node.querySelectorAll('.setting[data-key]')) {
+      const r = state.settings.byKey[row.dataset.key];
+      const hit = !q || [r.key, r.name, r.description, r.section].some((t) => String(t || '').toLowerCase().includes(q));
+      row.hidden = !hit;
+      any = any || hit;
+    }
+    for (const el of node.querySelectorAll('[data-section]')) {
+      const box = node.querySelector('.panel.settings[data-section="' + el.dataset.section + '"]');
+      el.hidden = !!q && (!box || ![...box.querySelectorAll('.setting')].some((x) => !x.hidden));
+    }
+    // Access and the index stand aside while filtering (the matching rows are the page).
+    for (const el of node.querySelectorAll('#access, [data-settings-access], #access + .sub')) el.hidden = !!q;
+    node.querySelector('[data-filter-none]').hidden = !q || any;
+  };
+  filter.addEventListener('input', apply);
+  filter.addEventListener('keydown', (ev) => { if (ev.key === 'Escape' && filter.value) { ev.stopPropagation(); filter.value = ''; apply(); } });
+  apply();
+  return node;
+}
+/// 603 (E13): a long page's index — a sticky strip of its sections (with a figure each when given); a link scrolls.
+function pageIndex(items) {
+  return h('nav', { class: 'page-index', 'aria-label': 'On this page' }, items.map(([id, label, figure]) =>
+    h('a', { href: '#' + (location.hash.slice(1) || '/'), 'data-index': id, on: { click: (ev) => {
+      ev.preventDefault();
+      const t = document.getElementById(id);
+      if (t) { t.scrollIntoView({ block: 'start', behavior: 'smooth' }); }
+    } } }, label, figure ? h('span', { class: 'muted' }, ' ' + figure) : null)));
 }
 function settingRow(r) {
-  const source = h('span', { class: 'pill src src-' + r.source, title: r.source === 'file' ? 'set in the file' : r.source === 'default' ? 'not set: the default' : (r.note || '') },
+  const source = h('span', { class: 'tag src src-' + r.source, title: r.source === 'file' ? 'set in the file' : r.source === 'default' ? 'not set: the default' : (r.note || '') },
     r.source === 'env' ? 'env ' + r.environment : r.source);
   const reset = r.editable && r.source === 'file'
     ? btn('Default', () => changeSetting(r.key, null), { small: true, title: 'Comment it out in the file: the default (' + shownValue(r.defaultValue, r.type) + ') applies' }) : null;
   // 602: a control that is a block of its own (the permissions checklist) goes UNDER the text, full
   // width — beside it, its max-content width squeezed the description to one word per line.
-  return h('div', { class: r.type === 'permissions' ? 'setting setting-wide' : 'setting', 'data-key': r.key },
+  const row = h('div', { class: r.type === 'permissions' ? 'setting setting-wide' : 'setting', 'data-key': r.key },
     h('div', { class: 'setting-main' },
       h('div', { class: 'setting-name' }, h('code', null, r.name), ' ', source),
       h('div', null, r.description),
       h('div', { class: 'muted setting-meta' }, 'default ', h('code', null, shownValue(r.defaultValue, r.type)), ' · ', r.appliesNote,
         r.note ? h('div', null, r.note) : null)),
     h('div', { class: 'setting-control' }, settingControl(r), reset));
+  if (state.settingErr.has(r.key)) paintSettingError(row, r.key);
+  return row;
 }
 function settingControl(r) {
   // 599c: the projects folder — chosen in the Mac's own folder picker (the server writes what was chosen;
@@ -913,7 +1057,7 @@ function settingControl(r) {
   if (!r.editable) return h('code', { class: 'setting-value', title: r.note || '' }, shownValue(r.value, r.type));
   let input;
   if (r.type === 'bool') {
-    input = h('input', { type: 'checkbox', 'aria-label': r.key });
+    input = h('input', { type: 'checkbox', role: 'switch', 'aria-label': r.key });
     input.checked = r.value === true;
     input.addEventListener('change', () => changeSetting(r.key, input.checked));
   } else if (r.type === 'choice') {
@@ -954,7 +1098,7 @@ function settingControl(r) {
     input.value = String(r.value);
     input.addEventListener('change', () => {
       const n = Number(input.value);
-      if (!isInt(n, r.min, r.max)) { toast(r.key + ' is a whole number, ' + r.min + '–' + r.max, true); input.value = String(r.value); return; }
+      if (!isInt(n, r.min, r.max)) { settingFailed(r.key, r.key + ' is a whole number, ' + r.min + '–' + r.max); input.value = String(r.value); return; }
       changeSetting(r.key, n);
     });
   } else {
@@ -966,23 +1110,38 @@ function settingControl(r) {
   }
   return input;
 }
+/// 603: a setting that could not be changed says so in its own row (kept across the page's re-render).
+state.settingErr = new Map();
+function settingFailed(key, text) {
+  state.settingErr.set(key, text);
+  const row = document.querySelector('.setting[data-key="' + CSS.escape(key) + '"]');
+  if (row) paintSettingError(row, key); else pageFailure(text);
+}
+function paintSettingError(row, key) {
+  row.querySelector('.setting-error')?.remove();
+  const text = state.settingErr.get(key);
+  if (text) row.querySelector('.setting-main').append(callout('bad', { compact: true, cls: 'setting-error', body: text,
+    dismiss: () => { state.settingErr.delete(key); paintSettingError(row, key); } }));
+}
 async function chooseProjectsDir() {
   try {
     const c = await api('settings/projects-dir/choose', { method: 'POST', json: {} });
     if (c.cancelled) return;
     adoptSettings(c.report);
+    state.settingErr.delete('defaults.projects_dir');
     toast('defaults.projects_dir saved: ' + c.path, false);
   } catch (e) {
-    toast(e.message || String(e), true);
+    settingFailed('defaults.projects_dir', e.message || String(e));
   }
   refresh(false);
 }
 async function changeSetting(key, value) {
   try {
     if (value === null) await resetSetting(key); else await saveSetting(key, value);
+    state.settingErr.delete(key);
     toast(key + (value === null ? ' is the default again' : ' saved'), false);
   } catch (e) {
-    toast(e.message || String(e), true);
+    settingFailed(key, e.message || String(e));
   }
   refresh(false);
 }
@@ -1037,10 +1196,9 @@ function setLive(kind, text) {
 // sandboxes shut down), came back as another build; doz ui stopped (the page retries on its own).
 function banner(key, kind, parts, actions = []) {
   const box = $('banners');
-  const el = h('div', { class: 'banner' + (kind ? ' ' + kind : ''), 'data-banner': key, role: kind === 'bad' ? 'alert' : 'status' },
-    h('div', { class: 'b-text' }, parts),
-    h('div', { class: 'b-acts' }, ...actions,
-      h('button', { type: 'button', class: 'b-x', title: 'Dismiss', 'aria-label': 'Dismiss', on: { click: () => el.remove() } }, '×')));
+  // 603: a banner is the callout's banner variant (a surface with the tone's edge), dismissible.
+  const el = callout(kind || 'info', { banner: true, cls: 'b-' + (kind || 'info'), bodyCls: 'b-text', body: parts, actions, dismiss: true,
+    attrs: { 'data-banner': key }, role: kind === 'bad' ? 'alert' : 'status' });
   const old = box.querySelector('[data-banner="' + key + '"]');
   if (old) old.replaceWith(el); else box.append(el);
   return el;
@@ -1232,10 +1390,10 @@ function showUiOverlay() {
 function buildUiOverlay() {
   const o = $('ui-overlay');
   if (o.querySelector('#ui-try-now')) return;
-  const tryNow = h('button', { type: 'button', class: 'btn primary', id: 'ui-try-now', on: { click: () => { updateUiOverlay('trying…'); uiRetryTick(); } } },
+  const tryNow = h('button', { type: 'button', class: 'btn lg primary', id: 'ui-try-now', on: { click: () => { updateUiOverlay('trying…'); uiRetryTick(); } } },
     withIcon('refresh-cw', 'Try now'));
   o.replaceChildren(h('div', { class: 'ui-ov-card' },
-    h('div', { class: 'ui-ov-head' }, h('span', { class: 'ui-ov-spin', 'aria-hidden': 'true' }),
+    h('div', { class: 'ui-ov-head' }, h('span', { class: 'ui-ov-spin spin lg', 'aria-hidden': 'true' }),
       h('h2', { id: 'ui-ov-title' }, 'Paused — reconnecting to doz ui…')),
     h('div', { id: 'ui-ov-desc' },
       h('p', null, 'Nothing on this page works until it reconnects. Run ', h('code', null, 'doz ui'),
@@ -1273,9 +1431,10 @@ function uiBack() {
   if (!state.uiOverlay) return;
   state.uiOverlay = false;
   for (const el of pausedParts()) el.inert = false;
+  if (state.modal) modalInert(true);                   // 603: a wizard's modal keeps the page under it inert
   document.body.classList.remove('ui-paused');
   $('ui-overlay').hidden = true;
-  $('main').focus();
+  (state.modal ? $('wm-box') : $('main')).focus();
 }
 
 function connect() {
@@ -1298,13 +1457,13 @@ function connect() {
     liveRefresh();
   });
   // 594 W19: a line from doz ui itself ("doz ui restarted — 0.12.0-rc.4").
-  es.addEventListener('notice', (ev) => { try { toast(JSON.parse(ev.data).text, false); } catch (_) { /* */ } });
+  es.addEventListener('notice', (ev) => { try { toast(JSON.parse(ev.data).text, false, 'info'); } catch (_) { /* */ } });
   es.addEventListener('host', (ev) => { try { hostChanged(JSON.parse(ev.data)); } catch (_) { /* ignore a malformed line */ } });
   // 594: the host's image preparations, while any runs (and once when the last ends).
   es.addEventListener('preparations', (ev) => {
     try { state.preps = JSON.parse(ev.data); } catch (_) { return; }
     renderOps();
-    if (state.view === 'onboarding') renderWizard();
+    if (state.modal === 'onboarding') renderWizard();
   });
   es.addEventListener('op', (ev) => { try { trackOp(JSON.parse(ev.data)); } catch (_) { /* */ } });
   es.addEventListener('activity', (ev) => {
@@ -1333,13 +1492,6 @@ function connect() {
     uiLost(false);
   };
 }
-function notice(text, bad) {
-  const n = $('notice');
-  if (!text) { n.hidden = true; return; }
-  n.hidden = false;
-  n.className = 'notice' + (bad ? ' bad' : '');
-  n.textContent = text;
-}
 
 // ── the nav: a child per sandbox (593) ──────────────────────────────────────
 // From the overview (`ls` without session counts — never the guest's session holders), re-read on
@@ -1356,27 +1508,63 @@ function renderNavSandboxes() {
   if (state.overview) $('onb-dot').hidden = state.overview.onboarded !== false;
   renderHostFoot();
   const list = state.overview ? state.overview.sandboxes.slice().sort((a, b) => a.name.localeCompare(b.name)) : [];
-  $('nav-sandboxes').replaceChildren(...list.map((s) => h('a', {
-    href: '#/sandbox/' + s.name, class: 'nav-child' + (state.view === 'sandbox' && state.param === s.name ? ' active' : ''),
-    role: 'listitem', 'data-sandbox': s.name, title: s.name + ' — ' + s.phaseLabel },
-    h('span', { class: 'ph-dot ph-' + s.phase, 'aria-hidden': 'true' }), h('span', { class: 'nav-name' }, s.name))));
+  $('nav-count').textContent = state.overview ? String(list.length) : '';
+  // 603: each sandbox under "All sandboxes", its phase as a dot whose shape says whether it holds RAM (and
+  // its word for assistive tech and the tooltip); the one shown is the page's current item.
+  $('nav-sandboxes').replaceChildren(...list.map((s) => {
+    const here = !state.modal && state.view === 'sandbox' && state.param === s.name;
+    return h('a', { href: '#/sandbox/' + s.name, class: 'nav-child child' + (here ? ' active' : ''), 'aria-current': here ? 'page' : null,
+      role: 'listitem', 'data-sandbox': s.name, title: s.name + ' — ' + s.phaseLabel },
+      h('span', { class: 'ph-dot ph-' + s.phase, role: 'img', 'aria-label': s.phaseLabel }), h('span', { class: 'nav-name' }, s.name));
+  }));
 }
 function paintNav() {
   for (const a of document.querySelectorAll('#nav > a')) {
-    a.classList.toggle('active', a.dataset.view === state.view || ((state.view === 'sandbox' || state.view === 'new') && a.dataset.view === 'overview'));
+    // A sandbox's own page marks its child entry; New sandbox belongs to All sandboxes.
+    // (603: an open wizard's entry — Onboarding, or All sandboxes for New sandbox — marks the nav under its modal.)
+    const cur = state.modal === 'onboarding' ? 'onboarding' : state.modal === 'new' ? 'overview' : state.view;
+    const on = a.dataset.view === cur;
+    a.classList.toggle('active', on);
+    if (on) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
   }
   renderNavSandboxes();
+  navRail(false);
+}
+/// 603: below 980 px the sidebar is an icon rail; its toggle shows the whole sidebar over the page.
+function navRail(open) {
+  document.body.classList.toggle('nav-open', !!open);
+  $('nav-toggle').setAttribute('aria-expanded', open ? 'true' : 'false');
+  $('nav-toggle').setAttribute('aria-label', open ? 'Hide the menu' : 'Show the menu');
 }
 
 // ── routing ─────────────────────────────────────────────────────────────────
 // #/VIEW, #/sandbox/NAME and #/sandbox/NAME/SESSION (a session addressed: its tab opened or selected).
+// 603 (owner, on rc.1): #/new and #/onboarding are MODALS over the page under them — that page (state.view, its
+// hash state.bgHash) is never re-rendered or torn down by opening or closing one (the sandbox page's terminals
+// stay as they are). A deep link opens the modal over Sandboxes.
+const MODAL_VIEWS = new Set(['new', 'onboarding']);
 function route() {
   const m = /^#\/([a-z]+)(?:\/([a-z0-9-]{1,40})(?:\/([A-Za-z0-9_-][A-Za-z0-9._-]{0,63}))?)?$/.exec(location.hash);
   if (m && m[1] === 'terminals') { location.replace('#/sessions'); return; }      // 591's name for the grid's place
-  state.view = m ? m[1] : 'overview';
+  const v = m ? m[1] : 'overview';
+  if (MODAL_VIEWS.has(v) && !m[2]) {
+    const first = !state.bgHash;
+    if (first) { state.view = 'overview'; state.param = null; state.session = null; state.bgHash = '#/overview'; routePage(); }
+    openWizardModal(v, !first);
+    return;
+  }
+  if (state.modal) {
+    closeWizardModal();
+    if (location.hash === state.bgHash) return;                   // back to the page under it, as it was
+  }
+  state.view = v;
   state.param = m && m[2] ? m[2] : null;
   state.session = m && m[3] ? m[3] : null;
   if (state.view === 'sandbox' && !state.param) state.view = 'overview';
+  state.bgHash = location.hash;
+  routePage();
+}
+function routePage() {
   paintNav();
   // 591: the terminals live in their own section, never re-rendered by refresh() (a live update
   // must not steal a terminal's focus or reparent its canvas). 593: that section is the sandbox
@@ -1389,13 +1577,127 @@ function route() {
   if (!onGrid) gridLeave();
   if (state.view !== 'operations') state.opsBox = null;
   if (state.view === 'operations') { acknowledgeOps(); loadPreparations(); }
-  if (state.view !== 'onboarding') wizardStopPolling();
+  if (state.modal !== 'onboarding') wizardStopPolling();
   if (state.view === 'images' || state.view === 'resources') remeasure();   // 595: measured on arrival, Refresh, an op's end
   if (onSbx) { showSandbox(); return; }
   if (onGrid) { gridEnter(); return; }
   refresh(true);
 }
 window.addEventListener('hashchange', () => { if (!state.signedOut) route(); });
+
+// ── 603: the wizards' modal ─────────────────────────────────────────────────
+// A real dialog (role=dialog, aria-modal, labelled by the wizard's title): the rest of the page is inert while it
+// is open, focus moves in and is kept there (Tab wraps), and returns to what opened it. ✕ or Escape (not inside a
+// field or a list) closes it — after asking, when the person has made choices; the browser's Back closes it and
+// KEEPS the choices (Forward, or the wizard's entry, resumes them).
+const MODAL_INERT = ['side', 'banners', 'notice', 'view', 'sbx', 'grid'];
+function modalInert(on) {
+  if (!on && state.uiOverlay) return;                  // the "doz ui stopped" overlay keeps everything inert
+  for (const id of MODAL_INERT) { const el = id === 'side' ? document.querySelector('.side') : $(id); if (el) el.inert = on; }
+}
+function openWizardModal(v, fromPage) {
+  const was = state.modal;
+  state.modal = v;
+  if (!was) {
+    const a = document.activeElement;
+    state.modalOpener = a && a !== document.body && !$('wiz-modal').contains(a) ? a : null;
+    // A live update may re-render the opener's section meanwhile: then its successor (same place, same name) gets focus.
+    state.modalOpenerKey = state.modalOpener ? { sec: state.modalOpener.closest('section[id], aside[id], nav[id], .side'), name: accName(state.modalOpener) } : null;
+    state.modalBack = !!fromPage;          // opened from a page of this tab: closing goes back in the history
+    modalInert(true);
+    $('wiz-modal').hidden = false;
+    document.body.classList.add('modal-open');
+  }
+  paintNav();
+  if (was !== v || !$('wm-box').firstChild) renderModal(true);
+}
+function closeWizardModal() {
+  if (!state.modal) return;
+  if (state.modal === 'onboarding') wizardStopPolling();
+  state.modal = null;
+  $('wiz-modal').hidden = true;
+  $('wm-box').replaceChildren();
+  document.body.classList.remove('modal-open');
+  modalInert(false);
+  paintNav();
+  const o = state.modalOpener, k = state.modalOpenerKey;
+  state.modalOpener = null; state.modalOpenerKey = null;
+  const usable = (e) => e && e.isConnected && !e.closest('[inert]') && e.getClientRects().length > 0;
+  const heir = !usable(o) && k && k.sec && k.sec.isConnected && k.name
+    ? [...k.sec.querySelectorAll('button, a[href], [tabindex]')].find((e) => usable(e) && accName(e) === k.name) : null;
+  (usable(o) ? o : heir || $('main')).focus();
+}
+function accName(e) { return (e.getAttribute('aria-label') || e.textContent || '').replace(/\s+/g, ' ').trim(); }
+async function renderModal(first) {
+  const v = state.modal;
+  if (!v) return;
+  let node;
+  try { node = v === 'new' ? await viewNew() : await viewOnboarding(); } catch (e) {
+    node = h('div', { class: 'wizard' }, wizHead(v === 'new' ? 'New sandbox' : 'Set up Dozer Sandbox', null, [], null),
+      h('div', { class: 'wiz-card' }, h('div', { class: 'w-body' }, callout('bad', { cls: 'notice', title: 'This could not be read', body: e.message || String(e) }))));
+  }
+  if (state.modal !== v || state.signedOut) return;
+  wizMount(node, first);
+}
+/// Put a wizard's node in the modal: the current step scrolled into the strip's view; focus on the step's first
+/// field (or the dialog itself) when it opens or the step changes.
+function wizMount(node, focus) {
+  const box = $('wm-box');
+  box.replaceChildren(node);
+  const strip = box.querySelector('.wm-steps ol');
+  const cur = strip && strip.querySelector('li.current');
+  if (cur) strip.scrollLeft = Math.max(0, cur.offsetLeft - (strip.clientWidth - cur.offsetWidth) / 2);
+  if (!focus) return;
+  const f = box.querySelector('.w-body input:not([type=hidden]):not([disabled]):not([type=radio]), .w-body select, .w-body textarea, .w-body button.base-card');
+  (f || box).focus();
+}
+/// The modal's header: the title (its label), what the wizard offers there, ✕; the step strip under it.
+function wizHead(title, sub, actions, steps) {
+  return h('header', { class: 'wm-head' },
+    h('div', { class: 'wm-title-row' }, h('h1', { id: 'wm-title' }, title), h('span', { class: 'wm-gap' }), ...actions,
+      ((b) => { b.dataset.wmClose = ''; return b; })(btn('Close', () => wizardCloseRequest(), { quiet: true, iconOnly: true, icon: 'x', title: 'Close (Esc)' }))),
+    sub ? h('p', { class: 'sub wm-sub' }, sub) : null,
+    steps ? h('nav', { class: 'wm-steps', 'aria-label': 'Steps' }, steps.compact, steps.list) : null);
+}
+/// Has the person chosen anything a close would lose? (A made sandbox, or a store already prepared, loses nothing.)
+function wizDirty() {
+  if (state.modal === 'new') {
+    const nw = state.nw;
+    return !!nw && !nw.tools && (nw.step > 0 || !!nw.form || nw.explicit.size > 0 || nw.path !== nw.initPath || nw.newName !== nw.initName || nw.mode !== nw.initMode);
+  }
+  if (state.modal === 'onboarding') { const w = state.wiz; return !!w && w.step > WIZ.checks && w.step < WIZ.preparing; }
+  return false;
+}
+function wizardCloseRequest() {
+  if (!state.modal) return;
+  const leave = () => {
+    if (state.modal === 'new') state.nw = null; else if (state.modal === 'onboarding') state.wiz = null;
+    if (state.modalBack) history.back(); else location.replace(state.bgHash && !MODAL_VIEWS.has(state.bgHash.slice(2)) ? state.bgHash : '#/overview');
+  };
+  if (!wizDirty()) { leave(); return; }
+  dialog(state.modal === 'new' ? 'Discard this new sandbox?' : 'Stop setting up?',
+    state.modal === 'new' ? 'Nothing is written yet: closing forgets the choices made so far.'
+      : 'Nothing is written yet: closing forgets the choices made so far. Onboarding can be run again from the sidebar.',
+    [], 'Discard', async () => { leave(); }, { danger: true, icon: 'x' });
+}
+// Keyboard: Escape closes (asking first when needed) — never from inside a field, a list or a menu; Tab wraps.
+$('wm-box').addEventListener('keydown', (ev) => {
+  if (ev.key === 'Escape') {
+    if (ev.defaultPrevented || ev.target.closest('input, select, textarea, [contenteditable], .menu')) return;
+    ev.preventDefault();
+    wizardCloseRequest();
+    return;
+  }
+  if (ev.key !== 'Tab') return;
+  const box = $('wm-box');
+  const f = [...box.querySelectorAll('a[href], button:not([disabled]), input:not([disabled]):not([type=hidden]), select:not([disabled]), textarea:not([disabled]), summary, [tabindex]:not([tabindex="-1"])')]
+    .filter((e) => e.getClientRects().length > 0);
+  if (!f.length) { ev.preventDefault(); box.focus(); return; }
+  const first = f[0], last = f[f.length - 1], a = document.activeElement;
+  if (ev.shiftKey && (a === first || a === box)) { ev.preventDefault(); last.focus(); }
+  else if (!ev.shiftKey && a === last) { ev.preventDefault(); first.focus(); }
+});
+$('wm-scrim').addEventListener('click', () => { const b = $('wm-box'); (b.querySelector('[data-wm-close]') || b).focus(); });
 
 let refreshing = false, again = false;
 async function refresh(scrollTop) {
@@ -1406,9 +1708,7 @@ async function refresh(scrollTop) {
   refreshing = true;
   try {
     const views = { overview: viewOverview, images: viewImages, resources: viewResources, operations: viewOperations, accounts: viewAccounts,
-                    metrics: viewMetrics, activity: viewActivity, doctor: viewDoctor, settings: viewSettings, onboarding: viewOnboarding, new: viewNew };
-    // 599f: the wizard is never re-rendered under the person choosing (a live update); it re-renders itself.
-    if (state.view === 'new' && !scrollTop && state.nw && state.nw.node && $('view').contains(state.nw.node)) return;
+                    metrics: viewMetrics, activity: viewActivity, doctor: viewDoctor, settings: viewSettings };
     const fn = views[state.view] || viewOverview;
     const node = await fn();
     if (node && !state.signedOut) {
@@ -1419,7 +1719,7 @@ async function refresh(scrollTop) {
   } catch (e) {
     if (!state.signedOut) {
       if (e.status === 404 && state.view === 'sandbox') { location.hash = '#/overview'; return; }
-      $('view').replaceChildren(h('div', { class: 'notice bad' }, e.message || String(e)));
+      $('view').replaceChildren(callout('bad', { cls: 'notice', title: 'This page could not be read', body: e.message || String(e) }));
     }
   } finally {
     refreshing = false;
@@ -1428,7 +1728,8 @@ async function refresh(scrollTop) {
 }
 
 // ── building blocks ─────────────────────────────────────────────────────────
-function card(k, v, n) { return h('div', { class: 'card' }, h('div', { class: 'k' }, k), h('div', { class: 'v' }, v), n ? h('div', { class: 'n' }, n) : null); }
+/// 603: a figure in a stats strip (one band, not separate cards).
+function card(k, v, n) { return h('div', { class: 'stat' }, h('div', { class: 'k' }, k), h('div', { class: 'v' }, v), n ? h('div', { class: 'n', title: typeof n === 'string' ? n : null }, n) : null); }
 function table(head, rows, numeric = []) {
   if (!rows.length) return null;
   return h('table', null,
@@ -1442,12 +1743,142 @@ function meter(part, whole) {
   bar.style.width = pct.toFixed(1) + '%';
   return h('div', { class: 'meter', title: pct.toFixed(0) + '% of the allocation' }, bar);
 }
-/// A button: its icon (opts.icon, else the label's — `iconFor`) and its text label.
+/// A button: its icon (opts.icon, else the label's — `iconFor`) and its text label. 603: one family —
+/// opts.primary (one per view), quiet (dense places), danger; small (24 px) or lg (32 px); iconOnly (the
+/// label becomes its aria-label and tooltip — only where the icon is unambiguous).
 function btn(label, onClick, opts = {}) {
-  return h('button', { type: 'button', class: 'btn' + (opts.danger ? ' danger' : '') + (opts.primary ? ' primary' : '') + (opts.small ? ' small' : ''),
-                       title: opts.title || null, on: { click: (ev) => { ev.stopPropagation(); onClick(ev); } } },
-    withIcon(opts.icon || iconFor(label), label));
+  const cls = ['btn'];
+  if (opts.primary) cls.push('primary');
+  if (opts.danger) cls.push('danger');
+  if (opts.quiet) cls.push('quiet');
+  if (opts.small) cls.push('sm');
+  if (opts.lg) cls.push('lg');
+  if (opts.iconOnly) cls.push('icon-only');
+  return h('button', { type: 'button', class: cls.join(' '), title: opts.title || (opts.iconOnly ? label : null), 'aria-label': opts.iconOnly ? label : null,
+                       on: { click: (ev) => { ev.stopPropagation(); onClick(ev); } } },
+    opts.iconOnly ? icon(opts.icon || iconFor(label)) : withIcon(opts.icon || iconFor(label), label));
 }
+
+// ── 603: menus — a button that opens a menu (⋯ overflow, a split button's caret). The menu is in the DOM
+// (hidden) beside its button, so what it holds is findable; open, it is fixed to the viewport, placed below
+// (or above) the button and kept on screen. Arrow keys, Home/End move; Escape (or Tab) closes and gives the
+// focus back; a click outside closes. Items:
+//   { label, icon, desc, danger, disabled, why, check, data: {k: v}, onSelect }  ·  { sep: true }  ·  { heading }
+// A disabled item stays visible and says why (its `why` is its description line).
+const menus = new Set();
+function menuItemsNodes(items, close) {
+  return items.filter(Boolean).map((it) => {
+    if (it.sep) return h('div', { class: 'menu-sep', role: 'separator' });
+    if (it.heading) return h('div', { class: 'menu-label' }, it.heading);
+    const attrs = { type: 'button', role: 'menuitem', tabindex: '-1', class: 'menu-item' + (it.danger ? ' danger' : '') };
+    for (const [k, v] of Object.entries(it.data || {})) attrs['data-' + k] = v;
+    // The one-line description (or why it is disabled) is drawn by CSS from data-desc, so an item's text is
+    // exactly its label; assistive tech gets it as the description.
+    const desc = (it.disabled ? it.why : null) || it.desc || null;
+    if (desc) { attrs['data-desc'] = desc; attrs['aria-description'] = desc; }
+    const b = h('button', attrs, icon(it.icon || iconFor(it.label)), h('span', { class: 'mi-label' }, it.label),
+      it.check ? h('span', { class: 'menu-check', 'aria-hidden': 'true' }, icon('check')) : null);
+    if (it.check) b.setAttribute('aria-checked', 'true');
+    if (it.disabled) b.disabled = true;
+    b.addEventListener('click', (ev) => { ev.stopPropagation(); if (b.disabled) return; close(true); it.onSelect && it.onSelect(ev); });
+    return b;
+  });
+}
+function menuButton(trigger, items, opts = {}) {
+  const menu = h('div', { class: 'menu', role: 'menu', hidden: true, 'aria-label': opts.label || trigger.getAttribute('aria-label') || trigger.textContent.trim() });
+  const wrap = opts.wrap || h('span', { class: 'menu-wrap' });
+  trigger.setAttribute('aria-haspopup', 'menu');
+  trigger.setAttribute('aria-expanded', 'false');
+  const ctl = { el: wrap, button: trigger, menu, open, close, setItems, isOpen: () => !menu.hidden };
+  function place() {
+    const r = trigger.getBoundingClientRect(), m = 8;
+    menu.style.left = '0px'; menu.style.top = '0px';
+    const w = menu.offsetWidth, hgt = menu.offsetHeight;
+    let left = opts.align === 'end' ? r.right - w : r.left;
+    if (left + w > innerWidth - m) left = r.right - w;
+    left = Math.max(m, Math.min(left, innerWidth - w - m));
+    let top = r.bottom + 4;
+    if (top + hgt > innerHeight - m && r.top - 4 - hgt >= m) top = r.top - 4 - hgt;
+    top = Math.max(m, Math.min(top, innerHeight - hgt - m));
+    menu.style.left = Math.round(left) + 'px'; menu.style.top = Math.round(top) + 'px';
+  }
+  function items_() { return [...menu.querySelectorAll('.menu-item:not(:disabled)')]; }
+  function open(focusFirst) {
+    for (const o of menus) if (o !== ctl) o.close();
+    menu.hidden = false;
+    trigger.setAttribute('aria-expanded', 'true');
+    place();
+    if (focusFirst) { const f = items_()[0]; if (f) f.focus(); }
+    if (opts.onOpen) opts.onOpen();
+  }
+  function close(refocus) {
+    if (menu.hidden) return;
+    menu.hidden = true;
+    trigger.setAttribute('aria-expanded', 'false');
+    if (refocus && trigger.isConnected) trigger.focus();
+    if (opts.onClose) opts.onClose();
+  }
+  function setItems(list) { menu.replaceChildren(...menuItemsNodes(list, close)); if (!menu.hidden) place(); }
+  trigger.addEventListener('click', (ev) => { ev.stopPropagation(); if (menu.hidden) open(ev.detail === 0); else close(false); });
+  trigger.addEventListener('keydown', (ev) => { if (ev.key === 'ArrowDown') { ev.preventDefault(); open(true); } });
+  menu.addEventListener('keydown', (ev) => {
+    const list = items_(), i = list.indexOf(document.activeElement);
+    if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') { ev.preventDefault(); const n = list.length; if (n) list[(i + (ev.key === 'ArrowDown' ? 1 : n - 1) + (i < 0 ? 1 : 0)) % n].focus(); }
+    else if (ev.key === 'Home' || ev.key === 'End') { ev.preventDefault(); const f = ev.key === 'Home' ? list[0] : list[list.length - 1]; if (f) f.focus(); }
+    else if (ev.key === 'Escape') { ev.preventDefault(); ev.stopPropagation(); close(true); }
+    else if (ev.key === 'Tab') close(false);
+  });
+  menu.addEventListener('click', (ev) => ev.stopPropagation());
+  setItems(items);
+  if (!opts.wrap) wrap.append(trigger);
+  wrap.append(menu);
+  menus.add(ctl);
+  return ctl;
+}
+/// The ⋯ button: an icon-only quiet button that opens `items`.
+function moreMenu(label, items, opts = {}) {
+  const b = h('button', { type: 'button', class: 'btn quiet icon-only' + (opts.small ? ' sm' : ''), 'aria-label': label, title: label }, icon('ellipsis'));
+  if (opts.data) for (const [k, v] of Object.entries(opts.data)) b.dataset[k] = v;
+  return menuButton(b, items, { align: 'end', ...opts });
+}
+document.addEventListener('click', () => { for (const m of menus) { if (!m.el.isConnected) menus.delete(m); else m.close(false); } });
+window.addEventListener('resize', () => { for (const m of menus) m.close(false); });
+document.addEventListener('scroll', (ev) => { for (const m of menus) if (!m.menu.contains(ev.target)) m.close(false); }, true);
+
+// ── 603: keyboard — arrow keys inside segmented controls and tab lists move the focus (roving tabindex:
+// the chosen one is the group's one Tab stop); Enter/Space chooses.
+function rove(group) {
+  const items = [...group.querySelectorAll(':scope > button, :scope > .tab-wrap > button.tab')].filter((b) => !b.hidden);
+  if (!items.length) return;
+  const cur = items.find((b) => b.getAttribute('aria-pressed') === 'true' || b.getAttribute('aria-selected') === 'true' || b.classList.contains('active')) || items[0];
+  for (const b of items) b.tabIndex = b === cur ? 0 : -1;
+}
+function roveAll(root) { for (const g of root.querySelectorAll('.segmented, [role="tablist"]')) rove(g); }
+new MutationObserver((list) => {
+  const seen = new Set();
+  for (const m of list) {
+    const t = m.target instanceof Element ? m.target : m.target.parentElement;
+    if (!t) continue;
+    const g = t.closest('.segmented, [role="tablist"]');
+    if (g) seen.add(g);
+    for (const n of m.addedNodes) if (n instanceof Element) { if (n.matches('.segmented, [role="tablist"]')) seen.add(n); for (const x of n.querySelectorAll('.segmented, [role="tablist"]')) seen.add(x); }
+  }
+  for (const g of seen) rove(g);
+}).observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['aria-pressed', 'aria-selected', 'class'] });
+document.addEventListener('keydown', (ev) => {
+  const t = ev.target;
+  if (!(t instanceof HTMLElement) || !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(ev.key) || ev.altKey || ev.metaKey || ev.ctrlKey) return;
+  const g = t.closest('.segmented, [role="tablist"]');
+  if (!g || !t.matches('button')) return;
+  const items = [...g.querySelectorAll(':scope > button, :scope > .tab-wrap > button.tab')].filter((b) => !b.hidden && !b.disabled);
+  const i = items.indexOf(t);
+  if (i < 0) return;
+  ev.preventDefault();
+  const n = items.length;
+  const next = ev.key === 'Home' ? items[0] : ev.key === 'End' ? items[n - 1] : items[(i + (ev.key === 'ArrowRight' ? 1 : n - 1)) % n];
+  for (const b of items) b.tabIndex = b === next ? 0 : -1;
+  next.focus();
+});
 
 // The owner's vocabulary (2026-09-25); aliases in the tooltips.
 const VERBS = {
@@ -1486,7 +1917,7 @@ function confirmShutdown(name) {
   dialog('Shut down ' + name + '?', DESTRUCTIVE.shutdown + ' Start cold-boots the same disk.', [
     { name: 'dontAsk', label: 'Don’t ask again', type: 'checkbox', help: 'Sets ui.confirm_shutdown = false in the settings (Settings turns it back on).' },
   ], 'Shut down', async (v) => {
-    if (v.dontAsk) await saveSetting('ui.confirm_shutdown', false).catch((e) => toast('The setting was not saved: ' + (e.message || e), true));
+    if (v.dontAsk) await saveSetting('ui.confirm_shutdown', false).catch((e) => pageFailure('ui.confirm_shutdown was not saved: ' + (e.message || e)));
     return await actOrThrow(body);
   }, { danger: true });
 }
@@ -1515,17 +1946,21 @@ async function startWithBootView(name) {
   }
   await act({ action: 'start', sandbox: name });
 }
-function lifecycleButtons(s, all) {
+/// 603 (E4): a Sandboxes row's actions — the one likely next verb (Start, Resume, Wake, Pause) as a quiet button,
+/// the phase's other verbs in ⋯ (each with what it does). In a transition: the set shown when asked, disabled.
+const NEXT_VERB = { off: 'start', failed: 'start', paused: 'resume', asleep: 'wake', hibernated: 'wake', running: 'pause' };
+function rowLifecycle(s) {
   const tr = transitionOf(s.name);
   const busy = s.busy || s.phase === 'booting' || opRunningFor(s.name) || !!tr;
-  // In a transition this page started, the buttons it showed when asked — disabled, never swapped.
   const verbs = tr && tr.verbs ? tr.verbs : verbsFor(s.phase);
-  const extra = all ? ['reset', 'rm'] : [];
-  return h('div', { class: 'actions', 'data-lifecycle-for': s.name }, [...verbs, ...extra].map((v) => {
-    const b = btn(VERBS[v][0], () => lifecycle(v, s.name), { small: true, title: tr ? TRANSITION_LABEL[tr.action] : VERBS[v][1], danger: !!DESTRUCTIVE[v] });
-    if (busy) b.disabled = true;
-    return b;
-  }));
+  const next = verbs.includes(NEXT_VERB[s.phase]) ? NEXT_VERB[s.phase] : verbs[0];
+  const why = tr ? TRANSITION_LABEL[tr.action] : 'Wait until it settles';
+  const b = next ? btn(VERBS[next][0], () => lifecycle(next, s.name), { small: true, quiet: true, title: busy ? why : VERBS[next][1] }) : null;
+  if (b && busy) b.disabled = true;
+  const rest = verbs.filter((v) => v !== next);
+  const more = rest.length ? moreMenu('More for ' + s.name, rest.map((v) => ({ label: VERBS[v][0] + (DESTRUCTIVE[v] ? '…' : ''), icon: iconFor(VERBS[v][0]),
+    desc: VERBS[v][1], danger: !!DESTRUCTIVE[v], disabled: busy, why, onSelect: () => lifecycle(v, s.name) })), { small: true }) : null;
+  return h('div', { class: 'row-acts', 'data-lifecycle-for': s.name }, b, more ? more.el : null);
 }
 /// The phase pill — or, in a transition, what is under way.
 function sandboxPill(s) {
@@ -1543,7 +1978,7 @@ function hostCard(host) {
   }
   // 594 W18: every action starts a host on demand (as the CLI does); this starts one on its own.
   const c = card('Host', 'not running', host.recoveryPending.length ? 'recovery pending: ' + host.recoveryPending.join(', ') : 'nothing is running — shown from the store');
-  c.append(h('div', { class: 'n' }, startHostButton()));
+  c.append(h('div', { class: 'n-act' }, startHostButton()));
   return c;
 }
 
@@ -1552,19 +1987,19 @@ async function viewOverview() {
   const o = await api('overview');
   state.overview = o;
   renderNavSandboxes();
-  const rows = o.sandboxes.map((s) => h('tr', { class: 'click', on: { click: () => { location.hash = '#/sandbox/' + s.name; } } },
-    h('td', null, h('a', { href: '#/sandbox/' + s.name }, s.name), h('div', { class: 'muted' }, s.image),
-      s.workspace ? null : h('div', { class: 'muted no-ws', 'data-isolated': '', title: ISOLATED_NOTE }, 'isolated'),
+  const rows = o.sandboxes.map((s) => h('tr', { class: 'click', 'data-sandbox-row': s.name, on: { click: () => { location.hash = '#/sandbox/' + s.name; } } },
+    h('td', null, h('a', { class: 'name', href: '#/sandbox/' + s.name }, s.name),
+      h('div', { class: 'sub2' }, s.image, s.workspace ? null : h('span', { class: 'no-ws', 'data-isolated': '', title: ISOLATED_NOTE }, ' · isolated')),
       h('div', { 'data-op-for': s.name })),
-    h('td', null, sandboxPill(s), s.diedWithHost ? h('div', { class: 'st-warn' }, 'died with its host') : null),
-    h('td', { class: 'num' }, h('div', null, s.ramHeldMiB ? mib(s.ramHeldMiB) : '—'), h('div', { class: 'muted' }, 'of ' + mib(s.memoryMiB)), meter(s.ramHeldMiB, s.memoryMiB)),
+    h('td', null, sandboxPill(s), s.diedWithHost ? h('div', { class: 'st-warn sub2' }, 'died with its host') : null),
+    h('td', { class: 'num' }, h('div', null, s.ramHeldMiB ? mib(s.ramHeldMiB) : '—'), h('div', { class: 'sub2' }, 'of ' + mib(s.memoryMiB)), meter(s.ramHeldMiB, s.memoryMiB)),
     h('td', { class: 'num' }, bytes(s.diskBytes)),
-    h('td', null, s.network, s.deniedConnections ? h('div', { class: 'st-warn' }, s.deniedConnections + ' denied') : null),
+    h('td', null, s.network, s.deniedConnections ? [' ', h('span', { class: 'tag warn' }, s.deniedConnections + ' denied')] : null),
     s.accountApplies
-      ? h('td', null, s.account || '—', s.credentialState ? h('div', { class: s.credentialState === 'ok' ? 'st-ok' : 'st-warn' }, s.credentialState) : null,
-        s.foreignCredentials ? h('div', { class: 'st-warn' }, s.foreignCredentials + ' own credential(s)') : null)
+      ? h('td', null, s.account || '—', s.credentialState ? h('div', { class: (s.credentialState === 'ok' ? 'st-ok' : 'st-warn') + ' sub2' }, s.credentialState) : null,
+        s.foreignCredentials ? h('div', { class: 'st-warn sub2' }, s.foreignCredentials + ' own credential(s)') : null)
       : h('td', { class: 'muted', title: 'its network cannot reach an account’s API' }, 'n/a'),
-    h('td', null, lifecycleButtons(s, false))));
+    h('td', { class: 'row-acts-cell' }, rowLifecycle(s))));
   return h('div', null,
     h('div', { class: 'head' }, h('h1', null, 'Sandboxes'),
       h('div', { class: 'actions' }, quickAddButton(), (() => {
@@ -1573,7 +2008,7 @@ async function viewOverview() {
         return b;
       })())),
     h('p', { class: 'sub' }, o.source === 'host' ? 'Live from the host.' : 'No host is running: read from the store (nothing is live). An action starts the host.'),
-    h('div', { class: 'cards' },
+    h('div', { class: 'stats' },
       hostCard(o.host),
       card('Sandboxes', String(o.totals.sandboxes), o.totals.live + ' with a VM'),
       card('RAM held', mib(o.totals.ramHeldMiB), 'charged to this Mac now'),
@@ -1581,8 +2016,10 @@ async function viewOverview() {
     h('h2', null, 'All sandboxes'),
     // No session column: counting sessions asks every session's holder in the guest, and this list
     // is kept live — sessions are on each sandbox's page (590 bug 3).
-    panel(table(['Sandbox', 'Phase', 'RAM held', 'Disk', 'Network', 'Account', ''], rows, [2, 3]),
-      'No sandboxes yet — New sandbox, or doz create NAME --image lab'));
+    o.sandboxes.length ? panel(table(['Sandbox', 'Phase', 'RAM held', 'Disk', 'Network', 'Account', h('span', { class: 'sr-only' }, 'Actions')], rows, [2, 3]))
+      : h('div', { class: 'panel' }, h('div', { class: 'empty-big' }, icon('box'), h('div', { class: 'e-title' }, 'No sandboxes yet'),
+        h('p', null, 'A sandbox is a small Linux VM for one project. Quick add makes one with every default; New sandbox walks through each choice. In a terminal: doz new, or doz init then doz up.'),
+        h('div', { class: 'actions center' }, quickAddButton()))));
 }
 
 // ── 599c: Quick add (owner: "a "Quick Add" sandbox that picks defaults for workspace name etc and opens
@@ -1628,7 +2065,7 @@ async function quickAdd(button) {
       if (s && s.state === 'done' && state.view === 'sandbox' && state.param === p.name) openTerminal(p.name, null, 'interactive');
     }
   } catch (e) {
-    toast(e.message || String(e), true);
+    pageFailure('Quick add: ' + (e.message || String(e)), { key: 'quick-add' });
   } finally {
     state.quickAdding = false;
     for (const b of document.querySelectorAll('[data-quick-add]')) b.disabled = false;
@@ -1648,9 +2085,13 @@ const NW_FIELD = { cpus: 'cpus', memory: 'memory', network: 'network', permissio
                    agent_sudo: 'agentSudo', ssh_agent: 'sshAgent', clipboard: 'clipboard', browser_bridge: 'browserBridge', open_files: 'openFiles', tmux: 'tmux',
                    ignore_mode: 'ignoreMode' };
 function newSandboxWizard(start = {}) {
-  state.nw = null;
-  state.nwStart = start;
-  if (location.hash === '#/new') refresh(true); else location.hash = '#/new';
+  // 603: a draft left by the browser's Back is resumed, never silently replaced (a new start asks first).
+  const go = () => { if (location.hash === '#/new') renderModal(true); else location.hash = '#/new'; };
+  const draft = state.nw && !state.nw.tools && (state.nw.step > 0 || !!state.nw.form || state.nw.explicit.size > 0);
+  if (draft && !start.folder) { go(); return; }
+  const fresh = () => { state.nw = null; state.nwStart = start; go(); };
+  if (!draft) { fresh(); return; }
+  dialog('Discard the unfinished new sandbox?', 'A New sandbox wizard was left part-way; starting again forgets its choices.', [], 'Discard', async () => { fresh(); }, { danger: true, icon: 'x' });
 }
 async function viewNew() {
   if (!state.nw) {
@@ -1663,14 +2104,13 @@ async function viewNew() {
     try { steps = (await api('project/open', { method: 'POST', json: { folder: projectsDir + '/' + newName } })).steps; } catch (_) { /* shown after the folder */ }
     state.nw = { step: 0, images, accounts, bases, projectsDir, newName, mode: start.folder ? 'existing' : 'new', path: start.folder || '',
                  open: null, form: null, explicit: new Set(), preview: null, error: '', steps, reached: 0 };
+    Object.assign(state.nw, { initName: newName, initMode: state.nw.mode, initPath: state.nw.path });
   }
   return nwNode();
 }
 function nwRender() {
-  if (state.view !== 'new' || !state.nw) return;
-  $('view').replaceChildren(nwNode());
-  const first = $('view').querySelector('[data-nw-body] input:not([type=hidden]):not([disabled]), [data-nw-body] select, [data-nw-body] textarea, [data-nw-body] button.base-card');
-  if (first) first.focus();
+  if (state.modal !== 'new' || !state.nw) return;
+  wizMount(nwNode(), true);
 }
 function nwSection(form) {
   const img = form.image || '';
@@ -1705,15 +2145,49 @@ function nwPayload() {
   for (const [key, field] of Object.entries(NW_FIELD)) if (nw.explicit.has(key) && f[field] !== undefined && f[field] !== null) out[field] = f[field];
   return { folder: nw.open.folder, form: out, explicit: [...nw.explicit] };
 }
+/// 603 (E15; owner on rc.1: horizontal, in the modal's header): the wizards' step strip — done (a check; the step's
+/// answer as its tooltip), current (the accent circle), later; a done or reachable step is a link back. One row of
+/// equal columns, never two; in a narrow window the circles only, with "Step N of M · its name" above.
+function stepperNode(steps, current, opts = {}) {
+  const list = h('ol', { class: 'stepper wiz-steps' }, steps.map((s, i) => {
+    const state_ = i === current ? 'current' : (opts.done ? opts.done(i) : i < current) ? 'done' : null;
+    const go = opts.go && opts.go(i);
+    const note = state_ === 'done' && opts.note ? opts.note(s, i) : null;
+    const attrs = { class: state_, 'aria-current': i === current ? 'step' : null, title: s.title + (note ? ' — ' + note : '') };
+    if (opts.data) attrs[opts.data] = s.id;
+    return h('li', attrs, h('span', { class: 'n wiz-n', 'aria-hidden': state_ === 'done' ? null : 'true' }, state_ === 'done' ? icon('check') : String(i + 1)),
+      go ? h('a', { class: 's-label', href: opts.href || '#', on: { click: (ev) => { ev.preventDefault(); go(); } } }, s.title) : h('span', { class: 's-label' }, s.title),
+      note ? h('span', { class: 's-note' }, note) : null);
+  }));
+  const compact = h('div', { class: 'step-compact', 'aria-hidden': 'true' },
+    h('b', null, 'Step ' + (current + 1) + ' of ' + steps.length), ' · ', h('span', null, (steps[current] || {}).title || ''));
+  return { list, compact };
+}
+/// A done New Sandbox step's answer, under its name in the stepper.
+function nwAnswer(id) {
+  const nw = state.nw, f = nw.form;
+  if (!f) return null;
+  const home = (p) => String(p || '').replace(/^\/Users\/[^/]+/, '~');
+  switch (id) {
+    case 'folder': return nw.open ? home(nw.open.folder) : null;
+    case 'image': return f.name + ' · ' + (f.dockerfile ? 'Dockerfile' : f.image);
+    case 'account': { const a = nwAgent(f); return a ? (f.account && f.account !== 'default' ? f.account : 'the store default') : 'none needed'; }
+    case 'access': { const g = f.github || setting('defaults.github', 'off'), ssh = f.sshAgent || setting('sandbox.ssh_agent', 'off');
+      return 'GitHub ' + ({ off: 'off', read: 'read-only', push: 'read and push' }[g] || g) + ' · SSH ' + ssh; }
+    case 'rules': return f.ignoreMode || setting('workspace.ignore_mode', 'lock');
+    case 'permissions': return nwNetwork(f) + (nwPermissionNet(nwNetwork(f)) ? ' · ' + (f.permissions || setting('defaults.permissions', 'standard')) : '');
+    case 'resources': return (f.cpus || setting('defaults.cpus', 2)) + ' CPUs · ' + (f.memory || 'default memory');
+    case 'bridges': return 'clipboard ' + (f.clipboard || setting('sandbox.clipboard', 'write')) + ' · browser ' + (f.browserBridge || setting('sandbox.browser_bridge', 'on'));
+    case 'session': return (f.tmux ?? setting('sessions.tmux', false)) ? 'in tmux' : 'no tmux';
+    default: return null;
+  }
+}
 function nwNode() {
   const nw = state.nw;
   if (nw.tools) return nwToolsNode(nw);
   const steps = nw.steps || [{ id: 'folder', title: 'Project folder' }];
-  const stepper = h('ol', { class: 'wiz-steps', 'aria-label': 'Steps' }, steps.map((s, i) => {
-    const can = nw.form && i <= Math.max(nw.reached, steps.length - 1) && i !== nw.step;
-    return h('li', { class: i === nw.step ? 'current' : i < nw.step ? 'done' : null, 'aria-current': i === nw.step ? 'step' : null, 'data-nw-step': s.id },
-      h('span', { class: 'wiz-n' }, String(i + 1)), can ? h('a', { href: '#/new', on: { click: (ev) => { ev.preventDefault(); nwGo(i); } } }, s.title) : s.title);
-  }));
+  const { list: stepper, compact } = stepperNode(steps, nw.step, { data: 'data-nw-step', href: '#/new', note: (s) => nwAnswer(s.id),
+    go: (i) => (nw.form && i <= Math.max(nw.reached, steps.length - 1) && i !== nw.step ? () => nwGo(i) : null) });
   const ids = steps.map((s) => s.id);
   const id = ids[nw.step] || 'folder';
   const step = { folder: nwFolder, image: nwImage, account: nwAccount, access: nwAccess, rules: nwRules, permissions: nwPermissions,
@@ -1722,12 +2196,13 @@ function nwNode() {
   const error = h('div', { class: 'dlg-error', role: 'alert', 'data-nw-error': '' }, nw.error || '');
   const last = id === 'review';
   const back = nw.step > 0 ? btn('Back', () => nwGo(nw.step - 1)) : null;
-  const skip = nw.form && !last ? btn('Skip to review', () => nwGo(ids.length - 1), { icon: 'skip-forward', title: 'Everything not chosen yet keeps its default' }) : null;
+  const skip = nw.form && !last ? btn('Skip to review', () => nwGo(ids.length - 1), { quiet: true, icon: 'skip-forward', title: 'Everything not chosen yet keeps its default' }) : null;
   if (skip) skip.dataset.nwSkip = '';
-  const next = last ? null : h('button', { type: 'submit', class: 'btn primary', 'data-nw-next': '' }, withIcon('arrow-right', 'Next'));
-  const form = h('form', { class: 'wiz-body panel', 'data-nw-body': id, novalidate: '' },
-    h('h2', null, (steps[nw.step] || { title: 'Project folder' }).title), step.el, error,
-    h('div', { class: 'wiz-buttons' }, back, h('span', { class: 'wiz-gap' }), skip, step.extra || null, next));
+  // Next: the step's one primary — a trailing arrow (forward); the actions in a footer that never leaves the screen.
+  const next = last ? null : h('button', { type: 'submit', class: 'btn lg primary', 'data-nw-next': '' }, h('span', { class: 'btn-label' }, 'Next'), icon('arrow-right'));
+  const form = h('form', { class: 'wiz-card', 'data-nw-body': id, novalidate: '' },
+    h('div', { class: 'w-body' }, h('h2', null, (steps[nw.step] || { title: 'Project folder' }).title), step.el, error),
+    h('div', { class: 'w-foot wiz-buttons' }, back, h('span', { class: 'wiz-gap' }), skip, step.extra || null, next));
   form.addEventListener('submit', (ev) => { ev.preventDefault(); if (!last) nwGo(nw.step + 1); });
   form.addEventListener('keydown', (ev) => {
     // Alt+← / Alt+→: Back / Next (Enter in a field is Next; a textarea keeps its Enter).
@@ -1735,11 +2210,11 @@ function nwNode() {
     if (ev.altKey && ev.key === 'ArrowRight' && !last) { ev.preventDefault(); nwGo(nw.step + 1); }
   });
   const node = h('div', { class: 'wizard nw', 'data-nw': id },
-    h('div', { class: 'head' }, h('h1', null, 'New sandbox'),
-      h('div', { class: 'actions' }, btn('One-page form', () => createDialog(), { small: true, icon: 'table', title: 'All choices on one page (an isolated sandbox, no project file)' }))),
-    h('p', { class: 'sub' }, 'Step by step; your choices are written to the project folder’s ', h('code', null, 'doz_project.yaml'),
-      ' — ', h('code', null, 'doz up'), ' there makes the same sandbox. The same as ', h('code', null, 'doz init'), ' in a terminal.'),
-    stepper, form);
+    wizHead('New sandbox', ['Step by step; your choices are written to the project folder’s ', h('code', null, 'doz_project.yaml'),
+      ' — ', h('code', null, 'doz up'), ' there makes the same sandbox. The same as ', h('code', null, 'doz init'), ' in a terminal.'],
+      [btn('One-page form', () => createDialog(), { quiet: true, small: true, icon: 'list-checks', title: 'All choices on one page (an isolated sandbox, no project file)' })],
+      { list: stepper, compact }),
+    form);
   nw.node = node;
   return node;
 }
@@ -1751,9 +2226,7 @@ function nwNode() {
 function nwToolsNode(nw) {
   const t = nw.tools, plan = t.plan;
   const steps = (nw.steps || []).concat([{ id: 'tools', title: 'Setting up tools' }]);
-  const stepper = h('ol', { class: 'wiz-steps', 'aria-label': 'Steps' }, steps.map((s, i) =>
-    h('li', { class: i === steps.length - 1 ? 'current' : 'done', 'aria-current': i === steps.length - 1 ? 'step' : null, 'data-nw-step': s.id },
-      h('span', { class: 'wiz-n' }, String(i + 1)), s.title)));
+  const { list: stepper, compact } = stepperNode(steps, steps.length - 1, { data: 'data-nw-step', note: (s) => nwAnswer(s.id) });
   const last = new Map(((plan && plan.last && plan.last.results) || []).map((r) => [r.id, r]));
   const busy = t.phase === 'starting' || t.phase === 'retrying';
   const rows = ((plan && plan.plan.items) || []).map((it) => {
@@ -1776,16 +2249,16 @@ function nwToolsNode(nw) {
     ? [btn('Retry', () => nwRetryTools(nw), { icon: 'refresh-cw', title: 'Set the tools up again now' }), btn('Continue anyway', open, { primary: true, icon: 'arrow-right' })]
     : [btn('Open the sandbox', open, { primary: true, icon: 'box' })];
   const node = h('div', { class: 'wizard nw', 'data-nw': 'tools' },
-    h('div', { class: 'head' }, h('h1', null, 'New sandbox')),
-    h('p', { class: 'sub' }, t.name + ' is made. Now it starts, and Dozer sets up the tools its settings call for — the tools layer, on any base, without rebuilding an image.'),
-    stepper,
-    h('section', { class: 'wiz-body panel', 'data-nw-tools': t.phase },
-      h('h2', null, 'Setting up tools'),
-      plan ? h('ul', { class: 'plain tool-list' }, rows) : h('p', { class: 'muted' }, 'Reading the tools layer…'),
-      h('p', { class: 'muted mono tools-progress', 'data-tools-progress': '', 'aria-live': 'polite' }, busy ? (t.progress || 'starting…') : ''),
-      t.error ? h('div', { class: 'notice bad', 'data-tools-error': '' }, t.error) : null,
-      failed ? h('p', { class: 'muted' }, 'Something could not be set up — the sandbox works without it. Retry, or continue; ', h('code', null, 'doz tools ' + t.name + ' --apply'), ' tries again later.') : null,
-      h('div', { class: 'wiz-buttons' }, h('span', { class: 'wiz-gap' }), buttons)));
+    wizHead('New sandbox', t.name + ' is made. Now it starts, and Dozer sets up the tools its settings call for — the tools layer, on any base, without rebuilding an image.',
+      [], { list: stepper, compact }),
+      h('section', { class: 'wiz-card', 'data-nw-tools': t.phase },
+        h('div', { class: 'w-body' },
+          h('h2', null, 'Setting up tools'),
+          plan ? h('ul', { class: 'plain tool-list' }, rows) : h('p', { class: 'muted' }, 'Reading the tools layer…'),
+          h('p', { class: 'muted mono tools-progress', 'data-tools-progress': '', 'aria-live': 'polite' }, busy ? (t.progress || 'starting…') : ''),
+          t.error ? callout('bad', { cls: 'notice', attrs: { 'data-tools-error': '' }, body: t.error }) : null,
+          failed ? h('p', { class: 'muted' }, 'Something could not be set up — the sandbox works without it. Retry, or continue; ', h('code', null, 'doz tools ' + t.name + ' --apply'), ' tries again later.') : null),
+        h('div', { class: 'w-foot wiz-buttons' }, h('span', { class: 'wiz-gap' }), buttons)));
   nw.node = node;
   return node;
 }
@@ -1795,7 +2268,7 @@ async function nwFollow(nw, op) {
     const o = state.ops.get(op.id);
     if (o && o.text && o.text !== t.progress) {
       t.progress = o.text;
-      const p = $('view').querySelector('[data-tools-progress]');
+      const p = $('wm-box').querySelector('[data-tools-progress]');
       if (p) p.textContent = o.text;
     }
   }, 300);
@@ -1849,7 +2322,6 @@ async function nwGo(i) {
   nw.step = Math.max(0, Math.min(i, nw.steps.length - 1));
   nw.reached = Math.max(nw.reached, nw.step);
   nwRender();
-  $('main').scrollTop = 0;
 }
 
 function nwFolder() {
@@ -1873,12 +2345,12 @@ function nwFolder() {
       if (r.cancelled) return;
       nw.path = r.path; nw.mode = 'existing'; nw.open = null; nw.form = null;
       nwRender();
-    } catch (e) { toast(e.message || String(e), true); }
+    } catch (e) { nw.error = e.message || String(e); nwRender(); }
   }, { small: true, icon: 'folder', title: 'This Mac’s folder picker' });
   choose.dataset.nwChoose = '';
   const found = nw.open && nw.open.file
-    ? h('div', { class: 'notice', 'data-nw-found': nw.open.file }, icon('layout-template'), ' This folder has ', h('code', null, nw.open.file),
-        ' — the wizard starts from it; the review shows what changes before anything is written.') : null;
+    ? callout('info', { cls: 'notice', icon: 'layout-template', attrs: { 'data-nw-found': nw.open.file }, body: ['This folder has ', h('code', null, nw.open.file),
+        ' — the wizard starts from it; the review shows what changes before anything is written.'] }) : null;
   const el = h('div', { class: 'wiz-choices' },
     radio('new', 'A new folder in your projects folder', h('div', { class: 'nw-sub' }, h('label', { class: 'field' }, h('span', null, 'Folder name'), name), where)),
     radio('existing', 'A folder you have (your project)', h('div', { class: 'nw-sub' }, h('label', { class: 'field' }, h('span', null, 'Folder'), h('div', { class: 'row' }, path, choose)),
@@ -1954,8 +2426,8 @@ function nwAccess() {
     if (c.ssh !== (f.sshAgent || setting('sandbox.ssh_agent', 'off'))) nwSet('ssh_agent', c.ssh);
   } });
   const note = nwPermissionNet(net) ? null
-    : h('p', { class: 'notice', 'data-nw-github-net': net }, 'GitHub as you needs a network with permissions (agent, locked or open) — this sandbox’s is ' + net +
-      '. Choose it under Permissions and network, or leave GitHub off.');
+    : callout('warn', { cls: 'notice', attrs: { 'data-nw-github-net': net }, body: 'GitHub as you needs a network with permissions (agent, locked or open) — this sandbox’s is ' + net +
+      '. Choose it under Permissions and network, or leave GitHub off.' });
   return {
     el: h('div', { class: 'nw-fields' }, note, box),
     async collect(forward) {
@@ -1980,7 +2452,7 @@ function nwRules() {
       nw.open.rules = r.rules || [];
       nw.open.exists = r.exists;
       nwRender();
-    } catch (e) { toast(e.message || String(e), true); }
+    } catch (e) { nw.error = e.message || String(e); nwRender(); }
   };
   return {
     el: h('div', { class: 'nw-fields' },
@@ -2110,7 +2582,7 @@ function nwReview() {
   const pre = h('pre', { class: 'nw-yaml', 'data-nw-yaml': '' }, nw.preview ? nw.preview.text : 'Reading…');
   const where = h('div', { class: 'muted mono', 'data-nw-file': '' }, nw.preview ? nw.preview.path : '');
   const diffBox = h('div', { 'data-nw-diff-box': '' });
-  const go = btn(nw.open && nw.open.file ? 'Replace the file and create' : 'Write and create', () => nwCreate(go), { primary: true, icon: 'rocket' });
+  const go = btn(nw.open && nw.open.file ? 'Replace the file and create' : 'Write and create', () => nwCreate(go), { primary: true, lg: true, icon: 'rocket' });
   go.dataset.nwCreate = '';
   go.disabled = !nw.preview;
   const paint = () => {
@@ -2123,12 +2595,33 @@ function nwReview() {
   };
   if (nw.preview) setTimeout(paint, 0);
   else {
-    api('project/preview', { method: 'POST', json: nwPayload() }).then((p) => { nw.preview = p; if (state.view === 'new' && state.nw === nw) paint(); })
-      .catch((e) => { pre.textContent = ''; const err = $('view').querySelector('[data-nw-error]'); if (err) err.textContent = e.message || String(e); });
+    api('project/preview', { method: 'POST', json: nwPayload() }).then((p) => { nw.preview = p; if (state.modal === 'new' && state.nw === nw) { paint(); pre.dispatchEvent(new Event('nw-preview')); } })
+      .catch((e) => { pre.textContent = ''; const err = $('wm-box').querySelector('[data-nw-error]'); if (err) err.textContent = e.message || String(e); });
   }
+  // 603 (E15, owner decision 11): what will happen first — the choices as facts, then the steps — and the file,
+  // exactly as written, one click away (the replace diff still comes before an existing file is replaced).
+  const f = nw.form, fact = (k, v) => (v ? [h('dt', null, k), h('dd', null, v)] : null);
+  const img = nw.images.find((x) => x.name === f.image);
+  const willPrepare = !f.dockerfile && img && !img.baked;
+  const lines = h('span', { 'data-nw-lines': '' }, '');
+  const disclosure = h('details', { class: 'disclosure nw-file' }, h('summary', null, icon('chevron-down'), 'The file, exactly as written', lines), where, pre);
+  const lineCount = () => { lines.textContent = nw.preview ? ' (' + plural(nw.preview.text.split('\n').filter((l, i, a) => i < a.length - 1 || l).length, 'line', 'lines') + ')' : ''; };
+  if (nw.preview) setTimeout(lineCount, 0);
+  else pre.addEventListener('nw-preview', lineCount);
   return {
-    el: h('div', { class: 'nw-fields' }, h('p', null, 'The project file — exactly what is written:'), where, pre, diffBox,
-      h('small', { class: 'muted' }, 'Then the sandbox is made from it (as ', h('code', null, 'doz up'), ' there would), started, and opened.')),
+    el: h('div', { class: 'nw-fields nw-review' },
+      h('dl', { class: 'facts' },
+        fact('Folder', [h('code', null, nwAnswer('folder')), nw.open && nw.open.file ? ' — ' + nw.open.file + ' is there' : ' — doz_project.yaml is new']),
+        fact('Sandbox', f.name + ' · ' + (f.dockerfile ? 'your Dockerfile' : f.image) + ' · ' + nwAnswer('resources')),
+        fact('Account', nwAnswer('account')),
+        fact('Network', nwAnswer('permissions')),
+        fact('Access', nwAnswer('access')),
+        fact('Workspace rules', nwAnswer('rules')),
+        fact('Bridges', nwAnswer('bridges') + ' · files ' + (f.openFiles || setting('sandbox.open_files', 'on'))),
+        fact('Session', nwAnswer('session') + ' · sudo ' + ((f.agentSudo ?? setting('sandbox.agent_sudo', true)) ? 'yes' : 'no'))),
+      callout('info', { compact: true, attrs: { 'data-nw-what': '' }, body: ['Writing the file, then making the sandbox as ', h('code', null, 'doz up'),
+        ' would there, starting it and setting up its tools; then it opens.', willPrepare ? ' The first start prepares the ' + f.image + ' image (minutes, needs network).' : ''] }),
+      diffBox, disclosure),
     extra: go,
   };
 }
@@ -2153,14 +2646,14 @@ async function nwCreate(button) {
       await nwRunTools(nw);
     } catch (e) {
       button.disabled = false;
-      const err = $('view').querySelector('[data-nw-error]');
-      if (err) err.textContent = e.message || String(e); else toast(e.message || String(e), true);
+      const err = $('wm-box').querySelector('[data-nw-error]');
+      if (err) err.textContent = e.message || String(e); else pageFailure(e.message || String(e));
     }
   };
   if (p.existing !== undefined && p.existing !== null && p.existing !== p.text) {
     const d = dialog('Replace ' + p.path.split('/').pop() + '?', 'The folder has a project file. These lines change (− there now, + to be written):',
       [], 'Replace it', async () => { await run(p.replace); }, { danger: true });
-    d.querySelector('form > p.sub').after(nwDiffNode(p.diff.filter((l) => !l.startsWith('  '))));
+    d.querySelector('.dlg-body > p.sub').after(nwDiffNode(p.diff.filter((l) => !l.startsWith('  '))));
     d.dataset.nwConfirm = '';
     return;
   }
@@ -2175,7 +2668,7 @@ async function createDialog(quick = null) {
   let perms = { value: () => null };
   // 594 W28 (owner: "i dont think we should rebuild images without the user agreeing … better to warn"):
   // an out-of-date image is said here, with the choice — use it as it is (the default), or rebuild first.
-  const imgNote = h('div', { class: 'img-choice', 'data-image-choice': '', hidden: true });
+  const imgNote = h('div', { class: 'callout warn compact img-choice', role: 'group', 'data-image-choice': '', hidden: true });
   let imgChoice = 'current';
   const renderImgNote = (name) => {
     const i = images.find((x) => x.name === name);
@@ -2188,10 +2681,10 @@ async function createDialog(quick = null) {
       r.addEventListener('change', () => { if (r.checked) imgChoice = value; });
       return h('label', { class: 'check' }, r, ' ', label);
     };
-    imgNote.replaceChildren(
-      h('p', { class: 'img-choice-note' }, icon('flame'), ' The ' + name + ' image is out of date: ' + i.standing.replace(/ — rebuild when ready: .*$/, '') + '.'),
+    imgNote.replaceChildren(icon('flame'), h('div', { class: 'c-body' },
+      h('p', { class: 'img-choice-note c-title' }, 'The ' + name + ' image is out of date: ' + i.standing.replace(/ — rebuild when ready: .*$/, '') + '.'),
       radio('current', 'Use the current image' + missing, true),
-      radio('rebuild', 'Rebuild it first (~2 min, needs network; existing sandboxes are NOT affected)', false));
+      radio('rebuild', 'Rebuild it first (~2 min, needs network; existing sandboxes are NOT affected)', false)));
     imgNote.hidden = false;
   };
   const dlg = dialog('New sandbox','It is created off; Start boots it (the first start of an image not yet prepared prepares it — minutes, needs network).', [
@@ -2232,14 +2725,15 @@ async function createDialog(quick = null) {
   let chooser = null, acct = null;
   // 599c: Quick add could not decide this one — said at the top; the form below is pre-filled with its defaults.
   if (quick && quick.why) {
-    const sub = dlg.querySelector('form > p.sub');
-    const note = h('div', { class: 'notice quick-why', role: 'note', 'data-quick-why': quick.kind || '' },
-      icon(quick.kind === 'account' ? 'key-round' : 'flame'), ' Quick add needs your choice: ' + quick.why);
-    if (sub) sub.after(note); else dlg.querySelector('form').prepend(note);
+    const sub = dlg.querySelector('.dlg-body > p.sub');
+    const note = callout('warn', { cls: 'notice quick-why', role: 'note', attrs: { 'data-quick-why': quick.kind || '' },
+      icon: quick.kind === 'account' ? 'key-round' : 'flame', title: 'Quick add needs your choice', body: quick.why });
+    if (sub) sub.after(note); else dlg.querySelector('.dlg-body').prepend(note);
   }
   const submit = dlg.querySelector('button[type="submit"]');
-  const why = h('small', { class: 'dlg-why', 'data-create-why': '', 'aria-live': 'polite' });
-  submit.parentElement.before(why);
+  const why = dlg.why;
+  why.dataset.createWhy = '';
+  why.setAttribute('aria-live', 'polite');
   const gate = () => {
     const w = picker.blocked();
     why.textContent = w || '';
@@ -2339,12 +2833,14 @@ async function refreshSandbox() {
     // A transition began or ended while this was read: what it read may be the phase before — read again.
     if (gen !== state.trGen) { sbxAgain = true; return; }
     state.sbx = { name, d, net, accounts };
+    if ($('sbx-bar').querySelector('.menu:not([hidden])') || $('sbx-details').querySelector('.menu:not([hidden])')) { state.sbxHeld = true; return; }
     const parts = sandboxParts(name, d, net, accounts);
     $('sbx-bar').replaceChildren(parts.bar);
     $('sbx-details').replaceChildren(parts.details);
     $('sbx-body').classList.toggle('details-closed', !setting('ui.details_open', true));
     paintRowOps();
     paintTermEmpty();
+    paintStripActs();
     // 593 §9: saved panes go live once it runs (their sessions listed by the detail), or repaint.
     promoteSaved(name, d.info.phase === 'running' && !d.info.busy && d.sessions ? d.sessions.filter((x) => !x.ended).map((x) => x.name) : null);
     paintTabs();
@@ -2356,7 +2852,7 @@ async function refreshSandbox() {
     }
   } catch (e) {
     if (e.status === 404) { if (state.view === 'sandbox' && state.param === name) location.hash = '#/overview'; return; }
-    if (!state.signedOut) toast(e.message || String(e), true);
+    if (!state.signedOut) failureFor(name, e.message || String(e));
   } finally {
     sbxRefreshing = false;
     if (sbxAgain) { sbxAgain = false; refreshSandbox(); }
@@ -2379,7 +2875,7 @@ async function sandboxArrived(name, want) {
     if (have) { const v = sview(name); v.selected[have.pane] = have.id; v.focusedPane = have.pane; renderTerminals(); if (!have.saved) focusTerm(have); }
     else if (running && live.includes(want)) openTerminal(name, want, 'interactive');
     else if (!running && (await savedRows(name)).some((r) => r.name === want)) openSavedTerminal(name, (await savedRows(name)).find((r) => r.name === want));
-    else toast('Session ' + want + ' is not running in ' + name, true);
+    else failureFor(name, 'Session ' + want + ' is not running in ' + name);
     return;
   }
   if (!pageTerminals(name).length && running && live.includes(s.d.defaultSession) && setting('ui.terminals', true) && !sview(name).restoredAny) {
@@ -2490,171 +2986,275 @@ async function restorePanes(name) {
     if (state.view === 'sandbox' && state.param === name) renderTerminals();
   }
 }
+/// 603: a sandbox's terminal in the user's own terminal app (doz attach), from the bar, the strip or a session row.
+async function openInTerminal(name, session) {
+  try {
+    const r = await api('sandboxes/' + name + '/terminal', { method: 'POST', json: session ? { session } : {} });
+    toast(r.message, false, 'square-terminal');
+  } catch (e) { failureFor(name, e.message); }
+}
+function runDetachedDialog(name) {
+  dialog('Run a command in ' + name, 'A new session running the command — no shell in front (say bash -lc \'…\' for one). It runs inside the sandbox; attach to see it.',
+    [{ name: 'session', label: 'Session name', placeholder: 'e.g. worker', required: true },
+     { name: 'command', label: 'Command', placeholder: 'sleep 600', required: true }], 'Run', async (v) => {
+      const argv = splitArgs(v.command);
+      if (!argv.length) throw new Error('the command is empty');
+      await actOrThrow({ action: 'open-session', sandbox: name, session: v.session, argv });
+    });
+}
+function takePointDialog(name, running) {
+  dialog('Take a restore point of ' + name, running ? 'A running sandbox pauses for the clone (milliseconds); its copy gets e2fsck on the first boot from it.' : 'An instant APFS clone of the disks.',
+    [{ name: 'point', label: 'Name', placeholder: 'default point-N' }, { name: 'note', label: 'Note' }], 'Take', async (v) => {
+      const b = { action: 'point-take', sandbox: name };
+      if (v.point) b.point = v.point;
+      if (v.note) b.note = v.note;
+      await actOrThrow(b);
+    });
+}
+/// Sessions need a VM: running, or one a session request wakes (paused, asleep, hibernated) — never while off,
+/// failed, booting, busy or while another operation on it runs (590 bug 2). Null: ready; else why not.
+function sessionsWhyNot(name, i) {
+  const ready = ['running', 'paused', 'asleep', 'hibernated'].includes(i.phase) && !i.busy && !opRunningFor(name) && !transitionOf(name);
+  return ready ? null : i.phase === 'off' || i.phase === 'failed' ? 'Start it first' : 'Wait until it is running';
+}
+/// 603: the bar's lifecycle — the phase's verbs as ONE group (led by the primary for an off, failed, paused,
+/// asleep or hibernated sandbox: Start, Resume or Wake; a running one has none) and Shut down apart, in red.
+/// In a transition this page started: the buttons it showed when asked — disabled, never swapped.
+const PRIMARY_VERB = { off: 'start', failed: 'start', paused: 'resume', asleep: 'wake', hibernated: 'wake' };
+function lifecycleBar(s) {
+  const tr = transitionOf(s.name);
+  const busy = s.busy || s.phase === 'booting' || opRunningFor(s.name) || !!tr;
+  const verbs = tr && tr.verbs ? tr.verbs : verbsFor(s.phase);
+  const mk = (v) => {
+    const b = btn(VERBS[v][0], () => lifecycle(v, s.name), { primary: !busy && PRIMARY_VERB[s.phase] === v, danger: v === 'shutdown',
+      title: tr ? TRANSITION_LABEL[tr.action] : VERBS[v][1] });
+    if (busy) b.disabled = true;
+    return b;
+  };
+  const group = verbs.filter((v) => v !== 'shutdown');
+  return h('span', { class: 'sbx-life', 'data-lifecycle-for': s.name },
+    group.length ? h('span', { class: 'btn-group', role: 'group', 'aria-label': 'Lifecycle' }, group.map(mk)) : null,
+    verbs.includes('shutdown') ? mk('shutdown') : null);
+}
+function chip(k, v, attrs = {}) {
+  return h(attrs.onClick ? 'button' : 'span', { class: 'chip-kv', type: attrs.onClick ? 'button' : null, title: attrs.title || null, ...(attrs.data || {}),
+    on: attrs.onClick ? { click: attrs.onClick } : null }, h('span', { class: 'k' }, k), v);
+}
+/// 603: the inspector's tabs — the selected one is kept per sandbox in this page (owner decision 4).
+const INSP_TABS = [['overview', 'Overview', 'Overview', 'info'], ['sessions', 'Sessions', 'Sessions', 'terminal'], ['points', 'Points', 'Restore points', 'history'],
+                   ['network', 'Network', 'Network', 'shield'], ['keys', 'Keys', 'Keys & account', 'key-round'], ['config', 'Config', 'Configuration', 'settings']];
+function inspShow(name, tab) {
+  sview(name).inspTab = tab;
+  const root = $('sbx-details');
+  for (const b of root.querySelectorAll('.itab')) b.setAttribute('aria-selected', b.dataset.inspTab === tab ? 'true' : 'false');
+  for (const p of root.querySelectorAll('.ipanel')) p.hidden = p.dataset.insp !== tab;
+  root.scrollTop = 0;
+}
 function sandboxParts(name, d, net, accounts) {
   const i = d.info;
   const running = i.phase === 'running';
-  // Sessions need a VM: running, or one a session request wakes (paused, asleep, hibernated) — never
-  // while off, failed, booting, busy or while another operation on it runs (590 bug 2).
-  const sessionsReady = ['running', 'paused', 'asleep', 'hibernated'].includes(i.phase) && !i.busy && !opRunningFor(name) && !transitionOf(name);
-  const whyNot = sessionsReady ? null : i.phase === 'off' || i.phase === 'failed' ? 'Start it first' : 'Wait until it is running';
-  const gated = (b) => { if (!sessionsReady) { b.disabled = true; b.title = whyNot; } return b; };
-  const fact = (k, v) => h('div', null, h('div', { class: 'k' }, k), h('div', { class: 'v' }, v));
-  const copy = btn('Copy', async (ev) => {
+  const whyNot = sessionsWhyNot(name, i);
+  const gated = (b) => { if (whyNot) { b.disabled = true; b.title = whyNot; } return b; };
+  const fact = (k, v) => [h('dt', null, k), h('dd', null, v)];
+  const copy = btn('Copy the command', async (ev) => {
     const b = ev.currentTarget;
-    try { await navigator.clipboard.writeText(d.attachCommand); setButton(b, 'Copied'); } catch (_) { setButton(b, 'Select and copy'); }
-    setTimeout(() => { setButton(b, 'Copy'); }, 1500);
-  });
-  const terminal = (session) => async () => {
-    try {
-      const r = await api('sandboxes/' + name + '/terminal', { method: 'POST', json: session ? { session } : {} });
-      toast(r.message);
-    } catch (e) { toast(e.message, true); }
-  };
+    try { await navigator.clipboard.writeText(d.attachCommand); setButton(b, 'Copied', 'check'); } catch (_) { setButton(b, 'Select and copy', 'clipboard'); }
+    setTimeout(() => { setButton(b, 'Copy the command', 'copy'); }, 1500);
+  }, { small: true, quiet: true, iconOnly: true, icon: 'copy' });
   // 593 §9: paused, asleep or hibernated — the sessions as last saved, each can be shown (its saved
   // screen). A shut-down sandbox has none (owner, 2026-09-30).
   const savedState = (s) => 'screen saved ' + when(s.savedAt) + (s.savedReason ? ' (' + s.savedReason + ')' : '');
+  const live = (d.sessions || []).filter((s) => !s.ended && !s.saved);
   const sessions = (d.sessions || []).map((s) => h('tr', { 'data-session': s.name },
-    h('td', null, s.name, s.name === d.defaultSession ? h('span', { class: 'tag' }, 'default') : null),
-    h('td', null, s.saved ? h('span', { class: 'muted' }, savedState(s)) : s.ended ? h('span', { class: 'muted' }, 'ended (exit ' + s.exitCode + ')') : 'running'),
-    h('td', { class: 'mono' }, s.command),
-    h('td', { class: 'num' }, s.cols ? s.cols + '×' + s.rows : '—'),
-    h('td', { class: 'num' }, s.saved ? '—' : String(s.clients)),
-    h('td', null, s.saved ? h('div', { class: 'actions' },
-      btn('Show', () => openSavedTerminal(name, s), { small: true, icon: 'eye', title: 'Its last saved screen in a tab (read-only; it goes live when the sandbox runs)' }))
-    : s.ended ? null : h('div', { class: 'actions' },
-      btn('Open', () => openTerminal(name, s.name, 'interactive'), { small: true, title: 'A terminal on this session, here in the browser' }),
-      btn('Watch', () => openTerminal(name, s.name, 'watch'), { small: true, title: 'Watch only: nothing you type reaches the session, and it never resizes it' }),
-      gated(btn('Open in Terminal', terminal(s.name), { small: true }))))));
+    h('td', null, h('div', { class: 'cell-name' }, h('span', { class: 'dot ph-' + (s.saved ? i.phase : s.ended ? 'off' : 'running'), 'aria-hidden': 'true' }),
+        h('span', { class: 'nm' }, s.name), s.name === d.defaultSession ? h('span', { class: 'tag' }, 'default') : null),
+      h('div', { class: 'sub2' }, s.saved ? savedState(s) : s.ended ? 'ended (exit ' + s.exitCode + ')' : 'running' + (s.cols ? ' · ' + s.cols + '×' + s.rows : '') + ' · ' + plural(s.clients, 'viewer', 'viewers'))),
+    h('td', { class: 'mono trunc', title: s.command }, s.command),
+    h('td', { class: 'row-acts-cell' }, h('div', { class: 'row-acts' }, s.saved
+      ? btn('Show', () => openSavedTerminal(name, s), { small: true, quiet: true, icon: 'eye', title: 'Its last saved screen in a tab (read-only; it goes live when the sandbox runs)' })
+      : s.ended ? null : [
+        btn('Open', () => openTerminal(name, s.name, 'interactive'), { small: true, quiet: true, title: 'A terminal on this session, here in the browser' }),
+        moreMenu('More for ' + s.name, [
+          { label: 'Watch', icon: 'eye', desc: 'Read-only: nothing you type reaches it, it never resizes', onSelect: () => openTerminal(name, s.name, 'watch') },
+          { label: 'Open in Terminal', icon: 'square-terminal', desc: 'In your terminal app (doz attach)', disabled: !!whyNot, why: whyNot, onSelect: () => openInTerminal(name, s.name) },
+        ], { small: true, onClose: sbxMenuClosed }).el]))));
+  const pointMenu = (p) => moreMenu('More for ' + p.name, [
+    { label: 'Fork…', icon: 'git-fork', desc: 'A new sandbox whose disks are this point’s', onSelect: () => dialog('Fork ' + p.name, 'A new sandbox whose disks are this point’s (it cold-boots on start).',
+      [{ name: 'newName', label: 'New sandbox name', required: true }], 'Fork', async (v) => { await actOrThrow({ action: 'point-fork', sandbox: name, point: p.id, newName: v.newName }); }) },
+    { label: 'Save as template…', icon: 'layout-template', desc: 'Its root disk becomes a template (never its state disk)', onSelect: () => templateDialog(name, d, p.id) },
+    { label: 'Duplicate…', icon: 'copy', desc: 'A new sandbox from this point', onSelect: () => duplicateDialog(name, d, accounts, p.id) },
+    { sep: true },
+    { label: 'Delete…', icon: 'trash-2', danger: true, desc: 'Only this restore point', onSelect: () => confirmAction('Delete ' + p.name, 'Delete the restore point “' + p.name + '” of ' + name + '.', name,
+      { action: 'point-rm', sandbox: name, point: p.id }) },
+  ], { small: true, onClose: sbxMenuClosed });
   const points = d.restorePoints.map((p) => h('tr', null,
-    h('td', null, p.name, h('div', { class: 'muted mono' }, p.id)),
-    h('td', null, full(p.createdAt), h('div', { class: 'muted' }, when(p.createdAt))),
-    h('td', null, p.takenWhile + (p.automatic ? ' (auto)' : ''), p.needsFsck ? h('div', { class: 'st-warn' }, 'e2fsck on next boot') : null),
-    h('td', null, p.note || '—'),
-    h('td', null, h('div', { class: 'actions' },
+    h('td', null, h('div', { class: 'nm' }, p.name), h('div', { class: 'sub2 mono trunc', title: p.id }, p.id)),
+    h('td', { title: full(p.createdAt) }, when(p.createdAt), h('div', { class: 'sub2' }, p.takenWhile + (p.automatic ? ' (auto)' : '')),
+      p.needsFsck ? h('div', { class: 'st-warn sub2' }, 'e2fsck on next boot') : null, p.note ? h('div', { class: 'sub2' }, p.note) : null),
+    h('td', { class: 'row-acts-cell' }, h('div', { class: 'row-acts' },
       btn('Revert', () => confirmAction('Revert ' + name, 'Revert to “' + p.name + '”: it shuts down (running programs end); the current disk is kept as a restore point first. Start boots it.', name,
-        { action: 'point-revert', sandbox: name, point: p.id }), { small: true, danger: true }),
-      btn('Fork', () => dialog('Fork ' + p.name, 'A new sandbox whose disks are this point’s (it cold-boots on start).',
-        [{ name: 'newName', label: 'New sandbox name', required: true }], 'Fork', async (v) => { await actOrThrow({ action: 'point-fork', sandbox: name, point: p.id, newName: v.newName }); }), { small: true }),
-      btn('Save as template…', () => templateDialog(name, d, p.id), { small: true, title: 'Its root disk becomes a template (never its state disk)' }),
-      btn('Duplicate…', () => duplicateDialog(name, d, accounts, p.id), { small: true, title: 'A new sandbox from this point, with a new workspace, CPUs, memory, network' }),
-      btn('Delete', () => confirmAction('Delete ' + p.name, 'Delete the restore point “' + p.name + '” of ' + name + '.', name,
-        { action: 'point-rm', sandbox: name, point: p.id }), { small: true, danger: true })))));
+        { action: 'point-revert', sandbox: name, point: p.id }), { small: true, quiet: true, danger: true }),
+      pointMenu(p).el))));
   const creds = d.credentials.map((c) => h('tr', null,
-    h('td', null, c.binding, h('div', { class: 'muted' }, c.hosts.join(', '))),
-    h('td', null, c.set ? 'set' : 'not set'),
-    h('td', null, c.source || '—', c.account ? h('div', { class: 'muted' }, 'account ' + c.account) : null),
-    h('td', null, c.state || '—', c.expiresAt ? h('div', { class: 'muted' }, 'expires ' + when(c.expiresAt)) : null),
-    h('td', null, c.policy || '—'),
-    h('td', null, c.set && c.source && !c.source.startsWith('account:')
-      ? btn('Remove', () => act({ action: 'key-rm', sandbox: name, binding: c.binding }), { small: true }) : null)));
+    h('td', null, c.binding, h('div', { class: 'sub2 trunc', title: c.hosts.join(', ') }, c.hosts.join(', '))),
+    h('td', null, c.set ? 'set' : 'not set', ((t) => h('div', { class: 'sub2 trunc', title: t }, t))([c.source || '—', c.account ? 'account ' + c.account : null].filter(Boolean).join(' · '))),
+    h('td', null, c.state || '—', c.expiresAt ? h('div', { class: 'sub2' }, 'expires ' + when(c.expiresAt)) : null, c.policy ? h('div', { class: 'sub2' }, 'policy ' + c.policy) : null),
+    h('td', { class: 'row-acts-cell' }, c.set && c.source && !c.source.startsWith('account:')
+      ? btn('Remove', () => act({ action: 'key-rm', sandbox: name, binding: c.binding }), { small: true, quiet: true }) : null)));
   const foreign = d.credentials.flatMap((c) => c.foreign).map((f) => h('tr', null,
-    h('td', null, f.kind + (f.matches ? ' (= ' + f.matches + ')' : '')),
-    h('td', { class: 'mono' }, f.prefix + '…'),
-    h('td', { class: 'mono' }, f.fingerprint),
-    h('td', null, f.header),
-    h('td', { class: 'num' }, String(f.requests)),
-    h('td', null, when(f.lastSeen))));
+    h('td', null, f.kind + (f.matches ? ' (= ' + f.matches + ')' : ''), h('div', { class: 'sub2 mono' }, f.prefix + '…')),
+    h('td', { class: 'mono trunc', title: f.fingerprint }, f.fingerprint),
+    h('td', null, f.header, h('div', { class: 'sub2' }, plural(f.requests, 'request', 'requests') + ' · ' + when(f.lastSeen)))));
   const proxied = net.proxied;
   const busy = i.busy || i.phase === 'booting' || opRunningFor(name) || !!transitionOf(name);
   const detailsOpen = setting('ui.details_open', true);
-  const netText = i.network + (i.deniedConnections ? ' (' + i.deniedConnections + ' denied)' : '');
+  const noDisk = !d.hasRootDisk;
+  const holdWhy = busy ? 'Wait until it settles' : noDisk ? 'It has no disk yet — start it once' : null;
+  const showTab = (tab) => () => {
+    if (!setting('ui.details_open', true)) { $('sbx-body').classList.remove('details-closed'); saveSetting('ui.details_open', true).then(() => refreshSandbox()).catch(() => {}); }
+    inspShow(name, tab);
+  };
+  // ── the bar: title row (name, phase, labelled chips) · toolbar (lifecycle, Shut down, ⋯ | status, details) ──
+  const more = moreMenu('More: duplicate, save as template, boot log, reset, remove', [
+    { label: 'Duplicate…', icon: 'copy', desc: 'A new sandbox from this disk', disabled: !!holdWhy, why: holdWhy, onSelect: () => duplicateDialog(name, d, accounts, null) },
+    { label: 'Save as template…', icon: 'layout-template', desc: 'Its root disk becomes an image (never its state disk)', disabled: !!holdWhy, why: holdWhy, onSelect: () => templateDialog(name, d, null) },
+    { label: 'Boot log', icon: 'history', desc: 'Its last boots: the steps and the kernel console', onSelect: () => bootLogDialog(name) },
+    { sep: true },
+    { label: 'Reset…', icon: 'rotate-ccw', danger: true, desc: 'Discard the disk — back to the image', disabled: busy, why: 'Wait until it settles', data: { 'lifecycle-item': name }, onSelect: () => lifecycle('reset', name) },
+    { label: 'Remove…', icon: 'trash-2', danger: true, desc: 'The sandbox, its disks and restore points', disabled: busy, why: 'Wait until it settles', data: { 'lifecycle-item': name }, onSelect: () => lifecycle('rm', name) },
+  ], { data: { sbxMore: name }, onClose: sbxMenuClosed });
+  more.button.dataset.lifecycleMore = name;
+  const detailsBtn = btn(detailsOpen ? 'Hide details' : 'Details', () => {
+    const open = !setting('ui.details_open', true);
+    $('sbx-body').classList.toggle('details-closed', !open);
+    saveSetting('ui.details_open', open).then(() => refreshSandbox()).catch((e) => pageFailure('ui.details_open was not saved: ' + (e.message || e)));
+  }, { quiet: true, iconOnly: true, icon: 'panel-right', title: (detailsOpen ? 'Hide' : 'Show') + ' the details: sessions, restore points, network, keys (remembered: ui.details_open)' });
+  detailsBtn.setAttribute('aria-pressed', detailsOpen ? 'true' : 'false');
+  const suggestions = net.permissions ? net.permissions.suggestions : [];
+  const refused = suggestions.reduce((n, s) => n + s.count, 0);
   const bar = h('div', { class: 'sbx-bar-inner' },
     h('div', { class: 'sbx-title' },
       h('h1', null, name), sandboxPill(i),
-      h('span', { class: 'sbx-meta' },
-        h('span', { title: i.image + (i.dockerfile ? ' — Dockerfile ' + i.dockerfile : ''), 'data-image-title': '' }, i.imageTitle || i.image),
-        h('span', null, (i.ramHeldMiB ? mib(i.ramHeldMiB) : '—') + ' of ' + mib(i.memoryMiB)),
-        h('span', { class: i.deniedConnections ? 'st-warn' : null }, netText),
-        i.accountApplies ? h('span', null, 'account ' + (i.account || '—')) : null,
-        i.workspace ? null : h('span', { class: 'badge-isolated', 'data-isolated': '', title: ISOLATED_NOTE }, withIcon('shield', 'isolated')),
+      h('span', { class: 'chips sbx-meta' },
+        chip('Image', h('span', { 'data-image-title': '' }, i.imageTitle || i.image), { title: i.image + (i.dockerfile ? ' — Dockerfile ' + i.dockerfile : '') }),
+        chip('RAM', (i.ramHeldMiB ? mib(i.ramHeldMiB) : '—') + ' of ' + mib(i.memoryMiB)),
+        chip('Network', [i.network, i.deniedConnections ? h('span', { class: 'tag warn' }, i.deniedConnections + ' denied') : null, icon('panel-right')],
+          { onClick: showTab('network'), title: 'Its network — the Network tab', data: { 'data-network-chip': '' } }),
+        i.accountApplies ? chip('Account', i.account || '—') : null,
+        i.workspace ? null : h('span', { class: 'tag outline badge-isolated', 'data-isolated': '', title: ISOLATED_NOTE }, withIcon('shield', 'isolated')),
         // 599g: the workspace's .dozignore / .dozreadonly (the details say how many patterns and whether in force).
-        i.workspaceRules ? h('span', { 'data-workspace-rules': i.workspaceRulesView || '', title: 'Workspace rules: ' + i.workspaceRules + ' — doz ignore show ' + name },
+        i.workspaceRules ? h('span', { class: 'tag outline', 'data-workspace-rules': i.workspaceRulesView || '', title: 'Workspace rules: ' + i.workspaceRules + ' — doz ignore show ' + name },
           withIcon('shield', 'rules')) : null)),
-    h('div', { class: 'sbx-actions' },
-      lifecycleButtons(i, true),
-      h('span', { class: 'sbx-sep', 'aria-hidden': 'true' }),
-      gated(btn('Open in Terminal', terminal(null), { small: true, title: 'Your terminal app attaches to the ' + d.defaultSession + ' session (waking the sandbox if it sleeps)' })),
-      gated(btn('New shell', () => newShellTerminal(name).catch((e) => toast(e.message || String(e), true)),
-        { small: true, title: 'A new shell session (shell-2, shell-3, …) in a browser terminal' })),
-      ((b) => { if (busy) b.disabled = true; return b; })(btn('Terminal…', () => newTerminalDialog(name), { small: true, title: 'A NEW session: a shell, or one running a command (a running session opens from Details › Sessions)' })),
-      termUI.splitBtn || null,
-      h('span', { class: 'sbx-sep', 'aria-hidden': 'true' }),
-      ((b) => { if (busy || !d.hasRootDisk) { b.disabled = true; b.title = d.hasRootDisk ? 'Wait until it settles' : 'It has no disk yet — start it once'; } return b; })(
-        btn('Duplicate…', () => duplicateDialog(name, d, accounts, null), { small: true, title: 'A new sandbox from this one’s disk: a new workspace, CPUs, memory, network, account' })),
-      ((b) => { if (busy || !d.hasRootDisk) { b.disabled = true; b.title = d.hasRootDisk ? 'Wait until it settles' : 'It has no disk yet — start it once'; } return b; })(
-        btn('Save as template…', () => templateDialog(name, d, null), { small: true, title: 'Its root disk becomes an image other sandboxes are created from (never its state disk)' })),
-      btn('Boot log', () => bootLogDialog(name), { small: true, icon: 'history', title: 'Its last boots — the steps and the kernel console, as the boot view showed them (any phase)' }),
-      btn(detailsOpen ? 'Hide details' : 'Details', () => {
-        const open = !setting('ui.details_open', true);
-        $('sbx-body').classList.toggle('details-closed', !open);
-        saveSetting('ui.details_open', open).then(() => refreshSandbox()).catch((e) => toast('The setting was not saved: ' + (e.message || e), true));
-      }, { small: true, title: 'The sessions, restore points, network and keys panel (remembered: ui.details_open)' })),
-    h('div', { 'data-op-for': name, 'data-banner': '1', role: 'status' }),
+    h('div', { class: 'sbx-actions toolbar', role: 'toolbar', 'aria-label': name },
+      lifecycleBar(i), more.el,
+      h('span', { class: 'spacer' }),
+      // The status slot: the operation under way (a quiet line), or how it ended (a callout that stays on failure).
+      h('div', { 'data-op-for': name, 'data-banner': '1', role: 'status' }),
+      detailsBtn),
     i.credentialProblem ? credentialBanner(name, i, accounts) : null,
     // 594 W28: its system disk came from an image an older doz made.
-    i.olderImage ? h('div', { class: 'cred-banner img-banner', role: 'status', 'data-older-image': name },
-      h('div', { class: 'cred-banner-text' }, icon('flame'), ' ' + name + ' was ' + i.olderImage + '.')) : null,
+    i.olderImage ? callout('warn', { compact: true, cls: 'cred-banner img-banner', icon: 'flame', attrs: { 'data-older-image': name }, body: name + ' was ' + i.olderImage + '.' }) : null,
     // 596 (B8): its Dockerfile changed (or was built again) — offered, never rebuilt by itself.
-    i.rebuildAvailable ? h('div', { class: 'cred-banner img-banner', role: 'status', 'data-rebuild-available': name },
-      h('div', { class: 'cred-banner-text' }, icon('flame'), ' ' + i.rebuildAvailable + '.'),
-      h('div', { class: 'actions' }, btn('Rebuild the image', () => dialog('Rebuild ' + i.image + '?',
+    i.rebuildAvailable ? callout('warn', { compact: true, cls: 'cred-banner img-banner', icon: 'flame', attrs: { 'data-rebuild-available': name }, body: i.rebuildAvailable + '.',
+      actions: [btn('Rebuild the image', () => dialog('Rebuild ' + i.image + '?',
         'Runs container build again (seconds when nothing changed: its cache), then bakes only if the built image changed. ' + DOCKERFILE_POLICY_NOTE + ' This sandbox keeps its disk until you reset it.',
-        [], 'Rebuild', async () => { await actOrThrow({ action: 'image-bake', image: i.image }); }, { icon: 'flame' }), { small: true, icon: 'flame' }))) : null);
-  const details = h('div', { class: 'sbx-details-inner' },
-    h('div', { class: 'cards small-cards' },
-      card('RAM held', mib(i.ramHeldMiB), 'of ' + mib(i.memoryMiB) + (i.memoryReturnedMiB ? ' · balloon returned ' + mib(i.memoryReturnedMiB) : '')),
-      card('Disk', bytes(i.diskBytes), d.snapshotBytes ? 'snapshot ' + bytes(d.snapshotBytes) : (d.hasRootDisk ? 'root disk kept' : 'no root disk yet')),
-      card('CPUs', String(d.cpus))),
-    h('div', { class: 'panel' }, h('div', { class: 'cmd' }, h('code', null, d.attachCommand), copy)),
-    i.workspaceRules ? h('p', { class: 'muted', 'data-workspace-rules-line': '' },
-      'Workspace rules: ' + i.workspaceRules + '. Which rule decides a path: doz ignore check ' + name + ' PATH. Not a security boundary.')
-      // 599g (owner A3): a shared folder with no rule file says so, rather than nothing (isolated: nothing to say).
-      : i.workspace ? h('p', { class: 'muted', 'data-workspace-rules-none': '' },
-        'Workspace rules: none — the folder is shared as is. A .dozignore or .dozreadonly in it keeps the agent away from some files.') : null,
-    h('div', { class: 'head' }, h('h2', null, 'Sessions'), h('div', { class: 'actions' },
-      gated(btn('Run detached…', () => dialog('Run a command in ' + name, 'A new session running the command — no shell in front (say bash -lc \'…\' for one). It runs inside the sandbox; attach to see it.',
-        [{ name: 'session', label: 'Session name', placeholder: 'e.g. worker', required: true },
-         { name: 'command', label: 'Command', placeholder: 'sleep 600', required: true }], 'Run', async (v) => {
-          const argv = splitArgs(v.command);
-          if (!argv.length) throw new Error('the command is empty');
-          await actOrThrow({ action: 'open-session', sandbox: name, session: v.session, argv });
-        }), { small: true })))),
-    panel(table(['Session', 'State', 'Command', 'Size', 'Viewers', ''], sessions, [3, 4]),
-      running ? 'No sessions.' : i.phase === 'off' || i.phase === 'failed' ? 'No sessions — ' + (i.phase === 'off' ? 'shut down' : 'failed') + '. Start boots it fresh, with new sessions.'
-        : 'No saved screens — sessions are listed while it runs, and saved when it pauses, sleeps or hibernates.'),
-    h('div', { class: 'head' }, h('h2', null, 'Restore points'), h('div', { class: 'actions' },
-      btn('Take a restore point…', () => dialog('Take a restore point of ' + name, running ? 'A running sandbox pauses for the clone (milliseconds); its copy gets e2fsck on the first boot from it.' : 'An instant APFS clone of the disks.',
-        [{ name: 'point', label: 'Name', placeholder: 'default point-N' }, { name: 'note', label: 'Note' }], 'Take', async (v) => {
-          const b = { action: 'point-take', sandbox: name };
-          if (v.point) b.point = v.point;
-          if (v.note) b.note = v.note;
-          await actOrThrow(b);
-        }), { small: true }))),
-    panel(table(['Point', 'Taken', 'While', 'Note', ''], points), 'No restore points.'),
-    h('div', { class: 'head' }, h('h2', null, 'Network'), proxied ? btn('Edit policy…', () => policyDialog(name, net.policy), { small: true }) : null),
-    networkPanel(net),
-    h('div', { class: 'head' }, h('h2', null, 'Keys & account'), h('div', { class: 'actions' },
-      proxied ? btn('Key policy…', () => dialog('Key policy of ' + name, 'What the proxy does with a credential the guest brings itself. auto: strict when the account is not the Mac login, allow otherwise.',
-        [{ name: 'policy', label: 'Policy', type: 'select', options: ['auto', 'allow', 'strict'], value: 'auto' }], 'Set', async (v) => {
-          await actOrThrow({ action: 'key-policy', sandbox: name, policy: v.policy });
-        }), { small: true }) : null,
-      proxied ? btn('Account…', () => accountDialog(name, i, accounts), { small: true }) : null)),
-    panel(table(['Key', 'Set', 'Source', 'State', 'Policy', ''], creds), 'No keys — the sandbox uses none.'),
-    keyEntry(name, proxied),
-    foreign.length ? h('h2', null, 'Credentials the guest brought itself (fingerprints only)') : null,
-    foreign.length ? panel(table(['Kind', 'Prefix', 'Fingerprint', 'Header', 'Requests', 'Last seen'], foreign, [4])) : null,
-    h('h2', null, 'Configuration'),
-    h('div', { class: 'panel' }, h('div', { class: 'facts' },
-      fact('Memory', mib(d.memoryMiB)), fact('Root disk', mib(d.rootfsMiB)), fact('State disk', mib(d.stateDiskMiB)),
-      fact('Journal', d.journalMiB ? mib(d.journalMiB) : 'none'), fact('Network', d.networkMode + (d.subnet ? ' · ' + d.subnet : '')),
-      fact('Account', i.accountApplies ? (i.account || '—') : 'n/a'),
-      fact('Workspace', i.workspace ? i.workspace + ' → /workspace (live)' : 'isolated — ' + ISOLATED_NOTE),
-      fact('Shares', d.shares.length ? d.shares.map((s) => s.hostPath + ' → ' + s.guestPath).join(', ') : 'none'),
-      d.project ? fact('Project', d.project) : null,
-      fact('Directory', d.directory))),
-    h('h2', null, 'Environment prompt'),
-    promptPanel(d));
+        [], 'Rebuild', async () => { await actOrThrow({ action: 'image-bake', image: i.image }); }, { icon: 'flame' }), { small: true, icon: 'flame' })] }) : null,
+    // 597: what the agent was refused, said once here with the way to decide (the Network tab).
+    refused ? callout('warn', { compact: true, attrs: { 'data-refused': name }, body: ['The agent was refused ' + plural(refused, 'time', 'times') + ' — ',
+      ...suggestions.slice(0, 3).flatMap((s, n) => [n ? ', ' : '', h('strong', null, s.permission ? s.what : s.what), ' (' + s.count + ')']), '.'],
+      actions: [btn('Review in Network', showTab('network'), { small: true, icon: 'shield' })] }) : null);
+  // ── the inspector: six tabs instead of nine stacked sections ──
+  const tab = sview(name).inspTab || 'overview';
+  const counts = { sessions: live.length ? h('span', { class: 'count' }, String(live.length)) : null,
+                   network: i.deniedConnections ? h('span', { class: 'count warn' }, String(i.deniedConnections)) : null };
+  const tabs = h('div', { class: 'itabs', role: 'tablist', 'aria-label': 'Details of ' + name },
+    INSP_TABS.map(([id, label, title, ic]) => h('button', { type: 'button', role: 'tab', class: 'itab', id: 'itab-' + id, 'data-insp-tab': id, 'aria-controls': 'ipanel-' + id,
+      'aria-selected': id === tab ? 'true' : 'false', title, on: { click: () => inspShow(name, id) } }, icon(ic), h('span', { class: 'itab-l' }, label), counts[id] || null)));
+  const panel_ = (id, ...kids) => h('section', { class: 'ipanel', role: 'tabpanel', id: 'ipanel-' + id, 'data-insp': id, 'aria-labelledby': 'itab-' + id, hidden: id !== tab }, ...kids);
+  const head = (title, ...acts) => h('div', { class: 'head' }, h('h2', null, title), acts.length ? h('div', { class: 'actions' }, acts) : null);
+  const last = d.restorePoints.length ? d.restorePoints[d.restorePoints.length - 1] : null;
+  const details = h('div', { class: 'sbx-details-inner' }, tabs,
+    panel_('overview',
+      h('div', { class: 'stats' },
+        stat('RAM held', mib(i.ramHeldMiB), 'of ' + mib(i.memoryMiB) + (i.memoryReturnedMiB ? ' · balloon returned ' + mib(i.memoryReturnedMiB) : '')),
+        stat('Disk', bytes(i.diskBytes), d.snapshotBytes ? 'snapshot ' + bytes(d.snapshotBytes) : (d.hasRootDisk ? 'root disk kept' : 'no root disk yet')),
+        stat('CPUs', String(d.cpus))),
+      h('div', null, h('div', { class: 'insp-lbl' }, 'Attach from a terminal'), h('div', { class: 'cmd' }, h('code', null, d.attachCommand), copy)),
+      h('div', null, h('div', { class: 'insp-lbl' }, 'Workspace'),
+        h('div', { class: i.workspace ? null : 'muted' }, i.workspace ? [h('code', null, i.workspace), ' → /workspace (live)'] : 'Isolated — ' + ISOLATED_NOTE),
+        i.workspaceRules ? h('p', { class: 'muted', 'data-workspace-rules-line': '' },
+          'Workspace rules: ' + i.workspaceRules + '. Which rule decides a path: doz ignore check ' + name + ' PATH. Not a security boundary.')
+          // 599g (owner A3): a shared folder with no rule file says so, rather than nothing (isolated: nothing to say).
+          : i.workspace ? h('p', { class: 'muted', 'data-workspace-rules-none': '' },
+            'Workspace rules: none — the folder is shared as is. A .dozignore or .dozreadonly in it keeps the agent away from some files.') : null),
+      h('div', null, h('div', { class: 'insp-lbl' }, 'Sessions'),
+        live.length ? h('div', null, live.map((s) => s.name).join(', '), ' ', h('a', { href: '#/sandbox/' + name, on: { click: (ev) => { ev.preventDefault(); inspShow(name, 'sessions'); } } }, 'All sessions'))
+          : h('div', { class: 'muted' }, running ? 'None running.' : 'None running — it is ' + (PHASE_WORD[i.phase] || i.phase) + '.')),
+      h('div', null, h('div', { class: 'insp-lbl' }, 'Last restore point'),
+        last ? h('div', null, last.name + ' · ' + when(last.createdAt) + ' ', h('a', { href: '#/sandbox/' + name, on: { click: (ev) => { ev.preventDefault(); inspShow(name, 'points'); } } }, 'All points'))
+          : h('div', { class: 'muted' }, 'None yet.'))),
+    panel_('sessions',
+      head('Sessions', gated(btn('Run detached…', () => runDetachedDialog(name), { small: true }))),
+      panel(table(['Session', 'Command', ''], sessions),
+        running ? 'No sessions.' : i.phase === 'off' || i.phase === 'failed' ? 'No sessions — ' + (i.phase === 'off' ? 'shut down' : 'failed') + '. Start boots it fresh, with new sessions.'
+          : 'No saved screens — sessions are listed while it runs, and saved when it pauses, sleeps or hibernates.')),
+    panel_('points',
+      head('Restore points', btn('Take a restore point…', () => takePointDialog(name, running), { small: true })),
+      panel(table(['Point', 'Taken', ''], points), 'No restore points yet.')),
+    panel_('network',
+      head('Network', proxied ? btn('Edit policy…', () => policyDialog(name, net.policy), { small: true }) : null),
+      networkPanel(net)),
+    panel_('keys',
+      head('Keys & account',
+        proxied ? btn('Key policy…', () => dialog('Key policy of ' + name, 'What the proxy does with a credential the guest brings itself. auto: strict when the account is not the Mac login, allow otherwise.',
+          [{ name: 'policy', label: 'Policy', type: 'select', options: ['auto', 'allow', 'strict'], value: 'auto' }], 'Set', async (v) => {
+            await actOrThrow({ action: 'key-policy', sandbox: name, policy: v.policy });
+          }), { small: true }) : null,
+        proxied ? btn('Account…', () => accountDialog(name, i, accounts), { small: true }) : null),
+      panel(table(['Key', 'Set', 'State', ''], creds), 'No keys — the sandbox uses none.'),
+      keyEntry(name, proxied),
+      foreign.length ? h('h2', null, 'Credentials the guest brought itself (fingerprints only)') : null,
+      foreign.length ? panel(table(['Kind', 'Fingerprint', 'Header'], foreign)) : null),
+    panel_('config',
+      head('Configuration'),
+      h('div', { class: 'panel' }, h('div', { class: 'panel-body' }, h('dl', { class: 'facts' },
+        fact('Memory', mib(d.memoryMiB)), fact('Root disk', mib(d.rootfsMiB)), fact('State disk', mib(d.stateDiskMiB)),
+        fact('Journal', d.journalMiB ? mib(d.journalMiB) : 'none'), fact('Network', d.networkMode + (d.subnet ? ' · ' + d.subnet : '')),
+        fact('Account', i.accountApplies ? (i.account || '—') : 'n/a'),
+        fact('Workspace', i.workspace ? i.workspace + ' → /workspace (live)' : 'isolated — ' + ISOLATED_NOTE),
+        fact('Shares', d.shares.length ? d.shares.map((s) => s.hostPath + ' → ' + s.guestPath).join(', ') : 'none'),
+        d.project ? fact('Project', d.project) : null,
+        fact('Directory', d.directory)))),
+      h('h2', null, 'Environment prompt'),
+      promptPanel(d)),
+    h('div', { class: 'insp-resize', role: 'separator', 'aria-orientation': 'vertical', 'aria-label': 'Resize the details', title: 'Drag to resize the details (320–560 px)',
+      on: { pointerdown: inspResizeStart } }));
   return { bar, details };
+}
+/// A stat in a strip (it replaces separate cards).
+function stat(k, v, n) { return h('div', { class: 'stat' }, h('div', { class: 'k' }, k), h('div', { class: 'v' }, v), n ? h('div', { class: 'n', title: n }, n) : null); }
+/// A menu on the sandbox page closed: a re-render it held back runs now.
+function sbxMenuClosed() { if (state.sbxHeld) { state.sbxHeld = false; refreshSandbox(); } }
+/// 603: the inspector's width — dragged between 300 and 560 px, kept in this browser (a layout convenience).
+function inspWidth(w) {
+  const px = Math.max(320, Math.min(560, Math.round(w)));
+  $('sbx-body').style.setProperty('--insp-w', px + 'px');
+  return px;
+}
+(() => { try { const w = Number(localStorage.getItem('doz.inspectorWidth')); if (w) inspWidth(w); } catch (_) { /* no storage: the default */ } })();
+function inspResizeStart(ev) {
+  ev.preventDefault();
+  const body = $('sbx-body'), right = body.getBoundingClientRect().right;
+  let px = 0;
+  const move = (e) => { px = inspWidth(right - e.clientX); };
+  const up = () => {
+    document.removeEventListener('pointermove', move); document.removeEventListener('pointerup', up);
+    document.body.classList.remove('resizing');
+    if (px) { try { localStorage.setItem('doz.inspectorWidth', String(px)); } catch (_) { /* */ } }
+  };
+  document.body.classList.add('resizing');
+  document.addEventListener('pointermove', move);
+  document.addEventListener('pointerup', up);
 }
 /// 594 (D15/D16): what the agent is told about where it runs, as its NEXT session gets it.
 function promptPanel(d) {
@@ -2665,7 +3265,7 @@ function promptPanel(d) {
   return h('div', { class: 'panel prompt-panel' },
     h('div', { class: 'muted' }, 'Written at every session start, from this sandbox’s current facts — ', how, '. Layers: ', p.layers.join(' + '),
       '. The dozer skill: ', h('code', null, p.skillPath), ' (' + p.skillLines + ' lines).'),
-    p.error ? h('div', { class: 'notice bad' }, 'It does not render, so sessions do not start: ' + p.error)
+    p.error ? callout('bad', { cls: 'notice', body: 'It does not render, so sessions do not start: ' + p.error })
             : h('pre', { class: 'prompt-text' }, p.text || ''),
     h('div', { class: 'muted' }, 'Your own template: agent-prompt.md beside doz.toml · this sandbox’s own lines: agent_prompt in doz_project.yaml, or doz create --agent-prompt FILE.'));
 }
@@ -2820,11 +3420,15 @@ function confirmGitHub(id, then) {
       : 'git and gh in this sandbox use your GitHub login (your Mac\'s gh login, or a token you gave it) — read-only: the agent can read everything your login can. The token never enters the sandbox; switching this off revokes it at once.',
     [], push ? 'Allow pushing' : 'Use my GitHub login', async () => { await then(); }, { danger: push, icon: 'check' });
 }
+state.permErr = new Map();
 function permissionsPanel(name, net) {
   const p = net.permissions;
   if (!p) return null;
   const on = new Set(p.rows.filter((r) => r.on).map((r) => r.id));
-  const send = async (body) => { try { await actOrThrow({ action: 'net-policy', sandbox: name, ...body }); } catch (e) { toast(e.message || String(e), true); } };
+  const send = async (body) => {
+    try { state.permErr.delete(name); await actOrThrow({ action: 'net-policy', sandbox: name, ...body }); }
+    catch (e) { state.permErr.set(name, e.message || String(e)); refreshSandbox(); }
+  };
   const change = (id, v) => {
     if (id === 'web' && v) return confirmWeb(() => send({ grant: ['web'] }));
     if ((id === 'github:as-you' || id === 'github:push') && v) return confirmGitHub(id, () => send({ grant: [id] }));
@@ -2836,19 +3440,21 @@ function permissionsPanel(name, net) {
     b.addEventListener('click', () => { if (id === 'open') confirmWeb(() => send({ preset: 'open' })); else send({ preset: id }); });
     return b;
   };
-  const suggestions = p.suggestions.map((s) => h('div', { class: 'perm-suggest', 'data-suggest': s.grant },
-    icon('shield'), ' The agent tried to ', h('strong', null, s.permission ? s.what : 'reach ' + s.what),
-    ' (' + s.hosts.join(', ') + ', ' + s.count + ' time' + (s.count === 1 ? '' : 's') + ') ',
-    btn(s.permission ? 'Allow' : 'Allow this site', () => (s.permission === 'web' ? confirmWeb(() => send({ grant: [s.grant] })) : send({ grant: [s.grant] })),
-      { small: true, icon: 'check' })));
+  const suggestions = p.suggestions.map((s) => callout('warn', { compact: true, cls: 'perm-suggest', icon: 'shield', attrs: { 'data-suggest': s.grant },
+    body: ['The agent tried to ', h('strong', null, s.permission ? s.what : 'reach ' + s.what),
+      h('div', { class: 'muted' }, s.hosts.join(', ') + ' · ' + s.count + ' time' + (s.count === 1 ? '' : 's'))],
+    actions: [btn(s.permission ? 'Allow' : 'Allow this site', () => (s.permission === 'web' ? confirmWeb(() => send({ grant: [s.grant] })) : send({ grant: [s.grant] })),
+      { small: true, icon: 'check' })] }));
   const sites = p.sites.map((host) => h('span', { class: 'tag perm-site', 'data-site': host }, host, ' ',
-    h('button', { type: 'button', class: 'link-button', title: 'Deny ' + host, on: { click: () => send({ revoke: ['site:' + host] }) } }, '×')));
+    h('button', { type: 'button', class: 'btn sm quiet icon-only', title: 'Deny ' + host, 'aria-label': 'Deny ' + host, on: { click: () => send({ revoke: ['site:' + host] }) } }, icon('x'))));
   const siteInput = h('input', { type: 'text', placeholder: 'api.example.com', 'aria-label': 'A site to allow', 'data-site-input': '', spellcheck: 'false' });
   return h('div', { class: 'panel perm-panel', 'data-perm-panel': name },
     h('div', { class: 'perm-head' }, h('strong', null, 'What the agent can do'),
       h('div', { class: 'segmented', role: 'group', 'aria-label': 'Preset' }, presetBtn('locked'), presetBtn('agent'), presetBtn('open')),
       p.preset ? null : h('span', { class: 'tag', 'data-perm-custom': '' }, 'Custom'),
       p.inferred ? h('span', { class: 'muted' }, ' an older policy, shown as permissions (stored as names at its first change)') : null),
+    state.permErr.has(name) ? callout('bad', { compact: true, body: state.permErr.get(name), attrs: { 'data-perm-error': '' },
+      dismiss: () => { state.permErr.delete(name); refreshSandbox(); } }) : null,
     suggestions.length ? h('div', { class: 'perm-suggestions' }, suggestions) : null,
     permissionSwitches(p.rows, on, change),
     h('div', { class: 'perm-sites' }, h('span', null, 'Other sites: '), sites.length ? sites : h('span', { class: 'muted' }, 'none'), ' ', siteInput,
@@ -2944,15 +3550,17 @@ async function viewImages() {
     // Shared: with the disk it was made from (none for a disk with no parent — the lab's prepared disk).
     const own = n ? n.uniqueBytes : null, shared = n ? n.sharedWithParentBytes ?? null : null;
     return h('tr', { 'data-image': r.name, 'data-status': r.status || '' },
-    h('td', null, r.name, r.kind === 'custom' ? h('span', { class: 'tag tpl' }, 'template') : null,
+    h('td', null, h('span', { class: 'nm' }, r.name), ' ', r.kind === 'custom' ? h('span', { class: 'tag tpl' }, 'template') : null,
       // 594 W28: out of date — a badge, and the line that says why (never rebuilt by itself).
       r.status === 'older recipe' || r.status === 'update available' ? h('span', { class: 'tag img-status st-' + r.status.replace(/ /g, '-'), 'data-image-badge': r.status }, r.status) : null,
-      r.standing ? h('div', { class: 'muted img-standing', 'data-image-standing': '' }, r.standing) : null),
+      r.standing ? h('div', { class: 'muted img-standing', 'data-image-standing': '' }, r.standing) : null,
+      // 603 (E17): the key is rarely read — in the row's details, truncated (the whole of it as the tooltip).
+      r.key ? h('div', { class: 'sub2 mono trunc img-key', title: 'key ' + r.key }, r.key) : null),
     // 596 (B1): base × agent ("Python · Claude Code").
     h('td', { 'data-image-base': r.base || '' }, r.kind === 'custom' ? 'template' : (r.title || r.kind)),
     // W32: what the image's state means, in words — never a bare dash.
     h('td', { 'data-image-status-cell': '' }, h('span', { class: r.status === 'up to date' ? 'muted' : '' }, r.status || 'up to date')),
-    h('td', null, r.baked ? (r.bakedAt ? full(r.bakedAt) : 'yes') : h('span', { class: 'muted' }, 'no — bakes on first start')),
+    h('td', { title: r.bakedAt ? full(r.bakedAt) : null }, r.baked ? (r.bakedAt ? when(r.bakedAt) : 'yes') : h('span', { class: 'muted' }, 'no — bakes on first start')),
     h('td', { class: 'num' }, r.allocatedBytes ? bytes(r.allocatedBytes) : '—'),
     h('td', { class: 'num', 'data-own-cell': '' }, n ? sizePart(own, size) : '—'),
     h('td', { class: 'num', 'data-shared-cell': '' }, n ? sizePart(shared, size) : '—'),
@@ -2970,24 +3578,25 @@ async function viewImages() {
       ] : '—'),
     h('td', null, [r.versionSetting ? null : r.note, r.fromSandbox ? 'from ' + r.fromSandbox : null, r.dockerfile ? 'Dockerfile ' + r.dockerfile : null,
       r.baseUpdate].filter(Boolean).join(' · ') || '—'),
-    h('td', { class: 'mono muted' }, r.key ? r.key.slice(0, 16) : ''),
-    h('td', null, h('div', { class: 'actions' },
-      // 594 W28: rebuilding is one explained step.
+    h('td', { class: 'row-acts-cell' }, h('div', { class: 'row-acts' },
+      // 594 W28: rebuilding is one explained step. 603: the row's next verb; Remove… in ⋯.
       r.kind === 'builtin' ? (r.baked
         ? btn('Rebuild', () => dialog('Rebuild the ' + r.name + ' image?',
             'About 2 minutes, needs network. Existing sandboxes keep their disks — nothing in them changes. New sandboxes, and Reset, use the new image (a reset keeps the agent’s own state and /workspace, and drops other system changes).',
             [], 'Rebuild', async () => { await actOrThrow({ action: 'image-bake', image: r.name }); }, { icon: 'flame' }),
-          { small: true, primary: !!r.standing, icon: 'flame', title: 'Minutes, needs network' })
-        : btn('Bake', () => act({ action: 'image-bake', image: r.name }), { small: true, title: 'Minutes, needs network' })) : null,
-      r.baked || r.kind === 'custom' ? btn('Remove', () => confirmAction('Remove ' + (r.kind === 'custom' ? 'template ' : 'image ') + r.name,
-        r.kind === 'custom' ? 'The template is deleted; sandboxes created from it keep working.' : 'Its baked disk is deleted (it is baked again when next needed); sandboxes cloned from it keep working.',
-        r.name, { action: 'image-rm', image: r.name }), { small: true, danger: true }) : null)));
+          { small: true, primary: !!r.standing, quiet: !r.standing, icon: 'flame', title: 'Minutes, needs network' })
+        : btn('Bake', () => act({ action: 'image-bake', image: r.name }), { small: true, quiet: true, title: 'Minutes, needs network' })) : null,
+      r.baked || r.kind === 'custom' ? moreMenu('More for ' + r.name, [{ label: 'Remove…', icon: 'trash-2', danger: true,
+        desc: r.kind === 'custom' ? 'The template; sandboxes made from it keep working' : 'Its baked disk; baked again when next needed',
+        onSelect: () => confirmAction('Remove ' + (r.kind === 'custom' ? 'template ' : 'image ') + r.name,
+          r.kind === 'custom' ? 'The template is deleted; sandboxes created from it keep working.' : 'Its baked disk is deleted (it is baked again when next needed); sandboxes cloned from it keep working.',
+          r.name, { action: 'image-rm', image: r.name }) }], { small: true }).el : null)));
   });
   return h('div', null, h('div', { class: 'head' }, h('h1', null, 'Images'),
       h('div', { class: 'actions' }, btn('Refresh', () => { remeasure(); refresh(false); }, { small: true, title: 'Measure again' }), imagesToggle())),
     h('p', { class: 'sub' }, 'Built-in images, and templates saved from sandboxes (a sandbox’s root disk — never its state disk). Own is what only this image holds (what removing it frees); shared is what it reuses from the disk it was made from. Progress of a bake shows under Operations. Everything Dozer uses: ',
       h('a', { href: '#/resources' }, 'Resources'), '.'),
-    panel(table(['Image', 'Base · Agent', 'Status', 'Baked', 'Size', 'Own', 'Shared', barLegend(), 'Version', 'Note', 'Key', ''], rows, [4, 5, 6])));
+    panel(((t) => { if (t) t.classList.add('images-t'); return t; })(table(['Image', 'Base · Agent', 'Status', 'Baked', 'Size', 'Own', 'Shared', barLegend(), 'Version', 'Note', h('span', { class: 'sr-only' }, 'Actions')], rows, [4, 5, 6]))));
 }
 async function viewLineage() {
   const t = await measured('tree', 'images/tree');
@@ -3104,9 +3713,27 @@ function resGroupPanel(r, group, title) {
     rows.push(resRow(p, kids.length));
     if (kids.length && resOpen(p)) for (const k of kids) rows.push(resRow(k, 0));
   }
-  return h('section', { class: 'res-group', 'data-res-group': group },
-    h('div', { class: 'head' }, h('h2', null, title), h('span', { class: 'muted' }, group === 'outside' ? 'shown, never deleted here' : bytes(total))),
+  return resSection(group, title, group === 'outside' ? 'shown, never deleted here' : bytes(total),
     panel(table(['', 'Item', 'Size', 'Freed if deleted', 'Used by', 'Notes', 'Managed in'], rows, [2, 3])));
+}
+/// 603 (E13): a Resources group — its heading opens and closes it (the state kept in this browser).
+function resClosed() { try { return new Set(JSON.parse(localStorage.getItem('doz.resClosed') || '[]')); } catch (_) { return new Set(); } }
+function resSection(group, title, figure, body) {
+  const closed = resClosed().has(group);
+  const toggle = h('button', { type: 'button', class: 'res-toggle' + (closed ? '' : ' open'), 'aria-expanded': closed ? 'false' : 'true',
+    'aria-controls': 'res-body-' + group, title: (closed ? 'Show ' : 'Hide ') + title }, icon('chevron-down'));
+  const wrap = h('div', { id: 'res-body-' + group, hidden: closed }, body);
+  toggle.addEventListener('click', () => {
+    const set = resClosed();
+    const nowClosed = !wrap.hidden;
+    if (nowClosed) set.add(group); else set.delete(group);
+    try { localStorage.setItem('doz.resClosed', JSON.stringify([...set])); } catch (_) { /* this page only */ }
+    wrap.hidden = nowClosed;
+    toggle.classList.toggle('open', !nowClosed);
+    toggle.setAttribute('aria-expanded', nowClosed ? 'false' : 'true');
+  });
+  return h('section', { class: 'res-group', 'data-res-group': group, id: 'res-' + group },
+    h('div', { class: 'head res-head' }, h('h2', null, toggle, title), h('span', { class: 'muted' }, figure)), wrap);
 }
 /// The top bar is Dozer's own split only (owner, 595): what stays, what Clean up frees, and what `du`
 /// counts again for blocks APFS clones share — the whole is Dozer's total. The volume's free space is
@@ -3142,8 +3769,7 @@ function resMemoryPanel(r) {
     h('td', { class: 'num' }, bytes(m.heldBytes), m.allocationBytes ? meter(m.heldBytes, m.allocationBytes) : null),
     h('td', { class: 'num' }, m.allocationBytes ? bytes(m.allocationBytes) : '—'),
     h('td', { class: 'num' }, m.cpus ?? '—')));
-  return h('section', { class: 'res-group', 'data-res-group': 'memory' },
-    h('div', { class: 'head' }, h('h2', null, 'Memory and CPUs'), h('span', { class: 'muted' }, bytes(held) + ' held · ' + r.allocatedCPUs + ' of ' + r.machineCPUs + ' CPUs given to sandboxes')),
+  return resSection('memory', 'Memory and CPUs', bytes(held) + ' held · ' + r.allocatedCPUs + ' of ' + r.machineCPUs + ' CPUs given to sandboxes',
     panel(table(['What', 'Phase', 'Held now', 'Allocation', 'CPUs'], rows, [2, 3, 4]), 'No sandbox has a VM, and no host is running.'));
 }
 function resNetworkPanel(r) {
@@ -3151,8 +3777,7 @@ function resNetworkPanel(r) {
     h('td', null, h('a', { href: '#/sandbox/' + n.sandbox }, n.sandbox)),
     h('td', { class: 'num' }, bytes(n.upToday)), h('td', { class: 'num' }, bytes(n.downToday)),
     h('td', { class: 'num' }, bytes(n.upTotal)), h('td', { class: 'num' }, bytes(n.downTotal)), h('td', { class: 'num' }, n.connectionsTotal)));
-  return h('section', { class: 'res-group', 'data-res-group': 'network' },
-    h('div', { class: 'head' }, h('h2', null, 'Network'), h('span', { class: 'muted' }, 'through each sandbox’s proxy, from the metrics')),
+  return resSection('network', 'Network', 'through each sandbox’s proxy, from the metrics',
     panel(table(['Sandbox', 'Up today', 'Down today', 'Up in all', 'Down in all', 'Connections'], rows, [1, 2, 3, 4, 5]), 'No proxied traffic recorded yet.'));
 }
 function resKernelsPanel(r) {
@@ -3164,8 +3789,7 @@ function resKernelsPanel(r) {
     h('td', null, k.usedBy.length ? k.usedBy.join(', ') : h('span', { class: 'muted' }, 'none')),
     h('td', null, k.current ? h('span', { class: 'muted' }, 'new sandboxes boot it')
       : btn('Use this kernel', () => act({ action: 'resources-kernel', kernel: k.id }), { small: true, title: 'New sandboxes boot it; existing ones keep theirs (a wake keeps its snapshot’s kernel)' }))));
-  return h('section', { class: 'res-group', 'data-res-group': 'kernels' },
-    h('div', { class: 'head' }, h('h2', null, 'Kernels'), h('span', { class: 'muted' }, '“Use this kernel” is for sandboxes created from now on')),
+  return resSection('kernels', 'Kernels', '“Use this kernel” is for sandboxes created from now on',
     panel(table(['Version', 'sha256', 'Size', 'Needed by', ''], rows, [2]), 'No kernel yet — the first start fetches it.'));
 }
 function paintResSelection() {
@@ -3204,6 +3828,9 @@ function resourcesNode(r) {
     h('p', { class: 'sub' }, 'Everything Dozer uses. Images are managed on ', h('a', { href: '#/images' }, 'Images'), ', a sandbox on its page, accounts on ',
       h('a', { href: '#/accounts' }, 'Accounts & keys'), ' — the rows link there. Deleting here is for what has no other home. Measured in ' + Math.round(r.milliseconds) + ' ms.'),
     resTotalBar(r),
+    pageIndex([...RES_GROUPS.filter(([g]) => r.items.some((i) => i.group === g)).map(([g, t]) => ['res-' + g, t,
+      g === 'outside' ? null : bytes(r.items.filter((i) => i.group === g && !i.parent).reduce((a, i) => a + (i.sizeBytes || 0), 0))]),
+      ['res-memory', 'Memory and CPUs'], ['res-network', 'Network'], ['res-kernels', 'Kernels']]),
     h('div', { class: 'res-toolbar' }, selAll, clear, del),
     RES_GROUPS.map(([g, t]) => resGroupPanel(r, g, t)),
     h('p', { class: 'res-sum', 'data-res-sum': '' }, 'The rows add up to ' + bytes(r.attributedBytes) + ' of the ' + bytes(r.totalBytes) + ' measured — unattributed: ',
@@ -3220,9 +3847,10 @@ async function resDelete(ids, clean) {
   if (!clean && !ids.length) return;
   let plan;
   try { plan = await api('resources/preview', { method: 'POST', json: clean ? { clean: true } : { ids } }); }
-  catch (e) { toast(e.message || String(e), true); return; }
+  catch (e) { pageFailure(e.message || String(e), { key: 'resources' }); return; }
   if (!plan.items.length) {
-    toast(clean ? 'Nothing to clean up — everything re-creatable is in use or already gone.' : 'Nothing can be deleted: ' + (plan.refused[0] ? plan.refused[0].reason : 'no such item'), !clean);
+    if (clean) toast('Nothing to clean up — everything re-creatable is in use or already gone.', false, 'info');
+    else pageFailure('Nothing can be deleted: ' + (plan.refused[0] ? plan.refused[0].reason : 'no such item'), { key: 'resources' });
     return;
   }
   const n = plan.items.length;
@@ -3358,13 +3986,12 @@ function accountChooser({ accounts, agent, same = null, defaultValue = '', value
         + (s.needs ? ' — never a Claude subscription' : '')));
     }
     if (missing) {
-      parts.push(h('div', { class: 'acct-need', 'data-acct-need': current },
-        h('div', { class: 'acct-need-title' }, icon('key-round'), ' ' + name + ' needs an Anthropic API key'),
-        h('small', null, 'Add one now — it is stored as `doz account add` stores it (the login keychain), and this sandbox uses it.'),
-        secretEntryAllowed()
-          ? accountForm({ kind: 'api-key', name: acc.accounts.some((x) => x.name === 'anthropic') ? 'anthropic-2' : 'anthropic',
-              onAdded: (r, n) => { acc = r; chosen = n; toast('account ' + n + ' added'); render(); onChange(); } })
-          : accountCommandsNode('api-key')));
+      parts.push(callout('warn', { cls: 'acct-need', icon: 'key-round', attrs: { 'data-acct-need': current }, title: name + ' needs an Anthropic API key',
+        body: [h('small', null, 'Add one now — it is stored as `doz account add` stores it (the login keychain), and this sandbox uses it.'),
+          secretEntryAllowed()
+            ? accountForm({ kind: 'api-key', name: acc.accounts.some((x) => x.name === 'anthropic') ? 'anthropic-2' : 'anthropic',
+                onAdded: (r, n) => { acc = r; chosen = n; toast('account ' + n + ' added'); render(); onChange(); } })
+            : accountCommandsNode('api-key')] }));
     }
     el.replaceChildren(...parts);
   }
@@ -3400,10 +4027,8 @@ function accountDialog(name, i, accounts) {
 /// 594: an existing sandbox whose account does not fit its agent — "pi can't use the account mac —
 /// choose an API-key account" — with the accounts that fit (or the key field) right there.
 function credentialBanner(name, i, accounts) {
-  return h('div', { class: 'cred-banner', role: 'alert', 'data-cred-banner': name },
-    h('div', { class: 'cred-banner-text' }, icon('key-round'), ' ' + i.credentialProblem),
-    h('div', { class: 'actions' },
-      btn('Choose an account…', () => accountDialog(name, i, accounts), { small: true, primary: true, icon: 'key-round' })));
+  return callout('bad', { compact: true, cls: 'cred-banner', icon: 'key-round', attrs: { 'data-cred-banner': name }, body: i.credentialProblem,
+    actions: [btn('Choose an account…', () => accountDialog(name, i, accounts), { small: true, primary: true, icon: 'key-round' })] });
 }
 
 /// 594 (owner ruling: sandbox keys in the browser too): a sandbox's own Anthropic key — what `doz key set
@@ -3454,19 +4079,29 @@ async function viewAccounts() {
     h('td', null, x.expiresAt ? full(x.expiresAt) : '—', x.expiresAt ? h('div', { class: 'muted' }, when(x.expiresAt)) : null),
     h('td', { class: 'mono' }, x.fingerprint || '—', x.keychainService ? h('div', { class: 'muted' }, 'keychain: ' + x.keychainService) : null),
     h('td', null, x.usedBy.length ? x.usedBy.join(', ') : '—'),
-    h('td', null, h('div', { class: 'actions' },
-      x.isDefault ? null : btn('Make default', () => act({ action: 'account-default', account: x.name }), { small: true }),
-      x.kind === 'mac' ? null : btn('Verify', () => act({ action: 'account-verify', account: x.name }), { small: true, title: 'One tiny request to the API with it' }),
-      x.name === 'mac' ? null : btn('Remove', () => confirmAction('Remove account ' + x.name, 'Its keychain item is deleted' + (x.usedBy.length ? '; sandboxes pinned to it must move first (' + x.usedBy.join(', ') + ')' : '') + '.',
-        x.name, { action: 'account-rm', account: x.name }), { small: true, danger: true })))));
-  const keep = h('input', { type: 'checkbox', id: 'keepalive' });
+    h('td', { class: 'row-acts-cell' }, (() => {
+      const items = [
+        x.isDefault ? null : { label: 'Make default', icon: 'star', desc: 'Sandboxes that follow the store default use it', onSelect: () => act({ action: 'account-default', account: x.name }) },
+        x.kind === 'mac' || x.isDefault ? null : { label: 'Verify', icon: 'badge-check', desc: 'One tiny request to the API with it', onSelect: () => act({ action: 'account-verify', account: x.name }) },
+        x.name === 'mac' ? null : { sep: true },
+        x.name === 'mac' ? null : { label: 'Remove…', icon: 'trash-2', danger: true, desc: 'Its keychain item is deleted', onSelect: () => confirmAction('Remove account ' + x.name,
+          'Its keychain item is deleted' + (x.usedBy.length ? '; sandboxes pinned to it must move first (' + x.usedBy.join(', ') + ')' : '') + '.', x.name, { action: 'account-rm', account: x.name }) },
+      ].filter(Boolean);
+      // The next verb: Verify for a key or a token, else Make default; the rest in ⋯.
+      const next = x.kind !== 'mac' ? btn('Verify', () => act({ action: 'account-verify', account: x.name }), { small: true, quiet: true, title: 'One tiny request to the API with it' })
+        : x.isDefault ? null : btn('Make default', () => act({ action: 'account-default', account: x.name }), { small: true, quiet: true });
+      const rest = items.filter((it) => it.sep || !next || it.label !== next.textContent.trim());
+      while (rest.length && rest[0].sep) rest.shift();
+      return h('div', { class: 'row-acts' }, next, rest.length ? moreMenu('More for ' + x.name, rest, { small: true }).el : null);
+    })())));
+  const keep = h('input', { type: 'checkbox', role: 'switch', id: 'keepalive' });
   keep.checked = a.keepalive;
   keep.addEventListener('change', () => act({ action: 'account-keepalive', enabled: keep.checked }));
   return h('div', null, h('h1', null, 'Accounts & keys'),
     h('p', { class: 'sub' }, 'Anthropic credentials the host holds for sandboxes. Never a secret: states, keychain item names and fingerprints only.'),
-    h('div', { class: 'cards' },
+    h('div', { class: 'stats' },
       card('Default account', a.defaultAccount, a.defaultAccount === 'none' ? 'sandboxes that follow it get none' : ''),
-      h('div', { class: 'card' }, h('div', { class: 'k' }, 'Keep-alive'), h('label', { class: 'v switch' }, keep, ' ', a.keepalive ? 'on' : 'off'),
+      h('div', { class: 'stat' }, h('div', { class: 'k' }, 'Keep-alive'), h('label', { class: 'v switch-row' }, keep, a.keepalive ? 'on' : 'off'),
         h('div', { class: 'n' }, 'runs the Mac’s own claude -p near expiry while a sandbox uses the login'))),
     h('div', { class: 'head' }, h('h2', null, 'Accounts'), btn('Set the default to none', () => act({ action: 'account-default', account: 'none' }), { small: true })),
     panel(table(['Account', 'Kind', 'Identity', 'State', 'Expires', 'Fingerprint', 'Used by', ''], rows)),
@@ -3504,7 +4139,7 @@ async function viewMetrics() {
   for (const el of [imageSel, daysSel, steps]) {
     el.addEventListener('change', () => { state.metricsFilter = { image: imageSel.value, days: daysSel.value, steps: steps.checked }; refresh(false); });
   }
-  const csv = h('a', { class: 'btn small', href: '/api/v1/metrics.csv?' + qs, download: 'dozer-metrics.csv' }, withIcon('download', 'Download CSV'));
+  const csv = h('a', { class: 'btn sm', href: '/api/v1/metrics.csv?' + qs, download: 'dozer-metrics.csv' }, withIcon('download', 'Download CSV'));
   const toolbar = h('div', { class: 'toolbar' }, imageSel, daysSel, h('label', null, steps, ' steps inside actions'), csv);
   if (!m.available) return h('div', null, h('h1', null, 'Metrics'), toolbar, panel(null, 'No metrics yet — the host records every action it times.'));
   const max = Math.max(1, ...m.summary.map((r) => r.p90Ms || r.medianMs || 0));
@@ -3520,7 +4155,7 @@ async function viewMetrics() {
   return h('div', null, h('h1', null, 'Metrics'),
     h('p', { class: 'sub' }, 'Lifecycle timings the host recorded.'),
     toolbar,
-    h('div', { class: 'cards' }, card('Host runs', String(m.runs)), card('Rows', String(m.rows)), card('Sessions', String(m.sessions)), card('Network minutes', String(m.networkMinutes))),
+    h('div', { class: 'stats' }, card('Host runs', String(m.runs)), card('Rows', String(m.rows)), card('Sessions', String(m.sessions)), card('Network minutes', String(m.networkMinutes))),
     h('h2', null, 'Per action'),
     panel(h('div', { class: 'bars' }, table(['Action', 'Count', 'Median', 'P90', 'Min', 'Max', 'Failed', ''], rows, [1, 2, 3, 4, 5, 6])), 'Nothing recorded for this filter.'));
 }
@@ -3629,10 +4264,10 @@ function renderAccessStep(container, opts = {}) {
   function keyNode() {
     if (st.report.githubKeySet) {
       const rm = btn('Remove key', async () => {
-        try { st.report = await api('access/github-key', { method: 'POST', json: { remove: true } }); delete st.results.github; render(); }
-        catch (e) { toast(e.message || String(e), true); }
+        try { st.error = null; st.report = await api('access/github-key', { method: 'POST', json: { remove: true } }); delete st.results.github; render(); }
+        catch (e) { st.error = e.message || String(e); render(); }
       }, { small: true, icon: 'trash-2' });
-      return h('div', { class: 'notice', 'data-access-key': 'set' }, 'A GitHub key is set (in the login keychain as doz-github — never in a sandbox). ', rm);
+      return callout('ok', { cls: 'notice', icon: 'key-round', attrs: { 'data-access-key': 'set' }, body: 'A GitHub key is set (in the login keychain as doz-github — never in a sandbox).', actions: [rm] });
     }
     if (!secretEntryAllowed()) {
       return h('div', { class: 'panel wiz-cmds', 'data-access-key': 'commands' },
@@ -3690,7 +4325,7 @@ function renderAccessStep(container, opts = {}) {
           }
           if (mode === 'settings') for (const it of r.items) st.results[it.id] = it;
           render();
-        }).catch((e) => { container.replaceChildren(h('div', { class: 'notice bad' }, e.message || String(e))); })
+        }).catch((e) => { container.replaceChildren(callout('bad', { cls: 'notice', body: e.message || String(e) })); })
           .finally(() => { st.loading = false; });
       }
       return ctl;
@@ -3727,6 +4362,7 @@ function renderAccessStep(container, opts = {}) {
       h('h3', null, mode === 'settings' ? 'Each credential, as last confirmed' : 'Confirmed?'),
       ids().map(statusRow),
       h('div', { class: 'wiz-buttons' }, st.busy ? h('span', { class: 'muted' }, h('span', { class: 'mini-spin', 'aria-hidden': 'true' }), ' checking…') : null, confirmBtn)));
+    if (st.error) parts.push(callout('bad', { compact: true, body: st.error, dismiss: () => { st.error = null; render(); } }));
     container.replaceChildren(h('div', { class: 'access-step', 'data-access-mode': mode }, parts));
     return ctl;
   }
@@ -3772,7 +4408,8 @@ function rulesStep(opts) {
     return label;
   });
   return h('div', { class: 'rules-step', 'data-rules-step': mode },
-    h('p', null, g.intro), points, folder,
+    h('p', null, g.intro),
+    h('details', { class: 'disclosure' }, h('summary', null, icon('chevron-down'), 'How they work, and what they are not'), points), folder,
     h('fieldset', { class: 'wiz-choices' }, h('legend', null, g.question), radios),
     h('p', { class: 'muted' }, mode === 'sandbox' ? g.sandboxScope : g.defaultScope));
 }
@@ -3794,7 +4431,7 @@ function wizardStopPolling() { clearInterval(wizTimer); wizTimer = null; }
 function wizardPoll() {
   if (wizTimer) return;
   wizTimer = setInterval(async () => {
-    if (state.view !== 'onboarding' || !state.wiz || state.wiz.step !== WIZ.preparing) { wizardStopPolling(); return; }
+    if (state.modal !== 'onboarding' || !state.wiz || state.wiz.step !== WIZ.preparing) { wizardStopPolling(); return; }
     try { state.preps = await api('preparations'); } catch (_) { return; }
     renderOps();
     renderWizard();
@@ -3810,17 +4447,26 @@ async function viewOnboarding() {
 /// Re-render in place (a preparation's progress; a step change). The first-sandbox form is never
 /// re-rendered under the person typing in it.
 function renderWizard(force) {
-  if (state.view !== 'onboarding' || !state.wiz) return;
+  if (state.modal !== 'onboarding' || !state.wiz) return;
   if (!force && state.wiz.step !== WIZ.preparing) return;
-  $('view').replaceChildren(wizardNode());
+  // A step change moves focus in; a preparation's tick does not (it would pull focus from the button in use).
+  const before = state.wizShown;
+  state.wizShown = state.wiz.step;
+  wizMount(wizardNode(), !!force && before !== state.wiz.step);
+}
+/// 603: a step's failure is said in the step (above its buttons) and stays until the next try or step.
+function wizFail(text) {
+  if (!state.wiz) { pageFailure(text); return; }
+  state.wiz.error = text;
+  renderWizard(true);
 }
 function wizGo(step) {
   const w = state.wiz;
   w.step = step;
+  w.error = null;
   if (step === WIZ.preparing) { loadPreparations().then(() => renderWizard(true)); wizardPoll(); } else wizardStopPolling();
   if (step >= WIZ.first) refreshNav();          // the nav's Onboarding dot goes once the record is written
   renderWizard(true);
-  $('main').scrollTop = 0;
 }
 function wizButtons(...buttons) { return h('div', { class: 'wiz-buttons' }, buttons); }
 function wizChosenImages() {
@@ -3839,13 +4485,19 @@ function wizardNode() {
   const w = state.wiz, d = w.data;
   // 596: the base catalogue for the First sandbox step, read early (a late answer never re-renders a typed form).
   if (!w.basesAsked) { w.basesAsked = true; api('bases').then((b) => { w.bases = b; }).catch(() => { w.bases = null; }); }
-  const stepper = h('ol', { class: 'wiz-steps', 'aria-label': 'Steps' }, WIZ_STEPS.map((s, i) =>
-    h('li', { class: i === w.step ? 'current' : i < w.step ? 'done' : null, 'aria-current': i === w.step ? 'step' : null }, h('span', { class: 'wiz-n' }, String(i + 1)), s)));
+  // 603: the same vertical stepper as New sandbox (a done step can be gone back to before Preparing).
+  const { list: stepper, compact } = stepperNode(WIZ_STEPS.map((title, i) => ({ id: String(i), title })), w.step,
+    { go: (i) => (i < w.step && w.step < WIZ.preparing && i > 0 ? () => wizGo(i) : null) });
   const body = [wizStep0, wizStep1, wizStep2, wizStepRules, wizStep3, wizStep4, wizStep5, wizStep6][w.step](d, w);
+  // The step's buttons (its last part) become the card's footer, which never leaves the screen.
+  const last = body[body.length - 1];
+  const foot = last && last.classList && last.classList.contains('wiz-buttons') ? body.pop() : null;
+  if (foot) foot.classList.add('w-foot');
   return h('div', { class: 'wizard', 'data-step': String(w.step) },
-    h('h1', null, 'Set up Dozer Sandbox'),
-    h('p', { class: 'sub' }, 'Once for this Mac (store ', h('code', null, $('store-path').textContent), '). The same as ', h('code', null, 'doz onboard'), ' in a terminal.'),
-    stepper, h('section', { class: 'wiz-body panel' }, body));
+    wizHead('Set up Dozer Sandbox', ['Once for this Mac (store ', h('code', null, $('store-path').textContent), '). The same as ', h('code', null, 'doz onboard'), ' in a terminal.'],
+      [], { list: stepper, compact }),
+    h('section', { class: 'wiz-card wiz-body' }, h('div', { class: 'w-body' }, body,
+      w.error ? callout('bad', { compact: true, body: w.error, attrs: { 'data-wiz-error': '' }, dismiss: () => { w.error = null; renderWizard(true); } }) : null), foot));
 }
 function wizStep0(d) {
   // 602 (owner: "detect if onboarding has already ran (i ran it in the cli) and show that and give the
@@ -3887,7 +4539,7 @@ function wizStep1(d, w) {
     h('h2', null, 'Checks'),
     h('p', { class: 'sub' }, 'The doctor’s checks. A required one that fails stops the setup; the others only say what will not work yet (Claude Code missing or signed out: add an account later; vmnet: only --network nat needs it).'),
     table(['', 'Check', 'Detail'], rows),
-    d.blocked ? h('div', { class: 'notice bad' }, 'A required check failed — fix it, then Check again.') : null,
+    d.blocked ? callout('bad', { cls: 'notice', body: 'A required check failed — fix it, then Check again.' }) : null,
     wizButtons(btn('Back', () => wizGo(0)), btn('Check again', async () => { w.data = await api('onboarding'); renderWizard(true); }), next),
   ];
 }
@@ -3903,12 +4555,12 @@ function wizStep2(d, w) {
   const keyed = w.account === 'api-key' || w.account === 'setup-token';
   let entry = null;
   if (keyed && w.added) {
-    entry = h('div', { class: 'notice', 'data-added': w.added.name }, 'Account ', h('strong', null, w.added.name), ' added (' + w.added.kind +
-      (w.added.verification ? ', ' + w.added.verification : '') + ') — the store’s default account. Its secret is in the login keychain, not in this page.');
+    entry = callout('ok', { cls: 'notice', attrs: { 'data-added': w.added.name }, body: ['Account ', h('strong', null, w.added.name), ' added (' + w.added.kind +
+      (w.added.verification ? ', ' + w.added.verification : '') + ') — the store’s default account. Its secret is in the login keychain, not in this page.'] });
   } else if (keyed && secretEntryAllowed()) {
     entry = accountForm({ kind: w.account, name: 'work', onAdded: async (r, name) => {
       const row = r.accounts.find((x) => x.name === name) || { kind: w.account };
-      try { await actOrThrow({ action: 'account-default', account: name }); } catch (e) { toast(e.message || String(e), true); }
+      try { await actOrThrow({ action: 'account-default', account: name }); } catch (e) { w.error = e.message || String(e); }
       w.added = { name, kind: row.kind, verification: row.verification };
       renderWizard(true);
     } });
@@ -3946,8 +4598,8 @@ function wizStep2(d, w) {
         if (w.account === 'mac' && d.defaultAccount !== 'mac') { await actOrThrow({ action: 'account-default', account: 'mac' }); d.defaultAccount = 'mac'; }
         // Confirm what is not yet; a failure stays on this step with its reason and Skip — never a dead end.
         if (await access.confirm()) wizGo(WIZ.rules);
-        else { toast('Not everything is confirmed — Skip it, turn it off, or check again', true); b.disabled = false; }
-      } catch (e) { toast(e.message || String(e), true); b.disabled = false; }
+        else { wizFail('Not everything is confirmed — Skip it, turn it off, or check again.'); }
+      } catch (e) { wizFail(e.message || String(e)); }
     }, { primary: true })),
   ];
 }
@@ -3989,7 +4641,7 @@ function wizStep3(d, w) {
       await actOrThrow({ action: 'onboard', images: chosen });
       w.prepImages = todo;
       wizGo(todo.length ? WIZ.preparing : WIZ.first);
-    } catch (e) { toast(e.message || String(e), true); b.disabled = false; }
+    } catch (e) { wizFail(e.message || String(e)); }
   }, { primary: true });
   if (short) go.disabled = true;
   return [
@@ -4058,7 +4710,7 @@ function prepCard(p, opts = {}) {
     h('div', { class: 'prep-head' }, running ? h('span', { class: 'mini-spin', 'aria-hidden': 'true' }) : h('span', { class: 'op-state' }, p.state === 'done' ? '✓' : '✕'),
       h('strong', null, p.image), h('span', { class: 'muted' }, ' · ' + (running ? dur(p.seconds) + ' so far' : p.state + ' in ' + dur(p.seconds)) + ' · asked by ' + p.requestedBy.join(', '))),
     overall, current, transfer, tail,
-    p.error && p.state !== 'cancelled' ? h('div', { class: 'notice bad' }, p.error) : null,
+    p.error && p.state !== 'cancelled' ? callout('bad', { compact: true, cls: 'notice', body: p.error }) : null,
     running && p.estimateBasis && p.remainingSeconds == null && !m ? h('div', { class: 'muted' }, p.estimateBasis) : null,
     details);
 }
@@ -4079,7 +4731,7 @@ function wizStep4(d, w) {
     wizButtons(
       running ? btn('Cancel preparation', () => act({ action: 'prepare-cancel', images: mine }), { danger: true }) : null,
       failed.length ? btn('Try again', async () => {
-        try { await actOrThrow({ action: 'onboard', images: failed.map((p) => p.image) }); await loadPreparations(); renderWizard(true); } catch (e) { toast(e.message || String(e), true); }
+        try { await actOrThrow({ action: 'onboard', images: failed.map((p) => p.image) }); await loadPreparations(); renderWizard(true); } catch (e) { wizFail(e.message || String(e)); }
       }) : null,
       running ? btn('Continue in the background', () => { toast('It goes on in the host — Operations shows it.'); wizGo(WIZ.first); }) : null,
       next),
@@ -4251,7 +4903,7 @@ window.addEventListener('message', (ev) => {
       break;
     case 'title': t.title = m.s.slice(0, 120); paintTabs(); break;
     case 'paste': safePaste(t, m.text, m.bracketed); break;
-    case 'paste-too-big': toast('That paste is too big — a terminal takes at most 1 MiB at once', true); break;
+    case 'paste-too-big': failureFor(t.sandbox, 'That paste is too big — a terminal takes at most 1 MiB at once'); break;
     case 'key': savedKey(t); break;
   }
 });
@@ -4277,7 +4929,7 @@ async function waitForOp(op, seconds = 300) {
 /// The setting ui.terminals: off, the UI opens no browser terminal (and the server refuses a ticket).
 function terminalsAllowed() {
   if (setting('ui.terminals', true)) return true;
-  toast('Browser terminals are off (Settings → ui.terminals). Open in Terminal still works.', true);
+  pageFailure('Browser terminals are off (Settings → ui.terminals). Open in Terminal still works.', { tone: 'warn', key: 'terminals-off' });
   return false;
 }
 
@@ -4452,7 +5104,7 @@ function terminalElements(t) {
   const glyph = h('div', { class: 'tc-glyph', hidden: true });
   const head = h('div', { class: 'tc-head' });
   const detail = h('div', { class: 'tc-detail' });
-  const action = h('button', { type: 'button', class: 'btn small tc-act' });
+  const action = h('button', { type: 'button', class: 'btn sm tc-act' });
   action.addEventListener('click', (ev) => { ev.stopPropagation(); coverAction(t); });
   const cover = h('div', { class: 'term-cover', role: 'status', 'aria-live': 'polite' }, h('div', { class: 'tc-box' }, spin, glyph, head, detail, action));
   const wrap = h('div', { class: 'term-wrap', 'data-terminal': String(t.id) }, host, cover, note);
@@ -4476,7 +5128,7 @@ function encodePaste(raw) {
 function safePaste(t, raw, bracketed) {
   if (t.mode !== 'interactive' || !t.frame) return;
   const size = utf8.encode(raw).length;
-  if (size > PASTE_MAX_BYTES) { toast('That paste is ' + bytes(size) + ' — a terminal takes at most 1 MiB at once', true); return; }
+  if (size > PASTE_MAX_BYTES) { failureFor(t.sandbox, 'That paste is ' + bytes(size) + ' — a terminal takes at most 1 MiB at once'); return; }
   const { text, replaced } = encodePaste(raw);
   const reasons = [];
   if (replaced) reasons.push(replaced + ' control character' + (replaced === 1 ? ' was' : 's were') + ' replaced with spaces.');
@@ -4486,14 +5138,14 @@ function safePaste(t, raw, bracketed) {
   const lines = text.split('\r');
   const d = h('dialog', { class: 'dlg paste-dialog' });
   const ok = h('button', { type: 'button', class: 'btn primary' }, withIcon('clipboard-paste', 'Paste'));
-  const cancel = h('button', { type: 'button', class: 'btn' }, withIcon('x', 'Cancel'));
+  const cancel = h('button', { type: 'button', class: 'btn quiet' }, withIcon('x', 'Cancel'));
   ok.addEventListener('click', () => { d.close(); toFrame(t, { t: 'paste', text }); focusTerm(t); });
   cancel.addEventListener('click', () => { d.close(); focusTerm(t); });
   d.append(h('form', { method: 'dialog' },
-    h('h2', null, 'Paste ' + lines.length + ' line' + (lines.length === 1 ? '' : 's') + ' (' + bytes(size) + ') into ' + t.sandbox + '?'),
-    ...reasons.map((r) => h('p', { class: 'sub' }, r)),
-    h('pre', { class: 'paste-preview' }, lines.slice(0, 5).join('\n').slice(0, 2000) + (lines.length > 5 ? '\n…' : '')),
-    h('div', { class: 'dlg-buttons' }, cancel, ok)));
+    h('div', { class: 'dlg-head' }, h('h2', { class: 'h-title' }, 'Paste ' + lines.length + ' line' + (lines.length === 1 ? '' : 's') + ' (' + bytes(size) + ') into ' + t.sandbox + '?')),
+    h('div', { class: 'dlg-body' }, ...reasons.map((r) => h('p', { class: 'sub' }, r)),
+      h('pre', { class: 'paste-preview' }, lines.slice(0, 5).join('\n').slice(0, 2000) + (lines.length > 5 ? '\n…' : ''))),
+    h('div', { class: 'dlg-foot dlg-buttons' }, cancel, ok)));
   d.addEventListener('close', () => d.remove());
   document.body.append(d);
   d.showModal();
@@ -4670,13 +5322,13 @@ function bootLabel(b) {
 }
 async function bootLogDialog(name) {
   let boots;
-  try { boots = (await api('sandboxes/' + name + '/boots')).boots; } catch (e) { toast(e.message || String(e), true); return; }
+  try { boots = (await api('sandboxes/' + name + '/boots')).boots; } catch (e) { failureFor(name, e.message || String(e)); return; }
   const d = h('dialog', { class: 'dlg bootlog-dialog', 'data-sandbox': name });
   const picker = h('select', { 'aria-label': 'Which boot', class: 'bootlog-picker' },
     boots.map((b) => h('option', { value: String(b.number), 'data-result': b.result }, bootLabel(b))));
   const area = h('div', { class: 'bootlog-area' });
   const why = h('div', { class: 'bootlog-error', role: 'status' });
-  const close = h('button', { type: 'button', class: 'btn' }, withIcon('x', 'Close'));
+  const close = h('button', { type: 'button', class: 'btn quiet' }, withIcon('x', 'Close'));
   d.append(h('div', { class: 'bootlog-head' }, h('h2', null, 'Boot log — ' + name), picker, close),
     h('p', { class: 'sub' }, 'Each start and wake of ' + name + ': Dozer’s steps as the boot view showed them, then the kernel console. The last '
       + setting('host.boot_logs_kept', 5) + ' are kept (Settings › host.boot_logs_kept); doz console ' + name + ' --list shows them too.'),
@@ -4766,33 +5418,33 @@ function renderTerminals() {
     };
     termUI.splitMain = btn('Split', () => {
       if (sview(state.param).split) unsplit();
-      else splitWith(termUI.splitKind).catch((e) => toast(e.message || String(e), true));
-    }, { small: true, title: 'Two terminals side by side — the right one is a ' + SPLIT_KINDS[termUI.splitKind] });
-    termUI.splitMenu = h('div', { class: 'menu', role: 'menu', hidden: true },
-      Object.entries(SPLIT_KINDS).map(([kind, label]) => h('button', { type: 'button', role: 'menuitem', class: 'menu-item', 'data-kind': kind,
-        on: { click: (ev) => {
-          ev.stopPropagation();
-          termUI.splitMenu.hidden = true;
-          termUI.splitKind = kind;
-          // The choice is the setting ui.split_default (doz.toml), not this browser's.
-          if (setting('ui.split_default', 'shell') !== kind) saveSetting('ui.split_default', kind).catch((e) => toast('The setting was not saved: ' + (e.message || e), true));
-          paintSplitButton();
-          splitWith(kind).catch((e) => toast(e.message || String(e), true));
-        } } }, label)));
-    const caret = h('button', { type: 'button', class: 'btn small split-caret', title: 'What the split adds', 'aria-haspopup': 'menu',
-      'aria-label': 'What the split adds', on: { click: (ev) => { ev.stopPropagation(); termUI.splitMenu.hidden = !termUI.splitMenu.hidden; } } },
+      else splitWith(termUI.splitKind).catch((e) => failureFor(state.param, e.message || String(e)));
+    }, { small: true, quiet: true, iconOnly: true, icon: 'columns-2', title: 'Two terminals side by side — the right one is a ' + SPLIT_KINDS[termUI.splitKind] });
+    // 603: the caret is a menuButton (kept on screen; the old menu opened off the left edge and its items
+    // ended in a literal "null" — replaceChildren writes a null as text, h() skips it).
+    const caret = h('button', { type: 'button', class: 'btn sm quiet split-caret caret', title: 'What the split adds', 'aria-label': 'What the split adds' },
       icon('chevron-down'));
-    document.addEventListener('click', () => { termUI.splitMenu.hidden = true; });
-    termUI.splitBtn = h('div', { class: 'split-button' }, termUI.splitMain, caret, termUI.splitMenu);
+    termUI.splitBtn = h('div', { class: 'btn-group split-button', role: 'group', 'aria-label': 'Split' }, termUI.splitMain, caret);
+    termUI.splitCtl = menuButton(caret, [], { wrap: termUI.splitBtn, label: 'What the split adds' });
+    termUI.splitMenu = termUI.splitCtl.menu;
+    // 603 (E3): what makes or arranges terminals sits on the tab strip it changes.
+    termUI.newShell = btn('New shell', () => { const n = state.param; newShellTerminal(n).catch((e) => failureFor(n, e.message || String(e))); },
+      { small: true, quiet: true, title: 'A new shell session (shell-2, shell-3, …) in a browser terminal' });
+    const nsCaret = h('button', { type: 'button', class: 'btn sm quiet caret', title: 'Other terminals', 'aria-label': 'Other terminals' }, icon('chevron-down'));
+    const nsGroup = h('div', { class: 'btn-group', role: 'group', 'aria-label': 'New terminal' }, termUI.newShell, nsCaret);
+    termUI.nsCtl = menuButton(nsCaret, [], { wrap: nsGroup, label: 'Other terminals' });
+    termUI.openTerm = btn('Open in Terminal', () => openInTerminal(state.param, null), { small: true, quiet: true, iconOnly: true, icon: 'square-terminal' });
+    termUI.acts = h('div', { class: 'strip-acts', role: 'toolbar', 'aria-label': 'Terminals' }, nsGroup, termUI.splitBtn, termUI.openTerm);
     termUI.panes = [0, 1].map((i) => {
-      const strip = h('div', { class: 'tabs', role: 'tablist' });
+      const strip = h('div', { class: 'tabs', role: 'tablist', 'aria-label': 'Terminals' });
+      const head = h('div', { class: 'term-strip' }, strip);
       const body = h('div', { class: 'term-body' });
       const empty = h('div', { class: 'term-empty' });
-      const pane = h('div', { class: 'term-pane', 'data-pane': String(i) }, strip, body);
+      const pane = h('div', { class: 'term-pane', 'data-pane': String(i) }, head, body);
       body.append(empty);
       pane.addEventListener('focusin', () => { if (state.param) sview(state.param).focusedPane = i; });
       pane.addEventListener('mousedown', () => { if (state.param) sview(state.param).focusedPane = i; });
-      return { root: pane, strip, body, empty };
+      return { root: pane, strip, head, body, empty };
     });
     termUI.grid = h('div', { class: 'term-grid' }, termUI.panes[0].root, termUI.panes[1].root);
     root.replaceChildren(termUI.grid);
@@ -4823,13 +5475,37 @@ function renderTerminals() {
     }
   });
   paintTermEmpty();
+  // The strip's actions on the rightmost pane shown.
+  const host = (v.split ? termUI.panes[1] : termUI.panes[0]).head;
+  if (termUI.acts.parentNode !== host) host.append(termUI.acts);
+  paintStripActs();
   if (name) persistLayout(name);
   // The URL names the session shown (replaceState: no route).
   const sel = name && terminals.get(v.selected[v.focusedPane] ?? v.selected[0]);
-  if (sel && sel.session && state.session !== sel.session) {
+  // (603: never under a wizard's modal — its URL is #/new or #/onboarding; the page's hash follows.)
+  if (sel && sel.session && state.session !== sel.session && !state.modal) {
     state.session = sel.session;
     history.replaceState(null, '', location.pathname + '#/sandbox/' + name + '/' + sel.session);
+    state.bgHash = location.hash;
   }
+}
+/// The strip's actions follow the sandbox: a session needs a VM (New shell, Run detached, Open in Terminal); a new
+/// terminal waits while something is under way.
+function paintStripActs() {
+  if (!termUI.acts) return;
+  const name = state.param, s = state.sbx;
+  const i = s && s.name === name && s.d ? s.d.info : null;
+  const why = i ? sessionsWhyNot(name, i) : 'Loading…';
+  const busy = !i || i.busy || i.phase === 'booting' || opRunningFor(name) || !!transitionOf(name);
+  termUI.newShell.disabled = !!why;
+  termUI.newShell.title = why || 'A new shell session (shell-2, shell-3, …) in a browser terminal';
+  termUI.openTerm.disabled = !!why;
+  termUI.openTerm.title = why || 'Open in Terminal — your terminal app attaches to the ' + (s && s.d ? s.d.defaultSession : 'default') + ' session';
+  if (termUI.nsCtl.isOpen()) return;
+  termUI.nsCtl.setItems([
+    { label: 'Terminal…', icon: 'terminal', desc: 'A new session: a shell, or a command', disabled: busy, why: 'Wait until it settles', onSelect: () => newTerminalDialog(name) },
+    { label: 'Run detached…', icon: 'play', desc: 'A new session running a command, not opened here', disabled: !!why, why, onSelect: () => runDetachedDialog(name) },
+  ]);
 }
 /// A pane's tab strip scrolls sideways when its tabs overflow; the selected tab is always in view
 /// (orchestrator ruling, 593 follow-up).
@@ -4861,7 +5537,8 @@ function paintTermEmpty() {
     box.append(h('div', { class: 'term-empty-head' }, i.phase === 'off' ? 'Shut down' : s.name + ' failed to start'),
       h('div', { class: 'term-empty-note' }, 'Starting boots it fresh — new sessions.'),
       h('div', { class: 'actions center' },
-        btn('Start', () => lifecycle('start', s.name), { primary: true, title: bootViewOnStart() ? 'Boot it, and watch it boot here' : 'Boot it' })));
+        // The bar's Start is the page's one primary; here it is the terminal's own button, as on the covers.
+        ((b) => { b.classList.add('tc-act'); return b; })(btn('Start', () => lifecycle('start', s.name), { small: true, title: bootViewOnStart() ? 'Boot it, and watch it boot here' : 'Boot it' }))));
   } else {
     // 593 §9 (S4): "New shell" always makes a NEW session; a running session is opened by its own name
     // (the sessions list). The image's own session is offered by name: opened when it runs, started when not.
@@ -4871,13 +5548,13 @@ function paintTermEmpty() {
     box.append(h('div', { class: 'term-empty-head' }, 'No terminal open'),
       h('div', { class: 'actions center' },
         defaultSaved ? null : defaultRuns
-          ? btn('Open ' + s.d.defaultSession, () => openTerminal(s.name, s.d.defaultSession, 'interactive'), { primary: true, icon: 'terminal',
+          ? btn('Open ' + s.d.defaultSession, () => openTerminal(s.name, s.d.defaultSession, 'interactive'), { icon: 'terminal',
             title: 'A terminal on the running ' + s.d.defaultSession + ' session' })
-          : btn('Start ' + s.d.defaultSession, () => openDefaultTerminal(s.name), { primary: true, icon: 'play',
+          : btn('Start ' + s.d.defaultSession, () => openDefaultTerminal(s.name), { icon: 'play',
             title: 'Start the image’s own session (' + s.d.defaultSession + ')' + (i.phase === 'running' ? '' : ' — it wakes the sandbox') }),
         ...live.filter((x) => x.name !== s.d.defaultSession && !x.saved).slice(0, 8).map((x) => btn('Open ' + x.name, () => openTerminal(s.name, x.name, 'interactive'), { icon: 'terminal' })),
         ...saved.slice(0, 8).map((x) => btn('Show ' + x.name, () => openSavedTerminal(s.name, x), { icon: 'eye', title: 'Its last saved screen (read-only)' })),
-        btn('New shell', () => newShellTerminal(s.name).catch((e) => toast(e.message || String(e), true)), { title: 'A NEW shell session (shell-2, shell-3, …)' })));
+        btn('New shell', () => newShellTerminal(s.name).catch((e) => failureFor(s.name, e.message || String(e))), { title: 'A NEW shell session (shell-2, shell-3, …)' })));
   }
   p.empty.replaceChildren(box);
 }
@@ -4923,11 +5600,17 @@ function paintSplitButton() {
   setButton(termUI.splitMain, split ? 'Unsplit' : 'Split', 'columns-2');
   termUI.splitMain.title = split ? 'Back to one pane (the right pane’s terminals move left)'
                                  : 'Two terminals side by side — the right one is a ' + SPLIT_KINDS[termUI.splitKind];
-  for (const item of termUI.splitMenu.children) {
-    item.replaceChildren(icon(SPLIT_ICONS[item.dataset.kind]), h('span', { class: 'btn-label' },
-      (split ? 'Add a ' : 'Split with a ') + SPLIT_KINDS[item.dataset.kind]),
-      item.dataset.kind === termUI.splitKind ? h('span', { class: 'menu-check', title: 'the default (ui.split_default)' }, icon('check')) : null);
-  }
+  termUI.splitCtl.setItems(Object.entries(SPLIT_KINDS).map(([kind, label]) => ({
+    label: (split ? 'Add a ' : 'Split with a ') + label, icon: SPLIT_ICONS[kind], check: kind === termUI.splitKind, data: { kind },
+    desc: kind === termUI.splitKind ? 'the default (ui.split_default)' : null,
+    onSelect: () => {
+      termUI.splitKind = kind;
+      // The choice is the setting ui.split_default (doz.toml), not this browser's.
+      if (setting('ui.split_default', 'shell') !== kind) saveSetting('ui.split_default', kind).catch((e) => pageFailure('ui.split_default was not saved: ' + (e.message || e)));
+      paintSplitButton();
+      splitWith(kind).catch((e) => failureFor(state.param, e.message || String(e)));
+    },
+  })));
 }
 /// Split (if needed) and fill the right pane with `kind` — so a split always creates something.
 /// With no terminal on the left there is nothing to watch, attach to or put a shell beside: the
@@ -4950,7 +5633,7 @@ async function splitWith(kind) {
 
 async function newTerminalDialog(sandbox) {
   const names = [sandbox || state.param].filter(Boolean);
-  if (!names.length) { toast('Open a sandbox first', true); return; }
+  if (!names.length) { pageFailure('Open a sandbox first'); return; }
   const first = names[0];
   // What to open: ALWAYS a new session (593 §9 S4, owner — after "New terminal" attached to a session that
   // already ran): a new shell, or a new session running a command. A running session is reached through
@@ -5034,7 +5717,7 @@ function gridBuild() {
   phaseSel.addEventListener('change', () => { grid.phase = phaseSel.value; gridRender(); });
   sizeSel.addEventListener('change', () => {
     gridApplySize(sizeSel.value);
-    saveSetting('ui.grid_tile_size', sizeSel.value).catch((e) => toast('The setting was not saved: ' + (e.message || e), true));
+    saveSetting('ui.grid_tile_size', sizeSel.value).catch((e) => pageFailure('ui.grid_tile_size was not saved: ' + (e.message || e)));
   });
   grid.status = h('span', { class: 'grid-status', role: 'status' });
   grid.body = h('div', { class: 'tiles' });
@@ -5078,7 +5761,7 @@ async function gridRefresh(force) {
   }
   grid.lastList = Date.now();
   let o;
-  try { o = await api('overview'); } catch (e) { toast(e.message || String(e), true); return; }
+  try { o = await api('overview'); } catch (e) { pageFailure(e.message || String(e), { key: 'grid' }); return; }
   state.overview = o;
   renderNavSandboxes();
   // A running sandbox's sessions come from its guest; any other's from its saved screens (593 §9 — S3:
@@ -5176,7 +5859,7 @@ function paintTile(tile, w) {
     tile.note.hidden = false;
     tile.note.className = 'tile-note static';
     tile.note.replaceChildren(
-      !w.none && PHASE_GLYPH[s.phase] ? h('div', { class: 'tc-glyph' }, icon(PHASE_GLYPH[s.phase])) : null,
+      ...(!w.none && PHASE_GLYPH[s.phase] ? [h('div', { class: 'tc-glyph' }, icon(PHASE_GLYPH[s.phase]))] : []),   // (no null: replaceChildren writes it as text)
       h('div', { class: 'tile-note-head' }, w.none ? 'No sessions running' : s.phaseLabel),
       h('div', null, w.none ? 'Open one from its page.' : s.phase === 'off' ? 'Starting boots it fresh — new sessions.'
         : known.length ? 'Sessions when it last ran: ' + known.map((x) => x.name).join(', ') : 'Its sessions are listed while it runs.'));
@@ -5230,12 +5913,50 @@ function detachTile(tile) {
   closeTerminal(t.id);                                   // the socket closes; the frame and its engine go
 }
 
+// ── 603: page shortcuts (owner decision 10 — only the guide's): g then s → Sandboxes, / → the Settings filter,
+// ? → this list. Never while a terminal has the focus (its frame), nor in a field, a menu or a dialog.
+const SHORTCUTS = [['g s', 'Sandboxes'], ['/', 'The Settings filter'], ['?', 'These shortcuts'], ['Esc', 'Close a menu or a dialog']];
+let gPending = 0;
+function shortcutsDialog() {
+  const d = h('dialog', { class: 'dlg', 'aria-labelledby': 'sc-title' });
+  const close = h('button', { type: 'button', class: 'btn quiet', on: { click: () => d.close() } }, withIcon('x', 'Close'));
+  d.append(h('div', { class: 'dlg-head' }, h('h2', { class: 'h-title', id: 'sc-title' }, 'Keyboard shortcuts')),
+    h('div', { class: 'dlg-body' }, h('dl', { class: 'facts' }, SHORTCUTS.flatMap(([k, what]) => [h('dt', null, k.split(' ').map((x) => h('kbd', null, x))), h('dd', null, what)])),
+      h('p', { class: 'sub' }, 'Not while a terminal has the focus — there every key is the terminal’s. Tab moves between controls; arrow keys move within tabs, segmented controls and menus.')),
+    h('div', { class: 'dlg-foot' }, close));
+  d.addEventListener('close', () => d.remove());
+  document.body.append(d);
+  d.showModal();
+  close.focus();
+}
+document.addEventListener('keydown', (ev) => {
+  if (ev.defaultPrevented || ev.metaKey || ev.ctrlKey || ev.altKey || state.signedOut) return;
+  const a = document.activeElement;
+  if (a && (a.tagName === 'IFRAME' || a.closest('input, textarea, select, [contenteditable], dialog, .menu'))) return;
+  if (document.querySelector('dialog[open]') || state.modal || document.body.classList.contains('ui-paused')) return;
+  if (ev.key === 'g') { gPending = Date.now(); return; }
+  if (ev.key === 's' && Date.now() - gPending < 1200) { gPending = 0; ev.preventDefault(); location.hash = '#/overview'; return; }
+  gPending = 0;
+  if (ev.key === '/') {
+    ev.preventDefault();
+    const focusFilter = () => { const f = document.querySelector('[data-settings-filter]'); if (f) { f.focus(); f.select(); return true; } return false; };
+    if (!focusFilter()) { location.hash = '#/settings'; const t0 = Date.now(); const tick = () => { if (!focusFilter() && Date.now() - t0 < 4000) setTimeout(tick, 100); }; setTimeout(tick, 100); }
+  } else if (ev.key === '?') { ev.preventDefault(); shortcutsDialog(); }
+});
+
 // ── start ───────────────────────────────────────────────────────────────────
 // The static page's own controls get their icons here (index.html holds no SVG).
 const NAV_ICONS = { overview: 'box', sessions: 'layout-grid', images: 'layers', resources: 'cylinder', operations: 'list-checks', accounts: 'key-round',
                     metrics: 'chart-line', activity: 'activity', onboarding: 'rocket', doctor: 'stethoscope', settings: 'settings' };
-for (const a of document.querySelectorAll('#nav > a[data-view]')) if (NAV_ICONS[a.dataset.view]) a.prepend(icon(NAV_ICONS[a.dataset.view]));
+for (const a of document.querySelectorAll('#nav > a[data-view]')) {
+  if (NAV_ICONS[a.dataset.view]) a.prepend(icon(NAV_ICONS[a.dataset.view]));
+  a.title = a.querySelector('.lbl').textContent;       // the rail's tooltip (the label stays readable to assistive tech)
+}
 setButton($('sign-out'), 'Sign out');
+$('nav-toggle').replaceChildren(icon('panel-right'));
+$('nav-toggle').addEventListener('click', (ev) => { ev.stopPropagation(); navRail(!document.body.classList.contains('nav-open')); });
+document.addEventListener('click', (ev) => { if (document.body.classList.contains('nav-open') && !ev.target.closest('.side')) navRail(false); });
+document.addEventListener('keydown', (ev) => { if (ev.key === 'Escape' && document.body.classList.contains('nav-open')) navRail(false); });
 
 (async () => {
   if (await bootstrap()) {

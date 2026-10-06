@@ -94,18 +94,23 @@ names the shortest way back — in the project folder that is just `doz up`.
 
 ### In the dashboard
 
-**Sandboxes** › **New sandbox** is a wizard with the same ten steps. It starts with the **project
+**Sandboxes** › **New sandbox** is a wizard with the same ten steps, in a window over the dashboard. It starts with the **project
 folder**: a new folder in your projects folder, or a folder you have (type it, or **Choose…** in your
 Mac's folder picker). If that folder has a project file, the wizard starts from it.
 
-- Every step is filled in from your settings (or from the file). **Back** and **Next** move between
-  steps, **Enter** is Next, **Alt+←** / **Alt+→** too, and **Skip to review** jumps to the end keeping
-  every default.
+- Every step is filled in from your settings (or from the file). The steps run across the top, a
+  check on each one done (hover it for your answer) — click one to go back to it. **Back** and **Next**
+  (at the bottom, always in view) move between steps, **Enter** is Next, **Alt+←** / **Alt+→** too, and
+  **Skip to review** jumps to the end keeping every default.
+- **✕** or **Escape** closes the wizard; once you have chosen something it asks first. The browser's
+  **Back** closes it too and keeps your choices — **Forward**, or **New sandbox** again, picks up where
+  you were.
 - **Workspace rules** lists the folder's `.dozignore` / `.dozreadonly` as they are now; add or edit one on
   the Mac and press **Look again**.
-- **Review** shows the exact `doz_project.yaml` it will write. **Write and create** writes it into the
-  folder, makes the sandbox from it — as `doz up` there would — starts it and opens its page with the
-  boot in a terminal. A folder that already has a file asks first, showing what changes.
+- **Review** lists your choices and says what will happen; **The file, exactly as written** unfolds the
+  `doz_project.yaml` it will write. **Write and create** writes it into the folder, makes the sandbox
+  from it — as `doz up` there would — starts it, sets up its tools and opens its page. A folder that
+  already has a file asks first, showing what changes.
 - **One-page form** (top right) is the old single form, for an isolated sandbox with no project file.
   **Quick add** stays the no-questions way in ([The quickest way](05-sandboxes-and-lifecycle.md#the-quickest-way-quick-add-and-doz-new)).
 

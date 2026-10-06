@@ -90,11 +90,13 @@ wakes. With `--no-wake`, `attach` waits for a sleeping sandbox instead of waking
 
 On a sandbox's page in the dashboard:
 
-- **Open** (in the empty terminal area, or a session's row under Details › Sessions) attaches to a
-  session, starting the image's own one if needed.
-- **Watch** is read-only: nothing you type reaches the session, and it never resizes it.
-- **New shell** starts a new shell session (`shell-2`, `shell-3`, …); **Terminal…** attaches to any
-  session, watches one, or starts a new one running a command.
+- **Open** (in the empty terminal area, or a session's row in the details' **Sessions** tab) attaches
+  to a session, starting the image's own one if needed.
+- **Watch** (a session's **⋯**) is read-only: nothing you type reaches the session, and it never
+  resizes it.
+- On the terminals' tab strip, **New shell** starts a new shell session (`shell-2`, `shell-3`, …); its
+  **▾** › **Terminal…** starts a new session — a shell, or one running a command — and **Run
+  detached…** one that runs without opening here.
 - Terminals are **tabs**; **Split** shows two side by side (⇄ moves a tab across). Two tabs on one
   session are marked "shared with tab N". Closing a tab only closes the view.
 - **All sessions** shows every session of every running sandbox as a live, read-only tile.
