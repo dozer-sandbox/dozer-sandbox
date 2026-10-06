@@ -293,6 +293,7 @@ public enum DozerImages {
                                shares: shares, subnet: network == .nat ? subnet : nil,
                                imageSpec: imageSpec, customImage: customKey)
         spec.network = network
+        if o.audio == true { spec.audio = true }          // EXPERIMENTAL (604); nil otherwise — the spec as before
         try spec.validate()
         return (spec, imageName)
     }

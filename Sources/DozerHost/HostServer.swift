@@ -72,6 +72,9 @@ public final class HostServer: @unchecked Sendable {
         HostLog.line("doz host \(version) (pid \(getpid())) — store \(store.root.path), idle timeout \(idleTimeoutMinutes) min")
         HostLog.line(launched ? "detached: parent \(getppid())\(getppid() == 1 ? " (launchd)" : " — NOT launchd"), session \(getsid(0))"
                               : "in the foreground (parent \(getppid())): it lives in that terminal's process tree")
+        // EXPERIMENTAL (604): which app macOS asks about the microphone for, for this host's audio sandboxes.
+        HostLog.line("microphone (audio sandboxes, experimental): macOS asks on behalf of "
+                     + (HostCore.microphoneApp.map { "\($0.description) — \($0.path)" } ?? "an app it could not name"))
         if ProcessInfo.processInfo.environment["DOZ_TEST_CREDENTIALS"] == "memory" {
             HostLog.line("TEST: DOZ_TEST_CREDENTIALS=memory — accounts' secrets live in this host's memory, never the keychain; nothing is verified")
         }

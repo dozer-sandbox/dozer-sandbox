@@ -39,6 +39,7 @@ both.
 | [Settings reference](15-settings-reference.md) | look up any setting, its default and when it applies |
 | [Security model](16-security-model.md) | understand what protects your Mac, and what doesn't |
 | [Troubleshooting and FAQ](17-troubleshooting-and-faq.md) | fix something, or find a quick answer |
+| [Audio sandboxes (EXPERIMENTAL)](23-audio-experimental.md) | try a sandbox with your Mac's microphone and speakers |
 
 ## Conventions
 

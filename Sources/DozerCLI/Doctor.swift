@@ -96,6 +96,17 @@ struct Doctor: AsyncParsableCommand {
             out.append(DoctorCheck(check: "tools layer", status: .ok,
                                    detail: "gh \(ToolsLayer.ghVersion) not downloaded yet — the first sandbox with GitHub as you fetches it (~14 MB, once)"))
         }
+        // EXPERIMENTAL: audio sandboxes — the sound kernel this doz carries, and who macOS asks about the microphone.
+        do {
+            let carried = MacAudio.bundledSoundKernel()
+            let ok = carried.map(SoundKernel.isVerified) ?? false
+            let who = MacAudio.responsibleApp()?.description ?? "an app macOS did not name"
+            out.append(DoctorCheck(check: "audio", status: .ok,
+                                   detail: "experimental — " + (ok ? "the sound kernel is here (\(SoundKernel.fileName), sha256 checked) — doz create --audio works"
+                                               : carried == nil ? "this doz carries no sound kernel — doz create --audio is not available"
+                                                                : "the sound kernel beside this doz is damaged (sha256 differs) — reinstall doz")
+                                       + "; a host started from here asks macOS for the microphone as \(who)"))
+        }
         // 594 W28: an agent image an older doz made, or a newer agent release — said, never rebuilt by itself.
         let settings = DozerSettings.load()
         for image in ["claude-code", "pi"] {
@@ -129,6 +140,7 @@ struct Doctor: AsyncParsableCommand {
                         detail += ", parent \(pp), NOT launchd — it lives in another process's tree, and stopping that tree stops it: doz host stop, then let a command start it again"
                     }
                 }
+                if let app = st.microphoneApp { detail += ", microphone asked as \(app) (audio sandboxes)" }
                 // 591: its program changed under it — overwritten in place is a failure (its VMs are refused).
                 if let note = st.executableNote {
                     status = st.executableChange == "overwritten" ? .fail : (status == .ok ? .warn : status)

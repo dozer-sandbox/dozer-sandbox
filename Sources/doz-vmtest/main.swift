@@ -985,6 +985,23 @@ Task {
             exit(try await ignoreCrashSave())
         case "ignore-crash-restore":
             try await ignoreCrashRestore(label: "crash2", thenQuit: true)
+        case "spike-audio":
+            // SPIKE (604): the Mac's microphone + speakers as a virtio-snd device — AudioSpike.swift.
+            try await audioSpike()
+        case "spike-build":
+            // SPIKE (604 stage 1b): run a root script in a big throwaway sandbox (the sound kernel's build).
+            try await spikeBuild()
+        case "spike-audio-live":
+            // SPIKE (604 stage 1b): tone, microphone, latency, streams open across the lifecycle (DOZ_KERNEL = a sound kernel).
+            try await audioLiveSpike()
+        case "spike-audio-live-save":
+            exit(try await liveCrashSave())
+        case "spike-audio-live-restore":
+            try await liveCrashRestore(thenQuit: true)
+        case "spike-audio-crash-save":
+            exit(try await audCrashSave())
+        case "spike-audio-crash-restore":
+            try await audCrashRestore(thenQuit: true)
         case "lifecycle":
             try await lifecycleSuite()
         case "crash":

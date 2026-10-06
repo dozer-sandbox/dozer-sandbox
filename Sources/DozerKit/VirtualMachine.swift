@@ -59,6 +59,8 @@ struct PinnedIdentity: VZInstanceExtension {
     /// restored into a VM with exactly the devices it was taken with, so this is persisted per
     /// sandbox (`PersistedSandbox.memoryBalloon`) and a VM slept by an older build restores without.
     let memoryBalloon: Bool
+    /// EXPERIMENTAL (604): the audio device (an audio sandbox). A VM input like the balloon; the layout records it.
+    var audio: Bool = false
     /// 591: the kernel's sha256 (recorded in the layout).
     var kernelSHA256: String? = nil
     /// 591: on a restore, the layout the snapshot was taken with — the new VM must match it.
@@ -77,6 +79,10 @@ struct PinnedIdentity: VZInstanceExtension {
             for device in config.networkDevices { device.macAddress = mac }
         }
         if memoryBalloon { config.memoryBalloonDevices = [VZVirtioTraditionalMemoryBalloonDeviceConfiguration()] }
+        if audio { AudioDevice.add(to: config) }
+        // SPIKE (604): extra devices from the audio spike (doz-vmtest spike-audio) — BEFORE the layout,
+        // so a sound device is recorded (`otherDevices["audio"]`) and compared on a restore like any device.
+        SpikeVMDevices.configure?(config)
         // 591: the VM as it will be built; a restore into a different one is refused HERE, before VZ
         // is asked (its own refusal is an opaque "invalid argument" or "Internal Virtualization error").
         let actual = VMLayout.of(config, kernelSHA256: kernelSHA256)
@@ -85,6 +91,14 @@ struct PinnedIdentity: VZInstanceExtension {
             throw SandboxError.snapshotNeedsOtherBuild(sandbox: sandboxName, recordedBy: expected?.recordedBy, differences: d)
         }
     }
+}
+
+/// SPIKE (604, workspace changes/604-*/604.01-SPIKE.md) — a TEST-ONLY seam: when set, every VM this
+/// process configures gets the devices it adds (the audio spike adds a `VZVirtioSoundDeviceConfiguration`).
+/// Nothing in doz sets it; it exists only so `doz-vmtest spike-audio` can drive the real library. Remove
+/// it (or replace it with a real per-sandbox device setting) when stage 2 decides.
+public enum SpikeVMDevices {
+    nonisolated(unsafe) public static var configure: (@Sendable (VZVirtualMachineConfiguration) -> Void)?
 }
 
 /// The VM's balloon target (bytes): read, or set and read back. nil without a balloon device.

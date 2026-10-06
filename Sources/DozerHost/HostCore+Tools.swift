@@ -37,8 +37,12 @@ extension HostCore {
         let mode = proxied ? AgentPermissions.gitHubMode(m.sandbox.egress?.policy.permissions) : nil
         return ToolInputs(github: mode != nil,
                           ssh: proxied && Self.sandboxValue(m.config, SettingKey.sshAgent) == .string("on"),
-                          tmux: Self.sandboxValue(m.config, SettingKey.tmux) == .bool(true))
+                          tmux: Self.sandboxValue(m.config, SettingKey.tmux) == .bool(true),
+                          audio: m.config.spec.audio == true, audioApp: Self.microphoneApp?.name)
     }
+
+    /// EXPERIMENTAL (604): the Mac app macOS asks about the microphone for, for this process (looked up once).
+    nonisolated static let microphoneApp: MacAudio.ResponsibleApp? = MacAudio.responsibleApp()
 
     /// Give the sandbox its tool inputs and gh's source; on a RUNNING sandbox whose inputs changed, apply the
     /// layer now (quietly — the viewers are told when something changed or failed).

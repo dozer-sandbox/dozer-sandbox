@@ -386,6 +386,20 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
 - **virtio-fs caches:** deleting a file on the HOST that the guest has cached is not visible at once
   — tests use fresh file names (this cost an afternoon of chasing a non-bug).
 
+### EXPERIMENTAL audio sandboxes (604) — workspace `changes/604-*/604.01-SPIKE.md` (stages 1, 1b, 1c)
+
+- **`doz create --audio` only**: `SandboxSpec.audio` (nil = no audio: no device, the pinned kernel, and the spec and
+  `ToolInputs` encode byte-identically — `AudioTests`). `PinnedIdentity.audio` adds the virtio-snd device (Mac mic in,
+  speakers out); `VMLayout` records it, so a mismatched restore is refused. The VM boots `SoundKernel` (kata
+  6.18.15-186 + sound.conf, sha256 pinned in `Audio.swift`) from the kernel CACHE — the host copies it there, verified,
+  at create and before every boot (`MacAudio.installSoundKernel`); bakes and image keys keep the pinned kernel. Never
+  downloaded: `release.sh` ships it (`SOUND_KERNEL`, sha256-checked, `libexec/doz/kernels/`); dev: `DOZ_TEST_SOUND_KERNEL`.
+- **The tools layer** (audio only): alsa-utils, `/etc/asound.conf` (stamp v2: `default` = asym of the card's
+  playback/capture devices — NOT dmix, which stalls on this card), and the TEMPORARY `doz-sound` (`DozSound.swift`).
+- **macOS asks about the microphone for the host's RESPONSIBLE app** (the app that started doz — survives the detached
+  double spawn), named in host.log, `host status` `microphoneApp`, `doctor` and doz-sound's hint. Known defects: VZ can
+  stop the VM on pause/save while a capture waits on an unanswered prompt; an open stream stalls after a restore.
+
 ### The web layer (`doz ui`, 590) — its security design is workspace `changes/590-*/590.01-DESIGN.md`
 
 - **Loopback only, an OS-picked port, nothing else representable** (`WebLoopbackAddress`). No flag,

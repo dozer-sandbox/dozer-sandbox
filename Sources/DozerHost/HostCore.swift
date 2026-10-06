@@ -274,6 +274,11 @@ public actor HostCore {
     /// Start recording a boot of `m` (`cold boot`, `wake`, `restore after crash`).
     func beginBoot(_ m: Managed, kind: String) {
         guard !readOnly else { return }
+        // EXPERIMENTAL (604): put the sound kernel back when it went (Resources may delete an unused one); the
+        // boot says plainly when it cannot.
+        if m.config.spec.audio == true {
+            _ = try? MacAudio.installSoundKernel(into: m.config.spec.kernelCacheDirectory ?? StoreLayout(spec: m.config.spec).kernels)
+        }
         m.boot = BootRecorder(kind: kind, bootLog: m.sandbox.bootLogURL)
     }
 
@@ -732,6 +737,7 @@ public actor HostCore {
             s.parentPid = getppid()
             s.sessionID = getsid(0)
             s.launchedDetached = HostServer.launchedDetached
+            s.microphoneApp = Self.microphoneApp?.description
         }
         if let executable, let c = executableChange() {
             s.executableChange = c.rawValue
@@ -786,6 +792,8 @@ public actor HostCore {
             try await follow(try preparation(for: img, requestedBy: "create \(name) --rebuild"), emit: emit)
         }
         let (spec, image) = try DozerImages.spec(name: name, options: o, store: store)
+        // EXPERIMENTAL (604): an audio sandbox's VM boots the sound kernel — verified into the kernel cache now.
+        if spec.audio == true { try MacAudio.installSoundKernel(into: spec.kernelCacheDirectory ?? StoreLayout(spec: spec).kernels) }
         // 594: the agent's credential prerequisite, before anything is made (pi: an API-key account).
         if spec.network.policy != nil {
             let (def, kinds) = accountKinds()

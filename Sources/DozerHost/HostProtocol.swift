@@ -171,6 +171,8 @@ public struct CreateOptions: Codable, Equatable, Sendable {
     /// `doz create --prepare`: prepare the image the sandbox's first start would wait for, now (started
     /// or joined, its progress on the request's stream) — without booting the sandbox.
     public var prepare: Bool?
+    /// EXPERIMENTAL (604): an audio sandbox — the Mac's microphone and speakers (`SandboxSpec.audio`).
+    public var audio: Bool?
 
     public init(image: String, cpus: Int? = nil, memoryMiB: UInt64? = nil, workspace: String? = nil,
                 network: String? = nil, subnet: String? = nil, account: String? = nil) {
@@ -927,4 +929,7 @@ public struct HostStatus: Codable, Equatable, Sendable {
     public var parentPid: Int32?
     public var sessionID: Int32?
     public var launchedDetached: Bool?
+    /// EXPERIMENTAL (604): the Mac app macOS asks about the microphone for, for this host's audio sandboxes
+    /// (its responsible app).
+    public var microphoneApp: String?
 }
