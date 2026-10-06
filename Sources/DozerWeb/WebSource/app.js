@@ -1076,7 +1076,7 @@ function settingControl(r) {
     api('bases').then((b) => {
       const std = new Set(b.standard[''] || []);
       let on = new Set(b.defaults[''] || []);
-      const all = b.permissions.map((x) => x.id);
+      const all = b.permissions.map((x) => x.id).filter((x) => !isAgentModel(x));
       const words = () => {
         const same = (a, c) => a.size === c.size && [...a].every((x) => c.has(x));
         if (same(on, std)) return 'standard';
@@ -2478,7 +2478,7 @@ function nwPermissions() {
     const base = nwBase(f);
     const rows = b.permissions.filter((r) => r.group !== 'github');
     const std = new Set((b.standard[base] || b.standard[''] || []).filter((x) => !x.startsWith('github:')));
-    const all = rows.map((r) => r.id);
+    const all = rows.map((r) => r.id).filter((x) => !isAgentModel(x));
     const fromWords = (ws) => {
       let s = new Set(std);
       for (const w of ws) {
@@ -2515,7 +2515,7 @@ function nwPermissions() {
           nwRender();
         };
         if (id === 'web' && v) confirmWeb(async () => apply()); else apply();
-      }, { hosts: true })));
+      }, { hosts: true, agent: nwAgent(f) })));
   } else {
     parts.push(h('p', { class: 'muted' }, 'A ' + nwNetwork(f) + ' network has no permissions to choose.'));
   }
@@ -2765,7 +2765,7 @@ function newSandboxPermissions(bases, picker, network) {
   if (!bases || !bases.permissions) return { el, value: () => null, baseChanged() {}, networkChanged() {} };
   let on = new Set(), touched = false;
   const baseKey = () => { const b = picker.base(); return b === null ? null : b; };
-  const presetFor = (net, b) => net === 'locked' ? ['model'] : net === 'open' ? bases.permissions.map((r) => r.id)
+  const presetFor = (net, b) => net === 'locked' ? ['model'] : net === 'open' ? bases.permissions.map((r) => r.id).filter((x) => !isAgentModel(x))
     : net === 'agent' ? (bases.standard[b] || bases.standard[''] || [])
     : [...(bases.defaults[b] || bases.defaults[''] || []), ...(bases.github || [])];   // 599e: + the Access step's GitHub choice
   const visible = () => baseKey() !== null && !['bake', 'nat', 'none'].includes(network.value);
@@ -2783,9 +2783,9 @@ function newSandboxPermissions(bases, picker, network) {
     el.hidden = !visible();
     const std = new Set(bases.standard[baseKey() || ''] || []);
     const same = (a, b) => a.size === b.size && [...a].every((x) => b.has(x));
-    const label = same(on, std) ? 'Standard' : same(on, new Set(['model'])) ? 'Locked' : same(on, new Set(bases.permissions.map((r) => r.id))) ? 'Open' : 'Custom';
+    const label = same(on, std) ? 'Standard' : same(on, new Set(['model'])) ? 'Locked' : same(on, new Set(bases.permissions.map((r) => r.id).filter((x) => !isAgentModel(x)))) ? 'Open' : 'Custom';
     el.replaceChildren(h('span', null, 'What the agent can do ', h('span', { class: 'tag', 'data-new-perm-preset': label }, label)),
-      permissionSwitches(bases.permissions, on, change, { hosts: true }));
+      permissionSwitches(bases.permissions, on, change, { hosts: true, agent: picker.agent() }));
   }
   reset();
   return {
@@ -3380,7 +3380,13 @@ function policyDialog(name, policy) {
 // the hosts behind a permission come from the running doz.
 const PRESET_LABEL = { locked: 'Locked', agent: 'Standard', open: 'Open' };
 /// The switches: `rows` (id, title, summary, locked, warning, group, hosts), `on` (a Set), `change(id, on)`.
+/// 599i: an agent's own model permission — "Talk to OpenAI" is Codex's: shown (on, always) only in a Codex
+/// sandbox's form, and never a switch another agent's form offers. The host adds it whatever a form sends.
+const AGENT_MODEL = { codex: 'model:openai' };
+const isAgentModel = (id) => Object.values(AGENT_MODEL).includes(id);
 function permissionSwitches(rows, on, change, opts = {}) {
+  const own = AGENT_MODEL[agentKey(opts.agent || '', AGENT_MODEL)];
+  rows = rows.filter((r) => !isAgentModel(r.id) || r.id === own || on.has(r.id)).map((r) => (r.id === own ? { ...r, locked: true } : r));
   const sw = (r, indent) => {
     const box = h('input', { type: 'checkbox', role: 'switch', 'data-permission': r.id, 'aria-label': r.title });
     box.checked = on.has(r.id) || r.locked;
@@ -4818,7 +4824,7 @@ function wizStep5(d, w) {
     if (!/^[a-z0-9][a-z0-9-]{0,39}$/.test(n)) { error.textContent = 'The name: 1–40 of a-z 0-9 - (not starting with -).'; return; }
     let ws;
     try { ws = chooser.get(); } catch (e) { error.textContent = e.message; return; }
-    if (acct && !acct.ok()) { error.textContent = (AGENT_NAMES[picker.agent()] || 'This agent') + ' needs an Anthropic API key — add one above.'; return; }
+    if (acct && !acct.ok()) { error.textContent = (AGENT_NAMES[picker.agent()] || 'This agent') + ' needs an account it can use — add one above.'; return; }
     const blocked = picker.blocked();
     if (blocked) { error.textContent = blocked; return; }
     w.firstWorkspace = ws.workspace || '';
