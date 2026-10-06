@@ -927,6 +927,10 @@ Task {
             // 599d: GitHub as the user — a fake GitHub, a fake gh, a throwaway ssh-agent (seams only).
             let binary = args.firstIndex(of: "--doz").flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil } ?? ".build/debug/doz"
             await cliGitHubSuite(binary: URL(fileURLWithPath: binary).standardizedFileURL.path)
+        case "cli-codex":
+            // 599i: Codex — Dozer's own ChatGPT sign-in, the proxy's swap and renewal, an API key (a fake OpenAI).
+            let binary = args.firstIndex(of: "--doz").flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil } ?? ".build/debug/doz"
+            await cliCodexSuite(binary: URL(fileURLWithPath: binary).standardizedFileURL.path)
         case "cli-tools":
             // 599h: the tools layer — gh, the ssh client + host keys, packages; every base (seams only).
             let binary = args.firstIndex(of: "--doz").flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil } ?? ".build/debug/doz"

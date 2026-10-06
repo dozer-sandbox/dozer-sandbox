@@ -7,7 +7,7 @@ it's needed and then makes each sandbox an instant copy of it.
 ## Concepts
 
 - **An image is two choices: an agent and a base.**
-  - The **agent**: **Claude Code**, **pi**, or **none** (a shell only).
+  - The **agent**: **Claude Code**, **pi**, **Codex** ([Codex](24-codex.md)), or **none** (a shell only).
   - The **base**: the Linux system underneath — one of the **recommended bases** (below), **your own
     Dockerfile**, or a **template** you saved from a sandbox.
 - **Image names** follow the pair: `<base>-<agent>`, for example `python-claude-code` or `go-pi`, and
@@ -17,12 +17,14 @@ it's needed and then makes each sandbox an instant copy of it.
   |---|---|---|
   | `claude-code` | Node.js | Claude Code |
   | `pi` | Node.js | pi |
+  | `codex` | Node.js | Codex (new — on other bases `<base>-codex`) |
   | `lab` | Alpine | none (bash and a few tools) |
 
 - **The developer baseline.** On every base, Dozer adds the tools agents expect: git, curl, jq,
   ripgrep (`rg`), fd, python3, less, vim, ssh, sudo, tmux and the package lists, so the agent can
   install more with `sudo apt-get install` (or `apk add` on Alpine). Claude Code on a base without
-  Node is its standalone build; pi on a base without Node gets its own Node.
+  Node is its standalone build; pi on a base without Node gets its own Node; Codex is its official
+  static linux-arm64 build on every base.
 - **Preparing** an image downloads the base (digest-pinned), installs the baseline and the agent in a
   temporary VM, and checks the result. Minutes, once, with the network. A sandbox started while its
   image is being prepared joins that preparation.

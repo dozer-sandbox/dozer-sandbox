@@ -178,8 +178,9 @@ public struct WebAccountAdd: Equatable, Sendable, CustomStringConvertible, Custo
         guard let name = d["name"] as? String, name.count <= 40, (try? AccountStore.validateName(name)) != nil else {
             throw WebAction.Invalid("name: an account name, 1–40 of a-z 0-9 - (not default or none)")
         }
-        guard let k = d["kind"] as? String, let kind = AccountKind(rawValue: k), kind != .mac else {
-            throw WebAction.Invalid("kind: api-key or setup-token")
+        // 599i: an OpenAI key too. A ChatGPT sign-in is never typed: it is Dozer's own browser sign-in (the CLI).
+        guard let k = d["kind"] as? String, let kind = AccountKind(rawValue: k), [.apiKey, .setupToken, .openaiKey].contains(kind) else {
+            throw WebAction.Invalid("kind: api-key, setup-token or openai-key")
         }
         var plan: String?
         if let p = d["plan"], !(p is NSNull) {

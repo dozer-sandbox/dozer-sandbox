@@ -1,14 +1,15 @@
 # Agents and accounts
 
-Dozer runs two AI coding agents out of the box — **Claude Code** and **pi** — and gives each one the
-Claude account it should use, without the secret ever entering the sandbox. This page covers which
+Dozer runs three AI coding agents out of the box — **Claude Code**, **pi** and OpenAI's **Codex** — and
+gives each one the account it should use, without the secret ever entering the sandbox. Codex has its
+own page: [Codex](24-codex.md). This page covers which
 agent can use which account, how to add accounts, the agent's versions and its `sudo`, and what the
 agent is told about where it runs.
 
 ## Concepts
 
 - **The agent runs as a normal user** (`agent`) in `/workspace`. Its own settings, logins and
-  history (`~/.claude`, `~/.pi/agent`) are on a separate **state disk** that survives shutdown and
+  history (`~/.claude`, `~/.pi/agent`, Codex's `~/.codex`) are on a separate **state disk** that survives shutdown and
   reset.
 - **An account** is how the agent pays for its model. Dozer's proxy on your Mac holds the secret and
   adds it to requests to Anthropic on their way out. Inside the sandbox, `ANTHROPIC_API_KEY` or
@@ -22,12 +23,17 @@ agent is told about where it runs.
   | setup token | a `claude setup-token` token (a Claude subscription, valid a year) | your login keychain, `doz-claude:NAME` | none — add a new one before it expires |
   | API key | an Anthropic API key | your login keychain, `doz-anthropic:NAME` | none |
 
+  For **Codex**, two more kinds (OpenAI's): a **ChatGPT sign-in** (`doz account add NAME --chatgpt`
+  — Dozer's own, in your browser; renewed by Dozer on your Mac) and an **OpenAI API key**
+  (`--openai-key`). See [Codex](24-codex.md).
+
 - **Which agent can use which:**
 
   | agent | accounts it can use |
   |---|---|
   | Claude Code | `mac`, a setup token, an API key |
   | pi | an API key only (a Claude subscription is never given to it) |
+  | Codex | a ChatGPT sign-in or an OpenAI API key — never an Anthropic account (and no Claude agent ever gets an OpenAI one) |
 
   This is checked **before** a sandbox is made. With no account pi can use, Dozer stops and tells you
   the next step (or, on a terminal and in the dashboard, offers to take a key right there).
@@ -154,7 +160,8 @@ At every session start, Dozer tells the agent where it is:
   app, a workspace folder in the Finder — saying only what is on (the `dozer` skill has the details:
   types, apps, refusals); and, only when you turned it on, one line saying `git` and `gh` are signed in
   as you on GitHub, read-only or with push ([GitHub as you](18-github.md));
-- the **`dozer` skill** (`~/.claude/skills/dozer/SKILL.md`, pi: `~/.pi/agent/skills/dozer/SKILL.md`),
+- the **`dozer` skill** (`~/.claude/skills/dozer/SKILL.md`, pi: `~/.pi/agent/skills/dozer/SKILL.md`,
+  Codex: `~/.agents/skills/dozer/SKILL.md`),
   which it reads when a question is about the machine: what persists, the network, credentials,
   sleep, and what it can't do from inside (and must ask you for).
 
@@ -170,7 +177,7 @@ replacing (`--agent-prompt-mode replace`). Your text may use `{{variables}}` fro
 `sandbox.name`, `sandbox.image`, `sandbox.base`, `sandbox.cpus`, `sandbox.memory`,
 `workspace.shared`, `workspace.host_path`, `workspace.guest_path`, `workspace.description`, `workspace.rules`,
 `network.mode`, `network.allowed_hosts`, `network.description`, `network.permissions`,
-`account.name`, `credentials.description`, `sandbox.sudo`, `sandbox.timezone`, `sudo.description`,
+`account.name`, `agent.state`, `credentials.description`, `sandbox.sudo`, `sandbox.timezone`, `sudo.description`,
 `clipboard.description`, `browser.description`, `files.description`, `mac.open`, `github.facts`, `github.description`, `mac.hostname`, `dozer.version` (the template
 `agent-prompt.md` lists them with what each says). `doz inspect NAME --prompt` shows any mistake: an unknown variable is an error that stops the
 agent's sessions from starting until it's fixed, never silently blank.
@@ -185,7 +192,7 @@ touched.
 | `defaults.account` | `mac` | The account of a store that hasn't chosen one. |
 | `host.keepalive` | `false` | Keep-alive for a store that hasn't chosen (`doz account keepalive`). |
 | `claude.permissions` | `skip` | Claude Code's own permission prompts in a sandbox: `skip` or `ask`. |
-| `images.claude_code_version` · `images.pi_version` | `latest` | The agent version an image is prepared with. |
+| `images.claude_code_version` · `images.pi_version` · `images.codex_version` | `latest` | The agent version an image is prepared with. |
 | `sandbox.agent_sudo` | `true` | The agent's passwordless sudo. Per sandbox too. |
 | `agent.prompt` | `true` | Give the agent its facts block and the `dozer` skill. |
 | `ui.allow_secret_entry` | `true` | The dashboard may take a key or token. |
