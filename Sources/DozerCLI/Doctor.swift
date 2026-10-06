@@ -109,7 +109,7 @@ struct Doctor: AsyncParsableCommand {
         }
         // 594 W28: an agent image an older doz made, or a newer agent release — said, never rebuilt by itself.
         let settings = DozerSettings.load()
-        for image in ["claude-code", "pi"] {
+        for image in ["claude-code", "pi", "codex"] {
             let s = AgentVersions.standing(image, store: store, settings: settings)
             guard s.version != nil else { continue }
             var parts: [String] = []
@@ -207,11 +207,13 @@ struct Doctor: AsyncParsableCommand {
             }
         }
         let rows = accounts.accounts.map { a -> String in
-            var s = a.name + (accounts.defaultAccount == a.name ? " (default)" : "")
+            var s = a.name + (accounts.defaultAccount == a.name || accounts.openaiDefault == a.name ? " (default)" : "")
             switch a.kind {
             case .mac: s += a.configDir.map { " (Mac login, \($0))" } ?? ""
             case .setupToken: s += " (setup-token" + (a.expiresAt.map { ", expires \($0.formatted(date: .abbreviated, time: .omitted))" } ?? "") + ")"
             case .apiKey: s += " (api-key)"
+            case .openaiKey: s += " (openai-key)"
+            case .chatgpt: s += " (chatgpt" + (a.plan.map { ", \($0)" } ?? "") + ")"
             }
             return s
         }

@@ -327,7 +327,7 @@ public enum WebAction: Equatable, Sendable {
             // 596 (B6): a Dockerfile base — an absolute path (the host checks the file); the image then
             // only carries the agent (claude-code, pi or lab = none).
             if let df = try f.dockerfile("dockerfile") {
-                guard ["claude-code", "pi", "lab"].contains(o.image) else { throw Invalid("dockerfile: goes with image claude-code, pi or lab (the agent)") }
+                guard ["claude-code", "pi", "codex", "lab"].contains(o.image) else { throw Invalid("dockerfile: goes with image claude-code, pi, codex or lab (the agent)") }
                 o.dockerfile = df
             }
             guard !(o.isolated == true && o.workspace != nil) else { throw Invalid("isolated: or a workspace, not both") }
@@ -366,7 +366,7 @@ public enum WebAction: Equatable, Sendable {
         case "image-bake":
             // 596: any base × agent image (python-claude-code, go, df-…-pi) — by its canonical name.
             let i = try f.image("image")
-            guard ["lab", "claude-code", "pi"].contains(i) || ImageChoice.parse(i)?.name == i else {
+            guard ["lab", "claude-code", "pi", "codex"].contains(i) || ImageChoice.parse(i)?.name == i else {
                 throw Invalid("image: lab, claude-code, pi or a base × agent image")
             }
             a = .imageBake(i)

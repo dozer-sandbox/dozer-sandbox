@@ -269,26 +269,163 @@ public enum AgentImages {
         switch ImageChoice.parse(image)?.agent {
         case .claudeCode?: [AgentCredentialSupport(provider: "anthropic", accountKinds: ["mac", "setup-token", "api-key"])]
         case .pi?: [AgentCredentialSupport(provider: "anthropic", accountKinds: ["api-key"])]
+        // 599i: Codex — OpenAI only: Dozer's own ChatGPT sign-in, or an OpenAI API key.
+        case .codex?: [AgentCredentialSupport(provider: "openai", accountKinds: ["chatgpt", "openai-key"])]
         default: nil
         }
     }
 
     /// The agent's name as a person reads it (596: any image of that agent).
     public static func agentName(_ image: String) -> String? {
-        switch ImageChoice.parse(image)?.agent { case .claudeCode?: "Claude Code"; case .pi?: "pi"; default: nil }
+        switch ImageChoice.parse(image)?.agent { case .claudeCode?: "Claude Code"; case .pi?: "pi"; case .codex?: "Codex"; default: nil }
     }
 
     /// The npm package of an agent image (nil: not an agent image).
     public static func package(_ image: String) -> String? {
-        switch image { case "claude-code": claudeCodePackage; case "pi": piPackage; default: nil }
+        switch image { case "claude-code": claudeCodePackage; case "pi": piPackage; case "codex": codexPackage; default: nil }
     }
     public static func pinned(_ image: String) -> AgentRelease? {
-        switch image { case "claude-code": claudeCodePinned; case "pi": piPinned; default: nil }
+        switch image { case "claude-code": claudeCodePinned; case "pi": piPinned; case "codex": codexPinned; default: nil }
     }
     /// The agent image's spec at `release`.
     public static func spec(_ image: String, release: AgentRelease) -> ImageSpec? {
-        switch image { case "claude-code": claudeCode(release); case "pi": pi(release); default: nil }
+        switch image {
+        case "claude-code": claudeCode(release)
+        case "pi": pi(release)
+        case "codex": try? ImageComposer.spec(name: "codex", base: BaseCatalogue.base("node")!.source(), agent: .codex, release: release, native: nil)
+        default: nil
+        }
     }
+
+    // MARK: 599i — Codex
+
+    /// 599i: the OpenAI Codex CLI. Its npm package is a Node wrapper; the program is the linux-arm64
+    /// platform package (a static musl binary), which Dozer installs directly on every base.
+    public static let codexPackage = "@openai/codex"
+    /// 599i: Codex 0.160.1 — the version installed on the owner's Mac at the probe (2026-10-06). The
+    /// integrity is the LINUX-ARM64 platform tarball's (`@openai/codex@0.160.1-linux-arm64`), the one
+    /// a bake downloads; the version is the main package's.
+    public static let codexPinned = AgentRelease(version: "0.160.1",
+        integrity: "sha512-JLyjBlmjPvwTaicHemw+y5xQSz3Uja2r7F/xkvS8gFufTA2g132Ak+0fo35xnJ/k2uc9fTtjm0LrsEGI78L6Ng==")
+    /// The platform package's version for a Codex version (`0.160.1-linux-arm64`).
+    public static func codexPlatformVersion(_ version: String) -> String { version + "-linux-arm64" }
+
+    /// 599i: Codex from the registry's linux-arm64 tarball, its sha512 checked against `r.integrity`
+    /// (resolved on the Mac — in the script, so in the bake key), unpacked under /opt/codex; on a musl base
+    /// the bundled glibc `rg` is removed so the baseline's ripgrep is used. The check line has npm installs'
+    /// shape, so `ImageComposer.npmIntegrity` reads it back.
+    static func codexInstall(_ r: AgentRelease) -> BakeStep {
+        let pv = codexPlatformVersion(r.version)
+        return BakeStep.script("install Codex \(r.version) (linux-arm64, integrity-pinned)", """
+            cd "$(mktemp -d)"
+            curl -fsSL --retry 3 -o codex.tgz 'https://registry.npmjs.org/\(codexPackage)/-/codex-\(pv).tgz'
+            got="sha512-$(python3 -c 'h=__import__("hashlib").sha512(open(__import__("sys").argv[1],"rb").read()).digest(); print(__import__("base64").b64encode(h).decode(), end="")' codex.tgz)"
+            [ "$got" = '\(r.integrity)' ] || { echo "integrity mismatch for \(codexPackage)@\(pv): $got" >&2; exit 1; }
+            tar -xzf codex.tgz
+            rm -rf /opt/codex
+            mv package /opt/codex
+            chown -R root:root /opt/codex
+            t=/opt/codex/vendor/aarch64-unknown-linux-musl
+            test -x "$t/bin/codex"
+            if [ -e /lib/ld-musl-aarch64.so.1 ]; then rm -f "$t/codex-path/rg"; fi
+            ln -sf "$t/bin/codex" /usr/local/bin/codex
+            rm -f codex.tgz
+            echo "Codex \(r.version) (linux-arm64) installed under /opt/codex"
+            """)
+    }
+
+    /// 599i: Codex in a sandbox starts ready to work, like Claude Code (585): `~/.local/bin/codex` (first on
+    /// the agent's PATH) marks the working folder trusted in `$CODEX_HOME/config.toml` (only when the folder
+    /// has no entry — a person's own choice is kept), then runs `/usr/local/bin/codex` with
+    /// `--dangerously-bypass-approvals-and-sandbox` (the VM, the proxy and the vault are the boundary, so
+    /// its approvals and its own Linux sandbox only get in the way), the update check off, its credentials
+    /// read from auth.json (which the host writes — placeholders only), and the sandbox's facts as a developer
+    /// message. `DOZ_CODEX_PERMISSIONS=ask` (the setting codex.permissions) and root keep its approvals.
+    static let codexLauncher = BakeStep.script("install the doz codex launcher", codexLauncherScript, needsNetworkFalse: ())
+
+    static let codexLauncherScript = """
+        mkdir -p /usr/local/lib/dozer /home/agent/.local/bin
+        cat > /usr/local/lib/dozer/codex-setup.py <<'PY'
+        \(codexSetupPython)
+        PY
+        cat > /home/agent/.local/bin/codex <<'SH'
+        #!/bin/sh
+        # doz: Codex with its first-run setup done and, by default, its approvals and own sandbox off.
+        mode=skip
+        [ "${DOZ_CODEX_PERMISSIONS:-skip}" = ask ] && mode=ask
+        [ "$(id -u)" = 0 ] && mode=ask
+        # The host writes the credentials (placeholders) and the facts at every session start.
+        common="-c check_for_update_on_startup=false -c cli_auth_credentials_store=file"
+        p=/run/dozer/agent-prompt.md
+        dev=
+        if [ -s "$p" ]; then
+          case " $* " in
+            *developer_instructions*) ;;
+            *) dev=$(python3 /usr/local/lib/dozer/codex-setup.py prompt "$p") || dev= ;;
+          esac
+        fi
+        trust() { python3 /usr/local/lib/dozer/codex-setup.py trust || echo "doz: could not pre-seed Codex's setup" >&2; }
+        agent() {
+          trust
+          if [ "$mode" = skip ]; then
+            set -- --dangerously-bypass-approvals-and-sandbox -c notice.hide_full_access_warning=true "$@"
+          fi
+          if [ -n "$dev" ]; then set -- -c "developer_instructions=$dev" "$@"; fi
+          # shellcheck disable=SC2086
+          exec /usr/local/bin/codex $common "$@"
+        }
+        case "$1" in
+          exec|e|resume|fork)
+            sub=$1; shift
+            trust
+            if [ "$mode" = skip ]; then set -- --dangerously-bypass-approvals-and-sandbox "$@"; fi
+            if [ -n "$dev" ]; then set -- -c "developer_instructions=$dev" "$@"; fi
+            # shellcheck disable=SC2086
+            exec /usr/local/bin/codex $common "$sub" "$@" ;;
+          review)
+            trust
+            # shellcheck disable=SC2086
+            exec /usr/local/bin/codex $common "$@" ;;
+          agents|login|logout|mcp|plugin|app-server|remote-control|app|completion|update|doctor|sandbox|debug|apply|a|queue|archive|delete|migrate-rollouts|unarchive|cloud|exec-server|features|help|--help|-h|--version|-V)
+            exec /usr/local/bin/codex "$@" ;;
+          *) agent "$@" ;;
+        esac
+        SH
+        chmod 0755 /home/agent/.local/bin/codex /usr/local/lib/dozer
+        chmod 0644 /usr/local/lib/dozer/codex-setup.py
+        chown -R agent:agent /home/agent/.local
+        """
+
+    /// 599i: the launcher's helper (python3 — every base's baseline has it): `trust` marks the working
+    /// folder trusted in `$CODEX_HOME/config.toml` when it has no entry there (appended; a config Dozer cannot
+    /// read is left alone); `prompt FILE` prints the file as a TOML basic string for `-c developer_instructions=`.
+    static let codexSetupPython = #"""
+        json, os, sys = __import__('json'), __import__('os'), __import__('sys')   # (no line starts with an import: the audit reads Swift's)
+        def toml_string(text):
+            return json.dumps(text.replace('\x7f', ''), ensure_ascii=False)
+        if len(sys.argv) > 2 and sys.argv[1] == 'prompt':
+            with open(sys.argv[2], encoding='utf-8', errors='replace') as h: text = h.read().strip()
+            if text: sys.stdout.write(toml_string(text))
+            sys.exit(0)
+        home = os.environ.get('CODEX_HOME') or os.path.join(os.environ['HOME'], '.codex')
+        os.makedirs(home, exist_ok=True)
+        f = os.path.join(home, 'config.toml')
+        cwd = os.getcwd()
+        try:
+            with open(f, encoding='utf-8') as h: text = h.read()
+        except FileNotFoundError:
+            text = ''
+        try:
+            cfg = __import__('tomllib').loads(text)
+        except Exception:
+            sys.exit(0)
+        if cwd in (cfg.get('projects') or {}):
+            sys.exit(0)
+        add = ('' if text.endswith('\n') or not text else '\n') + '\n[projects.' + toml_string(cwd) + ']\ntrust_level = "trusted"\n'
+        t = f + '.doz-tmp'
+        with os.fdopen(os.open(t, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), 'w', encoding='utf-8') as h: h.write(text + add)
+        os.replace(t, f)
+        """#
 
     /// The imageSpecs' digest-pinned Debian `node` base (glibc).
     public static let nodeBase = "docker.io/library/node@sha256:d649c27dae7ba0137b3cef5dd75baa422c08dc3d9e3fc0c23dfb172dc3cc6436"

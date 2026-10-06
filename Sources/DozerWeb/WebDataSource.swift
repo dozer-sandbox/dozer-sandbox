@@ -196,7 +196,7 @@ public final class HostWebData: DozerWebData, @unchecked Sendable {
         let file = AccountStore(store: store, settings: .load()).load()
         // 594 W6: what each agent image WILL install (the hourly cache; "latest" when never asked).
         let settings = DozerSettings.load()
-        let versions = Dictionary(uniqueKeysWithValues: ["claude-code", "pi"].compactMap { i in
+        let versions = Dictionary(uniqueKeysWithValues: ["claude-code", "pi", "codex"].compactMap { i in
             Onboarding.agentVersionText(i, store: store, settings: settings).map { (i, $0) } })
         return WebOnboarding(status: status, checks: checks, freeBytes: Onboarding.volume(of: store)?.free, macSignedIn: signedIn,
                              defaultAccount: file.defaultAccount, versions: versions)
@@ -422,7 +422,8 @@ public final class HostWebData: DozerWebData, @unchecked Sendable {
     public func accounts() async throws -> WebAccounts {
         let rows = try await query(HostRequest(.accountList)).0.decode([AccountRow].self)
         let file = AccountStore(store: store, settings: .load()).load()
-        return WebAccounts(accounts: rows.map(WebAccount.init), defaultAccount: file.defaultAccount, keepalive: file.keepalive)
+        return WebAccounts(accounts: rows.map(WebAccount.init), defaultAccount: file.defaultAccount, keepalive: file.keepalive,
+                           openaiDefault: file.openaiDefault)
     }
 
     public func metrics(_ q: WebMetricsQuery) async throws -> WebMetrics {
@@ -461,8 +462,9 @@ public final class HostWebData: DozerWebData, @unchecked Sendable {
         guard let live = d.policy else { throw HostError(.invalid, "\(name) is not proxied (network \(d.info.network)) — it has no policy") }
         // `before` without the strict sign-in block, like `after`: the host re-derives that block.
         let base = d.info.base.flatMap { BaseCatalogue.base($0) != nil ? $0 : nil }
-        let before = try HostCore.editedPolicy(live, HostRequest(.netPolicy, name: name), base: base)
-        return WebPolicyPreview(before: before, after: try HostCore.editedPolicy(live, edit.request(name), base: base))
+        let agent = ImageChoice.parse(d.info.image)?.agent        // 599i: Codex keeps "Talk to OpenAI"
+        let before = try HostCore.editedPolicy(live, HostRequest(.netPolicy, name: name), base: base, agent: agent)
+        return WebPolicyPreview(before: before, after: try HostCore.editedPolicy(live, edit.request(name), base: base, agent: agent))
     }
 
     public func openTerminal(_ name: String, session: String?) async throws -> String {

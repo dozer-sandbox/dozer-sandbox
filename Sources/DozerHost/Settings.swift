@@ -357,8 +357,11 @@ public enum SettingKey {
     /// image is prepared with — `latest` (resolved at preparation time) or an exact one.
     public static let claudeCodeVersion = "images.claude_code_version"
     public static let piVersion = "images.pi_version"
+    /// 599i: Codex — its version, and whether its approvals and own sandbox are skipped (the VM is the sandbox).
+    public static let codexVersion = "images.codex_version"
+    public static let codexPermissions = "codex.permissions"
     public static func agentVersion(_ image: String) -> String? {
-        switch image { case "claude-code": claudeCodeVersion; case "pi": piVersion; default: nil }
+        switch image { case "claude-code": claudeCodeVersion; case "pi": piVersion; case "codex": codexVersion; default: nil }
     }
 }
 
@@ -430,13 +433,16 @@ public struct DozerSettings: Sendable {
             .init("claude", "permissions", .choice(["skip", "ask"]), .string("skip"),
                   "Claude Code in a claude-code sandbox: skip its permission prompts (the sandbox is the boundary), or ask as on a Mac.",
                   flag: "-e DOZ_CLAUDE_PERMISSIONS=… on run/exec", applies: .nextSession),
+            .init("codex", "permissions", .choice(["skip", "ask"]), .string("skip"),
+                  "Codex in a codex sandbox: skip its approvals and its own Linux sandbox (the VM is the boundary), or ask as on a Mac.",
+                  flag: "-e DOZ_CODEX_PERMISSIONS=… on run/exec", applies: .nextSession),
             .init("defaults", "cpus", .int(1...64), .int(2),
                   "CPUs of a new sandbox.",
                   flag: "doz create --cpus", applies: .nextCreate),
             .init("defaults", "nat_subnet", .subnet, .string(""),
                   "The vmnet subnet of a new --network nat sandbox.",
                   env: "DOZ_SUBNET", flag: "doz create --subnet", applies: .nextCreate),
-            .init("defaults", "image", .choice(["lab", "claude-code", "pi"]), .string("lab"),
+            .init("defaults", "image", .choice(["lab", "claude-code", "pi", "codex"]), .string("lab"),
                   "The image of a new sandbox when none is named (doz up NAME, doz init, the UI's New sandbox). doz onboard writes the one you chose.",
                   flag: "doz create --image", applies: .nextCreate),
             .init("defaults", "projects_dir", .path, .string("~/Developer/dozer-sandbox-projects"),
@@ -495,7 +501,10 @@ public struct DozerSettings: Sendable {
         s.append(.init("images", "pi_version", .version, .string("latest"),
                        "The pi coding agent the pi image is prepared with: latest or an exact version, as images.claude_code_version.",
                        applies: .nextCreate))
-        for (image, memory, network) in [("lab", 1024, "bake"), ("claude-code", 2048, "agent"), ("pi", 2048, "agent")] {
+        s.append(.init("images", "codex_version", .version, .string("latest"),
+                       "The OpenAI Codex CLI the codex image (and every base's Codex image) is prepared with: latest or an exact version like 0.160.1, as images.claude_code_version.",
+                       applies: .nextCreate))
+        for (image, memory, network) in [("lab", 1024, "bake"), ("claude-code", 2048, "agent"), ("pi", 2048, "agent"), ("codex", 2048, "agent")] {
             s.append(.init("images.\(image)", "memory_mib", .int(256...262_144), .int(memory),
                            "Memory (MiB) of a new \(image) sandbox (a custom image follows the image it was saved from).",
                            flag: "doz create --memory", applies: .nextCreate))
@@ -670,7 +679,8 @@ public struct DozerSettings: Sendable {
         case nil: "lab"
         case "claude-code": "claude-code"
         case "pi": "pi"
-        case let n?: ImageChoice.parse(n)?.agent == .pi ? "pi" : "claude-code"
+        case "codex": "codex"
+        case let n?: ImageChoice.parse(n)?.agent == .pi ? "pi" : ImageChoice.parse(n)?.agent == .codex ? "codex" : "claude-code"
         }
     }
 

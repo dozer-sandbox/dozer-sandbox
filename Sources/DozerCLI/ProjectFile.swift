@@ -84,12 +84,12 @@ extension DozerProject {
             case "image":
                 let s = try scalarString(v, key)
                 guard s.range(of: "^(custom:)?[a-z0-9][a-z0-9-]{0,39}$", options: .regularExpression) != nil else {
-                    throw bad(v, "image: claude-code, pi, lab, a base × agent image or a template's name (a Dockerfile: dockerfile: ./Dockerfile)")
+                    throw bad(v, "image: claude-code, pi, codex, lab, a base × agent image or a template's name (a Dockerfile: dockerfile: ./Dockerfile)")
                 }
                 image = s
             case "agent":
                 let s = try scalarString(v, key)
-                guard ["claude-code", "pi", "none"].contains(s) else { throw bad(v, "agent: claude-code, pi or none") }
+                guard ["claude-code", "pi", "codex", "none"].contains(s) else { throw bad(v, "agent: claude-code, pi, codex or none") }
                 p.agent = s
             case "base":
                 let s = try scalarString(v, key)
@@ -194,7 +194,7 @@ extension DozerProject {
         if image != nil, chosen { throw bad(root, "image, or agent/base/dockerfile — not both") }
         if p.base != nil, p.dockerfile != nil { throw bad(root, "base or dockerfile — not both") }
         guard let image = image ?? (chosen ? p.chosenImage : nil) else {
-            throw bad(root, "image is required (claude-code, pi, lab or a template) — or agent with base or dockerfile")
+            throw bad(root, "image is required (claude-code, pi, codex, lab or a template) — or agent with base or dockerfile")
         }
         p.name = name
         p.image = image

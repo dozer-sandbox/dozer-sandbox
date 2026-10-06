@@ -341,8 +341,8 @@ public struct WebOnboardingConfig: Equatable, Sendable {
         guard Set(d.keys).isSuperset(of: ["defaultImage", "account"]), Set(d.keys).isSubset(of: ["defaultImage", "account", "access", "ignoreMode"]) else {
             throw WebAction.Invalid("exactly defaultImage and account (and access, ignoreMode)")
         }
-        guard let i = d["defaultImage"] as? String, ["lab", "claude-code", "pi"].contains(i) else {
-            throw WebAction.Invalid("defaultImage: lab, claude-code or pi")
+        guard let i = d["defaultImage"] as? String, ["lab", "claude-code", "pi", "codex"].contains(i) else {
+            throw WebAction.Invalid("defaultImage: lab, claude-code, pi or codex")
         }
         guard let a = d["account"] as? String, Onboarding.Account(rawValue: a) != nil else {
             throw WebAction.Invalid("account: \(Onboarding.Account.allCases.map(\.rawValue).joined(separator: ", "))")

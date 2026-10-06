@@ -5,10 +5,10 @@ import DozerHost
 
 /// What `create` and `up` take to make a sandbox.
 struct CreateArguments: ParsableArguments {
-    @Option(name: .long, help: "lab (Alpine + bash), claude-code, pi, a base × agent image (python-claude-code, go, …), or a template (doz image ls). Shorthand for --agent/--base.")
+    @Option(name: .long, help: "lab (Alpine + bash), claude-code, pi, codex, a base × agent image (python-claude-code, go-codex, go, …), or a template (doz image ls). Shorthand for --agent/--base.")
     var image: String?
 
-    @Option(name: .long, help: "The agent — claude-code, pi or none (a shell only). Default claude-code.")
+    @Option(name: .long, help: "The agent — claude-code, pi, codex (OpenAI Codex) or none (a shell only). Default claude-code.")
     var agent: String?
 
     @Option(name: .long, help: "A recommended base (doz base ls): node, python, go, rust, java, ruby, dotnet, debian, ubuntu, alpine. Default node.")
@@ -91,8 +91,9 @@ struct CreateArguments: ParsableArguments {
         switch agent ?? "claude-code" {
         case "claude-code", "claude": a = .claudeCode
         case "pi": a = .pi
+        case "codex": a = .codex
         case "none", "shell": a = .none
-        case let x: throw ValidationError("--agent: claude-code, pi or none — not \(x)")
+        case let x: throw ValidationError("--agent: claude-code, pi, codex or none — not \(x)")
         }
         if dockerfile != nil {
             guard base == nil else { throw ValidationError("--base or --dockerfile — not both") }
@@ -116,7 +117,7 @@ struct CreateArguments: ParsableArguments {
 
     func options(defaultImage: String? = nil) throws -> CreateOptions {
         guard let img = try chosenImage() ?? image ?? defaultImage else {
-            throw ValidationError("--image (or --agent/--base/--dockerfile) is required: lab, claude-code, pi, a base × agent image or a template")
+            throw ValidationError("--image (or --agent/--base/--dockerfile) is required: lab, claude-code, pi, codex, a base × agent image or a template")
         }
         var mem: UInt64?
         if let m = memory {

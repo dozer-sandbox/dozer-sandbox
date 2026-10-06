@@ -18,9 +18,24 @@ public enum AccountKind: String, Codable, Sendable, CaseIterable {
     case mac
     case setupToken = "setup-token"
     case apiKey = "api-key"
+    /// 599i: an OpenAI API key (`doz-openai:NAME`) — Codex.
+    case openaiKey = "openai-key"
+    /// 599i: a ChatGPT plan through Dozer's OWN sign-in on this Mac (`doz account add NAME --chatgpt`):
+    /// the tokens in `doz-chatgpt:NAME`, refreshed by the host — never the Mac's own ~/.codex login.
+    case chatgpt
 
     /// The vault binding its secret goes in.
-    public var binding: CredentialBinding { self == .apiKey ? .anthropic : .claudeOAuth }
+    public var binding: CredentialBinding {
+        switch self {
+        case .apiKey: .anthropic
+        case .mac, .setupToken: .claudeOAuth
+        case .openaiKey: .openai
+        case .chatgpt: .chatgpt
+        }
+    }
+
+    /// 599i: whose credential it is — `anthropic` (Claude Code, pi) or `openai` (Codex).
+    public var provider: String { self == .openaiKey || self == .chatgpt ? "openai" : "anthropic" }
 }
 
 public struct AccountRecord: Codable, Equatable, Sendable {
@@ -44,6 +59,9 @@ public struct AccountRecord: Codable, Equatable, Sendable {
     public var verifiedAt: Date?
     /// `verified`, `rejected: …`, `unverified: …`.
     public var verification: String?
+    /// 599i: a ChatGPT sign-in's email and account id (from its id_token's claims) — not secrets.
+    public var email: String?
+    public var accountID: String?
 
     public init(name: String, kind: AccountKind, keychainService: String? = nil, adopted: Bool? = nil, configDir: String? = nil,
                 plan: String? = nil, tier: String? = nil, identity: ClaudeIdentity? = nil, fingerprint: String? = nil,
@@ -74,8 +92,16 @@ public struct AccountsFile: Codable, Equatable, Sendable {
     /// D3: run the Mac's own `claude` near expiry while a sandbox uses the Mac login (off by default).
     public var keepalive: Bool = false
     public var accounts: [AccountRecord] = []
+    /// 599i: the OpenAI account Codex sandboxes that follow the default use (nil: none — never an
+    /// Anthropic account). `doz account default NAME` with an OpenAI account sets it.
+    public var openaiDefault: String?
 
     public init() {}
+
+    /// 599i: the default account that applies to a sandbox of `image` (Codex: the OpenAI one).
+    public func defaultAccount(for image: String?) -> String {
+        AgentCredentials.defaultAccount(for: image, anthropic: defaultAccount, openai: openaiDefault)
+    }
 }
 
 /// `<store>/accounts.json`.
@@ -102,6 +128,9 @@ public struct AccountStore: Sendable {
     public static let reserved: Set<String> = ["default", "none"]
     public static let setupTokenPrefix = "doz-claude:"
     public static let apiKeyPrefix = "doz-anthropic:"
+    /// 599i: an OpenAI API key, and a ChatGPT sign-in's tokens (a JSON document, never on disk).
+    public static let openaiKeyPrefix = "doz-openai:"
+    public static let chatgptPrefix = "doz-chatgpt:"
     /// A setup token lives one year (`claude setup-token`: 31 536 000 s).
     public static let setupTokenLifetime: TimeInterval = 31_536_000
 
@@ -208,6 +237,18 @@ public struct AnthropicVerifier: AccountVerifying {
     public init() {}
 
     public func verify(kind: AccountKind, secret: String) async -> AccountVerification {
+        // 599i: an OpenAI key — one GET api.openai.com/v1/models (over the proxy's leg; the test seam's CA in tests).
+        if kind == .openaiKey {
+            let override = OpenAISeam.upstream()
+            return await Task.detached {
+                switch OpenAIAccess.checkKey(secret, override: override) {
+                case .success(true): return AccountVerification.verified
+                case .success(false): return .rejected("HTTP 401")
+                case .failure(let f): return .unavailable(f.reason)
+                }
+            }.value
+        }
+        if kind == .chatgpt { return .verified }
         var req = URLRequest(url: URL(string: "https://api.anthropic.com/v1/messages")!)
         req.httpMethod = "POST"
         req.timeoutInterval = 30

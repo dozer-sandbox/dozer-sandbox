@@ -76,7 +76,7 @@ public enum PermissionPolicy {
         if let names = p.permissions { return (names, p.rules) }
         var names: [String] = []
         // 599d: never inferred — the user's GitHub login is only ever on because it was switched on by name.
-        for perm in AgentPermissions.all where perm.id != "web" && perm.group != "github" {
+        for perm in AgentPermissions.all where perm.id != "web" && perm.group != "github" && !AgentPermissions.isAgentModel(perm.id) {
             let covered = perm.hosts.allSatisfy { h in
                 let host = h.host.hasPrefix("*.") ? "x" + h.host.dropFirst(1) : h.host
                 return p.evaluateConnection(host: host, port: h.ports?.first ?? 443).kind != .deny
@@ -100,7 +100,9 @@ public enum PermissionPolicy {
 
     /// P6: grants and revokes — permission ids, or `site:HOST` (allowed first; revoked = denied).
     /// "model" cannot be revoked (the agent could not work). The preset is re-derived for `base`.
-    public static func edited(_ current: NetworkPolicy, grant: [String], revoke: [String], base: String?) throws -> NetworkPolicy {
+    /// 599i: `agent` — the sandbox's agent: its own model permission ("Talk to OpenAI" for Codex) is kept
+    /// and cannot be revoked.
+    public static func edited(_ current: NetworkPolicy, grant: [String], revoke: [String], base: String?, agent: AgentKind? = nil) throws -> NetworkPolicy {
         var p = asPermissions(current, base: base)
         var names = Set(p.permissions ?? [])
         for g in grant {
@@ -129,10 +131,13 @@ public enum PermissionPolicy {
             } else {
                 guard let perm = AgentPermissions.permission(r) else { throw HostError(.invalid, "no permission \(r) — doz net permissions lists them (or site:HOST)") }
                 guard !perm.locked else { throw HostError(.invalid, "\(perm.title) cannot be switched off — the agent needs it to work (use --network locked for nothing else)") }
+                guard !AgentPermissions.agentPermissions(agent).contains(r) else {
+                    throw HostError(.invalid, "\(perm.title) cannot be switched off — \(agent?.title ?? "the agent") needs it to work")
+                }
                 names.remove(r)
             }
         }
-        let n = AgentPermissions.normalized(Array(names))
+        let n = AgentPermissions.normalized(Array(names) + AgentPermissions.agentPermissions(agent))
         p.permissions = n
         p.preset = p.rules.isEmpty ? AgentPermissions.presetName(n, base: base) : nil
         return p
@@ -150,10 +155,12 @@ public enum PermissionPolicy {
         let inferredMode = policy.permissions == nil
         let (names, own) = inferred(policy)
         let standard = Set(AgentPermissions.preset("agent", base: base) ?? [])
-        let rows = AgentPermissions.all.map { p in
-            PermissionRow(id: p.id, title: p.title, summary: p.summary, on: names.contains(p.id), locked: p.locked, warning: p.warning,
+        // 599i: an agent's own model permission is listed only where it is on (a Codex sandbox).
+        let rows = AgentPermissions.all.filter { !AgentPermissions.isAgentModel($0.id) || names.contains($0.id) }.map { p in
+            PermissionRow(id: p.id, title: p.title, summary: p.summary, on: names.contains(p.id),
+                          locked: p.locked || AgentPermissions.isAgentModel(p.id), warning: p.warning,
                           group: p.group, hosts: p.hosts.map { h in h.host + (h.pathPrefixes != nil ? " (the agent's own package)" : "") },
-                          standard: standard.contains(p.id))
+                          standard: standard.contains(p.id) || AgentPermissions.isAgentModel(p.id))
         }
         var tmp = policy
         tmp.permissions = names
@@ -186,7 +193,7 @@ public enum PermissionPolicy {
     public static func facts(_ policy: NetworkPolicy, sandbox: String) -> String {
         let (names, own) = inferred(policy)
         let on = AgentPermissions.all.filter { names.contains($0.id) }.map(\.phrase)
-        let off = AgentPermissions.all.filter { !names.contains($0.id) }
+        let off = AgentPermissions.all.filter { !names.contains($0.id) && !AgentPermissions.isAgentModel($0.id) }
         var s = "You may " + list(on) + "."
         let sites = own.filter { $0.action == .allow && !$0.hasHTTPConditions }.map(\.host)
         if !sites.isEmpty { s += " Sites the user allowed: " + sites.prefix(20).joined(separator: ", ") + "." }

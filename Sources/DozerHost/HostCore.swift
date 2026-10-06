@@ -43,6 +43,8 @@ public actor HostCore {
     public nonisolated let accountStore: AccountStore
     nonisolated let services: CredentialServices
     var watchers: [String: LoginWatcher] = [:]
+    /// 599i: one session per ChatGPT account (its sandboxes share it).
+    var chatgptSessions: [String: ChatGPTSession] = [:]
 
     /// Actor-confined: one per sandbox.
     final class Managed {
@@ -797,7 +799,8 @@ public actor HostCore {
         // 594: the agent's credential prerequisite, before anything is made (pi: an API-key account).
         if spec.network.policy != nil {
             let (def, kinds) = accountKinds()
-            if let p = AgentCredentials.createProblem(image: spec.imageSpec?.name, account: o.account, defaultAccount: def, kinds: kinds) {
+            if let p = AgentCredentials.createProblem(image: spec.imageSpec?.name, account: o.account, defaultAccount: def, kinds: kinds,
+                                                      openaiDefault: openaiDefault()) {
                 throw HostError(.invalid, p)
             }
         }
@@ -1283,6 +1286,13 @@ public actor HostCore {
     /// (`skip`), and never over the caller's own `-e DOZ_CLAUDE_PERMISSIONS=…`.
     static func withClaudePermissions(_ env: [String: String], imageSpec: String?,
                                       settings: @autoclosure () -> DozerSettings = .load()) -> [String: String] {
+        // 599i: Codex's launcher reads DOZ_CODEX_PERMISSIONS (the setting codex.permissions) the same way.
+        if imageSpec.flatMap({ ImageChoice.parse($0) })?.agent == .codex {
+            guard env["DOZ_CODEX_PERMISSIONS"] == nil, let mode = settings().string(SettingKey.codexPermissions), mode != "skip" else { return env }
+            var e = env
+            e["DOZ_CODEX_PERMISSIONS"] = mode
+            return e
+        }
         guard imageSpec.flatMap({ ImageChoice.parse($0) })?.agent == .claudeCode, env["DOZ_CLAUDE_PERMISSIONS"] == nil else { return env }
         guard let mode = settings().string(SettingKey.claudePermissions), mode != "skip" else { return env }
         var e = env
@@ -1373,6 +1383,8 @@ public actor HostCore {
                 argv += ["--append-system-prompt", AgentPrompt.guestPromptPath]
             }
         }
+        // 599i: Codex's credentials for this session — its auth.json with placeholders only (or none).
+        await deliverCodexAuth(m)
         let size = TermSize(cols: r.cols ?? 120, rows: r.rows ?? 36)
         let workdir: String? = m.config.spec.imageSpec == nil && m.config.workspace != nil ? DozerImages.workspaceGuestPath : nil
         // A command the caller named (doz run NAME -- CMD, the dashboard's "run a command"): a program the
@@ -1420,6 +1432,8 @@ public actor HostCore {
         guard let argv = r.argv, !argv.isEmpty else { throw HostError(.invalid, "exec needs a command (doz exec NAME -- CMD…)") }
         // 594 W27: an off sandbox is cold-started first when the caller asks (`doz exec` does).
         let first = try await ensureRunning(m, wake: r.wake ?? true, start: r.start ?? false, emit: emit)
+        // 599i: `doz exec NAME -- codex exec …` works before any session has run (its auth.json, placeholders only).
+        if m.config.imageChoice?.agent == .codex, (argv.first as NSString?)?.lastPathComponent == "codex" { await deliverCodexAuth(m) }
         let ctx = Self.execContext(config: m.config, environment: Self.withClaudePermissions(r.environment ?? [:], imageSpec: m.config.spec.imageSpec?.name),
                                    workdir: r.workdir, user: r.user)
         let t0 = ContinuousClock.now
@@ -1684,7 +1698,7 @@ public actor HostCore {
             var mode = try DozerImages.networkMode(net)
             // 597: locked / agent / open are permissions (for the source's base); nothing given = copied.
             if case .proxied(let p) = mode, let preset = p.preset, let names = AgentPermissions.preset(preset, base: PermissionPolicy.base(of: m.config)) {
-                mode = .proxied(.permissions(names, preset: preset))
+                mode = .proxied(.permissions(names + AgentPermissions.agentPermissions(m.config.imageChoice?.agent), preset: preset))
             }
             let wasNAT = spec.network == .nat
             spec.network = mode
@@ -1710,7 +1724,8 @@ public actor HostCore {
             }
             // 594: the agent's credential prerequisite (a duplicate keeps the source's account unless told).
             let (def, kinds) = accountKinds()
-            if let p = AgentCredentials.createProblem(image: spec.imageSpec?.name, account: o.account ?? cfg.account ?? "none", defaultAccount: def, kinds: kinds) {
+            if let p = AgentCredentials.createProblem(image: spec.imageSpec?.name, account: o.account ?? cfg.account ?? "none", defaultAccount: def, kinds: kinds,
+                                                      openaiDefault: openaiDefault()) {
                 throw HostError(.invalid, p)
             }
         } else {
@@ -1869,7 +1884,8 @@ public actor HostCore {
     /// What a `net-policy` change makes of `current` (the live policy): the preset, removals, denies,
     /// allows, in that order — the policy that is kept (without the strict sign-in block, which is
     /// re-derived). Pure, so `doz ui`'s preview (590) shows exactly what the change will do.
-    public static func editedPolicy(_ current: NetworkPolicy, _ r: HostRequest, base: String? = nil) throws -> NetworkPolicy {
+    /// 599i: `agent` — the sandbox's agent (Codex keeps "Talk to OpenAI" through every edit).
+    public static func editedPolicy(_ current: NetworkPolicy, _ r: HostRequest, base: String? = nil, agent: AgentKind? = nil) throws -> NetworkPolicy {
         var p = withoutSignInBlock(current)
         if let preset = r.preset {
             // 597 (P2): locked / agent (Standard) / open are sets of permissions (for the sandbox's base);
@@ -1877,7 +1893,7 @@ public actor HostCore {
             if let names = AgentPermissions.preset(preset == "standard" ? "agent" : preset, base: base) {
                 // 599d: the user's GitHub login is beside the preset — choosing a preset keeps it as it was.
                 let identity = (p.permissions ?? []).filter { $0 == AgentPermissions.gitHubAsYou || $0 == AgentPermissions.gitHubPush }
-                p = .permissions(names + identity, preset: preset == "standard" ? "agent" : preset)
+                p = .permissions(names + identity + AgentPermissions.agentPermissions(agent), preset: preset == "standard" ? "agent" : preset)
             } else {
                 guard let np = NetworkPolicy.presets[preset] else { throw HostError(.invalid, "unknown preset \(preset) — locked, standard (agent), open or bake") }
                 p = np
@@ -1885,7 +1901,7 @@ public actor HostCore {
         }
         // 597 (P6): by permission, or site:HOST.
         if !(r.grant ?? []).isEmpty || !(r.revoke ?? []).isEmpty {
-            p = try PermissionPolicy.edited(p, grant: r.grant ?? [], revoke: r.revoke ?? [], base: base)
+            p = try PermissionPolicy.edited(p, grant: r.grant ?? [], revoke: r.revoke ?? [], base: base, agent: agent)
         }
         for h in r.removeHosts ?? [] {
             let host = h.lowercased()
@@ -1907,7 +1923,7 @@ public actor HostCore {
             throw HostError(.invalid, "\(m.name) is not proxied (network \(m.config.networkName)) — it has no policy")
         }
         if isPolicyQuery(r) { return egress.policy }
-        let p = try Self.editedPolicy(egress.policy, r, base: PermissionPolicy.base(of: m.config))
+        let p = try Self.editedPolicy(egress.policy, r, base: PermissionPolicy.base(of: m.config), agent: m.config.imageChoice?.agent)
         m.sandbox.setNetworkPolicy(Self.withSignInBlock(p, strict: egress.vault.foreignPolicy == .strict))
         m.config.spec.network = .proxied(p)
         try m.config.write(store.configFile(m.name))

@@ -48,8 +48,8 @@ public struct WebQuickAddQuery: Equatable, Sendable {
         let row = images.first { $0.name == p.image }
         let outOfDate = row.flatMap { $0.baked ? $0.standing : nil }
         if let r = QuickAdd.requirement(image: p.image, network: QuickAdd.network(image: p.image, settings: settings),
-                                        defaultAccount: accounts.accounts.first { $0.isDefault }?.name ?? "none",
-                                        accountKinds: kinds, outOfDate: outOfDate) {
+                                        defaultAccount: accounts.defaultAccount,
+                                        accountKinds: kinds, outOfDate: outOfDate, openaiDefault: accounts.openaiDefault) {
             p.requirementKind = r.kind
             p.requirement = r.text
         }

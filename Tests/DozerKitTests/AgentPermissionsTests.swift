@@ -34,8 +34,8 @@ final class AgentPermissionsTests: XCTestCase {
         XCTAssertEqual(AgentPermissions.preset("agent", base: nil), ["model", "update", "install:system", "github", "error-reports"],
                        "a Dockerfile's: system packages only")
         XCTAssertEqual(AgentPermissions.preset("agent", base: "debian"), ["model", "update", "install:system", "github", "error-reports"])
-        // 599d: Open is everything but the user's GitHub login.
-        XCTAssertEqual(AgentPermissions.preset("open", base: nil), AgentPermissions.all.map(\.id).filter { !$0.hasPrefix("github:") })
+        // 599d: Open is everything but the user's GitHub login. 599i: and an agent's own model permission (Codex's).
+        XCTAssertEqual(AgentPermissions.preset("open", base: nil), AgentPermissions.all.map(\.id).filter { !$0.hasPrefix("github:") && $0 != "model:openai" })
         XCTAssertNil(AgentPermissions.preset("bake", base: nil), "bake stays a preset of rules")
         XCTAssertEqual(AgentPermissions.presetName(["model"], base: "go"), "locked")
         XCTAssertEqual(AgentPermissions.presetName(AgentPermissions.preset("agent", base: "go")!.reversed(), base: "go"), "agent")

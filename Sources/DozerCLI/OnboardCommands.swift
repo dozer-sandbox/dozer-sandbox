@@ -14,6 +14,8 @@ struct OnboardReport: Encodable {
     var account: String
     /// The account added now (a key or a token), when one was.
     var accountAdded: String?
+    /// 599i: the OpenAI account the Codex step added (and made the OpenAI default).
+    var openaiAccountAdded: String? = nil
     var accountCommands: [String]
     var settings: String
     var settingsPath: String?
@@ -48,6 +50,8 @@ struct OnboardingFlow {
     var githubKeyStdin = false
     /// 599g: the Workspace rules step's flag (nil: asked on a terminal, else the settings are left as they are).
     var ignoreModeFlag: String? = nil
+    /// 599i: Codex's OpenAI account step — chatgpt, openai-key or later (nil: asked on a terminal when codex is chosen).
+    var openaiFlag: String? = nil
 
     func say(_ s: String) { if talk { Out.stdout(s + "\n") } }
 
@@ -119,7 +123,7 @@ struct OnboardingFlow {
         say("\n4. Images")
         if imagesFlag == nil {
             let settings = DozerSettings.load()
-            let versions = Dictionary(uniqueKeysWithValues: ["claude-code", "pi"].compactMap { i in
+            let versions = Dictionary(uniqueKeysWithValues: ["claude-code", "pi", "codex"].compactMap { i in
                 Onboarding.agentVersionText(i, store: store, settings: settings).map { (i, $0) } })
             let opts = Onboarding.imageOptions(rows, versions: versions)
             let ticks = asker.checklist("  Which images to prepare now (in the background — minutes, once)?",
@@ -130,6 +134,12 @@ struct OnboardingFlow {
             checks = checks.filter { $0.check != "disk" } + disk.filter { $0.check == "disk" }
         }
         say(chosen.isEmpty ? "  none now — each image is prepared by its first start" : "  " + chosen.joined(separator: ", "))
+
+        // 4b (599i). Codex's account — OpenAI only, Dozer's own: a ChatGPT sign-in in the browser, or an OpenAI key.
+        var openaiAdded: String?
+        if chosen.contains(where: { ImageChoice.parse($0)?.agent == .codex }) || openaiFlag != nil {
+            openaiAdded = try openAIAccountStep()
+        }
 
         // 5. Settings (D7): written only when missing; the user's prompt template beside them (D16).
         say("\n5. Settings")
@@ -188,10 +198,56 @@ struct OnboardingFlow {
             say("\nDone — this Mac is onboarded (\(rec.images.isEmpty ? "no image prepared yet" : rec.images.joined(separator: ", ") + " ready")).")
             say("Next: doz new (a sandbox with every default, attached) · doz init in a project folder (then doz up there) · the UI: doz ui")
         }
-        return OnboardReport(store: store.root.path, checks: checks, account: choice.rawValue, accountAdded: added,
+        return OnboardReport(store: store.root.path, checks: checks, account: choice.rawValue, accountAdded: added, openaiAccountAdded: openaiAdded,
                              accountCommands: added == nil ? Onboarding.accountCommands(choice) : [],
                              settings: settings.rawValue, settingsPath: settingsPath, promptTemplate: template.rawValue,
                              promptTemplatePath: templatePath, images: chosen, access: accessReport.items, ignoreMode: ignoreMode, result: result)
+    }
+
+    /// 599i: Codex's OpenAI account — a ChatGPT sign-in (the browser opens; Dozer's own sign-in, the Mac's
+    /// ~/.codex is never touched) or an OpenAI key (a no-echo prompt), added as `doz account add` adds it and
+    /// made the store's OpenAI default; or later. Off a terminal without --openai-account: later.
+    private func openAIAccountStep() throws -> String? {
+        say("  Codex account (OpenAI)")
+        let options = ["Sign in with ChatGPT now — your browser opens (Codex on your ChatGPT plan)", "Add an OpenAI API key", "Decide later"]
+        let pick: String
+        if let f = openaiFlag { pick = f } else if asker.interactive {
+            pick = ["chatgpt", "openai-key", "later"][asker.choose("  How should Codex sandboxes reach OpenAI?", options, preferred: 0)]
+        } else { pick = "later" }
+        func later() -> String? {
+            say("  decide later — a codex sandbox says what it needs; then: doz account add chatgpt --chatgpt (or NAME --openai-key), doz account default NAME")
+            return nil
+        }
+        guard pick != "later" else { return later() }
+        let name = asker.interactive ? asker.text("  Account name", default: pick == "chatgpt" ? "chatgpt" : "openai") {
+            (try? AccountStore.validateName($0)) == nil ? "1–40 of a-z 0-9 - (not default or none)" : nil
+        } : (pick == "chatgpt" ? "chatgpt" : "openai")
+        var secret: String?
+        if pick == "chatgpt" {
+            do { secret = try ChatGPTSignIn.run { say("  " + $0) }.json } catch {
+                say("  could not sign in: \(error.localizedDescription) — later: doz account add \(name) --chatgpt")
+                return nil
+            }
+        } else if asker.interactive && isatty(STDIN_FILENO) == 1 {
+            secret = try readSecret("  OpenAI API key (not echoed): ", g)
+        }
+        guard let secret, !secret.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            say("  no key given now — later: doz account add \(name) --openai-key")
+            return nil
+        }
+        let kind: AccountKind = pick == "chatgpt" ? .chatgpt : .openaiKey
+        let m = try rawCall(HostRequest.accountAdd(name: name, kind: kind, plan: nil, secret: secret, force: force), g)
+        guard m.ok == true else {
+            let why = (m.error?.message ?? "no reason").replacingOccurrences(of: secret.trimmingCharacters(in: .whitespacesAndNewlines), with: "…")
+            say("  could not add \(name): \(why) — onboarding goes on without it")
+            return nil
+        }
+        var r = HostRequest(.accountDefault)
+        r.account = name
+        _ = try call(r, g)
+        let row = ((try? m.result?.decode([AccountRow].self)) ?? []).first { $0.name == name }
+        say("  account \(name) added (\(kind.rawValue)\(row?.identity.map { ", \($0)" } ?? "")\(row?.plan.map { ", \($0)" } ?? "")) — the store's default OpenAI account (Codex)")
+        return name
     }
 
     /// A key or a setup token, added exactly as `doz account add` adds it, then made the store default.
@@ -294,8 +350,8 @@ struct Onboard: AsyncParsableCommand {
     @OptionGroup var g: GlobalOptions
     @Flag(name: .long, help: "Show the onboarding record and the images; follow a preparation that is running.") var status = false
     @Flag(name: .long, help: "Cancel the images being prepared.") var cancel = false
-    @Option(name: .long, help: "The images to prepare, comma-separated: claude-code, pi, lab (default: claude-code).") var images: String?
-    @Flag(name: .long, help: "Prepare all three images (claude-code, pi, lab — ~15+ min the first time).") var allImages = false
+    @Option(name: .long, help: "The images to prepare, comma-separated: claude-code, pi, codex, lab (default: claude-code).") var images: String?
+    @Flag(name: .long, help: "Prepare all four images (claude-code, pi, codex, lab — ~20+ min the first time).") var allImages = false
     @Flag(name: .long, help: "Prepare no image now (the first start of each does it).") var noImages = false
     @Option(name: .long, help: "The Claude account step without asking: mac (this Mac's login), api-key, setup-token, or later. Given, the Claude Code checks are not run.") var account: String?
     @Option(name: .long, help: "With --account api-key|setup-token: the account's name (default: work; asked on a terminal).") var accountName: String?
@@ -307,6 +363,7 @@ struct Onboard: AsyncParsableCommand {
     @Flag(name: .long, help: "Read a GitHub token from stdin as the default key (implies --github-source key).") var githubKeyStdin = false
     @Option(name: .long, help: "The Access step's SSH choice without asking: on or off (forward this Mac's ssh-agent, github.com only).") var sshAgent: String?
     @Option(name: .long, help: "The Workspace rules step without asking: lock or hide — what a .dozignore in a sandbox's folder does to the paths it lists, by default (the setting workspace.ignore_mode). Lock: listed but unreadable; hide: not there.") var ignoreMode: String?
+    @Option(name: .long, help: "Codex's OpenAI account without asking: chatgpt (sign in with ChatGPT in your browser — Dozer's own sign-in), openai-key (pasted at a no-echo prompt) or later.") var openaiAccount: String?
     @Flag(name: [.short, .long], help: "Accept every default; ask nothing. A credential that cannot be confirmed is skipped with a note (exit 0).") var yes = false
 
     func validate() throws {
@@ -314,6 +371,7 @@ struct Onboard: AsyncParsableCommand {
         if let v = githubSource, !["gh", "key"].contains(v) { throw ValidationError("--github-source: gh or key") }
         if let v = sshAgent, !["on", "off"].contains(v) { throw ValidationError("--ssh-agent: on or off") }
         if let v = ignoreMode, !["lock", "hide"].contains(v) { throw ValidationError("--ignore-mode: lock or hide") }
+        if let v = openaiAccount, !["chatgpt", "openai-key", "later"].contains(v) { throw ValidationError("--openai-account: chatgpt, openai-key or later") }
         if githubKeyStdin && secretStdin { throw ValidationError("--github-key-stdin and --secret-stdin both read stdin — add one later (doz access set --github-key / doz account add)") }
         if githubKeyStdin && githubSource == "gh" { throw ValidationError("--github-key-stdin goes with --github-source key") }
         if [status, cancel].filter({ $0 }).count + ((images != nil || allImages || noImages || account != nil || ignoreMode != nil) ? 1 : 0) > 1 {
@@ -322,7 +380,7 @@ struct Onboard: AsyncParsableCommand {
         if [images != nil, allImages, noImages].filter({ $0 }).count > 1 { throw ValidationError("one of --images, --all-images, --no-images") }
         if let i = images {
             for n in i.split(separator: ",") where !DozerImages.builtIn.contains(n.trimmingCharacters(in: .whitespaces)) {
-                throw ValidationError("--images: claude-code, pi, lab (not \(n))")
+                throw ValidationError("--images: claude-code, pi, codex, lab (not \(n))")
             }
         }
         if let a = account, Onboarding.Account(rawValue: a) == nil { throw ValidationError("--account: mac, api-key, setup-token or later") }
@@ -333,7 +391,7 @@ struct Onboard: AsyncParsableCommand {
     }
 
     var imageList: [String]? {
-        if allImages { return ["claude-code", "pi", "lab"] }
+        if allImages { return ["claude-code", "pi", "codex", "lab"] }
         if noImages { return [] }
         return images.map { $0.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) } }
     }
@@ -351,6 +409,7 @@ struct Onboard: AsyncParsableCommand {
         flow.sshFlag = sshAgent
         flow.githubKeyStdin = githubKeyStdin
         flow.ignoreModeFlag = ignoreMode
+        flow.openaiFlag = openaiAccount
         flow.force = force
         let report = try await flow.run()
         if g.json { Out.json(report) }

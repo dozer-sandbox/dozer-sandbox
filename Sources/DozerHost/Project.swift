@@ -85,8 +85,8 @@ public struct DozerProject: Equatable, Sendable {
     public static let keys: [(key: String, summary: String)] = [
         ("version", "the file's format: 1"),
         ("name", "the sandbox: 1–40 of a-z 0-9 -"),
-        ("image", "claude-code, pi, lab, a base × agent image (python-claude-code, …), or a template (doz image ls) — or agent + base/dockerfile"),
-        ("agent", "claude-code, pi or none (default claude-code)"),
+        ("image", "claude-code, pi, codex, lab, a base × agent image (python-claude-code, …), or a template (doz image ls) — or agent + base/dockerfile"),
+        ("agent", "claude-code, pi, codex or none (default claude-code)"),
         ("base", "a recommended base: node, python, go, rust, java, ruby, dotnet, debian, ubuntu, alpine (doz base ls)"),
         ("dockerfile", "your Dockerfile (./Dockerfile): built with Apple's container build — its RUN steps run OUTSIDE Dozer's network policy"),
         ("cpus", "virtual CPUs, 1–64 (default: the settings' defaults.cpus)"),
@@ -139,7 +139,7 @@ public struct DozerProject: Equatable, Sendable {
     public func problem(effectiveNetwork: String? = nil) -> String? {
         if !WebNameCheck.isSandboxName(name) { return "name: 1–40 of a-z 0-9 - (not starting with -)" }
         if base != nil, dockerfile != nil { return "base or dockerfile — not both" }
-        if let a = agent, !["claude-code", "pi", "none"].contains(a) { return "agent: claude-code, pi or none" }
+        if let a = agent, !["claude-code", "pi", "codex", "none"].contains(a) { return "agent: claude-code, pi, codex or none" }
         if let b = base, BaseCatalogue.base(b) == nil { return "base: \(BaseCatalogue.ids.joined(separator: ", ")) (doz base ls)" }
         if let c = cpus, !(1...64).contains(c) { return "cpus: a whole number 1–64" }
         if let m = memoryMiB, !(256...262_144).contains(m) { return "memory: 256 MiB – 256 GiB" }
@@ -161,7 +161,7 @@ public struct DozerProject: Equatable, Sendable {
 
     /// 596: the image agent + base name (a Dockerfile's: the agent's, the host swaps in its base).
     public var chosenImage: String {
-        let a: AgentKind = switch agent ?? "claude-code" { case "pi": .pi; case "none": .none; default: .claudeCode }
+        let a: AgentKind = switch agent ?? "claude-code" { case "pi": .pi; case "codex": .codex; case "none": .none; default: .claudeCode }
         if dockerfile != nil { return ImageChoice(base: a == .none ? "alpine" : "node", agent: a).name }
         return ImageChoice(base: base ?? "node", agent: a).name
     }
@@ -189,12 +189,12 @@ public struct DozerProject: Equatable, Sendable {
         """
         // 596 (B10): the image as agent + base/dockerfile when the file said so, else by name.
         if agent != nil || base != nil || dockerfile != nil {
-            out += "agent: \(agent ?? "claude-code")               # claude-code, pi or none — when made\n"
+            out += "agent: \(agent ?? "claude-code")               # claude-code, pi, codex or none — when made\n"
             out += base.map { "base: \($0)                   # doz base ls — when made\n" } ?? "# base: node                 # doz base ls — or dockerfile — when made\n"
             out += dockerfile.map { "dockerfile: \(quoted($0))     # built with Apple's container build, OUTSIDE Dozer's network policy — when made\n" } ?? ""
         } else {
             out += "image: \(image)                  # when made\n"
-            out += "# (or: agent: claude-code|pi|none with base: python … or dockerfile: ./Dockerfile — doz base ls)\n"
+            out += "# (or: agent: claude-code|pi|codex|none with base: python … or dockerfile: ./Dockerfile — doz base ls)\n"
         }
         out += "\n"
         out += cpus.map { "cpus: \($0)                     # when made\n" } ?? "# cpus: 2                    # when made\n"
