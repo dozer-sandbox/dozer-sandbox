@@ -985,6 +985,13 @@ Task {
             exit(try await ignoreCrashSave())
         case "ignore-crash-restore":
             try await ignoreCrashRestore(label: "crash2", thenQuit: true)
+        case "spike-audio":
+            // SPIKE (604): the Mac's microphone + speakers as a virtio-snd device — AudioSpike.swift.
+            try await audioSpike()
+        case "spike-audio-crash-save":
+            exit(try await audCrashSave())
+        case "spike-audio-crash-restore":
+            try await audCrashRestore(thenQuit: true)
         case "lifecycle":
             try await lifecycleSuite()
         case "crash":
