@@ -59,6 +59,8 @@ struct PinnedIdentity: VZInstanceExtension {
     /// restored into a VM with exactly the devices it was taken with, so this is persisted per
     /// sandbox (`PersistedSandbox.memoryBalloon`) and a VM slept by an older build restores without.
     let memoryBalloon: Bool
+    /// EXPERIMENTAL (604): the audio device (an audio sandbox). A VM input like the balloon; the layout records it.
+    var audio: Bool = false
     /// 591: the kernel's sha256 (recorded in the layout).
     var kernelSHA256: String? = nil
     /// 591: on a restore, the layout the snapshot was taken with — the new VM must match it.
@@ -77,6 +79,7 @@ struct PinnedIdentity: VZInstanceExtension {
             for device in config.networkDevices { device.macAddress = mac }
         }
         if memoryBalloon { config.memoryBalloonDevices = [VZVirtioTraditionalMemoryBalloonDeviceConfiguration()] }
+        if audio { AudioDevice.add(to: config) }
         // SPIKE (604): extra devices from the audio spike (doz-vmtest spike-audio) — BEFORE the layout,
         // so a sound device is recorded (`otherDevices["audio"]`) and compared on a restore like any device.
         SpikeVMDevices.configure?(config)

@@ -78,6 +78,10 @@ struct CreateArguments: ParsableArguments {
     @Flag(name: .long, help: "When the image is out of date: use it as it is (the default off a terminal; said as a warning).")
     var useCurrent = false
 
+    // EXPERIMENTAL (604): an audio sandbox.
+    @Flag(name: .long, help: "EXPERIMENTAL: give the sandbox the Mac's microphone and speakers (a sound device and its own kernel; doz-sound inside to record and play). macOS asks about the microphone for the app that started doz.")
+    var audio = false
+
     /// 596 (B10): the image `--agent`/`--base`/`--dockerfile` name (nil: none of them given).
     /// `--image claude-code` stays the shorthand for `--agent claude-code --base node`.
     func chosenImage() throws -> String? {
@@ -125,6 +129,7 @@ struct CreateArguments: ParsableArguments {
         var o = CreateOptions(image: img, cpus: cpus, memoryMiB: mem, workspace: absoluteWorkspace, network: network, subnet: subnet, account: account)
         o.isolated = isolated ? true : nil
         o.agentSudo = agentSudo
+        o.audio = audio ? true : nil
         // 597 (P6): --allow web,site:api.example.com,-error-reports
         var words = allow.flatMap { $0.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) } }.filter { !$0.isEmpty }
         // 599d: --github read|push|off is the same as allowing (or not) its two permissions.

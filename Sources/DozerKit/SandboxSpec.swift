@@ -55,6 +55,10 @@ public struct SandboxSpec: Sendable, Codable, Equatable {
     /// boots, as before 587). Part of the prepared disk's key. An image sandbox's root and state
     /// disks take `imageSpec.journalMiB` instead. A spec persisted before 587 decodes as nil.
     public var journalMiB: Int?
+    /// EXPERIMENTAL (604): an audio sandbox — its VM gets a virtio-snd device (the Mac's microphone and speakers)
+    /// and boots the sound kernel (`SoundKernel`, from the kernel cache). nil (every other sandbox, and every spec
+    /// persisted before): no device, the pinned kernel — and the spec encodes exactly as before (an absent key).
+    public var audio: Bool?
 
     public init(
         name: String,

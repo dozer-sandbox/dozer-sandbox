@@ -1054,17 +1054,27 @@ public actor Sandbox {
         // 591: a restore boots the VM from what was RECORDED where this build controls it — the
         // balloon (above) and the kernel file the snapshot was taken under (a later build may pin a
         // newer kernel). A kernel this Mac no longer has refuses the wake; the snapshot is kept.
-        var vmKernel = kernel
-        let currentKernelSHA = try KernelProvider.sha256(of: kernelURL)
+        // EXPERIMENTAL (604): an audio sandbox's VM boots the sound kernel (verified, from the kernel cache — the
+        // host puts it there); everything above (bakes, image keys) used the pinned kernel.
+        var bootKernelURL = kernelURL
+        if spec.audio == true {
+            let sound = SoundKernel.path(inCache: kernelProvider.cacheDirectory)
+            guard SoundKernel.isVerified(sound) else {
+                throw SandboxError.invalidSpec("\(spec.name) is an audio sandbox (experimental), and its sound kernel \(SoundKernel.fileName) is missing or damaged in \(kernelProvider.cacheDirectory.path) — a doz that carries it puts it there when the sandbox starts")
+            }
+            bootKernelURL = sound
+        }
+        var vmKernel = Kernel(path: bootKernelURL, platform: .linuxArm)
+        let currentKernelSHA = bootKernelURL == kernelURL ? try KernelProvider.sha256(of: kernelURL) : SoundKernel.sha256
         var vmKernelSHA = currentKernelSHA
         if let persisted, let recorded = persisted.vmLayout {
-            guard let k = VMLayout.kernelForRestore(recorded: recorded, current: kernelURL, currentSHA256: currentKernelSHA,
+            guard let k = VMLayout.kernelForRestore(recorded: recorded, current: bootKernelURL, currentSHA256: currentKernelSHA,
                                                     searchDirectories: [kernelProvider.cacheDirectory, layout.kernels]) else {
                 throw SandboxError.snapshotNeedsOtherBuild(
                     sandbox: spec.name, recordedBy: recorded.recordedBy,
                     differences: ["kernel: slept with \(recorded.kernelSHA256?.prefix(12) ?? "?"), which this Mac no longer has; this build's is \(currentKernelSHA.prefix(12))"])
             }
-            if k != kernelURL {
+            if k != bootKernelURL {
                 note("restoring with the kernel it slept under (\(k.lastPathComponent)) — a cold boot would use this build's")
                 vmKernel = Kernel(path: k, platform: .linuxArm)
                 vmKernelSHA = recorded.kernelSHA256 ?? currentKernelSHA
@@ -1127,7 +1137,7 @@ public actor Sandbox {
         let vmm = DozerVMM(
             inner: VZVirtualMachineManager(kernel: vmKernel, initialFilesystem: initfs, group: SharedEventLoop.group),
             identity: PinnedIdentity(machineIdentifier: identity.machineIdentifier, macAddress: identity.macAddress,
-                                     memoryBalloon: identity.memoryBalloon == true, kernelSHA256: vmKernelSHA,
+                                     memoryBalloon: identity.memoryBalloon == true, audio: spec.audio == true, kernelSHA256: vmKernelSHA,
                                      expected: persisted?.vmLayout, sandboxName: spec.name, recorder: recorder),
             adopt: persisted != nil ? (snapshot: layout.snapshot, flag: flag, containerID: spec.name) : nil)
         let spec = self.spec
@@ -1474,7 +1484,7 @@ public actor Sandbox {
                 ghProblem = "no gh on this Mac for it"
             }
         }
-        let script = ToolsLayer.applyScript(plan, state: state, ghCopied: ghCopied, ghProblem: ghProblem)
+        let script = ToolsLayer.applyScript(plan, state: state, ghCopied: ghCopied, ghProblem: ghProblem, audioApp: inputs.audioApp)
         let missing = ToolsLayer.missingPackages(plan, state)
         let installLabel = "tools: installing " + missing.map(\.title).joined(separator: ", ") + " with \(state.packageManager), through the proxy"
         if shout && !missing.isEmpty { broadcaster.yield(.stepStarted(installLabel)) }

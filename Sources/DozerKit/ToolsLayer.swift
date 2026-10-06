@@ -29,7 +29,17 @@ public struct ToolInputs: Codable, Equatable, Sendable {
     public var ssh: Bool
     /// `sessions.tmux` is on.
     public var tmux: Bool
-    public init(github: Bool = false, ssh: Bool = false, tmux: Bool = false) { self.github = github; self.ssh = ssh; self.tmux = tmux }
+    /// EXPERIMENTAL (604): an audio sandbox — alsa-utils, /etc/asound.conf and the TEMPORARY `doz-sound`. nil (every
+    /// other sandbox): nothing, and the inputs encode exactly as before.
+    public var audio: Bool?
+    /// EXPERIMENTAL (604): the Mac app macOS asks about the microphone for (the host's responsible app), named in
+    /// doz-sound's permission hint.
+    public var audioApp: String?
+    public init(github: Bool = false, ssh: Bool = false, tmux: Bool = false, audio: Bool = false, audioApp: String? = nil) {
+        self.github = github; self.ssh = ssh; self.tmux = tmux
+        self.audio = audio ? true : nil
+        self.audioApp = audio ? audioApp : nil
+    }
 }
 
 /// One tool of the layer: what, why (the setting), where it comes from.
@@ -146,6 +156,14 @@ public enum ToolsLayer {
             items.append(ToolItem(id: "tmux", title: "tmux", reason: "for tmux sessions", kind: "package",
                                   source: "apt/apk through the proxy, when missing", package: "tmux", command: "tmux"))
         }
+        if inputs.audio == true {
+            items.append(ToolItem(id: "alsa-utils", title: "alsa-utils", reason: "for audio (experimental)", kind: "package",
+                                  source: "apt/apk through the proxy, when missing", package: "alsa-utils", command: "aplay"))
+            items.append(ToolItem(id: "asound-conf", title: "the sound card as ALSA's default", reason: "for audio (experimental)", kind: "file",
+                                  source: "written by Dozer in \(DozSound.asoundPath)"))
+            items.append(ToolItem(id: "doz-sound", title: "doz-sound (temporary)", reason: "for audio (experimental)", kind: "file",
+                                  source: "written by Dozer in \(DozSound.path)"))
+        }
         for (id, cmd) in [("git", "git"), ("curl", "curl"), ("ca-certificates", caBundle)] {
             items.append(ToolItem(id: id, title: id, reason: "always", kind: "package", source: "apt/apk through the proxy, when missing",
                                   package: id, command: cmd))
@@ -161,6 +179,7 @@ public enum ToolsLayer {
         [ -x '\(guestGhPath)' ] && v=$(cat '\(guestStateDirectory)/gh.version' 2>/dev/null) && echo "gh=$v"
         for c in git curl ssh tmux; do command -v "$c" >/dev/null 2>&1 && echo "have=$c"; done
         [ -s '\(caBundle)' ] && echo have=ca-certificates
+        command -v aplay >/dev/null 2>&1 && echo have=alsa-utils
         grep -qxF '\(knownHostsBegin)' '\(knownHostsPath)' 2>/dev/null && echo have=github-known-hosts
         if command -v apt-get >/dev/null 2>&1; then echo pm=apt; elif command -v apk >/dev/null 2>&1; then echo pm=apk; else echo pm=none; fi
         exit 0
@@ -192,7 +211,7 @@ public enum ToolsLayer {
 
     /// Root shell: apply `plan` to a guest in `state` (gh already copied to `<guestGhPath>.tmp` when
     /// `ghCopied`). One `doz-tool ID STATE DETAIL` line per tool. Never fails the caller.
-    public static func applyScript(_ plan: ToolPlan, state: GuestState, ghCopied: Bool, ghProblem: String?) -> String {
+    public static func applyScript(_ plan: ToolPlan, state: GuestState, ghCopied: Bool, ghProblem: String?, audioApp: String? = nil) -> String {
         var s = "log='\(guestLog)'; mkdir -p '\(guestStateDirectory)' 2>/dev/null; "
         func say(_ id: String, _ st: String, _ detail: String) -> String {
             "echo 'doz-tool \(id) \(st) \(detail.replacingOccurrences(of: "'", with: "’"))'; "
@@ -220,6 +239,9 @@ public enum ToolsLayer {
                 s += "if \(check); then \(say(item.id, "installed", "from \(state.packageManager)"))else \(say(item.id, "failed", "\(state.packageManager) could not install \(item.package ?? item.id) — see \(guestLog)"))fi; "
             }
         }
+        // EXPERIMENTAL (604): an audio sandbox's ALSA default and doz-sound (after the packages: they need aplay).
+        if plan.items.contains(where: { $0.id == "asound-conf" }) { s += DozSound.asoundScript(say: say) }
+        if plan.items.contains(where: { $0.id == "doz-sound" }) { s += DozSound.installScript(app: audioApp, say: say) }
         // gh: Dozer's copy (in place when copied), or nothing to do, or a reason. Also linked as /usr/local/bin/gh
         // (every PATH has it: `doz exec`, scripts) — only when that name is free or already Dozer's link.
         let link = "if [ ! -e '\(ghLink)' ] && [ ! -L '\(ghLink)' ] || [ \"$(readlink '\(ghLink)')\" = '\(guestGhPath)' ]; then ln -sf '\(guestGhPath)' '\(ghLink)'; fi; "

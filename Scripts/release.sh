@@ -10,6 +10,12 @@
 #   doz-<version>/libexec/doz/doz            the executable, signed with Scripts/doz.entitlements
 #   doz-<version>/libexec/doz/VERSION        the version it was built for (DozerCommand.version reads it)
 #   doz-<version>/libexec/doz/DozerKit_*.bundle   its resources (guest binaries, web assets)
+#   doz-<version>/libexec/doz/kernels/vmlinux-6.18.15-186-sound   EXPERIMENTAL audio sandboxes' kernel (see below)
+#
+# EXPERIMENTAL (604): the sound kernel (kata 6.18.15-186 + workspace probes/604-*/kernel/sound.conf) is NOT in git
+# (16 MB). SOUND_KERNEL names the file (default: the 604 probe's build); it must have the sha256 pinned in
+# Sources/DozerKit/Audio.swift (SoundKernel.sha256) or the release stops. NO_SOUND_KERNEL=1 ships without it
+# (doz create --audio then says this doz does not carry one).
 #
 # SIGNING. With SIGN_IDENTITY (a "Developer ID Application: …" identity, from a gitignored
 # Makefile.config — see Makefile.config.example) the executable and every Mac (Mach-O) binary in its
@@ -35,6 +41,9 @@ SIGN_IDENTITY="${SIGN_IDENTITY:-}"
 NOTARY_PROFILE="${NOTARY_PROFILE:-}"
 DRY_RUN="${DRY_RUN:-}"
 ENTITLEMENTS="Scripts/doz.entitlements"
+SOUND_KERNEL="${SOUND_KERNEL:-/private/tmp/claude-502/-Users-jscott-Developer-deck-factory-A/cfb48c97-0265-4851-b0f8-ecd4082f0b1f/scratchpad/kbuild/vmlinux-6.18.15-186-sound}"
+SOUND_KERNEL_NAME="$(sed -n 's/.*static let fileName = "\(vmlinux-[^"]*\)".*/\1/p' Sources/DozerKit/Audio.swift)"
+SOUND_KERNEL_SHA="$(sed -n 's/.*static let sha256 = "\([0-9a-f]\{64\}\)".*/\1/p' Sources/DozerKit/Audio.swift)"
 
 say() { printf '%s\n' "$*"; }
 fail() { printf 'x release: %s\n' "$*" >&2; exit 1; }
@@ -50,6 +59,13 @@ if [[ -z "${VERSION:-}" ]]; then
 fi
 [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]] || fail "VERSION must be semver (X.Y.Z), not '$VERSION'"
 [[ "$(uname -m)" == "arm64" ]] || fail "doz is Apple silicon only (this is $(uname -m))"
+
+if [[ -z "${NO_SOUND_KERNEL:-}" ]]; then
+    [[ -n "$SOUND_KERNEL_NAME" && -n "$SOUND_KERNEL_SHA" ]] || fail "cannot read SoundKernel.fileName/sha256 from Sources/DozerKit/Audio.swift"
+    [[ -f "$SOUND_KERNEL" ]] || fail "no sound kernel at SOUND_KERNEL=$SOUND_KERNEL (or NO_SOUND_KERNEL=1 to ship without — doz create --audio then refuses)"
+    got="$(shasum -a 256 "$SOUND_KERNEL" | cut -d' ' -f1)"
+    [[ "$got" == "$SOUND_KERNEL_SHA" ]] || fail "the sound kernel at $SOUND_KERNEL has sha256 $got, not the pinned $SOUND_KERNEL_SHA"
+fi
 
 NAME="doz-${VERSION}-macos-arm64"
 STAGE="$OUT/stage/doz-${VERSION}"
@@ -86,6 +102,10 @@ for b in .build/release/DozerKit_*.bundle; do
     run cp -R "$b" "$STAGE/libexec/doz/"
 done
 run cp .build/release/doz "$STAGE/libexec/doz/doz"
+if [[ -z "${NO_SOUND_KERNEL:-}" ]]; then
+    run mkdir -p "$STAGE/libexec/doz/kernels"
+    run cp "$SOUND_KERNEL" "$STAGE/libexec/doz/kernels/$SOUND_KERNEL_NAME"
+fi
 if [[ -n "$DRY_RUN" ]]; then say "  [dry-run] echo $VERSION > $STAGE/libexec/doz/VERSION"; else printf '%s\n' "$VERSION" > "$STAGE/libexec/doz/VERSION"; fi
 run ln -s ../libexec/doz/doz "$STAGE/bin/doz"
 
@@ -111,6 +131,11 @@ if [[ -z "$DRY_RUN" ]]; then
     say "  entitlement: com.apple.security.virtualization"
     [[ "$("$STAGE/bin/doz" --version)" == "$VERSION" ]] || fail "the packed doz says $("$STAGE/bin/doz" --version), not $VERSION"
     say "  doz --version: $VERSION"
+    if [[ -z "${NO_SOUND_KERNEL:-}" ]]; then
+        grep -q 'com.apple.security.device.audio-input' <<<"$ents" || fail "the signed doz does not carry com.apple.security.device.audio-input"
+        [[ "$(shasum -a 256 "$STAGE/libexec/doz/kernels/$SOUND_KERNEL_NAME" | cut -d' ' -f1)" == "$SOUND_KERNEL_SHA" ]] || fail "the staged sound kernel's sha256 is wrong"
+        say "  sound kernel (experimental): kernels/$SOUND_KERNEL_NAME, sha256 ${SOUND_KERNEL_SHA:0:12}…"
+    fi
 fi
 
 # 5. Notarise (Developer ID with a profile only).
