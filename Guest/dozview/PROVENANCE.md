@@ -9,8 +9,8 @@ rebuild; `make dozview-verify` rebuilds from scratch and checks the committed by
 
 | | |
 |---|---|
-| sha256 (auto) | `451b784b492ccb04492618877b5170cfa8875642e1c29c1a3aec12d5bd8e15db` |
-| size (auto) | 185544 bytes |
+| sha256 (auto) | `54bc83724805fcb7f4d018b268033b5c9e4d16b6242bc3aeb58b9c98bc0f380a` |
+| size (auto) | 185984 bytes |
 | format | ELF 64-bit LSB executable, ARM aarch64, statically linked (musl), stripped |
 | source | [`dozview.c`](dozview.c) and [`match/`](match/) (this directory) — libc, pthreads and Linux UAPI headers only |
 | Zig | 0.16.0 — the same pinned toolchain as deckhold (see `../deckhold/build.sh`) |

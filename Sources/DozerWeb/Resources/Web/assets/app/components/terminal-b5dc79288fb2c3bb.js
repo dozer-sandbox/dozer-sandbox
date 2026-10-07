@@ -27,6 +27,8 @@ function engineBytes() {
   if (!engineWasm) engineWasm = fetch(wasmURL(), { credentials: 'omit' }).then((r) => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.arrayBuffer(); });
   return engineWasm;
 }
+/// 608: scroll what the pane shows into its scrollback (a restarted session's new screen then starts below it).
+export function keepScrollback(t) { toFrame(t, { t: 'keep-scrollback' }); }
 function toFrame(t, msg, transfer) {
   if (t.frame && t.frame.contentWindow) t.frame.contentWindow.postMessage(msg, '*', transfer || []);
 }

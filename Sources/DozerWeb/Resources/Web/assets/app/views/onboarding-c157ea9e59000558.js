@@ -16,7 +16,7 @@ import { imagePicker, pickerNameHint } from '../components/image-picker-8e307c2c
 import { wizHead, wizMount } from '../components/modal-714313309ad4200d.js';
 import { refreshNav } from '../components/nav-207ac9e8f8879ea1.js';
 import { pageFailure, toast } from '../components/notices-0170b06a2323aa78.js';
-import { statusPill } from '../components/pills-c5288545ad950375.js';
+import { statusPill } from '../components/pills-6cc2c4dee9e42d98.js';
 import { prepCard } from '../components/prep-card-bb27e67e762cea2d.js';
 import { rulesStep } from '../components/rules-step-caa581df445e9800.js';
 import { stepperNode } from '../components/stepper-19d0f8aab00bfb93.js';

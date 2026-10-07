@@ -1270,6 +1270,11 @@ static void invalidate_all(void) {
         struct fuse_out_header oh; struct fuse_notify_inval_entry_out ie; memset(&ie, 0, sizeof ie);
         size_t nl = strlen(v[i].name);
         ie.parent = v[i].parent; ie.namelen = (uint32_t)nl;
+        /* 1.1.1: EXPIRE, never drop: a dropped (unhashed) dentry is "(deleted)" to every program whose
+         * current folder it is — getcwd fails (Codex: "invalid cwd"). Expired, the kernel asks LOOKUP again on
+         * the next walk and gets the new rules' answer (a hidden name: ENOENT, which drops it then). A kernel
+         * before FUSE 7.38 ignores the flag (it was padding) and drops as before. */
+        ie.flags = FUSE_EXPIRE_ONLY;
         struct iovec iov[3] = {{&oh, sizeof oh}, {&ie, sizeof ie}, {v[i].name, nl + 1}};
         oh.len = (uint32_t)(sizeof oh + sizeof ie + nl + 1); oh.error = FUSE_NOTIFY_INVAL_ENTRY; oh.unique = 0;
         (void)!writev(fusefd, iov, 3);
@@ -1282,9 +1287,15 @@ static void invalidate_all(void) {
     free(v);
 }
 
+static int same_file(const fileid_t *a, const fileid_t *b) {
+    return a->present == b->present && (!a->present || (a->ino == b->ino && a->size == b->size
+        && a->mt.tv_sec == b->mt.tv_sec && a->mt.tv_nsec == b->mt.tv_nsec));
+}
+
 static void reload(const char *why) {
     double t0 = now_ms();
     static int kept_logged;
+    fileid_t was_ign = fid_ign, was_ro = fid_ro, was_conf = fid_conf;
     rules_t *nr = rules_build();
     if (!nr) { if (!kept_logged++) logm("rules (%s): the base is not reachable — keeping the last rules", why); return; }
     kept_logged = 0;
@@ -1293,8 +1304,12 @@ static void reload(const char *why) {
     nr->gen = ++rules_gen_counter;
     R = nr;
     pthread_mutex_unlock(&mu);
+    /* The same files and conf as before (a wake's SIGUSR1, a poll that found nothing new): nothing to tell the
+     * kernel. */
+    int same = old && same_file(&was_ign, &fid_ign) && same_file(&was_ro, &fid_ro) && same_file(&was_conf, &fid_conf)
+               && old->hide == nr->hide && old->fold == nr->fold;
     rules_free(old);
-    if (old) invalidate_all();
+    if (old && !same) invalidate_all();
     logm("rules (%s): .dozignore %s (%d), .dozreadonly %s (%d), %d dropped, mode %s, fold %s — %.1f ms", why,
          nr->ign_present ? "present" : "absent", nr->n_ign, nr->ro_present ? "present" : "absent", nr->n_ro, nr->n_bad,
          nr->hide ? "hide" : "lock", nr->fold ? "on" : "off", now_ms() - t0);

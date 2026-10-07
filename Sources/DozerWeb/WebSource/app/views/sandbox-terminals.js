@@ -207,9 +207,14 @@ function tabElement(t, pane) {
     on: { click: () => closeTerminal(t.id) } }, icon('x'));
   // 608: Restart session / End session — for a running session of a running sandbox.
   const live = t.session && !t.saved && !t.ended && !t.restarting && !t.bootlog && sandboxPhase(t.sandbox) === 'running';
-  const menu = live ? menuButton(h('button', { type: 'button', class: 'tab-x', title: 'Session ' + t.session + ': restart or end it',
-    'aria-label': 'More for ' + label, 'data-session-menu': t.session }, icon('ellipsis')), sessionMenuItems(t.sandbox, t.session, null),
-    { align: 'end', label: 'Session ' + t.session }).el : null;
+  // The menu is kept on the terminal across re-renders (a title or phase change re-renders the strip — an open
+  // menu must not vanish under the pointer).
+  if (live && !t.sessionMenu) {
+    t.sessionMenu = menuButton(h('button', { type: 'button', class: 'tab-x', title: 'Session ' + t.session + ': restart or end it',
+      'aria-label': 'More for session ' + t.session, 'data-session-menu': t.session }, icon('ellipsis')), sessionMenuItems(t.sandbox, t.session, null),
+      { align: 'end', label: 'Session ' + t.session });
+  } else if (!live && t.sessionMenu) t.sessionMenu = null;
+  const menu = live ? t.sessionMenu.el : null;
   return h('div', { class: 'tab-wrap' }, select, move, menu, close);
 }
 const SPLIT_ICONS = { shell: 'plus', watch: 'eye', attach: 'link', dialog: 'terminal' };

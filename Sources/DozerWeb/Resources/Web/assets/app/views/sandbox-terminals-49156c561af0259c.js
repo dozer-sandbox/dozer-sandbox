@@ -13,12 +13,12 @@ import { splitArgs } from '../core/util-1195caf40612902f.js';
 import { isRemote } from '../core/session-822695b1266e88c3.js';
 import { btn } from '../components/button-8e61dd531eed2262.js';
 import { dialog } from '../components/dialog-28078aaa2d068a1e.js';
-import { lifecycle, sessionsWhyNot } from '../components/lifecycle-c981ba8755715a2d.js';
+import { lifecycle, sessionsWhyNot } from '../components/lifecycle-cbef20377b2138bf.js';
 import { menuButton } from '../components/menus-95968d15addcffdf.js';
 import { failureFor, pageFailure } from '../components/notices-0170b06a2323aa78.js';
-import { bootTerm, closeTerminal, focusTerm, openDefaultTerminal, openTerminal, terminalTitle } from '../components/terminal-7d5a217f8344b3ef.js';
+import { bootTerm, closeTerminal, focusTerm, openDefaultTerminal, openTerminal, terminalTitle } from '../components/terminal-b5dc79288fb2c3bb.js';
 import { openInTerminal, runDetachedDialog } from './sandbox-dialogs-8e11ce3b80400bd9.js';
-import { sessionMenuItems } from '../components/session-actions-624a05e7606c6868.js';
+import { sessionMenuItems } from '../components/session-actions-c3cf7387983580ce.js';
 // Calls up the layers (provided by app.js — core/hooks.js):
 const openSavedTerminal = upcall('openSavedTerminal'), persistLayout = upcall('persistLayout');
 
@@ -207,9 +207,14 @@ function tabElement(t, pane) {
     on: { click: () => closeTerminal(t.id) } }, icon('x'));
   // 608: Restart session / End session — for a running session of a running sandbox.
   const live = t.session && !t.saved && !t.ended && !t.restarting && !t.bootlog && sandboxPhase(t.sandbox) === 'running';
-  const menu = live ? menuButton(h('button', { type: 'button', class: 'tab-x', title: 'Session ' + t.session + ': restart or end it',
-    'aria-label': 'More for ' + label, 'data-session-menu': t.session }, icon('ellipsis')), sessionMenuItems(t.sandbox, t.session, null),
-    { align: 'end', label: 'Session ' + t.session }).el : null;
+  // The menu is kept on the terminal across re-renders (a title or phase change re-renders the strip — an open
+  // menu must not vanish under the pointer).
+  if (live && !t.sessionMenu) {
+    t.sessionMenu = menuButton(h('button', { type: 'button', class: 'tab-x', title: 'Session ' + t.session + ': restart or end it',
+      'aria-label': 'More for session ' + t.session, 'data-session-menu': t.session }, icon('ellipsis')), sessionMenuItems(t.sandbox, t.session, null),
+      { align: 'end', label: 'Session ' + t.session });
+  } else if (!live && t.sessionMenu) t.sessionMenu = null;
+  const menu = live ? t.sessionMenu.el : null;
   return h('div', { class: 'tab-wrap' }, select, move, menu, close);
 }
 const SPLIT_ICONS = { shell: 'plus', watch: 'eye', attach: 'link', dialog: 'terminal' };

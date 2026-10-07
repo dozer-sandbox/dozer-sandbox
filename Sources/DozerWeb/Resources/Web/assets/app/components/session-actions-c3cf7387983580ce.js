@@ -6,7 +6,7 @@ import { state } from '../core/state-d393c12b794a3f10.js';
 import { terminals } from '../core/terminals-fa5cf7fc28fdb48f.js';
 import { actOrThrow, waitForOp } from '../core/operations-4c1f59c249615405.js';
 import { dialog } from './dialog-28078aaa2d068a1e.js';
-import { paintCover, reattachTerminals } from './terminal-7d5a217f8344b3ef.js';
+import { keepScrollback, paintCover, reattachTerminals } from './terminal-b5dc79288fb2c3bb.js';
 import { failureFor } from './notices-0170b06a2323aa78.js';
 
 const AGENT_SESSIONS = { claude: 'Claude Code', codex: 'Codex', pi: 'pi' };
@@ -27,7 +27,7 @@ export function sessionMenuItems(name, session, why) {
   return [
     { label: 'Restart session', icon: 'rotate-ccw', desc: sessionAgent(name, session) ? 'Start it again — the conversation continues' : 'End its program and start it again',
       disabled: !!why, why, onSelect: () => restartSessionDialog(name, session) },
-    { label: 'End session', icon: 'power', desc: 'Its program stops (hung up, then terminated)', disabled: !!why, why, onSelect: () => endSessionDialog(name, session) },
+    { label: 'End session', icon: 'power', danger: true, desc: 'Its program stops (hung up, then terminated)', disabled: !!why, why, onSelect: () => endSessionDialog(name, session) },
   ];
 }
 
@@ -63,7 +63,7 @@ export async function restartSession(name, session, fresh) {
   } finally {
     for (const t of panes) {
       t.restarting = false;
-      if (done && done.state === 'done' && !t.closed) { t.ended = false; t.errorText = ''; t.disconnected = ''; t.reattach = true; }
+      if (done && done.state === 'done' && !t.closed) { keepScrollback(t); t.ended = false; t.errorText = ''; t.disconnected = ''; t.reattach = true; }
       else if (!t.ws && !t.closed) { t.ended = true; t.endText = 'the restart did not finish'; }
       paintCover(t);
     }

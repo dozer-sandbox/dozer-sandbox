@@ -64,7 +64,7 @@ func cliSessionsSuite(binary: String) async {
     usleep(800_000)
     r = t.run(["sessions", "restart", "s1", "tm", "-d", "--yes"], timeout: 60)
     usleep(1_500_000)
-    check(r.code == 0 && ex("ps -o args | grep -c '^sleep 7777'") == "1" && ex("ps -o args | grep -c '[t]mux: server'") == "1",
+    check(r.code == 0 && ex("ps -o args | grep -c '^sleep 7777'") == "1" && ex("ps -o args | grep -c '[{]tmux: server}'") == "1",
           "restart tm → one program and one tmux server, not the old one re-attached by tmux (\(ex("ps -o pid,args | grep -e '[s]leep 7777' -e '[t]mux: server' | tr '\\n' ';'")))")
     check(t.run(["config", "set", "--sandbox", "s1", "sessions.tmux", "false"]).code == 0, "tmux off again")
 

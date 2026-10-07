@@ -15,17 +15,17 @@ import { chip, panel, stat, table } from '../components/blocks-53c969feeec8fe89.
 import { btn } from '../components/button-8e61dd531eed2262.js';
 import { callout } from '../components/callout-295f8e0570c7e239.js';
 import { confirmAction, dialog } from '../components/dialog-28078aaa2d068a1e.js';
-import { lifecycle, lifecycleBar, sessionsWhyNot } from '../components/lifecycle-c981ba8755715a2d.js';
+import { lifecycle, lifecycleBar, sessionsWhyNot } from '../components/lifecycle-cbef20377b2138bf.js';
 import { moreMenu } from '../components/menus-95968d15addcffdf.js';
-import { sessionMenuItems } from '../components/session-actions-624a05e7606c6868.js';
+import { sessionMenuItems } from '../components/session-actions-c3cf7387983580ce.js';
 import { failureFor, pageFailure, paintRowOps } from '../components/notices-0170b06a2323aa78.js';
-import { sandboxPill } from '../components/pills-c5288545ad950375.js';
-import { bootLogDialog, focusTerm, openTerminal, PHASE_WORD } from '../components/terminal-7d5a217f8344b3ef.js';
+import { sandboxPill } from '../components/pills-6cc2c4dee9e42d98.js';
+import { bootLogDialog, focusTerm, openTerminal, PHASE_WORD } from '../components/terminal-b5dc79288fb2c3bb.js';
 import { ISOLATED_NOTE } from '../components/workspace-chooser-cafd4b19f43a7e5b.js';
 import { duplicateDialog, openInTerminal, policyDialog, runDetachedDialog, takePointDialog, templateDialog } from './sandbox-dialogs-8e11ce3b80400bd9.js';
-import { openSavedTerminal, promoteSaved, restorePanes, savedRows } from './sandbox-layout-037c90a2096596dc.js';
+import { openSavedTerminal, promoteSaved, restorePanes, savedRows } from './sandbox-layout-8c87bc1b3030b344.js';
 import { networkPanel } from './sandbox-network-4f32a2ec91b56086.js';
-import { paintStripActs, paintTabs, paintTermEmpty, renderTerminals } from './sandbox-terminals-907c498f87f3e923.js';
+import { paintStripActs, paintTabs, paintTermEmpty, renderTerminals } from './sandbox-terminals-49156c561af0259c.js';
 
 // ── a sandbox's page (593): a control bar, the terminal area, a collapsible details panel ──────
 // #sbx is persistent: refreshSandbox() re-renders the bar and the details, never #terminals.
