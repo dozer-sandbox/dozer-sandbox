@@ -72,8 +72,9 @@ Add `-v` to any command to see every step it takes.
 | symptom | what to do |
 |---|---|
 | Ctrl-] doesn't detach | Once opens the menu on the bottom row; press it again (or `d`). |
-| "Sign in with a new link" | `doz ui link`. |
-| A browser terminal says "Disconnected" | `doz ui` stopped or the browser signed out; reconnect or `doz ui link`. |
+| "Sign in with a new link" | Paste a link from `doz ui link --print-url` into the page, or open one with `doz ui link`. |
+| A browser terminal says "Disconnected" | It was silent a long time or could not reattach: **Reconnect**. After `doz ui` restarts it reattaches by itself. |
+| The installed dashboard app says "Dozer isn't running on this Mac" | Run `doz ui`; the window comes back by itself. |
 | The dashboard is paused under an overlay | `doz ui` stopped: start it again and the page reconnects. |
 | Open in Terminal does nothing | Make a terminal app the handler for `.command` files (Finder › Get Info › Open with › Change All…). |
 | A copy didn't reach the clipboard | Look at the notice (off, too big, too many); `doz config show --sandbox NAME`. |

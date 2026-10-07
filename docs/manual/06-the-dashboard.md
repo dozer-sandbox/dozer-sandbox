@@ -9,29 +9,56 @@ refused and allowing it with one click. It runs on your Mac only; nothing else c
 
 - **One dashboard per store.** Running `doz ui` again reuses the one that runs.
 - **A one-use sign-in link.** `doz ui` opens your browser with a link that works **once**, for **five
-  minutes**, and signs that browser in (until you sign out, or 12 hours without the page open). Nobody
-  else can sign in without a link.
+  minutes**, and signs that browser in — it stays signed in until you sign out or don't use it for
+  **14 days** (each visit renews it), so an installed dashboard app opens signed in. Nobody else can sign
+  in without a link.
+- **An app, if you like.** Install it from Chrome or Safari and it opens in its own window with its own
+  icon (see [Install it as an app](#install-it-as-an-app)).
 - **A client of the host**, like the command line. Opening the dashboard doesn't start the host;
   any action you take does, as a command would.
 
 ## Start it
 
 ```sh
-doz ui                    # serve it and open it in your browser
+doz ui                    # serve it and open it in your browser (the same as doz ui start)
 doz ui --print-url        # print the link instead of opening a browser
 doz ui link               # another browser or tab on the dashboard that runs
+doz ui restart            # restart the running dashboard: open pages carry on by themselves
 doz ui --new-link         # sign every page out and make a new link
 ```
 
-Stop it with **Ctrl-C** in its terminal. The address is `http://127.0.0.1:PORT`: the port this store's
-last dashboard used when it's free, so a page left open reconnects by itself — still signed in — when
-you start `doz ui` again, and no new tab opens.
+Stop it with **Ctrl-C** in its terminal. The address is `http://127.0.0.1:PORT` — this Mac only. The
+port is the setting `ui.port`: `0` (the default) means the port this store's last dashboard used, when
+it's free, so a page left open reconnects by itself — still signed in — when you start `doz ui` again,
+and no new tab opens. If another program took that port, `doz ui` says which and listens elsewhere. For
+an installed app, fix the port, because an app belongs to one address:
+
+```sh
+doz config set ui.port 7443   # then: doz ui restart
+doz ui start --port 7444      # one run on another port
+```
+
+A fixed port that another program holds is never silently swapped: `doz ui` refuses to start and names
+the program. After `doz ui restart` onto a new port, the dashboard opens there in a new tab and the old
+page says where it went (a browser rule keeps a page from following by itself).
 
 **When a tab opens:** only when none of the dashboard's pages is open (the setting `ui.open_browser`:
 `auto`). Set it to `always` or `never`, or use `--open` / `--no-open` for one run.
 
 Treat a printed link like a password: anyone with it can sign in to your dashboard for those five
 minutes.
+
+## Install it as an app
+
+- **Chrome (or Edge):** on the dashboard, the address bar's install icon or **⋮ › Cast, save and share ›
+  Install page as app…** — *Install Dozer Sandbox*. It opens in its own window, with the Dozer icon in the
+  Dock and in ⌘-Tab, and shares Chrome's sign-in.
+- **Safari:** **File › Add to Dock**. A Safari web app keeps its own cookies, so it opens on the
+  dashboard's sign-in: paste a link from `doz ui link --print-url` into its field.
+
+When `doz ui` isn't running, the app (or a reload) shows **Dozer isn't running on this Mac** with what to
+run, instead of the browser's error page; it comes back by itself, on the view it was on, as soon as
+`doz ui` answers. The app needs nothing to stay running in the background.
 
 ## The pages
 
@@ -112,15 +139,31 @@ The sidebar's footer shows the dashboard's connection and the host's state and v
   dashboard, **Restart host** asks first, hibernates what runs and starts the newer host (sandboxes
   wake when you use them). If the dashboard is the older one, restart `doz ui`.
 
-## When `doz ui` stops
+## When `doz ui` restarts or stops
 
-A banner says so. After a moment the page is paused under an overlay: nothing behind it can be
-clicked, and it says it is reconnecting, what to run, when it was last connected, and whether the host
-was running, with **Try now**. The page retries every second and comes back by itself when you start
-`doz ui` again (it says "doz ui restarted"). If the port changed, or after `--new-link`, it asks for a
-new link: run `doz ui link`.
+A restart is routine — an upgrade, `doz ui restart`, the Mac waking up. For the first seconds the page
+says, calmly, **Reconnecting to Dozer…**; nothing behind it can be clicked meanwhile. When `doz ui`
+answers again the page carries on where it was, still signed in, with no reload:
+
+- **Terminals reattach by themselves**, with their screens (what you typed while it was away is
+  dropped, never typed later). An open **New sandbox** wizard keeps its choices.
+- **An operation that was running** (a start, a wake) ends with what happened — the host carried it
+  on — "finished while doz ui restarted", never a spinner that never stops.
+- **A newer doz ui** (after `brew upgrade doz` and a restart): a banner says *Dozer was updated* with
+  **Reload**; the page reloads by itself as soon as nothing would be lost (no wizard or dialog open, no
+  terminal you're typing in, nothing typed in a field).
+
+If `doz ui` was stopped (Ctrl-C), or doesn't come back within 15 seconds, the overlay says what to run,
+when it was last connected and whether the host was running, with **Try now**; after a minute it adds
+the port the page expected. The page retries every second and comes back by itself when you start
+`doz ui` again (it says "doz ui restarted").
 
 ![Paused while doz ui is away](images/dashboard-overlay.png)
+
+**When the page must sign in again** — after `doz ui --new-link` / `doz ui link --rotate`, after 14 days
+unused, or when you signed out — it says why and asks for a link **inside the page**: paste one from
+`doz ui link --print-url` (or open one with `doz ui link`). Everything on the page stays as it was while
+you sign in; its terminals reattach afterwards.
 
 ## Terminals in the browser
 
@@ -148,6 +191,7 @@ dashboard can switch this off but never on.
 | key | default | what it does |
 |---|---|---|
 | `ui.open_browser` | `auto` | When `doz ui` opens a tab: `auto` (only when no page is open), `always`, `never`. |
+| `ui.port` | `0` | The port on 127.0.0.1: `0` = the last one when free, or a fixed port 1024–65535 (for an installed app). |
 | `ui.theme` | `auto` | `auto` follows macOS; `light`; `dark`. |
 | `ui.terminals` | `true` | Terminals in the browser. `false`: none open (Open in Terminal still works). |
 | `ui.terminal_font_size` | `13` | Font size of a browser terminal (9–32). |
@@ -173,8 +217,11 @@ dashboard can switch this off but never on.
 
 | symptom | what to do |
 |---|---|
-| "Sign in with a new link" | The link was used, expired, or every page was signed out: `doz ui link`. |
-| A terminal says "Disconnected" | `doz ui` stopped, the browser signed out, or it was silent a long time. Reconnect, or `doz ui link`. |
+| "Sign in with a new link" | The link was used, expired, or every page was signed out: paste a link from `doz ui link --print-url`, or open one with `doz ui link`. |
+| A terminal says "Disconnected" | It was silent a long time, or it could not reattach: **Reconnect**. (After a restart or a sign-in it reattaches by itself.) |
+| "Dozer moved to 127.0.0.1:…" | `ui.port` changed and `doz ui` restarted there: use the tab it opened (an installed app: install it again from there). |
+| The installed app shows "Dozer isn't running" | Start `doz ui`; the window comes back by itself. |
+| "ui.port is …, and … listens on 127.0.0.1:…" | Another program holds the fixed port: stop it, or `doz config set ui.port N` (`0` = automatic). |
 | Two tabs open each time | Set `ui.open_browser` to `auto` (the default) or run `doz ui --no-open`. |
 | Open in Terminal does nothing | Make a terminal app the handler for `.command` files: Finder › Get Info on any `.command` file › Open with › Change All… |
 | "the resources are missing" | Reinstall: `brew reinstall doz`. |

@@ -545,7 +545,7 @@ public struct DozerSettings: Sendable {
 
     /// What cannot be set here, by design, and why — printed in the file and the docs.
     public static let notSettable: [String] = [
-        "the web UI's limits: session lifetime (12 h), link lifetime (5 min), request body, connection and stream caps",
+        "the web UI's limits: session lifetime (14 days unused), link lifetime (5 min), request body, connection and stream caps",
         "the web UI's checks: exact Host, Origin + CSRF on every change, the Content-Security-Policy",
         "the browser terminal's safety: one-use 30 s tickets, the 1 MiB paste cap and the unsafe-paste confirmation",
         "the guest binaries (DOZ_DECKHOLD / DOZ_DOZNET are developer overrides, environment only)",
