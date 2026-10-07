@@ -1592,15 +1592,29 @@ public actor Sandbox {
     /// The guest paths (e.g. /workspace) that are served through a view right now.
     public nonisolated var viewedGuestPaths: [String] { activeViews.values.map(\.guestPath).sorted() }
 
-    /// The views the host wants now: every share whose Mac folder holds a rule file (two `stat`s each).
-    nonisolated func wantedViews(shareTags: [String: String]) -> [String: WorkspaceViewConfig] {
+    /// Serve EVERY share through the view, a passthrough one where the folder has no rule file (BUG
+    /// cwd-after-wake): a hibernation's re-mount detaches the raw share at its guest path and gives the
+    /// fresh mount new node ids, so a program whose cwd was inside (Codex validates its cwd per turn) gets
+    /// ENOENT from getcwd. The view is never re-mounted — its daemon lives in guest memory and re-opens its
+    /// link to the share — so a cwd inside it survives. Default true; false = 599g's rule (views only with
+    /// rule files).
+    public nonisolated var passthroughViews: Bool {
+        get { passthroughBox.withLock { $0 } }
+        set { passthroughBox.withLock { $0 = newValue } }
+    }
+    private nonisolated let passthroughBox = LockedBox<Bool>(true)
+
+    /// The views the host wants now: every share whose Mac folder holds a rule file (two `stat`s each), and
+    /// — `includePassthrough` and `passthroughViews` — every other share as a passthrough view.
+    nonisolated func wantedViews(shareTags: [String: String], includePassthrough: Bool = true) -> [String: WorkspaceViewConfig] {
         var out: [String: WorkspaceViewConfig] = [:]
         for share in spec.shares {
             guard let tag = shareTags[share.guestPath] else { continue }
             let folder = URL(fileURLWithPath: share.hostPath)
-            guard WorkspaceRules.present(in: folder) else { continue }
+            let rules = WorkspaceRules.present(in: folder)
+            guard rules || (includePassthrough && passthroughViews) else { continue }
             out[tag] = WorkspaceViewConfig(tag: tag, guestPath: share.guestPath, mode: workspaceRuleMode,
-                                           fold: WorkspaceRules.caseInsensitive(folder))
+                                           fold: WorkspaceRules.caseInsensitive(folder), passthrough: !rules)
         }
         return out
     }
@@ -1619,7 +1633,7 @@ public actor Sandbox {
             return
         }
         let label = views.values.sorted { $0.guestPath < $1.guestPath }
-            .map { "\($0.guestPath) (\($0.mode.rawValue)\($0.fold ? ", case-insensitive" : ""))" }.joined(separator: ", ")
+            .map { $0.isPassthrough ? "\($0.guestPath) (no rules)" : "\($0.guestPath) (\($0.mode.rawValue)\($0.fold ? ", case-insensitive" : ""))" }.joined(separator: ", ")
         let work: () async throws -> String = {
             try await c.copyIn(from: bin, to: URL(fileURLWithPath: WorkspaceView.binaryGuestPath), mode: 0o755)
             let script = views.values.sorted { $0.guestPath < $1.guestPath }.map(WorkspaceView.startScript).joined(separator: "; ")
@@ -1646,7 +1660,11 @@ public actor Sandbox {
             case .failed:
                 let gp = wanted[st.tag]?.guestPath ?? guestPaths[st.tag] ?? st.tag
                 active[st.tag] = nil
-                note("workspace rules: the view of \(gp) could not start — \(gp) is EMPTY in the sandbox until it does (the next wake or start tries again)")
+                if wanted[st.tag]?.isPassthrough == true {
+                    note("workspace: the view of \(gp) could not start — \(gp) is the share as it is (a program inside loses its directory at a hibernation)")
+                } else {
+                    note("workspace rules: the view of \(gp) could not start — \(gp) is EMPTY in the sandbox until it does (the next wake or start tries again)")
+                }
             case .off:
                 active[st.tag] = nil
             }
@@ -1661,7 +1679,9 @@ public actor Sandbox {
         guard phase == .running, let c = container else { return }
         let wanted = wantedViews(shareTags: identity?.shareTags ?? [:])
         let active = activeViews
-        let new = wanted.filter { active[$0.key] == nil }
+        // A passthrough view is started only at a fresh boot or a hibernation's wake (where the raw share's
+        // cwds are cut anyway) — never live under a running program, whose cwd it would cut.
+        let new = wanted.filter { active[$0.key] == nil && !$0.value.isPassthrough }
         if !new.isEmpty {
             note("workspace rules: a rule file appeared — serving \(new.values.map(\.guestPath).sorted().joined(separator: ", ")) through the view (a program already inside keeps what it has open until it changes directory)")
             await startViews(new, on: c, quiet: true)

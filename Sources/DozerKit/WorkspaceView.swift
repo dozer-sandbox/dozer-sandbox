@@ -28,8 +28,14 @@ public struct WorkspaceViewConfig: Sendable, Equatable, Codable {
     public var guestPath: String
     public var mode: WorkspaceRuleMode
     public var fold: Bool
-    public init(tag: String, guestPath: String, mode: WorkspaceRuleMode, fold: Bool) {
-        self.tag = tag; self.guestPath = guestPath; self.mode = mode; self.fold = fold
+    /// The share's Mac folder holds NO rule file: the view only keeps /workspace alive across a hibernation
+    /// (a process whose cwd is inside keeps it — the raw re-mount would cut it). It hides nothing, makes
+    /// nothing read-only (dozview ≥ 1.1.0), and when it cannot start the share is bound as it is — never
+    /// left empty. nil (an older record) = false.
+    public var passthrough: Bool?
+    public var isPassthrough: Bool { passthrough == true }
+    public init(tag: String, guestPath: String, mode: WorkspaceRuleMode, fold: Bool, passthrough: Bool = false) {
+        self.tag = tag; self.guestPath = guestPath; self.mode = mode; self.fold = fold; self.passthrough = passthrough ? true : nil
     }
 }
 
@@ -87,7 +93,13 @@ public enum WorkspaceView {
             + " && mkdir -p '\(r)' && { mountpoint -q '\(r)' || mount --bind '\(g)' '\(r)'; } && ls -a '\(r)' >/dev/null"
             + " && { n=0; while mountpoint -q '\(g)' && [ $n -lt 8 ]; do umount -l '\(g)'; n=$((n+1)); done; } && ! mountpoint -q '\(g)'"
             + " && mkdir -p '\(g)' && \(writeConf(c)) && pid=$(\(startCommand(c))) && ls -a '\(g)' >/dev/null"
-            + " && echo \"doz-view \(c.tag) started $pid\"; } 2>&1 || echo 'doz-view \(c.tag) failed: the view could not start'"
+            + " && echo \"doz-view \(c.tag) started $pid\"; } 2>&1 || { \(fallback(c.tag, g, c.isPassthrough))echo 'doz-view \(c.tag) failed: the view could not start'; }"
+    }
+
+    /// A passthrough view that could not start leaves the SHARE at G (bound from RAW, else from the fresh
+    /// virtio-fs mount) — never an empty folder: there are no rules to keep.
+    static func fallback(_ tag: String, _ g: String, _ passthrough: Bool) -> String {
+        passthrough ? "{ mountpoint -q '\(g)' || mount --bind '\(rawPath(tag))' '\(g)' 2>/dev/null || mount --bind '/run/dozer-vfs/\(tag)' '\(g)' 2>/dev/null; } ; " : ""
     }
 
     /// Root shell, inside the wake's re-mount (after `/run/dozer-vfs` is fresh and listed), for a share
@@ -98,10 +110,10 @@ public enum WorkspaceView {
         let r = rawPath(tag), pf = pidPath(tag)
         var s = "umount -l '\(r)' 2>/dev/null || true; mount --bind '/run/dozer-vfs/\(tag)' '\(r)'; ls -a '\(r)' >/dev/null"
         if let w = wanted { s += "; \(writeConf(w)) || true" }
-        let c = WorkspaceViewConfig(tag: tag, guestPath: g, mode: wanted?.mode ?? .lock, fold: wanted?.fold ?? true)
+        let c = WorkspaceViewConfig(tag: tag, guestPath: g, mode: wanted?.mode ?? .lock, fold: wanted?.fold ?? true, passthrough: wanted?.isPassthrough ?? false)
         s += "; \(aliveFunction); if dzv_alive '\(pf)'; then kill -USR1 \"$(cat '\(pf)')\"; echo \"doz-view \(tag) running $(cat '\(pf)')\""
             + "; else umount -l '\(g)' 2>/dev/null || true; mkdir -p '\(g)'"
-            + "; if pid=$(\(startCommand(c)) 2>&1); then echo \"doz-view \(tag) restarted $pid\"; else echo \"doz-view \(tag) failed: $pid\"; fi; fi"
+            + "; if pid=$(\(startCommand(c)) 2>&1); then echo \"doz-view \(tag) restarted $pid\"; else \(fallback(tag, g, c.isPassthrough))echo \"doz-view \(tag) failed: $pid\"; fi; fi"
         return s
     }
 

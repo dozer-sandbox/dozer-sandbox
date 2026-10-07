@@ -101,7 +101,7 @@
 #define RENAME_EXCHANGE (1 << 1)
 #endif
 
-#define DOZVIEW_VERSION "1.0.1"
+#define DOZVIEW_VERSION "1.1.0"
 #define VIRTIOFS_MAGIC 0x65735546UL /* FUSE_SUPER_MAGIC — virtio-fs is a FUSE file system */
 #define PATHMAX 4096
 #define BUFSZ ((size_t)(1 << 20) + 8192)
@@ -246,9 +246,14 @@ static rules_t *rules_build(void) {
     rules_t *r = calloc(1, sizeof *r);
     if (!r) { dm_free_lines(ip, il, ni); dm_free_lines(rp, rl, nr); return NULL; }
     conf_read(&r->hide, &r->fold);
+    /* No rule file = a PASSTHROUGH view (the host serves every share through one, so a process whose cwd
+     * is in the share survives a hibernation): nothing is excluded or read-only, not even the implicit
+     * read-only names — `git init` must still make .git/hooks. The implicit names and the rule files'
+     * own protection apply once a rule file exists. */
+    int any = fi.present || fr.present;
     for (int k = 0; k < (r->fold ? 2 : 1); k++) {
         build_set(&r->ign[k], ip, ni, NULL, 0, k, &r->n_bad);
-        build_set(&r->ro[k], rp, nr, implicit_ro, N_IMPLICIT, k, &r->n_bad);
+        build_set(&r->ro[k], rp, nr, any ? implicit_ro : NULL, any ? N_IMPLICIT : 0, k, &r->n_bad);
     }
     r->n_ign = ni; r->n_ro = nr; r->ign_present = fi.present; r->ro_present = fr.present;
     fid_ign = fi; fid_ro = fr;
@@ -394,7 +399,7 @@ static int classify_with(const char *rel, int isdir, const uint8_t *pinfo, uint8
         o += s->n; if (pi) pi += s->n;
     }
     free(folded);
-    if (is_rule_file(rel, r->fold)) return C_RO;
+    if ((r->ign_present || r->ro_present) && is_rule_file(rel, r->fold)) return C_RO;
     if ((excl && !isdir) || skip) return C_EXCL;
     return ro ? C_RO : C_NONE;
 }
@@ -412,7 +417,8 @@ static int classify_node(node *n, char *pathbuf) {
     int pcls; const uint8_t *pi = parent_info(n->parent, &pcls);
     if (node_path(n, pathbuf, PATHMAX) < 0) return C_EXCL;
     int sz = info_size(R);
-    if (n->info_len != sz) { free(n->info); n->info = calloc((size_t)(sz ? sz : 1), 1); n->info_len = sz; }
+    /* `!n->info` too: with no pattern at all (a passthrough view) sz is 0 == a new node's info_len */
+    if (n->info_len != sz || !n->info) { free(n->info); n->info = calloc((size_t)(sz ? sz : 1), 1); n->info_len = sz; }
     if (!n->info) return C_EXCL;
     n->cls = pcls == C_EXCL ? C_EXCL : classify_with(pathbuf, S_ISDIR(n->mode), pi, n->info);
     n->rgen = R->gen; n->sgen = struct_gen;
