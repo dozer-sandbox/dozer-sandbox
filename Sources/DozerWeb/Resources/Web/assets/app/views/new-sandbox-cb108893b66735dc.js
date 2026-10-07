@@ -20,7 +20,7 @@ import { pageFailure, toast } from '../components/notices-0170b06a2323aa78.js';
 import { confirmWeb, isAgentModel, permissionSwitches } from '../components/permissions-84a4fe4360bac4b5.js';
 import { rulesStep } from '../components/rules-step-caa581df445e9800.js';
 import { stepperNode } from '../components/stepper-19d0f8aab00bfb93.js';
-import { openDefaultTerminal } from '../components/terminal-8accd4d583784e48.js';
+import { openDefaultTerminal } from '../components/terminal-7d5a217f8344b3ef.js';
 
 // ── 599f: the New Sandbox wizard (owner: "a new wizard process for creating a purposeful sandbox that steps
 // the user through all the choices, capturing the config in a doz_project.yml in the project / working dir").

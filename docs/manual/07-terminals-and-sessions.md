@@ -25,6 +25,8 @@ doz attach my-app server          # a session by name
 doz run my-app -- htop            # a NEW session running a program, attached
 doz run my-app -d --session worker -- bash -lc 'make watch'    # start one in the background
 doz sessions my-app               # list them
+doz sessions restart my-app codex # end its program and start it again (an agent continues its conversation)
+doz sessions end my-app worker    # end its program
 doz exec my-app -- ls /workspace  # a one-off command: no terminal, output and exit code pass through
 ```
 
@@ -38,6 +40,23 @@ doz exec my-app -- ls /workspace  # a one-off command: no terminal, output and e
 - A program the sandbox does not have is said plainly — "`sudo` is not installed in this sandbox's
   image (not on its PATH)" — and `doz` exits `125`. There is no `sudo` in the lab; it isn't needed
   there: `exec` already runs as root unless `--user` names another user.
+
+### Restarting or ending a session
+
+`doz sessions restart NAME SESSION` ends the session's program and starts **the same program again**, in
+the same session, folder and user — the screen you are attached to comes back with it. For the sandbox's
+own agent session it **continues the conversation**: Claude Code with `--continue`, Codex with
+`resume --last`, pi with `--continue` — only the turn in progress is lost. `--fresh` starts a new
+conversation instead. Use it when a program is stuck, or after a wake left it in a broken state.
+
+`doz sessions end NAME SESSION` only ends it. Both hang the program up the way closing its terminal does,
+then terminate it, then kill it if they must; anything attached sees it end. Both ask first on a terminal
+(`--yes` does not), need the sandbox **running** (they never wake it), and `restart` attaches afterwards
+unless `-d`.
+
+What a restart runs is what the session was opened with, as Dozer recorded it then; variables given with
+`-e` are not kept (it says so), and a session opened by an older doz cannot be restarted — end it and
+`doz run` it again.
 
 ### Leaving: the Ctrl-] menu
 
@@ -100,6 +119,10 @@ On a sandbox's page in the dashboard:
 - Terminals are **tabs**; **Split** shows two side by side (⇄ moves a tab across). Two tabs on one
   session are marked "shared with tab N". Closing a tab only closes the view.
 - **All sessions** shows every session of every running sandbox as a live, read-only tile.
+- **Restart session** and **End session** are on a tab's **⋯** and on a session's **⋯** in the details'
+  **Sessions** tab (see [Restarting or ending a session](#restarting-or-ending-a-session)). Both ask first; for
+  an agent session you can choose to start a new conversation. The tab shows "Restarting the session…" and
+  reattaches when the program is back, keeping what was on screen above it.
 
 Each tab's title follows `ui.terminal_title`, like `1 · my-app · claude · 14:05`.
 

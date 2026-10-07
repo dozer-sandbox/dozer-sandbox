@@ -459,6 +459,22 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   allowlisted, paths quoted) and `open`s it, so the user's DEFAULT app for `.command` files runs it
   (Terminal, iTerm2, Ghostty). No AppleScript, so no Automation permission and no second window
   (the AppleScript version opened two when Terminal was not running). Never a command from the browser.
+- **End / Restart session (608, `SessionRestart.swift`)**: host ops `session-end` / `session-restart`, held under
+  the SAME `sessionGate` as `open-session`, RUNNING sandboxes only (never a wake). Ending is
+  `GuestCommand.endSession` (root): the session's tmux server (`/tmp/tmux-*/doz-NAME`) killed first, then
+  HUP → TERM → KILL of the program's PROCESS GROUP (forkpty made it a leader), done when deckhold's socket is
+  gone (`doz-end hangup|terminate|kill|not-running|stuck`). A restart reopens through `openSessionLocked` from
+  `<sandbox>/sessions.json` (`SessionRecords`: argv as CHOSEN — before pi's prompt file, tmux and a resume —
+  workdir, user, variable NAMES only; ≤ 64; 0600; cleared with the sessions: shutdown, reset, died-with-host;
+  fields only ever added). No record: the default session's argv, else refused. The default session of an agent
+  image (argv == the default) gets `SessionResume.arguments` as `extraArguments` (never recorded): Claude Code
+  `--continue` (only after `SessionResume.check` finds ~/.claude/projects/<cwd, non-alnum→'-'>/*.jsonl — it
+  refuses without one), Codex `resume --last` (0.160.1: newest in the cwd, else a new one; `--all` would ignore
+  the folder), pi `--continue` (newest else new); `fresh` = none. CLI `doz sessions end|restart NAME SESSION`
+  (`sessions` became a group whose default subcommand `ls` keeps `doz sessions NAME`); web actions
+  `session-end` / `session-restart` (one HostOp each; `components/session-actions.js`: a tab's ⋯ and the
+  Sessions tab's ⋯; a restarting pane (`t.restarting`) ignores the `ended` frame and the socket's close, shows
+  "Restarting the session…", and reattaches with its scrollback when the operation is done).
 - **`open-session` is serialized per sandbox** (`HostCore.sessionGate`, a `KeyedGate` held across
   its awaits — the actor alone is re-entrant) and idempotent: a concurrent or repeated open of one
   session answers "already running", and a deckhold "Address in use" re-lists and answers with the
@@ -1211,6 +1227,11 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   `refreshWorkspaceViews` from the host's open-session) — but a passthrough view is started only at a fresh
   boot or a hibernation's wake, never live under a running program (it would cut that program's cwd). Turning
   a view OFF waits for the next cold start. The facts' rules line ignores passthrough views. `make test-vm-cwd`.
+  608: the knob is the setting **`workspace.view`** (on|off, per sandbox: `--workspace-view`, `workspace_view` in
+  doz_project.yaml; `HostCore.workspaceViewOn` → `Sandbox.passthroughViews`, read at load and per request,
+  applies `.nextStart`). `SandboxInfo.workspaceView` (`HostCore.workspaceViewState`, pure): live | rules | direct |
+  next-start | fallback — a passthrough view that failed to start is `Sandbox.viewFallbacks` (the boot says so,
+  `doctor` warns "workspace view"). The manual's cost table (21-the-workspace-view.md) is from `make test-vm-cwd`.
 - **Semantics are Docker's, and ONE contract in two languages**: `DockerIgnore` (Swift) and
   `Guest/dozview/match` (C) both pass `Tests/Fixtures/dozignore-vectors.json` (real moby/BuildKit output) and
   agree on `WorkspaceRulesTests.testSwiftAndCAgreeOnADifferentialFuzz`. BuildKit's walker (D1: `d`, `!d/f`, `d`

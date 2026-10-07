@@ -18,6 +18,7 @@ import { menuButton } from '../components/menus.js';
 import { failureFor, pageFailure } from '../components/notices.js';
 import { bootTerm, closeTerminal, focusTerm, openDefaultTerminal, openTerminal, terminalTitle } from '../components/terminal.js';
 import { openInTerminal, runDetachedDialog } from './sandbox-dialogs.js';
+import { sessionMenuItems } from '../components/session-actions.js';
 // Calls up the layers (provided by app.js — core/hooks.js):
 const openSavedTerminal = upcall('openSavedTerminal'), persistLayout = upcall('persistLayout');
 
@@ -204,7 +205,12 @@ function tabElement(t, pane) {
     on: { click: () => { t.pane = 1 - t.pane; v.selected[t.pane] = t.id; renderTerminals(); focusTerm(t); } } }, icon('arrow-left-right')) : null;
   const close = h('button', { type: 'button', class: 'tab-x', title: 'Close this terminal (the session keeps running)', 'aria-label': 'Close ' + label,
     on: { click: () => closeTerminal(t.id) } }, icon('x'));
-  return h('div', { class: 'tab-wrap' }, select, move, close);
+  // 608: Restart session / End session — for a running session of a running sandbox.
+  const live = t.session && !t.saved && !t.ended && !t.restarting && !t.bootlog && sandboxPhase(t.sandbox) === 'running';
+  const menu = live ? menuButton(h('button', { type: 'button', class: 'tab-x', title: 'Session ' + t.session + ': restart or end it',
+    'aria-label': 'More for ' + label, 'data-session-menu': t.session }, icon('ellipsis')), sessionMenuItems(t.sandbox, t.session, null),
+    { align: 'end', label: 'Session ' + t.session }).el : null;
+  return h('div', { class: 'tab-wrap' }, select, move, menu, close);
 }
 const SPLIT_ICONS = { shell: 'plus', watch: 'eye', attach: 'link', dialog: 'terminal' };
 export function paintSplitButton() {

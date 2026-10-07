@@ -7,12 +7,12 @@ import { state } from '../core/state-d393c12b794a3f10.js';
 import { card, meter, panel, table } from '../components/blocks-53c969feeec8fe89.js';
 import { btn } from '../components/button-8e61dd531eed2262.js';
 import { hostCard } from '../components/host-7680a0af8ea66d01.js';
-import { rowLifecycle } from '../components/lifecycle-9307e49bb0c3be84.js';
+import { rowLifecycle } from '../components/lifecycle-c981ba8755715a2d.js';
 import { renderNavSandboxes } from '../components/nav-207ac9e8f8879ea1.js';
-import { sandboxPill } from '../components/pills-57c55d9eba2fffc2.js';
-import { quickAddButton } from '../components/quick-add-f76a5e6fb57610fa.js';
+import { sandboxPill } from '../components/pills-c5288545ad950375.js';
+import { quickAddButton } from '../components/quick-add-e820efa54de72999.js';
 import { ISOLATED_NOTE } from '../components/workspace-chooser-cafd4b19f43a7e5b.js';
-import { newSandboxWizard } from './new-sandbox-b5ffa65d2f455f40.js';
+import { newSandboxWizard } from './new-sandbox-cb108893b66735dc.js';
 
 // ── views ───────────────────────────────────────────────────────────────────
 export async function viewOverview() {

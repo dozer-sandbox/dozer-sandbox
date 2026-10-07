@@ -20,6 +20,9 @@ rm
 ls
 inspect
 sessions
+sessions/end
+sessions/ls
+sessions/restart
 attach
 run
 exec

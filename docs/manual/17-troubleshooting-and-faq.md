@@ -89,6 +89,14 @@ Add `-v` to any command to see every step it takes.
 | The disk is filling up | `doz resources`, then `doz resources clean --dry-run`. |
 | "Dockerfile changed — rebuild available" | `doz image bake df-…`, then `doz reset NAME`. |
 
+### Sessions after a wake
+
+| symptom | what to do |
+|---|---|
+| Codex: `turn/start failed: invalid cwd: No such file or directory` after a wake; a shell's `ls .` says `No such file or directory` | The program's folder was cut off by a wake from hibernation — a sandbox still on the plain share (`workspace.view` off, or started before 0.30.0). Restart the session: `doz sessions restart NAME SESSION` (the conversation continues), or **⋯ › Restart session** on its tab. From its next start the sandbox uses [the workspace view](21-the-workspace-view.md) and this does not happen again. |
+| `doz doctor` warns "workspace view" | The live view of `/workspace` could not start, so the folder is shared directly. `doz console NAME --steps` shows why; `doz shutdown NAME` and `doz start NAME` try again. |
+| A program is stuck | `doz sessions restart NAME SESSION`, or `doz sessions end NAME SESSION`. |
+
 ## FAQ
 
 **Is a sandbox a container?**

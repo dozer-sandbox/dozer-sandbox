@@ -185,6 +185,8 @@ doz builder start [--yes]      # container system start --enable-kernel-install 
 | `run NAME [--session S] [-d] -- CMD …` | A **new** session running `CMD`, attached; exits with `CMD`'s exit code. No shell in front — write `bash -lc '…'` for one. |
 | `exec NAME [--user U] [--workdir D] [-e K=V] [--timeout S] -- CMD …` | One-shot, no terminal: stdout, stderr and the exit code pass straight through (default timeout 120 s). Agent images run as the agent's user in `/workspace`; `--user root` for root. A sleeping sandbox is woken and an off one started first (594; `--no-wake`, `--no-start`; `--json` has `started`, `woke`, `bootMilliseconds`) — `run` starts one too. |
 | `sessions NAME` | The sandbox's terminal sessions. |
+| `sessions restart NAME SESSION [--fresh] [-d]` | End the session's program and start the same one again, in the same session and folder (an agent's own session continues its conversation; `--fresh`: a new one), then attach. Running sandboxes only. |
+| `sessions end NAME SESSION` | End the session's program (hung up, then terminated, then killed). |
 | `ls` · `inspect NAME` | Every sandbox: image, phase, RAM held, disk, sessions, network · everything as JSON. |
 
 **RAM held** in `ls` is what the VM costs the Mac right now: the allocation, less what the memory
