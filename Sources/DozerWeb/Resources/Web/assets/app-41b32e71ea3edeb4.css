@@ -1,5 +1,15 @@
 /* doz ui — the dashboard's styles. No external fonts, images or scripts (the CSP allows only 'self'). Built from the
    603 style guide: tokens first, then base, controls, callouts, the sidebar, the sandbox page, tables, wizards, long pages. */
+/* 607: cascade layers, lowest first. Inside a layer the cascade is as it always was (specificity, then order);
+   between layers the later one wins whatever the specificity — so a rule moved between layers can change who
+   wins: the 607 probe run-cascade.sh compares every element’s computed style with the sheet before.
+   tokens      the 603 tokens (:root custom properties), ui.theme, reduced motion
+   base        box-sizing, html/body, body type, links
+   components  code and the focus ring; the building blocks (the terminal pane, pills, cards, forms, menus,
+               callouts, notices, dialogs, tables, progress …); a feature's own blocks
+   views       the page layouts: the sidebar, the sandbox page, the wizards' modal, long pages */
+@layer tokens, base, components, views;
+@layer tokens {
 /* 603: the style guide's tokens (603.01-DESIGN.html §3) — every colour defined ONCE with
    light-dark(); `color-scheme` decides which side applies, so the theme switch is one property:
    :root = light dark (follows macOS) · [data-theme=light] · [data-theme=dark] (ui.theme). */
@@ -95,12 +105,16 @@
 :root[data-theme="light"] { color-scheme: light; }
 :root[data-theme="dark"]  { color-scheme: dark; }
 @media (prefers-reduced-motion: reduce) { :root { --dur-1: 0ms; --dur-2: 0ms; } }
+}
+@layer base {
 * { box-sizing: border-box; }
 html, body { margin: 0; background: var(--bg); color: var(--ink); }
 /* 603 step 2: ONE UI size (13 px) for tables, controls and body text; 14 for prose and section titles. */
 body { font: var(--fw-regular) var(--fs-md)/var(--lh) var(--font); -webkit-font-smoothing: antialiased; }
 a { color: var(--accent); text-underline-offset: 2px; }
 a:hover { color: var(--accent-hover); }
+}
+@layer components {
 code, kbd, .mono { font-family: var(--mono); font-size: var(--fs-mono); }
 /* A visible focus ring on everything focusable (E9); never removed except on main and the overlay
    container, which take focus programmatically. Inputs ring at offset 0 and colour their border. */
@@ -1002,6 +1016,8 @@ dialog.dlg form { display: flex; flex-direction: column; max-height: calc(100vh 
 @media (max-width: 760px) { .callout .c-acts { grid-column: 2; grid-row: auto; justify-content: flex-start; margin-top: 4px; } }
 .df-state .icon { width: 14px; height: 14px; vertical-align: -2px; }
 .quick-why { margin: 0; }
+}
+@layer views {
 
 /* ── 603 step 5: the sidebar — four groups (Sandboxes · Store · Activity · Setup); the current page is a RAISED
    item with an accent icon (never the ink fill a primary button had); counts and alerts at the right edge;
@@ -1181,6 +1197,8 @@ dl.facts dd { margin: 0; overflow-wrap: anywhere; }
 .ipanel[data-insp="keys"] th:nth-child(4) { width: 76px; }
 .ipanel td { overflow-wrap: break-word; }
 .ipanel td .trunc { max-width: 100%; }
+}
+@layer components {
 
 /* ── 603 step 7: tables — sentence-case headers in ink-2 (32 px), rows 36 px, numbers right and tabular; a row that
    opens something is a link in its first cell and clickable as a whole; its actions: the one likely next verb as a
@@ -1214,6 +1232,8 @@ td.row-acts-cell .row-acts { justify-content: flex-end; flex-wrap: nowrap; }
 /* Images below 1100 px: the bar says own and shared; their figure columns (and the note) step aside. */
 @media (max-width: 1100px) { .images-t th:nth-child(6), .images-t td:nth-child(6), .images-t th:nth-child(7), .images-t td:nth-child(7),
   .images-t th:nth-child(10), .images-t td:nth-child(10) { display: none; } }
+}
+@layer views {
 
 /* ── 603: the wizards (New sandbox, onboarding) — a modal over the page, the full width of the window up to
    --wm-max; its header (title, ✕, the step strip) and footer (the actions) stay put while the body scrolls.
@@ -1283,6 +1303,8 @@ details.disclosure > summary .icon { width: 14px; height: 14px; transform: rotat
 details.disclosure[open] > summary .icon { transform: none; }
 details.disclosure > :not(summary) { margin-top: 6px; }
 .nw-review dl.facts { margin: 0; }
+}
+@layer components {
 /* Progress — a 4 px bar (determinate or indeterminate) and the 12 px spinner; a preparation card keeps its shape. */
 .wiz-bar { height: 4px; border-radius: var(--r-xs); background: var(--surface-3); overflow: hidden; position: relative; }
 .wiz-bar > span { display: block; height: 100%; background: var(--accent); border-radius: var(--r-xs); transition: width var(--dur-2) var(--ease); }
@@ -1291,6 +1313,8 @@ details.disclosure > :not(summary) { margin-top: 6px; }
 .prep-card.prep-done { border-color: color-mix(in srgb, var(--ok) 40%, var(--line)); }
 .prep-card.prep-failed { border-color: color-mix(in srgb, var(--bad) 55%, var(--line)); }
 .prep-output { font: var(--fs-xs)/1.5 var(--mono); color: var(--ink-2); background: var(--surface-2); border-radius: var(--r-sm); padding: 6px 8px; overflow: hidden; }
+}
+@layer views {
 
 /* ── 603 step 9: long pages — a sticky index of the page's sections (with a figure each on Resources), groups
    that fold (Resources, kept in this browser), and the Settings filter. ── */
@@ -1309,3 +1333,4 @@ details.disclosure > :not(summary) { margin-top: 6px; }
 .res-head h2 { display: inline-flex; align-items: center; gap: 4px; }
 .res-head .res-toggle { margin-left: -4px; }
 .filter-none[hidden], .setting[hidden], .set-head[hidden], .panel[hidden] { display: none; }
+}
