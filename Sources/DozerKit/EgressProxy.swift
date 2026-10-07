@@ -110,11 +110,48 @@ public final class EgressProxy: @unchecked Sendable {
         if port == 22, host.lowercased() == "github.com", sshToGitHub {
             return NetworkPolicy.ConnectionVerdict(kind: .allow, rule: "SSH agent forwarding (github.com:22)", ruleIndex: nil)
         }
+        // 599i: the renewal of this sandbox's ChatGPT sign-in is answered by the proxy itself, so its host is
+        // reached (decrypted) even when the policy does not allow it — every OTHER request there is still judged.
+        if port == 443, host.lowercased() == OpenAIAccess.authHost, chatgptRenewal != nil,
+           policy.evaluateConnection(host: host, port: port).kind == .deny {
+            return NetworkPolicy.ConnectionVerdict(kind: .inspect, rule: "ChatGPT sign-in renewal (answered by Dozer on the Mac)", ruleIndex: nil)
+        }
         return policy.evaluateConnection(host: host, port: port)
     }
 
-    /// 599d test seam: where a GitHub host's upstream leg goes instead (nil: the real host).
+    /// 599i TEST SEAM: the OpenAI hosts' upstream leg (chatgpt.com, api.openai.com, auth.openai.com) goes
+    /// to a fake OpenAI, trusting ONLY its CA. The host sets it only from `DOZ_TEST_OPENAI_UPSTREAM` +
+    /// `DOZ_TEST_OPENAI_CA`.
+    public var openaiUpstreamForTests: UpstreamOverride? {
+        get { lock.lock(); defer { lock.unlock() }; return _openaiUpstream }
+        set { lock.lock(); _openaiUpstream = newValue; lock.unlock() }
+    }
+    private var _openaiUpstream: UpstreamOverride?
+
+    /// 599i: Codex's refresh of a ChatGPT sign-in (`POST auth.openai.com/oauth/token`) is ANSWERED HERE,
+    /// never forwarded: the refresh token in the guest is a placeholder, and the Mac holds (and renews)
+    /// the real one. `answer` gets the request body and returns the whole response; nil = the body
+    /// carried no placeholder of this sandbox's (then the request is judged by the policy like any other).
+    public struct ChatGPTRenewal: Sendable {
+        public var answer: @Sendable (_ body: [UInt8]) -> [UInt8]?
+        public init(answer: @escaping @Sendable (_ body: [UInt8]) -> [UInt8]?) { self.answer = answer }
+    }
+    public var chatgptRenewal: ChatGPTRenewal? {
+        get { lock.lock(); defer { lock.unlock() }; return _chatgptRenewal }
+        set { lock.lock(); _chatgptRenewal = newValue; lock.unlock() }
+    }
+    private var _chatgptRenewal: ChatGPTRenewal?
+    /// The most a renewal request's body may be (it is held whole before it is answered).
+    static let maximumRenewalBody = 64 << 10
+
+    /// 599i: whether a request is Codex's renewal of a ChatGPT sign-in (answered by the proxy).
+    func isChatGPTRenewal(host: String, method: String, path: String) -> Bool {
+        chatgptRenewal != nil && host.lowercased() == OpenAIAccess.authHost && method == "POST" && path == OpenAIAccess.tokenPath
+    }
+
+    /// 599d test seam: where a GitHub host's upstream leg goes instead (nil: the real host). 599i: and the OpenAI hosts'.
     func upstreamOverride(for host: String) -> UpstreamOverride? {
+        if let o = openaiUpstreamForTests, OpenAIAccess.isOpenAIHost(host) { return o }
         guard let o = githubUpstreamForTests, GitHubAccess.credentialHosts.contains(host.lowercased()) else { return nil }
         return o
     }
@@ -549,6 +586,39 @@ public final class EgressProxy: @unchecked Sendable {
                 refuseGitHub(hd.record, GitHubAccess.pushOff(gate?.sandbox ?? "this sandbox", "a request Dozer could not decide was refused"))
             }
         }
+        // 599i: Codex's renewal of a ChatGPT sign-in — held whole, then answered here (or, when it carries no
+        // placeholder of this sandbox's, judged by the policy and forwarded like any request).
+        var renewal: (head: [UInt8], record: ConnectionRecord, length: Int, body: [UInt8])?
+        func finishRenewal() {
+            guard let rn = renewal else { return }
+            renewal = nil
+            var r = rn.record
+            if let gate = chatgptRenewal, let answer = gate.answer(rn.body) {
+                let ok = answer.count >= 12 && Array(answer[9..<12]) == Array("200".utf8)
+                r.verdict = ok ? .allowed : .denied
+                r.open = false
+                r.credential = ok ? "answered chatgpt renewal (the Mac renews the sign-in)" : "refused chatgpt renewal"
+                log.upsert(r)
+                current = nil
+                reject(answer)
+                return
+            }
+            // Not ours: the policy decides, as for any request.
+            let v = policy.evaluate(host: host, port: port, method: "POST", path: OpenAIAccess.tokenPath)
+            r.rule = v.rule
+            if v.action == .deny {
+                r.verdict = .denied; r.open = false
+                log.upsert(r)
+                current = nil
+                reject(Self.denial(host: "\(host) POST \(OpenAIAccess.tokenPath)", rule: v.rule))
+                return
+            }
+            if sendUpstream(rn.head, r), !rn.body.isEmpty {
+                upstream?.send(rn.body)
+                rec.bytesUp += rn.body.count
+                current?.bytesUp += rn.body.count
+            }
+        }
         func process(_ events: [HTTPRequestReader.Event]) {
             for e in events {
                 if closing { return }
@@ -559,6 +629,21 @@ public final class EgressProxy: @unchecked Sendable {
                     guard let h = HTTPHead(raw) else { reject(Self.forbidden("unreadable request")); return }
                     if var c = current { c.open = false; log.upsert(c) }
                     let path = h.pathOnly
+                    if isChatGPTRenewal(host: host, method: h.method, path: path) {
+                        let r = ConnectionRecord(kind: .http, host: host, port: port, method: h.method, path: path,
+                                                 verdict: .allowed, rule: "ChatGPT sign-in renewal (answered by Dozer on the Mac)", decrypted: true, open: true)
+                        let length = Int(h.value("content-length") ?? "") ?? -1
+                        guard h.value("transfer-encoding") == nil, length >= 0, length <= Self.maximumRenewalBody else {
+                            var d = r; d.verdict = .denied; d.open = false; d.credential = "refused: a renewal Dozer could not read"
+                            log.upsert(d)
+                            current = nil
+                            reject(OpenAIAccess.refreshAnswer(placeholder: "", guestIDToken: nil, problem: "a sign-in renewal Dozer could not read was refused"))
+                            return
+                        }
+                        renewal = (raw, r, length, [])
+                        if length == 0 { finishRenewal() }
+                        continue
+                    }
                     let v = policy.evaluate(host: host, port: port, method: h.method, path: path)
                     var r = ConnectionRecord(kind: .http, host: host, port: port, method: h.method, path: path,
                                              verdict: .allowed, rule: v.rule, decrypted: true, open: true)
@@ -583,7 +668,8 @@ public final class EgressProxy: @unchecked Sendable {
                         r.credential = code == 401 ? "unavailable: \(why)" : "refused: \(why)"
                         log.upsert(r)
                         current = nil
-                        reject(Self.refusal(code, why))
+                        // 599i: in OpenAI's error shape on OpenAI's hosts (Codex shows its message).
+                        reject(OpenAIAccess.isOpenAIHost(host) ? OpenAIAccess.refusal(code, why) : Self.refusal(code, why))
                         return
                     case .swapped(_, let b): r.credential = "swapped \(b)"; awaitingStatus = b
                     case .injected(_, let b): r.credential = "injected \(b)"; awaitingStatus = b
@@ -624,6 +710,15 @@ public final class EgressProxy: @unchecked Sendable {
                     }
                     guard sendUpstream(out, r) else { return }
                 case .body(let b), .raw(let b):
+                    if var rn = renewal {
+                        rn.body += b
+                        renewal = rn
+                        if rn.body.count >= rn.length {
+                            if rn.body.count > rn.length { renewal = nil; reject(Self.forbidden("a renewal longer than it said")); return }
+                            finishRenewal()
+                        }
+                        continue
+                    }
                     if var hd = held {
                         hd.body += b
                         held = hd

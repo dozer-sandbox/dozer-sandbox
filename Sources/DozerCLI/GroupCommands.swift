@@ -702,7 +702,7 @@ struct HostUpgradeCheck: AsyncParsableCommand {
         // doz prepared — never rebuilt here (owner: "better to warn / nag the user about out-of-date images").
         if store.root.path.isEmpty == false, FileManager.default.fileExists(atPath: store.root.path) {
             let settings = DozerSettings.load()
-            let older = ["claude-code", "pi"].compactMap { image in
+            let older = ["claude-code", "pi", "codex"].compactMap { image in
                 AgentVersions.standing(image, store: store, settings: settings).olderRecipeLine.map { "\(image): \($0)" }
             }
             if !older.isEmpty { a.olderImages = older }

@@ -23,7 +23,7 @@ struct Init: AsyncParsableCommand {
     @OptionGroup var g: GlobalOptions
     @Argument(help: "The folder (default: the current one; made when missing).") var directory: String?
     @Option(name: .long, help: "The sandbox's name (default: from the folder's name).") var name: String?
-    @Option(name: .long, help: "claude-code, pi, lab, a base × agent image or a template (default: the settings' defaults.image).") var image: String?
+    @Option(name: .long, help: "claude-code, pi, codex, lab, a base × agent image or a template (default: the settings' defaults.image).") var image: String?
     @Option(name: .long, help: "Virtual CPUs.") var cpus: Int?
     @Option(name: .long, help: "Guest RAM: 2G, 512M, 2048 (MiB).") var memory: String?
     @Option(name: .long, help: "agent, bake, locked, open, nat or none.") var network: String?
@@ -157,7 +157,7 @@ struct Init: AsyncParsableCommand {
             img = e.image
         } else {
             let def = existing?.image ?? settings.string(SettingKey.defaultImage) ?? "claude-code"
-            img = asker.text("Image — claude-code, pi, lab, a base × agent image (python-claude-code, go-pi, …; doz base ls) or a template", default: def) {
+            img = asker.text("Image — claude-code, pi, codex, lab, a base × agent image (python-claude-code, go-codex, …; doz base ls) or a template", default: def) {
                 $0.range(of: "^(custom:)?[a-z0-9][a-z0-9-]{0,39}$", options: .regularExpression) != nil ? nil : "an image name"
             }
             p = existing ?? DozerProject(name: sandbox, image: img)

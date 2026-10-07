@@ -643,6 +643,23 @@ doz create NAME --image claude-code --account work
 - `doz key set NAME --claude-login` still works: it is `account use NAME mac`.
   `key set NAME --anthropic` gives the sandbox a key of its own and takes it off its account.
 
+### Codex: OpenAI accounts
+
+Codex sandboxes (`--agent codex`, image `codex` or `<base>-codex`) use OpenAI accounts only — never an
+Anthropic one, and no Claude agent ever gets an OpenAI one:
+
+```sh
+doz account add chatgpt --chatgpt       # Dozer's OWN ChatGPT sign-in: your browser opens (your Mac's ~/.codex is never touched)
+doz account add openai --openai-key     # an OpenAI API key (prompt or stdin)
+doz account default chatgpt             # the store's OpenAI default — what Codex sandboxes follow
+doz create cx --agent codex --base python
+```
+
+The sandbox's `~/.codex/auth.json` holds placeholders; the proxy puts the access token into requests to
+`chatgpt.com` (a key: `api.openai.com`) and renews the sign-in on the Mac — Codex's own renewal is
+answered by the proxy. Codex runs without approval prompts (`codex.permissions = ask` keeps them). The
+manual's [Codex](manual/24-codex.md) page has the details.
+
 ### The Mac's login: how renewal works
 
 Dozer reads only the **access token** of the Mac's Claude Code login, never the refresh token.

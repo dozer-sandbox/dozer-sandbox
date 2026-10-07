@@ -398,7 +398,20 @@ public enum AgentVersions {
         let want = setting(image, settings)
         let rec = all(store)[image]
         var f = Freshness(image: image, setting: want, latest: rec?.latest?.version, checkedAt: rec?.checkedAt, error: nil, looked: false)
-        guard let package = AgentImages.package(image), let lookup = registry.lookup else { return f }
+        guard let package = AgentImages.package(image), let npm = registry.lookup else { return f }
+        // 599i: Codex is installed from its linux-arm64 platform package — its release is the version of
+        // `@openai/codex` and the integrity of `@openai/codex@<version>-linux-arm64` (the tarball a bake downloads).
+        let lookup: NpmRegistry.Lookup
+        if image == "codex" {
+            lookup = { p, tag in
+                var v = tag
+                if tag == "latest" { v = try await npm(p, "latest").version }
+                let platform = try await npm(p, AgentImages.codexPlatformVersion(v))
+                return AgentRelease(version: v, integrity: platform.integrity)
+            }
+        } else {
+            lookup = npm
+        }
         if want != "latest" {
             guard known(image, version: want, store: store) == nil else { return f }
             do {

@@ -188,4 +188,85 @@ final class EgressProxyTests: XCTestCase {
     func testDoznetResourceIsBundled() {
         XCTAssertNotNil(DoznetBinary.locate())
     }
+
+    // MARK: 599i — Codex's renewal of a ChatGPT sign-in is answered here, never forwarded
+
+    func codexProxy() throws -> (EgressProxy, String) {
+        // Policy: Codex's model hosts only — auth.openai.com is NOT allowed (the renewal is answered anyway).
+        let proxy = try EgressProxy(policy: NetworkPolicy(rules: [EgressRule(host: "chatgpt.com")]), ca: try SandboxCA.generate(sandbox: "t"))
+        proxy.vault.set(.chatgpt, secret: "ACCESS-REAL")
+        let ph = try XCTUnwrap(proxy.vault.mintForFile("chatgpt"))
+        let vault = proxy.vault
+        proxy.chatgptRenewal = EgressProxy.ChatGPTRenewal { body in
+            guard let t = OpenAIAccess.refreshToken(inRenewalBody: body), t.hasPrefix(CredentialVault.placeholderPrefix) else { return nil }
+            guard vault.binding(ofPlaceholder: t) == "chatgpt" else {
+                return OpenAIAccess.refreshAnswer(placeholder: t, guestIDToken: nil, problem: "not this sandbox's sign-in")
+            }
+            return OpenAIAccess.refreshAnswer(placeholder: t, guestIDToken: "h.p.ZG96LXVuc2lnbmVk", problem: nil)
+        }
+        return (proxy, ph)
+    }
+
+    func testCodexsRenewalIsAnsweredOnTheMacWithTheSamePlaceholder() throws {
+        let (proxy, ph) = try codexProxy()
+        let g = try tunnel(proxy, host: "auth.openai.com")
+        defer { close(g.fd) }
+        let body = #"{"client_id":"app_EMoamEEZ73f0CkXaXp7hrann","grant_type":"refresh_token","refresh_token":"\#(ph)"}"#
+        try g.send("POST /oauth/token HTTP/1.1\r\nHost: auth.openai.com\r\nContent-Type: application/json\r\nContent-Length: \(body.utf8.count)\r\n\r\n" + body)
+        let reply = try g.receiveAll()
+        XCTAssertTrue(reply.hasPrefix("HTTP/1.1 200"), reply)
+        XCTAssertTrue(reply.contains("\"access_token\":\"\(ph)\""))
+        XCTAssertTrue(reply.contains("\"refresh_token\":\"\(ph)\""))
+        XCTAssertFalse(reply.contains("ACCESS-REAL"), "the real token never goes to the guest")
+        let r = try XCTUnwrap(waitForRecord(proxy.log) { $0.path == "/oauth/token" })
+        XCTAssertEqual(r.verdict, .allowed)
+        XCTAssertEqual(r.credential, "answered chatgpt renewal (the Mac renews the sign-in)")
+        XCTAssertEqual(r.bytesUp, 0, "nothing went upstream")
+    }
+
+    func testARenewalWithAnotherPlaceholderIsRefusedAndOneWithoutIsJudgedByThePolicy() throws {
+        let (proxy, _) = try codexProxy()
+        proxy.vault.set(.openai, secret: "sk-REAL")
+        let other = try XCTUnwrap(proxy.vault.mint("openai"))
+        let g = try tunnel(proxy, host: "auth.openai.com")
+        defer { close(g.fd) }
+        let body = #"{"grant_type":"refresh_token","refresh_token":"\#(other)"}"#
+        try g.send("POST /oauth/token HTTP/1.1\r\nHost: auth.openai.com\r\nContent-Length: \(body.utf8.count)\r\n\r\n" + body)
+        let reply = try g.receiveAll()
+        XCTAssertTrue(reply.hasPrefix("HTTP/1.1 401"), reply)
+        XCTAssertTrue(reply.contains("not this sandbox's sign-in"))
+        // A renewal that carries no Dozer placeholder (a login made inside the sandbox): the policy, which denies it.
+        let g2 = try tunnel(proxy, host: "auth.openai.com")
+        defer { close(g2.fd) }
+        let own = #"{"grant_type":"refresh_token","refresh_token":"rt_their_own"}"#
+        try g2.send("POST /oauth/token HTTP/1.1\r\nHost: auth.openai.com\r\nContent-Length: \(own.utf8.count)\r\n\r\n" + own)
+        let reply2 = try g2.receiveAll()
+        XCTAssertTrue(reply2.hasPrefix("HTTP/1.1 403"), reply2)
+        XCTAssertTrue(reply2.contains("X-Sandbox-Policy: denied"))
+        // Any other request to auth.openai.com: the policy as usual.
+        let g3 = try tunnel(proxy, host: "auth.openai.com")
+        defer { close(g3.fd) }
+        try g3.send("GET /oauth/authorize HTTP/1.1\r\nHost: auth.openai.com\r\n\r\n")
+        XCTAssertTrue(try g3.receiveAll().hasPrefix("HTTP/1.1 403"))
+    }
+
+    func testWithoutASignInAuthOpenAIComIsNotReachedAtAll() throws {
+        let proxy = try EgressProxy(policy: NetworkPolicy(rules: [EgressRule(host: "chatgpt.com")]), ca: try SandboxCA.generate(sandbox: "t"))
+        let fd = open(proxy, header: "DOZ1 P\nCONNECT auth.openai.com:443 HTTP/1.1\r\nHost: auth.openai.com:443\r\n\r\n")
+        defer { close(fd) }
+        XCTAssertTrue(readAll(fd).hasPrefix("HTTP/1.1 403"))
+    }
+
+    func testAnUnusableSignInIsRefusedInOpenAIsShape() throws {
+        let proxy = try EgressProxy(policy: NetworkPolicy(rules: [EgressRule(host: "chatgpt.com")]), ca: try SandboxCA.generate(sandbox: "t"))
+        proxy.vault.set(.chatgpt, secret: nil, expiresAt: nil, environment: [:], notice: "the account x has no OpenAI account now")
+        let ph = try XCTUnwrap(proxy.vault.mintForFile("chatgpt"))
+        let g = try tunnel(proxy, host: "chatgpt.com")
+        defer { close(g.fd) }
+        try g.send("POST /backend-api/codex/responses HTTP/1.1\r\nHost: chatgpt.com\r\nAuthorization: Bearer \(ph)\r\nContent-Length: 0\r\n\r\n")
+        let reply = try g.receiveAll()
+        XCTAssertTrue(reply.hasPrefix("HTTP/1.1 401"), reply)
+        XCTAssertTrue(reply.contains("\"message\":\"doz: the account x has no OpenAI account now\""), reply)
+        XCTAssertFalse(reply.contains("authentication_error"), "not Anthropic's shape on OpenAI's host")
+    }
 }

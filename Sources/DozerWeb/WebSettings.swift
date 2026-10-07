@@ -178,8 +178,9 @@ public struct WebAccountAdd: Equatable, Sendable, CustomStringConvertible, Custo
         guard let name = d["name"] as? String, name.count <= 40, (try? AccountStore.validateName(name)) != nil else {
             throw WebAction.Invalid("name: an account name, 1–40 of a-z 0-9 - (not default or none)")
         }
-        guard let k = d["kind"] as? String, let kind = AccountKind(rawValue: k), kind != .mac else {
-            throw WebAction.Invalid("kind: api-key or setup-token")
+        // 599i: an OpenAI key too. A ChatGPT sign-in is never typed: it is Dozer's own browser sign-in (the CLI).
+        guard let k = d["kind"] as? String, let kind = AccountKind(rawValue: k), [.apiKey, .setupToken, .openaiKey].contains(kind) else {
+            throw WebAction.Invalid("kind: api-key, setup-token or openai-key")
         }
         var plan: String?
         if let p = d["plan"], !(p is NSNull) {
@@ -341,8 +342,8 @@ public struct WebOnboardingConfig: Equatable, Sendable {
         guard Set(d.keys).isSuperset(of: ["defaultImage", "account"]), Set(d.keys).isSubset(of: ["defaultImage", "account", "access", "ignoreMode"]) else {
             throw WebAction.Invalid("exactly defaultImage and account (and access, ignoreMode)")
         }
-        guard let i = d["defaultImage"] as? String, ["lab", "claude-code", "pi"].contains(i) else {
-            throw WebAction.Invalid("defaultImage: lab, claude-code or pi")
+        guard let i = d["defaultImage"] as? String, ["lab", "claude-code", "pi", "codex"].contains(i) else {
+            throw WebAction.Invalid("defaultImage: lab, claude-code, pi or codex")
         }
         guard let a = d["account"] as? String, Onboarding.Account(rawValue: a) != nil else {
             throw WebAction.Invalid("account: \(Onboarding.Account.allCases.map(\.rawValue).joined(separator: ", "))")

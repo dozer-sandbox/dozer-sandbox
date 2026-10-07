@@ -153,6 +153,7 @@ public struct SandboxConfig: Codable, Equatable, Sendable {
         switch spec.imageSpec.flatMap({ ImageChoice.parse($0.name) })?.agent {
         case .claudeCode?: ("claude", ["claude"])
         case .pi?: ("pi", ["pi"])
+        case .codex?: ("codex", ["codex"])          // 599i
         default: ("shell", ["bash", "-l"])
         }
     }
@@ -166,7 +167,7 @@ public struct SandboxConfig: Codable, Equatable, Sendable {
 
 /// The images a sandbox can be created from, and the specs they make.
 public enum DozerImages {
-    public static let builtIn = ["lab", "claude-code", "pi"]
+    public static let builtIn = ["lab", "claude-code", "pi", "codex"]
     /// The lab's apk packages (Alpine 3.20).
     /// 599 (594.B3): tmux too (sessions.tmux).
     public static let labPackages = ["bash", "ncurses", "fd", "tmux"]
@@ -178,6 +179,7 @@ public enum DozerImages {
         switch image {
         case "claude-code": AgentImages.claudeCode
         case "pi": AgentImages.pi
+        case "codex": AgentImages.spec("codex", release: AgentImages.codexPinned)      // 599i
         default: nil
         }
     }
@@ -236,7 +238,7 @@ public enum DozerImages {
         if imageSpec == nil, image != "lab" {
             let customName = o.image.hasPrefix("custom:") ? String(o.image.dropFirst(7)) : o.image
             guard let c = store.layout("_").customImages().first(where: { $0.name == customName || $0.key == customName }) else {
-                throw HostError(.notFound, "no image \(o.image) — lab, claude-code, pi, or a custom image (doz image ls)")
+                throw HostError(.notFound, "no image \(o.image) — lab, claude-code, pi, codex, or a custom image (doz image ls)")
             }
             customKey = c.key
             imageSpec = c.imageSpec
@@ -277,6 +279,8 @@ public enum DozerImages {
                     names = PermissionPolicy.names(from: [w], base: baseID, start: names)
                 }
             }
+            // 599i: the agent's own model permission (Codex: "Talk to OpenAI") — whatever was chosen.
+            names = AgentPermissions.normalized(names + AgentPermissions.agentPermissions(imageSpec.flatMap { ImageChoice.parse($0.name) }?.agent))
             var q = NetworkPolicy.permissions(names, preset: sites.isEmpty ? AgentPermissions.presetName(names, base: baseID) : nil)
             for s in sites { q.rules.append(EgressRule(host: s, note: "site you allowed")) }
             network = .proxied(q)

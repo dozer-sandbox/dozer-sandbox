@@ -166,9 +166,11 @@ public enum AgentKind: String, Sendable, Codable, CaseIterable, Equatable {
     case claudeCode = "claude-code"
     case pi
     case none
+    /// 599i: the OpenAI Codex CLI (last, so `allCases` keeps its earlier order).
+    case codex
 
     public var title: String {
-        switch self { case .claudeCode: "Claude Code"; case .pi: "pi"; case .none: "none" }
+        switch self { case .claudeCode: "Claude Code"; case .pi: "pi"; case .none: "none"; case .codex: "Codex" }
     }
 }
 
@@ -189,6 +191,7 @@ public struct ImageChoice: Sendable, Equatable, Hashable {
         switch (base, agent) {
         case ("node", .claudeCode): "claude-code"
         case ("node", .pi): "pi"
+        case ("node", .codex): "codex"
         case ("alpine", .none): "lab"
         case (_, .none): base
         default: "\(base)-\(agent.rawValue)"
@@ -209,10 +212,11 @@ public struct ImageChoice: Sendable, Equatable, Hashable {
         switch name {
         case "claude-code": return ImageChoice(base: "node", agent: .claudeCode)
         case "pi": return ImageChoice(base: "node", agent: .pi)
+        case "codex": return ImageChoice(base: "node", agent: .codex)
         case "lab": return ImageChoice(base: "alpine", agent: .none)
         default: break
         }
-        for a in [AgentKind.claudeCode, .pi] where name.hasSuffix("-" + a.rawValue) {
+        for a in [AgentKind.claudeCode, .pi, .codex] where name.hasSuffix("-" + a.rawValue) {
             let b = String(name.dropLast(a.rawValue.count + 1))
             if isBase(b) { return ImageChoice(base: b, agent: a) }
         }
@@ -337,7 +341,7 @@ public enum ImageComposer {
             switch agent {
             case .claudeCode: return AgentImages.claudeCode(release, base: base.reference)
             case .pi: return AgentImages.pi(release, base: base.reference)
-            case .none: break
+            case .none, .codex: break          // 599i: Codex has no pre-596 Node image — composed below
             }
         }
         var steps = [createUser(base.packageManager), baseline(base.packageManager)]
@@ -386,6 +390,16 @@ public enum ImageComposer {
             persist = ["~/.pi/agent"]
             env["PI_CODING_AGENT_DIR"] = home + "/.pi/agent"
             agentPackage = AgentPackage(package: AgentImages.piPackage, version: release.version)
+        case .codex:
+            // 599i: one recipe on every base — the static musl binary from the registry's linux-arm64 tarball.
+            guard let release else { throw SandboxError.invalidSpec("Codex needs a version") }
+            steps.append(AgentImages.codexInstall(release))
+            steps.append(AgentImages.codexLauncher)
+            verify.insert(contentsOf: [VerifyCheck(["codex", "--version"], expect: "codex-cli " + release.version),
+                                       VerifyCheck(["sh", "-c", "test -x /home/agent/.local/bin/codex && echo launcher-ok"], expect: "launcher-ok")], at: 0)
+            persist = ["~/.codex"]
+            env["CODEX_HOME"] = home + "/.codex"
+            agentPackage = AgentPackage(package: AgentImages.codexPackage, version: release.version)
         }
         var s = ImageSpec(name: name, base: base.reference, steps: steps, verify: verify, user: user, home: home,
                           persistDirs: persist, sessionEnvironment: env, rootfsMiB: base.rootfsMiB)
@@ -398,7 +412,8 @@ public enum ImageComposer {
     // MARK: this build's recipe for an image (594 W28)
 
     /// The keys `spec(…)` itself adds to a session's environment (the rest come from the base).
-    static let composerKeys: Set<String> = ["PATH", "CLAUDE_CONFIG_DIR", "DISABLE_AUTOUPDATER", "DISABLE_UPDATES", "PI_CODING_AGENT_DIR", "USE_BUILTIN_RIPGREP"]
+    static let composerKeys: Set<String> = ["PATH", "CLAUDE_CONFIG_DIR", "DISABLE_AUTOUPDATER", "DISABLE_UPDATES", "PI_CODING_AGENT_DIR", "USE_BUILTIN_RIPGREP",
+                                            "CODEX_HOME"]
 
     /// 594 W28 × 596: what THIS build bakes for what `spec` installs — the same base (its digest, or a
     /// Dockerfile's build as the spec describes it), the same agent release (its npm integrity or its

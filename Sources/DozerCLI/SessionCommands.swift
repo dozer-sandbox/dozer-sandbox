@@ -58,7 +58,9 @@ struct Inspect: AsyncParsableCommand {
         if let e = r.error {
             return "the environment prompt of \(name) does not render: \(e)\nits sessions do not start until it does (or: doz config set agent.prompt false)\n"
         }
-        let how = r.agent == "pi" ? "pi's --append-system-prompt \(r.promptPath)" : "Claude Code's --append-system-prompt (the launcher reads \(r.promptPath))"
+        let how = r.agent == "pi" ? "pi's --append-system-prompt \(r.promptPath)"
+            : r.agent == "codex" ? "Codex's developer instructions (-c developer_instructions — the launcher reads \(r.promptPath))"
+            : "Claude Code's --append-system-prompt (the launcher reads \(r.promptPath))"
         return "the environment prompt of \(name) (\(r.layers.joined(separator: " + "))) — \(how), written at every session start:\n\n"
             + (r.text ?? "") + "\n\nand the dozer skill, \(r.skillPath) (\((r.skill ?? "").split(separator: "\n").count) lines; --json has its text)\n"
     }

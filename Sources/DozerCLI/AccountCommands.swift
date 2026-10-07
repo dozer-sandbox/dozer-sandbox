@@ -11,11 +11,13 @@ import DozerHost
 
 struct AccountCommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(commandName: "account",
-        abstract: "Anthropic accounts the host holds for sandboxes: the Mac's Claude login, setup tokens, API keys.",
+        abstract: "Accounts the host holds for sandboxes: the Mac's Claude login, setup tokens, API keys; for Codex, a ChatGPT sign-in or an OpenAI key.",
         discussion: """
         mac (built in) is this Mac's own Claude Code login: nothing to add, renewed while Claude Code runs on the Mac. \
         A `claude setup-token` token lasts a year and needs no Mac: doz account add work --setup-token (paste it). \
-        A sandbox follows the store's default account (mac out of the box) unless it pins one: doz account use NAME ACCOUNT.
+        Codex uses OpenAI accounts only: mac — this Mac's own Codex login, read-only, nothing to add (the default when Codex is signed in \
+        on this Mac) — or doz account add NAME --chatgpt (Dozer's own sign-in, in your browser) or --openai-key. A sandbox follows the store's default account (mac out of the box; for Codex the default OpenAI account) \
+        unless it pins one: doz account use NAME ACCOUNT.
         """,
         subcommands: [AccountList.self, AccountAdd.self, AccountVerify.self, AccountRemove.self, AccountDefault.self,
                       AccountUse.self, AccountKeepalive.self])
@@ -54,13 +56,19 @@ func readSecret(_ prompt: String, _ g: GlobalOptions) throws -> String {
 
 struct AccountAdd: AsyncParsableCommand {
     static let configuration = CommandConfiguration(commandName: "add",
-        abstract: "Add an account: a setup token or an API key (prompt or stdin), or another Claude config dir's Mac login.",
-        discussion: "claude setup-token  then  doz account add work --setup-token --plan max  (paste the token). The token is checked with one tiny request and kept in the login keychain as doz-claude:NAME.")
+        abstract: "Add an account: a setup token or an API key (prompt or stdin), another Claude config dir's Mac login, a ChatGPT sign-in or an OpenAI key (Codex).",
+        discussion: """
+        claude setup-token  then  doz account add work --setup-token --plan max  (paste the token). The token is checked with one tiny request and kept in the login keychain as doz-claude:NAME. \
+        doz account add chatgpt --chatgpt  opens your browser on OpenAI's sign-in: Dozer's OWN sign-in for Codex sandboxes (kept in the keychain as doz-chatgpt:NAME and renewed by Dozer; \
+        the sandbox only ever sees placeholders). Your Mac's own Codex login (~/.codex) is never read or changed.
+        """)
     @OptionGroup var g: GlobalOptions
     @Argument var name: String
     @Flag(name: .long, help: "A `claude setup-token` token (a Claude subscription, 1 year).") var setupToken = false
     @Flag(name: .long, help: "An Anthropic API key.") var apiKey = false
     @Flag(name: .long, help: "The Mac's Claude login of another config dir (--config-dir).") var claudeLogin = false
+    @Flag(name: .long, help: "An OpenAI API key (Codex).") var openaiKey = false
+    @Flag(name: .long, help: "Sign in with ChatGPT in your browser (Codex on your ChatGPT plan) — Dozer's own sign-in, not your Mac's Codex login.") var chatgpt = false
     @Option(name: .long, help: "With --claude-login: the CLAUDE_CONFIG_DIR it uses.") var configDir: String?
     @Option(name: .long, help: "With --api-key: adopt an existing keychain item (its service name) instead of storing a new one.") var keychain: String?
     @Option(name: .long, help: "With --setup-token: the plan (max, pro, team, enterprise) — Claude Code in the sandbox shows it and picks its default model by it.") var plan: String?
@@ -68,29 +76,45 @@ struct AccountAdd: AsyncParsableCommand {
     @Flag(name: .long, help: "Replace an account of that name.") var force = false
 
     func validate() throws {
-        guard [setupToken, apiKey, claudeLogin].filter({ $0 }).count == 1 else { throw ValidationError("which kind? --setup-token, --api-key or --claude-login") }
+        guard [setupToken, apiKey, claudeLogin, openaiKey, chatgpt].filter({ $0 }).count == 1 else {
+            throw ValidationError("which kind? --setup-token, --api-key, --claude-login, --openai-key or --chatgpt")
+        }
         if claudeLogin && configDir == nil { throw ValidationError("--claude-login needs --config-dir (the default Mac login is the built-in account mac)") }
-        if keychain != nil && !apiKey { throw ValidationError("--keychain is for --api-key") }
+        if keychain != nil && !apiKey && !openaiKey { throw ValidationError("--keychain is for --api-key or --openai-key") }
+        if plan != nil && (chatgpt || openaiKey) { throw ValidationError("--plan is for --setup-token (a ChatGPT sign-in says its own plan)") }
         if let p = plan, !["max", "pro", "team", "enterprise"].contains(p.lowercased()) { throw ValidationError("--plan: max, pro, team or enterprise") }
     }
 
     func run() async throws {
-        var r = HostRequest.accountAdd(name: name, kind: setupToken ? .setupToken : apiKey ? .apiKey : .mac, plan: plan, secret: nil,
+        let kind: AccountKind = setupToken ? .setupToken : apiKey ? .apiKey : openaiKey ? .openaiKey : chatgpt ? .chatgpt : .mac
+        var r = HostRequest.accountAdd(name: name, kind: kind, plan: plan, secret: nil,
                              verify: !noVerify, force: force, configDir: configDir, keychain: keychain)
-        if setupToken || (apiKey && keychain == nil) {
-            let s = try readSecret(setupToken ? "setup token from `claude setup-token` (not echoed): " : "Anthropic API key (not echoed): ", g)
+        if chatgpt {
+            // 599i: check the name first (an existing account without --force), then sign in.
+            try AccountStore.validateName(name)
+            if !force, let m = try? rawCall(HostRequest(.accountList), g), let rows = try? m.result?.decode([AccountRow].self),
+               rows.contains(where: { $0.name == name }) {
+                throw fail(HostError(.exists, "an account \(name) exists — --force replaces it (signs in again)"), g)
+            }
+            let tokens: ChatGPTTokens
+            do { tokens = try ChatGPTSignIn.run { Out.stderr("[doz] \($0)\n") } } catch { throw fail(HostError(.failed, error.localizedDescription), g) }
+            r.secret = tokens.json
+        } else if setupToken || ((apiKey || openaiKey) && keychain == nil) {
+            let s = try readSecret(setupToken ? "setup token from `claude setup-token` (not echoed): "
+                                   : openaiKey ? "OpenAI API key (not echoed): " : "Anthropic API key (not echoed): ", g)
             guard !s.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw fail(HostError(.invalid, "nothing read (pipe it in, or paste it at the prompt)"), g) }
             r.secret = s
         }
         let rows = try decode(try call(r, g), [AccountRow].self, g)
         if g.json { Out.json(rows); return }
         let a = rows.first { $0.name == name }
-        Out.stdout("account \(name) added (\(a?.kind ?? "?")\(a?.verification.map { ", \($0)" } ?? "")) — doz account use SANDBOX \(name)\n")
+        let who = [a?.identity, a?.plan].compactMap { $0 }.joined(separator: ", ")
+        Out.stdout("account \(name) added (\(a?.kind ?? "?")\(who.isEmpty ? "" : ": " + who)\(a?.verification.map { ", \($0)" } ?? "")) — doz account use SANDBOX \(name)\n")
     }
 }
 
 struct AccountVerify: AsyncParsableCommand {
-    static let configuration = CommandConfiguration(commandName: "verify", abstract: "Check an account with one tiny request to api.anthropic.com.")
+    static let configuration = CommandConfiguration(commandName: "verify", abstract: "Check an account: one tiny request to api.anthropic.com (or api.openai.com for an OpenAI key); a ChatGPT sign-in is renewed when it is due.")
     @OptionGroup var g: GlobalOptions
     @Argument var name: String
     func run() async throws {
@@ -117,14 +141,19 @@ struct AccountRemove: AsyncParsableCommand {
 }
 
 struct AccountDefault: AsyncParsableCommand {
-    static let configuration = CommandConfiguration(commandName: "default", abstract: "The account sandboxes that follow the default use (or none).")
+    static let configuration = CommandConfiguration(commandName: "default", abstract: "The account sandboxes that follow the default use (or none). An OpenAI account sets the Codex default; --codex sets it by name (mac = this Mac's Codex login).")
     @OptionGroup var g: GlobalOptions
     @Argument var name: String
+    @Flag(name: .long, help: "Set the default of Codex sandboxes: mac (this Mac's own Codex login), an OpenAI account, or none.") var codex = false
     func run() async throws {
         var r = HostRequest(.accountDefault)
         r.account = name
+        if codex { r.accountKind = "codex" }
         let rows = try decode(try call(r, g), [AccountRow].self, g)
-        if g.json { Out.json(rows) } else { Out.stdout("the default account is \(name)\n") }
+        if g.json { Out.json(rows) } else {
+            let openai = codex || rows.first { $0.name == name }.flatMap { AccountKind(rawValue: $0.kind) }?.provider == "openai"
+            Out.stdout(openai ? "the default OpenAI account (Codex) is \(name)\n" : "the default account is \(name)\n")
+        }
     }
 }
 
@@ -140,7 +169,7 @@ struct AccountUse: AsyncParsableCommand {
         r.account = account
         let rows = try decode(try call(r, g), [CredentialRow].self, g)
         if g.json { Out.json(rows); return }
-        Out.stdout(account == "none" ? "\(sandbox) uses no Anthropic account\n" : "\(sandbox) uses \(account)\n")
+        Out.stdout(account == "none" ? "\(sandbox) uses no account\n" : "\(sandbox) uses \(account)\n")
     }
 }
 

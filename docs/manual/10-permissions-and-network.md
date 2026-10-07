@@ -11,6 +11,7 @@ switches — and logs it. You decide what the agent may reach; the agent can't c
   | permission | id | what it allows | in Standard |
   |---|---|---|---|
   | Talk to its AI model | `model` | Anthropic's API | always on |
+  | Talk to OpenAI | `model:openai` | Codex's model (`chatgpt.com`, `api.openai.com`) — [Codex](24-codex.md) | always on in a Codex sandbox; never in another agent's |
   | Sign in | `sign-in` | Claude's sign-in pages, for signing in *inside* the sandbox | off (Dozer supplies the credential) |
   | Update itself | `update` | new versions of Claude Code or pi | on |
   | Install software — system packages | `install:system` | apt / apk | on |

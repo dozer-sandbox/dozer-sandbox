@@ -679,20 +679,22 @@ function workspaceChooser({ nameInput = null, image = () => null, name = null, i
 // becomes the workspace unless one was set; built with Apple's container build, OUTSIDE Dozer's network
 // policy — said on the card), DeckStack recipe (disabled, coming soon) — or a Template (a saved disk).
 // The image a pair makes is named as the host names it: claude-code / pi / lab keep their names.
-const AGENTS = [['claude-code', 'Claude Code'], ['pi', 'pi'], ['none', 'none']];
+const AGENTS = [['claude-code', 'Claude Code'], ['pi', 'pi'], ['codex', 'Codex'], ['none', 'none']];
 /// B9, the same words as the server's (`Dockerfiles.outsidePolicyNote`).
 const DOCKERFILE_POLICY_NOTE = 'Dockerfile builds run in Apple’s builder (container build), OUTSIDE Dozer’s network policy: its RUN steps reach the internet directly, without Dozer’s proxy or allow list. The sandbox made from the image is under the policy as usual.';
 function imageNameOf(base, agent) {
   if (base === 'node' && agent === 'claude-code') return 'claude-code';
   if (base === 'node' && agent === 'pi') return 'pi';
+  if (base === 'node' && agent === 'codex') return 'codex';
   if (base === 'alpine' && agent === 'none') return 'lab';
   return agent === 'none' ? base : base + '-' + agent;
 }
 function parseImageName(name, baseIDs) {
   if (name === 'claude-code') return { base: 'node', agent: 'claude-code' };
   if (name === 'pi') return { base: 'node', agent: 'pi' };
+  if (name === 'codex') return { base: 'node', agent: 'codex' };
   if (name === 'lab') return { base: 'alpine', agent: 'none' };
-  for (const a of ['claude-code', 'pi']) if (name.endsWith('-' + a) && baseIDs.includes(name.slice(0, -a.length - 1))) return { base: name.slice(0, -a.length - 1), agent: a };
+  for (const a of ['claude-code', 'pi', 'codex']) if (name.endsWith('-' + a) && baseIDs.includes(name.slice(0, -a.length - 1))) return { base: name.slice(0, -a.length - 1), agent: a };
   return baseIDs.includes(name) ? { base: name, agent: 'none' } : null;
 }
 function imagePicker({ images = [], bases = null, value = 'claude-code', dockerfile = '', onChange = () => {}, onDockerfile = () => {} }) {
@@ -952,7 +954,7 @@ async function resetSetting(key) { adoptSettings(await api('settings', { method:
 
 const SETTING_SECTIONS = {
   ui: 'This UI', host: 'The host', store: 'The store', claude: 'Claude Code', defaults: 'New sandboxes', agent: 'The agent', sandbox: 'Inside every sandbox',
-  'images.lab': 'New lab sandboxes', 'images.claude-code': 'New claude-code sandboxes', 'images.pi': 'New pi sandboxes', kernel: 'The kernel',
+  'images.lab': 'New lab sandboxes', 'images.claude-code': 'New claude-code sandboxes', 'images.pi': 'New pi sandboxes', 'images.codex': 'New codex sandboxes', kernel: 'The kernel',
   resources: 'Resources', sessions: 'Sessions', bridges: 'Bridges', workspace: 'Workspace rules', github: 'GitHub', images: 'Images',
 };
 // An empty app list means none (default apps only), not "automatic".
@@ -1074,7 +1076,7 @@ function settingControl(r) {
     api('bases').then((b) => {
       const std = new Set(b.standard[''] || []);
       let on = new Set(b.defaults[''] || []);
-      const all = b.permissions.map((x) => x.id);
+      const all = b.permissions.map((x) => x.id).filter((x) => !isAgentModel(x));
       const words = () => {
         const same = (a, c) => a.size === c.size && [...a].every((x) => c.has(x));
         if (same(on, std)) return 'standard';
@@ -2116,6 +2118,7 @@ function nwSection(form) {
   const img = form.image || '';
   if (img === 'lab') return 'lab';
   const p = parseImageName(img, (state.nw.bases ? state.nw.bases.bases : []).map((b) => b.id));
+  if ((p && p.agent === 'codex') || img === 'codex') return 'codex';
   return (p && p.agent === 'pi') || img === 'pi' ? 'pi' : 'claude-code';
 }
 function nwAgent(form) {
@@ -2475,7 +2478,7 @@ function nwPermissions() {
     const base = nwBase(f);
     const rows = b.permissions.filter((r) => r.group !== 'github');
     const std = new Set((b.standard[base] || b.standard[''] || []).filter((x) => !x.startsWith('github:')));
-    const all = rows.map((r) => r.id);
+    const all = rows.map((r) => r.id).filter((x) => !isAgentModel(x));
     const fromWords = (ws) => {
       let s = new Set(std);
       for (const w of ws) {
@@ -2512,7 +2515,7 @@ function nwPermissions() {
           nwRender();
         };
         if (id === 'web' && v) confirmWeb(async () => apply()); else apply();
-      }, { hosts: true })));
+      }, { hosts: true, agent: nwAgent(f) })));
   } else {
     parts.push(h('p', { class: 'muted' }, 'A ' + nwNetwork(f) + ' network has no permissions to choose.'));
   }
@@ -2762,7 +2765,7 @@ function newSandboxPermissions(bases, picker, network) {
   if (!bases || !bases.permissions) return { el, value: () => null, baseChanged() {}, networkChanged() {} };
   let on = new Set(), touched = false;
   const baseKey = () => { const b = picker.base(); return b === null ? null : b; };
-  const presetFor = (net, b) => net === 'locked' ? ['model'] : net === 'open' ? bases.permissions.map((r) => r.id)
+  const presetFor = (net, b) => net === 'locked' ? ['model'] : net === 'open' ? bases.permissions.map((r) => r.id).filter((x) => !isAgentModel(x))
     : net === 'agent' ? (bases.standard[b] || bases.standard[''] || [])
     : [...(bases.defaults[b] || bases.defaults[''] || []), ...(bases.github || [])];   // 599e: + the Access step's GitHub choice
   const visible = () => baseKey() !== null && !['bake', 'nat', 'none'].includes(network.value);
@@ -2780,9 +2783,9 @@ function newSandboxPermissions(bases, picker, network) {
     el.hidden = !visible();
     const std = new Set(bases.standard[baseKey() || ''] || []);
     const same = (a, b) => a.size === b.size && [...a].every((x) => b.has(x));
-    const label = same(on, std) ? 'Standard' : same(on, new Set(['model'])) ? 'Locked' : same(on, new Set(bases.permissions.map((r) => r.id))) ? 'Open' : 'Custom';
+    const label = same(on, std) ? 'Standard' : same(on, new Set(['model'])) ? 'Locked' : same(on, new Set(bases.permissions.map((r) => r.id).filter((x) => !isAgentModel(x)))) ? 'Open' : 'Custom';
     el.replaceChildren(h('span', null, 'What the agent can do ', h('span', { class: 'tag', 'data-new-perm-preset': label }, label)),
-      permissionSwitches(bases.permissions, on, change, { hosts: true }));
+      permissionSwitches(bases.permissions, on, change, { hosts: true, agent: picker.agent() }));
   }
   reset();
   return {
@@ -3261,7 +3264,9 @@ function promptPanel(d) {
   const p = d.agentPrompt;
   if (!p) return panel(null, 'This image runs no agent — there is no environment prompt.');
   if (!p.enabled) return panel(null, 'Off — agent.prompt is false (Settings): the agent gets no facts block and no dozer skill.');
-  const how = p.agent === 'pi' ? 'pi’s --append-system-prompt ' + p.promptPath : 'Claude Code’s --append-system-prompt (its launcher reads ' + p.promptPath + ')';
+  const how = p.agent === 'pi' ? 'pi’s --append-system-prompt ' + p.promptPath
+    : p.agent === 'codex' ? 'Codex’s developer instructions (its launcher reads ' + p.promptPath + ')'
+    : 'Claude Code’s --append-system-prompt (its launcher reads ' + p.promptPath + ')';
   return h('div', { class: 'panel prompt-panel' },
     h('div', { class: 'muted' }, 'Written at every session start, from this sandbox’s current facts — ', how, '. Layers: ', p.layers.join(' + '),
       '. The dozer skill: ', h('code', null, p.skillPath), ' (' + p.skillLines + ' lines).'),
@@ -3375,7 +3380,13 @@ function policyDialog(name, policy) {
 // the hosts behind a permission come from the running doz.
 const PRESET_LABEL = { locked: 'Locked', agent: 'Standard', open: 'Open' };
 /// The switches: `rows` (id, title, summary, locked, warning, group, hosts), `on` (a Set), `change(id, on)`.
+/// 599i: an agent's own model permission — "Talk to OpenAI" is Codex's: shown (on, always) only in a Codex
+/// sandbox's form, and never a switch another agent's form offers. The host adds it whatever a form sends.
+const AGENT_MODEL = { codex: 'model:openai' };
+const isAgentModel = (id) => Object.values(AGENT_MODEL).includes(id);
 function permissionSwitches(rows, on, change, opts = {}) {
+  const own = AGENT_MODEL[agentKey(opts.agent || '', AGENT_MODEL)];
+  rows = rows.filter((r) => !isAgentModel(r.id) || r.id === own || on.has(r.id)).map((r) => (r.id === own ? { ...r, locked: true } : r));
   const sw = (r, indent) => {
     const box = h('input', { type: 'checkbox', role: 'switch', 'data-permission': r.id, 'aria-label': r.title });
     box.checked = on.has(r.id) || r.locked;
@@ -3883,6 +3894,10 @@ async function resDelete(ids, clean) {
 function secretEntryAllowed() { return setting('ui.allow_secret_entry', true) === true; }
 const ACCOUNT_COMMANDS = {
   'api-key': ['doz account add work --api-key       (it asks for the key, not echoed)', 'doz account default work'],
+  // 599i: Codex — an OpenAI key, or Dozer's own ChatGPT sign-in (the browser opens on this Mac).
+  'openai-key': ['doz account add openai --openai-key   (it asks for the key, not echoed)', 'doz account default openai'],
+  chatgpt: ['doz account add chatgpt --chatgpt     (your browser opens: sign in with ChatGPT — Dozer’s own sign-in;',
+    '                                       your Mac’s Codex login is not touched)', 'doz account default chatgpt'],
   'setup-token': ['claude setup-token                    (on this Mac: prints a 1-year token)',
     'doz account add work --setup-token   (paste it; not echoed)', 'doz account default work'],
 };
@@ -3894,7 +3909,8 @@ function accountCommandsNode(kind) {
 /// opts: {kind (fixed) | null (a choice), name, onAdded(result, name)}.
 function accountForm(opts) {
   const kindSel = h('select', { name: 'acct-kind', 'aria-label': 'Kind' },
-    h('option', { value: 'api-key' }, 'Anthropic API key'), h('option', { value: 'setup-token' }, 'Claude setup token'));
+    h('option', { value: 'api-key' }, 'Anthropic API key'), h('option', { value: 'setup-token' }, 'Claude setup token'),
+    h('option', { value: 'openai-key' }, 'OpenAI API key (Codex)'));
   if (opts.kind) kindSel.value = opts.kind;
   const name = h('input', { type: 'text', name: 'acct-name', autocomplete: 'off', spellcheck: 'false', placeholder: 'a-z 0-9 -' });
   name.value = opts.name || 'work';
@@ -3910,7 +3926,8 @@ function accountForm(opts) {
     planRow.hidden = !token;
     secretLabel.textContent = token ? 'Setup token' : 'API key';
     hint.textContent = token ? 'Run claude setup-token on this Mac and paste what it prints (it starts sk-ant-oat…; valid a year). Not shown, not kept in this page.'
-                             : 'An Anthropic API key (sk-ant-api…). Not shown, not kept in this page.';
+      : kindSel.value === 'openai-key' ? 'An OpenAI API key (sk-…) for Codex. Not shown, not kept in this page.'
+      : 'An Anthropic API key (sk-ant-api…). Not shown, not kept in this page.';
   };
   kindSel.addEventListener('change', paint);
   paint();
@@ -3950,26 +3967,38 @@ function accountForm(opts) {
 // store default is not preselected. When the agent needs one and none fits: "pi needs an Anthropic API
 // key", with the masked key field right there (accountForm: the same route and guarantees) — or, with
 // ui.allow_secret_entry off, the commands. `ok()` says whether the form may create.
-const AGENT_NAMES = { 'claude-code': 'Claude Code', pi: 'pi' };
-const KIND_LABELS = { mac: 'this Mac’s login', 'setup-token': 'setup token', 'api-key': 'API key' };
+const AGENT_NAMES = { 'claude-code': 'Claude Code', pi: 'pi', codex: 'Codex' };
+const KIND_LABELS = { mac: 'this Mac’s login', 'setup-token': 'setup token', 'api-key': 'API key', 'openai-key': 'OpenAI API key', chatgpt: 'ChatGPT sign-in',
+  'codex-mac': 'this Mac’s Codex login' };
+/// 599i: an image name or agent → the agent the accounts table is keyed by (python-codex → codex).
+function agentKey(a, table) {
+  if (!a || !table) return a;
+  if (table[a]) return a;
+  return Object.keys(table).find((k) => a.endsWith('-' + k)) || a;
+}
+/// 599i: Codex uses OpenAI accounts only (a ChatGPT sign-in or an OpenAI key).
+function isOpenAIAgent(kinds) { return !!kinds && kinds.every((k) => k === 'chatgpt' || k === 'openai-key' || k === 'codex-mac'); }
 function accountChooser({ accounts, agent, same = null, defaultValue = '', value = null, onChange = () => {} }) {
   let acc = accounts, current = agent(), chosen = value;            // 599f: `value` pre-selects (a project file's account)
   const el = h('div', { class: 'field acct-chooser', 'data-acct-chooser': '' });
-  const kindsOf = (a) => (a && acc.agents ? acc.agents[a] : null);
+  const kindsOf = (a) => (a && acc.agents ? acc.agents[agentKey(a, acc.agents)] : null);
   const fits = (kinds) => acc.accounts.filter((x) => !kinds || kinds.includes(x.kind));
   function state() {
     const kinds = kindsOf(current);
     const needs = !!kinds && !kinds.includes('mac');
     const usable = fits(kinds);
-    const def = acc.accounts.find((x) => x.name === acc.defaultAccount);
-    const defFits = acc.defaultAccount !== 'none' ? (!!def && (!kinds || kinds.includes(def.kind))) : !needs;
-    return { kinds, needs, usable, defFits };
+    // 599i: Codex follows the store's OpenAI default (none until one is chosen), never the Anthropic one.
+    const defName = isOpenAIAgent(kinds) ? (acc.openaiDefault || 'none') : acc.defaultAccount;
+    // Two rows can be named mac (Claude's and, rc.3, this Mac's Codex login): the one this agent can use.
+    const def = acc.accounts.find((x) => x.name === defName && (!kinds || kinds.includes(x.kind)));
+    const defFits = defName !== 'none' ? (!!def && (!kinds || kinds.includes(def.kind))) : !needs;
+    return { kinds, needs, usable, defFits, defName };
   }
   function render() {
     const s = state();
     const opts = [];
     if (same) opts.push(['', same]);
-    if (s.defFits) opts.push([defaultValue, 'the store default (' + acc.defaultAccount + ')']);
+    if (s.defFits) opts.push([defaultValue, 'the store default (' + s.defName + ')']);
     for (const x of s.usable) opts.push([x.name, x.name + ' (' + (KIND_LABELS[x.kind] || x.kind) + ')']);
     if (!s.needs) opts.push(['none', 'none']);
     const sel = h('select', { name: 'account', 'aria-label': 'Account' }, opts.map(([v, l]) => h('option', { value: v }, l)));
@@ -3983,9 +4012,19 @@ function accountChooser({ accounts, agent, same = null, defaultValue = '', value
     if (!missing) parts.push(sel);
     if (s.kinds && current) {
       parts.push(h('small', { class: 'muted' }, name + ' can use: ' + s.kinds.map((k) => KIND_LABELS[k] || k).join(', ')
-        + (s.needs ? ' — never a Claude subscription' : '')));
+        + (isOpenAIAgent(s.kinds) ? ' — never a Claude account' : s.needs ? ' — never a Claude subscription' : '')));
     }
-    if (missing) {
+    if (missing && isOpenAIAgent(s.kinds)) {
+      // 599i: Codex — Dozer's own ChatGPT sign-in runs in a terminal (the browser opens on this Mac); a key can be typed here.
+      parts.push(callout('warn', { cls: 'acct-need', icon: 'key-round', attrs: { 'data-acct-need': current }, title: name + ' needs an OpenAI account',
+        body: [h('small', null, 'Sign in with ChatGPT (your plan) in a terminal, or add an OpenAI API key — stored as `doz account add` stores it (the login keychain); the sandbox only ever sees a placeholder.'),
+          accountCommandsNode('chatgpt'),
+          secretEntryAllowed()
+            ? accountForm({ kind: 'openai-key', name: acc.accounts.some((x) => x.name === 'openai') ? 'openai-2' : 'openai',
+                onAdded: (r, n) => { acc = r; chosen = n; toast('account ' + n + ' added'); render(); onChange(); } })
+            : accountCommandsNode('openai-key'),
+          btn('Check again', async () => { try { acc = await api('accounts'); } catch (_) { /* keep */ } render(); onChange(); }, { small: true, icon: 'refresh-cw' })] }));
+    } else if (missing) {
       parts.push(callout('warn', { cls: 'acct-need', icon: 'key-round', attrs: { 'data-acct-need': current }, title: name + ' needs an Anthropic API key',
         body: [h('small', null, 'Add one now — it is stored as `doz account add` stores it (the login keychain), and this sandbox uses it.'),
           secretEntryAllowed()
@@ -4011,9 +4050,9 @@ function accountChooser({ accounts, agent, same = null, defaultValue = '', value
 function accountDialog(name, i, accounts) {
   const slot = h('div');
   let acct = null;
-  const dlg = dialog('Account of ' + name, 'Which Anthropic account the proxy uses for it — from its next session. The guest only ever sees a placeholder.',
+  const dlg = dialog('Account of ' + name, 'Which account the proxy uses for it — from its next session. The guest only ever sees a placeholder.',
     [{ name: 'account', type: 'custom', el: slot, get: () => {
-      if (!acct.ok()) throw new Error((AGENT_NAMES[i.agent] || 'This agent') + ' needs an Anthropic API key — add one above.');
+      if (!acct.ok()) throw new Error((AGENT_NAMES[agentKey(i.agent, AGENT_NAMES)] || 'This agent') + ' needs an account it can use — add one above.');
       return acct.get() || 'default';
     } }], 'Use', async (v) => {
       await actOrThrow({ action: 'account-use', sandbox: name, account: v.account });
@@ -4425,7 +4464,7 @@ function rulesStep(opts) {
 const WIZ_STEPS = ['Welcome', 'Checks', 'Access', 'Workspace rules', 'Images', 'Preparing', 'First sandbox', 'Done'];
 // The steps by name (599g put Workspace rules between Access and Images).
 const WIZ = { welcome: 0, checks: 1, access: 2, rules: 3, images: 4, preparing: 5, first: 6, done: 7 };
-const WIZ_ORDER = ['claude-code', 'pi', 'lab'];
+const WIZ_ORDER = ['claude-code', 'pi', 'codex', 'lab'];
 let wizTimer = null;
 function wizardStopPolling() { clearInterval(wizTimer); wizTimer = null; }
 function wizardPoll() {
@@ -4646,12 +4685,46 @@ function wizStep3(d, w) {
   if (short) go.disabled = true;
   return [
     h('h2', null, 'Images'),
-    h('p', { class: 'sub' }, 'Preparing an image downloads its base and bakes it — the part a first start would otherwise make you wait for. claude-code is ticked; pi and lab are optional (each can also be prepared later, or by its first start).'),
+    h('p', { class: 'sub' }, 'Preparing an image downloads its base and bakes it — the part a first start would otherwise make you wait for. claude-code is ticked; pi, codex and lab are optional (each can also be prepared later, or by its first start).'),
     h('div', { class: 'wiz-choices' }, items),
+    chosen.includes('codex') ? wizCodexAccount(w) : null,
     h('p', { class: short ? 'st-fail' : 'muted', 'data-disk': '1' }, need ? 'About ' + bytes(need) + ' of disk needed (with room for a first sandbox)' +
       (d.freeBytes != null ? '; ' + bytes(d.freeBytes) + ' free' : '') + (short ? ' — free some space or choose fewer images.' : '.') : 'Nothing to download.'),
     wizButtons(btn('Back', () => wizGo(WIZ.rules)), go),
   ];
+}
+/// 599i: with the codex image ticked — Codex uses an OpenAI account: Dozer's own ChatGPT sign-in (a terminal
+/// command: the browser opens on this Mac) or an OpenAI key in the masked field; made the store's OpenAI default.
+function wizCodexAccount(w) {
+  const box = h('div', { class: 'panel wiz-codex', 'data-codex-account': '' });
+  const paint = () => {
+    if (w.codexAdded) {
+      box.replaceChildren(callout('ok', { cls: 'notice', attrs: { 'data-added': w.codexAdded }, body: ['Codex: account ', h('strong', null, w.codexAdded),
+        ' added — the store’s default OpenAI account. Its secret is in the login keychain, not in this page.'] }));
+      return;
+    }
+    if (w.codexMac) {
+      // rc.3: Codex is signed in on this Mac — the least setup: nothing to add.
+      box.replaceChildren(callout('ok', { cls: 'notice', attrs: { 'data-codex-mac': '' }, title: 'Codex is signed in on this Mac',
+        body: [h('span', null, 'Codex sandboxes use that login (the account mac) — nothing is copied: Dozer reads only its short-lived access token, and the Mac’s Codex renews it. '
+          + 'Keep Codex running on this Mac, or turn on Settings › codex.keep_alive, so it stays fresh. Another account can still be chosen per sandbox.')] }));
+      return;
+    }
+    box.replaceChildren(h('h3', null, 'Codex account (OpenAI)'),
+      h('p', { class: 'muted' }, 'Codex uses your ChatGPT plan (Dozer signs in on this Mac — your Mac’s own Codex login is not touched) or an OpenAI API key. Either can be added later; a codex sandbox says what it needs.'),
+      accountCommandsNode('chatgpt'),
+      secretEntryAllowed() ? accountForm({ kind: 'openai-key', name: 'openai', onAdded: async (r, name) => {
+        try { await actOrThrow({ action: 'account-default', account: name }); } catch (e) { w.error = e.message || String(e); }
+        w.codexAdded = name;
+        paint();
+      } }) : accountCommandsNode('openai-key'));
+  };
+  paint();
+  if (w.codexMac === undefined) {
+    w.codexMac = false;
+    api('accounts').then((a) => { w.codexMac = a.accounts.some((x) => x.kind === 'codex-mac' && (x.state === 'ok' || x.state === 'expired')); paint(); }).catch(() => {});
+  }
+  return box;
 }
 /// 594 (owner: "more progress detail"): ONE card for a host preparation — the wizard's Preparing step and
 /// the Operations page both draw it — from the host's model (593's ProgressBoard: the step under way, the
@@ -4764,7 +4837,7 @@ function wizStep5(d, w) {
     if (!/^[a-z0-9][a-z0-9-]{0,39}$/.test(n)) { error.textContent = 'The name: 1–40 of a-z 0-9 - (not starting with -).'; return; }
     let ws;
     try { ws = chooser.get(); } catch (e) { error.textContent = e.message; return; }
-    if (acct && !acct.ok()) { error.textContent = (AGENT_NAMES[picker.agent()] || 'This agent') + ' needs an Anthropic API key — add one above.'; return; }
+    if (acct && !acct.ok()) { error.textContent = (AGENT_NAMES[picker.agent()] || 'This agent') + ' needs an account it can use — add one above.'; return; }
     const blocked = picker.blocked();
     if (blocked) { error.textContent = blocked; return; }
     w.firstWorkspace = ws.workspace || '';
@@ -5692,7 +5765,7 @@ async function newShellTerminal(sandbox, pane) {
 /// any running session that is bash), else `sh -l`.
 function loginShell(detail, rows) {
   const image = detail && detail.info ? detail.info.image : '';
-  const hasBash = ['lab', 'claude-code', 'pi'].includes(image) || rows.some((r) => /(^|\/)bash(\s|$)/.test(r.command));
+  const hasBash = ['lab', 'claude-code', 'pi', 'codex'].includes(image) || rows.some((r) => /(^|\/)bash(\s|$)/.test(r.command));
   return hasBash ? ['bash', '-l'] : ['sh', '-l'];
 }
 

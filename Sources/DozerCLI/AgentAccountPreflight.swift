@@ -26,15 +26,45 @@ func preflightAgentAccount(image: String?, network: String?, account: String?, _
     let m = try rawCall(HostRequest(.accountList), g)
     guard m.ok == true, let rows = try? m.result?.decode([AccountRow].self) else { return account }
     var kinds: [String: AccountKind] = ["mac": .mac]
-    for r in rows { if let k = AccountKind(rawValue: r.kind) { kinds[r.name] = k } }
-    let defaultAccount = rows.first { $0.isDefault }?.name ?? "none"
-    guard let problem = AgentCredentials.createProblem(image: image, account: account, defaultAccount: defaultAccount, kinds: kinds) else {
+    // rc.3: this Mac's Codex login is listed as mac too (kind codex-mac) — kept apart from Claude's mac.
+    for r in rows where r.kind != AccountKind.codexMac.rawValue { if let k = AccountKind(rawValue: r.kind) { kinds[r.name] = k } }
+    let codexMac = rows.contains { $0.kind == AccountKind.codexMac.rawValue && ($0.state == "ok" || $0.state == "expired") }
+    // 599i: the Anthropic default and the OpenAI one (Codex) are each marked default.
+    let defaultAccount = rows.first { $0.isDefault && AccountKind(rawValue: $0.kind)?.provider != "openai" }?.name ?? "none"
+    let openaiDefault = rows.first { $0.isDefault && AccountKind(rawValue: $0.kind)?.provider == "openai" }?.name
+    guard let problem = AgentCredentials.createProblem(image: image, account: account, defaultAccount: defaultAccount, kinds: kinds,
+                                                       openaiDefault: openaiDefault, codexMac: codexMac) else {
         return account
     }
     let asker = Asker(yes: false, json: g.json)
     guard asker.interactive, isatty(STDIN_FILENO) == 1 else { throw fail(HostError(.invalid, problem), g) }
     Out.stderr("[doz] \(problem)\n")
     let fits = kinds.filter { AgentCredentials.accepts(image, $0.value) }.keys.sorted()
+    // 599i: Codex — an OpenAI account: one that fits, Dozer's own ChatGPT sign-in now, or an OpenAI key.
+    if AgentCredentials.provider(image) == "openai" {
+        let fits = fits.filter { $0 != "mac" } + (codexMac ? ["mac"] : [])
+        let i = asker.choose("Which account?", fits.map { "use \($0)" } + ["sign in with ChatGPT now (your browser opens)", "add an OpenAI API key now"],
+                             preferred: 0)
+        if i < fits.count { return fits[i] }
+        let chatgpt = i == fits.count
+        let name = asker.text("Account name", default: chatgpt ? (kinds["chatgpt"] == nil ? "chatgpt" : "chatgpt-2") : (kinds["openai"] == nil ? "openai" : "openai-2")) {
+            (try? AccountStore.validateName($0)) == nil ? "1–40 of a-z 0-9 - (not default or none)" : (kinds[$0] != nil ? "\($0) exists" : nil)
+        }
+        let secret: String
+        if chatgpt {
+            do { secret = try ChatGPTSignIn.run { Out.stderr("[doz] \($0)\n") }.json } catch { throw fail(HostError(.failed, error.localizedDescription), g) }
+        } else {
+            secret = try readSecret("OpenAI API key for Codex (not echoed): ", g)
+        }
+        let trimmed = secret.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { throw fail(HostError(.invalid, problem), g) }
+        let added = try rawCall(HostRequest.accountAdd(name: name, kind: chatgpt ? .chatgpt : .openaiKey, plan: nil, secret: secret), g)
+        guard added.ok == true else {
+            throw fail(HostError(.invalid, "could not add \(name): " + (added.error?.message ?? "no reason").replacingOccurrences(of: trimmed, with: "…")), g)
+        }
+        Out.stderr("[doz] account \(name) added (\(chatgpt ? "chatgpt" : "openai-key")) — this sandbox uses it\n")
+        return name
+    }
     if !fits.isEmpty {
         let i = asker.choose("Which account?", fits.map { "use \($0)" } + ["add an Anthropic API key now"], preferred: 0)
         if i < fits.count { return fits[i] }

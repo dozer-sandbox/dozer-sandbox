@@ -78,6 +78,10 @@ public final class HostServer: @unchecked Sendable {
         if ProcessInfo.processInfo.environment["DOZ_TEST_CREDENTIALS"] == "memory" {
             HostLog.line("TEST: DOZ_TEST_CREDENTIALS=memory — accounts' secrets live in this host's memory, never the keychain; nothing is verified")
         }
+        // 599i: a test's fake OpenAI — said, so a test can check its host has it before anything reaches OpenAI.
+        if let o = OpenAISeam.upstream() {
+            HostLog.line("TEST: DOZ_TEST_OPENAI_UPSTREAM — OpenAI's hosts (sign-in, refresh, the proxy's leg) go to \(o.host):\(o.port), trusting only its CA")
+        }
         // 591: the VM layouts this host records name it; and it remembers the file it runs from, to
         // tell a later "Internal Virtualization error" caused by an update underneath it.
         VMLayout.recorder = "doz \(version)"

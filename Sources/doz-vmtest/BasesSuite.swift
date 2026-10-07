@@ -64,7 +64,7 @@ func basesCLIPart(_ binary: String) async {
     r = h.run(["create", "x1", "--image", "lab", "--agent", "pi"])
     check(r.code != 0 && r.err.contains("not both"), "--image with --agent: refused")
     r = h.run(["create", "x1", "--agent", "codex"])
-    check(r.code != 0 && r.err.contains("--agent: claude-code, pi or none"), "an unknown agent is refused")
+    check(r.code != 0 && r.err.contains("--agent: claude-code, pi, codex or none"), "an unknown agent is refused")
     r = h.run(["create", "g1", "--base", "go", "--agent", "none", "--isolated", "--json"])
     let g1 = try? HostWire.decoder.decode(SandboxInfo.self, from: r.outData)
     check(r.code == 0 && g1?.image == "go" && g1?.imageTitle == "Go · none" && g1?.base == "go", "create --base go --agent none: image go, Go · none")
@@ -430,8 +430,12 @@ func basesMatrixPart(_ binary: String) async {
             check(h.run(["exec", name, "--", "sh", "-c", "test -x /opt/node/bin/node && /opt/node/bin/node --version"]).out.hasPrefix("v\(NodeRuntime.version)"),
                   "\(name): Node \(NodeRuntime.version) under /opt/node")
             check(h.run(["exec", name, "--", "sh", "-c", "command -v node || echo no-node"]).out == "no-node\n", "\(name): Node is pi's, not on the sessions' PATH")
+        case .codex:
+            // 599i: the static binary on every base (`make test-cli-codex` checks the rest).
+            let v = h.run(["exec", name, "--", "codex", "--version"]).out
+            check(v.contains("codex-cli "), "\(name): codex --version → \(v.trimmingCharacters(in: .whitespacesAndNewlines))")
         case .none:
-            check(h.run(["exec", name, "--", "sh", "-c", "command -v claude || command -v pi || echo no-agent"]).out == "no-agent\n", "\(name): no agent")
+            check(h.run(["exec", name, "--", "sh", "-c", "command -v claude || command -v pi || command -v codex || echo no-agent"]).out == "no-agent\n", "\(name): no agent")
         }
         if b == "go" {
             check(h.run(["net", "policy", name]).out.contains("proxy.golang.org"), "\(name): Go's module proxy is allowed")

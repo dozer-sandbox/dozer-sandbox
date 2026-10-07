@@ -234,7 +234,7 @@ public enum Resources {
                                             "base-digests.json", "dockerfiles.json",
                                             // 599e: the Access step's last checks (never a secret).
                                             "access.json"]
-    static let builtInImages = ["lab", "claude-code", "pi"]
+    static let builtInImages = ["lab", "claude-code", "pi", "codex"]
     /// 596: an image a preparation makes again (any base × agent — a template is not).
     static func isPreparedImage(_ name: String) -> Bool { builtInImages.contains(name) || ImageChoice.parse(name)?.name == name }
     /// The ids a person may name (`doz resources rm`, the page): a word, then `:` and a name.

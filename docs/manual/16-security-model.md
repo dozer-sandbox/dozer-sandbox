@@ -40,6 +40,12 @@ out. Inside the sandbox the agent sees a placeholder (`doz_cred_…`), so there'
 - a credential the agent brings itself is flagged or refused (the [key policy](09-agents-and-accounts.md#a-credential-the-agent-brings-itself));
 - accounts are stored in your login keychain, and the dashboard never shows a secret.
 
+**Codex's ChatGPT plan** works the same way ([Codex](24-codex.md)): Dozer's own ChatGPT sign-in is kept in
+your login keychain; the sandbox's `~/.codex/auth.json` holds placeholders (and the sign-in's details
+without their signature); the proxy puts the access token into requests to `chatgpt.com` only, and
+renews it on your Mac — Codex's own renewal request is answered by the proxy, never sent on. Your
+Mac's own Codex login (`~/.codex`) is never read or changed.
+
 **Your GitHub login** works the same way, and only when you choose it — for new sandboxes in setup's
 Access step, or for one sandbox ([GitHub as you](18-github.md)):
 

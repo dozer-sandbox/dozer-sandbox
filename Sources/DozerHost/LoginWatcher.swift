@@ -298,8 +298,8 @@ public final class LoginWatcher: @unchecked Sendable {
     }
 }
 
-enum CredentialVaultClock {
-    static func hm(_ d: Date) -> String {
+public enum CredentialVaultClock {
+    public static func hm(_ d: Date) -> String {
         let f = DateFormatter()
         f.dateFormat = "HH:mm"
         return f.string(from: d)

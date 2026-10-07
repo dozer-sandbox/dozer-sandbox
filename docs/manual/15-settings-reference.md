@@ -114,13 +114,20 @@ This table is generated from `doz config show` and checked against it on every b
 |---|---|---|---|---|---|
 | `claude.permissions` | `skip` | skip \| ask | next session | `-e DOZ_CLAUDE_PERMISSIONS=… on run/exec` | Claude Code in a claude-code sandbox: skip its permission prompts (the sandbox is the boundary), or ask as on a Mac. |
 
+### `[codex]`
+
+| key | default | values | applies | overridden by | what it does |
+|---|---|---|---|---|---|
+| `codex.permissions` | `skip` | skip \| ask | next session | `-e DOZ_CODEX_PERMISSIONS=… on run/exec` | Codex in a codex sandbox: skip its approvals and its own Linux sandbox (the VM is the boundary), or ask as on a Mac. |
+| `codex.keep_alive` | `false` | boolean | at once | — | Codex sandboxes on the account mac (this Mac's own Codex login): when its access token is about to expire and a sandbox used it in the last 15 minutes, run this Mac's codex doctor once — no model call — which renews the login the way Codex itself does. Off: the login renews only while Codex (the app or a codex session) runs on this Mac; when it has expired, Codex in a sandbox says so. |
+
 ### `[defaults]`
 
 | key | default | values | applies | overridden by | what it does |
 |---|---|---|---|---|---|
 | `defaults.cpus` | `2` | integer 1–64 | new sandboxes | `doz create --cpus` | CPUs of a new sandbox. |
 | `defaults.nat_subnet` | `""` | IPv4 subnet, a.b.c.d/nn ("" = a free one) | new sandboxes | `$DOZ_SUBNET`, `doz create --subnet` | The vmnet subnet of a new --network nat sandbox. |
-| `defaults.image` | `lab` | lab \| claude-code \| pi | new sandboxes | `doz create --image` | The image of a new sandbox when none is named (doz up NAME, doz init, the UI's New sandbox). doz onboard writes the one you chose. |
+| `defaults.image` | `lab` | lab \| claude-code \| pi \| codex | new sandboxes | `doz create --image` | The image of a new sandbox when none is named (doz up NAME, doz init, the UI's New sandbox). doz onboard writes the one you chose. |
 | `defaults.projects_dir` | `~/Developer/dozer-sandbox-projects` | path ("" = automatic) | new sandboxes | — | The base folder of new sandboxes' workspaces: the web UI's New sandbox and Quick add, and doz new, share <projects_dir>/<sandbox name> (created when missing, like any workspace). doz create is isolated unless --workspace; doz init uses the folder it runs in. In the web UI, Settings › Choose… sets it with the Mac's folder picker. |
 | `defaults.account` | `mac` | mac \| none | a store that hasn't chosen | — | The Anthropic account of a store that has not chosen one: mac (this Mac's Claude Code login) or none. doz account default decides for a store once it has. |
 | `defaults.permissions` | `standard` | standard \| locked \| open, or permissions like +web,-error-reports (doz net permissions) | new sandboxes | `doz create --allow / --network` | What a new sandbox's agent may do (its network, as permissions — doz net permissions): standard (talk to its AI model, update itself, install system packages and its base's language packages, use GitHub, send error reports), locked (its AI model only), open (everything, the web included), or standard with changes like +web,-error-reports. Stored by name: a Dozer update that adds a host to a permission reaches every sandbox that has it. |
@@ -179,6 +186,7 @@ This table is generated from `doz config show` and checked against it on every b
 |---|---|---|---|---|---|
 | `images.claude_code_version` | `latest` | latest, or an exact version like 2.1.227 | new sandboxes | — | The Claude Code the claude-code image is prepared with: latest (asked of the npm registry when the image is prepared, then installed at that exact version, integrity-checked; a newer one is only said — doz image bake claude-code rebuilds when you choose) or an exact version like 2.1.227. A sandbox keeps the version it was created with; doz reset NAME moves it to the image's current one. |
 | `images.pi_version` | `latest` | latest, or an exact version like 2.1.227 | new sandboxes | — | The pi coding agent the pi image is prepared with: latest or an exact version, as images.claude_code_version. |
+| `images.codex_version` | `latest` | latest, or an exact version like 2.1.227 | new sandboxes | — | The OpenAI Codex CLI the codex image (and every base's Codex image) is prepared with: latest or an exact version like 0.160.1, as images.claude_code_version. |
 
 ### `[images.lab]`
 
@@ -200,6 +208,13 @@ This table is generated from `doz config show` and checked against it on every b
 |---|---|---|---|---|---|
 | `images.pi.memory_mib` | `2048` | integer 256–262144 | new sandboxes | `doz create --memory` | Memory (MiB) of a new pi sandbox (a custom image follows the image it was saved from). |
 | `images.pi.network` | `agent` | agent \| bake \| locked \| open \| nat \| none | new sandboxes | `doz create --network` | The network of a new pi sandbox: agent, bake, locked, open (proxied presets), nat or none. |
+
+### `[images.codex]`
+
+| key | default | values | applies | overridden by | what it does |
+|---|---|---|---|---|---|
+| `images.codex.memory_mib` | `2048` | integer 256–262144 | new sandboxes | `doz create --memory` | Memory (MiB) of a new codex sandbox (a custom image follows the image it was saved from). |
+| `images.codex.network` | `agent` | agent \| bake \| locked \| open \| nat \| none | new sandboxes | `doz create --network` | The network of a new codex sandbox: agent, bake, locked, open (proxied presets), nat or none. |
 
 ### `[kernel]`
 

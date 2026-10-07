@@ -119,7 +119,7 @@ doz new [--image I] [--name N] [--isolated] [-d]     # 599c: every default — c
 doz create NAME --image lab|claude-code|pi|<base>-<agent>|<template> \
     [--cpus 2] [--memory 2G] [--workspace ~/code/proj | --isolated] \
     [--network agent|bake|locked|open|nat|none] [--subnet CIDR]
-doz create NAME --agent claude-code|pi|none --base node|python|go|rust|java|ruby|dotnet|debian|ubuntu|alpine
+doz create NAME --agent claude-code|pi|codex|none --base node|python|go|rust|java|ruby|dotnet|debian|ubuntu|alpine
 doz create NAME --agent claude-code --dockerfile ./Dockerfile      # 596: your own base (workspace = its folder)
 
 doz up NAME [same options] [--session S] [-d] [-- CMD …]

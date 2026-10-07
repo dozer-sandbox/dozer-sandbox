@@ -481,7 +481,7 @@ final class WebHTTPIntegrationTests: XCTestCase {
         XCTAssertFalse(o.host.running)
         XCTAssertTrue(o.sandboxes.isEmpty)
         let images = try await data.images()
-        XCTAssertEqual(Set(images.map(\.name)), ["lab", "claude-code", "pi"])
+        XCTAssertEqual(Set(images.map(\.name)), ["lab", "claude-code", "pi", "codex"])
         do {
             _ = try await data.sandbox("nope")
             XCTFail("expected not-found")

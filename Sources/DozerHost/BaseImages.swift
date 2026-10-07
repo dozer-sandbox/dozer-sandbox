@@ -214,7 +214,7 @@ extension DozerImages {
     public static func composedImagesInStore(_ store: DozerStore) -> [String] {
         let dir = store.root.appendingPathComponent("images")
         let names = (try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []
-        var out = ["claude-code", "pi"]
+        var out = ["claude-code", "pi", "codex"]
         for n in names.sorted() where ImageChoice.parse(n)?.name == n && n != "lab" && !out.contains(n) { out.append(n) }
         return out
     }

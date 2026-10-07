@@ -65,6 +65,10 @@ public enum AgentPermissions {
         var a: [AgentPermission] = [
             AgentPermission(id: "model", title: "Talk to its AI model", summary: "Needed for the agent to work.", phrase: "talk to your AI model",
                             hosts: [PermissionHost("api.anthropic.com", ports: nil), PermissionHost("statsig.anthropic.com", ports: nil)], locked: true),
+            // 599i: Codex's model (OpenAI) — only ever on in a Codex sandbox, where it cannot be switched off.
+            AgentPermission(id: openAIModel, title: "Talk to OpenAI", summary: "Codex's model and its usage limits (OpenAI) — needed for Codex to work.",
+                            phrase: "talk to your AI model (OpenAI)",
+                            hosts: [PermissionHost("chatgpt.com"), PermissionHost("api.openai.com"), PermissionHost("ab.chatgpt.com")], locked: false),
             AgentPermission(id: "sign-in", title: "Sign in", summary: "Only for signing in inside the sandbox — Dozer's proxy already supplies the credential.",
                             phrase: "sign in to Claude inside the sandbox",
                             hosts: [PermissionHost("console.anthropic.com", ports: nil), PermissionHost("claude.ai", ports: nil), PermissionHost("platform.claude.com", ports: nil)],
@@ -111,6 +115,20 @@ public enum AgentPermissions {
 
     /// 599d: "Use GitHub as you" and "Push to GitHub" (which needs it). Off in EVERY preset — Open
     /// included: Open is about the network, these are the user's identity; each is turned on by name.
+    /// 599i: "Talk to OpenAI" — the model permission of an agent other than Claude Code / pi. Never part of
+    /// a preset (Open included): it is added for the agent that needs it (`agentPermissions`), kept across
+    /// preset changes, never inferred, never suggested, and not listed in another agent's checklist or facts.
+    public static let openAIModel = "model:openai"
+    static let agentModelPermissions: Set<String> = [openAIModel]
+
+    /// 599i: the permissions an agent always has (Codex: "Talk to OpenAI"); none for Claude Code and pi.
+    public static func agentPermissions(_ agent: AgentKind?) -> [String] {
+        agent == .codex ? [openAIModel] : []
+    }
+
+    /// 599i: whether `id` is an agent's own model permission (shown only where it is on).
+    public static func isAgentModel(_ id: String) -> Bool { agentModelPermissions.contains(id) }
+
     public static let gitHubAsYou = "github:as-you"
     public static let gitHubPush = "github:push"
     static let identityPermissions: Set<String> = [gitHubAsYou, gitHubPush]
@@ -133,7 +151,7 @@ public enum AgentPermissions {
         switch name {
         case "locked": return ["model"]
         case "agent", "standard": return ["model", "update"] + installDefaults(base: base) + ["github", "error-reports"]
-        case "open": return all.map(\.id).filter { !identityPermissions.contains($0) }
+        case "open": return all.map(\.id).filter { !identityPermissions.contains($0) && !agentModelPermissions.contains($0) }
         default: return nil
         }
     }
@@ -141,7 +159,7 @@ public enum AgentPermissions {
     /// Which preset `names` is for `base` (nil: Custom).
     public static func presetName(_ names: [String], base: String?) -> String? {
         // 599d: the user's GitHub login is beside the preset, not part of it (a preset + "as you" is still that preset).
-        let rest = Set(names).subtracting(identityPermissions)
+        let rest = Set(names).subtracting(identityPermissions).subtracting(agentModelPermissions)
         for p in ["locked", "agent", "open"] where Set(preset(p, base: base) ?? []) == rest { return p }
         return nil
     }
@@ -176,7 +194,7 @@ public enum AgentPermissions {
     public static func permission(forHost host: String) -> AgentPermission? {
         let h = host.lowercased()
         // 599d: a denied host never suggests the user's own GitHub login (that is switched on deliberately).
-        let candidates = all.filter { $0.id != "web" && $0.group != "github" }
+        let candidates = all.filter { $0.id != "web" && $0.group != "github" && !agentModelPermissions.contains($0.id) }
         for p in candidates {
             for ph in p.hosts where ph.host == h && ph.pathPrefixes == nil { return p }
         }

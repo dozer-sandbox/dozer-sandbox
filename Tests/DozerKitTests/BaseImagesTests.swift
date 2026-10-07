@@ -93,6 +93,14 @@ final class BaseImagesTests: XCTestCase {
                     if b.packageManager == .apt { XCTAssertTrue(script.contains(NodeRuntime.sha256)); XCTAssertEqual(s.bakeHosts, ["nodejs.org"]) }
                 case .pi:
                     XCTAssertEqual(s, AgentImages.pi(release))
+                case .codex:
+                    // 599i: one recipe on every base — the registry's linux-arm64 tarball, integrity-checked.
+                    XCTAssertTrue(script.contains("https://registry.npmjs.org/@openai/codex/-/codex-2.1.285-linux-arm64.tgz"), name)
+                    XCTAssertTrue(script.contains("[ \"$got\" = 'sha512-AAAA' ]"), name)
+                    XCTAssertEqual(s.persistDirs, ["~/.codex"])
+                    XCTAssertEqual(s.sessionEnvironment["CODEX_HOME"], "/home/agent/.codex")
+                    XCTAssertEqual(s.agent, AgentPackage(package: "@openai/codex", version: "2.1.285"))
+                    XCTAssertNil(s.bakeHosts, "\(name): the npm registry is in the bake preset")
                 case .none:
                     XCTAssertNil(s.agent)
                     XCTAssertTrue(s.persistDirs.isEmpty)

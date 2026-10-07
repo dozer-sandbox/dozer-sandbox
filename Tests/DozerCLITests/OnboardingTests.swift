@@ -71,7 +71,7 @@ final class OnboardingTests: XCTestCase {
         fails("name: a\nimage: lab\nagent: pi\n", "not both")
         fails("name: a\nbase: python\ndockerfile: ./Dockerfile\n", "base or dockerfile")
         fails("name: a\nbase: cobol\n", "base: node, python")
-        fails("name: a\nagent: codex\nbase: go\n", "agent: claude-code, pi or none")
+        fails("name: a\nagent: gemini\nbase: go\n", "agent: claude-code, pi, codex or none")
         fails("name: a\nimage: lab\ncpus: 100\n", "cpus")
         fails("name: a\nimage: lab\ncpus: two\n", "cpus")
         fails("name: a\nimage: lab\nmemory: lots\n", "memory")

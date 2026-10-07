@@ -984,12 +984,15 @@ public struct WebAccounts: Codable, Equatable, Sendable {
     /// 594: the kinds of account each agent can use (`AgentImages.credentials`): claude-code → mac,
     /// setup-token, api-key; pi → api-key. The forms offer only these.
     public var agents: [String: [String]] = [:]
+    /// 599i: the OpenAI account Codex sandboxes follow (nil: none).
+    public var openaiDefault: String?
 
-    public init(accounts: [WebAccount], defaultAccount: String, keepalive: Bool) {
+    public init(accounts: [WebAccount], defaultAccount: String, keepalive: Bool, openaiDefault: String? = nil) {
         self.accounts = accounts
         self.defaultAccount = defaultAccount
         self.keepalive = keepalive
-        for image in ["claude-code", "pi"] {
+        self.openaiDefault = openaiDefault
+        for image in ["claude-code", "pi", "codex"] {
             if let c = AgentImages.credentials(image) { agents[image] = c.flatMap(\.accountKinds) }
         }
     }

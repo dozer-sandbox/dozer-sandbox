@@ -65,7 +65,8 @@ public enum AgentPrompt {
         ("network.allowed_hosts", "the hosts the policy allows (proxied), comma-separated"),
         ("network.description", "a sentence: how the sandbox reaches the network and what to do when refused"),
         ("network.permissions", "what the agent may and may not do, in plain words, and the permission to ask for"),
-        ("account.name", "the Anthropic account the proxy injects, or none"),
+        ("account.name", "the account the proxy injects (Anthropic; OpenAI for Codex), or none"),
+        ("agent.state", "where the agent keeps its own state on the state disk (`~/.claude`, `~/.pi/agent`; Codex: `~/.codex`)"),
         ("credentials.description", "a sentence: how credentials reach the agent"),
         ("sandbox.sudo", "yes or no: the agent has passwordless sudo (sandbox.agent_sudo)"),
         ("sandbox.timezone", "the VM's time zone, e.g. Australia/Sydney (the Mac's, by default)"),
@@ -118,7 +119,7 @@ public enum AgentPrompt {
     ## What persists
 
     - **The root disk** (`/`, packages you install, files outside /workspace) survives stops and restarts. The user can *reset* it to the image, which discards everything installed or written on it.
-    - **The state disk** holds the agent's own state (`~/.claude`, `~/.pi/agent`: logins, history, settings) and survives even a reset.
+    - **The state disk** holds the agent's own state ({{agent.state}}: logins, history, settings) and survives even a reset.
     - **Restore points** are instant copies of the disks the user takes (`doz point take {{sandbox.name}}`) and can go back to. You cannot take one yourself.
 
     ## The network
@@ -202,8 +203,11 @@ public enum AgentPrompt {
                               base: String? = nil, apk: Bool = false, clipboard: Bool = true,
                               browser: Bool = true, openFiles: Bool = true, openApps: [String] = [],
                               github: GitHubAccess.Mode? = nil, sshAgent: Bool = false, tools: ToolsReport? = nil,
-                              workspaceRules: WorkspaceRuleMode? = nil) -> [String: String] {
+                              workspaceRules: WorkspaceRuleMode? = nil, agent: String? = nil) -> [String: String] {
         var v: [String: String] = [:]
+        // 599i: Codex's own state, and its provider (OpenAI) — Claude Code and pi read exactly as before.
+        let codex = agent == "codex"
+        v["agent.state"] = codex ? "`~/.codex`" : "`~/.claude`, `~/.pi/agent`"
         // 599g: only while a view serves the user's rules (it is the guest's state, not the Mac's files).
         switch workspaceRules {
         case .lock?:
@@ -328,6 +332,10 @@ public enum AgentPrompt {
             v["account.name"] = "none usable (\(account ?? "none"))"
             v["credentials.description"] = "no credential you can use is attached (\(problem)), so your requests to the model will fail. "
                 + "Do not log in or ask for a key inside the sandbox — tell the user to choose an account in Dozer: `doz account use \(name) ACCOUNT` on the Mac, or the sandbox's page in `doz ui`."
+        } else if network.policy != nil, account == "mac", codex {
+            v["credentials.description"] = "the Mac's proxy puts the user's own Codex login on their Mac (the account mac) into your requests to OpenAI on the way out; the Mac's Codex renews it. The tokens in ~/.codex/auth.json and the key-like values in your environment are placeholders — that is expected; never run `codex login` or `codex logout`, and never ask the user for a key. If a request says the Mac's Codex login has expired, tell the user to run codex on their Mac."
+        } else if network.policy != nil, let account, codex {
+            v["credentials.description"] = "the Mac's proxy puts the account's credential (\(account)) into your requests to OpenAI on the way out (Dozer signed in on the Mac and renews it there). The tokens in ~/.codex/auth.json and the key-like values in your environment are placeholders — that is expected; never run `codex login` or `codex logout`, and never ask the user for a key."
         } else if network.policy != nil, let account {
             v["credentials.description"] = "the Mac's proxy adds the account's credential (\(account)) to your requests to Anthropic on the way out. The key-like values in your environment are placeholders — that is expected; never log in, and never ask the user for a key."
         } else if network.policy != nil {
@@ -391,6 +399,7 @@ public enum AgentPrompt {
         switch spec.imageSpec.flatMap({ ImageChoice.parse($0.name) })?.agent {
         case .claudeCode?: "claude-code"
         case .pi?: "pi"
+        case .codex?: "codex"          // 599i
         default: nil
         }
     }
@@ -405,7 +414,12 @@ public enum AgentPrompt {
 
     /// Where the skill goes in the guest.
     public static func skillDirectory(agent: String, home: String) -> String {
-        agent == "pi" ? "\(home)/.pi/agent/skills/dozer" : "\(home)/.claude/skills/dozer"
+        switch agent {
+        case "pi": "\(home)/.pi/agent/skills/dozer"
+        // 599i: Codex's user skills (`~/.agents/skills`; `$CODEX_HOME/skills` is deprecated) — never AGENTS.md.
+        case "codex": "\(home)/.agents/skills/dozer"
+        default: "\(home)/.claude/skills/dozer"
+        }
     }
 
     /// The prompt and skill a sandbox gets at its next session. nil: its image runs no agent.
@@ -431,7 +445,7 @@ public enum AgentPrompt {
                           openApps: WorkspaceFiles.appNames(settings.string(SettingKey.openApps) ?? "") ?? [],
                           github: AgentPermissions.gitHubMode(policy?.permissions),
                           sshAgent: policy != nil && HostCore.sandboxValue(config, SettingKey.sshAgent, settings: settings) == .string("on"),
-                          tools: tools, workspaceRules: workspaceRules)
+                          tools: tools, workspaceRules: workspaceRules, agent: agent)
         var r = AgentPromptReport(enabled: settings.bool(SettingKey.agentPrompt), agent: agent, text: nil, error: nil, layers: [],
                                   skill: nil, promptPath: guestPromptPath,
                                   skillPath: skillDirectory(agent: agent, home: imageSpec.home) + "/SKILL.md")
@@ -544,7 +558,7 @@ extension HostCore {
             note(m.name, "the agent's sudo: \(m.config.agentSudo.map { $0 ? "on" : "off" } ?? "follows sandbox.agent_sudo") — from the next session")
         }
         guard let report = agentPromptReport(m) else {
-            throw HostError(.invalid, "\(m.name) runs no agent (image \(m.config.image)) — the environment prompt is for claude-code and pi sandboxes")
+            throw HostError(.invalid, "\(m.name) runs no agent (image \(m.config.image)) — the environment prompt is for claude-code, pi and codex sandboxes")
         }
         return report
     }

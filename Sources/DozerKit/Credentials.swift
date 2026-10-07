@@ -89,6 +89,18 @@ public struct CredentialBinding: Sendable, Codable, Equatable, Identifiable {
     public static let claudeOAuth = CredentialBinding(id: "claude-oauth", hosts: ["api.anthropic.com"], header: .bearer,
                                                       environmentVariable: "CLAUDE_CODE_OAUTH_TOKEN")
 
+    /// 599i: an OpenAI API key (Codex): `Authorization: Bearer` on api.openai.com, `OPENAI_API_KEY` in the
+    /// guest (and in Codex's auth.json, written at each session start).
+    public static let openai = CredentialBinding(id: "openai", hosts: OpenAIAccess.apiHosts, header: .bearer,
+                                                 environmentVariable: "OPENAI_API_KEY")
+
+    /// 599i: a ChatGPT plan through Dozer's own sign-in: the ACCESS token, `Authorization: Bearer` on
+    /// chatgpt.com — swap-only (only ever in place of the placeholder Codex's auth.json holds; no
+    /// variable). auth.openai.com is covered so the proxy decrypts it: Codex's own refresh request is
+    /// answered there by the proxy and never forwarded (`EgressProxy.chatgptRenewal`).
+    public static let chatgpt = CredentialBinding(id: "chatgpt", hosts: OpenAIAccess.chatgptHosts + [OpenAIAccess.authHost], header: .bearer,
+                                                  swapOnly: true)
+
     public func covers(_ host: String) -> Bool { hosts.contains(host.lowercased()) }
 }
 
@@ -419,6 +431,22 @@ public final class CredentialVault: @unchecked Sendable {
     public func upstreamRejected(_ id: String) {
         let cb = onStale
         cb?(id)
+    }
+
+    /// 599i: the binding a placeholder was minted for (nil: unknown or revoked).
+    public func binding(ofPlaceholder t: String) -> String? {
+        lock.lock(); defer { lock.unlock() }
+        return bindingFor(token: t)
+    }
+
+    /// 599i: one fresh placeholder for `id` whose binding issues one (holds a secret, reads one on use, or
+    /// says why it has none) — for a placeholder that goes into a FILE in the guest (Codex's auth.json),
+    /// not a variable.
+    public func mintForFile(_ id: String) -> String? {
+        lock.lock()
+        let ok = bindings[id] != nil && (secrets[id] != nil || providers[id] != nil || notices[id] != nil)
+        lock.unlock()
+        return ok ? mint(id) : nil
     }
 
     private func bindingFor(token t: String) -> String? {
