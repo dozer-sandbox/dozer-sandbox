@@ -65,6 +65,10 @@ public enum WebAction: Equatable, Sendable {
     case builderInstall
     /// 599h: set the sandbox's tools layer up again now (the New Sandbox wizard's Retry) — `tools-apply`.
     case toolsApply(String)
+    /// 608: End session / Restart session (a terminal tab's menu, the inspector's Sessions tab) — the CLI's
+    /// `doz sessions end|restart`; lifecycle-class, so a remote (doz serve) browser may use them too.
+    case sessionEnd(name: String, session: String)
+    case sessionRestart(name: String, session: String, fresh: Bool)
 
     public static let lifecycleOps: [String: HostOp] = [
         "start": .start, "wake": .wake, "pause": .pause, "resume": .resume, "sleep": .sleep, "hibernate": .hibernate,
@@ -79,7 +83,8 @@ public enum WebAction: Equatable, Sendable {
         switch self {
         case .create(let n, _), .lifecycle(_, let n), .openSession(let n, _, _), .pointTake(let n, _, _), .pointRevert(let n, _),
              .pointFork(let n, _, _), .pointRemove(let n, _), .pointSaveImage(let n, _, _, _), .netPolicy(let n, _), .keyPolicy(let n, _),
-             .keyRemove(let n, _), .accountUse(let n, _), .templateCreate(let n, _, _, _), .duplicate(let n, _, _, _), .toolsApply(let n):
+             .keyRemove(let n, _), .accountUse(let n, _), .templateCreate(let n, _, _, _), .duplicate(let n, _, _, _), .toolsApply(let n),
+             .sessionEnd(let n, _), .sessionRestart(let n, _, _):
             return n
         case .imageBake, .imageRemove, .accountDefault, .accountKeepalive, .accountVerify, .accountRemove, .onboard, .prepareCancel,
              .resourcesRemove, .resourcesClean, .resourcesKernel, .hostStart, .hostRestart, .builderStart, .builderInstall:
@@ -119,6 +124,8 @@ public enum WebAction: Equatable, Sendable {
         case .builderStart: return "start Apple's container services"
         case .builderInstall: return "install Apple's container tool"
         case .toolsApply(let n): return "set up the tools of \(n)"
+        case .sessionEnd(let n, let s): return "end session \(s) in \(n)"
+        case .sessionRestart(let n, let s, _): return "restart session \(s) in \(n)"
         default: break
         }
         let r = hostRequest
@@ -248,6 +255,15 @@ public enum WebAction: Equatable, Sendable {
             return r
         case .toolsApply(let n):
             return HostRequest(.toolsApply, name: n)
+        case .sessionEnd(let n, let s):
+            var r = HostRequest(.sessionEnd, name: n)
+            r.session = s
+            return r
+        case .sessionRestart(let n, let s, let fresh):
+            var r = HostRequest(.sessionRestart, name: n)
+            r.session = s
+            r.fresh = fresh ? true : nil
+            return r
         }
     }
 
@@ -290,6 +306,8 @@ public enum WebAction: Equatable, Sendable {
             "builder-start": [],
             "builder-install": [],
             "tools-apply": ["sandbox"],
+            "session-end": ["sandbox", "session"],
+            "session-restart": ["sandbox", "session", "fresh"],
         ]
         for (verb, op) in lifecycleOps { f[verb] = [.reset, .rm].contains(op) ? ["sandbox", "confirm"] : ["sandbox"] }
         return f
@@ -417,6 +435,10 @@ public enum WebAction: Equatable, Sendable {
             a = .builderInstall
         case "tools-apply":
             a = .toolsApply(try f.sandbox("sandbox"))
+        case "session-end":
+            a = .sessionEnd(name: try f.sandbox("sandbox"), session: try f.required(f.session("session"), "session"))
+        case "session-restart":
+            a = .sessionRestart(name: try f.sandbox("sandbox"), session: try f.required(f.session("session"), "session"), fresh: try f.flag("fresh") == true)
         default:
             guard let op = lifecycleOps[verb] else { throw Invalid("unknown action") }
             a = .lifecycle(op, name: try f.sandbox("sandbox"))

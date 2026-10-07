@@ -146,6 +146,7 @@ public actor HostCore {
         managed[cfg.name] = m
         sb.setAgentSudo(Self.agentSudo(cfg))
         sb.setWorkspaceRuleMode(Self.ruleMode(cfg).mode)              // 599g
+        sb.passthroughViews = Self.workspaceViewOn(cfg)                // 608
         if !readOnly { sb.setTimeZone(Self.guestTimeZone()) }
         if !readOnly {
             let name = cfg.name
@@ -218,6 +219,7 @@ public actor HostCore {
                 // screens and has no panes: its saved screens and its terminal layout are deleted.
                 SavedScreens.remove(layout)
                 try? TerminalLayout.write(nil, store, m.name)
+                SessionRecords.write(nil, store, m.name)        // 608
                 note(m.name, "was running when the previous host died — its programs are gone; the next start checks its disk (e2fsck)")
                 metrics?.record(run: metricsRun, action: "died with host", sandbox: m.name, image: m.config.image,
                                 phaseBefore: "running", phaseAfter: "off", startedAt: Date(), durationMs: nil, ok: false)
@@ -398,6 +400,9 @@ public actor HostCore {
         i.agent = m.sandbox.spec.imageSpec?.name
         i.credentialProblem = credentialProblem(m)
         i.workspaceRules = workspaceRulesInfo(m, phase: phase)       // 599g: two stats when there are no rules
+        i.workspaceView = Self.workspaceViewState(running: phase == .running, workspace: m.config.workspace != nil,
+                                                  active: Array(m.sandbox.activeViews.values), fallbacks: m.sandbox.viewFallbacks,
+                                                  viewOn: m.sandbox.passthroughViews)   // 608
         // 594 W28: an image an older doz's recipe made (its disk lacks what this doz's has). 596: any
         // base × agent image.
         if let s = m.sandbox.spec.imageSpec, m.sandbox.spec.customImage == nil, ImageChoice.parse(s.name)?.name == s.name,
@@ -567,6 +572,7 @@ public actor HostCore {
             m.sandbox.setAgentSudo(Self.agentSudo(m.config))
             m.sandbox.setTimeZone(Self.guestTimeZone())
             m.sandbox.setWorkspaceRuleMode(Self.ruleMode(m.config).mode)   // 599g: read per request, like the rest
+            m.sandbox.passthroughViews = Self.workspaceViewOn(m.config)    // 608: used at the next fresh boot / hibernation's wake
             // 599d: the setting sandbox.ssh_agent changed in the file since — follow it.
             if m.sandbox.egress != nil, (Self.sandboxValue(m.config, SettingKey.sshAgent) == .string("on")) != (m.sandbox.sshAgentSocket != nil) {
                 applyGitHub(m)
@@ -626,6 +632,10 @@ public actor HostCore {
             try TerminalLayout.write(r.layout, store, m.name)
             guard let l = TerminalLayout.read(store, m.name) else { return .null }
             return try JSONValue(encoding: l)
+        case .sessionEnd:
+            return try JSONValue(encoding: try await sessionEnd(r))          // 608
+        case .sessionRestart:
+            return try JSONValue(encoding: try await sessionRestart(r))      // 608
         case .openSession:
             var opened = try await openSession(r, emit: emit)
             opened.defaultSession = defaultSessionName(r.name)      // 594 (W17): the shortest reattach hint
@@ -1017,7 +1027,7 @@ public actor HostCore {
         finishAction(m, row, t0, ok: true, phaseAfter: (await effectivePhase(m)).rawValue)
         // 593 §9: a reset's or a shutdown's sessions are gone — so are its panes (owner, 2026-09-30; the
         // saved screens went with the library's step).
-        if op == .reset || op == .shutdown { try? TerminalLayout.write(nil, store, m.name) }
+        if op == .reset || op == .shutdown { try? TerminalLayout.write(nil, store, m.name); SessionRecords.write(nil, store, m.name) }
         // 594 W28: a reset takes the image a NEW sandbox gets now (after a rebuild: this doz's) — the
         // state disk (the agent's own state) and the workspace are kept; the next start clones it.
         if op == .reset { moveToCurrentImage(m) }
@@ -1321,7 +1331,9 @@ public actor HostCore {
         return opened
     }
 
-    private func openSessionLocked(_ r: HostRequest) async throws -> SessionOpened {
+    /// `extraArguments` (608): appended to the program's argv after everything the host adds (pi's prompt
+    /// file) and NOT recorded — a restart's resume arguments (`SessionResume`).
+    func openSessionLocked(_ r: HostRequest, extraArguments: [String] = []) async throws -> SessionOpened {
         let m = try get(r.name)
         try await ensureRunning(m, wake: r.wake ?? true)
         // 599g: a rule file that appeared since the boot gets its view before the program starts (nothing
@@ -1358,6 +1370,8 @@ public actor HostCore {
             session = d.name
             argv = d.argv
         }
+        // 608: what a restart reopens — the program as chosen here (before pi's prompt file, tmux, a resume).
+        let recordArgv = argv
         // 594 (D15): the environment prompt and the dozer skill, rendered from the sandbox's current
         // facts and written into the guest before the program starts. pi's own session names the
         // facts file (pi reads a file given to --append-system-prompt); Claude Code's launcher reads it.
@@ -1385,6 +1399,7 @@ public actor HostCore {
                 argv += ["--append-system-prompt", AgentPrompt.guestPromptPath]
             }
         }
+        argv += extraArguments
         // 599i: Codex's credentials for this session — its auth.json with placeholders only (or none).
         await deliverCodexAuth(m)
         let size = TermSize(cols: r.cols ?? 120, rows: r.rows ?? 36)
@@ -1416,6 +1431,11 @@ public actor HostCore {
             throw error
         }
         m.lastSessionOpen = ContinuousClock.now
+        // 608: the record a restart reopens from (names of the variables only — never their values).
+        if !readOnly {
+            SessionRecords.record(session, SessionRecord(argv: recordArgv, workdir: r.workdir, user: r.user,
+                                                         environmentKeys: r.environment.map { Array($0.keys) }), store, m.name)
+        }
         let openMs = ms(since: t0)
         metrics?.record(run: metricsRun, action: "session open", sandbox: m.name, image: m.config.image, phaseBefore: "running",
                         phaseAfter: "running", startedAt: started, durationMs: openMs, detail: ["session": session])

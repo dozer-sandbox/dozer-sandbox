@@ -67,6 +67,8 @@ struct CreateArguments: ParsableArguments {
 
     @Option(name: .long, help: "lock or hide: what a .dozignore in the workspace folder does to the paths it lists — lock (listed, every access refused) or hide (not there). Not a security boundary (default: the setting workspace.ignore_mode, lock).")
     var ignoreMode: String?
+    @Option(name: .long, help: "on or off: /workspace through Dozer's live view of the folder, so programs working there keep their folder across a wake from hibernation or a host restart (on, the default: the setting workspace.view), or shared directly — a little faster, but such a wake cuts them off.")
+    var workspaceView: String?
 
     @Flag(name: .long, help: "When the image is out of date (an older doz's recipe, or a newer agent release): rebuild it first (~2 min, needs network; existing sandboxes are not affected).")
     var rebuild = false
@@ -166,6 +168,7 @@ struct CreateArguments: ParsableArguments {
         try take(SettingKey.sshAgent, sshAgent, "--ssh-agent")
         if let tmux { s[SettingKey.tmux] = .bool(tmux) }
         try take(SettingKey.ignoreMode, ignoreMode, "--ignore-mode")
+        try take(SettingKey.workspaceView, workspaceView, "--workspace-view")
         return s.isEmpty ? nil : s
     }
 
@@ -198,7 +201,7 @@ struct CreateArguments: ParsableArguments {
         image != nil || cpus != nil || memory != nil || workspace != nil || network != nil || subnet != nil || account != nil || agentPrompt != nil || isolated || agentSudo != nil
             || agent != nil || base != nil || dockerfile != nil || !allow.isEmpty
             || clipboard != nil || browserBridge != nil || openFiles != nil || tmux != nil || github != nil || sshAgent != nil
-            || ignoreMode != nil
+            || ignoreMode != nil || workspaceView != nil
     }
 }
 

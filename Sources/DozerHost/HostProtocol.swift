@@ -121,6 +121,13 @@ public enum HostOp: String, Codable, Sendable, CaseIterable {
     /// reads them, the mode, the warnings, and — from a host whose sandbox runs — what the guest's view does;
     /// with `paths`, which rule decides each. Read-only (in-process when no host runs: no VM needed).
     case workspaceRules = "workspace-rules"
+    /// 608: end a session's program (`session`) — HUP, then TERM, then KILL of its process group
+    /// (`SessionEnded`). A running sandbox only: it never wakes one.
+    case sessionEnd = "session-end"
+    /// 608: end it and open the SAME session again — the program, folder and user it was opened with
+    /// (`sessions.json`); an agent's default session continues its conversation unless `fresh`
+    /// (`SessionRestarted`). Serialised with open-session.
+    case sessionRestart = "session-restart"
 
     /// Operations that only read — answered from the store in-process when no host is running.
     public var isReadOnly: Bool {
@@ -308,6 +315,8 @@ public struct HostRequest: Codable, Equatable, Sendable {
     /// path inside it), and whether to compute the warnings (git ls-files on the Mac; a moment on a big tree).
     public var paths: [String]?
     public var warnings: Bool?
+    /// 608 `session-restart`: a new conversation instead of continuing the last one.
+    public var fresh: Bool?
 
     public init(_ op: HostOp, name: String? = nil) {
         v = HostProtocol.version
@@ -520,6 +529,11 @@ public struct SandboxInfo: Codable, Equatable, Sendable {
     public var olderImage: [String]? = nil
     /// 599g: the workspace's rules (nil: no .dozignore / .dozreadonly in its folder, or isolated).
     public var workspaceRules: WorkspaceRulesInfo? = nil
+    /// 608: how /workspace reaches a RUNNING sandbox — `live` (the live view, no rules), `rules` (the view
+    /// with its rules), `direct` (shared directly: workspace.view off), `next-start` (shared directly until
+    /// the next start: it started before the view was on), `fallback` (the view could not start — shared
+    /// directly; doctor warns). nil: isolated, or not running.
+    public var workspaceView: String? = nil
     /// 594 W28: a create that used an out-of-date image says so (the CLI fills it for --json).
     public var imageNotice: String? = nil
     /// `create` with `prepare`: `prepared` (its image's preparation ran, or was joined, to the end) or
@@ -543,6 +557,7 @@ public struct SandboxInfo: Codable, Equatable, Sendable {
         case agent, credentialProblem, base, imageTitle, dockerfile, rebuildAvailable
         case olderImage, olderImageLine, imageNotice      // 594 W28
         case workspaceRules                               // 599g
+        case workspaceView                                // 608
         case imagePreparation                             // create --prepare
     }
 
@@ -577,6 +592,7 @@ public struct SandboxInfo: Codable, Equatable, Sendable {
         olderImage = try c.decodeIfPresent([String].self, forKey: .olderImage)
         imageNotice = try c.decodeIfPresent(String.self, forKey: .imageNotice)
         workspaceRules = try c.decodeIfPresent(WorkspaceRulesInfo.self, forKey: .workspaceRules)
+        workspaceView = try c.decodeIfPresent(String.self, forKey: .workspaceView)
         imagePreparation = try c.decodeIfPresent(String.self, forKey: .imagePreparation)
     }
 
@@ -611,6 +627,7 @@ public struct SandboxInfo: Codable, Equatable, Sendable {
         try c.encodeIfPresent(dockerfile, forKey: .dockerfile)
         try c.encodeIfPresent(rebuildAvailable, forKey: .rebuildAvailable)
         try c.encodeIfPresent(workspaceRules, forKey: .workspaceRules)
+        try c.encodeIfPresent(workspaceView, forKey: .workspaceView)
         try c.encodeIfPresent(olderImage, forKey: .olderImage)
         try c.encodeIfPresent(olderImageLine, forKey: .olderImageLine)
         try c.encodeIfPresent(imageNotice, forKey: .imageNotice)

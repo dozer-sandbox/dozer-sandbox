@@ -1224,6 +1224,7 @@ public actor Sandbox {
             // 599g: workspace rules — a share whose Mac folder holds .dozignore/.dozreadonly is served
             // through the view. Never fatal: a failure is said (and the share is then EMPTY, not open).
             setActiveViews([:])
+            fallbackBox.withLock { $0 = [] }
             let views = wantedViews(shareTags: identity.shareTags)
             if !views.isEmpty { await startViews(views, on: c, quiet: false) }
         } else if let egress, egress.ca == nil {
@@ -1604,6 +1605,11 @@ public actor Sandbox {
     }
     private nonisolated let passthroughBox = LockedBox<Bool>(true)
 
+    /// 608: the guest paths whose PASSTHROUGH view could not start this boot — served as the plain share
+    /// instead (the host's `SandboxInfo.workspaceView` = "fallback", and doctor warns). Cleared at a fresh boot.
+    public nonisolated var viewFallbacks: Set<String> { fallbackBox.withLock { $0 } }
+    private nonisolated let fallbackBox = LockedBox<Set<String>>([])
+
     /// The views the host wants now: every share whose Mac folder holds a rule file (two `stat`s each), and
     /// — `includePassthrough` and `passthroughViews` — every other share as a passthrough view.
     nonisolated func wantedViews(shareTags: [String: String], includePassthrough: Bool = true) -> [String: WorkspaceViewConfig] {
@@ -1641,7 +1647,10 @@ public actor Sandbox {
             return r.output + r.errorOutput
         }
         do {
-            let out = quiet ? try await work() : try await timed("workspace rules: \(label) served through the view", work)
+            let title = views.values.allSatisfy(\.isPassthrough)
+                ? "workspace: \(views.values.map(\.guestPath).sorted().joined(separator: ", ")) through the live view (programs there keep their folder across a wake)"
+                : "workspace rules: \(label) served through the view"
+            let out = quiet ? try await work() : try await timed(title, work)
             recordViewStatus(out, wanted: views, guestPaths: [:])
         } catch {
             note("workspace rules: the view could not start: \(error.localizedDescription)")
@@ -1656,11 +1665,13 @@ public actor Sandbox {
             case .running, .started, .restarted:
                 let gp = wanted[st.tag]?.guestPath ?? active[st.tag]?.guestPath ?? guestPaths[st.tag] ?? "?"
                 active[st.tag] = wanted[st.tag] ?? active[st.tag] ?? WorkspaceViewConfig(tag: st.tag, guestPath: gp, mode: workspaceRuleMode, fold: true)
+                fallbackBox.withLock { _ = $0.remove(gp) }
                 if st.state == .restarted { note("workspace rules: the view of \(gp) was not running — started it again") }
             case .failed:
                 let gp = wanted[st.tag]?.guestPath ?? guestPaths[st.tag] ?? st.tag
                 active[st.tag] = nil
                 if wanted[st.tag]?.isPassthrough == true {
+                    fallbackBox.withLock { _ = $0.insert(gp) }
                     note("workspace: the view of \(gp) could not start — \(gp) is the share as it is (a program inside loses its directory at a hibernation)")
                 } else {
                     note("workspace rules: the view of \(gp) could not start — \(gp) is EMPTY in the sandbox until it does (the next wake or start tries again)")
@@ -1955,6 +1966,30 @@ public actor Sandbox {
     }
 
     /// The guest's sessions (`deckhold ls`), live and ended.
+    /// 608: how `endSession` ended a session's program.
+    public enum SessionEnd: String, Codable, Sendable {
+        case hangup, terminate, kill
+        /// It was not running (ended already, or never opened).
+        case notRunning = "not-running"
+        /// Even SIGKILL did not end it within the time (a process stuck in the kernel).
+        case stuck
+    }
+
+    /// 608: end session `name`'s program (its process group: HUP, then TERM, then KILL — `GuestCommand.endSession`).
+    /// Viewers get the program's EXIT, as when it exits by itself. Running sandboxes only — ending a program
+    /// is never a reason to wake one.
+    public func endSession(_ name: String) async throws -> SessionEnd {
+        try GuestCommand.validateSessionName(name)
+        guard phase == .running else { throw SandboxError.notRunning(phase) }
+        let r = try await execInContainer(["sh", "-c", GuestCommand.endSession(name: name)], privileged: true, timeout: 20)
+        let word = r.output.split(separator: "\n").last { $0.hasPrefix("doz-end ") }.map { String($0.dropFirst(8)) }
+        guard let w = word, let how = SessionEnd(rawValue: w.trimmingCharacters(in: .whitespaces)) else {
+            throw SandboxError.commandFailed(command: "end session \(name)", exitCode: r.exitCode, output: r.output + r.errorOutput)
+        }
+        note("session \(name): " + (how == .notRunning ? "was not running" : how == .stuck ? "did NOT end (stuck)" : "ended (\(how.rawValue))"))
+        return how
+    }
+
     public func sessions() async throws -> [SessionInfo] {
         let r = try await exec(GuestCommand.list(), timeoutSeconds: 15)
         return SessionInfo.parseList(r.output)

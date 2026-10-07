@@ -79,6 +79,8 @@ public struct DozerProject: Equatable, Sendable {
          "# tmux: false                # true: sessions run inside tmux (windows, panes, Ctrl-b). From the next session"),
         ("ignore_mode", SettingKey.ignoreMode,
          "# ignore_mode: lock          # what .dozignore does to the paths it lists: lock (listed, no access) or hide (not there). At the next start or wake"),
+        ("workspace_view", SettingKey.workspaceView,
+         "# workspace_view: on         # on: /workspace through the live view (programs keep their folder across a wake); off: shared directly. At the next start"),
     ]
 
     /// The keys, in the order the file lists them, with what each says.
