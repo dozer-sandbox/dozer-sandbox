@@ -16,64 +16,24 @@
 //   · 605: the page outlives its server. doz ui restarting is a calm pause (terminals reattach, operations
 //     resolve, a newer build offers a reload); a sign-in again happens INSIDE the page, over what it shows.
 
-import { expose } from './app/core/hooks-a4b871a481b363cd.js';
+import { expose, provide } from './app/core/hooks-a4b871a481b363cd.js';
 import { $, h } from './app/dom/h-d909ae8eb40113fe.js';
 import { icon, iconFor, OP_GLYPH, PHASE_GLYPH, setButton, withIcon } from './app/dom/icons-c0c96726ac1ee67b.js';
-
-const state = {
-  csrf: null,
-  expiresAt: null,
-  view: 'overview',
-  param: null,
-  session: null,           // 593: #/sandbox/NAME/SESSION
-  sbx: null,               // 593: the shown sandbox's {name, d, net, accounts}
-  opsSeenAt: Date.now(),   // 593: a failure that ended after this is unacknowledged (the Operations badge)
-  opsFilter: '',
-  imagesMode: 'table',     // 593: Images › Table | Lineage
-  overview: null,
-  activity: [],
-  ops: new Map(),
-  es: null,
-  renewTimer: null,
-  deniedOnly: false,
-  signedOut: false,
-  metricsFilter: { image: '', days: '', steps: false },
-  settings: null,          // 591: {report, byKey} from GET /api/v1/settings
-  preps: [],               // 594: the host's image preparations (SSE `preparations`, GET /api/v1/preparations)
-  wiz: null,               // 594: the onboarding wizard's state (#/onboarding)
-};
-
-// ── formatting ──────────────────────────────────────────────────────────────
-function bytes(n) {
-  if (n === undefined || n === null) return '—';
-  if (n < 1024) return n + ' B';
-  const u = ['KiB', 'MiB', 'GiB', 'TiB'];
-  let v = n / 1024, i = 0;
-  while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
-  return (v >= 10 ? v.toFixed(0) : v.toFixed(1)) + ' ' + u[i];
-}
-function mib(m) { return m ? bytes(m * 1048576) : '—'; }
-function ms(v) {
-  if (v === undefined || v === null) return '—';
-  if (v < 1) return v.toFixed(2) + ' ms';
-  if (v < 1000) return Math.round(v) + ' ms';
-  return (v / 1000).toFixed(v < 10000 ? 2 : 1) + ' s';
-}
-function when(iso) {
-  if (!iso) return '—';
-  const d = new Date(iso);
-  const s = (Date.now() - d.getTime()) / 1000;
-  const abs = Math.abs(s);
-  let rel;
-  if (abs < 45) rel = 'just now';
-  else if (abs < 3600) rel = Math.round(abs / 60) + ' min';
-  else if (abs < 86400) rel = Math.round(abs / 3600) + ' h';
-  else rel = Math.round(abs / 86400) + ' d';
-  if (rel !== 'just now') rel = s >= 0 ? rel + ' ago' : 'in ' + rel;
-  return rel;
-}
-function clock(iso) { return iso ? new Date(iso).toLocaleTimeString() : '—'; }
-function full(iso) { return iso ? new Date(iso).toLocaleString() : '—'; }
+import { AGENT_NAMES, agentKey, AGENTS, DOCKERFILE_POLICY_NOTE, imageNameOf, isOpenAIAgent, KIND_LABELS, parseImageName } from './app/core/agents-30faadc83708a5b4.js';
+import { api } from './app/core/api-fdcae3512c62073e.js';
+import { connect, liveRefresh } from './app/core/events-9d73a74bb31d8ac9.js';
+import { approx, bytes, clock, dur, elapsedText, full, mib, ms, pct, plural, when } from './app/core/format-b2e68384da8d2f36.js';
+import { measured, remeasure, scheduleResTotal } from './app/core/measure-e0a8c6c6f385cfae.js';
+import { act, actOrThrow, beginTransition, loadPreparations, opEnded, prepRunning, TRANSITION_LABEL, transitionOf, waitForOp, waitOp, waitOps } from './app/core/operations-42c200ff280c0cd3.js';
+import { showUiOverlay, uiLost, uiRetryTick } from './app/core/reconnect-0bb085ccd361cc04.js';
+import { MODAL_VIEWS, refresh, route } from './app/core/router-58067a817bdb8a5e.js';
+import { DESTRUCTIVE, NEXT_VERB, opRunningFor, PRIMARY_VERB, sandboxBusy, sandboxImage, sandboxPhase, SAVED_PHASES, VERBS, verbsFor } from './app/core/sandboxes-3e934908ffd1ebe4.js';
+import { bootstrap, signedOut } from './app/core/session-a3fb68fd0a96bf5e.js';
+import { adoptSettings, bootViewOnStart, loadSettings, resetSetting, saveSetting, secretEntryAllowed, setting, terminalsAllowed } from './app/core/settings-984a49e33f0f7f1a.js';
+import { state } from './app/core/state-0bc303c3470c675e.js';
+import { INPUT_CHUNK, pageTerminals, PASTE_CONFIRM_BYTES, PASTE_MAX_BYTES, SPLIT_KINDS, sview, terminals, termUI } from './app/core/terminals-fa5cf7fc28fdb48f.js';
+import { isInt, lines, quietly, splitArgs, utf8 } from './app/core/util-1195caf40612902f.js';
+import { WIZ, WIZ_ORDER, WIZ_STEPS } from './app/core/wizards-f3940647fbf5e4d3.js';
 /// 603: a pill is a state — tinted, a glyph and the word (never colour alone); the glyph is the phase's own
 /// (a dot while it runs, a spinner while under way).
 function phaseGlyph(phase, busy) {
@@ -87,90 +47,6 @@ function phasePill(phase, label, busy) {
 }
 const STATUS_GLYPH = { ok: 'check', warn: 'triangle-alert', fail: 'x', off: 'power' };
 function statusPill(s) { return h('span', { class: 'pill st-' + s }, STATUS_GLYPH[s] ? icon(STATUS_GLYPH[s]) : null, s); }
-
-// ── HTTP ────────────────────────────────────────────────────────────────────
-class HttpError extends Error {
-  constructor(status, code, message) { super(message); this.status = status; this.code = code; }
-}
-async function api(path, opts = {}) {
-  const init = { method: opts.method || 'GET', credentials: 'same-origin', cache: 'no-store', headers: {} };
-  if (init.method !== 'GET') init.headers['X-Doz-CSRF'] = state.csrf || '';
-  if (opts.bearer) init.headers['Authorization'] = 'Bearer ' + opts.bearer;
-  if (opts.json !== undefined) {
-    init.headers['Content-Type'] = 'application/json';
-    init.body = JSON.stringify(opts.json);
-  }
-  const r = await fetch('/api/v1/' + path, init);
-  if (r.status === 204) return null;
-  let body = null;
-  try { body = await r.json(); } catch (_) { /* not JSON */ }
-  if (!r.ok) {
-    const e = body && body.error ? body.error : { code: 'http-' + r.status, message: 'HTTP ' + r.status };
-    if (r.status === 401) signedOut(e.message, e.code);
-    throw new HttpError(r.status, e.code, e.message);
-  }
-  return body;
-}
-
-// ── actions ─────────────────────────────────────────────────────────────────
-// One typed action → one host operation. Answers at once; progress arrives as SSE `op` events.
-async function act(body) {
-  // No repeat of what is already under way (the server refuses it too — 409).
-  const label = body.action + (body.sandbox ? ' ' + body.sandbox : '');
-  if ([...state.ops.values()].some((o) => o.state === 'running' && o.label === label && o.action === body.action)) {
-    toast(label + ' is already under way', false);
-    return null;
-  }
-  beginTransition(body.sandbox, body.action);
-  try {
-    const op = await api('actions', { method: 'POST', json: body });
-    trackOp(op);
-    return op;
-  } catch (e) {
-    endTransition(body.sandbox, body.action);
-    failureFor(body.sandbox, e.message || String(e));
-    return null;
-  }
-}
-
-// ── transitions (593 follow-up — owner: "when i clicked on the button to start the sandbox, it briefly
-// flashed a button that it was "Shut Down" before the boot sequence"). The moment a lifecycle action is
-// asked for, its sandbox is IN that transition on this page: the phase pill says so ("Booting…", with a
-// spinner), every lifecycle button stays where it was but disabled — the set shown when it was clicked,
-// never another phase's — and the boot view's cover says it is starting. It ends when the operation
-// ends (or is refused); only then does the control bar show the new phase's buttons.
-const TRANSITION_LABEL = { start: 'Booting…', wake: 'Waking…', resume: 'Resuming…', pause: 'Pausing…', sleep: 'Going to sleep…',
-                           hibernate: 'Hibernating…', shutdown: 'Shutting down…', reset: 'Resetting…', rm: 'Removing…' };
-state.transitions = new Map();
-state.trGen = 0;
-function beginTransition(name, action) {
-  if (!name || !TRANSITION_LABEL[action]) return;
-  const have = state.transitions.get(name);
-  if (have && have.action === action) return;
-  state.trGen++;
-  state.transitions.set(name, { action, verbs: verbsFor(sandboxPhase(name)) });
-  paintTransition(name);
-}
-/// `repaint`: the action failed or was refused — show what is true again at once. After a success the
-/// refresh that follows repaints from the NEW state (repainting now would show the phase it just left).
-function endTransition(name, action, repaint = true) {
-  const t = name && state.transitions.get(name);
-  if (!t || (action && t.action !== action)) return;
-  state.trGen++;
-  state.transitions.delete(name);
-  for (const x of terminals.values()) {
-    if (x.sandbox !== name) continue;
-    if (x.bootIntent) { x.bootIntent = false; if (repaint) paintCover(x); } else if (x.saved && repaint) paintCover(x);
-  }
-}
-/// This page's transition of the sandbox, or — an operation it did not start here (a reload, another
-/// tab's) — the running lifecycle operation it knows of (then the buttons follow the phase).
-function transitionOf(name) {
-  const t = state.transitions.get(name);
-  if (t) return t;
-  const o = [...state.ops.values()].find((x) => x.sandbox === name && x.state === 'running' && TRANSITION_LABEL[x.action]);
-  return o ? { action: o.action, verbs: null } : null;
-}
 function transitionPill(t, name) {
   return h('span', { class: 'pill ph-busy', 'data-pill-for': name, 'data-transition': t.action },
     h('span', { class: 'mini-spin', 'aria-hidden': 'true' }), ' ' + TRANSITION_LABEL[t.action]);
@@ -189,30 +65,6 @@ function paintTransition(name) {
   for (const el of document.querySelectorAll('[data-pill-for]')) if (el.dataset.pillFor === name) el.replaceWith(transitionPill(t, name));
   for (const x of terminals.values()) if (x.sandbox === name && x.saved) paintCover(x);
   if (state.view === 'sandbox' && state.param === name) paintTermEmpty();
-}
-function trackOp(op) {
-  const before = state.ops.get(op.id);
-  // 595: a fast operation's end (SSE) can arrive before the POST's own "running" answer — never
-  // let the older news overwrite the end (it left the page thinking it still ran).
-  if (before && before.state !== 'running' && op.state === 'running') return;
-  state.ops.set(op.id, op);
-  if (state.ops.size > 60) state.ops.delete(state.ops.keys().next().value);
-  renderOps();
-  paintRowOps();
-  // A new operation: re-render, so its sandbox's buttons are disabled while it runs.
-  // (Not for a removal: the page it would refetch is about to be gone.)
-  if (!before && op.state === 'running' && op.action !== 'rm') refresh(false);
-  if (op.state !== 'running' && (!before || before.state === 'running')) {
-    endTransition(op.sandbox, op.action, op.state === 'failed');
-    if (op.state === 'failed') opFailed(op);
-    refreshNav();
-    // 595: an operation's end may have changed the disks — measure again (the nav's total too).
-    remeasure();
-    scheduleResTotal();
-    // The sandbox this page shows is gone: back to the list (route() refreshes) instead of a 404.
-    if (op.state === 'done' && op.action === 'rm' && state.view === 'sandbox' && state.param === op.sandbox) { location.hash = '#/overview'; return; }
-    refresh(false);
-  }
 }
 /// 603 (E7): a toast acknowledges a success (or says something worth knowing) and goes after 4 s. A FAILURE is
 /// never only a toast: it is said where the action was started and stays until dismissed or fixed — in its
@@ -283,12 +135,6 @@ function bridgeNotice(kind, text) {
   t.classList.add('bridge');
   t.dataset.bridge = k;
 }
-// 593 (owner): Operations is its own page, not a block on top of every page. What the nav shows: the
-// running count (with a spinner) and a red dot while a failure is unacknowledged — one that ended
-// after the Operations page was last shown (or this page loaded). In-context progress stays: the
-// overview row and the sandbox's control bar (`data-op-for`).
-function opEnded(o) { return new Date(o.startedAt).getTime() + (o.milliseconds || 0); }
-function prepRunning(p) { return p.state === 'running' || p.state === 'cancelling'; }
 function renderOps() {
   const running = [...state.ops.values()].filter((o) => o.state === 'running').length + state.preps.filter(prepRunning).length;
   const badge = $('ops-badge');
@@ -365,10 +211,6 @@ function preparationsSection() {
     h('p', { class: 'sub' }, 'The kernel, the base image and the bake of a built-in image — asked for by doz onboard, the onboarding wizard, doz image bake or a first start. One per image at a time; whoever asks next joins it.'),
     panel(table(['', 'Image', 'Asked by', 'Started', 'Took', 'Progress', ''], rows, [4])));
 }
-async function loadPreparations() {
-  try { state.preps = await api('preparations'); } catch (_) { /* the last list */ }
-  renderOps();
-}
 /// The newest operation of each sandbox, shown under its name in the list (live, without a refetch).
 /// A running operation counts its seconds, so a two-minute first start (pull, flatten, bake) is
 /// visibly alive; the text is the host's latest step.
@@ -419,7 +261,6 @@ function paintRowOps() {
     } : null }));
   }
 }
-function opRunningFor(name) { return [...state.ops.values()].some((o) => o.sandbox === name && o.state === 'running'); }
 
 // ── dialogs (forms live outside the view) ───────────────────────────────────
 // fields: [{name, label, type: text|number|select|textarea|checkbox, options, value, placeholder, help, required}]
@@ -594,32 +435,6 @@ function workspaceChooser({ nameInput = null, image = () => null, name = null, i
     },
   };
 }
-// ── 596: the image of a new sandbox — Agent × Base ────────────────────────────
-// Owner (2026-09-30): "more options in New Sandbox ui page for the base image … recommended base images
-// … Dockerfile (requires `container build` which should be installed on-demand) … [COMING SOON] Deck
-// Stack Recipes". Two choices (B1): the AGENT (Claude Code · pi · none) and the BASE — Recommended (a
-// card per catalogue base), Dockerfile (Choose Dockerfile… is the Mac's own file picker; its folder
-// becomes the workspace unless one was set; built with Apple's container build, OUTSIDE Dozer's network
-// policy — said on the card), DeckStack recipe (disabled, coming soon) — or a Template (a saved disk).
-// The image a pair makes is named as the host names it: claude-code / pi / lab keep their names.
-const AGENTS = [['claude-code', 'Claude Code'], ['pi', 'pi'], ['codex', 'Codex'], ['none', 'none']];
-/// B9, the same words as the server's (`Dockerfiles.outsidePolicyNote`).
-const DOCKERFILE_POLICY_NOTE = 'Dockerfile builds run in Apple’s builder (container build), OUTSIDE Dozer’s network policy: its RUN steps reach the internet directly, without Dozer’s proxy or allow list. The sandbox made from the image is under the policy as usual.';
-function imageNameOf(base, agent) {
-  if (base === 'node' && agent === 'claude-code') return 'claude-code';
-  if (base === 'node' && agent === 'pi') return 'pi';
-  if (base === 'node' && agent === 'codex') return 'codex';
-  if (base === 'alpine' && agent === 'none') return 'lab';
-  return agent === 'none' ? base : base + '-' + agent;
-}
-function parseImageName(name, baseIDs) {
-  if (name === 'claude-code') return { base: 'node', agent: 'claude-code' };
-  if (name === 'pi') return { base: 'node', agent: 'pi' };
-  if (name === 'codex') return { base: 'node', agent: 'codex' };
-  if (name === 'lab') return { base: 'alpine', agent: 'none' };
-  for (const a of ['claude-code', 'pi', 'codex']) if (name.endsWith('-' + a) && baseIDs.includes(name.slice(0, -a.length - 1))) return { base: name.slice(0, -a.length - 1), agent: a };
-  return baseIDs.includes(name) ? { base: name, agent: 'none' } : null;
-}
 function imagePicker({ images = [], bases = null, value = 'claude-code', dockerfile = '', onChange = () => {}, onDockerfile = () => {} }) {
   const catalogue = bases ? bases.bases : [];
   const ids = catalogue.map((b) => b.id);
@@ -775,13 +590,6 @@ function pickerNameHint(picker) {
   const a = picker.agent();
   return 'dockerfile' + (a === 'claude-code' ? '-claude' : a ? '-' + a : '');
 }
-/// Wait (briefly) for the operations this page started to end.
-async function waitOps(max = 60000) {
-  const t0 = Date.now();
-  while (Date.now() - t0 < max && [...state.ops.values()].some((o) => o.state === 'running' && o.action && o.action.startsWith('builder-'))) {
-    await new Promise((r) => setTimeout(r, 400));
-  }
-}
 
 /// A destructive action: the person types the name; the request carries it as `confirm`.
 function confirmAction(title, text, name, body) {
@@ -790,102 +598,6 @@ function confirmAction(title, text, name, body) {
     return op;
   }, { danger: true, confirmName: name });
 }
-async function actOrThrow(body) {
-  beginTransition(body.sandbox, body.action);
-  let op;
-  try { op = await api('actions', { method: 'POST', json: body }); } catch (e) { endTransition(body.sandbox, body.action); throw e; }
-  trackOp(op);
-  return op;
-}
-function lines(s) { return s.split(/[\n,]+/).map((x) => x.trim()).filter(Boolean); }
-/// A command line → argv (spaces split; '…' and "…" group; \ escapes in "…"). No shell runs it.
-function splitArgs(s) {
-  const out = [];
-  let cur = '', q = null, any = false;
-  for (let i = 0; i < s.length; i++) {
-    const c = s[i];
-    if (q) {
-      if (c === q) q = null;
-      else if (c === '\\' && q === '"' && i + 1 < s.length) cur += s[++i];
-      else cur += c;
-    } else if (c === '\'' || c === '"') { q = c; any = true; }
-    else if (/\s/.test(c)) { if (cur || any) out.push(cur); cur = ''; any = false; }
-    else if (c === '\\' && i + 1 < s.length) cur += s[++i];
-    else cur += c;
-  }
-  if (q) throw new Error('an unclosed quote');
-  if (cur || any) out.push(cur);
-  return out;
-}
-
-// ── session ─────────────────────────────────────────────────────────────────
-async function bootstrap() {
-  const m = /^#cap=([A-Za-z0-9_-]{16,256})$/.exec(location.hash);
-  if (m) {
-    // The capability leaves the address bar and the history entry before anything else happens.
-    history.replaceState(null, '', location.pathname + '#/overview');
-    try {
-      adopt(await api('session', { method: 'POST', bearer: m[1] }));
-      return true;
-    } catch (e) {
-      signedOut(e.message, e.code);
-      return false;
-    }
-  }
-  try {
-    adopt(await api('session'));
-    // 605 (remember this browser): every page load renews the sign-in (14 days from now).
-    try { adopt(await api('session/renew', { method: 'POST' })); } catch (_) { /* the session stands */ }
-    return true;
-  } catch (e) {
-    if (!state.signedOut) signedOut(e.message, e.code);
-    return false;
-  }
-}
-function adopt(info) {
-  state.csrf = info.csrf;
-  state.expiresAt = new Date(info.expiresAt);
-  const sp = $('store-path');
-  sp.textContent = info.store;
-  sp.title = info.store;
-  $('version').textContent = 'doz ' + info.version;
-  document.title = 'Dozer — ' + info.store.split('/').pop();
-  $('sign-out').hidden = false;
-  state.everSignedIn = true;
-  scheduleRenew();
-  registerWorker();
-}
-/// 605: the service worker — ONLY the offline page (an installed app opened, or a reload, while doz ui is
-/// not running). It never answers /api or the event stream (sw.js). Registered once signed in; a browser
-/// that cannot (a private window) simply has no offline page.
-function registerWorker() {
-  if (state.swAsked || !('serviceWorker' in navigator)) return;
-  state.swAsked = true;
-  navigator.serviceWorker.register('/sw.js', { scope: '/', updateViaCache: 'none' }).catch(() => { /* the page works without it */ });
-}
-// ── settings (591) ──────────────────────────────────────────────────────────
-// doz.toml, as the UI process reads it (GET /api/v1/settings, every value with its default, source and
-// description). A change is one typed, CSRF-checked POST {key, value} or {key, reset: true}; the
-// server checks the key against its closed schema and the value against the key's type and range,
-// writes the file, and answers the new report — the page re-reads it, so a ui.* setting applies at once.
-function setting(key, fallback) {
-  const r = state.settings && state.settings.byKey[key];
-  return r ? r.value : fallback;
-}
-function adoptSettings(report) {
-  state.settings = { report, byKey: Object.fromEntries(report.settings.map((r) => [r.key, r])) };
-  const theme = setting('ui.theme', 'auto');
-  if (theme === 'light' || theme === 'dark') document.documentElement.dataset.theme = theme;
-  else delete document.documentElement.dataset.theme;
-  const split = setting('ui.split_default', 'shell');
-  termUI.splitKind = SPLIT_KINDS[split] ? split : 'shell';
-  paintSplitButton();
-}
-async function loadSettings() {
-  try { adoptSettings(await api('settings')); } catch (_) { /* the defaults, until the next read */ }
-}
-async function saveSetting(key, value) { adoptSettings(await api('settings', { method: 'POST', json: { key, value } })); }
-async function resetSetting(key) { adoptSettings(await api('settings', { method: 'POST', json: { key, reset: true } })); }
 
 const SETTING_SECTIONS = {
   ui: 'This UI', host: 'The host', store: 'The store', claude: 'Claude Code', defaults: 'New sandboxes', agent: 'The agent', sandbox: 'Inside every sandbox',
@@ -1082,105 +794,6 @@ async function changeSetting(key, value) {
   }
   refresh(false);
 }
-
-function scheduleRenew() {
-  clearTimeout(state.renewTimer);
-  const half = Math.max(30000, (state.expiresAt.getTime() - Date.now()) / 2);
-  state.renewTimer = setTimeout(async () => {
-    try { adopt(await api('session/renew', { method: 'POST' })); } catch (_) { /* signedOut() handles 401 */ }
-  }, half);
-}
-/// 605 (C.4): signed out — the page asks for a new link INSIDE itself, over what it shows: the view, an
-/// open wizard's choices and the terminals stay as they are (the terminals reattach after the sign-in).
-/// `code` says why (the server's 401 code): a new link was made, the sign-in expired, this browser signed
-/// out — or unknown (another port, a lost sign-in, or never signed in here).
-function signedOut(message, code) {
-  if (state.signedOut) return;
-  state.signedOut = true;
-  state.csrf = null;
-  clearTimeout(state.renewTimer);
-  if (state.es) { state.es.close(); state.es = null; }
-  for (const d of document.querySelectorAll('dialog')) d.close();
-  setLive('bad', 'signed out');
-  $('sign-out').hidden = true;
-  // 591: the server closes this session's terminals; 605: the page keeps them and reattaches them later.
-  for (const t of terminals.values()) if (!t.closed && t.opened && !t.ended && !t.errorText) { t.reattach = true; paintCover(t); }
-  showSignIn(message, code);
-}
-const SIGN_IN_TITLE = {
-  'session-rotated': 'This page was signed out', 'session-expired': 'This browser’s sign-in expired', 'signed-out': 'You signed out',
-};
-function showSignIn(message, code) {
-  const o = $('ui-overlay');
-  const title = SIGN_IN_TITLE[code] || (state.everSignedIn ? 'This page was signed out' : 'Sign in to Dozer');
-  const field = h('input', { type: 'password', id: 'signin-link', name: 'link', autocomplete: 'off', spellcheck: 'false',
-    placeholder: 'http://127.0.0.1:…/#cap=…', 'aria-describedby': 'signin-help' });
-  const err = h('p', { class: 'signin-err', id: 'signin-err', role: 'alert', hidden: true });
-  const go = h('button', { type: 'submit', class: 'btn primary', id: 'signin-go' }, withIcon('key-round', 'Sign in'));
-  const form = h('form', { class: 'signin-form', id: 'signin-form' },
-    h('label', { class: 'signin-label', for: 'signin-link' }, 'Sign in with a new link'),
-    h('div', { class: 'signin-row' }, field, go), err);
-  form.addEventListener('submit', (ev) => { ev.preventDefault(); signInWith(field, err, go); });
-  o.replaceChildren(h('div', { class: 'ui-ov-card signin-card' },
-    h('div', { class: 'ui-ov-head' }, h('h2', { id: 'ui-ov-title' }, title)),
-    h('div', { id: 'ui-ov-desc' },
-      h('p', null, message || 'This page is not signed in.'),
-      form,
-      h('p', { class: 'muted', id: 'signin-help' }, 'In a terminal on this Mac: ', h('code', null, 'doz ui link'),
-        ' opens a fresh one-use link in your browser; ', h('code', null, 'doz ui link --print-url'), ' prints one to paste here. (Not running? ',
-        h('code', null, 'doz ui'), '.)'),
-      h('p', { class: 'muted' }, 'A link works once, for five minutes. Everything on this page stays as it is while you sign in.'))));
-  for (const el of pausedParts()) el.inert = true;
-  document.body.classList.add('ui-paused', 'signing-in');
-  o.setAttribute('role', 'dialog');
-  o.setAttribute('aria-modal', 'true');
-  o.setAttribute('aria-labelledby', 'ui-ov-title');
-  o.setAttribute('aria-describedby', 'ui-ov-desc');
-  o.hidden = false;
-  state.uiOverlay = true;
-  quietly(() => field.focus());
-}
-/// The pasted link's `#cap=` is sent as a link's is (Authorization: Bearer, once); the field is emptied
-/// first — the link never reaches storage, a log or the address bar.
-async function signInWith(field, err, go) {
-  const text = field.value.trim();
-  field.value = '';
-  err.hidden = true;
-  const m = /#cap=([A-Za-z0-9_-]{16,256})$/.exec(text);
-  let other = null;
-  try { const u = new URL(text); if (u.origin !== location.origin) other = u.origin; } catch (_) { /* not a URL: the regex decides */ }
-  const fail = (t) => { err.textContent = t; err.hidden = false; quietly(() => field.focus()); };
-  if (!m) { fail('That is not a sign-in link — it looks like http://127.0.0.1:PORT/#cap=… (doz ui link --print-url).'); return; }
-  if (other) { fail('That link is for another doz ui (' + other + '); this page is ' + location.origin + '. Make one for this page: doz ui link --print-url.'); return; }
-  go.disabled = true;
-  try {
-    adopt(await api('session', { method: 'POST', bearer: m[1] }));
-  } catch (e) {
-    go.disabled = false;
-    fail(e.message || String(e));
-    return;
-  }
-  signedIn();
-}
-/// Signed in again (or for the first time): the page carries on where it was.
-function signedIn() {
-  state.signedOut = false;
-  hideOverlay();
-  dropBanner('ui-stopped');
-  setLive('', 'connecting…');
-  if (!state.started) { startApp(); return; }
-  loadSettings();
-  connect();                         // `hello` refreshes everything and reattaches the terminals
-}
-function hideOverlay() {
-  state.uiOverlay = false;
-  for (const el of pausedParts()) el.inert = false;
-  if (state.modal) modalInert(true);
-  document.body.classList.remove('ui-paused', 'signing-in');
-  $('ui-overlay').hidden = true;
-  $('ui-overlay').replaceChildren();
-  (state.modal ? $('wm-box') : $('main')).focus();
-}
 // 599c: Quick add in the sidebar, beside Sandboxes.
 $('nav-quick-add').replaceChildren(icon('plus'));
 $('nav-quick-add').addEventListener('click', (ev) => { ev.preventDefault(); quickAdd(ev.currentTarget); });
@@ -1188,13 +801,6 @@ $('sign-out').addEventListener('click', async () => {
   try { await api('session', { method: 'DELETE' }); } catch (_) { /* already gone */ }
   signedOut('This browser is signed out of Dozer.', 'signed-out');
 });
-
-// ── live updates ────────────────────────────────────────────────────────────
-function setLive(kind, text) {
-  const el = $('live');
-  el.className = 'live' + (kind ? ' ' + kind : '');
-  $('live-text').textContent = text;
-}
 // ── 594 W18: the host and the doz ui server, watched ─────────────────────────
 // The footer holds two facts: this page's link to the `doz ui` server (#live) and the host's state and
 // build (#host-live). A banner says each transition once: the host stopped (hibernated), died (its
@@ -1212,7 +818,6 @@ function dropBanner(key) {
   const el = $('banners').querySelector('[data-banner="' + key + '"]');
   if (el) el.remove();
 }
-function plural(n, one, many) { return n + ' ' + (n === 1 ? one : many); }
 function sandboxLinks(names) {
   return names.map((n) => h('a', { href: '#/sandbox/' + n, 'data-sandbox-link': n }, n));
 }
@@ -1296,341 +901,6 @@ function hostChanged(c) {
   refreshNav();
   liveRefresh();
 }
-/// What a live change re-renders: not Settings (a half-typed value), Operations (its own events) or the
-/// onboarding wizard (its own), nor a page whose masked key field is being filled in.
-function liveRefresh() {
-  const typing = [...document.querySelectorAll('[data-secret]')].some((e) => e.value);
-  if (state.view !== 'settings' && state.view !== 'operations' && state.view !== 'onboarding' && !typing) refresh(false);
-}
-/// The doz ui server went away (it said so, or the stream broke): keep what the page shows, say so, and
-/// retry — the next doz ui listens on the same port when it can and keeps its pages' sessions (594 W19:
-/// `<store>/ui.sessions`), so the page finds it by itself, still signed in. When the session did not carry
-/// over (another port, `--new-link`, expired) the page asks for a new link.
-///
-/// 594 W21 (owner: "show an overlay over the entire web ui when its disconnected because navigating
-/// anywhere or attempting to restart sandboxes wont work anyway"): after ~1.5 s of failed reconnects —
-/// never on a momentary blip — the page is PAUSED: everything but the banner strip is `inert` and dimmed
-/// under an overlay (role alertdialog, focus moved into it). The banner strip stays in front of it and
-/// live (owner: "i still like the info banners at the top"): the banner says WHAT happened (doz ui
-/// stopped); the overlay says the page is paused and reconnecting, what to do, and holds the one Try now.
-/// The HOST stopping is never this: the page still works then (a banner; Start host).
-///
-/// 605 (C.2): the first 15 s are CALM — a neutral "Reconnecting to Dozer…" (doz ui restarting is routine:
-/// an upgrade, `doz ui restart`, the Mac waking) — and `end: restarting` keeps it calm for a minute. The
-/// alarming wording comes at once only when doz ui said it STOPPED (`end: shutdown`), else after 15 s.
-/// After a minute the overlay adds that doz ui may run on another port, and which one this page expected.
-const UI_OVERLAY_AFTER_MS = 1500;
-const UI_CALM_MS = 15000, UI_RESTART_CALM_MS = 60000, UI_OTHER_PORT_MS = 60000;
-function uiLost(said, reason) {
-  if (state.signedOut || state.uiMoved) return;
-  if (state.es) { state.es.close(); state.es = null; }
-  state.uiDown = true;
-  if (reason === 'restarting') state.uiRestarting = true; else state.uiSaid = state.uiSaid || said;
-  renderHostFoot();
-  if (!state.uiDownSince) {
-    state.uiDownSince = Date.now();
-    state.lastConnected = state.uiDownSince;   // connected until this moment
-  }
-  setLive(uiCalm() ? '' : 'bad', state.uiRestarting ? 'restarting…' : state.uiSaid ? 'stopped — retrying' : 'reconnecting…');
-  if (state.uiRetry) return;
-  state.uiRetry = setTimeout(uiRetryTick, said ? 400 : 250);
-}
-/// Still the calm part of being away (see uiLost).
-function uiCalm() {
-  const away = state.uiDownSince ? Date.now() - state.uiDownSince : 0;
-  if (state.uiRestarting) return away < UI_RESTART_CALM_MS;
-  return !state.uiSaid && away < UI_CALM_MS;
-}
-function hostLastKnown() {
-  const host = state.overview && state.overview.host;
-  if (!host) return 'The page never heard from the host.';
-  if (host.running) {
-    const n = host.liveSandboxes.length;
-    return 'The host was running (doz ' + (host.version || '?') + (n ? ', ' + plural(n, 'sandbox', 'sandboxes') + ' live' : '') +
-      ') as far as this page knows — doz ui stopping does not stop it.';
-  }
-  return 'The host was not running when this page last heard.';
-}
-async function uiRetryTick() {
-  clearTimeout(state.uiRetry);
-  state.uiRetry = null;
-  if (state.signedOut) return;
-  let r = null;
-  try { r = await fetch('/api/v1/session', { credentials: 'same-origin', cache: 'no-store' }); } catch (_) { /* not listening */ }
-  if (state.signedOut || !state.uiDown) return;
-  if (r && r.ok) {
-    // doz ui is back and this page is still signed in (594 W19: a restarted doz ui keeps its pages'
-    // sessions on the same port) — or the stream only broke: carry on, silently.
-    try { adopt(await r.json()); } catch (_) { /* the session stands; its details next time */ }
-    uiBack();
-    connect();
-    return;
-  }
-  if (r && r.status === 401) {
-    // doz ui is back, but this page's session did not carry over: say why (605: the 401's code) —
-    // never hang on "reconnecting".
-    let code = '';
-    try { code = (await r.json()).error.code; } catch (_) { /* unknown */ }
-    const msg = code === 'session-expired' ? 'doz ui is back, and this browser’s sign-in had expired (14 days unused).'
-      : code === 'session-rotated' ? 'doz ui restarted with a new link — this page’s sign-in did not carry over.'
-      : 'doz ui restarted, and this page’s sign-in did not carry over (it listens on another port, or its sign-in was lost).';
-    const wasPaused = state.uiOverlay;
-    uiBack();
-    if (wasPaused) banner('ui-stopped', 'bad', [code === 'session-expired' ? 'doz ui is back — this browser’s sign-in expired.' : 'doz ui restarted with a new link — this page is signed out.']);
-    signedOut(msg, code || 'session-rotated');
-    return;
-  }
-  // Still away.
-  if (Date.now() - state.uiDownSince >= UI_OVERLAY_AFTER_MS) showUiOverlay(); else updateUiOverlay();
-  state.uiRetry = setTimeout(uiRetryTick, state.uiOverlay ? 1000 : 400);
-}
-/// Everything but the banner strip: the sidebar and main's other children (an inert ancestor would
-/// take the banners with it).
-function pausedParts() {
-  return [document.querySelector('.side'), ...[...$('main').children].filter((e) => e.id !== 'banners')];
-}
-function showUiOverlay() {
-  if (state.uiOverlay) { updateUiOverlay(); return; }
-  state.uiOverlay = true;
-  uiStoppedBanner();
-  for (const el of pausedParts()) el.inert = true;
-  document.body.classList.add('ui-paused');
-  const o = $('ui-overlay');
-  buildUiOverlay();
-  $('ui-ov-host').textContent = hostLastKnown();
-  o.setAttribute('role', 'alertdialog');
-  o.setAttribute('aria-modal', 'true');
-  o.setAttribute('aria-labelledby', 'ui-ov-title');
-  o.setAttribute('aria-describedby', 'ui-ov-desc');
-  o.hidden = false;
-  updateUiOverlay();
-  $('ui-try-now').focus();
-}
-/// Built while doz ui still answers (on `hello`): the button's icon is a `<use>` of the served sprite,
-/// which a page that has lost its server can no longer fetch.
-function buildUiOverlay() {
-  const o = $('ui-overlay');
-  if (o.querySelector('#ui-try-now') || state.signedOut) return;
-  const tryNow = h('button', { type: 'button', class: 'btn lg primary', id: 'ui-try-now', on: { click: () => { updateUiOverlay('trying…'); uiRetryTick(); } } },
-    withIcon('refresh-cw', 'Try now'));
-  o.replaceChildren(h('div', { class: 'ui-ov-card' },
-    h('div', { class: 'ui-ov-head' }, h('span', { class: 'ui-ov-spin spin lg', 'aria-hidden': 'true' }),
-      h('h2', { id: 'ui-ov-title' }, 'Paused — reconnecting to doz ui…')),
-    h('div', { id: 'ui-ov-desc' },
-      h('p', { id: 'ui-ov-what' }, 'Nothing on this page works until it reconnects. Run ', h('code', null, 'doz ui'),
-        ' in a terminal — this page reconnects by itself (same port), still signed in.'),
-      h('p', { class: 'muted', id: 'ui-ov-when' }),
-      h('p', { class: 'muted', id: 'ui-ov-port', hidden: true }),
-      h('p', { class: 'muted', id: 'ui-ov-host' })),
-    h('div', { class: 'ui-ov-acts' }, tryNow)));
-}
-function updateUiOverlay(status) {
-  const w = $('ui-ov-when');
-  if (!w) return;
-  const ago = state.lastConnected ? Math.round((Date.now() - state.lastConnected) / 1000) : null;
-  w.textContent = 'Last connected ' + clock(state.lastConnected) + (ago != null ? ' (' + ago + ' s ago)' : '') + '. ' + (status || 'Retrying every second.');
-  paintUiOverlayTone();
-}
-/// 605: the banner and the overlay's words follow the tone — calm while it is routine, then what to do.
-function uiStoppedBanner() {
-  const calm = uiCalm();
-  const key = calm ? 'calm' : 'stopped';
-  const have = $('banners').querySelector('[data-banner="ui-stopped"]');
-  if (have && have.dataset.tone === key) return;
-  const el = calm ? banner('ui-stopped', 'info', [state.uiRestarting ? 'doz ui is restarting — reconnecting…' : 'Reconnecting to Dozer…'])
-    : banner('ui-stopped', 'bad', [(state.uiSaid ? 'The doz ui process stopped' : 'This page lost its doz ui server') +
-      ' (last connected ' + clock(state.lastConnected) + ').']);
-  el.dataset.tone = key;
-}
-function paintUiOverlayTone() {
-  const t = $('ui-ov-title'), what = $('ui-ov-what');
-  if (!t || !what || state.signedOut) return;
-  const calm = uiCalm();
-  uiStoppedBanner();
-  $('ui-overlay').dataset.tone = calm ? 'calm' : 'stopped';
-  setLive(calm ? '' : 'bad', state.uiRestarting && calm ? 'restarting…' : state.uiSaid ? 'stopped — retrying' : 'reconnecting…');
-  if (calm) {
-    t.textContent = 'Reconnecting to Dozer…';
-    what.replaceChildren(state.uiRestarting ? 'doz ui is restarting — this page resumes by itself, still signed in, and its terminals reattach.'
-      : 'This page resumes by itself as soon as doz ui answers again — still signed in, its terminals reattach.');
-  } else {
-    t.textContent = 'Paused — reconnecting to doz ui…';
-    what.replaceChildren('Nothing on this page works until it reconnects. Run ', h('code', null, 'doz ui'),
-      ' in a terminal — this page reconnects by itself (same port), still signed in.');
-  }
-  const port = $('ui-ov-port');
-  const away = state.uiDownSince ? Date.now() - state.uiDownSince : 0;
-  if (port) {
-    port.hidden = away < UI_OTHER_PORT_MS;
-    if (!port.hidden && !port.childNodes.length) {
-      port.append('If doz ui is running on another port, run ', h('code', null, 'doz ui'), ' — it opens the right page. This page expected ',
-        h('code', null, location.host), '.');
-    }
-  }
-}
-/// Reconnected: the overlay goes by itself; the page refreshes (on `hello`).
-function uiBack() {
-  state.uiDown = false;
-  state.uiDownSince = null;
-  state.uiSaid = false;
-  state.uiRestarting = false;
-  clearTimeout(state.uiRetry);
-  state.uiRetry = null;
-  dropBanner('ui-stopped');
-  if (!state.uiOverlay || state.signedOut) return;
-  state.uiOverlay = false;
-  for (const el of pausedParts()) el.inert = false;
-  if (state.modal) modalInert(true);                   // 603: a wizard's modal keeps the page under it inert
-  document.body.classList.remove('ui-paused');
-  $('ui-overlay').hidden = true;
-  delete $('ui-overlay').dataset.tone;
-  (state.modal ? $('wm-box') : $('main')).focus();
-}
-
-function connect() {
-  if (state.signedOut) return;
-  const es = new EventSource('/api/v1/stream');
-  state.es = es;
-  es.addEventListener('hello', async (ev) => {
-    let hello = {};
-    try { hello = JSON.parse(ev.data); } catch (_) { /* an older doz ui: no build named */ }
-    setLive('on', 'live');
-    uiBack();
-    buildUiOverlay();
-    checkBuild(hello);
-    try { adoptOperations(await api('operations')); } catch (_) { /* */ }
-    loadPreparations();
-    refreshNav();
-    refresh(true);
-    reattachTerminals();
-  });
-  // The Settings page is not about the store's live state: re-rendering it would drop a half-typed
-  // value; nor is Operations (its own events keep it current), nor the onboarding wizard (its own).
-  es.addEventListener('changed', () => {
-    refreshNav();
-    liveRefresh();
-  });
-  // 594 W19: a line from doz ui itself ("doz ui restarted — 0.12.0-rc.4").
-  es.addEventListener('notice', (ev) => { try { toast(JSON.parse(ev.data).text, false, 'info'); } catch (_) { /* */ } });
-  es.addEventListener('host', (ev) => { try { hostChanged(JSON.parse(ev.data)); } catch (_) { /* ignore a malformed line */ } });
-  // 594: the host's image preparations, while any runs (and once when the last ends).
-  es.addEventListener('preparations', (ev) => {
-    try { state.preps = JSON.parse(ev.data); } catch (_) { return; }
-    renderOps();
-    if (state.modal === 'onboarding') renderWizard();
-  });
-  es.addEventListener('op', (ev) => { try { trackOp(JSON.parse(ev.data)); } catch (_) { /* */ } });
-  es.addEventListener('activity', (ev) => {
-    try {
-      const a = JSON.parse(ev.data);
-      state.activity.push(a);
-      if (state.activity.length > 500) state.activity.shift();
-      if (state.view === 'activity') renderActivity();
-    } catch (_) { /* ignore a malformed line */ }
-  });
-  es.addEventListener('resync', () => { es.close(); setTimeout(connect, 250); });
-  es.addEventListener('end', async (ev) => {
-    es.close();
-    let reason = '';
-    try { reason = JSON.parse(ev.data).reason; } catch (_) { /* */ }
-    if (reason === 'session-ended') { signedOut('This browser’s session ended.', 'signed-out'); return; }
-    if (reason === 'shutdown') { uiLost(true); return; }
-    // 605: `doz ui restart` — calm; the same port and session.
-    if (reason === 'restarting') { uiLost(false, 'restarting'); return; }
-    // 605: `doz ui restart` moved the UI to another port: say where (it opened a page there itself).
-    if (reason === 'moved') { let to = ''; try { to = JSON.parse(ev.data).origin; } catch (_) { /* */ } movedAway(to); return; }
-    // 594 W19: `doz ui --new-link` / `doz ui link --rotate` ended every session.
-    if (reason === 'rotated') { signedOut('A new link was made for this UI (doz ui --new-link, or doz ui link --rotate): every page signed out. Open the new link — or run doz ui link.', 'session-rotated'); return; }
-    setTimeout(connect, 500);
-  });
-  // A broken stream (doz ui killed, the Mac asleep): the page's own retry, never the browser's
-  // (which would hammer a new doz ui with a session it does not know).
-  es.onerror = () => {
-    if (state.signedOut || state.uiMoved || state.es !== es) return;
-    uiLost(false);
-  };
-}
-
-/// 605: the operations the server knows. A running one it reports ended goes through trackOp (its
-/// sandbox's transition ends); a running one this page had that the server does not know any more (an
-/// older doz ui kept no record) ends here as interrupted — never a forever-spinner.
-function adoptOperations(list) {
-  const ids = new Set(list.map((o) => o.id));
-  for (const o of list) {
-    const b = state.ops.get(o.id);
-    if (b && b.state === 'running' && o.state !== 'running') trackOp(o); else state.ops.set(o.id, o);
-  }
-  for (const o of [...state.ops.values()]) {
-    if (o.state === 'running' && !ids.has(o.id)) {
-      trackOp({ ...o, state: 'interrupted', interrupted: true, text: 'doz ui restarted while it ran; this page lost track of it',
-                milliseconds: Date.now() - new Date(o.startedAt).getTime() });
-    }
-  }
-  renderOps();
-  paintRowOps();
-}
-/// 605: `hello` names the build's page files; this document's differ → doz ui was updated underneath it.
-function checkBuild(hello) {
-  if (!hello || !hello.script) return;
-  const script = document.querySelector('script[src^="/assets/app-"]');
-  const style = document.querySelector('link[rel="stylesheet"][href^="/assets/app-"]');
-  const mine = (script && script.getAttribute('src')) + '|' + (style && style.getAttribute('href'));
-  if (mine === hello.script + '|' + hello.style) return;
-  state.updateTo = hello.version || 'a new build';
-  banner('ui-updated', 'info', ['Dozer was updated to ' + state.updateTo + ' — reload this page to use it.'],
-    [btn('Reload', () => location.reload(), { small: true, primary: true, icon: 'refresh-cw' })]);
-  // It reloads by itself once nothing would be lost; until then the banner waits for the click.
-  clearInterval(state.reloadTimer);
-  state.reloadTimer = setInterval(() => { if (!state.uiDown && !state.signedOut && pageIsIdle()) location.reload(); }, 3000);
-}
-/// Nothing would be lost by a reload now: no wizard or dialog open, no interactive terminal focused, no
-/// field focused, nothing typed in a field.
-function pageIsIdle() {
-  if (state.modal || document.querySelector('dialog[open]')) return false;
-  const a = document.activeElement;
-  if (a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.tagName === 'SELECT')) return false;
-  if (a && a.tagName === 'IFRAME') {
-    const t = [...terminals.values()].find((x) => x.frame === a);
-    if (t && t.mode === 'interactive') return false;
-  }
-  return ![...document.querySelectorAll('input[data-typed], textarea[data-typed]')].some((e) => e.isConnected && e.value !== '');
-}
-// A field the person typed in (a value set by the page itself is not "typed").
-document.addEventListener('input', (ev) => { const t = ev.target; if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) t.dataset.typed = ''; }, true);
-/// 605: `doz ui restart` moved doz ui to another port (ui.port). A page cannot follow by itself — a
-/// script's navigation to another port is "same-site", which the server's Fetch-Metadata rule refuses —
-/// so the new doz ui opened the dashboard there, and this page says where it went (and stops retrying).
-function movedAway(to) {
-  if (!/^https?:\/\/(127\.0\.0\.1|\[::1\]):\d{2,5}$/.test(to || '')) { uiLost(true); return; }
-  state.uiMoved = true;
-  if (state.es) { state.es.close(); state.es = null; }
-  clearTimeout(state.uiRetry);
-  state.uiRetry = null;
-  setLive('', 'moved');
-  const addr = to.replace(/^https?:\/\//, '');
-  const b = banner('ui-stopped', 'info', ['doz ui moved to ' + addr + '.']);
-  b.dataset.tone = 'calm';
-  const o = $('ui-overlay');
-  const copy = h('button', { type: 'button', class: 'btn', id: 'ui-copy-addr' }, withIcon('copy', 'Copy the address'));
-  copy.addEventListener('click', () => { navigator.clipboard.writeText(to).then(() => toast('Copied ' + to, false), () => toast('Copy it by hand: ' + to, true)); });
-  o.replaceChildren(h('div', { class: 'ui-ov-card' },
-    h('div', { class: 'ui-ov-head' }, h('h2', { id: 'ui-ov-title' }, 'Dozer moved to ' + addr)),
-    h('div', { id: 'ui-ov-desc' },
-      h('p', null, 'doz ui now listens on another port (the setting ui.port), and opened the dashboard there in a new tab — this one can be closed.'),
-      h('p', { class: 'muted' }, 'An installed Dozer app belongs to its port: install it again from the new page. In a terminal, ', h('code', null, 'doz ui link'),
-        ' opens a page on the new port.')),
-    h('div', { class: 'ui-ov-acts' }, copy)));
-  for (const el of pausedParts()) el.inert = true;
-  document.body.classList.add('ui-paused');
-  o.dataset.tone = 'calm';
-  o.setAttribute('role', 'dialog');
-  o.setAttribute('aria-modal', 'true');
-  o.setAttribute('aria-labelledby', 'ui-ov-title');
-  o.setAttribute('aria-describedby', 'ui-ov-desc');
-  o.hidden = false;
-  state.uiOverlay = true;
-  copy.focus();
-}
 
 // ── the nav: a child per sandbox (593) ──────────────────────────────────────
 // From the overview (`ls` without session counts — never the guest's session holders), re-read on
@@ -1675,64 +945,6 @@ function navRail(open) {
   $('nav-toggle').setAttribute('aria-expanded', open ? 'true' : 'false');
   $('nav-toggle').setAttribute('aria-label', open ? 'Hide the menu' : 'Show the menu');
 }
-
-// ── routing ─────────────────────────────────────────────────────────────────
-// #/VIEW, #/sandbox/NAME and #/sandbox/NAME/SESSION (a session addressed: its tab opened or selected).
-// 603 (owner, on rc.1): #/new and #/onboarding are MODALS over the page under them — that page (state.view, its
-// hash state.bgHash) is never re-rendered or torn down by opening or closing one (the sandbox page's terminals
-// stay as they are). A deep link opens the modal over Sandboxes.
-const MODAL_VIEWS = new Set(['new', 'onboarding']);
-function route() {
-  const m = /^#\/([a-z]+)(?:\/([a-z0-9-]{1,40})(?:\/([A-Za-z0-9_-][A-Za-z0-9._-]{0,63}))?)?$/.exec(location.hash);
-  if (m && m[1] === 'terminals') { location.replace('#/sessions'); return; }      // 591's name for the grid's place
-  const v = m ? m[1] : 'overview';
-  if (MODAL_VIEWS.has(v) && !m[2]) {
-    const first = !state.bgHash;
-    if (first) { state.view = 'overview'; state.param = null; state.session = null; state.bgHash = '#/overview'; routePage(); }
-    openWizardModal(v, !first);
-    return;
-  }
-  if (state.modal) {
-    closeWizardModal();
-    if (location.hash === state.bgHash) return;                   // back to the page under it, as it was
-  }
-  state.view = v;
-  state.param = m && m[2] ? m[2] : null;
-  state.session = m && m[3] ? m[3] : null;
-  if (state.view === 'sandbox' && !state.param) state.view = 'overview';
-  state.bgHash = location.hash;
-  routePage();
-}
-function routePage() {
-  paintNav();
-  // 591: the terminals live in their own section, never re-rendered by refresh() (a live update
-  // must not steal a terminal's focus or reparent its canvas). 593: that section is the sandbox
-  // page's terminal area; the grid is a section of its own too.
-  const onSbx = state.view === 'sandbox', onGrid = state.view === 'sessions';
-  $('sbx').hidden = !onSbx;
-  $('grid').hidden = !onGrid;
-  $('view').hidden = onSbx || onGrid;
-  $('main').classList.toggle('main-terms', onSbx);
-  if (!onGrid) gridLeave();
-  if (state.view !== 'operations') state.opsBox = null;
-  if (state.view === 'operations') { acknowledgeOps(); loadPreparations(); }
-  if (state.modal !== 'onboarding') wizardStopPolling();
-  if (state.view === 'images' || state.view === 'resources') remeasure();   // 595: measured on arrival, Refresh, an op's end
-  if (onSbx) { showSandbox(); return; }
-  if (onGrid) { gridEnter(); return; }
-  refresh(true);
-}
-window.addEventListener('hashchange', () => {
-  // 605: a link opened in this tab while it waits to sign in signs it in, in place.
-  if (state.signedOut && /^#cap=[A-Za-z0-9_-]{16,256}$/.test(location.hash)) {
-    const link = location.href;
-    history.replaceState(null, '', location.pathname + (state.bgHash || '#/overview'));
-    const field = $('signin-link');
-    if (field) { field.value = link; $('signin-form').requestSubmit(); }
-    return;
-  }
-  if (!state.signedOut) route();
-});
 
 // ── 603: the wizards' modal ─────────────────────────────────────────────────
 // A real dialog (role=dialog, aria-modal, labelled by the wizard's title): the rest of the page is inert while it
@@ -1847,34 +1059,6 @@ $('wm-box').addEventListener('keydown', (ev) => {
   else if (!ev.shiftKey && a === last) { ev.preventDefault(); first.focus(); }
 });
 $('wm-scrim').addEventListener('click', () => { const b = $('wm-box'); (b.querySelector('[data-wm-close]') || b).focus(); });
-
-let refreshing = false, again = false;
-async function refresh(scrollTop) {
-  if (state.signedOut) return;
-  if (state.view === 'sandbox') { refreshSandbox(); return; }
-  if (state.view === 'sessions') { gridRefresh(false); return; }
-  if (refreshing) { again = true; return; }
-  refreshing = true;
-  try {
-    const views = { overview: viewOverview, images: viewImages, resources: viewResources, operations: viewOperations, accounts: viewAccounts,
-                    metrics: viewMetrics, activity: viewActivity, doctor: viewDoctor, settings: viewSettings };
-    const fn = views[state.view] || viewOverview;
-    const node = await fn();
-    if (node && !state.signedOut) {
-      $('view').replaceChildren(node);
-      paintRowOps();
-      if (scrollTop) $('main').scrollTop = 0;
-    }
-  } catch (e) {
-    if (!state.signedOut) {
-      if (e.status === 404 && state.view === 'sandbox') { location.hash = '#/overview'; return; }
-      $('view').replaceChildren(callout('bad', { cls: 'notice', title: 'This page could not be read', body: e.message || String(e) }));
-    }
-  } finally {
-    refreshing = false;
-    if (again) { again = false; refresh(false); }
-  }
-}
 
 // ── building blocks ─────────────────────────────────────────────────────────
 /// 603: a figure in a stats strip (one band, not separate cards).
@@ -2028,35 +1212,6 @@ document.addEventListener('keydown', (ev) => {
   for (const b of items) b.tabIndex = b === next ? 0 : -1;
   next.focus();
 });
-
-// The owner's vocabulary (2026-09-25); aliases in the tooltips.
-const VERBS = {
-  start: ['Start', 'Boot it (cold boot) — or wake / resume it'],
-  pause: ['Pause', 'Suspend: guest CPU to 0 in ~1 ms, RAM kept'],
-  resume: ['Resume', 'Run again after a pause'],
-  sleep: ['Sleep', 'Pause + snapshot to disk: RAM kept, survives a host crash'],
-  hibernate: ['Hibernate', 'Snapshot and stop the VM — RAM returned; wake in ~0.3 s'],
-  wake: ['Wake', 'Back from sleep or hibernation, sessions where they were'],
-  shutdown: ['Shut down', 'Cold stop, keeping the disk (running programs end)'],
-  reset: ['Reset', 'Discard the disk — back to the image'],
-  rm: ['Remove', 'Remove the sandbox and everything it has on disk'],
-};
-const DESTRUCTIVE = {
-  shutdown: 'Running programs end; the disk is kept.',
-  reset: 'The root disk is discarded — everything installed or written since the image is gone. Restore points are kept.',
-  rm: 'The sandbox, its disks, snapshot and restore points are deleted.',
-};
-function verbsFor(phase) {
-  switch (phase) {
-    case 'off': return ['start'];
-    case 'running': return ['pause', 'sleep', 'hibernate', 'shutdown'];
-    case 'paused': return ['resume', 'sleep', 'hibernate', 'shutdown'];
-    case 'asleep': return ['wake', 'hibernate', 'shutdown'];
-    case 'hibernated': return ['wake', 'shutdown'];
-    case 'failed': return ['start'];
-    default: return [];
-  }
-}
 /// Shut Down keeps the disk, so it asks with a plain confirmation (and can stop asking); Reset and
 /// Remove destroy data and keep the typed name. "Don't ask again" is the setting ui.confirm_shutdown
 /// (doz.toml — every browser, and the Settings page turns it back on).
@@ -2076,8 +1231,6 @@ function lifecycle(verb, name) {
   else if (verb === 'start' && bootViewOnStart()) startWithBootView(name);
   else act({ action: verb, sandbox: name });
 }
-/// The settings' ui.boot_view_on_start (and a boot view needs browser terminals).
-function bootViewOnStart() { return setting('ui.boot_view_on_start', true) && setting('ui.terminals', true); }
 /// 591 — Start shows the boot: a terminal pane streams the host's steps and the kernel's console,
 /// then becomes the image's own session (the UI process does the switch; the boot stays in the scrollback).
 async function startWithBootView(name) {
@@ -2095,9 +1248,6 @@ async function startWithBootView(name) {
   }
   await act({ action: 'start', sandbox: name });
 }
-/// 603 (E4): a Sandboxes row's actions — the one likely next verb (Start, Resume, Wake, Pause) as a quiet button,
-/// the phase's other verbs in ⋯ (each with what it does). In a transition: the set shown when asked, disabled.
-const NEXT_VERB = { off: 'start', failed: 'start', paused: 'resume', asleep: 'wake', hibernated: 'wake', running: 'pause' };
 function rowLifecycle(s) {
   const tr = transitionOf(s.name);
   const busy = s.busy || s.phase === 'booting' || opRunningFor(s.name) || !!tr;
@@ -2183,16 +1333,6 @@ function quickAddButton() {
   const b = btn('Quick add', (ev) => quickAdd(ev.currentTarget), { icon: 'rocket', title: quickAddTitle() });
   b.dataset.quickAdd = '';
   return b;
-}
-/// Until the operation `id` this page started ends (its SSE end, or the answer) — or `max` ms.
-async function waitOp(id, max = 120000) {
-  const t0 = Date.now();
-  while (Date.now() - t0 < max) {
-    const o = state.ops.get(id);
-    if (o && o.state !== 'running') return o;
-    await new Promise((r) => setTimeout(r, 150));
-  }
-  return state.ops.get(id) || null;
 }
 async function quickAdd(button) {
   if (state.quickAdding) return;
@@ -3083,9 +2223,6 @@ function openSavedTerminal(name, row, pane) {
   v.selected[t.pane] = t.id;
   renderTerminals();
 }
-/// The phases one wakes (or resumes) back into — the only ones with saved screens (owner, 2026-09-30:
-/// a shut-down sandbox shows no session screens anywhere).
-const SAVED_PHASES = ['paused', 'asleep', 'hibernated'];
 /// Restore the stored layout: a RUNNING sandbox's tabs whose sessions run attach; a paused, asleep or
 /// hibernated one shows every session it has a saved screen of (S3) — the layout's first, in their panes.
 async function restorePanes(name) {
@@ -3167,10 +2304,6 @@ function sessionsWhyNot(name, i) {
   const ready = ['running', 'paused', 'asleep', 'hibernated'].includes(i.phase) && !i.busy && !opRunningFor(name) && !transitionOf(name);
   return ready ? null : i.phase === 'off' || i.phase === 'failed' ? 'Start it first' : 'Wait until it is running';
 }
-/// 603: the bar's lifecycle — the phase's verbs as ONE group (led by the primary for an off, failed, paused,
-/// asleep or hibernated sandbox: Start, Resume or Wake; a running one has none) and Shut down apart, in red.
-/// In a transition this page started: the buttons it showed when asked — disabled, never swapped.
-const PRIMARY_VERB = { off: 'start', failed: 'start', paused: 'resume', asleep: 'wake', hibernated: 'wake' };
 function lifecycleBar(s) {
   const tr = transitionOf(s.name);
   const busy = s.busy || s.phase === 'booting' || opRunningFor(s.name) || !!tr;
@@ -3659,11 +2792,6 @@ function imagesToggle() {
   };
   return h('div', { class: 'segmented', role: 'group', 'aria-label': 'View' }, mk('table', 'Table'), mk('lineage', 'Lineage'));
 }
-// ── 595 (R9, owner: "show the shared block reuse size and percentage per image and use a different
-// colour in the size bar … a legend in the bar column header Own / Shared"). Own = the blocks only this
-// disk holds (what deleting it frees — Resources' "freed if deleted"); Shared = the blocks it reuses
-// from the disk it was made from (APFS clones — 587's DiskAccounting). Each also as a % of its size.
-function pct(part, whole) { return whole > 0 && part != null ? Math.round((part / whole) * 100) + '%' : '—'; }
 function sizeBar(size, own, shared) {
   const whole = Math.max(1, size || 0);
   const bar = h('div', { class: 'lin-bar', 'data-own': String(own || 0), 'data-shared': String(shared || 0),
@@ -3686,18 +2814,6 @@ function treeNodeFor(tree, r) {
   return tree.nodes.find((n) => r.kind === 'custom' ? n.kind === 'template' && n.name === r.name
     : r.name === 'lab' ? n.kind === 'prepared' && r.key && (n.name + '-' + String(n.detail || '').split(' ').pop()) === r.key
     : n.kind === 'image' && n.name === r.name && !!r.key && n.detail === r.key) || null;
-}
-/// A measurement (the Resources report, the lineage): read when a page is arrived at, on Refresh and
-/// when an operation ends — never on a live update (it reads every disk's extent map).
-state.measured = { stale: new Set(['resources', 'tree']), resources: null, tree: null };
-function remeasure() { state.measured.stale.add('resources'); state.measured.stale.add('tree'); }
-async function measured(key, path) {
-  if (state.measured[key] && !state.measured.stale.has(key)) return state.measured[key];
-  const v = await api(path);
-  state.measured[key] = v;
-  state.measured.stale.delete(key);
-  if (key === 'resources') paintResTotal(v);
-  return v;
 }
 async function viewImages() {
   if (state.imagesMode === 'lineage') return viewLineage();
@@ -3793,7 +2909,6 @@ const RES_GROUPS = [['sandboxes', 'Sandboxes'], ['images', 'Images & templates']
                     ['stray', 'Stray files'], ['store', 'Dozer’s own'], ['outside', 'Outside the store']];
 state.resSel = new Set();
 state.resToggled = new Set();
-let resTotalTimer = null;
 function paintResTotal(r) {
   const el = $('res-total');
   if (!el || !r) return;
@@ -3801,14 +2916,6 @@ function paintResTotal(r) {
   el.textContent = bytes(r.totalBytes);
   el.title = 'Dozer uses ' + bytes(r.totalBytes) + ' of disk' + (r.unattributedBytes ? ' — ' + bytes(r.unattributedBytes) + ' unattributed' : '');
   el.classList.toggle('bad', r.unattributedBytes !== 0);
-}
-/// The nav's total, measured a moment after an operation ends (or at load) — never on a live update.
-function scheduleResTotal(delay = 2000) {
-  clearTimeout(resTotalTimer);
-  resTotalTimer = setTimeout(async () => {
-    if (state.view === 'resources') return;            // the page measures (and paints the total) itself
-    try { await measured('resources', 'resources'); } catch (_) { /* the last total */ }
-  }, delay);
 }
 function resOpen(it) { return (it.group === 'sandboxes') !== state.resToggled.has(it.id); }
 function resLink(link) {
@@ -4031,14 +3138,6 @@ async function resDelete(ids, clean) {
   d.querySelector('.dlg-extra').append(list);
   d.classList.add('dlg-wide');
 }
-
-// ── adding an account from a key or a token (594, owner ruling) ──────────────
-// While ui.allow_secret_entry (default on), the wizard's account step and this page take an API key or
-// a setup token in a MASKED field. The value is read once, the field is emptied at once, and it goes
-// out only in the body of one CSRF-checked POST /api/v1/accounts — never a URL, the page's state, a
-// toast or an operation. The host stores it exactly as `doz account add` does (the login keychain,
-// one check request). Off: the terminal commands instead.
-function secretEntryAllowed() { return setting('ui.allow_secret_entry', true) === true; }
 const ACCOUNT_COMMANDS = {
   'api-key': ['doz account add work --api-key       (it asks for the key, not echoed)', 'doz account default work'],
   // 599i: Codex — an OpenAI key, or Dozer's own ChatGPT sign-in (the browser opens on this Mac).
@@ -4106,25 +3205,6 @@ function accountForm(opts) {
     error,
     h('div', { class: 'wiz-buttons' }, add));
 }
-
-// ── 594: an agent's credential prerequisite in a create form ────────────────
-// Owner (2026-09-30): "creating a Pi sandbox should have pre-requisites for things like API key so that
-// this is not the first experience". The account picker offers only the accounts the chosen image's
-// agent can use (the host's table: WebAccounts.agents — pi: an Anthropic API key); an incompatible
-// store default is not preselected. When the agent needs one and none fits: "pi needs an Anthropic API
-// key", with the masked key field right there (accountForm: the same route and guarantees) — or, with
-// ui.allow_secret_entry off, the commands. `ok()` says whether the form may create.
-const AGENT_NAMES = { 'claude-code': 'Claude Code', pi: 'pi', codex: 'Codex' };
-const KIND_LABELS = { mac: 'this Mac’s login', 'setup-token': 'setup token', 'api-key': 'API key', 'openai-key': 'OpenAI API key', chatgpt: 'ChatGPT sign-in',
-  'codex-mac': 'this Mac’s Codex login' };
-/// 599i: an image name or agent → the agent the accounts table is keyed by (python-codex → codex).
-function agentKey(a, table) {
-  if (!a || !table) return a;
-  if (table[a]) return a;
-  return Object.keys(table).find((k) => a.endsWith('-' + k)) || a;
-}
-/// 599i: Codex uses OpenAI accounts only (a ChatGPT sign-in or an OpenAI key).
-function isOpenAIAgent(kinds) { return !!kinds && kinds.every((k) => k === 'chatgpt' || k === 'openai-key' || k === 'codex-mac'); }
 function accountChooser({ accounts, agent, same = null, defaultValue = '', value = null, onChange = () => {} }) {
   let acc = accounts, current = agent(), chosen = value;            // 599f: `value` pre-selects (a project file's account)
   const el = h('div', { class: 'field acct-chooser', 'data-acct-chooser': '' });
@@ -4599,19 +3679,6 @@ function rulesStep(opts) {
     h('fieldset', { class: 'wiz-choices' }, h('legend', null, g.question), radios),
     h('p', { class: 'muted' }, mode === 'sandbox' ? g.sandboxScope : g.defaultScope));
 }
-
-// ── onboarding (594) ────────────────────────────────────────────────────────
-// The wizard (D11): Welcome → Checks → Access → Workspace rules (599g) → Images → Preparing → First sandbox → Done.
-// The same model as every page: facts from GET /api/v1/onboarding; changes through the typed actions
-// (account-default, onboard, prepare-cancel, create) and ONE typed route for the settings file and
-// the prompt template (POST /api/v1/onboarding/config — each written only when missing, never
-// overwritten). A key or a setup token: the masked field (accountForm) while ui.allow_secret_entry,
-// else the CLI command. The preparation runs in the HOST: "Continue in the background" leaves it
-// running (Operations shows it), and closing this tab changes nothing.
-const WIZ_STEPS = ['Welcome', 'Checks', 'Access', 'Workspace rules', 'Images', 'Preparing', 'First sandbox', 'Done'];
-// The steps by name (599g put Workspace rules between Access and Images).
-const WIZ = { welcome: 0, checks: 1, access: 2, rules: 3, images: 4, preparing: 5, first: 6, done: 7 };
-const WIZ_ORDER = ['claude-code', 'pi', 'codex', 'lab'];
 let wizTimer = null;
 function wizardStopPolling() { clearInterval(wizTimer); wizTimer = null; }
 function wizardPoll() {
@@ -4873,16 +3940,6 @@ function wizCodexAccount(w) {
   }
   return box;
 }
-/// 594 (owner: "more progress detail"): ONE card for a host preparation — the wizard's Preparing step and
-/// the Operations page both draw it — from the host's model (593's ProgressBoard: the step under way, the
-/// transfer, the output's last lines; plus step N of M, the finished steps, the last run's times).
-///   · overall: "Step N of M" and a DETERMINATE bar (steps done / M), about how long is left;
-///   · the step under way: its label, its seconds, "usually ~X" — and an animated strip, never a full bar;
-///   · a download: its own determinate bar with bytes, speed and time left;
-///   · the output's last lines (guest text, already inert; cut to the width here);
-///   · the finished steps (open in the wizard), ✓ with the time each took, ✕ with why and its last output.
-function dur(s) { return s == null ? '—' : s < 1 ? Math.round(s * 1000) + ' ms' : s < 60 ? (s < 10 ? s.toFixed(1) : Math.round(s)) + ' s' : Math.floor(s / 60) + ' min ' + Math.round(s % 60) + ' s'; }
-function approx(s) { return s < 60 ? '~' + Math.max(1, Math.round(s)) + ' s' : '~' + Math.round(s / 60) + ' min'; }
 function determinate(fraction, cls, label) {
   const bar = h('div', { class: 'wiz-bar ' + (cls || ''), role: 'progressbar', 'aria-valuemin': '0', 'aria-valuemax': '100', 'aria-label': label || null,
                          'aria-valuenow': (fraction * 100).toFixed(0), 'data-fraction': fraction.toFixed(3) });
@@ -5048,31 +4105,6 @@ function wizStep6(d, w) {
   ];
 }
 
-// ── terminals (591) ─────────────────────────────────────────────────────────
-// Browser terminals on the host's attach relay (591.01-DESIGN.md). Rules this section keeps:
-//   · the engine (vendored ghostty-web 0.4.0, pinned by digest) runs ONLY in a sandboxed, opaque-origin
-//     iframe per terminal (/terminal-frame, frame.js — owner ruling T2): it has no cookie, no API, no
-//     CSRF token and can connect to nothing; this page owns the WebSocket and talks to the frame over a
-//     narrow, checked postMessage protocol. One frame = one WASM instance (upstream #141);
-//   · links are never opened (the frame drops Cmd/Ctrl clicks, and its sandbox has no popups);
-//   · a paste is made safe HERE (Ghostty 1.3.0's encode: unsafe control characters become spaces),
-//     confirmed when unsafe or large and refused over 1 MiB (CVE-2026-26982, upstream #193);
-//   · the ticket lives only in connectTerminal's memory for the moment it takes to open the socket;
-//   · guest text (a title, the ended line) is shown with textContent only;
-//   · what wakes a sandbox is decided by the UI process (the 541 rule), never here: every key and
-//     every report is sent, and the server says what it did.
-const terminals = new Map();
-const termUI = { built: false, by: {}, nextId: 1, dropped: 0 };
-/// 593: each sandbox's page keeps its own split, selected tab per pane and focused pane.
-function sview(name) {
-  if (!termUI.by[name]) termUI.by[name] = { split: false, selected: [null, null], focusedPane: 0 };
-  return termUI.by[name];
-}
-const PASTE_CONFIRM_BYTES = 64 * 1024;
-const PASTE_MAX_BYTES = 1024 * 1024;
-const INPUT_CHUNK = 16 * 1024;
-const utf8 = new TextEncoder();
-
 // This page never opens windows.
 window.open = function refuseToOpen() { return null; };
 
@@ -5080,7 +4112,6 @@ function wasmURL() {
   const m = document.querySelector('meta[name="doz-ghostty-wasm"]');
   return m ? m.getAttribute('content') : null;
 }
-function quietly(fn, fallback) { try { return fn(); } catch (_) { return fallback; } }
 /// The engine's WebAssembly, fetched once from this origin; each frame gets its own copy to compile.
 let engineWasm = null;
 function engineBytes() {
@@ -5090,10 +4121,6 @@ function engineBytes() {
 function toFrame(t, msg, transfer) {
   if (t.frame && t.frame.contentWindow) t.frame.contentWindow.postMessage(msg, '*', transfer || []);
 }
-
-// ── the frame protocol, page side: only our frames (by window), only an opaque origin, only these
-// messages with typed, capped fields. Anything else is dropped and counted.
-const isInt = (v, lo, hi) => Number.isInteger(v) && v >= lo && v <= hi;
 function validFrameMessage(m) {
   if (!m || typeof m !== 'object' || Array.isArray(m) || typeof m.t !== 'string') return false;
   const n = Object.keys(m).length;
@@ -5135,22 +4162,6 @@ async function openDefaultTerminal(name) {
   if (!op) return;
   const done = await waitForOp(op);
   if (done && done.state === 'done') openTerminal(name, null, 'interactive');
-}
-async function waitForOp(op, seconds = 300) {
-  const end = Date.now() + seconds * 1000;
-  while (Date.now() < end) {
-    const o = state.ops.get(op.id);
-    if (o && o.state !== 'running') return o;
-    await new Promise((r) => setTimeout(r, 250));
-  }
-  return null;
-}
-
-/// The setting ui.terminals: off, the UI opens no browser terminal (and the server refuses a ticket).
-function terminalsAllowed() {
-  if (setting('ui.terminals', true)) return true;
-  pageFailure('Browser terminals are off (Settings → ui.terminals). Open in Terminal still works.', { tone: 'warn', key: 'terminals-off' });
-  return false;
 }
 
 /// 593: a terminal record (a page terminal, or a grid tile's when `grid`).
@@ -5427,18 +4438,6 @@ function safePaste(t, raw, bracketed) {
   d.showModal();
   ok.focus();
 }
-
-// ── the cover (the UI process derives it; this only draws it)
-function elapsedText(verb, since) {
-  if (!verb || !since) return null;
-  const s = Math.floor((Date.now() - new Date(since).getTime()) / 1000);
-  if (s < 60) return null;
-  const m = Math.floor(s / 60);
-  if (m < 60) return verb + ' ' + m + ' min';
-  const hr = Math.floor(m / 60);
-  if (hr < 24) return verb + ' ' + hr + ' h';
-  return verb + ' ' + Math.floor(hr / 24) + ' d';
-}
 function paintCover(t) {
   const e = t.els;
   let kind = 'none', headline = '', detail = '', action = null, spinner = false, glyphKey = null;
@@ -5511,11 +4510,6 @@ function coverAction(t) {
 /// ({sandbox} {session} {image} {time} {phase}; "" = the session's name, as before). {time} is this Mac's
 /// (the page runs on it), refreshed each minute.
 const TITLE_PHASES = { asleep: 'asleep', hibernated: 'hibernated', paused: 'paused', booting: 'starting', off: 'shut down' };
-function sandboxImage(name) {
-  if (state.sbx && state.sbx.name === name && state.sbx.d) return state.sbx.d.info.image || '';
-  const row = state.overview && state.overview.sandboxes.find((s) => s.name === name);
-  return row ? row.image || '' : '';
-}
 function terminalTitle(t) {
   const tpl = String(setting('ui.terminal_title', '{sandbox} · {session} · {time}'));
   if (!tpl) return t.session || '…';
@@ -5525,17 +4519,6 @@ function terminalTitle(t) {
   const vars = { sandbox: t.sandbox, session: t.session || '…', image: String(sandboxImage(t.sandbox)).replace(/^custom:/, ''),
                  time, phase: TITLE_PHASES[phase] || phase };
   return tpl.replace(/\{([a-z]+)\}/g, (m, k) => (k in vars ? vars[k] : m)).replace(/[\u0000-\u001f\u007f-\u009f]/g, '').slice(0, 200);
-}
-function sandboxPhase(name) {
-  if (state.sbx && state.sbx.name === name && state.sbx.d) return state.sbx.d.info.phase;
-  const row = state.overview && state.overview.sandboxes.find((s) => s.name === name);
-  return row ? row.phase : '';
-}
-function sandboxBusy(name) {
-  if (state.transitions.has(name)) return true;
-  if (state.sbx && state.sbx.name === name && state.sbx.d) return !!state.sbx.d.info.busy || opRunningFor(name);
-  const row = state.overview && state.overview.sandboxes.find((s) => s.name === name);
-  return (row && row.busy) || opRunningFor(name);
 }
 const SAVED_WAKE = { paused: ['Resume', 'resume'], asleep: ['Wake', 'wake'], hibernated: ['Wake', 'wake'] };
 const PHASE_WORD = { paused: 'paused', asleep: 'asleep', hibernated: 'hibernated', off: 'shut down', failed: 'failed', booting: 'starting', running: 'running' };
@@ -5680,7 +4663,6 @@ function promoteSaved(name, live) {
 
 // ── a sandbox's terminal area: tabs, and a split (593: per sandbox; the grid's tiles are apart)
 function paintTabs() { if (state.view === 'sandbox') renderTerminals(); }
-function pageTerminals(name) { return [...terminals.values()].filter((t) => !t.grid && t.sandbox === name); }
 function renderTerminals() {
   const root = $('terminals');
   if (!termUI.built) {
@@ -5864,15 +4846,6 @@ function tabElement(t, pane) {
     on: { click: () => closeTerminal(t.id) } }, icon('x'));
   return h('div', { class: 'tab-wrap' }, select, move, close);
 }
-
-/// What a split adds on the right (the Split button's ▾ menu). Remembered per browser.
-const SPLIT_KINDS = {
-  shell: 'new shell',
-  watch: 'watch of the left terminal’s session (read-only)',
-  attach: 'second view of the left terminal’s session (shared)',
-  dialog: 'terminal you choose (New terminal…)',
-};
-termUI.splitKind = 'shell';   // until the settings load (ui.split_default)
 const SPLIT_ICONS = { shell: 'plus', watch: 'eye', attach: 'link', dialog: 'terminal' };
 function paintSplitButton() {
   if (!termUI.splitMain) return;
@@ -6267,6 +5240,16 @@ async function startApp() {
   }
 }
 
+// The calls that go UP the layers (core/hooks.js): every upcall('name') a lower module makes is provided here, once,
+// before anything runs.
+provide({
+  acknowledgeOps, banner, btn, callout, closeWizardModal, connect, dropBanner, failureFor, gridEnter, gridLeave,
+  gridRefresh, hostChanged, modalInert, opFailed, openWizardModal, pageFailure, paintCover, paintNav, paintResTotal,
+  paintRowOps, paintSplitButton, paintTransition, reattachTerminals, refresh, refreshNav, refreshSandbox,
+  renderActivity, renderHostFoot, renderOps, renderWizard, showSandbox, signedOut, startApp, toast, viewAccounts,
+  viewActivity, viewDoctor, viewImages, viewMetrics, viewOperations, viewOverview, viewResources, viewSettings,
+  wizardStopPolling,
+});
 // The browser probes' names. The one script's top-level names were globals, and the workspace's browser probes
 // (probes/*, over CDP Runtime.evaluate) read and call some of them; module names are not globals, so these stay
 // reachable by name as before (only this page's own scripts run here: script-src 'self'). One a lower layer calls
