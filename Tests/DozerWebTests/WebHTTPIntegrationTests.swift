@@ -506,6 +506,94 @@ final class WebHTTPIntegrationTests: XCTestCase {
         XCTAssertTrue(try s.read(until: "shutdown", seconds: 5).contains("event: end"))
         XCTAssertTrue(s.waitForClose(seconds: 5))
     }
+
+    // MARK: 605 — installable, and graceful restarts
+
+    func testTheWorkerAndTheOfflinePageAreServedWithoutASessionAndTheirOwnHeaders() async throws {
+        try await start()
+        let sw = try get("/sw.js")
+        XCTAssertEqual(sw.status, 200)
+        XCTAssertEqual(sw.header("content-type"), "application/javascript; charset=utf-8")
+        XCTAssertEqual(sw.header("cache-control"), "no-store")
+        XCTAssertEqual(sw.header("content-security-policy"), "default-src 'none'; connect-src 'self'", "the worker's own policy, once")
+        XCTAssertTrue(sw.text.contains("const PRECACHE"))
+        let off = try get("/offline")
+        XCTAssertEqual(off.status, 200)
+        XCTAssertEqual(off.header("content-type"), "text/html; charset=utf-8")
+        XCTAssertEqual(off.header("cache-control"), "no-store")
+        XCTAssertTrue(off.header("content-security-policy")?.contains("manifest-src 'self'; worker-src 'self'") == true)
+        XCTAssertTrue(off.text.contains("doz ui"))
+        XCTAssertEqual(try get("/sw.js", ["Host": "evil.example:\(server.origin.port)"]).status, 403, "the exact Host first")
+        XCTAssertEqual(try get("/offline", ["Sec-Fetch-Site": "cross-site"]).status, 403)
+        XCTAssertEqual(try get("/sw.js", method: "POST", body: nil).status, 404)
+        let manifest = try XCTUnwrap(try WebAssets.load().assets.values.first { $0.mimeType == "application/manifest+json" })
+        let m = try get(manifest.publicPath)
+        XCTAssertEqual(m.status, 200)
+        XCTAssertEqual(m.header("content-type"), "application/manifest+json")
+        XCTAssertFalse(m.headers.keys.contains { $0.hasPrefix("access-control") })
+    }
+
+    func testHelloNamesThisBuildsPageFiles() async throws {
+        try await start()
+        let (cookie, _) = try signIn()
+        let s = try RawStream(port: server.origin.port, path: "/api/v1/stream", headers: ["Host": host, "Cookie": cookie])
+        defer { s.close() }
+        let hello = try s.read(until: "event: hello", seconds: 5) + (try s.read(until: "\n\n", seconds: 5))
+        let a = try WebAssets.load()
+        XCTAssertTrue(hello.contains("\"script\":\"\(a.pageScript!)\""), hello)
+        XCTAssertTrue(hello.contains("\"style\":\"\(a.pageStyle!)\""), hello)
+        XCTAssertTrue(hello.contains("\"version\":\"test\""), hello)
+    }
+
+    /// `doz ui link --rotate`: the page's stream ends `rotated`, and its next request is a 401 that says
+    /// a new link was made (not just "not signed in"); signing out says signed-out.
+    func testA401SaysWhyThePageMustSignInAgain() async throws {
+        try await start()
+        let (cookie, csrf) = try signIn()
+        _ = await server.rotate()
+        let r = try get("/api/v1/session", ["Cookie": cookie])
+        XCTAssertEqual(r.status, 401)
+        XCTAssertTrue(r.text.contains("\"session-rotated\""), r.text)
+        let fresh = try signIn(await server.newLink().fragment!.replacingOccurrences(of: "cap=", with: ""))
+        XCTAssertEqual(try get("/api/v1/session", ["Cookie": fresh.0, "Origin": origin, "X-Doz-CSRF": fresh.1], method: "DELETE").status, 204)
+        XCTAssertTrue(try get("/api/v1/overview", ["Cookie": fresh.0]).text.contains("\"signed-out\""))
+        XCTAssertTrue(try get("/api/v1/overview", ["Cookie": "\(cookieName)=\(WebRandom.token())"]).text.contains("\"unauthenticated\""))
+        _ = csrf
+    }
+
+    /// `doz ui restart` (same port): streams end `restarting`, not `shutdown`.
+    func testARestartTellsStreamsRestarting() async throws {
+        try await start()
+        let (cookie, _) = try signIn()
+        let s = try RawStream(port: server.origin.port, path: "/api/v1/stream", headers: ["Host": host, "Cookie": cookie])
+        defer { s.close() }
+        _ = try s.read(until: "event: hello", seconds: 5)
+        await server.close(.restarting)
+        XCTAssertTrue(try s.read(until: "restarting", seconds: 5).contains("event: end"))
+    }
+
+    /// `doz ui restart` onto another port: each page's stream ends `moved` with its OWN one-use link to the
+    /// new origin (a different link per page).
+    func testARestartOntoAnotherPortGivesEachPageItsOwnLink() async throws {
+        try await start()
+        let (c1, _) = try signIn()
+        let (c2, _) = try signIn(await server.newLink().fragment!.replacingOccurrences(of: "cap=", with: ""))
+        let s1 = try RawStream(port: server.origin.port, path: "/api/v1/stream", headers: ["Host": host, "Cookie": c1])
+        let s2 = try RawStream(port: server.origin.port, path: "/api/v1/stream", headers: ["Host": host, "Cookie": c2])
+        defer { s1.close(); s2.close() }
+        _ = try s1.read(until: "event: hello", seconds: 5)
+        _ = try s2.read(until: "event: hello", seconds: 5)
+        let to = try WebOrigin(port: 54_999)
+        await server.close(.moving(to))
+        func link(_ text: String) -> String? {
+            guard let r = text.range(of: #"http://127\.0\.0\.1:54999/#cap=[A-Za-z0-9_-]+"#, options: .regularExpression) else { return nil }
+            return String(text[r])
+        }
+        let e1 = try s1.read(until: "54999", seconds: 5), e2 = try s2.read(until: "54999", seconds: 5)
+        XCTAssertTrue(e1.contains("\"reason\":\"moved\""), e1)
+        let l1 = try XCTUnwrap(link(e1)), l2 = try XCTUnwrap(link(e2))
+        XCTAssertNotEqual(l1, l2)
+    }
 }
 
 // MARK: the fake data

@@ -64,6 +64,7 @@ final class WebOperations: @unchecked Sendable {
                 guard let (state, text) = Self.resolution(ops[i], rows: rows, now: now) else { continue }
                 ops[i].state = state
                 ops[i].text = text
+                ops[i].milliseconds = max(0, now.timeIntervalSince(ops[i].startedAt) * 1000)
                 out.append(ops[i])
             }
             return out

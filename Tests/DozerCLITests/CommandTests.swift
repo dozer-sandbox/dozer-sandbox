@@ -4,6 +4,7 @@ import DozerKit
 import XCTest
 @testable import DozerCLI
 @testable import DozerHost
+import DozerWeb
 
 /// The command surface: the owner's vocabulary and its aliases, the arguments, `--json`, and the
 /// shapes of what `--json` prints. No host, no VM.
@@ -158,8 +159,8 @@ final class CommandTests: XCTestCase {
     /// 594 W19: when `doz ui` opens a tab — the flag over the setting (`ui.open_browser`), auto by default.
     func testWhenDozUIOpensATab() throws {
         func mode(_ args: [String], _ file: String? = nil) throws -> String {
-            let c = try XCTUnwrap(try parse(["ui"] + args) as? UIServe)
-            return c.delivery.openMode(DozerSettings(text: file))
+            let c = try XCTUnwrap(try parse(["ui"] + args) as? UIStart)
+            return c.o.delivery.openMode(DozerSettings(text: file))
         }
         XCTAssertEqual(try mode([]), "auto")
         XCTAssertEqual(try mode([], "[ui]\nopen_browser = \"never\"\n"), "never")
@@ -168,9 +169,32 @@ final class CommandTests: XCTestCase {
         XCTAssertEqual(try mode(["--no-open"], "[ui]\nopen_browser = \"always\"\n"), "never", "--no-open over the file")
         XCTAssertEqual(try mode([], "[ui]\nopen_browser = \"sometimes\"\n"), "auto", "a bad value: the default")
         XCTAssertThrowsError(try parse(["ui", "--open", "--no-open"]))
-        XCTAssertTrue(try parse(["ui", "--new-link"]) is UIServe)
+        XCTAssertTrue(try parse(["ui", "--new-link"]) is UIStart)
         XCTAssertTrue(try parse(["ui", "link", "--rotate"]) is UILink)
         XCTAssertThrowsError(try parse(["ui", "link", "--no-open"]), "doz ui link hands a link over")
+    }
+
+    /// 605: `doz ui start` is the default; `serve` (the earlier name) still parses — with the same options —
+    /// and is not listed; `restart` exists; `--port` is the setting ui.port's flag (0 or 1024–65535).
+    func testDozUIStartServeAliasRestartAndPort() throws {
+        XCTAssertTrue(try parse(["ui"]) is UIStart)
+        XCTAssertTrue(try parse(["ui", "start", "--no-open"]) is UIStart)
+        let alias = try XCTUnwrap(try parse(["ui", "serve", "--new-link", "--no-open"]) as? UIServe)
+        XCTAssertTrue(alias.o.newLink)
+        XCTAssertEqual(alias.o.delivery.openMode(DozerSettings(text: nil)), "never")
+        XCTAssertTrue(try parse(["ui", "restart"]) is UIRestart)
+        let listed = UICommand.helpMessage().components(separatedBy: "SUBCOMMANDS:").last ?? ""
+        XCTAssertFalse(listed.contains("  serve"), "the alias is not listed: \(listed)")
+        XCTAssertTrue(listed.contains("  start (default)") && listed.contains("  restart") && listed.contains("  link"), listed)
+        let s = try XCTUnwrap(try parse(["ui", "--port", "7777"]) as? UIStart)
+        XCTAssertEqual(s.o.flags[SettingKey.uiPort], .int(7777))
+        XCTAssertEqual(WebSettingsStore(environment: [:], flags: s.o.flags).int(SettingKey.uiPort), 7777, "the flag wins")
+        XCTAssertEqual(WebSettingsStore(environment: [:]).int(SettingKey.uiPort), 0, "automatic by default")
+        XCTAssertNoThrow(try parse(["ui", "--port", "0"]))
+        XCTAssertThrowsError(try parse(["ui", "--port", "80"]), "a privileged port")
+        XCTAssertThrowsError(try parse(["ui", "--port", "70000"]))
+        XCTAssertNil((try parse(["ui"]) as? UIStart)?.o.flags[SettingKey.uiPort])
+        XCTAssertFalse((try parse(["ui"]) as? UIStart)?.o.restarted ?? true)
     }
 
     /// 594 W18: the probes' version seam takes a plain version string only.

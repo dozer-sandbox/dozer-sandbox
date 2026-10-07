@@ -221,7 +221,7 @@ struct UIRunner {
         // 605 (owner Q10): `ui.port` — 0: 594 W18's reuse (the port this store's last UI had, when free —
         // an open page then reconnects by itself — else the OS's pick, said below); N: exactly N, never a
         // silent move (an installed app belongs to its port).
-        let configured = settings.current.int(SettingKey.uiPort) ?? 0
+        let configured = settings.int(SettingKey.uiPort)
         let address: WebLoopbackAddress
         if configured != 0 {
             guard let a = WebLoopbackAddress(reusing: configured) else {
@@ -250,7 +250,7 @@ struct UIRunner {
         let flags = o.flags, json = g.json
         let restarter = WebControl.Restarter(check: {
             // Where the new process will listen: ui.port as the file says NOW (a flag or variable still wins).
-            let next = WebSettingsStore(environment: env, flags: flags).current.int(SettingKey.uiPort) ?? 0
+            let next = WebSettingsStore(environment: env, flags: flags).int(SettingKey.uiPort)
             guard next != 0, next != server.origin.port else { return nil }
             guard !WebLoopbackAddress.inUse(next) else {
                 return "ui.port is \(next), and \(PortHolder.describe(next) ?? "another program") listens on 127.0.0.1:\(next) — doz ui stays on \(server.origin.port)"
@@ -258,7 +258,7 @@ struct UIRunner {
             return nil
         }, restart: {
             Task {
-                let next = WebSettingsStore(environment: env, flags: flags).current.int(SettingKey.uiPort) ?? 0
+                let next = WebSettingsStore(environment: env, flags: flags).int(SettingKey.uiPort)
                 if next != 0, next != server.origin.port, let to = try? WebOrigin(port: next) {
                     await server.close(.moving(to))
                 } else {
