@@ -8,8 +8,17 @@ phone — at `http://<this Mac>.local:7443`.
 doz serve
 ```
 
-It runs until you press Ctrl-C (or run `doz serve stop` in another terminal). Nothing listens beyond this Mac
-until you start it.
+It runs until you press Ctrl-C (or run `doz serve stop` in another terminal). To keep it running without a terminal
+open, start it in the background:
+
+```bash
+doz serve start --detach     # or -d: prints where it listens and an invite, then returns
+doz serve status             # pid, since when, the addresses, the version, its log
+doz serve stop
+```
+
+A detached `doz serve` belongs to no terminal — closing the terminal does not stop it; its output goes to
+`<store>/serve/serve.log`. Nothing listens beyond this Mac until you start it.
 
 ## Letting a browser in
 
@@ -21,7 +30,9 @@ once — use whichever suits the device:
 - a **link** — open it in the other browser.
 
 Whichever is used first lets ONE browser in, within five minutes; the other two stop working. `doz serve` prints
-an invite when it starts (on a terminal). For another one:
+an invite when it starts (on a terminal) — its link by name (`http://<this Mac>.local:7443/…`) and by each of the
+Mac's addresses (`http://192.168.1.20:7443/…`): `.local` names do not resolve the same everywhere, so use an address
+if the name does not answer. The links work in this Mac's own browser too. For another invite:
 
 ```bash
 doz serve share
@@ -31,7 +42,8 @@ or, on any browser that is already in: **Devices › Add another browser**. The 
 Devices page.
 
 A browser that opens the dashboard without an invite sees the sign-in page and nothing else — no sandbox, no
-name, no data.
+name, no data. A request `doz serve` refuses always gets an answer saying why — only a sandbox's connection is
+dropped without one.
 
 ## What another browser can do
 

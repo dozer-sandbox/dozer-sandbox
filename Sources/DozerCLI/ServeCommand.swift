@@ -17,7 +17,9 @@ struct ServeCommand: AsyncParsableCommand {
         discussion: """
         doz serve (doz serve start) serves this store's dashboard to the other browsers of your network — every network \
         interface of this Mac and Tailscale, never a sandbox's network (a sandbox cannot reach it) — until Ctrl-C (or doz \
-        serve stop). Nothing listens beyond this Mac until you run it; doz ui stays this Mac's own dashboard.
+        serve stop). With --detach it runs in the background, detached from the terminal, until doz serve stop. Nothing \
+        listens beyond this Mac until you run it; doz ui stays this Mac's own dashboard. Its links work from this Mac's \
+        own browser too, and are printed by name (<this Mac>.local) and by address.
 
         A browser gets in ONCE, with an invite: doz serve prints one when it starts (on a terminal), doz serve share makes \
         another, and any browser already in can make one (Devices › Add another browser). An invite is a QR code, a short \
@@ -45,6 +47,19 @@ struct ServeStart: AsyncParsableCommand {
     @Option(name: .long, help: "The port, 1024–65535 (default: the setting serve.port, $DOZ_SERVE_PORT; 7443).") var port: Int?
     @Option(name: .long, help: "Where to listen: lan, loopback, or this Mac's addresses separated by commas (default: the setting serve.bind, $DOZ_SERVE_BIND).") var bind: String?
     @Flag(name: .customLong("no-invite"), help: "Do not print an invite at start (doz serve share makes one).") var noInvite = false
+    @Flag(name: [.customShort("d"), .long], help: "Start it in the background, detached from this terminal (its log: <store>/serve/serve.log) — print where it listens and an invite, then return. Stop it with doz serve stop.") var detach = false
+    /// The detached start's intermediate (its own session): spawn the detached doz serve, print its pid, exit.
+    @Flag(name: .customLong("launch-detached"), help: .hidden) var launchDetached = false
+    /// The detached doz serve itself (its parent is launchd; no terminal).
+    @Flag(name: .customLong("launched"), help: .hidden) var launched = false
+
+    /// The flags a detached start passes on (the settings it was given on its command line).
+    var passthrough: [String] {
+        var a: [String] = []
+        if let port { a += ["--port", String(port)] }
+        if let bind { a += ["--bind", bind] }
+        return a
+    }
 
     func validate() throws {
         if let port, !(1024...65_535).contains(port) { throw ValidationError("--port is 1024–65535") }
@@ -57,13 +72,22 @@ struct ServeStart: AsyncParsableCommand {
         guard store.socketPathFits else {
             throw fail(HostError(.unavailable, UnixSocket.Failure.pathTooLong(store.socket.path).localizedDescription), g)
         }
+        if launchDetached {
+            // The intermediate: the detached doz serve in a session of its own; its pid on stdout; exit (its parent → launchd).
+            let log = DetachedLauncher.serveLog(rootURL)
+            let pid = try DetachedLauncher.spawnDetached(
+                DetachedLauncher.serveProcessArgs(executable: HostLauncher.executablePath, store: rootURL.path, extra: passthrough), log: log)
+            Out.stdout("\(pid)\n")
+            return
+        }
         if let r = WebServeControl.request(rootURL, "status", as: WebServeStatus.self), case .success(let st) = r {
             if g.json { Out.jsonLine(st) } else {
-                Out.stdout("doz serve is already running for \(rootURL.path) — \(st.origins.first ?? "")\n")
-                Out.stdout("Another browser: doz serve share. Its browsers: doz serve devices.\n")
+                Out.stdout("doz serve is already running for \(rootURL.path) — \(st.origins.first ?? "")\(st.pid.map { " (pid \($0))" } ?? "")\n")
+                Out.stdout("Another browser: doz serve share. Its browsers: doz serve devices. Stop it: doz serve stop\n")
             }
             return
         }
+        if detach { try await startDetached(rootURL); return }
         let env = ProcessInfo.processInfo.environment
         var flags = configFlags(g)
         if let port { flags[SettingKey.servePort] = .int(port) }
@@ -93,6 +117,9 @@ struct ServeStart: AsyncParsableCommand {
         let audit = WebServeAudit(file: WebServeControl.auditFile(rootURL))
         let state = WebServeState(config: config, names: names, devices: devices, audit: audit,
                                   natSubnet: settings.current.string(SettingKey.natSubnet))
+        state.detached = launched
+        state.logPath = launched ? DetachedLauncher.serveLog(rootURL).path : nil
+        state.responsibleApp = HostCore.responsibleAppDescription
         let server: DozerWebServer
         do {
             server = try await DozerWebServer.bindServe(data: data, assets: assets, version: DozerCommand.version,
@@ -140,7 +167,10 @@ struct ServeStart: AsyncParsableCommand {
                 }
             }
         }
-        if g.json {
+        if launched {
+            Out.stdout("doz serve \(DozerCommand.version) (pid \(getpid()), detached: parent \(getppid())) — \(state.origins.joined(separator: "  ")) — store \(rootURL.path)\n")
+            Out.stdout("responsible app (Local Network privacy, Bonjour): \(state.responsibleApp ?? "unknown")\n")
+        } else if g.json {
             Out.jsonLine(ServeStarted(origins: state.origins, publicOrigins: config.publicOrigins.map(\.description), store: rootURL.path,
                                       port: state.port, pid: Int(getpid())))
         } else {
@@ -148,7 +178,7 @@ struct ServeStart: AsyncParsableCommand {
             if let fw = Firewall.note() { Out.stdout(fw + "\n") }
             if !noInvite {
                 if isatty(STDOUT_FILENO) == 1 {
-                    let inv = await server.share(by: "the Mac").answer(origin: state.preferredOrigin)
+                    let inv = await server.share(by: "the Mac").answer(origin: state.preferredOrigin, alsoAt: state.addressOrigins)
                     Out.stdout("\n" + ServeShare.render(inv) + "\n")
                 } else {
                     Out.stdout("To let a browser in: doz serve share (on a terminal — an invite is a key).\n")
@@ -161,6 +191,50 @@ struct ServeStart: AsyncParsableCommand {
         }
         while true { try? await Task.sleep(for: .seconds(3600)) }
         withExtendedLifetime((sources, bonjour)) {}
+    }
+
+    /// `--detach`: the double spawn (the host's way), wait until it answers, say where, print an invite (a terminal only).
+    func startDetached(_ rootURL: URL) async throws {
+        let config = WebServeConfig(settings: WebSettingsStore(environment: ProcessInfo.processInfo.environment, flags: {
+            var f = configFlags(g)
+            if let port { f[SettingKey.servePort] = .int(port) }
+            if let bind { f[SettingKey.serveBind] = .string(bind) }
+            return f
+        }()))
+        if let holder = PortHolder.describe(config.port) {
+            throw fail(HostError(.unavailable, "serve.port is \(config.port), and \(holder) listens there — stop it, or choose another port: doz config set serve.port N"), g)
+        }
+        let log = DetachedLauncher.serveLog(rootURL)
+        let size = (try? FileManager.default.attributesOfItem(atPath: log.path)[.size] as? Int) ?? 0
+        let pid: pid_t
+        do {
+            pid = try DetachedLauncher.spawnViaIntermediate(
+                DetachedLauncher.serveIntermediateArgs(executable: HostLauncher.executablePath, store: rootURL.path, extra: passthrough), log: log)
+        } catch let e as HostError { throw fail(e, g) }
+        var st: WebServeStatus?
+        let end = Date().addingTimeInterval(20)
+        while Date() < end {
+            if case .success(let s)? = WebServeControl.request(rootURL, "status", as: WebServeStatus.self), s.state == "running" { st = s; break }
+            if kill(pid, 0) != 0 { break }
+            try? await Task.sleep(for: .milliseconds(150))
+        }
+        guard let st else {
+            let tail = (try? String(contentsOf: log, encoding: .utf8)).map { String($0.dropFirst(min(size, $0.utf8.count))) }?
+                .split(separator: "\n").suffix(3).joined(separator: " / ") ?? ""
+            throw fail(HostError(.unavailable, "doz serve did not start\(tail.isEmpty ? "" : ": \(tail)") — its log: \(log.path)"), g)
+        }
+        if g.json { Out.jsonLine(st); return }
+        Out.stdout("doz serve is running in the background (pid \(st.pid ?? Int(pid))) — store \(rootURL.path)\n")
+        for o in st.origins.filter({ !$0.contains("[") }) { Out.stdout("  \(o)\n") }
+        Out.stdout("  its log: \(log.path)\n")
+        if !noInvite {
+            if isatty(STDOUT_FILENO) == 1, case .success(let inv)? = WebServeControl.request(rootURL, "share", as: WebServeInviteAnswer.self) {
+                Out.stdout("\n" + ServeShare.render(inv) + "\n")
+            } else {
+                Out.stdout("To let a browser in: doz serve share (on a terminal — an invite is a key).\n")
+            }
+        }
+        Out.stdout("Stop it with doz serve stop. Its browsers: doz serve devices. Where it is: doz serve status.\n")
     }
 
     struct ServeStarted: Encodable { let origins: [String]; let publicOrigins: [String]; let store: String; let port: Int; let pid: Int }
@@ -262,6 +336,7 @@ struct ServeShare: AsyncParsableCommand {
         t += "  scan the QR code with a phone or tablet, or\n"
         t += "  type the code \(inv.code) on the dashboard's sign-in page (\(inv.link.components(separatedBy: "/#").first ?? "")), or\n"
         t += "  open the link: \(inv.link)\n"
+        for alt in inv.alternates ?? [] { t += "     or by address: \(alt)\n" }
         t += "It is a key for one browser: do not paste it anywhere else.\n"
         return t
     }
@@ -361,6 +436,14 @@ struct ServeStatus: AsyncParsableCommand {
             return
         }
         Out.stdout("doz serve is running — \(st.origins.joined(separator: "  "))\n")
+        var facts: [String] = []
+        if let pid = st.pid { facts.append("pid \(pid)") }
+        if let since = st.since { facts.append("since \(Out.ago(since))") }
+        if let v = st.version { facts.append("doz \(v)") }
+        if st.detached == true { facts.append("detached") }
+        if !facts.isEmpty { Out.stdout("  " + facts.joined(separator: " · ") + "\n") }
+        if let log = st.log { Out.stdout("  its log: \(log)\n") }
+        if let app = st.responsibleApp { Out.stdout("  on behalf of: \(app) (what macOS asks about Local Network access)\n") }
         if !st.publicOrigins.isEmpty { Out.stdout("  behind your proxy: \(st.publicOrigins.joined(separator: ", "))\n") }
         Out.stdout("  \(st.devices) browser\(st.devices == 1 ? "" : "s") let in, \(st.openInvites ?? 0) open invite\((st.openInvites ?? 0) == 1 ? "" : "s")")
         Out.stdout(st.advertised.map { "; announced as \"\($0)\"\n" } ?? "\n")

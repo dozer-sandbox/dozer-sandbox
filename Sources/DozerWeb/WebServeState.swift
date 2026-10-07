@@ -71,6 +71,11 @@ public final class WebServeState: @unchecked Sendable {
     private var cached: (at: Date, list: [WebInterfaceAddress]) = (.distantPast, [])
     private var probes: [String: Date] = [:]
     private var perAddress: [String: Int] = [:]
+    /// rc.2: when it started, whether detached (`doz serve start --detach`), its log, the app macOS attributes it to.
+    public let startedAt = Date()
+    public var detached = false
+    public var logPath: String?
+    public var responsibleApp: String?
     /// The port actually bound (the configured one; a test's ephemeral one).
     public internal(set) var port: Int
 
@@ -105,6 +110,11 @@ public final class WebServeState: @unchecked Sendable {
         return named + addrs
     }
 
+    /// doz serve's IPv4 address origins (`http://192.168.1.20:7443`) — an invite is printed at these too.
+    public var addressOrigins: [String] {
+        WebServeRules.servedAddresses(config.bind, interfaces()).filter(\.isV4).map { "http://\($0.urlHost):\(port)" }
+    }
+
     /// The origin an invite's link is made for when the asker has none (the CLI): `<LocalHostName>.local`,
     /// else the first served address, else the first public origin.
     public var preferredOrigin: String {
@@ -114,7 +124,11 @@ public final class WebServeState: @unchecked Sendable {
     }
 
     /// A new connection: nil = serve it, else why it is dropped.
+    /// TEST seam: decide a connection's fate instead of the rules (the HTTP tests reach the server only over loopback).
+    public var admitOverride: (@Sendable (WebIP, WebIP) -> WebServeRules.Drop?)?
+
     func admit(peer: SocketAddress?, local: SocketAddress?) -> WebServeRules.Drop? {
+        if let o = admitOverride, let p = peer?.ipAddress.flatMap(WebIP.init), let l = local?.ipAddress.flatMap(WebIP.init) { return o(p, l) }
         guard let p = peer?.ipAddress.flatMap(WebIP.init), let l = local?.ipAddress.flatMap(WebIP.init) else { return .notServed }
         return WebServeRules.admit(peer: p, local: l, bind: config.bind, interfaces: interfaces(), natSubnet: natSubnet)
     }

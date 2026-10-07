@@ -606,7 +606,7 @@ the Mac's own folder picker — or **Isolated** (nothing on the Mac is shared).
 ### The dashboard for your other browsers
 
 ```bash
-doz serve [start] [--port N] [--bind lan|loopback|ADDRESSES] [--no-invite] [--store DIR]   # serve the dashboard on your network; Ctrl-C stops it
+doz serve [start] [--detach|-d] [--port N] [--bind lan|loopback|ADDRESSES] [--no-invite] [--store DIR]   # serve the dashboard on your network; Ctrl-C (or doz serve stop) stops it; --detach: in the background
 doz serve share [--store DIR]                          # an invite for one more browser: a QR code, a code and a link (a terminal only)
 doz serve devices [--json] [--store DIR]               # the browsers let in: name, first and last seen, from where, which browser
 doz serve revoke ID | --all [--store DIR]              # remove a browser: signed out at once (its terminals close)

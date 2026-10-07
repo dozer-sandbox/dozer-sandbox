@@ -96,10 +96,12 @@ public enum WebRejection: String, Error, Equatable, Sendable {
     case macScreen = "mac-screen"
     /// `doz ui`'s Devices page needs a running doz serve for this.
     case serveNotRunning = "serve-not-running"
+    /// 606: the connection reached an address doz serve does not serve (another VPN's tunnel) — said, never a silent drop.
+    case notServedAddress = "not-served"
 
     public var status: Int {
         switch self {
-        case .hostRejected, .originRejected, .crossSite, .csrfRejected, .terminalsOff, .secretEntryOff, .secretOverHTTP, .macScreen: 403
+        case .hostRejected, .originRejected, .crossSite, .csrfRejected, .terminalsOff, .secretEntryOff, .secretOverHTTP, .macScreen, .notServedAddress: 403
         case .methodNotAllowed: 405
         case .alreadyRunning, .pickerOpen, .serveNotRunning: 409
         case .tooManyAttempts: 429
@@ -155,6 +157,7 @@ public enum WebRejection: String, Error, Equatable, Sendable {
         case .secretOverHTTP: "a key or token is never typed here over plain HTTP — the network between this browser and the Mac could read it. Add it on the Mac (doz account add NAME --api-key|--setup-token, or the Mac's own doz ui), or reach this dashboard over HTTPS through your reverse proxy (serve.public_origins)"
         case .macScreen: "that opens a window on the Mac's own screen — from another computer, type the path instead (or use a browser terminal)"
         case .serveNotRunning: "doz serve is not running for this store — start it in a terminal: doz serve"
+        case .notServedAddress: "doz serve does not answer on this network address — open it at http://<this Mac>.local or one of the addresses doz serve prints (serve.bind decides where it listens)"
         }
     }
 }

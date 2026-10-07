@@ -78,8 +78,10 @@ final class ServeRulesTests: XCTestCase {
         XCTAssertEqual(admit("fd9c:1:2:3::2", "fd53:3f5a:6290:d699::65"), .sandbox)
         // Reaching the bridge's own address from anywhere: dropped.
         XCTAssertEqual(admit("192.168.86.48", "192.168.112.1"), .sandbox)
-        // Not served: loopback, another VPN.
-        XCTAssertEqual(admit("127.0.0.1", "127.0.0.1"), .notServed)
+        // The Mac's own browser over loopback (rc.1: <mac>.local resolved to ::1 on the Mac): served — the same invite rules.
+        XCTAssertNil(admit("127.0.0.1", "127.0.0.1"))
+        XCTAssertNil(admit("::1", "::1"))
+        // Not served (and answered over HTTP with why): another VPN.
         XCTAssertEqual(admit("10.8.0.9", "10.8.0.2"), .notServed)
         // Link-local on a LAN interface (another Mac reaching <mac>.local over fe80::): served — and a link-local peer is
         // never mistaken for a sandbox (fe80::/64 is every interface's).
@@ -103,7 +105,7 @@ final class ServeRulesTests: XCTestCase {
         XCTAssertTrue(d.isSuperset(of: ["http://m1max.local:7443", "http://m1max.lan:7443", "http://192.168.86.65:7443", "http://100.124.200.51:7443",
                                         "http://[fd7a:115c:a1e0::7c3b:c833]:7443"]))
         XCTAssertFalse(d.contains("http://192.168.112.1:7443"), "never the bridge")
-        XCTAssertFalse(d.contains("http://127.0.0.1:7443"))
+        XCTAssertTrue(d.isSuperset(of: ["http://127.0.0.1:7443", "http://[::1]:7443", "http://localhost:7443"]), "the Mac's own browser")
         XCTAssertFalse(d.contains("http://10.8.0.2:7443"))
         XCTAssertFalse(d.contains { $0.contains("fe80") || $0.contains("169.254") }, "a link-local address is never a Host literal")
         let lo = WebServeRules.directOrigins(port: 7443, bind: .loopback, interfaces: mac, names: names)

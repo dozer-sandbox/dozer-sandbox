@@ -39,9 +39,12 @@ extension DozerWebServer {
 
     public func serveStatus() async throws -> WebServeStatus {
         if let st = serveState {
-            return WebServeStatus(state: "running", origins: st.origins, publicOrigins: st.config.publicOrigins.map(\.description),
-                                  port: st.port, bind: Self.describe(st.config.bind), devices: await st.devices.list().count,
-                                  openInvites: await st.devices.openInvites, advertised: advertised)
+            var s = WebServeStatus(state: "running", origins: st.origins, publicOrigins: st.config.publicOrigins.map(\.description),
+                                   port: st.port, bind: Self.describe(st.config.bind), devices: await st.devices.list().count,
+                                   openInvites: await st.devices.openInvites, advertised: advertised)
+            s.pid = Int(getpid()); s.since = st.startedAt; s.version = version; s.detached = st.detached
+            s.log = st.logPath; s.responsibleApp = st.responsibleApp
+            return s
         }
         if let r = WebServeControl.request(storeRoot, "status", as: WebServeStatus.self) { return try r.get() }
         return WebServeStatus(state: "stopped", origins: [], publicOrigins: [], port: nil, bind: nil,

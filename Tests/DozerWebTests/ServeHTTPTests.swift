@@ -222,6 +222,43 @@ final class ServeHTTPTests: XCTestCase {
         XCTAssertTrue(log.contains { $0.kind == "dropped" && $0.outcome == "sandbox" }, "said in the audit log")
     }
 
+    /// rc.1 bug: never a silent drop but a sandbox's — a connection to an address doz serve does not serve is TOLD why.
+    func testANotServedAddressIsAnsweredNeverSilentlyDropped() async throws {
+        try await start()
+        state.admitOverride = { _, _ in .notServed }
+        let r = try req("/")
+        XCTAssertEqual(r.status, 403)
+        XCTAssertTrue(r.text.contains("not-served"), r.text)
+        XCTAssertTrue(r.text.contains("doz serve does not answer on this network address"))
+        state.admitOverride = { _, _ in .sandbox }
+        XCTAssertThrowsError(try req("/"), "a sandbox's connection: dropped, nothing answered")
+        state.admitOverride = nil
+        XCTAssertEqual(try req("/").status, 200)
+    }
+
+    /// The Mac's own browser on a lan-bound doz serve: loopback served, by name and by 127.0.0.1 / localhost.
+    func testTheMacsOwnBrowserIsServedOnLoopback() async throws {
+        try await start(WebServeConfig(port: 0, bind: .lan, advertise: false),
+                        interfaces: [WebInterfaceAddress(name: "en0", address: WebIP("192.0.2.10")!, prefix: 24)])
+        for host in ["127.0.0.1:\(port)", "localhost:\(port)", "testmac.local:\(port)"] {
+            XCTAssertEqual(try req("/", ["Host": host]).status, 200, host)
+            XCTAssertEqual(try req("/api/v1/overview", ["Host": host]).status, 401, "\(host): still needs an invite")
+        }
+        let inv = await server.share(by: "the Mac")
+        let ok = try req("/api/v1/session", ["Host": "testmac.local:\(port)", "Origin": "http://testmac.local:\(port)", "Authorization": "Bearer \(inv.testToken)"], method: "POST")
+        XCTAssertEqual(ok.status, 200, ok.text)
+    }
+
+    func testTheCLIsInviteNamesTheAddressesToo() async throws {
+        try await start(WebServeConfig(port: 0, bind: .lan, advertise: false),
+                        interfaces: [WebInterfaceAddress(name: "en0", address: WebIP("192.0.2.10")!, prefix: 24)])
+        let a = await server.share(by: "the Mac").answer(origin: state.preferredOrigin, alsoAt: state.addressOrigins)
+        XCTAssertTrue(a.link.hasPrefix("http://testmac.local:\(port)/#cap="))
+        XCTAssertEqual(a.alternates?.count, 1)
+        XCTAssertTrue(a.alternates?[0].hasPrefix("http://192.0.2.10:\(port)/#cap=") == true)
+        XCTAssertEqual(a.alternates?[0].split(separator: "#").last, a.link.split(separator: "#").last, "the same invite")
+    }
+
     func testDozUIStillAnswersOnlyItsLoopbackOriginAndNotTheProbe() async throws {
         let ui = try await DozerWebServer.bind(data: fake, assets: try WebAssets.load(), version: "test", pollInterval: .milliseconds(200))
         let t = Task { try await ui.run() }

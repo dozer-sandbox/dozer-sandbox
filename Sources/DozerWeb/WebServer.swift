@@ -43,6 +43,9 @@ public final class DozerWebServer: @unchecked Sendable {
     private let lock = NSLock()
     private var children: [ObjectIdentifier: Channel] = [:]
     private var closing = false
+    /// 606: doz serve's connections answered with a refusal instead of served (never a silent drop but a sandbox's).
+    private var refusedConnections: [ObjectIdentifier: WebRejection] = [:]
+    func connectionRefusal(_ id: ObjectIdentifier) -> WebRejection? { lock.withLock { refusedConnections[id] } }
     private var _advertised: String?
     /// 606: doz serve's Bonjour name once registered (said by `GET /api/v1/serve`).
     public var advertised: String? {
@@ -78,6 +81,7 @@ public final class DozerWebServer: @unchecked Sendable {
             promise.completeWithTask { [self] in
                 guard let server else { return nil }
                 do {
+                    if let r = server.connectionRefusal(id) { throw r }      // 606: a refused doz serve connection
                     let grant = try await server.admitTerminal(head, peer: channel.remoteAddress)
                     lock.withLock { grants[id] = grant }
                     var h = HTTPHeaders()
@@ -314,22 +318,40 @@ public final class DozerWebServer: @unchecked Sendable {
                     // 606: doz serve drops a sandbox's connection (and one that reached an address it does not
                     // serve) before a byte is read, and caps each address's connections.
                     var address: String?
+                    var refusal: WebRejection?
                     if let s = serveState {
                         let peer = channel.remoteAddress?.ipAddress.flatMap(WebIP.init)?.description ?? "?"
-                        if let why = s.admit(peer: channel.remoteAddress, local: channel.localAddress) {
-                            s.audit.record(WebAuditEntry(kind: "dropped", address: peer, outcome: why.rawValue))
+                        switch s.admit(peer: channel.remoteAddress, local: channel.localAddress) {
+                        case .sandbox?:
+                            // A sandbox (Dozer's untrusted party) gets nothing at all: dropped before a byte is read.
+                            s.audit.record(WebAuditEntry(kind: "dropped", address: peer, outcome: WebServeRules.Drop.sandbox.rawValue))
                             channel.close(promise: nil)
                             continue
+                        case .notServed?:
+                            // Anyone else is TOLD why (rc.1: a silent drop looked like "no response" in the browser).
+                            s.audit.record(WebAuditEntry(kind: "refused", address: peer, outcome: WebServeRules.Drop.notServed.rawValue))
+                            refusal = .notServedAddress
+                        case nil:
+                            if s.open(peer) { address = peer } else {
+                                s.audit.record(WebAuditEntry(kind: "refused", address: peer, outcome: WebRejection.tooManyConnections.rawValue))
+                                refusal = .tooManyConnections
+                            }
                         }
-                        guard s.open(peer) else {
-                            s.audit.record(WebAuditEntry(kind: "refused", address: peer, outcome: WebRejection.tooManyConnections.rawValue))
-                            channel.close(promise: nil)
-                            continue
-                        }
-                        address = peer
                     }
                     let admitted: Bool = lock.withLock {
-                        guard !closing, children.count < limits.maximumConnections else { return false }
+                        guard !closing else { return false }
+                        if let refusal {
+                            // Answered once, then closed — not counted against the server's cap.
+                            refusedConnections[ObjectIdentifier(channel)] = refusal
+                            return true
+                        }
+                        guard children.count < limits.maximumConnections else {
+                            if serveState != nil {
+                                refusedConnections[ObjectIdentifier(channel)] = .tooManyConnections
+                                return true
+                            }
+                            return false
+                        }
                         children[ObjectIdentifier(channel)] = channel
                         return true
                     }
@@ -340,7 +362,10 @@ public final class DozerWebServer: @unchecked Sendable {
                     }
                     group.addTask {
                         await self.serve(accepted)
-                        _ = self.lock.withLock { self.children.removeValue(forKey: ObjectIdentifier(channel)) }
+                        _ = self.lock.withLock {
+                            self.children.removeValue(forKey: ObjectIdentifier(channel))
+                            self.refusedConnections.removeValue(forKey: ObjectIdentifier(channel))
+                        }
                         if let address { self.serveState?.closed(address) }
                     }
                 }
@@ -393,7 +418,7 @@ public final class DozerWebServer: @unchecked Sendable {
                 // A refused upgrade: NIO's typed upgrader does not pass the refused request's head on
                 // (only what followed it), so the refusal is answered here, from the decision itself,
                 // and the connection closed (its decoder has stopped parsing after an upgrade request).
-                if let r = gate.takeRefusal(id) { await refuse(conn, r) } else { await serve(conn, peer: accepted.channel.remoteAddress) }
+                if let r = gate.takeRefusal(id) ?? connectionRefusal(id) { await refuse(conn, r) } else { await serve(conn, peer: accepted.channel.remoteAddress) }
             case .websocket(let socket, let grant):
                 await terminal(socket, grant)
             }

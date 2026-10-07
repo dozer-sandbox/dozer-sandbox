@@ -647,6 +647,17 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   one JSON line out: status, devices, share, revoke, rename, probe, stop — `WebServeControl`), keeps `<store>/serve/`
   (0700: `devices.json`, `audit.jsonl`, `port` — 0600). `DozerWebServer.bindServe` + `WebServeState`; `WebAuth` is
   `.browser(WebSessionStore)` (doz ui) or `.devices(WebDeviceStore)` (doz serve). Never let `UICommand.swift` reach it.
+- **`--detach`** (rc.2): `DetachedLauncher` — the host's double spawn (`HostLauncher`'s pattern, untouched): an intermediate
+  `serve start --launch-detached` (own session) spawns `serve start --launched --no-invite` (own session/group, parent
+  launchd, stdin /dev/null, stdout+stderr `<store>/serve/serve.log`, no inherited fd, signals default), prints its pid,
+  exits; the CLI waits for `serve.sock` to answer, then prints the addresses + an invite (a TTY only). `status` carries
+  pid, since, version, detached, log, responsibleApp (the app macOS attributes it to — it survives the double spawn, as
+  604 found for the microphone; Bonjour's Local Network ask is on its behalf). `probes/606-*/serve-detach.mjs`.
+- **Loopback is served under `lan`** (rc.1 bug: on the Mac, `<mac>.local` resolved to ::1 and the silent drop read as
+  "no response"): the Mac's own browser — 127.0.0.1, [::1], localhost, by name — with the same invite rules. **Only a
+  sandbox's connection is dropped silently**; any other refusal (an address not served, the per-address cap) is
+  answered over HTTP (`refusedConnections` → `refuse`). Invites print their LAN-address forms beside `.local`
+  (`WebServeInviteAnswer.alternates`). `probes/606-*/serve-mac.mjs`.
 - **Where it listens** (`serve.bind`): `lan` = the wildcard `[::]` with an accept gate on each connection's LOCAL address
   (`WebServeRules.isServed`: `en*`, `bridge0–99`, the `utun` holding a Tailscale address; a LAN interface's link-local
   too — m1a reached `<mac>.local` over fe80::), re-read every 3 s; `loopback` (127.0.0.1 + ::1, a proxy on this Mac);

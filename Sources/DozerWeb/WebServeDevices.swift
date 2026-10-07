@@ -49,10 +49,14 @@ public struct WebServeInvite: Sendable, CustomStringConvertible, CustomDebugStri
     public var testToken: String { token }
 
     /// What a browser (and the CLI over the socket) receives: the link, the code, the expiry, the QR matrix of the link.
-    public func answer(origin: String) -> WebServeInviteAnswer {
+    /// `alsoAt`: the same invite at other origins of this doz serve (its LAN addresses — `.local` does not resolve
+    /// the same everywhere: IPv6 link-local on another Mac, ::1 on this one).
+    public func answer(origin: String, alsoAt: [String] = []) -> WebServeInviteAnswer {
         let link = link(origin: origin)
         let qr = try? WebQR.encode(link)
-        return WebServeInviteAnswer(link: link, code: code, expiresAt: expiresAt, qr: qr.map { WebServeInviteAnswer.QR(size: $0.size, rows: $0.rows) })
+        let alt = alsoAt.filter { $0 != origin }.map { self.link(origin: $0) }
+        return WebServeInviteAnswer(link: link, code: code, expiresAt: expiresAt, qr: qr.map { WebServeInviteAnswer.QR(size: $0.size, rows: $0.rows) },
+                                    alternates: alt.isEmpty ? nil : alt)
     }
 }
 
@@ -63,6 +67,8 @@ public struct WebServeInviteAnswer: Codable, Equatable, Sendable, CustomStringCo
     public var code: String
     public var expiresAt: Date
     public var qr: QR?
+    /// The same link at doz serve's LAN addresses (the CLI prints them beside the `.local` one).
+    public var alternates: [String]? = nil
     public var description: String { "WebServeInviteAnswer(redacted)" }
 }
 

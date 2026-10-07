@@ -1118,6 +1118,14 @@ public struct WebServeStatus: Codable, Equatable, Sendable {
     public var devices: Int
     public var openInvites: Int?
     public var advertised: String?
+    /// rc.2: the running doz serve's process, since when, its build, whether it was started detached (`--detach`),
+    /// its log (detached), and the app macOS attributes it to (Local Network privacy asks on that app's behalf).
+    public var pid: Int? = nil
+    public var since: Date? = nil
+    public var version: String? = nil
+    public var detached: Bool? = nil
+    public var log: String? = nil
+    public var responsibleApp: String? = nil
 
     public init(state: String, origins: [String], publicOrigins: [String], port: Int?, bind: String?, devices: Int, openInvites: Int?,
                 advertised: String?) {

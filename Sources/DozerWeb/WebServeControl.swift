@@ -94,7 +94,7 @@ public enum WebServeControl {
                 switch command {
                 case "status": box.data = encoded(try await server.serveStatus())
                 case "devices": box.data = encoded(try await server.serveDevices(current: nil))
-                case "share": box.data = encoded(await server.share(by: "the Mac").answer(origin: st.preferredOrigin))
+                case "share": box.data = encoded(await server.share(by: "the Mac").answer(origin: st.preferredOrigin, alsoAt: st.addressOrigins))
                 case "probe": box.data = encoded(["token": st.issueProbe()])
                 case "revoke" where words.count >= 2:
                     box.data = encoded(["revoked": try await server.revokeDevices(words[1] == "--all" ? nil : words[1], by: "the Mac")])

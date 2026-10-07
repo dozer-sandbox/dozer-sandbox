@@ -308,17 +308,23 @@ public enum WebServeRules {
     public enum Drop: String, Equatable, Sendable {
         /// The peer (or the address it reached) is a sandbox's network.
         case sandbox
-        /// It reached an address `doz serve` does not serve (loopback, another VPN, a link-local address).
+        /// It reached an address `doz serve` does not serve (another VPN's tunnel). Never a silent drop: it is
+        /// answered over HTTP with why (`WebRejection.notServedAddress`) — only a sandbox's connection is dropped.
         case notServed = "not-served"
     }
 
-    /// Whether a new connection is served: nil = yes, else why it is dropped (before a byte is read).
+    /// Whether a new connection is served: nil = yes; `.sandbox` = dropped before a byte is read; `.notServed` =
+    /// answered with why. The Mac's own loopback is served under `lan` (owner bug on rc.1: a browser ON the Mac opened
+    /// the printed http://<mac>.local link, which resolved to ::1 — and got no response): loopback is not a sandbox
+    /// (a guest cannot reach the Mac's loopback; a proxied sandbox's proxy is refused the dashboards' ports by
+    /// `LocalDashboards`), and the same invite rules admit it.
     public static func admit(peer: WebIP, local: WebIP, bind: WebServeBind, interfaces: [WebInterfaceAddress],
                              natSubnet: String? = nil) -> Drop? {
         if sandboxNetworks(interfaces, natSubnet: natSubnet).contains(where: { $0.contains(peer) }) { return .sandbox }
         if interfaces.contains(where: { isSandboxBridge($0.name) && $0.address == local }) { return .sandbox }
         switch bind {
         case .lan:
+            if local.isLoopback { return nil }
             return interfaces.contains(where: { $0.address == local && isServed($0) }) ? nil : .notServed
         case .loopback:
             return local.isLoopback ? nil : .notServed
@@ -340,7 +346,7 @@ public enum WebServeRules {
     public static func directOrigins(port: Int, bind: WebServeBind, interfaces: [WebInterfaceAddress], names: WebMacNames) -> Set<String> {
         var hosts = servedAddresses(bind, interfaces).map(\.urlHost)
         switch bind {
-        case .lan: hosts += names.names
+        case .lan: hosts += names.names + ["127.0.0.1", "[::1]", "localhost"]   // the Mac's own browser too
         case .loopback: hosts.append("localhost")
         case .addresses: hosts += names.names
         }
