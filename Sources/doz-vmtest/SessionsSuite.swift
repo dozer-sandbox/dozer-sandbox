@@ -37,11 +37,27 @@ func cliSessionsSuite(binary: String) async {
         }
         try? "m\n".write(to: ws.appendingPathComponent("sub/mac-\(i).txt"), atomically: true, encoding: .utf8)
         check(t.run(["wake", "s1"], timeout: 300).code == 0, "wake s1" + (step == "host-restart" ? " (a NEW host restores it)" : ""))
-        usleep(2_500_000)
-        let now = ex("cat /tmp/cw.now")
+        // The loop ticks every 0.5 s; the Mac's new file shows within virtio-fs's caching (≤ ~1–2 s) — polled ≤ 10 s.
+        let t0 = Date()
+        var now = ""
+        repeat { usleep(500_000); now = ex("cat /tmp/cw.now") } while !(now.hasPrefix("/workspace/sub") && now.contains("mac-\(i).txt")) && Date().timeIntervalSince(t0) < 10
         check(now.hasPrefix("/workspace/sub") && now.contains("mac-\(i).txt"),
-              "after \(step == "host-restart" ? "a host restart" : "hibernate → wake"): the program still sees its folder (\(now.replacingOccurrences(of: "\n", with: " ")))")
+              String(format: "after %@: the program still sees its folder, and the Mac's new file (%.1f s) (%@)", step == "host-restart" ? "a host restart" : "hibernate → wake",
+                     Date().timeIntervalSince(t0), now.replacingOccurrences(of: "\n", with: " ")))
     }
+
+    // a rule file appearing on the Mac (the view reloads its rules live) never cuts the program's folder either:
+    // the view EXPIRES the kernel's cached names, it never drops them (a dropped one is "(deleted)" to a cwd).
+    try? "secret.env\n".write(to: ws.appendingPathComponent(".dozignore"), atomically: true, encoding: .utf8)
+    try? "s\n".write(to: ws.appendingPathComponent("secret.env"), atomically: true, encoding: .utf8)
+    usleep(2_500_000)
+    var now = ex("cat /tmp/cw.now; cat /workspace/secret.env 2>&1")
+    check(now.hasPrefix("/workspace/sub") && now.contains("Permission denied"),
+          "a .dozignore that appears is in force at once, and the program keeps its folder (\(now.replacingOccurrences(of: "\n", with: " ")))")
+    try? FileManager.default.removeItem(at: ws.appendingPathComponent(".dozignore"))
+    usleep(2_500_000)
+    now = ex("cat /tmp/cw.now; cat /workspace/secret.env 2>&1")
+    check(now.hasPrefix("/workspace/sub") && now.hasSuffix("s"), "removed again: everything visible, the folder kept (\(now.replacingOccurrences(of: "\n", with: " ")))")
 
     // ── restart a running session ──────────────────────────────────────────────────────────────────
     check(t.run(["run", "s1", "-d", "--session", "loop", "--", "sh", "-c", "trap '' HUP; echo started-$$; while :; do sleep 1; done"]).code == 0,

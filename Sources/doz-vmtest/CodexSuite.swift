@@ -454,9 +454,10 @@ func cliCodexSuite(binary: String) async {
     noTokenInGuest("with the TUI running")
 
     // ── 9. 608: the Codex TUI in /workspace keeps working across hibernate → wake and a host restart; Restart session ──
-    // The TUI is driven through `doz attach` on a pseudo-terminal (python3's pty on the Mac): type a prompt slowly
-    // (Codex treats a fast burst as a paste), Enter, and read until the fake model's answer — or Codex's
-    // "invalid cwd" (the 0.29.0 bug, which the control sandbox — workspace.view off — still shows).
+    // The TUI is driven through `doz attach` on a pseudo-terminal (python3's pty on the Mac): the prompt as a
+    // bracketed paste (typed keys arrive in bursts through the relays and Codex takes a burst for a paste, whose
+    // Enter only adds a line), then Enter, and read until the fake model's answer — or Codex's "invalid cwd"
+    // (the 0.29.0 bug, which the control sandbox — workspace.view off — still shows).
     try? cwdTUIDriver.write(toFile: ws + "/tui.py", atomically: true, encoding: .utf8)
     func tui(_ name: String, _ prompt: String) -> (answered: Bool, invalidCwd: Bool, tail: String) {
         let p = Process()
@@ -502,7 +503,8 @@ func cliCodexSuite(binary: String) async {
     a = tui("cr", "after the restart")
     check(a.answered && !a.invalidCwd, "cr after Restart session: answered again (\(a.tail.debugDescription))")
     r = d(["exec", "cr", "--", "sh", "-c", "find /home/agent/.codex/sessions -name 'rollout-*.jsonl' | wc -l"])
-    info("cr: Codex's recorded sessions: \(r.out.trimmingCharacters(in: .whitespacesAndNewlines)) (resume --last continued the newest in /workspace)")
+    check(r.out.trimmingCharacters(in: .whitespacesAndNewlines) == "1",
+          "the conversation CONTINUED: Codex still has one recorded session (a new conversation would be a second) (\(r.out.trimmingCharacters(in: .whitespacesAndNewlines)))")
     // a host restart (it hibernates every sandbox; a NEW host restores them on wake)
     _ = d(["host", "stop"], timeout: 300)
     check(startHostWithFake(), "a new host, with the fake OpenAI")
@@ -516,8 +518,9 @@ func cliCodexSuite(binary: String) async {
     for name in ["cw", "cr"] { _ = d(["rm", name, "--yes"], timeout: 120) }
 }
 
-/// 608: drive a TUI through `doz attach` on a pseudo-terminal: argv[1] the prompt, argv[2] what to wait for,
-/// argv[3] seconds, the rest the command. Prints RESULT=FOUND|TIMEOUT and the screen's last text (controls removed).
+/// 608: drive a TUI through `doz attach` on a pseudo-terminal: argv[1] the prompt (sent as a bracketed paste, then
+/// Enter — again after 8 s with nothing working, at most 3), argv[2] what to wait for, argv[3] seconds, the rest the
+/// command. Prints RESULT=FOUND|TIMEOUT and the screen's last text (controls removed).
 let cwdTUIDriver = #"""
 import os, pty, sys, time, select, re, fcntl, termios, struct, signal
 prompt, expect, secs, argv = sys.argv[1], sys.argv[2].encode(), float(sys.argv[3]), sys.argv[4:]
@@ -525,7 +528,7 @@ pid, fd = pty.fork()
 if pid == 0:
     os.execvp(argv[0], argv)
 fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", 40, 120, 0, 0))
-buf = b""; start = time.time(); sent = None; result = "TIMEOUT"
+buf = b""; start = time.time(); sent = None; result = "TIMEOUT"; enters = 0
 def read(t):
     global buf
     r, _, _ = select.select([fd], [], [], t)
@@ -538,25 +541,26 @@ def read(t):
             return False
         buf += d
     return True
+last_enter = 0
 while time.time() - start < secs:
     if not read(0.3):
         break
     if sent is None and time.time() - start > 6:
-        for ch in prompt:
-            os.write(fd, ch.encode()); time.sleep(0.04)
-        time.sleep(0.8); os.write(fd, b"
-"); sent = len(buf)
+        os.write(fd, b"\x1b[200~" + prompt.encode() + b"\x1b[201~"); time.sleep(1.5)
+        os.write(fd, b"\r"); sent = len(buf); enters = 1; last_enter = time.time()
     if sent is not None and (expect in buf[sent:] or b"invalid cwd" in buf[sent:]):
         if expect in buf[sent:]:
             result = "FOUND"
         time.sleep(1.0); read(0.2)
         break
+    if sent is not None and enters < 3 and time.time() - last_enter > 8 and b"orking" not in buf[sent:]:
+        os.write(fd, b"\r"); enters += 1; last_enter = time.time()
 try:
     os.kill(pid, signal.SIGTERM)
 except OSError:
     pass
 text = re.sub(rb"\x1b\[[0-9;?<>=]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(\x07|\x1b\\)|\x1b.|[\x00-\x08\x0b-\x1f\x7f]", b" ", buf[sent or 0:])
 text = re.sub(rb" +", b" ", text).decode("utf-8", "replace")
-print(("invalid cwd " if b"invalid cwd" in buf else "") + text[-600:])
+print(("invalid cwd " if b"invalid cwd" in buf else "") + "enters=%d " % enters + text[-600:])
 print("RESULT=" + result)
 """#
