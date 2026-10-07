@@ -1200,11 +1200,17 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
 
 ### Workspace rules — `.dozignore` / `.dozreadonly` (599g) — design: workspace `changes/599g-*/` (01 feasibility, 02 plan, 03 spike)
 
-- **No rule file → no view, no daemon, nothing changed.** A share whose MAC folder holds `.dozignore` or
-  `.dozreadonly` (`WorkspaceRules.present`) is served through `dozview`; the decision is re-made at every
-  fresh boot, wake and session start (`Sandbox.wantedViews`, `refreshWorkspaceViews` from the host's
-  open-session). Turning a view OFF waits for the next cold start (a running view with no rule file shows
-  everything).
+- **Every share is served through `dozview`** (BUG cwd-after-wake, workspace `changes/BUG-cwd-after-wake.md`): a
+  hibernation's re-mount detaches the RAW share and the new virtio-fs server knows none of the old node ids, so a
+  program whose cwd was inside got ENOENT from getcwd (Codex: "invalid cwd"); the view is never re-mounted.
+  A share whose MAC folder holds `.dozignore` or `.dozreadonly` (`WorkspaceRules.present`) gets a view WITH rules;
+  any other a PASSTHROUGH one (`WorkspaceViewConfig.passthrough`; dozview ≥ 1.1.0 applies nothing — not even the
+  implicit read-only names — until a rule file exists; one that cannot start leaves the share bound, never an
+  empty folder). `Sandbox.passthroughViews = false` is 599g's old rule (no rule file → no view, no daemon).
+  The decision is re-made at every fresh boot, wake and session start (`Sandbox.wantedViews`,
+  `refreshWorkspaceViews` from the host's open-session) — but a passthrough view is started only at a fresh
+  boot or a hibernation's wake, never live under a running program (it would cut that program's cwd). Turning
+  a view OFF waits for the next cold start. The facts' rules line ignores passthrough views. `make test-vm-cwd`.
 - **Semantics are Docker's, and ONE contract in two languages**: `DockerIgnore` (Swift) and
   `Guest/dozview/match` (C) both pass `Tests/Fixtures/dozignore-vectors.json` (real moby/BuildKit output) and
   agree on `WorkspaceRulesTests.testSwiftAndCAgreeOnADifferentialFuzz`. BuildKit's walker (D1: `d`, `!d/f`, `d`
@@ -1479,6 +1485,7 @@ make test-cli-agentsudo # 594 W23: the agent's sudo in a fresh claude-code sandb
 make test-cli-codex # 599i: Codex through seams (a fake OpenAI over TLS, the browser seam): Dozer's own ChatGPT sign-in, the swap, the Mac's renewal, no token in the guest, an API key, Alpine (prepares codex + alpine-codex)
 make test-cli-github # 599d: GitHub as the user through seams (a fake GitHub, a fake gh, a throwaway ssh-agent): swap, read-only, push, no leak, identity, key source, off, SSH
 make test-cli-openfiles # 599b: workspace files opened on the Mac through the opener seam — every refusal, isolated, off, --app, URLs as before
+make test-vm-cwd     # BUG cwd-after-wake: a program's cwd in /workspace across sleep, hibernate and a new-process restore (the raw share as the control); the passthrough view's cost
 make test-vm-ignore  # 599g: workspace rules (.dozignore lock/hide, .dozreadonly) across boot/pause/sleep/hibernate/new-process restore, reload, folding, kills (scratch store)
 make dozview / dozview-verify # 599g: rebuild the guest view daemon (pinned Zig) / check the committed bytes
 make test-cli-hoststop # 594 W22: test-cli's host-stop part alone (per-sandbox progress plain/animated, --json, nothing running, a host killed mid-stop)

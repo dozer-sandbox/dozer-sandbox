@@ -426,20 +426,32 @@ func ignoreCrashRestore(label: String, thenQuit: Bool) async throws {
     }
 }
 
-/// No rule file: the share is bound as it always was and no daemon runs. A rule file appearing: at a
-/// session start (`refreshWorkspaceViews`) and while hibernated (the wake's re-mount turns the view on).
+/// No rule file: a PASSTHROUGH view (BUG cwd-after-wake — every share is served through the view so a
+/// program's cwd survives a hibernation; it hides nothing) — or, with `passthroughViews` off (599g's rule),
+/// the share bound as it always was and no daemon. A rule file appearing: at a session start
+/// (`refreshWorkspaceViews`) and while hibernated (the wake's re-mount turns the view on).
 func ignoreAppearing() async throws {
     let share = try ignorePrepareShare("ign-b", rules: false)
     let sb = try Sandbox(spec: ignoreSpec("ign-b", share: share, subnet: "192.168.204.0/24"))
     let log = logEvents(sb)
     defer { log.cancel() }
     try? await sb.delete()
-    print("ignore: no rule file")
+    print("ignore: no rule file, passthroughViews off (599g's rule)")
+    sb.passthroughViews = false
     try await sb.start()
     let none = try await sb.exec(["sh", "-c", "grep -c fuse.dozview /proc/mounts; pidof dozview | wc -w; grep -c ' /workspace virtiofs' /proc/mounts; cat /workspace/secret.env"], privileged: true, timeoutSeconds: 20)
     let lines = none.output.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
     check(sb.activeViews.isEmpty && lines.count >= 4 && lines[0] == "0" && lines[1] == "0" && lines[2] == "1" && lines[3] == "SECRET=1",
-          "no rule file → no view, no daemon: /workspace is the virtio-fs share itself (\(lines))")
+          "no rule file, passthroughViews off → no view, no daemon: /workspace is the virtio-fs share itself (\(lines))")
+    try await sb.shutDown()
+    sb.passthroughViews = true
+
+    print("ignore: no rule file — a passthrough view")
+    try await sb.start()
+    let pass = try await sb.exec(["sh", "-c", "grep -c ' /workspace fuse.dozview ' /proc/mounts; cat /workspace/secret.env; echo 'version: 9' > /workspace/doz_project.yaml && cat /workspace/doz_project.yaml; echo x > /workspace/.git/hooks/post-commit && echo hooks-ok"], timeoutSeconds: 20)
+    check(sb.activeViews.count == 1 && sb.activeViews.values.allSatisfy(\.isPassthrough) && pass.output.hasPrefix("1") && pass.output.contains("SECRET=1")
+          && pass.output.contains("version: 9") && pass.output.contains("hooks-ok"),
+          "no rule file → a passthrough view: nothing hidden or read-only (\(pass.output.replacingOccurrences(of: "\n", with: " ⏎ "))\(pass.errorOutput))")
 
     print("ignore: a rule file appears — at the next session start")
     try ignoreRules.write(to: share.appendingPathComponent(".dozignore"), atomically: true, encoding: .utf8)
@@ -452,7 +464,7 @@ func ignoreAppearing() async throws {
     print("ignore: a rule file appears while it is hibernated")
     try FileManager.default.removeItem(at: share.appendingPathComponent(".dozignore"))
     try await sb.start()
-    check(sb.activeViews.isEmpty, "a cold start without the rule file serves the share as it is")
+    check(sb.activeViews.values.allSatisfy(\.isPassthrough), "a cold start without the rule file serves the share as it is (a passthrough view)")
     try await sb.hibernate()
     try "config\n".write(to: share.appendingPathComponent(".dozreadonly"), atomically: true, encoding: .utf8)
     try await sb.wake()

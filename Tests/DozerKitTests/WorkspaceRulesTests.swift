@@ -227,7 +227,23 @@ final class WorkspaceRulesTests: XCTestCase {
         }
         XCTAssertTrue(s.contains("chmod 0755 /run/doz "), "/run/doz stays 0755 (the SSH agent's socket lives there)")
         XCTAssertFalse(s.contains("set -e"), "set -e is ignored in a tested list — the script chains with &&")
-        XCTAssertTrue(s.hasSuffix("|| echo 'doz-view t1 failed: the view could not start'"))
+        XCTAssertTrue(s.hasSuffix("|| { echo 'doz-view t1 failed: the view could not start'; }"))
+        XCTAssertFalse(s.contains("mount --bind '/run/doz/raw/t1' '/workspace'"), "a view with rules that cannot start leaves the guest path EMPTY")
+    }
+
+    /// BUG cwd-after-wake: a passthrough view (no rule file) that cannot start leaves the SHARE at the guest
+    /// path — there are no rules to keep — in the boot's start and in the wake's restart alike.
+    func testAPassthroughViewThatCannotStartLeavesTheShare() {
+        let c = WorkspaceViewConfig(tag: "t1", guestPath: "/workspace", mode: .lock, fold: false, passthrough: true)
+        XCTAssertTrue(c.isPassthrough)
+        let s = WorkspaceView.startScript(c)
+        let fallback = "{ mountpoint -q '/workspace' || mount --bind '/run/doz/raw/t1' '/workspace' 2>/dev/null || mount --bind '/run/dozer-vfs/t1' '/workspace' 2>/dev/null; } ; "
+        XCTAssertTrue(s.hasSuffix("|| { " + fallback + "echo 'doz-view t1 failed: the view could not start'; }"))
+        let w = GuestCommand.remountShares([(tag: "t1", guestPath: "/workspace")], views: ["t1": c])
+        XCTAssertTrue(w.contains("else " + fallback + "echo \"doz-view t1 failed: $pid\""), "the wake's restart falls back to the share too")
+        XCTAssertTrue(w.contains(fallback + "echo 'doz-view t1 failed: the view could not start'"), "a share without a view gets one at the wake, with the fallback")
+        let old = try? JSONDecoder().decode(WorkspaceViewConfig.self, from: Data(#"{"tag":"t","guestPath":"/w","mode":"lock","fold":true}"#.utf8))
+        XCTAssertEqual(old?.isPassthrough, false, "a record without the field is a view with rules")
         XCTAssertTrue(WorkspaceView.startScript(WorkspaceViewConfig(tag: "a'b", guestPath: "/workspace", mode: .lock, fold: true)).contains("failed: unsafe name"))
     }
 

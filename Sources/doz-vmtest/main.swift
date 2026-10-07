@@ -985,6 +985,11 @@ Task {
         case "ignore":
             // 599g: workspace rules (.dozignore / .dozreadonly) — IgnoreSuite.swift (`make test-vm-ignore`).
             try await ignoreSuite()
+        case "cwd-wake":
+            // BUG cwd-after-wake: a program's cwd in /workspace across sleep, hibernate and a new-process restore — CwdWakeSuite.swift (`make test-vm-cwd`).
+            try await cwdWakeSuite()
+        case "cwd-wake-save":
+            exit(try await cwdWakeSave())
         case "ignore-crash-save":
             exit(try await ignoreCrashSave())
         case "ignore-crash-restore":

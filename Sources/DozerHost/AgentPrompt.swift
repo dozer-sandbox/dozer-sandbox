@@ -512,7 +512,7 @@ extension HostCore {
         AgentPrompt.report(config: m.config, policy: m.sandbox.egress?.policy,
                            account: m.sandbox.egress == nil ? nil : accountName(m), version: version,
                            credentialProblem: credentialProblem(m), sudoInstalled: sudoInstalled, tools: m.sandbox.lastToolsReport,
-                           workspaceRules: m.sandbox.activeViews.values.first?.mode)
+                           workspaceRules: m.sandbox.activeViews.values.first(where: { !$0.isPassthrough })?.mode)
     }
 
     /// Write (or, when off, remove) the facts file and the skill in the guest — a utility exec as
