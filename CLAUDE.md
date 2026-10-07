@@ -1191,6 +1191,22 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   `account_id`, `last_refresh = now`; API key — `auth_mode: apikey` + placeholder. 0600, the agent's. No OpenAI account →
   only a file holding a doz placeholder is removed; an account whose credential is unusable leaves the file (its
   placeholders get the proxy's reason).
+- **`mac` for Codex (rc.3, `CodexMacLogin.swift`) — THIS Mac's own Codex login, 588's `mac` rules as the template.**
+  `AccountKind.codexMac` (`codex-mac`, never in accounts.json; `AccountRecord.codexMac`): a Codex sandbox's account
+  `mac` resolves to it (`resolvedAccount` by provider — Claude's `mac` is untouched). Dozer READS ONLY the access token
+  and the kept claims/account id from `$CODEX_HOME/auth.json` (else `~/.codex`; `CodexMacLogin.read` takes those fields
+  out of the parse — never the refresh token), NEVER writes CODEX_HOME (`testDozerNeverTouchesTheMacsCodexHome` allows
+  only this file, read-only). Re-read on use: the vault provider's version is the file's inode/size/mtime
+  (`CodexMacSession.version`). Expired / signed out / keyring store (`cli_auth_credentials_store` keyring|auto) /
+  an API-key login → `problem()`: the proxy's 401, never another account. It is the DEFAULT Codex account while the
+  Mac's Codex is signed in (`effectiveOpenAIDefault`: `openaiDefault` else mac-if-signed-in; compute it ONLY for an
+  OpenAI agent — it reads the Mac's file); `doz account default NAME --codex` sets it by name. Keep-alive
+  (`codex.keep_alive`, off): `codex doctor` (no model call — its websocket check asks for the auth, which refreshes)
+  once per expiry when the token is within `keepaliveWindow` (270 s; Codex refreshes within 5 min) and a sandbox used
+  it within 15 min. Freshness otherwise: the Codex app's server lists models every 4½ min (0.160.1
+  `models_refresh_worker.rs`), which refreshes. **Tests never read the real ~/.codex**: `CredentialServices.codexHome`
+  (memory seam: `DOZ_TEST_CODEX_HOME` or none; `CodexMacLogin.resolveHome` STOPS the process inside XCTest without it),
+  `DOZ_TEST_CODEX_BIN` (a fake codex); CLIHarness sets both to scratch paths. `CodexMacLoginTests`, the suite's part 6b.
 - **Permission `model:openai`** "Talk to OpenAI" (chatgpt.com, api.openai.com, ab.chatgpt.com): an AGENT permission
   (`AgentPermissions.agentPermissions(.codex)`) — added at create (`DozerImages.spec`), kept by every preset change and
   edit (`editedPolicy(…agent:)`, `PermissionPolicy.edited(…agent:)` refuses revoking it for Codex), never in a preset

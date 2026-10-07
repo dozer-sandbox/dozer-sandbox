@@ -23,7 +23,8 @@ agent is told about where it runs.
   | setup token | a `claude setup-token` token (a Claude subscription, valid a year) | your login keychain, `doz-claude:NAME` | none — add a new one before it expires |
   | API key | an Anthropic API key | your login keychain, `doz-anthropic:NAME` | none |
 
-  For **Codex**, two more kinds (OpenAI's): a **ChatGPT sign-in** (`doz account add NAME --chatgpt`
+  For **Codex**, OpenAI's kinds: **this Mac's Codex login** (`mac` — read-only, nothing to add; the
+  default while Codex is signed in on this Mac), a **ChatGPT sign-in** (`doz account add NAME --chatgpt`
   — Dozer's own, in your browser; renewed by Dozer on your Mac) and an **OpenAI API key**
   (`--openai-key`). See [Codex](24-codex.md).
 
@@ -33,7 +34,7 @@ agent is told about where it runs.
   |---|---|
   | Claude Code | `mac`, a setup token, an API key |
   | pi | an API key only (a Claude subscription is never given to it) |
-  | Codex | a ChatGPT sign-in or an OpenAI API key — never an Anthropic account (and no Claude agent ever gets an OpenAI one) |
+  | Codex | `mac` (this Mac's Codex login), a ChatGPT sign-in or an OpenAI API key — never an Anthropic account (and no Claude agent ever gets an OpenAI one) |
 
   This is checked **before** a sandbox is made. With no account pi can use, Dozer stops and tells you
   the next step (or, on a terminal and in the dashboard, offers to take a key right there).

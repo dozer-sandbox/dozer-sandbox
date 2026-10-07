@@ -119,6 +119,7 @@ This table is generated from `doz config show` and checked against it on every b
 | key | default | values | applies | overridden by | what it does |
 |---|---|---|---|---|---|
 | `codex.permissions` | `skip` | skip \| ask | next session | `-e DOZ_CODEX_PERMISSIONS=… on run/exec` | Codex in a codex sandbox: skip its approvals and its own Linux sandbox (the VM is the boundary), or ask as on a Mac. |
+| `codex.keep_alive` | `false` | boolean | at once | — | Codex sandboxes on the account mac (this Mac's own Codex login): when its access token is about to expire and a sandbox used it in the last 15 minutes, run this Mac's codex doctor once — no model call — which renews the login the way Codex itself does. Off: the login renews only while Codex (the app or a codex session) runs on this Mac; when it has expired, Codex in a sandbox says so. |
 
 ### `[defaults]`
 

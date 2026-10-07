@@ -376,6 +376,61 @@ func cliCodexSuite(binary: String) async {
     noTokenInGuest("with the API key")
     check(requests().filter { $0["grant"] as? String == "refresh_token" }.count == rotated, "no renewal while the key is in use")
 
+    // ── 6b. mac — THIS Mac's own Codex login (a FAKE Codex home), read-only ────────────────────────────
+    let codexHome = URL(fileURLWithPath: t.env["DOZ_TEST_CODEX_HOME"]!)
+    try? fm.createDirectory(at: codexHome, withIntermediateDirectories: true)
+    /// The fake Mac Codex signing in / refreshing: real tokens from the fake OpenAI, written to the fake home's auth.json.
+    let fetchTokens = """
+        curl -sS --cacert '\(ws)/ca.pem' --resolve auth.openai.com:\(port):127.0.0.1 -d 'grant_type=authorization_code&code=doz-test-code&client_id=x' \\
+          https://auth.openai.com:\(port)/oauth/token | /usr/bin/python3 -c 'j=__import__("json"); t=j.load(__import__("sys").stdin); print(j.dumps({"auth_mode":"chatgpt","OPENAI_API_KEY":None,"last_refresh":"2026-10-07T00:00:00Z","tokens":{"id_token":t["id_token"],"access_token":t["access_token"],"refresh_token":t["refresh_token"],"account_id":"acct-fake-599i"}}))' > "$CODEX_HOME/auth.json.new" && mv "$CODEX_HOME/auth.json.new" "$CODEX_HOME/auth.json"
+        """
+    func macSignsIn() -> Bool {
+        onMac(["/bin/sh", "-c", "CODEX_HOME='\(codexHome.path)'; " + fetchTokens]).code == 0
+    }
+    /// An expired access token in the Mac's file (what a Mac whose Codex has not run for an hour holds).
+    func macLoginExpires() {
+        func b64(_ s: String) -> String { OpenAIAccess.base64URL(Data(s.utf8)) }
+        let at = b64(#"{"alg":"RS256"}"#) + "." + b64("{\"exp\":\(Int(Date().timeIntervalSince1970) - 120)}") + ".c2ln"
+        let id = b64(#"{"alg":"RS256"}"#) + "." + b64(#"{"email":"person@example.invalid","https://api.openai.com/auth":{"chatgpt_plan_type":"plus","chatgpt_account_id":"acct-fake-599i"}}"#) + ".c2ln"
+        let o: [String: Any] = ["auth_mode": "chatgpt", "OPENAI_API_KEY": NSNull(), "tokens": ["id_token": id, "access_token": at, "refresh_token": "rt_mac_expired", "account_id": "acct-fake-599i"]]
+        try? JSONSerialization.data(withJSONObject: o).write(to: codexHome.appendingPathComponent("auth.json"))
+    }
+    func homeSnapshot() -> String { onMac(["/bin/sh", "-c", "ls -lT '\(codexHome.path)'"]).out }
+    // The fake codex the keep-alive may run: it records its arguments, then refreshes the fake home (as `codex doctor` would).
+    let fakeBin = URL(fileURLWithPath: t.env["DOZ_TEST_CODEX_BIN"]!)
+    try? fm.createDirectory(at: fakeBin.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try? "#!/bin/sh\necho \"$*\" >> '\(ws)/fake-codex.log'\n\(fetchTokens)\n".write(to: fakeBin, atomically: true, encoding: .utf8)
+    chmod(fakeBin.path, 0o755)
+    macLoginExpires()
+    r = d(["account", "ls"])
+    check(r.out.contains("codex-mac") && r.out.contains("expired"), "doz account ls: mac · codex-mac · expired (this Mac's Codex login, read)")
+    check(d(["account", "use", "cx", "mac"]).code == 0, "doz account use cx mac (this Mac's Codex login)")
+    var snap = homeSnapshot()
+    r = ask("Mac login, expired?", timeout: 180)
+    check(r.code != 0 && (r.out + r.err).contains("your Mac's Codex login has expired"), "an expired Mac login: Dozer's message, never another account (\((r.out + r.err).suffix(200).debugDescription))")
+    check(homeSnapshot() == snap, "Dozer did not write the Mac's Codex home")
+    check(macSignsIn(), "the Mac's Codex refreshes (the fake home gets fresh tokens)")
+    snap = homeSnapshot()
+    let macToken = ((try? JSONSerialization.jsonObject(with: Data(contentsOf: codexHome.appendingPathComponent("auth.json")))) as? [String: Any])
+        .flatMap { $0["tokens"] as? [String: Any] }?["access_token"] as? String ?? "?"
+    r = ask("Mac login, fresh?")
+    check(r.code == 0 && (r.out + r.err).contains("PONG-CHATGPT-"), "after the Mac's refresh, Codex is answered at once — no account change, no host restart (\((r.out + r.err).suffix(160).debugDescription))")
+    check(requests().contains { $0["auth"] as? String == "Bearer " + macToken }, "chatgpt.com got the Mac's access token, swapped in by the proxy")
+    check(!requests().contains { $0["refresh_token"] as? String == "rt_mac_expired" } && requests().filter({ $0["grant"] as? String == "refresh_token" }).count == rotated,
+          "Dozer never refreshed the Mac's login (no refresh grant since)")
+    check(homeSnapshot() == snap, "Dozer did not write the Mac's Codex home")
+    noTokenInGuest("on the Mac's Codex login")
+    // The keep-alive: the login expires again; with codex.keep_alive on, the Mac's own (fake) codex doctor runs.
+    macLoginExpires()
+    check(d(["config", "set", "codex.keep_alive", "true"]).code == 0, "doz config set codex.keep_alive true")
+    r = ask("Mac login, kept alive?")
+    let fakeCodexRuns = (try? String(contentsOfFile: ws + "/fake-codex.log", encoding: .utf8)) ?? ""
+    check(fakeCodexRuns.split(separator: "\n").contains("doctor"), "the keep-alive ran the Mac's codex doctor (no model call): \(fakeCodexRuns.debugDescription)")
+    check(r.code == 0 && (r.out + r.err).contains("PONG-CHATGPT-"), "…and Codex is answered with the renewed login (\((r.out + r.err).suffix(160).debugDescription))")
+    check(hostLog(t).contains("Codex keep-alive"), "the host log says so")
+    check(d(["config", "set", "codex.keep_alive", "false"]).code == 0, "keep-alive off again")
+    check(d(["account", "use", "cx", "okey"]).code == 0, "back on the key")
+
     // ── 7. Codex on a musl base (Alpine) ──────────────────────────────────────────────────────────────
     r = d(["create", "ax", "--agent", "codex", "--base", "alpine", "--isolated", "--account", "okey", "--start"], timeout: 2400)
     check(r.code == 0, "create ax --agent codex --base alpine --start \(r.code == 0 ? "" : r.err.suffix(300).description)")

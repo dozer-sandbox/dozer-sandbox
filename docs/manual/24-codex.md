@@ -2,10 +2,18 @@
 
 OpenAI's **Codex** runs in a Dozer sandbox the way Claude Code does: ready to work, without approval
 prompts (the VM and its network are the boundary), told where it runs, and with its credential kept on
-your Mac — it never enters the sandbox. It can use your **ChatGPT plan** (through Dozer's own sign-in)
-or an **OpenAI API key**.
+your Mac — it never enters the sandbox. It can use **this Mac's own Codex login** (`mac` — nothing to
+add), your **ChatGPT plan** through Dozer's own sign-in, or an **OpenAI API key**.
 
 ## Quick start
+
+If Codex is already signed in on this Mac (`codex login`, or the Codex app), there is nothing to add:
+
+```sh
+doz new --image codex                 # uses this Mac's Codex login (the account mac) — the default while it is signed in
+```
+
+Otherwise:
 
 ```sh
 doz account add chatgpt --chatgpt     # your browser opens: sign in with ChatGPT (Dozer's own sign-in)
@@ -48,6 +56,32 @@ shows the command to run in a terminal (the browser opens on your Mac).
 
 `codex exec`, `codex resume` and `codex fork` get the same; `codex login`, `codex mcp` and the other
 subcommands run as they are.
+
+## This Mac's Codex login (`mac`)
+
+The least setup: a Codex sandbox uses the login of the Codex already signed in on this Mac, as Claude
+Code sandboxes use the Mac's Claude login.
+
+- **Dozer only reads it.** From `$CODEX_HOME/auth.json` (else `~/.codex/auth.json`) it takes the
+  **access token** and the few account details Codex reads (plan, email, account id). It never uses or
+  keeps the refresh token and never writes anything there: your Mac's Codex stays the one that renews
+  the login. Nothing is copied into the sandbox — it gets placeholders, and the proxy puts the token in
+  on the way to `chatgpt.com`.
+- **It is the default** for Codex sandboxes while this Mac's Codex is signed in (`doz account ls` shows
+  `mac` · `codex-mac` with its plan, email and expiry). Choose another per sandbox
+  (`doz account use NAME ACCOUNT`) or for all (`doz account default NAME`); `doz account default mac --codex`
+  makes it the default explicitly.
+- **It must stay fresh.** Access tokens last about an hour; your Mac's Codex renews one when it is within
+  5 minutes of expiry, whenever it runs — the Codex app's background server checks every few minutes, so
+  while the app (or any `codex` session) runs, sandboxes stay signed in. A renewal reaches open sandboxes
+  at their next request. With nothing running it expires, and Codex in a sandbox says: "your Mac's Codex
+  login has expired — run codex on the Mac, or turn on the keep-alive". Never another account.
+- **Keep-alive** (off by default): `doz config set codex.keep_alive true`. When the token is about to
+  expire and a sandbox used it in the last 15 minutes, Dozer runs this Mac's own `codex doctor` once —
+  no model call — which renews the login the way Codex itself does.
+- **Not supported yet:** a Codex that keeps its login in the keyring (`cli_auth_credentials_store =
+  "keyring"`) — use `doz account add NAME --chatgpt` instead; and a Mac Codex signed in with an API key
+  — add the key as an account (`--openai-key`). `doz doctor` says which.
 
 ## Your ChatGPT plan, without the token in the sandbox
 
@@ -106,6 +140,7 @@ the codex image (or `doz onboard --openai-account chatgpt|openai-key|later`).
 |---|---|---|
 | `images.codex_version` | `latest` | The Codex version an image is prepared with. |
 | `codex.permissions` | `skip` | Codex's own approvals and sandbox in a sandbox: `skip` or `ask`. |
+| `codex.keep_alive` | `false` | Renew this Mac's Codex login near expiry (`codex doctor`) while a sandbox uses it. |
 | `images.codex.memory_mib` · `images.codex.network` | 2048 · `agent` | A new Codex sandbox's memory and network. |
 
 ## Troubleshooting
@@ -113,6 +148,7 @@ the codex image (or `doz onboard --openai-account chatgpt|openai-key|later`).
 | symptom | what to do |
 |---|---|
 | Codex says Dozer's sign-in has ended | `doz account add NAME --chatgpt --force` on your Mac; open sessions recover by themselves. |
+| "your Mac's Codex login has expired" | Run `codex` on the Mac (any prompt), or `doz config set codex.keep_alive true`. |
 | "Codex needs an OpenAI account" when creating | `doz account add chatgpt --chatgpt` (or `--openai-key`), then `doz account default NAME` or `--account NAME`. |
 | The sign-in's port is in use | Another sign-in (`codex login` on your Mac) is waiting — finish or cancel it, then try again. |
 | Codex asks for approval for every command | `codex.permissions` is `ask`, or Codex runs as root. |

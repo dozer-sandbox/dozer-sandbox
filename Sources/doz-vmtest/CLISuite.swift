@@ -64,6 +64,10 @@ final class CLIHarness: @unchecked Sendable {
         e["DOZ_SCREEN_CAPTURE"] = "1"
         // 591: the settings file is the suite's own (under the scratch store) — never the owner's ~/.config.
         e["XDG_CONFIG_HOME"] = store.appendingPathComponent("xdg").path
+        // 599i rc.3: the Mac's Codex login only ever from a FAKE home (none here unless a suite writes one) —
+        // a test never reads the real ~/.codex; and only a fake codex for the keep-alive.
+        e["DOZ_TEST_CODEX_HOME"] = store.appendingPathComponent("fake-codex-home").path
+        e["DOZ_TEST_CODEX_BIN"] = store.appendingPathComponent("fake-codex-bin/codex").path
         let vmtestKernels = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("doz-vmtest-store/kernels")
         if (e["DOZ_KERNEL_CACHE"] ?? "").isEmpty,
            FileManager.default.fileExists(atPath: vmtestKernels.appendingPathComponent(KernelArtifact.recommended.fileName).path) {
