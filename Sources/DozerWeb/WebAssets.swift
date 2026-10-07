@@ -107,6 +107,9 @@ public struct WebAssets: Sendable {
     public let pageScript: String?
     public let pageStyle: String?
 
+    /// 607: the page script's modules are served from one directory per layer, /assets/app/<layer>/.
+    public static let moduleLayers: Set<String> = ["dom", "core", "components", "views"]
+
     static func isIconPNG(_ publicPath: String) -> Bool {
         publicPath.hasPrefix("/assets/icon-") && publicPath.hasSuffix(".png")
     }

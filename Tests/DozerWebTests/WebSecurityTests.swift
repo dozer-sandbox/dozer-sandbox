@@ -185,6 +185,13 @@ final class WebSecurityTests: XCTestCase {
             "/assets/a/b.js", "api/v1/overview", "/api/v1/sandboxes/de mo", "/manifest.json",
         ]
         for t in refused { XCTAssertNil(WebRoute.parse(method: .get, target: t), t) }
+        // 607: the page script's modules — /assets/app/<layer>/<file> and nothing deeper or elsewhere.
+        XCTAssertEqual(WebRoute.parse(method: .get, target: "/assets/app/dom/h-0123456789abcdef.js"), .asset("/assets/app/dom/h-0123456789abcdef.js"))
+        XCTAssertEqual(WebRoute.parse(method: .head, target: "/assets/app/views/x.js"), .asset("/assets/app/views/x.js"))
+        for t in ["/assets/app/x.js", "/assets/app/other/x.js", "/assets/app/dom/a/b.js", "/assets/app/../app.js", "/assets/app/dom/", "/assets/x/dom/h.js"] {
+            XCTAssertNil(WebRoute.parse(method: .get, target: t), t)
+        }
+        XCTAssertNil(WebRoute.parse(method: .post, target: "/assets/app/dom/h.js"))
         // Phase 1: nothing unsafe but the session's own routes.
         for t in ["/api/v1/overview", "/api/v1/sandboxes/demo", "/api/v1/images", "/api/v1/stream", "/"] {
             XCTAssertNil(WebRoute.parse(method: .post, target: t), t)

@@ -6,7 +6,7 @@
       "mimeType" : "text/html; charset=utf-8",
       "publicPath" : "/",
       "resourcePath" : "index.html",
-      "sha256" : "1afd7e9989afa37e08bd1b880fb2064392f442e799418ff2395071df19e5ddd2"
+      "sha256" : "7ed6b2ca3a826ee53e8bedfbd4d7576391b723bbce52cc010b174dbab24fae58"
     },
     {
       "cachePolicy" : "public, max-age=31536000, immutable",
@@ -19,18 +19,42 @@
     {
       "cachePolicy" : "public, max-age=31536000, immutable",
       "class" : "page",
-      "mimeType" : "application/javascript; charset=utf-8",
-      "publicPath" : "/assets/app-3b9a3f54f4fde595.js",
-      "resourcePath" : "assets/app-3b9a3f54f4fde595.js",
-      "sha256" : "3b9a3f54f4fde595769ff3b5dd431631e01251115faaf479e7a335d3421a192e"
-    },
-    {
-      "cachePolicy" : "public, max-age=31536000, immutable",
-      "class" : "page",
       "mimeType" : "application/manifest+json",
       "publicPath" : "/assets/app-6ffe72642ff9c76d.webmanifest",
       "resourcePath" : "assets/app-6ffe72642ff9c76d.webmanifest",
       "sha256" : "6ffe72642ff9c76dcba774a4ac8d3113bd3bfd55e7d127d875491248c89bdc4f"
+    },
+    {
+      "cachePolicy" : "public, max-age=31536000, immutable",
+      "class" : "page",
+      "mimeType" : "application/javascript; charset=utf-8",
+      "publicPath" : "/assets/app-b2f3eb5bfdb369ac.js",
+      "resourcePath" : "assets/app-b2f3eb5bfdb369ac.js",
+      "sha256" : "b2f3eb5bfdb369ac9ef036f61644304a674b3515e8c517f3eab9efe26da0623f"
+    },
+    {
+      "cachePolicy" : "public, max-age=31536000, immutable",
+      "class" : "page",
+      "mimeType" : "application/javascript; charset=utf-8",
+      "publicPath" : "/assets/app/core/hooks-a4b871a481b363cd.js",
+      "resourcePath" : "assets/app/core/hooks-a4b871a481b363cd.js",
+      "sha256" : "a4b871a481b363cdca418b3cf3f55a5dae7425f73b522f810f3ea44847ae60e6"
+    },
+    {
+      "cachePolicy" : "public, max-age=31536000, immutable",
+      "class" : "page",
+      "mimeType" : "application/javascript; charset=utf-8",
+      "publicPath" : "/assets/app/dom/h-d909ae8eb40113fe.js",
+      "resourcePath" : "assets/app/dom/h-d909ae8eb40113fe.js",
+      "sha256" : "d909ae8eb40113fe8d32b3f6c71c29bd5c4c8b79ea55d2c1e3ab595f6c78238a"
+    },
+    {
+      "cachePolicy" : "public, max-age=31536000, immutable",
+      "class" : "page",
+      "mimeType" : "application/javascript; charset=utf-8",
+      "publicPath" : "/assets/app/dom/icons-c0c96726ac1ee67b.js",
+      "resourcePath" : "assets/app/dom/icons-c0c96726ac1ee67b.js",
+      "sha256" : "c0c96726ac1ee67b1ba3514f768266253ae567482b5e96a33a0ceb282da134da"
     },
     {
       "cachePolicy" : "public, max-age=31536000, immutable",

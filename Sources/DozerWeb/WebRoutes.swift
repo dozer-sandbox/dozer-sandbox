@@ -126,6 +126,11 @@ public enum WebRoute: Equatable, Sendable {
         let parts = path.dropFirst().split(separator: "/", omittingEmptySubsequences: false).map(String.init)
         guard !parts.contains(where: { $0.isEmpty || $0 == "." || $0 == ".." }) else { return nil }
         if parts.count == 2, parts[0] == "assets" { return method.isSafe ? .asset(path) : nil }
+        // 607: the page script's modules, one directory per layer — /assets/app/<dom|core|components|views>/<file>.
+        // (Served only when the manifest lists the exact path, like every asset.)
+        if parts.count == 4, parts[0] == "assets", parts[1] == "app", WebAssets.moduleLayers.contains(parts[2]) {
+            return method.isSafe ? .asset(path) : nil
+        }
         guard parts.count >= 3, parts[0] == "api", parts[1] == "v1" else { return nil }
         let rest = Array(parts.dropFirst(2))
         switch (method, rest.count) {
