@@ -656,7 +656,8 @@ public struct WebOperation: Codable, Equatable, Sendable {
     public var action: String
     public var label: String
     public var sandbox: String?
-    /// running, done, failed.
+    /// running, done, failed — or (605) interrupted: `doz ui` restarted while it ran and its outcome was
+    /// not seen (an ended state, never a failure).
     public var state: String
     /// The latest progress line while running; the outcome after.
     public var text: String
@@ -665,4 +666,6 @@ public struct WebOperation: Codable, Equatable, Sendable {
     /// 594 W22: finished lines, for an operation that does several things at once (Restart host: each
     /// sandbox's hibernation — "✓ hibernated w1 (snapshot 40 MB) — 0.4 s").
     public var lines: [String]? = nil
+    /// 605: started by an earlier `doz ui` that restarted while it ran (loaded from `ui.operations.json`).
+    public var interrupted: Bool? = nil
 }

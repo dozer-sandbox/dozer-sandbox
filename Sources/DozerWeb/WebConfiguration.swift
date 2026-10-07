@@ -29,7 +29,7 @@ public struct WebLoopbackAddress: Equatable, Sendable {
 
     /// Something accepts connections on 127.0.0.1:`port` (also a wildcard listener — which a
     /// SO_REUSEADDR bind to loopback would otherwise shadow on BSD).
-    static func inUse(_ port: Int) -> Bool {
+    public static func inUse(_ port: Int) -> Bool {
         let fd = socket(AF_INET, SOCK_STREAM, 0)
         guard fd >= 0 else { return true }
         defer { close(fd) }
@@ -100,11 +100,15 @@ public struct WebLimits: Sendable, Equatable {
     public var heartbeatInterval: TimeInterval
     public var maximumConnections: Int
 
-    public init(maximumRequestBodyBytes: Int = 16 * 1024, sessionLifetime: TimeInterval = 12 * 60 * 60,
+    /// 605 (owner Q8, "remember this browser"): a session lasts 14 days without use — the page renews it
+    /// when it loads and while it is open — so an installed app on this Mac stays signed in.
+    public static let rememberedSession: TimeInterval = 14 * 24 * 60 * 60
+
+    public init(maximumRequestBodyBytes: Int = 16 * 1024, sessionLifetime: TimeInterval = WebLimits.rememberedSession,
                 bootstrapLifetime: TimeInterval = 5 * 60, maximumSSEClients: Int = 8, maximumBufferedSSEEvents: Int = 64,
                 heartbeatInterval: TimeInterval = 15, maximumConnections: Int = 32) throws {
         guard (1...1_048_576).contains(maximumRequestBodyBytes),
-              (30...(7 * 24 * 60 * 60)).contains(sessionLifetime),
+              (30...(30 * 24 * 60 * 60)).contains(sessionLifetime),
               (1...3_600).contains(bootstrapLifetime),
               (1...32).contains(maximumSSEClients),
               (1...1024).contains(maximumBufferedSSEEvents),

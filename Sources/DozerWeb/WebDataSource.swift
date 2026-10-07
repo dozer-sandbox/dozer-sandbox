@@ -361,6 +361,14 @@ public final class HostWebData: DozerWebData, @unchecked Sendable {
                 rows[i].accountApplies = Self.reachesAccountAPI(p)
             }
         }
+        // 605: a host that is STOPPING (`doz host stop`: its socket closed, its lock still held) is putting
+        // its live sandboxes away (hibernating them). Read in-process meanwhile, a record still saying live
+        // looks shut down — and a page closes a shut-down sandbox's terminals. Say what is true: busy (the
+        // next look, once the host has gone, shows where each ended up).
+        if !fromHost, store.hostIsRunning() {
+            let stopping = Set(store.needsRecovery())
+            for i in rows.indices where stopping.contains(rows[i].name) { rows[i].busy = true }
+        }
         let st = fromHost ? await hostStatus() : nil
         var host = WebHost(running: st != nil, version: st?.version, pid: st?.pid, startedAt: st?.startedAt,
                            idleTimeoutMinutes: st?.idleTimeoutMinutes, idleSeconds: st?.idleSeconds,
@@ -375,8 +383,11 @@ public final class HostWebData: DozerWebData, @unchecked Sendable {
     }
 
     public func sandbox(_ name: String) async throws -> WebSandboxDetail {
-        let d = try await query(HostRequest(.inspect, name: name)).0.decode(SandboxDetail.self)
+        let (v, fromHost) = try await query(HostRequest(.inspect, name: name))
+        let d = try v.decode(SandboxDetail.self)
         var w = WebSandboxDetail(d, attachCommand: attachCommand(name))
+        // 605: as in `overview` — a stopping host is putting it away (never "shut down" meanwhile).
+        if !fromHost, store.hostIsRunning(), store.needsRecovery().contains(name) { w.info.busy = true }
         w.info.accountApplies = d.policy.map(Self.reachesAccountAPI) ?? false
         return w
     }

@@ -68,6 +68,13 @@ public final class WebSettingsStore: @unchecked Sendable {
 
     public var current: DozerSettings { DozerSettings.load(environment: environment) }
 
+    /// 605: an integer setting as this process sees it — its flag first (`doz ui --port`), then the
+    /// environment, the file, the default.
+    public func int(_ key: String) -> Int {
+        if case .int(let i)? = flags[key] { return i }
+        return current.int(key)
+    }
+
     public func report() -> SettingsReport { current.report(flags: flags) }
 
     /// Apply one change: refused when the UI may not set that key, or the environment or a flag sets

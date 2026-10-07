@@ -13,6 +13,8 @@
 //     POST /api/v1/accounts body, while ui.allow_secret_entry; a sandbox's own key likewise (keyEntry,
 //     POST /api/v1/sandboxes/NAME/key).
 //   · Forms live in <dialog>s outside the view, so a live refresh never wipes what is being typed.
+//   · 605: the page outlives its server. doz ui restarting is a calm pause (terminals reattach, operations
+//     resolve, a newer build offers a reload); a sign-in again happens INSIDE the page, over what it shows.
 'use strict';
 
 const state = {
@@ -185,7 +187,7 @@ async function api(path, opts = {}) {
   try { body = await r.json(); } catch (_) { /* not JSON */ }
   if (!r.ok) {
     const e = body && body.error ? body.error : { code: 'http-' + r.status, message: 'HTTP ' + r.status };
-    if (r.status === 401) signedOut(e.message);
+    if (r.status === 401) signedOut(e.message, e.code);
     throw new HttpError(r.status, e.code, e.message);
   }
   return body;
@@ -405,7 +407,7 @@ function renderOperations() {
   const rows = list.map((o) => {
     const secs = o.state === 'running' ? Math.max(0, Math.round((Date.now() - new Date(o.startedAt).getTime()) / 1000)) + ' s' : (o.milliseconds ? ms(o.milliseconds) : '—');
     return h('tr', { class: 'op-row op-' + o.state, 'data-op': o.id },
-      h('td', null, o.state === 'running' ? h('span', { class: 'mini-spin', title: 'running' }) : h('span', { class: 'op-state', title: o.state }, o.state === 'done' ? '✓' : '✕')),
+      h('td', null, o.state === 'running' ? h('span', { class: 'mini-spin', title: 'running' }) : h('span', { class: 'op-state', title: o.state }, o.state === 'done' ? '✓' : o.state === 'interrupted' ? '–' : '✕')),
       h('td', { class: 'op-action' }, OP_GLYPH[o.action] ? icon(OP_GLYPH[o.action]) : null, o.action), h('td', null, o.sandbox ? h('a', { href: '#/sandbox/' + o.sandbox }, o.sandbox) : '—'),
       h('td', null, clock(o.startedAt)), h('td', { class: 'num' }, secs),
       // 594 W22: an operation of several parts (Restart host) lists each finished one.
@@ -475,12 +477,14 @@ function paintRowOps() {
       kind = 'failed'; text = o.text;
     } else if (o && o.state === 'done' && Date.now() - oAt < 60000) {
       kind = 'done'; text = o.text;
+    } else if (o && o.state === 'interrupted' && Date.now() - oAt < 60000) {
+      kind = 'interrupted'; text = o.text;           // 605: ended while doz ui restarted, outcome not seen
     }
     const key = kind + '|' + text;
     if (el.dataset.painted === key) continue;
     el.dataset.painted = key;
     if (!el.dataset.banner) {
-      el.textContent = kind === 'none' ? '' : (kind === 'running' ? '… ' : kind === 'done' ? '✓ ' : '✕ ') + text;
+      el.textContent = kind === 'none' ? '' : (kind === 'running' ? '… ' : kind === 'done' ? '✓ ' : kind === 'interrupted' ? '– ' : '✕ ') + text;
       el.className = 'row-op' + (kind === 'none' ? ' empty-op' : ' op-' + kind);
       continue;
     }
@@ -489,7 +493,7 @@ function paintRowOps() {
     if (kind === 'none') { el.replaceChildren(); continue; }
     if (kind === 'running') { el.replaceChildren(h('span', { class: 'mini-spin', 'aria-hidden': 'true' }), h('span', { class: 'op-text' }, text)); continue; }
     const opId = o ? o.id : null;
-    el.replaceChildren(callout(kind === 'done' ? 'ok' : 'bad', { compact: true, body: text, dismiss: kind === 'failed' ? () => {
+    el.replaceChildren(callout(kind === 'done' ? 'ok' : kind === 'interrupted' ? 'info' : 'bad', { compact: true, body: text, dismiss: kind === 'failed' ? () => {
       if (opId) state.acked.add(opId); else state.sbxFail.delete(name);
       el.dataset.painted = '';
       paintRowOps();
@@ -905,15 +909,17 @@ async function bootstrap() {
       adopt(await api('session', { method: 'POST', bearer: m[1] }));
       return true;
     } catch (e) {
-      signedOut(e.message);
+      signedOut(e.message, e.code);
       return false;
     }
   }
   try {
     adopt(await api('session'));
+    // 605 (remember this browser): every page load renews the sign-in (14 days from now).
+    try { adopt(await api('session/renew', { method: 'POST' })); } catch (_) { /* the session stands */ }
     return true;
   } catch (e) {
-    if (!state.signedOut) signedOut(e.message);
+    if (!state.signedOut) signedOut(e.message, e.code);
     return false;
   }
 }
@@ -926,7 +932,17 @@ function adopt(info) {
   $('version').textContent = 'doz ' + info.version;
   document.title = 'Dozer — ' + info.store.split('/').pop();
   $('sign-out').hidden = false;
+  state.everSignedIn = true;
   scheduleRenew();
+  registerWorker();
+}
+/// 605: the service worker — ONLY the offline page (an installed app opened, or a reload, while doz ui is
+/// not running). It never answers /api or the event stream (sw.js). Registered once signed in; a browser
+/// that cannot (a private window) simply has no offline page.
+function registerWorker() {
+  if (state.swAsked || !('serviceWorker' in navigator)) return;
+  state.swAsked = true;
+  navigator.serviceWorker.register('/sw.js', { scope: '/', updateViaCache: 'none' }).catch(() => { /* the page works without it */ });
 }
 // ── settings (591) ──────────────────────────────────────────────────────────
 // doz.toml, as the UI process reads it (GET /api/v1/settings, every value with its default, source and
@@ -1155,7 +1171,11 @@ function scheduleRenew() {
     try { adopt(await api('session/renew', { method: 'POST' })); } catch (_) { /* signedOut() handles 401 */ }
   }, half);
 }
-function signedOut(message) {
+/// 605 (C.4): signed out — the page asks for a new link INSIDE itself, over what it shows: the view, an
+/// open wizard's choices and the terminals stay as they are (the terminals reattach after the sign-in).
+/// `code` says why (the server's 401 code): a new link was made, the sign-in expired, this browser signed
+/// out — or unknown (another port, a lost sign-in, or never signed in here).
+function signedOut(message, code) {
   if (state.signedOut) return;
   state.signedOut = true;
   state.csrf = null;
@@ -1164,26 +1184,90 @@ function signedOut(message) {
   for (const d of document.querySelectorAll('dialog')) d.close();
   setLive('bad', 'signed out');
   $('sign-out').hidden = true;
-  // 591: the server closes this session's terminals; the page forgets them.
-  gridLeave();
-  for (const t of [...terminals.values()]) closeTerminal(t.id);
-  $('sbx').hidden = true;
-  $('grid').hidden = true;
-  $('view').hidden = false;
-  const view = $('view');
-  view.replaceChildren(h('div', { class: 'signed-out' },
-    h('h1', null, 'Sign in with a new link'),
-    h('p', { class: 'sub' }, message || 'This page is not signed in.'),
-    h('p', null, 'In a terminal on this Mac, run ', h('code', null, 'doz ui link'),
-      ' — it opens a fresh one-use link. (If the UI is not running: ', h('code', null, 'doz ui'), '.)'),
-    h('p', { class: 'muted' }, 'Links work once and expire after a few minutes. Nothing on this page can sign you in by itself.')));
+  // 591: the server closes this session's terminals; 605: the page keeps them and reattaches them later.
+  for (const t of terminals.values()) if (!t.closed && t.opened && !t.ended && !t.errorText) { t.reattach = true; paintCover(t); }
+  showSignIn(message, code);
+}
+const SIGN_IN_TITLE = {
+  'session-rotated': 'This page was signed out', 'session-expired': 'This browser’s sign-in expired', 'signed-out': 'You signed out',
+};
+function showSignIn(message, code) {
+  const o = $('ui-overlay');
+  const title = SIGN_IN_TITLE[code] || (state.everSignedIn ? 'This page was signed out' : 'Sign in to Dozer');
+  const field = h('input', { type: 'password', id: 'signin-link', name: 'link', autocomplete: 'off', spellcheck: 'false',
+    placeholder: 'http://127.0.0.1:…/#cap=…', 'aria-describedby': 'signin-help' });
+  const err = h('p', { class: 'signin-err', id: 'signin-err', role: 'alert', hidden: true });
+  const go = h('button', { type: 'submit', class: 'btn primary', id: 'signin-go' }, withIcon('key-round', 'Sign in'));
+  const form = h('form', { class: 'signin-form', id: 'signin-form' },
+    h('label', { class: 'signin-label', for: 'signin-link' }, 'Sign in with a new link'),
+    h('div', { class: 'signin-row' }, field, go), err);
+  form.addEventListener('submit', (ev) => { ev.preventDefault(); signInWith(field, err, go); });
+  o.replaceChildren(h('div', { class: 'ui-ov-card signin-card' },
+    h('div', { class: 'ui-ov-head' }, h('h2', { id: 'ui-ov-title' }, title)),
+    h('div', { id: 'ui-ov-desc' },
+      h('p', null, message || 'This page is not signed in.'),
+      form,
+      h('p', { class: 'muted', id: 'signin-help' }, 'In a terminal on this Mac: ', h('code', null, 'doz ui link'),
+        ' opens a fresh one-use link in your browser; ', h('code', null, 'doz ui link --print-url'), ' prints one to paste here. (Not running? ',
+        h('code', null, 'doz ui'), '.)'),
+      h('p', { class: 'muted' }, 'A link works once, for five minutes. Everything on this page stays as it is while you sign in.'))));
+  for (const el of pausedParts()) el.inert = true;
+  document.body.classList.add('ui-paused', 'signing-in');
+  o.setAttribute('role', 'dialog');
+  o.setAttribute('aria-modal', 'true');
+  o.setAttribute('aria-labelledby', 'ui-ov-title');
+  o.setAttribute('aria-describedby', 'ui-ov-desc');
+  o.hidden = false;
+  state.uiOverlay = true;
+  quietly(() => field.focus());
+}
+/// The pasted link's `#cap=` is sent as a link's is (Authorization: Bearer, once); the field is emptied
+/// first — the link never reaches storage, a log or the address bar.
+async function signInWith(field, err, go) {
+  const text = field.value.trim();
+  field.value = '';
+  err.hidden = true;
+  const m = /#cap=([A-Za-z0-9_-]{16,256})$/.exec(text);
+  let other = null;
+  try { const u = new URL(text); if (u.origin !== location.origin) other = u.origin; } catch (_) { /* not a URL: the regex decides */ }
+  const fail = (t) => { err.textContent = t; err.hidden = false; quietly(() => field.focus()); };
+  if (!m) { fail('That is not a sign-in link — it looks like http://127.0.0.1:PORT/#cap=… (doz ui link --print-url).'); return; }
+  if (other) { fail('That link is for another doz ui (' + other + '); this page is ' + location.origin + '. Make one for this page: doz ui link --print-url.'); return; }
+  go.disabled = true;
+  try {
+    adopt(await api('session', { method: 'POST', bearer: m[1] }));
+  } catch (e) {
+    go.disabled = false;
+    fail(e.message || String(e));
+    return;
+  }
+  signedIn();
+}
+/// Signed in again (or for the first time): the page carries on where it was.
+function signedIn() {
+  state.signedOut = false;
+  hideOverlay();
+  dropBanner('ui-stopped');
+  setLive('', 'connecting…');
+  if (!state.started) { startApp(); return; }
+  loadSettings();
+  connect();                         // `hello` refreshes everything and reattaches the terminals
+}
+function hideOverlay() {
+  state.uiOverlay = false;
+  for (const el of pausedParts()) el.inert = false;
+  if (state.modal) modalInert(true);
+  document.body.classList.remove('ui-paused', 'signing-in');
+  $('ui-overlay').hidden = true;
+  $('ui-overlay').replaceChildren();
+  (state.modal ? $('wm-box') : $('main')).focus();
 }
 // 599c: Quick add in the sidebar, beside Sandboxes.
 $('nav-quick-add').replaceChildren(icon('plus'));
 $('nav-quick-add').addEventListener('click', (ev) => { ev.preventDefault(); quickAdd(ev.currentTarget); });
 $('sign-out').addEventListener('click', async () => {
   try { await api('session', { method: 'DELETE' }); } catch (_) { /* already gone */ }
-  signedOut('You signed out.');
+  signedOut('This browser is signed out of Dozer.', 'signed-out');
 });
 
 // ── live updates ────────────────────────────────────────────────────────────
@@ -1311,20 +1395,32 @@ function liveRefresh() {
 /// live (owner: "i still like the info banners at the top"): the banner says WHAT happened (doz ui
 /// stopped); the overlay says the page is paused and reconnecting, what to do, and holds the one Try now.
 /// The HOST stopping is never this: the page still works then (a banner; Start host).
+///
+/// 605 (C.2): the first 15 s are CALM — a neutral "Reconnecting to Dozer…" (doz ui restarting is routine:
+/// an upgrade, `doz ui restart`, the Mac waking) — and `end: restarting` keeps it calm for a minute. The
+/// alarming wording comes at once only when doz ui said it STOPPED (`end: shutdown`), else after 15 s.
+/// After a minute the overlay adds that doz ui may run on another port, and which one this page expected.
 const UI_OVERLAY_AFTER_MS = 1500;
-function uiLost(said) {
-  if (state.signedOut) return;
+const UI_CALM_MS = 15000, UI_RESTART_CALM_MS = 60000, UI_OTHER_PORT_MS = 60000;
+function uiLost(said, reason) {
+  if (state.signedOut || state.uiMoved) return;
   if (state.es) { state.es.close(); state.es = null; }
   state.uiDown = true;
-  state.uiSaid = state.uiSaid || said;
-  setLive('bad', said ? 'stopped — retrying' : 'reconnecting…');
+  if (reason === 'restarting') state.uiRestarting = true; else state.uiSaid = state.uiSaid || said;
   renderHostFoot();
   if (!state.uiDownSince) {
     state.uiDownSince = Date.now();
     state.lastConnected = state.uiDownSince;   // connected until this moment
   }
+  setLive(uiCalm() ? '' : 'bad', state.uiRestarting ? 'restarting…' : state.uiSaid ? 'stopped — retrying' : 'reconnecting…');
   if (state.uiRetry) return;
   state.uiRetry = setTimeout(uiRetryTick, said ? 400 : 250);
+}
+/// Still the calm part of being away (see uiLost).
+function uiCalm() {
+  const away = state.uiDownSince ? Date.now() - state.uiDownSince : 0;
+  if (state.uiRestarting) return away < UI_RESTART_CALM_MS;
+  return !state.uiSaid && away < UI_CALM_MS;
 }
 function hostLastKnown() {
   const host = state.overview && state.overview.host;
@@ -1352,12 +1448,17 @@ async function uiRetryTick() {
     return;
   }
   if (r && r.status === 401) {
-    // doz ui is back, but this page's session did not carry over (a new link was made, the port
-    // changed, or the session expired): say so — never hang on "reconnecting".
-    const msg = 'doz ui restarted, and this page’s sign-in did not carry over (a new link was made, or it listens on another port). Open the new link: run doz ui link.';
-    if (state.uiOverlay) uiOverlaySignedOut();
-    else uiBack();
-    signedOut(msg);
+    // doz ui is back, but this page's session did not carry over: say why (605: the 401's code) —
+    // never hang on "reconnecting".
+    let code = '';
+    try { code = (await r.json()).error.code; } catch (_) { /* unknown */ }
+    const msg = code === 'session-expired' ? 'doz ui is back, and this browser’s sign-in had expired (14 days unused).'
+      : code === 'session-rotated' ? 'doz ui restarted with a new link — this page’s sign-in did not carry over.'
+      : 'doz ui restarted, and this page’s sign-in did not carry over (it listens on another port, or its sign-in was lost).';
+    const wasPaused = state.uiOverlay;
+    uiBack();
+    if (wasPaused) banner('ui-stopped', 'bad', [code === 'session-expired' ? 'doz ui is back — this browser’s sign-in expired.' : 'doz ui restarted with a new link — this page is signed out.']);
+    signedOut(msg, code || 'session-rotated');
     return;
   }
   // Still away.
@@ -1372,8 +1473,7 @@ function pausedParts() {
 function showUiOverlay() {
   if (state.uiOverlay) { updateUiOverlay(); return; }
   state.uiOverlay = true;
-  banner('ui-stopped', 'bad', [(state.uiSaid ? 'The doz ui process stopped' : 'This page lost its doz ui server') +
-    ' (last connected ' + clock(state.lastConnected) + ').']);
+  uiStoppedBanner();
   for (const el of pausedParts()) el.inert = true;
   document.body.classList.add('ui-paused');
   const o = $('ui-overlay');
@@ -1391,16 +1491,17 @@ function showUiOverlay() {
 /// which a page that has lost its server can no longer fetch.
 function buildUiOverlay() {
   const o = $('ui-overlay');
-  if (o.querySelector('#ui-try-now')) return;
+  if (o.querySelector('#ui-try-now') || state.signedOut) return;
   const tryNow = h('button', { type: 'button', class: 'btn lg primary', id: 'ui-try-now', on: { click: () => { updateUiOverlay('trying…'); uiRetryTick(); } } },
     withIcon('refresh-cw', 'Try now'));
   o.replaceChildren(h('div', { class: 'ui-ov-card' },
     h('div', { class: 'ui-ov-head' }, h('span', { class: 'ui-ov-spin spin lg', 'aria-hidden': 'true' }),
       h('h2', { id: 'ui-ov-title' }, 'Paused — reconnecting to doz ui…')),
     h('div', { id: 'ui-ov-desc' },
-      h('p', null, 'Nothing on this page works until it reconnects. Run ', h('code', null, 'doz ui'),
+      h('p', { id: 'ui-ov-what' }, 'Nothing on this page works until it reconnects. Run ', h('code', null, 'doz ui'),
         ' in a terminal — this page reconnects by itself (same port), still signed in.'),
       h('p', { class: 'muted', id: 'ui-ov-when' }),
+      h('p', { class: 'muted', id: 'ui-ov-port', hidden: true }),
       h('p', { class: 'muted', id: 'ui-ov-host' })),
     h('div', { class: 'ui-ov-acts' }, tryNow)));
 }
@@ -1409,33 +1510,61 @@ function updateUiOverlay(status) {
   if (!w) return;
   const ago = state.lastConnected ? Math.round((Date.now() - state.lastConnected) / 1000) : null;
   w.textContent = 'Last connected ' + clock(state.lastConnected) + (ago != null ? ' (' + ago + ' s ago)' : '') + '. ' + (status || 'Retrying every second.');
+  paintUiOverlayTone();
 }
-/// The server came back with this page signed out (`--new-link`, another port): the overlay says so.
-function uiOverlaySignedOut() {
-  const o = $('ui-overlay');
-  o.querySelector('.ui-ov-spin')?.remove();
-  $('ui-ov-title').textContent = 'This page was signed out';
-  $('ui-ov-desc').replaceChildren(
-    h('p', null, 'doz ui is back, but this page’s sign-in did not carry over (a new link was made, or it listens on another port).'),
-    h('p', null, 'Run ', h('code', null, 'doz ui link'), ' in a terminal — it opens a fresh one-use link.'));
-  o.querySelector('.ui-ov-acts')?.remove();
-  banner('ui-stopped', 'bad', ['doz ui restarted with a new link — this page is signed out.']);
-  o.focus();
+/// 605: the banner and the overlay's words follow the tone — calm while it is routine, then what to do.
+function uiStoppedBanner() {
+  const calm = uiCalm();
+  const key = calm ? 'calm' : 'stopped';
+  const have = $('banners').querySelector('[data-banner="ui-stopped"]');
+  if (have && have.dataset.tone === key) return;
+  const el = calm ? banner('ui-stopped', 'info', [state.uiRestarting ? 'doz ui is restarting — reconnecting…' : 'Reconnecting to Dozer…'])
+    : banner('ui-stopped', 'bad', [(state.uiSaid ? 'The doz ui process stopped' : 'This page lost its doz ui server') +
+      ' (last connected ' + clock(state.lastConnected) + ').']);
+  el.dataset.tone = key;
+}
+function paintUiOverlayTone() {
+  const t = $('ui-ov-title'), what = $('ui-ov-what');
+  if (!t || !what || state.signedOut) return;
+  const calm = uiCalm();
+  uiStoppedBanner();
+  $('ui-overlay').dataset.tone = calm ? 'calm' : 'stopped';
+  setLive(calm ? '' : 'bad', state.uiRestarting && calm ? 'restarting…' : state.uiSaid ? 'stopped — retrying' : 'reconnecting…');
+  if (calm) {
+    t.textContent = 'Reconnecting to Dozer…';
+    what.replaceChildren(state.uiRestarting ? 'doz ui is restarting — this page resumes by itself, still signed in, and its terminals reattach.'
+      : 'This page resumes by itself as soon as doz ui answers again — still signed in, its terminals reattach.');
+  } else {
+    t.textContent = 'Paused — reconnecting to doz ui…';
+    what.replaceChildren('Nothing on this page works until it reconnects. Run ', h('code', null, 'doz ui'),
+      ' in a terminal — this page reconnects by itself (same port), still signed in.');
+  }
+  const port = $('ui-ov-port');
+  const away = state.uiDownSince ? Date.now() - state.uiDownSince : 0;
+  if (port) {
+    port.hidden = away < UI_OTHER_PORT_MS;
+    if (!port.hidden && !port.childNodes.length) {
+      port.append('If doz ui is running on another port, run ', h('code', null, 'doz ui'), ' — it opens the right page. This page expected ',
+        h('code', null, location.host), '.');
+    }
+  }
 }
 /// Reconnected: the overlay goes by itself; the page refreshes (on `hello`).
 function uiBack() {
   state.uiDown = false;
   state.uiDownSince = null;
   state.uiSaid = false;
+  state.uiRestarting = false;
   clearTimeout(state.uiRetry);
   state.uiRetry = null;
   dropBanner('ui-stopped');
-  if (!state.uiOverlay) return;
+  if (!state.uiOverlay || state.signedOut) return;
   state.uiOverlay = false;
   for (const el of pausedParts()) el.inert = false;
   if (state.modal) modalInert(true);                   // 603: a wizard's modal keeps the page under it inert
   document.body.classList.remove('ui-paused');
   $('ui-overlay').hidden = true;
+  delete $('ui-overlay').dataset.tone;
   (state.modal ? $('wm-box') : $('main')).focus();
 }
 
@@ -1443,14 +1572,18 @@ function connect() {
   if (state.signedOut) return;
   const es = new EventSource('/api/v1/stream');
   state.es = es;
-  es.addEventListener('hello', async () => {
+  es.addEventListener('hello', async (ev) => {
+    let hello = {};
+    try { hello = JSON.parse(ev.data); } catch (_) { /* an older doz ui: no build named */ }
     setLive('on', 'live');
     uiBack();
     buildUiOverlay();
-    try { for (const o of await api('operations')) state.ops.set(o.id, o); renderOps(); } catch (_) { /* */ }
+    checkBuild(hello);
+    try { adoptOperations(await api('operations')); } catch (_) { /* */ }
     loadPreparations();
     refreshNav();
     refresh(true);
+    reattachTerminals();
   });
   // The Settings page is not about the store's live state: re-rendering it would drop a half-typed
   // value; nor is Operations (its own events keep it current), nor the onboarding wizard (its own).
@@ -1481,18 +1614,103 @@ function connect() {
     es.close();
     let reason = '';
     try { reason = JSON.parse(ev.data).reason; } catch (_) { /* */ }
-    if (reason === 'session-ended') { signedOut('The session ended.'); return; }
+    if (reason === 'session-ended') { signedOut('This browser’s session ended.', 'signed-out'); return; }
     if (reason === 'shutdown') { uiLost(true); return; }
+    // 605: `doz ui restart` — calm; the same port and session.
+    if (reason === 'restarting') { uiLost(false, 'restarting'); return; }
+    // 605: `doz ui restart` moved the UI to another port: say where (it opened a page there itself).
+    if (reason === 'moved') { let to = ''; try { to = JSON.parse(ev.data).origin; } catch (_) { /* */ } movedAway(to); return; }
     // 594 W19: `doz ui --new-link` / `doz ui link --rotate` ended every session.
-    if (reason === 'rotated') { signedOut('A new link was made for this UI (doz ui --new-link, or doz ui link --rotate): every page signed out. Open the new link — or run doz ui link.'); return; }
+    if (reason === 'rotated') { signedOut('A new link was made for this UI (doz ui --new-link, or doz ui link --rotate): every page signed out. Open the new link — or run doz ui link.', 'session-rotated'); return; }
     setTimeout(connect, 500);
   });
   // A broken stream (doz ui killed, the Mac asleep): the page's own retry, never the browser's
   // (which would hammer a new doz ui with a session it does not know).
   es.onerror = () => {
-    if (state.signedOut || state.es !== es) return;
+    if (state.signedOut || state.uiMoved || state.es !== es) return;
     uiLost(false);
   };
+}
+
+/// 605: the operations the server knows. A running one it reports ended goes through trackOp (its
+/// sandbox's transition ends); a running one this page had that the server does not know any more (an
+/// older doz ui kept no record) ends here as interrupted — never a forever-spinner.
+function adoptOperations(list) {
+  const ids = new Set(list.map((o) => o.id));
+  for (const o of list) {
+    const b = state.ops.get(o.id);
+    if (b && b.state === 'running' && o.state !== 'running') trackOp(o); else state.ops.set(o.id, o);
+  }
+  for (const o of [...state.ops.values()]) {
+    if (o.state === 'running' && !ids.has(o.id)) {
+      trackOp({ ...o, state: 'interrupted', interrupted: true, text: 'doz ui restarted while it ran; this page lost track of it',
+                milliseconds: Date.now() - new Date(o.startedAt).getTime() });
+    }
+  }
+  renderOps();
+  paintRowOps();
+}
+/// 605: `hello` names the build's page files; this document's differ → doz ui was updated underneath it.
+function checkBuild(hello) {
+  if (!hello || !hello.script) return;
+  const script = document.querySelector('script[src^="/assets/app-"]');
+  const style = document.querySelector('link[rel="stylesheet"][href^="/assets/app-"]');
+  const mine = (script && script.getAttribute('src')) + '|' + (style && style.getAttribute('href'));
+  if (mine === hello.script + '|' + hello.style) return;
+  state.updateTo = hello.version || 'a new build';
+  banner('ui-updated', 'info', ['Dozer was updated to ' + state.updateTo + ' — reload this page to use it.'],
+    [btn('Reload', () => location.reload(), { small: true, primary: true, icon: 'refresh-cw' })]);
+  // It reloads by itself once nothing would be lost; until then the banner waits for the click.
+  clearInterval(state.reloadTimer);
+  state.reloadTimer = setInterval(() => { if (!state.uiDown && !state.signedOut && pageIsIdle()) location.reload(); }, 3000);
+}
+/// Nothing would be lost by a reload now: no wizard or dialog open, no interactive terminal focused, no
+/// field focused, nothing typed in a field.
+function pageIsIdle() {
+  if (state.modal || document.querySelector('dialog[open]')) return false;
+  const a = document.activeElement;
+  if (a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.tagName === 'SELECT')) return false;
+  if (a && a.tagName === 'IFRAME') {
+    const t = [...terminals.values()].find((x) => x.frame === a);
+    if (t && t.mode === 'interactive') return false;
+  }
+  return ![...document.querySelectorAll('input[data-typed], textarea[data-typed]')].some((e) => e.isConnected && e.value !== '');
+}
+// A field the person typed in (a value set by the page itself is not "typed").
+document.addEventListener('input', (ev) => { const t = ev.target; if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) t.dataset.typed = ''; }, true);
+/// 605: `doz ui restart` moved doz ui to another port (ui.port). A page cannot follow by itself — a
+/// script's navigation to another port is "same-site", which the server's Fetch-Metadata rule refuses —
+/// so the new doz ui opened the dashboard there, and this page says where it went (and stops retrying).
+function movedAway(to) {
+  if (!/^https?:\/\/(127\.0\.0\.1|\[::1\]):\d{2,5}$/.test(to || '')) { uiLost(true); return; }
+  state.uiMoved = true;
+  if (state.es) { state.es.close(); state.es = null; }
+  clearTimeout(state.uiRetry);
+  state.uiRetry = null;
+  setLive('', 'moved');
+  const addr = to.replace(/^https?:\/\//, '');
+  const b = banner('ui-stopped', 'info', ['doz ui moved to ' + addr + '.']);
+  b.dataset.tone = 'calm';
+  const o = $('ui-overlay');
+  const copy = h('button', { type: 'button', class: 'btn', id: 'ui-copy-addr' }, withIcon('copy', 'Copy the address'));
+  copy.addEventListener('click', () => { navigator.clipboard.writeText(to).then(() => toast('Copied ' + to, false), () => toast('Copy it by hand: ' + to, true)); });
+  o.replaceChildren(h('div', { class: 'ui-ov-card' },
+    h('div', { class: 'ui-ov-head' }, h('h2', { id: 'ui-ov-title' }, 'Dozer moved to ' + addr)),
+    h('div', { id: 'ui-ov-desc' },
+      h('p', null, 'doz ui now listens on another port (the setting ui.port), and opened the dashboard there in a new tab — this one can be closed.'),
+      h('p', { class: 'muted' }, 'An installed Dozer app belongs to its port: install it again from the new page. In a terminal, ', h('code', null, 'doz ui link'),
+        ' opens a page on the new port.')),
+    h('div', { class: 'ui-ov-acts' }, copy)));
+  for (const el of pausedParts()) el.inert = true;
+  document.body.classList.add('ui-paused');
+  o.dataset.tone = 'calm';
+  o.setAttribute('role', 'dialog');
+  o.setAttribute('aria-modal', 'true');
+  o.setAttribute('aria-labelledby', 'ui-ov-title');
+  o.setAttribute('aria-describedby', 'ui-ov-desc');
+  o.hidden = false;
+  state.uiOverlay = true;
+  copy.focus();
 }
 
 // ── the nav: a child per sandbox (593) ──────────────────────────────────────
@@ -1585,7 +1803,17 @@ function routePage() {
   if (onGrid) { gridEnter(); return; }
   refresh(true);
 }
-window.addEventListener('hashchange', () => { if (!state.signedOut) route(); });
+window.addEventListener('hashchange', () => {
+  // 605: a link opened in this tab while it waits to sign in signs it in, in place.
+  if (state.signedOut && /^#cap=[A-Za-z0-9_-]{16,256}$/.test(location.hash)) {
+    const link = location.href;
+    history.replaceState(null, '', location.pathname + (state.bgHash || '#/overview'));
+    const field = $('signin-link');
+    if (field) { field.value = link; $('signin-form').requestSubmit(); }
+    return;
+  }
+  if (!state.signedOut) route();
+});
 
 // ── 603: the wizards' modal ─────────────────────────────────────────────────
 // A real dialog (role=dialog, aria-modal, labelled by the wizard's title): the rest of the page is inert while it
@@ -5060,9 +5288,12 @@ async function openTerminal(sandbox, session, mode, pane, opts = {}) {
   if (await bootTerm(t, setting('ui.terminal_font_size', 13))) focusTerm(t);
 }
 
-async function connectTerminal(t) {
+/// 605: `opts.reattach` — the page had this terminal (doz ui restarted, or a sign-in again): the server
+/// keeps its scrollback; the answer is 'ok', 'retry' (busy: too many terminals or tickets) or 'failed'.
+async function connectTerminal(t, opts = {}) {
   const body = { mode: t.mode };
   if (t.session) body.session = t.session;
+  if (opts.reattach) body.reattach = true;
   if (t.mode === 'interactive') {
     body.cols = Math.max(2, Math.min(1000, t.cols));
     body.rows = Math.max(1, Math.min(500, t.rows));
@@ -5071,14 +5302,22 @@ async function connectTerminal(t) {
   try {
     ticket = (await api('sandboxes/' + t.sandbox + '/terminal-ticket', { method: 'POST', json: body })).ticket;
   } catch (e) {
-    t.errorText = e.message || String(e);
+    if (opts.reattach) {
+      if (e.status === 503) return 'retry';
+      if (e.status === 401) { t.reattach = true; paintCover(t); return 'failed'; }     // signedOut() follows
+      t.disconnected = 'it could not reattach (' + (e.message || e) + ')';
+    } else {
+      t.errorText = e.message || String(e);
+    }
     paintCover(t);
     paintTabs();
-    return;
+    return 'failed';
   }
-  if (t.closed) return;
-  // The ticket rides in the subprotocol list, never in the URL; it works once, within 30 s.
-  const ws = new WebSocket('ws://' + location.host + '/api/v1/sandboxes/' + t.sandbox + '/terminal-socket',
+  if (t.closed) return 'failed';
+  // The ticket rides in the subprotocol list, never in the URL; it works once, within 30 s. 605: wss on an
+  // https page (the dashboard served to other machines).
+  const scheme = location.protocol === 'https:' ? 'wss://' : 'ws://';
+  const ws = new WebSocket(scheme + location.host + '/api/v1/sandboxes/' + t.sandbox + '/terminal-socket',
                            ['doz-terminal.v1', 'doz-ticket.' + ticket]);
   ticket = null;
   ws.binaryType = 'arraybuffer';
@@ -5090,11 +5329,53 @@ async function connectTerminal(t) {
   });
   ws.addEventListener('message', (ev) => onTerminalMessage(t, ev));
   ws.addEventListener('close', (ev) => onTerminalClose(t, ws, ev));
+  return 'ok';
+}
+
+/// 605 (C.2): terminals come back by themselves — after doz ui restarted (`hello`), a sign-in again, or a
+/// socket that dropped while doz ui still answers. One at a time, at most 16, a back-off when the server
+/// is busy. What was typed in the gap is dropped, never queued (591).
+async function reattachTerminals() {
+  if (state.reattaching) { state.reattachAgain = true; return; }
+  state.reattaching = true;
+  try {
+    let n = 0;
+    for (const t of [...terminals.values()]) {
+      if (!t.reattach || t.closed) continue;
+      if (state.uiDown || state.signedOut || state.uiMoved || !state.csrf) break;
+      if (++n > 16) break;
+      for (let attempt = 0; attempt < 4; attempt++) {
+        t.reattach = false;
+        t.state = null;
+        t.disconnected = '';
+        t.reattached = true;
+        paintCover(t);
+        const r = await connectTerminal(t, { reattach: true });
+        if (r !== 'retry') break;
+        t.reattach = true;
+        await new Promise((res) => setTimeout(res, 1000 * 2 ** attempt));
+      }
+      if (t.reattach && !state.signedOut && !state.uiDown) { t.reattach = false; t.disconnected = 'it could not reattach — the server is busy'; paintCover(t); }
+    }
+  } finally {
+    state.reattaching = false;
+    if (state.reattachAgain) { state.reattachAgain = false; reattachTerminals(); }
+  }
+  paintTabs();
+}
+function termNote(t, text, ms = 4000) {
+  const n = t.els.note;
+  n.textContent = text.slice(0, 80);
+  n.hidden = false;
+  t.els.wrap.dataset.notice = n.textContent;
+  clearTimeout(t.noticeTimer);
+  t.noticeTimer = setTimeout(() => { n.hidden = true; }, ms);
 }
 
 function onTerminalMessage(t, ev) {
   if (typeof ev.data !== 'string') {
     toFrame(t, { t: 'write', data: ev.data }, [ev.data]);
+    if (t.reattached) { t.reattached = false; t.els.wrap.dataset.reattached = String((+t.els.wrap.dataset.reattached || 0) + 1); termNote(t, 'Reconnected', 3000); }
     return;
   }
   let m;
@@ -5104,14 +5385,7 @@ function onTerminalMessage(t, ev) {
     if (t.bootIntent && m.cover && !['shutDown', 'failed', 'reattaching'].includes(m.cover.kind)) t.bootIntent = false;
     if (m.session) t.session = m.session;
     // "woke in 0.4 s": one line over the screen, for a few seconds.
-    if (typeof m.notice === 'string' && m.notice) {
-      const n = t.els.note;
-      n.textContent = m.notice.slice(0, 80);
-      n.hidden = false;
-      t.els.wrap.dataset.notice = n.textContent;
-      clearTimeout(t.noticeTimer);
-      t.noticeTimer = setTimeout(() => { n.hidden = true; }, 4000);
-    }
+    if (typeof m.notice === 'string' && m.notice) termNote(t, m.notice);
   } else if (m.t === 'notice') {
     if (typeof m.kind === 'string' && typeof m.text === 'string') bridgeNotice(m.kind, m.text);
     return;
@@ -5132,7 +5406,17 @@ function onTerminalClose(t, ws, ev) {
   if (t.ws === ws) t.ws = null;
   clearInterval(t.pinger);
   if (t.closed || t.ended || t.errorText) return;
-  if (ev.reason === 'session-ended') return;            // signedOut() follows
+  // 605: a terminal that was attached comes back by itself — when doz ui restarts or stops (it reattaches
+  // on the next `hello`), when this page must sign in again (after the sign-in), or when the socket
+  // dropped while doz ui still answers (now). Never after an end, a long silence or a refusal.
+  if (t.opened && (['session-ended', 'shutdown', 'restarting'].includes(ev.reason) || ev.code === 1006)) {
+    t.reattach = true;
+    t.disconnected = '';
+    paintCover(t);
+    paintTabs();
+    setTimeout(() => { if (!state.uiDown && !state.signedOut) reattachTerminals(); }, 1000);
+    return;
+  }
   t.disconnected = !t.opened ? 'the terminal socket was refused — open it again'
     : ev.reason === 'shutdown' ? 'the doz ui process stopped'
     : ev.reason === 'idle' ? 'closed after a long silence'
@@ -5248,6 +5532,10 @@ function paintCover(t) {
     kind = 'working'; headline = 'Starting the sandbox…'; spinner = true;
   }
   else if (t.ended) { kind = 'ended'; headline = 'The session ended'; detail = t.endText; }
+  else if (t.reattach) {
+    kind = 'reattaching'; headline = 'Reconnecting…'; spinner = true;
+    detail = state.signedOut ? 'it reattaches once this page is signed in again' : 'it reattaches by itself when doz ui answers again';
+  }
   else if (t.disconnected) { kind = 'disconnected'; headline = 'Disconnected'; detail = t.disconnected; action = 'Reconnect'; }
   else if (!t.state) { kind = 'reattaching'; headline = 'Attaching…'; spinner = true; }
   else {
@@ -6031,8 +6319,11 @@ $('nav-toggle').addEventListener('click', (ev) => { ev.stopPropagation(); navRai
 document.addEventListener('click', (ev) => { if (document.body.classList.contains('nav-open') && !ev.target.closest('.side')) navRail(false); });
 document.addEventListener('keydown', (ev) => { if (ev.key === 'Escape' && document.body.classList.contains('nav-open')) navRail(false); });
 
-(async () => {
-  if (await bootstrap()) {
+/// The page's start, once signed in (at load, or — 605 — after its first sign-in inside the page).
+async function startApp() {
+  if (state.started) return;
+  state.started = true;
+  {
     if (!/^#\/[a-z]/.test(location.hash)) history.replaceState(null, '', location.pathname + '#/overview');
     await loadSettings();
     // 594 (D8): a store never onboarded opens on the setup wizard (once per page load).
@@ -6055,4 +6346,5 @@ document.addEventListener('keydown', (ev) => { if (ev.key === 'Escape' && docume
     // 599 (594.B4): the tabs' {time}, at each minute.
     setTimeout(() => { paintTabs(); setInterval(paintTabs, 60000); }, 60000 - (Date.now() % 60000) + 50);
   }
-})();
+}
+(async () => { if (await bootstrap()) startApp(); })();

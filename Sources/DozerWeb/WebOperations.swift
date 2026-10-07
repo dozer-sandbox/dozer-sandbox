@@ -9,10 +9,18 @@ import DozerHost
 ///
 /// Bounded: at most `maxRunning` at once (503 beyond), the last `keep` remembered. The outcome shown
 /// is a line this file writes from the result — the host's result itself is never sent on.
+///
+/// 605: the ring is kept in `<store>/ui.operations.json` (0600; written when an operation starts or
+/// ends — the lines this file wrote, never a host result, never a secret). A `doz ui` that restarts while
+/// one runs leaves the HOST running it (a plain request is not cancelled when its client goes); the next
+/// `doz ui` loads the ring, marks each running one interrupted, and resolves it from the monitor's
+/// overview (`reconcile`) — the sandbox reached the phase the operation was for, failed, or is somewhere
+/// else — so no page ever shows a forever-running operation.
 final class WebOperations: @unchecked Sendable {
     let data: DozerWebData
     let hub: SSEHub
     let monitor: WebMonitor
+    let file: URL?
     let maxRunning = 8
     let keep = 50
     private let lock = NSLock()
@@ -22,10 +30,75 @@ final class WebOperations: @unchecked Sendable {
     /// What runs now, by `WebAction.dedupeKey` — a repeat of an in-flight action is refused (409).
     private var inFlight: Set<String> = []
 
-    init(data: DozerWebData, hub: SSEHub, monitor: WebMonitor) {
+    init(data: DozerWebData, hub: SSEHub, monitor: WebMonitor, file: URL? = nil, now: Date = Date()) {
         self.data = data
         self.hub = hub
         self.monitor = monitor
+        self.file = file
+        guard let file, let d = try? Data(contentsOf: file), let saved = try? WebJSON.decoder.decode([WebOperation].self, from: d) else { return }
+        ops = Array(saved.suffix(keep)).map { o in
+            var o = o
+            if o.state == "running" {
+                o.interrupted = true
+                o.text = Self.interruptedText
+            }
+            return o
+        }
+    }
+
+    static let interruptedText = "interrupted — doz ui restarted while it ran; the host carried on"
+
+    /// Write the ring (0600, atomically).
+    private func save() {
+        guard let file else { return }
+        let snapshot = recent
+        WebSessionStore.write(snapshot.isEmpty ? nil : try? WebJSON.encoder.encode(snapshot), to: file)
+    }
+
+    /// 605: resolve the operations an earlier `doz ui` left running, from an overview.
+    func reconcile(_ o: WebOverview, now: Date = Date()) {
+        let rows = Dictionary(o.sandboxes.map { ($0.name, $0) }, uniquingKeysWith: { a, _ in a })
+        let changed: [WebOperation] = lock.withLock {
+            var out: [WebOperation] = []
+            for i in ops.indices where ops[i].state == "running" && ops[i].interrupted == true {
+                guard let (state, text) = Self.resolution(ops[i], rows: rows, now: now) else { continue }
+                ops[i].state = state
+                ops[i].text = text
+                ops[i].milliseconds = max(0, now.timeIntervalSince(ops[i].startedAt) * 1000)
+                out.append(ops[i])
+            }
+            return out
+        }
+        guard !changed.isEmpty else { return }
+        save()
+        for c in changed { hub.broadcast("op", c) }
+        onChange?(recent)
+    }
+
+    /// The phase each lifecycle operation is for (`rm`: gone; `create`: there).
+    static let targetPhase: [String: String] = ["start": "running", "wake": "running", "resume": "running", "pause": "paused",
+                                                "sleep": "asleep", "hibernate": "hibernated", "shutdown": "off", "reset": "off"]
+
+    /// What an interrupted operation became, judged from the sandbox now — nil while it is still under
+    /// way (busy or booting), for at most 30 minutes.
+    static func resolution(_ op: WebOperation, rows: [String: WebSandboxRow], now: Date) -> (String, String)? {
+        let unknown = ("interrupted", "doz ui restarted while it ran; the host carried it on — its outcome was not seen here")
+        guard let name = op.sandbox, targetPhase[op.action] != nil || op.action == "rm" || op.action == "create" else { return unknown }
+        let row = rows[name]
+        if let row, row.busy || row.phase == "booting" {
+            return now.timeIntervalSince(op.startedAt) > 30 * 60 ? unknown : nil
+        }
+        switch op.action {
+        case "rm":
+            return row == nil ? ("done", "\(name) removed — finished while doz ui restarted") : ("interrupted", "doz ui restarted while it ran; \(name) is still there")
+        case "create":
+            return row != nil ? ("done", "created \(name) — finished while doz ui restarted") : ("interrupted", "doz ui restarted while it ran; \(name) was not created")
+        default:
+            guard let row else { return ("interrupted", "doz ui restarted while it ran; \(name) is gone") }
+            if row.phase == targetPhase[op.action] { return ("done", "\(name) is \(row.phaseLabel) — finished while doz ui restarted") }
+            if row.phase == "failed" { return ("failed", "\(name) failed while doz ui restarted — its Boot log says why") }
+            return ("interrupted", "doz ui restarted while it ran; the host carried on — \(name) is now \(row.phaseLabel)")
+        }
     }
 
     var recent: [WebOperation] { lock.withLock { ops } }
@@ -52,6 +125,7 @@ final class WebOperations: @unchecked Sendable {
         }
         hub.broadcast("op", op)
         onChange?(recent)
+        save()
         let t0 = ContinuousClock.now
         let request = action.hostRequest
         Task {
@@ -78,6 +152,7 @@ final class WebOperations: @unchecked Sendable {
             }
             if let final { hub.broadcast("op", final) }
             onChange?(recent)
+            save()
             await monitor.poke()
         }
         return op

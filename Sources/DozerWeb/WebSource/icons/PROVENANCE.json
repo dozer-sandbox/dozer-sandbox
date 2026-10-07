@@ -1,0 +1,41 @@
+{
+  "renderer": "Scripts/render-web-icons.mjs — headless Google Chrome over the DevTools protocol, transparent background, device scale 1",
+  "sources": [
+    {
+      "file": "icon.svg",
+      "served": true,
+      "sha256": "d1299237fa178c3d811f57cea71a7aa9b668c5d418e28e741260d993744351b6"
+    },
+    {
+      "file": "icon-maskable.svg",
+      "served": false,
+      "sha256": "af23d011fd7b3654d3925350d284fa4b210e16f3f68b6ed8b1ede8f5d9742d51"
+    }
+  ],
+  "files": [
+    {
+      "file": "icon-192.png",
+      "from": "icon.svg",
+      "size": 192,
+      "sha256": "574d4c0403e40a580b921c78a7c5f3db544d1a5ee5882abd92b610eda3c52169"
+    },
+    {
+      "file": "icon-512.png",
+      "from": "icon.svg",
+      "size": 512,
+      "sha256": "a4352d6d216ea39c62008147e6bfb313718847610119c0a5953ac504274eea2c"
+    },
+    {
+      "file": "icon-maskable-512.png",
+      "from": "icon-maskable.svg",
+      "size": 512,
+      "sha256": "3e4d1a2a93dde7038dfd0ad2fbe3aa628e13fc924f4d6fca86ea3a302ba1433a"
+    },
+    {
+      "file": "icon-180.png",
+      "from": "icon-maskable.svg",
+      "size": 180,
+      "sha256": "05b92a010472981aeedd622ea5422218b688295ac427eb4e0f5f1ea0ea4b8487"
+    }
+  ]
+}

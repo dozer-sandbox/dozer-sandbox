@@ -990,6 +990,15 @@ dialog.dlg form { display: flex; flex-direction: column; max-height: calc(100vh 
 .ui-ov-card #ui-ov-desc > p:first-child { color: var(--ink); }
 .ui-ov-acts { margin-top: 14px; display: flex; justify-content: flex-end; }
 .ui-ov-spin { color: var(--accent); }
+/* 605: calm while doz ui restarts (the first 15 s, or `doz ui restart`): no alarm, a quieter scrim. */
+.ui-overlay[data-tone="calm"] { background: color-mix(in srgb, var(--scrim) 55%, transparent); }
+/* 605: the sign-in inside the page — over what the page shows (it stays as it was). */
+.signin-form { margin-top: 14px; }
+.signin-label { display: block; font-weight: var(--fw-strong); color: var(--ink); margin-bottom: 6px; }
+.signin-row { display: flex; gap: 8px; align-items: center; }
+.signin-row input { flex: 1; min-width: 0; }
+.ui-ov-card p.signin-err { color: var(--bad); }
+.op-interrupted .op-state, .op-row.op-interrupted .op-state { color: var(--ink-2); }
 @media (max-width: 760px) { .callout .c-acts { grid-column: 2; grid-row: auto; justify-content: flex-start; margin-top: 4px; } }
 .df-state .icon { width: 14px; height: 14px; vertical-align: -2px; }
 .quick-why { margin: 0; }

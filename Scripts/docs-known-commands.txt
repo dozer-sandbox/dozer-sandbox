@@ -80,7 +80,8 @@ host/status
 host/upgrade-check
 ui
 ui/link
-ui/serve
+ui/restart
+ui/start
 template
 template/create
 template/ls

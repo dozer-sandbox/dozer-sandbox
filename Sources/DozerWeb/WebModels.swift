@@ -1074,6 +1074,15 @@ public struct WebActivity: Codable, Equatable, Sendable {
 }
 
 /// `GET /api/v1/session`, and the bootstrap's answer.
+/// 605: the event stream's first event. `script`/`style`: this build's hashed page files — a page whose
+/// own differ was loaded from an older (or newer) doz ui, and offers a reload.
+public struct WebHello: Codable, Equatable, Sendable {
+    public var serverRun: String
+    public var version: String
+    public var script: String?
+    public var style: String?
+}
+
 public struct WebSessionInfo: Codable, Equatable, Sendable {
     public var csrf: String
     public var expiresAt: Date

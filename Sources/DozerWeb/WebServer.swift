@@ -89,7 +89,8 @@ public final class DozerWebServer: @unchecked Sendable {
 
     private init(origin: WebOrigin, version: String, limits: WebLimits, assets: WebAssets, data: DozerWebData,
                  capability: WebBootstrapCapability, pollInterval: Duration, gate: UpgradeGate,
-                 listener: NIOAsyncChannel<Accepted, Never>, settings: WebSettingsStore, sessionsFile: URL?) {
+                 listener: NIOAsyncChannel<Accepted, Never>, settings: WebSettingsStore, sessionsFile: URL?,
+                 revokedFile: URL?, operationsFile: URL?) {
         self.origin = origin
         self.settings = settings
         folderPicker = WebFolderPicker(environment: settings.environment)
@@ -101,12 +102,14 @@ public final class DozerWebServer: @unchecked Sendable {
         self.capability = capability
         self.listener = listener
         self.gate = gate
-        sessions = WebSessionStore(bootstrap: capability, limits: limits, persist: sessionsFile, port: origin.port)
+        sessions = WebSessionStore(bootstrap: capability, limits: limits, persist: sessionsFile, port: origin.port, revoked: revokedFile)
         hub = SSEHub(maxClients: limits.maximumSSEClients, capacity: limits.maximumBufferedSSEEvents)
         tickets = WebTerminalTicketStore()
         terminals = WebTerminalHub()
         monitor = WebMonitor(data: data, hub: hub, terminals: terminals, pollInterval: pollInterval)
-        operations = WebOperations(data: data, hub: hub, monitor: monitor)
+        operations = WebOperations(data: data, hub: hub, monitor: monitor, file: operationsFile)
+        let ops = operations
+        monitor.overviewHook.set { ops.reconcile($0) }
         let (terminals, monitor) = (self.terminals, self.monitor)
         terminals.operations = operations
         terminals.onOpen = { Task { await monitor.streamOpened() } }
@@ -114,19 +117,22 @@ public final class DozerWebServer: @unchecked Sendable {
     }
 
     /// Bind the listener (loopback; the OS's port, or `address`'s reused one — 594 W18 — falling
-    /// back to the OS's when it is taken). `run()` then serves. `settings`: the settings file this
-    /// UI reads and writes (591) — `doz ui` passes its own environment; the default reads no file
-    /// (every setting at its default: tests that do not test settings never see a real one).
+    /// back to the OS's when it is taken, unless `fixedPort`: 605's `ui.port` set to a port, which never
+    /// moves silently). `run()` then serves. `settings`: the settings file this UI reads and writes
+    /// (591) — `doz ui` passes its own environment; the default reads no file (every setting at its
+    /// default: tests that do not test settings never see a real one). 605: `revokedFile` keeps why a
+    /// cookie no longer signs in; `operationsFile` the operations ring across a restart.
     public static func bind(data: DozerWebData, assets: WebAssets, version: String, limits: WebLimits = .standard,
                             settings: WebSettingsStore = WebSettingsStore(environment: [:]),
                             capability: WebBootstrapCapability = .make(), pollInterval: Duration = .seconds(3),
-                            address: WebLoopbackAddress = WebLoopbackAddress(), sessionsFile: URL? = nil,
+                            address: WebLoopbackAddress = WebLoopbackAddress(), fixedPort: Bool = false, sessionsFile: URL? = nil,
+                            revokedFile: URL? = nil, operationsFile: URL? = nil,
                             group: EventLoopGroup = MultiThreadedEventLoopGroup.singleton) async throws -> DozerWebServer {
         let gate = UpgradeGate()
         let listener: NIOAsyncChannel<Accepted, Never>
         do {
             listener = try await listen(address, gate: gate, group: group)
-        } catch where address.port != 0 {
+        } catch where address.port != 0 && !fixedPort {
             // 594 W18: the last port is taken after all (a race with its check): the OS picks.
             listener = try await listen(WebLoopbackAddress(), gate: gate, group: group)
         }
@@ -136,7 +142,7 @@ public final class DozerWebServer: @unchecked Sendable {
         }
         let server = DozerWebServer(origin: try WebOrigin(port: port), version: version, limits: limits, assets: assets, data: data,
                                      capability: capability, pollInterval: pollInterval, gate: gate, listener: listener,
-                                     settings: settings, sessionsFile: sessionsFile)
+                                     settings: settings, sessionsFile: sessionsFile, revokedFile: revokedFile, operationsFile: operationsFile)
         gate.server = server
         return server
     }
@@ -218,8 +224,19 @@ public final class DozerWebServer: @unchecked Sendable {
     public func rotate() async -> URL {
         await sessions.revokeAll()
         for c in hub.all { c.finish(.rotated) }
-        await terminals.closeAll()
+        // 605: the page keeps its terminals and reattaches them after it signs in again.
+        await terminals.closeAll(reason: "session-ended")
         return await newLink()
+    }
+
+    /// 605: how this server stops.
+    public enum Stop: Sendable, Equatable {
+        /// doz ui stops (Ctrl-C, a signal): pages say doz ui stopped.
+        case shutdown
+        /// `doz ui restart` on the same port: pages stay calm and reconnect (sessions kept).
+        case restarting
+        /// `doz ui restart` onto another port: each open page is told where it went.
+        case moving(WebOrigin)
     }
 
     /// Serve until `close()`.
@@ -249,13 +266,22 @@ public final class DozerWebServer: @unchecked Sendable {
     /// Stop: no new connections, every stream told `shutdown`, every terminal closed (1001), every
     /// connection closed. Links die with the process; sessions too, unless kept for the next UI on
     /// the same port (594 W19, `WebSessionStore`'s `persist`).
-    public func close() async {
+    public func close(_ how: Stop = .shutdown) async {
         let open: [Channel] = lock.withLock {
             closing = true
             return Array(children.values)
         }
-        hub.finishAll(.shutdown)
-        await terminals.closeAll()
+        switch how {
+        case .shutdown:
+            hub.finishAll(.shutdown)
+            await terminals.closeAll()
+        case .restarting:
+            hub.finishAll(.restarting)
+            await terminals.closeAll(reason: "restarting")
+        case .moving(let to):
+            hub.finishAll(.moved(to.value))
+            await terminals.closeAll(reason: "restarting")
+        }
         await monitor.stop()
         try? await Task.sleep(for: .milliseconds(100))           // let the streams write their last frame
         try? await listener.channel.close()
@@ -479,6 +505,14 @@ public final class DozerWebServer: @unchecked Sendable {
             try WebSecurity.validateStatic(md, origin)
             guard let a = assets.assets[WebAssets.frameDocument] else { throw WebRejection.notFound }
             return .response(200, [("Content-Type", a.mimeType), ("Cache-Control", a.cachePolicy)] + WebSecurity.frameHeaders, a.data)
+        case .offline:
+            try WebSecurity.validateStatic(md, origin)
+            guard let a = assets.assets[WebAssets.offlineDocument] else { throw WebRejection.notFound }
+            return .response(200, [("Content-Type", a.mimeType), ("Cache-Control", a.cachePolicy)], a.data)
+        case .serviceWorker:
+            try WebSecurity.validateStatic(md, origin)
+            guard let a = assets.assets[WebAssets.serviceWorker] else { throw WebRejection.notFound }
+            return .response(200, [("Content-Type", a.mimeType), ("Cache-Control", a.cachePolicy)] + WebSecurity.serviceWorkerHeaders, a.data)
         case .sessionBootstrap:
             let cap = try WebSecurity.validateBootstrap(md, origin, limit: limits.maximumRequestBodyBytes)
             let s = try await sessions.exchange(cap)
@@ -491,7 +525,7 @@ public final class DozerWebServer: @unchecked Sendable {
         let session = md.method.isSafe ? try await sessions.authenticate(cookie)
                                        : try await sessions.authenticateMutation(cookie, csrf: md.csrfToken)
         switch route {
-        case .index, .asset, .sessionBootstrap, .terminalFrame:
+        case .index, .asset, .sessionBootstrap, .terminalFrame, .offline, .serviceWorker:
             throw WebRejection.notFound
         case .sessionInfo:
             return json(sessionInfo(session))
@@ -556,7 +590,7 @@ public final class DozerWebServer: @unchecked Sendable {
             try Self.requireJSONBody(md)
             guard settings.terminalsEnabled else { throw WebRejection.terminalsOff }
             let r = try WebTerminalTicketRequest.decode(body)
-            let t = try await tickets.mint(cookie: cookie, sandbox: name, session: r.session, mode: r.mode, size: r.size)
+            let t = try await tickets.mint(cookie: cookie, sandbox: name, session: r.session, mode: r.mode, size: r.size, reattach: r.reattach)
             return json(WebTerminalTicketInfo(ticket: t, expiresInSeconds: Int(tickets.lifetime), session: r.session, mode: r.mode))
         case .terminalSocket:
             throw WebRejection.upgradeRequired            // answered in respond(); never dispatched
@@ -718,8 +752,10 @@ public final class DozerWebServer: @unchecked Sendable {
         h.add(name: "Content-Type", value: "text/event-stream; charset=utf-8")
         h.add(name: "Cache-Control", value: "no-store")
         try await outbound.write(.head(HTTPResponseHead(version: head.version, status: .ok, headers: h)))
-        // `hello` first: the page (re)fetches everything on it — every (re)connect is a resync.
-        let hello = (try? WebJSON.encoder.encode(["serverRun": serverRun])) ?? Data()
+        // `hello` first: the page (re)fetches everything on it — every (re)connect is a resync. 605: with
+        // this build's page script and style, so a page of an older build offers a reload.
+        let hello = (try? WebJSON.encoder.encode(WebHello(serverRun: serverRun, version: version, script: assets.pageScript,
+                                                          style: assets.pageStyle))) ?? Data()
         try await outbound.write(.body(.byteBuffer(ByteBuffer(bytes: SSEFrame(event: "hello", id: hub.nextSeq(), json: hello).bytes))))
         conn.channel.closeFuture.whenComplete { _ in client.finish(.clientGone) }
         let sessions = self.sessions, cookie = client.cookie, beat = limits.heartbeatInterval, channel = conn.channel
@@ -742,16 +778,22 @@ public final class DozerWebServer: @unchecked Sendable {
         for await f in client.frames {
             try await outbound.write(.body(.byteBuffer(ByteBuffer(bytes: f.bytes))))
         }
+        var movedTo: String?
         let last: String? = switch client.end {
         case .overflow: "resync"
         case .sessionEnded: "session-ended"
         case .shutdown: "shutdown"
         case .rotated: "rotated"
         case .replaced: "replaced"
+        case .restarting: "restarting"
+        case .moved(let o): { movedTo = o; return "moved" }()
         case .clientGone, nil: nil
         }
         if let last {
-            let d = (try? WebJSON.encoder.encode(["reason": last])) ?? Data()
+            // 605: `moved` says where doz ui went (an origin — no key).
+            var body = ["reason": last]
+            if let movedTo { body["origin"] = movedTo }
+            let d = (try? WebJSON.encoder.encode(body)) ?? Data()
             try await outbound.write(.body(.byteBuffer(ByteBuffer(bytes: SSEFrame(event: last == "resync" ? "resync" : "end", id: hub.nextSeq(), json: d).bytes))))
         }
         try await outbound.write(.end(nil))

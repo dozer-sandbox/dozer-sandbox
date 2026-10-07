@@ -228,7 +228,8 @@ final class WebSecurityTests: XCTestCase {
         _ = try await store.authenticate(s.cookieValue)           // renewed: still valid
         clock.now += 11
         await XCTAssertThrowsRejection(.sessionExpired) { _ = try await store.authenticate(s.cookieValue) }
-        await XCTAssertThrowsRejection(.unauthenticated) { _ = try await store.authenticate(s.cookieValue) }
+        // 605: and it keeps saying why (the page shows the reason), never a bare "not signed in".
+        await XCTAssertThrowsRejection(.sessionExpired) { _ = try await store.authenticate(s.cookieValue) }
     }
 
     func testMutationsCompareTheCSRFToken() async throws {
@@ -239,7 +240,8 @@ final class WebSecurityTests: XCTestCase {
         await XCTAssertThrowsRejection(.csrfRejected) { _ = try await store.authenticateMutation(s.cookieValue, csrf: s.csrfToken + "x") }
         _ = try await store.authenticateMutation(s.cookieValue, csrf: s.csrfToken)
         await store.revoke(s.cookieValue)
-        await XCTAssertThrowsRejection(.unauthenticated) { _ = try await store.authenticate(s.cookieValue) }
+        // 605: the reason is this browser's own sign-out.
+        await XCTAssertThrowsRejection(.signedOut) { _ = try await store.authenticate(s.cookieValue) }
     }
 
     func testConstantTimeEqual() {
@@ -284,19 +286,23 @@ final class WebSecurityTests: XCTestCase {
         let a = try WebAssets.load()
         XCTAssertNotNil(a.assets["/"])
         XCTAssertEqual(a.assets["/"]?.cachePolicy, "no-store")
-        let documents: Set<String> = ["/", WebAssets.frameDocument]
+        // 605: + the offline page and the service worker (stable paths, no-store).
+        let documents: Set<String> = ["/", WebAssets.frameDocument, WebAssets.offlineDocument, WebAssets.serviceWorker]
         for (path, asset) in a.assets {
             XCTAssertEqual(WebAssets.sha256Hex(asset.data), asset.sha256, path)
-            // 591: the page's files are app-*, the terminal frame's frame-*, vendored ones vendor-*.
+            // 591: the page's files are app-*, the terminal frame's frame-*, vendored ones vendor-*; 605: the
+            // offline page's offline-*, the app icons icon-*.
             if documents.contains(path) {
                 XCTAssertEqual(asset.cachePolicy, "no-store", path)
             } else {
-                XCTAssertTrue(path.hasPrefix("/assets/app-") || path.hasPrefix("/assets/frame-") || path.hasPrefix("/assets/vendor-"), path)
+                XCTAssertTrue(["/assets/app-", "/assets/frame-", "/assets/vendor-", "/assets/offline-", "/assets/icon-"].contains { path.hasPrefix($0) }, path)
                 XCTAssertEqual(asset.cachePolicy, WebAssets.immutable)
             }
         }
-        // Every asset is referenced by one of the two documents.
-        let docs = documents.map { String(decoding: a.assets[$0]!.data, as: UTF8.self) }
+        XCTAssertEqual(Set(a.assets.keys).intersection(documents), documents)
+        // Every asset is referenced by one of the documents, the web app manifest or the worker.
+        let manifest = a.assets.values.first { $0.mimeType == "application/manifest+json" }.map { String(decoding: $0.data, as: UTF8.self) } ?? ""
+        let docs = documents.map { String(decoding: a.assets[$0]!.data, as: UTF8.self) } + [manifest]
         for path in a.assets.keys where !documents.contains(path) {
             XCTAssertTrue(docs.contains { $0.contains("\"\(path)\"") }, "a document references \(path)")
         }
@@ -311,14 +317,15 @@ final class WebSecurityTests: XCTestCase {
         let src = root.appendingPathComponent("Sources/DozerWeb/WebSource")
         let web = root.appendingPathComponent("Sources/DozerWeb/Resources/Web")
         let loaded = try WebAssets.load(webRoot: web)
-        for (name, ext) in [("app", "css"), ("app", "js"), ("frame", "css"), ("frame", "js")] {
+        for (name, ext) in [("app", "css"), ("app", "js"), ("frame", "css"), ("frame", "js"), ("offline", "css"), ("offline", "js")] {
             let d = try Data(contentsOf: src.appendingPathComponent("\(name).\(ext)"))
             let path = "/assets/\(name)-\(WebAssets.sha256Hex(d).prefix(16)).\(ext)"
             XCTAssertEqual(loaded.assets[path]?.data, d, "stale \(name).\(ext) — run make web-assets")
         }
         // index + app.css + app.js; (591) the terminal frame + frame.css + frame.js; the engine's script and
-        // WebAssembly; (593) the icon sprite.
-        XCTAssertEqual(loaded.assets.count, 9)
+        // WebAssembly; (593) the icon sprite; (605) the offline page + offline.css + offline.js, the service
+        // worker, the web app manifest, the SVG icon and its four PNGs.
+        XCTAssertEqual(loaded.assets.count, 19)
         XCTAssertEqual(loaded.assets.keys.filter { $0.hasPrefix("/assets/vendor-") }.count, 3)
     }
 

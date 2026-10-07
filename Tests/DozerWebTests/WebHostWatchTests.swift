@@ -197,7 +197,8 @@ final class WebHostWatchTests: XCTestCase {
         let clock = FixedClock()
         let old = WebSessionStore(bootstrap: cap, limits: .standard, now: { clock.now }, persist: file, port: 50_001)
         let o = try await old.exchange(cap.value)
-        clock.now = clock.now.addingTimeInterval(13 * 3600)
+        // 605: a session is remembered 14 days without use (was 12 h).
+        clock.now = clock.now.addingTimeInterval(WebLimits.rememberedSession + 3600)
         let late = WebSessionStore(bootstrap: .make(), limits: .standard, now: { clock.now }, persist: file, port: 50_001)
         do { _ = try await late.authenticate(o.cookieValue); XCTFail("expired") } catch {}
     }

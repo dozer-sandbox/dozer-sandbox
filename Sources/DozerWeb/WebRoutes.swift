@@ -19,6 +19,10 @@ public enum WebRoute: Equatable, Sendable {
     /// 591: GET /terminal-frame — the terminal engine's document, loaded only into a sandboxed,
     /// opaque-origin iframe of the page (its own CSP; `frame-ancestors 'self'`).
     case terminalFrame
+    /// 605: GET /offline — the page the service worker shows while doz ui is down (no session, no data).
+    case offline
+    /// 605: GET /sw.js — the service worker (its own CSP; it caches only the offline page and its files).
+    case serviceWorker
     // session
     case sessionBootstrap          // POST   /api/v1/session   (Authorization: Bearer <capability>)
     case sessionInfo               // GET    /api/v1/session
@@ -101,7 +105,7 @@ public enum WebRoute: Equatable, Sendable {
     case accessGithubKey           // POST /api/v1/access/github-key  ({secret} | {remove: true})
 
     public var isStatic: Bool {
-        switch self { case .index, .asset, .terminalFrame: true; default: false }
+        switch self { case .index, .asset, .terminalFrame, .offline, .serviceWorker: true; default: false }
     }
 
     /// Parse a request target. Only the metrics routes read a query string (three keys, each by its
@@ -117,6 +121,8 @@ public enum WebRoute: Equatable, Sendable {
         guard path.hasPrefix("/"), !path.contains("%"), !path.contains("//"), path.count <= 256 else { return nil }
         if path == "/" { return method.isSafe ? .index : nil }
         if path == WebAssets.frameDocument { return method.isSafe ? .terminalFrame : nil }
+        if path == WebAssets.offlineDocument { return method.isSafe ? .offline : nil }
+        if path == WebAssets.serviceWorker { return method.isSafe ? .serviceWorker : nil }
         let parts = path.dropFirst().split(separator: "/", omittingEmptySubsequences: false).map(String.init)
         guard !parts.contains(where: { $0.isEmpty || $0 == "." || $0 == ".." }) else { return nil }
         if parts.count == 2, parts[0] == "assets" { return method.isSafe ? .asset(path) : nil }
