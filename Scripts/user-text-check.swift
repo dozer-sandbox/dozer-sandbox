@@ -6,7 +6,7 @@
 //   2. every setting's description (`doz config show --json`);
 //   3. string literals in the CLI, the host and the web layer's Swift sources (one-line "…" strings and
 //      the lines of """…""" blocks), comments excluded;
-//   4. string literals in the dashboard's app.js, comments excluded.
+//   4. string literals in the dashboard's app.js and its modules (app/**, 607), comments excluded.
 // The pattern: a number 580–609 standing alone (optionally `.B<n>`), or W<1–2 digits>. Sizes, versions,
 // timeouts and HTTP codes do not fall in that range as words; `allowed` names the few that do.
 //
@@ -113,8 +113,16 @@ for dir in ["Sources/DozerCLI", "Sources/DozerHost", "Sources/DozerWeb", "Source
     }
 }
 
-// 4. the dashboard's own strings
-if let js = try? String(contentsOfFile: "Sources/DozerWeb/WebSource/app.js", encoding: .utf8) {
+// 4. the dashboard's own strings — app.js and (607) every module under app/
+var jsFiles = ["Sources/DozerWeb/WebSource/app.js"]
+if let e = FileManager.default.enumerator(atPath: "Sources/DozerWeb/WebSource/app") {
+    while let f = e.nextObject() as? String { if f.hasSuffix(".js") { jsFiles.append("Sources/DozerWeb/WebSource/app/" + f) } }
+}
+var jsCount = 0
+for path in jsFiles.sorted() {
+    guard let js = try? String(contentsOfFile: path, encoding: .utf8) else { continue }
+    jsCount += 1
+    let name = String(path.dropFirst("Sources/DozerWeb/WebSource/".count))
     let rx = try! NSRegularExpression(pattern: "'((?:[^'\\\\]|\\\\.)*)'")
     for (n, line) in js.components(separatedBy: "\n").enumerated() {
         if candidateRX.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)) == nil { continue }
@@ -124,13 +132,13 @@ if let js = try? String(contentsOfFile: "Sources/DozerWeb/WebSource/app.js", enc
         }
         if code.trimmingCharacters(in: .whitespaces).hasPrefix("*") { continue }
         for m in rx.matches(in: code, range: NSRange(code.startIndex..., in: code)) {
-            if let r = Range(m.range(at: 1), in: code) { scan(String(code[r]), "app.js:\(n + 1)") }
+            if let r = Range(m.range(at: 1), in: code) { scan(String(code[r]), "\(name):\(n + 1)") }
         }
     }
 }
 
 if problems.isEmpty {
-    print("ok user-text-check: \(helps) help texts, every setting, \(files) Swift files and app.js carry no feature number or walkthrough ID")
+    print("ok user-text-check: \(helps) help texts, every setting, \(files) Swift files and the dashboard's \(jsCount) scripts (app.js and its modules) carry no feature number or walkthrough ID")
 } else {
     for p in problems { FileHandle.standardError.write(Data("x user-text-check: \(p)\n".utf8)) }
     FileHandle.standardError.write(Data("Keep feature numbers in code comments; say what the thing is instead.\n".utf8))

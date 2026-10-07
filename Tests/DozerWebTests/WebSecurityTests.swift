@@ -185,6 +185,13 @@ final class WebSecurityTests: XCTestCase {
             "/assets/a/b.js", "api/v1/overview", "/api/v1/sandboxes/de mo", "/manifest.json",
         ]
         for t in refused { XCTAssertNil(WebRoute.parse(method: .get, target: t), t) }
+        // 607: the page script's modules — /assets/app/<layer>/<file> and nothing deeper or elsewhere.
+        XCTAssertEqual(WebRoute.parse(method: .get, target: "/assets/app/dom/h-0123456789abcdef.js"), .asset("/assets/app/dom/h-0123456789abcdef.js"))
+        XCTAssertEqual(WebRoute.parse(method: .head, target: "/assets/app/views/x.js"), .asset("/assets/app/views/x.js"))
+        for t in ["/assets/app/x.js", "/assets/app/other/x.js", "/assets/app/dom/a/b.js", "/assets/app/../app.js", "/assets/app/dom/", "/assets/x/dom/h.js"] {
+            XCTAssertNil(WebRoute.parse(method: .get, target: t), t)
+        }
+        XCTAssertNil(WebRoute.parse(method: .post, target: "/assets/app/dom/h.js"))
         // Phase 1: nothing unsafe but the session's own routes.
         for t in ["/api/v1/overview", "/api/v1/sandboxes/demo", "/api/v1/images", "/api/v1/stream", "/"] {
             XCTAssertNil(WebRoute.parse(method: .post, target: t), t)
@@ -291,19 +298,26 @@ final class WebSecurityTests: XCTestCase {
         for (path, asset) in a.assets {
             XCTAssertEqual(WebAssets.sha256Hex(asset.data), asset.sha256, path)
             // 591: the page's files are app-*, the terminal frame's frame-*, vendored ones vendor-*; 605: the
-            // offline page's offline-*, the app icons icon-*.
+            // offline page's offline-*, the app icons icon-*; 607: the page script's modules app/<layer>/*.
             if documents.contains(path) {
                 XCTAssertEqual(asset.cachePolicy, "no-store", path)
             } else {
-                XCTAssertTrue(["/assets/app-", "/assets/frame-", "/assets/vendor-", "/assets/offline-", "/assets/icon-"].contains { path.hasPrefix($0) }, path)
+                XCTAssertTrue(["/assets/app-", "/assets/app/", "/assets/frame-", "/assets/vendor-", "/assets/offline-", "/assets/icon-"].contains { path.hasPrefix($0) }, path)
                 XCTAssertEqual(asset.cachePolicy, WebAssets.immutable)
             }
         }
         XCTAssertEqual(Set(a.assets.keys).intersection(documents), documents)
-        // Every asset is referenced by one of the documents, the web app manifest or the worker.
+        // Every asset is referenced by one of the documents, the web app manifest or the worker — 607: a module by
+        // the page script or another module (a relative specifier: its hashed name in quotes).
         let manifest = a.assets.values.first { $0.mimeType == "application/manifest+json" }.map { String(decoding: $0.data, as: UTF8.self) } ?? ""
         let docs = documents.map { String(decoding: a.assets[$0]!.data, as: UTF8.self) } + [manifest]
+        let scripts = a.assets.filter { $0.key.hasPrefix("/assets/app") && $0.key.hasSuffix(".js") }.map { String(decoding: $0.value.data, as: UTF8.self) }
         for path in a.assets.keys where !documents.contains(path) {
+            if path.hasPrefix("/assets/app/") {
+                let name = String(path.split(separator: "/").last!)
+                XCTAssertTrue(scripts.contains { $0.contains("/\(name)'") }, "a page script imports \(path)")
+                continue
+            }
             XCTAssertTrue(docs.contains { $0.contains("\"\(path)\"") }, "a document references \(path)")
         }
         let index = String(decoding: a.assets["/"]!.data, as: UTF8.self)
@@ -317,15 +331,18 @@ final class WebSecurityTests: XCTestCase {
         let src = root.appendingPathComponent("Sources/DozerWeb/WebSource")
         let web = root.appendingPathComponent("Sources/DozerWeb/Resources/Web")
         let loaded = try WebAssets.load(webRoot: web)
-        for (name, ext) in [("app", "css"), ("app", "js"), ("frame", "css"), ("frame", "js"), ("offline", "css"), ("offline", "js")] {
+        // 607: app.js is the module entry — served with its import specifiers rewritten to the modules' hashed
+        // names (WebModulesTests checks that only those change), so its bytes are compared there.
+        for (name, ext) in [("app", "css"), ("frame", "css"), ("frame", "js"), ("offline", "css"), ("offline", "js")] {
             let d = try Data(contentsOf: src.appendingPathComponent("\(name).\(ext)"))
             let path = "/assets/\(name)-\(WebAssets.sha256Hex(d).prefix(16)).\(ext)"
             XCTAssertEqual(loaded.assets[path]?.data, d, "stale \(name).\(ext) — run make web-assets")
         }
         // index + app.css + app.js; (591) the terminal frame + frame.css + frame.js; the engine's script and
         // WebAssembly; (593) the icon sprite; (605) the offline page + offline.css + offline.js, the service
-        // worker, the web app manifest, the SVG icon and its four PNGs.
-        XCTAssertEqual(loaded.assets.count, 19)
+        // worker, the web app manifest, the SVG icon and its four PNGs; (607) one per module of app.js.
+        let modules = (FileManager.default.enumerator(atPath: src.appendingPathComponent("app").path)?.allObjects as? [String] ?? []).filter { $0.hasSuffix(".js") }
+        XCTAssertEqual(loaded.assets.count, 19 + modules.count)
         XCTAssertEqual(loaded.assets.keys.filter { $0.hasPrefix("/assets/vendor-") }.count, 3)
     }
 

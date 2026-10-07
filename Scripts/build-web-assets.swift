@@ -194,6 +194,155 @@ func appIconCheck(_ file: String, _ text: String) throws {
     guard ns.substring(from: covered).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw Failure.source("\(file): text after the drawing") }
 }
 
+/// 607: the page script's native ES modules — `WebSource/app.js` (the entry, loaded `type="module"`) and every
+/// `WebSource/app/<layer>/<name>.js`. The graph is CLOSED and checked here:
+///   · an import is a static `import … from './x.js'` / `import './x.js'` (or `export … from`) with a RELATIVE
+///     specifier naming a module that exists under app/ — no bare or absolute specifier, no dynamic import();
+///   · layers: dom < core < components < views < app.js — a module imports from its own layer or below, never up;
+///   · no cycle; no module the entry does not reach;
+///   · every `upcall('name')` (core/hooks.js: a call UP the layers) is provided by app.js's `provide({ … })`,
+///     and app.js provides nothing that nobody upcalls.
+struct ModuleGraph {
+    static let layers = ["dom": 0, "core": 1, "components": 2, "views": 3]
+    static let entryLayer = 4
+    var files: [String: String] = [:]          // "dom/h.js" → its text (paths relative to app/)
+    var imports: [String: [String]] = [:]      // a module → the modules it imports
+    var entryImports: [String] = []
+    var order: [String] = []                   // dependencies first (each module after everything it imports)
+
+    static let importPattern = try! NSRegularExpression(
+        pattern: #"(?m)^[ \t]*(?:import|export)\b[^'";=()]*?\bfrom[ \t]*(['"])([^'"\n]*)\1|^[ \t]*import[ \t]*(['"])([^'"\n]*)\3"#)
+
+    /// The specifiers a module's text imports, with their ranges.
+    static func specifiers(_ text: String) -> [(spec: String, range: NSRange)] {
+        let ns = text as NSString
+        return importPattern.matches(in: text, range: NSRange(location: 0, length: ns.length)).map { m in
+            let r = m.range(at: 2).location != NSNotFound ? m.range(at: 2) : m.range(at: 4)
+            return (ns.substring(with: r), r)
+        }
+    }
+
+    /// A specifier resolved against the importing file (nil = the entry, in WebSource/) to a path relative to app/.
+    static func resolve(_ spec: String, from: String?, file: String) throws -> String {
+        guard spec.hasPrefix("./") || spec.hasPrefix("../") else {
+            throw Failure.source("\(file) imports '\(spec)' — a module imports only by a relative specifier ('./x.js', '../core/x.js')")
+        }
+        guard spec.hasSuffix(".js") else { throw Failure.source("\(file) imports '\(spec)' — a module specifier names a .js file") }
+        var parts = from.map { ["app"] + $0.split(separator: "/").dropLast().map(String.init) } ?? []
+        for p in spec.split(separator: "/", omittingEmptySubsequences: false).map(String.init) {
+            switch p {
+            case ".": continue
+            case "..": guard !parts.isEmpty else { throw Failure.source("\(file) imports '\(spec)', outside WebSource") }; parts.removeLast()
+            case "": throw Failure.source("\(file) imports '\(spec)' — not a plain path")
+            default: parts.append(p)
+            }
+        }
+        guard parts.first == "app", parts.count >= 3 else { throw Failure.source("\(file) imports '\(spec)', which is not a module under app/") }
+        return parts.dropFirst().joined(separator: "/")
+    }
+
+    static func layer(_ rel: String) -> Int { layers[String(rel.split(separator: "/").first ?? "")] ?? -1 }
+
+    /// The text with every import specifier rewritten to its module's hashed name (same relative path).
+    func rewrite(_ text: String, from: String?, hashed: [String: String]) throws -> String {
+        let ns = NSMutableString(string: text)
+        for (spec, range) in Self.specifiers(text).reversed() {
+            let target = try Self.resolve(spec, from: from, file: from.map { "app/" + $0 } ?? "app.js")
+            guard let h = hashed[target] else { throw Failure.source("app/\(target) is not hashed before \(from ?? "app.js")") }
+            let base = String(target.split(separator: "/").last!), hbase = String(h.split(separator: "/").last!)
+            ns.replaceCharacters(in: range, with: String(spec.dropLast(base.count)) + hbase)
+        }
+        return ns as String
+    }
+}
+
+func loadModules(sources: URL, entry: String) throws -> ModuleGraph {
+    let fm = FileManager.default
+    var g = ModuleGraph()
+    let root = sources.appendingPathComponent("app")
+    if let e = fm.enumerator(at: root, includingPropertiesForKeys: [.isRegularFileKey, .isDirectoryKey]) {
+        let base = root.resolvingSymlinksInPath().path + "/"
+        while let u = e.nextObject() as? URL {
+            let path = u.resolvingSymlinksInPath().path
+            guard path.hasPrefix(base) else { throw Failure.source("unexpected path \(path)") }
+            let rel = String(path.dropFirst(base.count))
+            if u.lastPathComponent == ".DS_Store" { continue }
+            if (try? u.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true {
+                guard !rel.contains("/"), ModuleGraph.layers[rel] != nil else {
+                    throw Failure.source("app/\(rel): a module lives in app/dom, app/core, app/components or app/views")
+                }
+                continue
+            }
+            let comps = rel.split(separator: "/")
+            guard comps.count == 2, ModuleGraph.layers[String(comps[0])] != nil, rel.hasSuffix(".js"),
+                  comps[1].dropLast(3).allSatisfy({ ($0.isLowercase && $0.isASCII) || $0.isNumber || $0 == "-" }) else {
+                throw Failure.source("app/\(rel): only app/<dom|core|components|views>/<a-z0-9->.js lives in app/")
+            }
+            guard let d = try? Data(contentsOf: u), let t = String(data: d, encoding: .utf8) else { throw Failure.source("app/\(rel) is not UTF-8") }
+            g.files[rel] = t
+        }
+    }
+    let dynamic = try NSRegularExpression(pattern: #"\bimport\s*\("#)
+    func checked(_ text: String, _ from: String?) throws -> [String] {
+        let file = from.map { "app/" + $0 } ?? "app.js"
+        if dynamic.firstMatch(in: text, range: NSRange(location: 0, length: (text as NSString).length)) != nil {
+            throw Failure.source("\(file) uses import() — the module graph is static (the compiler hashes every module)")
+        }
+        var out: [String] = []
+        for (spec, _) in ModuleGraph.specifiers(text) {
+            let target = try ModuleGraph.resolve(spec, from: from, file: file)
+            guard g.files[target] != nil else { throw Failure.source("\(file) imports '\(spec)', which does not exist") }
+            let to = ModuleGraph.layer(target), at = from.map(ModuleGraph.layer) ?? ModuleGraph.entryLayer
+            guard to <= at else {
+                throw Failure.source("\(file) imports app/\(target) — up a layer (dom < core < components < views < app.js); call up with upcall('name') (core/hooks.js)")
+            }
+            if !out.contains(target) { out.append(target) }
+        }
+        return out
+    }
+    g.entryImports = try checked(entry, nil)
+    for (rel, text) in g.files { g.imports[rel] = try checked(text, rel) }
+    // No cycle; dependencies first; every module reached from the entry.
+    var state: [String: Int] = [:]          // 1 visiting, 2 done
+    var stack: [String] = []
+    func visit(_ m: String) throws {
+        if state[m] == 2 { return }
+        if state[m] == 1 {
+            let cycle = stack[stack.firstIndex(of: m)!...] + [m]
+            throw Failure.source("an import cycle: \(cycle.map { "app/" + $0 }.joined(separator: " → ")) — break it with upcall('name') (core/hooks.js)")
+        }
+        state[m] = 1; stack.append(m)
+        for d in g.imports[m] ?? [] { try visit(d) }
+        stack.removeLast(); state[m] = 2
+        g.order.append(m)
+    }
+    for m in g.entryImports { try visit(m) }
+    let unreached = Set(g.files.keys).subtracting(g.order)
+    guard unreached.isEmpty else { throw Failure.source("app.js never loads \(unreached.sorted().map { "app/" + $0 }) — a module nothing imports is a mistake") }
+    // Calls up the layers: each upcall('x') provided by app.js, and nothing provided that nobody upcalls.
+    let upcall = try NSRegularExpression(pattern: #"\bupcall\(\s*'([A-Za-z_$][\w$]*)'\s*\)"#)
+    var upcalled: [String: String] = [:]
+    let lineComment = try NSRegularExpression(pattern: #"(?m)^[ \t]*//[^\n]*$"#)
+    for (rel, raw) in g.files {
+        let text = lineComment.stringByReplacingMatches(in: raw, range: NSRange(location: 0, length: (raw as NSString).length), withTemplate: "")
+        for m in upcall.matches(in: text, range: NSRange(location: 0, length: (text as NSString).length)) {
+            upcalled[(text as NSString).substring(with: m.range(at: 1))] = "app/" + rel
+        }
+    }
+    var provided = Set<String>()
+    if let m = try NSRegularExpression(pattern: #"\bprovide\(\{([^}]*)\}\)"#).firstMatch(in: entry, range: NSRange(location: 0, length: (entry as NSString).length)) {
+        let list = (entry as NSString).substring(with: m.range(at: 1))
+        provided = Set(list.components(separatedBy: CharacterSet(charactersIn: ", \n\t")).filter { !$0.isEmpty })
+    }
+    for (name, file) in upcalled.sorted(by: { $0.key < $1.key }) where !provided.contains(name) {
+        throw Failure.source("\(file) calls upcall('\(name)'), which app.js does not provide")
+    }
+    if let extra = provided.subtracting(upcalled.keys).sorted().first {
+        throw Failure.source("app.js provides \(extra), which no module upcalls")
+    }
+    return g
+}
+
 func isPlainName(_ s: String) -> Bool {
     !s.isEmpty && s != "." && s != ".." && s.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || ".-_".contains($0)) }
 }
@@ -215,10 +364,10 @@ func main() throws {
         // 605: what the service worker shows while doz ui is not running (an installed app opened, a reload).
         ("offline.html", "/offline", "offline", "offline"),
     ]
-    // Nothing but those files, the service worker, the manifest, icons/ and vendor/ lives in WebSource:
-    // a stray file is a mistake.
+    // Nothing but those files, the service worker, the manifest, icons/, vendor/ and (607) app/ — the page
+    // script's modules — lives in WebSource: a stray file is a mistake.
     let top = Set((try? fm.contentsOfDirectory(atPath: sources.path)) ?? []).subtracting([".DS_Store"])
-    let known = Set(documents.flatMap { [$0.file, $0.css + ".css", $0.js + ".js"] } + ["vendor", "icons", "sw.js", "app.webmanifest"])
+    let known = Set(documents.flatMap { [$0.file, $0.css + ".css", $0.js + ".js"] } + ["vendor", "icons", "sw.js", "app.webmanifest", "app"])
     let unexpectedTop = top.subtracting(known)
     guard unexpectedTop.isEmpty else { throw Failure.source("unexpected files in WebSource: \(unexpectedTop.sorted())") }
 
@@ -262,8 +411,14 @@ func main() throws {
     guard (try? JSONSerialization.jsonObject(with: Data(manifestText.utf8))) is [String: Any] else {
         throw Failure.source("app.webmanifest is not a JSON object")
     }
+    // 607: the page script's modules (WebSource/app/**) — every one is page code under the same rules.
+    let modules = try loadModules(sources: sources, entry: String(decoding: scripts["app"]!, as: UTF8.self))
+    guard modules.files.isEmpty || docText["index.html"]!.contains("<script type=\"module\" src=\"/app.js\"></script>") else {
+        throw Failure.source("index.html must load app.js as a module: <script type=\"module\" src=\"/app.js\"></script>")
+    }
     let pageFiles = docText.map { ($0.key, $0.value) } + styles.map { ($0.key + ".css", String(decoding: $0.value, as: UTF8.self)) }
         + scripts.map { ($0.key + ".js", String(decoding: $0.value, as: UTF8.self)) } + [("sw.js", swText), ("app.webmanifest", manifestText)]
+        + modules.files.map { ("app/" + $0.key, $0.value) }
     for (name, text) in pageFiles {
         // 593: the SVG namespace is a name, not a URL anything loads (createElementNS).
         let scanned = text.replacingOccurrences(of: "\"http://www.w3.org/2000/svg\"", with: "\"svg-ns\"")
@@ -424,6 +579,22 @@ func main() throws {
                         sha256: sha256(manifestData), cachePolicy: immutable, class: "page"))
     refs["/app.webmanifest"] = "/" + manifestPath
     for (k, t) in docText { docText[k] = try rewrite(t, k) }
+
+    // ── 607: the modules, dependencies first: each one's import specifiers are rewritten to its dependencies'
+    //    hashed names (relative, so they resolve beside it), then it is hashed itself — and so is the entry, so
+    //    app-<h>.js changes whenever any module does (605's `hello.script` still names "this build's page").
+    var moduleHashed: [String: String] = [:]          // "dom/h.js" → "dom/h-<sha16>.js"
+    for rel in modules.order {
+        let text = try modules.rewrite(modules.files[rel]!, from: rel, hashed: moduleHashed)
+        let data = Data(text.utf8)
+        let name = "\(rel.dropLast(3))-\(sha256(data).prefix(16)).js"
+        moduleHashed[rel] = name
+        let path = "assets/app/" + name
+        expected[path] = data
+        assets.append(Asset(publicPath: "/" + path, resourcePath: path, mimeType: "application/javascript; charset=utf-8",
+                            sha256: sha256(data), cachePolicy: immutable, class: "page"))
+    }
+    scripts["app"] = Data(try modules.rewrite(String(decoding: scripts["app"]!, as: UTF8.self), from: nil, hashed: moduleHashed).utf8)
 
     // ── The page's own files.
     var hashed: [String: String] = [:]      // "/offline.css" → "/assets/offline-….css"
