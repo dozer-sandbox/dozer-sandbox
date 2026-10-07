@@ -1403,7 +1403,7 @@ function liveRefresh() {
 const UI_OVERLAY_AFTER_MS = 1500;
 const UI_CALM_MS = 15000, UI_RESTART_CALM_MS = 60000, UI_OTHER_PORT_MS = 60000;
 function uiLost(said, reason) {
-  if (state.signedOut) return;
+  if (state.signedOut || state.uiMoved) return;
   if (state.es) { state.es.close(); state.es = null; }
   state.uiDown = true;
   if (reason === 'restarting') state.uiRestarting = true; else state.uiSaid = state.uiSaid || said;
@@ -1618,8 +1618,8 @@ function connect() {
     if (reason === 'shutdown') { uiLost(true); return; }
     // 605: `doz ui restart` — calm; the same port and session.
     if (reason === 'restarting') { uiLost(false, 'restarting'); return; }
-    // 605: `doz ui restart` moved the UI to another port: follow it with this page's one-use link.
-    if (reason === 'moved') { let link = ''; try { link = JSON.parse(ev.data).link; } catch (_) { /* */ } followMove(link); return; }
+    // 605: `doz ui restart` moved the UI to another port: say where (it opened a page there itself).
+    if (reason === 'moved') { let to = ''; try { to = JSON.parse(ev.data).origin; } catch (_) { /* */ } movedAway(to); return; }
     // 594 W19: `doz ui --new-link` / `doz ui link --rotate` ended every session.
     if (reason === 'rotated') { signedOut('A new link was made for this UI (doz ui --new-link, or doz ui link --rotate): every page signed out. Open the new link — or run doz ui link.', 'session-rotated'); return; }
     setTimeout(connect, 500);
@@ -1627,7 +1627,7 @@ function connect() {
   // A broken stream (doz ui killed, the Mac asleep): the page's own retry, never the browser's
   // (which would hammer a new doz ui with a session it does not know).
   es.onerror = () => {
-    if (state.signedOut || state.es !== es) return;
+    if (state.signedOut || state.uiMoved || state.es !== es) return;
     uiLost(false);
   };
 }
@@ -1664,8 +1664,8 @@ function checkBuild(hello) {
   clearInterval(state.reloadTimer);
   state.reloadTimer = setInterval(() => { if (!state.uiDown && !state.signedOut && pageIsIdle()) location.reload(); }, 3000);
 }
-/// Nothing would be lost by a reload now: no wizard or dialog open, no interactive terminal focused,
-/// nothing typed in a field.
+/// Nothing would be lost by a reload now: no wizard or dialog open, no interactive terminal focused, no
+/// field focused, nothing typed in a field.
 function pageIsIdle() {
   if (state.modal || document.querySelector('dialog[open]')) return false;
   const a = document.activeElement;
@@ -1674,17 +1674,43 @@ function pageIsIdle() {
     const t = [...terminals.values()].find((x) => x.frame === a);
     if (t && t.mode === 'interactive') return false;
   }
-  return ![...document.querySelectorAll('input, textarea')].some((e) => !['checkbox', 'radio', 'hidden'].includes(e.type) && e.value !== e.defaultValue);
+  return ![...document.querySelectorAll('input[data-typed], textarea[data-typed]')].some((e) => e.isConnected && e.value !== '');
 }
-/// 605: the UI restarted onto another port and handed this page a one-use link to it. The new doz ui
-/// takes a moment to listen; the page cannot look at another origin (its CSP), so it waits, then goes.
-function followMove(link) {
-  if (!/^https?:\/\/(127\.0\.0\.1|\[::1\]|[a-z0-9.-]+):\d{2,5}\/#cap=[A-Za-z0-9_-]{16,256}$/.test(link || '')) { uiLost(false, 'restarting'); return; }
-  const to = link.replace(/\/#cap=.*$/, '');
-  uiLost(false, 'restarting');
-  const b = banner('ui-stopped', 'info', ['doz ui moved to ' + to.replace(/^https?:\/\//, '') + ' — following it…']);
+// A field the person typed in (a value set by the page itself is not "typed").
+document.addEventListener('input', (ev) => { const t = ev.target; if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) t.dataset.typed = ''; }, true);
+/// 605: `doz ui restart` moved doz ui to another port (ui.port). A page cannot follow by itself — a
+/// script's navigation to another port is "same-site", which the server's Fetch-Metadata rule refuses —
+/// so the new doz ui opened the dashboard there, and this page says where it went (and stops retrying).
+function movedAway(to) {
+  if (!/^https?:\/\/(127\.0\.0\.1|\[::1\]):\d{2,5}$/.test(to || '')) { uiLost(true); return; }
+  state.uiMoved = true;
+  if (state.es) { state.es.close(); state.es = null; }
+  clearTimeout(state.uiRetry);
+  state.uiRetry = null;
+  setLive('', 'moved');
+  const addr = to.replace(/^https?:\/\//, '');
+  const b = banner('ui-stopped', 'info', ['doz ui moved to ' + addr + '.']);
   b.dataset.tone = 'calm';
-  setTimeout(() => location.replace(link), 2500);
+  const o = $('ui-overlay');
+  const copy = h('button', { type: 'button', class: 'btn', id: 'ui-copy-addr' }, withIcon('copy', 'Copy the address'));
+  copy.addEventListener('click', () => { navigator.clipboard.writeText(to).then(() => toast('Copied ' + to, false), () => toast('Copy it by hand: ' + to, true)); });
+  o.replaceChildren(h('div', { class: 'ui-ov-card' },
+    h('div', { class: 'ui-ov-head' }, h('h2', { id: 'ui-ov-title' }, 'Dozer moved to ' + addr)),
+    h('div', { id: 'ui-ov-desc' },
+      h('p', null, 'doz ui now listens on another port (the setting ui.port), and opened the dashboard there in a new tab — this one can be closed.'),
+      h('p', { class: 'muted' }, 'An installed Dozer app belongs to its port: install it again from the new page. In a terminal, ', h('code', null, 'doz ui link'),
+        ' opens a page on the new port.')),
+    h('div', { class: 'ui-ov-acts' }, copy)));
+  for (const el of pausedParts()) el.inert = true;
+  document.body.classList.add('ui-paused');
+  o.dataset.tone = 'calm';
+  o.setAttribute('role', 'dialog');
+  o.setAttribute('aria-modal', 'true');
+  o.setAttribute('aria-labelledby', 'ui-ov-title');
+  o.setAttribute('aria-describedby', 'ui-ov-desc');
+  o.hidden = false;
+  state.uiOverlay = true;
+  copy.focus();
 }
 
 // ── the nav: a child per sandbox (593) ──────────────────────────────────────
@@ -5316,7 +5342,7 @@ async function reattachTerminals() {
     let n = 0;
     for (const t of [...terminals.values()]) {
       if (!t.reattach || t.closed) continue;
-      if (state.uiDown || state.signedOut || !state.csrf) break;
+      if (state.uiDown || state.signedOut || state.uiMoved || !state.csrf) break;
       if (++n > 16) break;
       for (let attempt = 0; attempt < 4; attempt++) {
         t.reattach = false;

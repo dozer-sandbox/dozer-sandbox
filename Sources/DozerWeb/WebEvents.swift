@@ -26,7 +26,9 @@ enum SSEEnd: Sendable, Equatable {
     case rotated
     /// 605: `doz ui restart` — the page stays calm and reconnects (same port, sessions kept).
     case restarting
-    /// 605: `doz ui restart` moved the UI to another port: this page's one-use link to it.
+    /// 605: `doz ui restart` moved the UI to another port (its origin). The page cannot follow by itself
+    /// (a script navigation to another port is same-site, which the Fetch-Metadata rule refuses): the new
+    /// doz ui opens a tab there, and this page says where it went.
     case moved(String)
 }
 

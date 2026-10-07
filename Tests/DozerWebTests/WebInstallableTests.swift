@@ -9,7 +9,7 @@ import XCTest
 /// 605 — the installable dashboard and its graceful restarts: the web app manifest and icons, the
 /// offline page and the service worker (routes, headers, the CSP, what the worker may cache), the asset
 /// compiler's rules for them, the remembered session and the reasons a page is told when it must sign in
-/// again, the hand-over to a new port, the operations ring across a restart, a terminal's reattach,
+/// again, the operations ring across a restart, a terminal's reattach,
 /// `ui.port`, and the stream's `hello`.
 final class WebInstallableTests: XCTestCase {
     static var root: URL { URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent() }
@@ -276,32 +276,6 @@ final class WebInstallableTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: file.path), "no session is kept")
         let next = WebSessionStore(bootstrap: .make(), limits: .standard, persist: file, port: 7002, revoked: revoked)
         await XCTAssertThrowsRejection(.sessionRotated) { _ = try await next.authenticate(s.cookieValue) }
-    }
-
-    func testARestartOntoAnotherPortHandsEachPageAOneUseLinkByDigest() async throws {
-        let dir = try scratch()
-        let file = dir.appendingPathComponent("ui.sessions")
-        let clock = Clock()
-        let old = WebSessionStore(bootstrap: .make(), limits: .standard, now: { clock.now }, persist: file, port: 7003)
-        let links = await old.handOver(to: 7004, count: 2)
-        XCTAssertEqual(links.count, 2)
-        let text = String(decoding: try Data(contentsOf: file), as: UTF8.self)
-        for l in links { XCTAssertFalse(text.contains(l.value), "only the digest is written"); XCTAssertTrue(text.contains(WebSessionStore.digest(l.value))) }
-        // The old one writes nothing more (the file is the next process's).
-        _ = try await old.exchange(await old.issue().value)
-        XCTAssertEqual(String(decoding: try Data(contentsOf: file), as: UTF8.self), text)
-        // Another port's store ignores the file; the new port's takes each link once.
-        let wrong = WebSessionStore(bootstrap: .make(), limits: .standard, now: { clock.now }, persist: file, port: 7005)
-        await XCTAssertThrowsRejection(.bootstrapRejected) { _ = try await wrong.exchange(links[0].value) }
-        let new = WebSessionStore(bootstrap: .make(), limits: .standard, now: { clock.now }, persist: file, port: 7004)
-        XCTAssertFalse(String(decoding: (try? Data(contentsOf: file)) ?? Data(), as: UTF8.self).contains(WebSessionStore.digest(links[0].value)),
-                       "a hand-over lives in the new process's memory from then on")
-        _ = try await new.exchange(links[0].value)
-        await XCTAssertThrowsRejection(.bootstrapUsed) { _ = try await new.exchange(links[0].value) }
-        await XCTAssertThrowsRejection(.bootstrapRejected) { _ = try await new.exchange(WebBootstrapCapability.make().value) }
-        // Two minutes, then no more.
-        clock.now += 121
-        await XCTAssertThrowsRejection(.bootstrapRejected) { _ = try await new.exchange(links[1].value) }
     }
 
     // MARK: operations across a restart

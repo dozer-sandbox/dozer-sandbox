@@ -235,7 +235,7 @@ public final class DozerWebServer: @unchecked Sendable {
         case shutdown
         /// `doz ui restart` on the same port: pages stay calm and reconnect (sessions kept).
         case restarting
-        /// `doz ui restart` onto another port: each open page gets a one-use link to it.
+        /// `doz ui restart` onto another port: each open page is told where it went.
         case moving(WebOrigin)
     }
 
@@ -279,9 +279,7 @@ public final class DozerWebServer: @unchecked Sendable {
             hub.finishAll(.restarting)
             await terminals.closeAll(reason: "restarting")
         case .moving(let to):
-            let pages = hub.all
-            let links = await sessions.handOver(to: to.port, count: pages.count)
-            for (c, l) in zip(pages, links) { c.finish(.moved(l.launchURL(origin: to).absoluteString)) }
+            hub.finishAll(.moved(to.value))
             await terminals.closeAll(reason: "restarting")
         }
         await monitor.stop()
@@ -780,7 +778,7 @@ public final class DozerWebServer: @unchecked Sendable {
         for await f in client.frames {
             try await outbound.write(.body(.byteBuffer(ByteBuffer(bytes: f.bytes))))
         }
-        var link: String?
+        var movedTo: String?
         let last: String? = switch client.end {
         case .overflow: "resync"
         case .sessionEnded: "session-ended"
@@ -788,13 +786,13 @@ public final class DozerWebServer: @unchecked Sendable {
         case .rotated: "rotated"
         case .replaced: "replaced"
         case .restarting: "restarting"
-        case .moved(let l): { link = l; return "moved" }()
+        case .moved(let o): { movedTo = o; return "moved" }()
         case .clientGone, nil: nil
         }
         if let last {
-            // 605: `moved` carries this page's own one-use link to the new port (this stream only).
+            // 605: `moved` says where doz ui went (an origin — no key).
             var body = ["reason": last]
-            if let link { body["link"] = link }
+            if let movedTo { body["origin"] = movedTo }
             let d = (try? WebJSON.encoder.encode(body)) ?? Data()
             try await outbound.write(.body(.byteBuffer(ByteBuffer(bytes: SSEFrame(event: last == "resync" ? "resync" : "end", id: hub.nextSeq(), json: d).bytes))))
         }

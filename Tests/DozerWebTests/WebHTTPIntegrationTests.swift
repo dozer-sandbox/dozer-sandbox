@@ -572,9 +572,9 @@ final class WebHTTPIntegrationTests: XCTestCase {
         XCTAssertTrue(try s.read(until: "restarting", seconds: 5).contains("event: end"))
     }
 
-    /// `doz ui restart` onto another port: each page's stream ends `moved` with its OWN one-use link to the
-    /// new origin (a different link per page).
-    func testARestartOntoAnotherPortGivesEachPageItsOwnLink() async throws {
+    /// `doz ui restart` onto another port: each page's stream ends `moved` with the new ORIGIN — never a link
+    /// (a key): the page cannot follow by itself (Fetch Metadata), the new doz ui opens one.
+    func testARestartOntoAnotherPortTellsEachPageWhereItWent() async throws {
         try await start()
         let (c1, _) = try signIn()
         let (c2, _) = try signIn(await server.newLink().fragment!.replacingOccurrences(of: "cap=", with: ""))
@@ -585,14 +585,11 @@ final class WebHTTPIntegrationTests: XCTestCase {
         _ = try s2.read(until: "event: hello", seconds: 5)
         let to = try WebOrigin(port: 54_999)
         await server.close(.moving(to))
-        func link(_ text: String) -> String? {
-            guard let r = text.range(of: #"http://127\.0\.0\.1:54999/#cap=[A-Za-z0-9_-]+"#, options: .regularExpression) else { return nil }
-            return String(text[r])
+        for s in [s1, s2] {
+            let e = try s.read(until: "54999", seconds: 5)
+            XCTAssertTrue(e.contains(#"{"origin":"http://127.0.0.1:54999","reason":"moved"}"#), e)
+            XCTAssertFalse(e.contains("cap="), "no key in the stream")
         }
-        let e1 = try s1.read(until: "54999", seconds: 5), e2 = try s2.read(until: "54999", seconds: 5)
-        XCTAssertTrue(e1.contains("\"reason\":\"moved\""), e1)
-        let l1 = try XCTUnwrap(link(e1)), l2 = try XCTUnwrap(link(e2))
-        XCTAssertNotEqual(l1, l2)
     }
 }
 

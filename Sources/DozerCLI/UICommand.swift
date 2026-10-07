@@ -153,7 +153,7 @@ struct UIRestart: AsyncParsableCommand {
         if g.json {
             Out.jsonLine(["origin": back.origin, "previous": old])
         } else {
-            Out.stdout("doz ui restarted on \(back.origin)\(back.origin == old ? "" : " (it was \(old): open pages follow it)")\n")
+            Out.stdout("doz ui restarted on \(back.origin)\(back.origin == old ? "" : " (it was \(old) — the pages there say where it went; it opens the dashboard here)")\n")
         }
     }
 }
@@ -233,6 +233,7 @@ struct UIRunner {
             address = WebControl.address(store)
         }
         let remembered = WebControl.rememberedPort(store)
+        // 605: `doz ui restart` onto another port (ui.port changed): the open pages cannot follow.
         let server: DozerWebServer
         do {
             server = try await DozerWebServer.bind(data: data, assets: assets, version: DozerCommand.version, settings: settings,
@@ -257,6 +258,7 @@ struct UIRunner {
             }
             return nil
         }, restart: {
+            fds.restarting = true
             Task {
                 let next = WebSettingsStore(environment: env, flags: flags).int(SettingKey.uiPort)
                 if next != 0, next != server.origin.port, let to = try? WebOrigin(port: next) {
@@ -302,7 +304,16 @@ struct UIRunner {
         // 594 W19: a page left open by the last doz ui reconnects by itself (same port, same session)
         // within a second or two — then no new tab: it is told this UI restarted. Otherwise one tab.
         // 605: after `doz ui restart` never a tab or a printed link — the open pages come back by themselves.
-        if o.restarted {
+        if o.restarted, let remembered, remembered != server.origin.port {
+            // The pages of the old port were told where doz ui went; a browser rule keeps them from
+            // following by themselves — so open the dashboard here (as doz ui does with no page open).
+            if mode == "never" {
+                if !g.json { Out.stdout("restarted on another port — the open pages cannot follow it: doz ui link opens one here\n") }
+            } else {
+                try delivery.deliver(server.launchURL, g)
+                if !g.json { Out.stdout("restarted on another port — opened the dashboard there (the old pages say where it went)\n") }
+            }
+        } else if o.restarted {
             if await server.waitForPage(seconds: 6) {
                 server.tellPages("doz ui restarted — \(DozerCommand.version)")
                 if !g.json { Out.stdout("restarted — the open pages reconnected\n") }
@@ -320,9 +331,14 @@ struct UIRunner {
             try delivery.deliver(server.launchURL, g)
         }
         do { try await serving.value } catch {
-            WebControl.cleanUp(store, listenFD: listenFD, lockFD: lockFD)
-            throw fail(HostError(.failed, "the UI server stopped: \(error)"), g)
+            if !fds.restarting {
+                WebControl.cleanUp(store, listenFD: listenFD, lockFD: lockFD)
+                throw fail(HostError(.failed, "the UI server stopped: \(error)"), g)
+            }
         }
+        // 605: the listener closed for `doz ui restart` — the restart replaces this process (exec); never
+        // return (that would exit before it does).
+        while fds.restarting { try? await Task.sleep(for: .seconds(1)) }
         withExtendedLifetime(sources) {}
     }
 
@@ -330,6 +346,8 @@ struct UIRunner {
     /// once it listens).
     final class ControlFDs: @unchecked Sendable {
         var listen: Int32 = -1
+        /// `doz ui restart` is under way: the server's end is not the command's.
+        var restarting = false
         let lock: Int32
         init(lock: Int32) { self.lock = lock }
     }
