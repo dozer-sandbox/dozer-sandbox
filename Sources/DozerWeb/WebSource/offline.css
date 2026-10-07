@@ -1,0 +1,23 @@
+/* offline.css — the page the service worker shows while doz ui is not running. Its own few tokens (the
+   dashboard's colours, from app.css), light and dark by the system; nothing loaded from elsewhere. */
+:root {
+  color-scheme: light dark;
+  --bg:     light-dark(#f6f6f4, #131312);
+  --surface: light-dark(#ffffff, #1b1b1a);
+  --surface-2: light-dark(#efefec, #242422);
+  --ink:    light-dark(#1b1b19, #ecebe7);
+  --ink-2:  light-dark(#5c5b56, #a6a49c);
+  --line:   light-dark(#e2e1dc, #2d2d2a);
+  --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, monospace;
+}
+html, body { margin: 0; min-height: 100%; background: var(--bg); color: var(--ink); font: 13px/1.5 var(--font); }
+body { display: grid; place-items: center; min-height: 100vh; padding: 16px; box-sizing: border-box; }
+.card { max-width: 440px; width: 100%; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 24px; box-sizing: border-box; }
+.mark { display: block; margin: 0 0 12px; }
+h1 { font-size: 18px; margin: 0 0 8px; }
+p { margin: 8px 0 0; }
+pre { margin: 8px 0 0; background: var(--surface-2); border-radius: 8px; padding: 8px 12px; }
+code { font-family: var(--mono); font-size: 12px; }
+.muted { color: var(--ink-2); }
+.small { font-size: 12px; }

@@ -119,6 +119,8 @@ public enum SettingApplies: String, Codable, Sendable, CaseIterable {
     case nextBoot = "next-boot"
     /// 594 W10: at each sandbox's next start or wake.
     case nextStartOrWake = "next-start-or-wake"
+    /// 605: when doz ui starts again (`doz ui restart`).
+    case uiRestart = "ui-restart"
 
     public var note: String {
         switch self {
@@ -130,6 +132,7 @@ public enum SettingApplies: String, Codable, Sendable, CaseIterable {
         case .newStore: "the choice for a store that has not made one (doz account keepalive wins)"
         case .nextBoot: "applies when the next boot of a sandbox is kept"
         case .nextStartOrWake: "applies at each sandbox's next start or wake"
+        case .uiRestart: "applies when doz ui starts again (doz ui restart)"
         }
     }
 }
@@ -170,6 +173,8 @@ public struct SettingDefinition: Sendable {
         case (.bool, .bool): return v
         case (.int(let r), .int(let i)):
             guard r.contains(i) else { throw SettingsError("\(key) is \(r.lowerBound)–\(r.upperBound)") }
+            // 605: a fixed dashboard port is an unprivileged one (0 = automatic).
+            if key == SettingKey.uiPort, (1...1023).contains(i) { throw SettingsError("\(key) is 0 (automatic) or a port 1024–65535") }
             return v
         case (.choice(let c), .string(let s)):
             guard c.contains(s) else { throw SettingsError("\(key) is one of \(c.joined(separator: ", "))") }
@@ -344,6 +349,8 @@ public enum SettingKey {
     public static let allowSecretEntry = "ui.allow_secret_entry"
     /// 594 W19 (owner: "a new web page opening up every time i run doz ui"): when `doz ui` opens a tab.
     public static let openBrowser = "ui.open_browser"
+    /// 605 (owner Q10): the loopback port `doz ui` listens on — 0 = automatic (the last one, when free).
+    public static let uiPort = "ui.port"
     /// 594: where the UI's new sandboxes get their workspace by default (`<projects_dir>/<name>`).
     public static let projectsDir = "defaults.projects_dir"
     public static let kernelPath = "kernel.path"
@@ -408,6 +415,9 @@ public struct DozerSettings: Sendable {
             .init("ui", "open_browser", .choice(["auto", "always", "never"]), .string("auto"),
                   "When doz ui opens a browser tab: auto (only when no page of this store's UI is open — an open page reconnects by itself instead), always (every start), never (it prints the address; doz ui link opens a page). --open and --no-open override it.",
                   applies: .nextCommand),
+            .init("ui", "port", .int(0...65_535), .int(0),
+                  "The port doz ui listens on, always on 127.0.0.1 (this Mac only): 0 = automatic (the port this store's last doz ui had, when it is free — else one the system picks, and doz ui says so), or a fixed port 1024–65535 (doz ui refuses to start, naming the program, when another holds it). An installed dashboard app belongs to one port: keep it fixed for one.",
+                  env: "DOZ_UI_PORT", flag: "--port N", applies: .uiRestart),
             .init("ui", "grid_live_tiles", .int(1...12), .int(8),
                   "All sessions: at most this many tiles show their session live at once (each is a terminal engine and a socket); the rest say so.",
                   applies: .now),

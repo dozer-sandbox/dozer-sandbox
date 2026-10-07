@@ -51,6 +51,10 @@ public enum WebRejection: String, Error, Equatable, Sendable {
     case bootstrapUsed = "bootstrap-used"
     case unauthenticated
     case sessionExpired = "session-expired"
+    /// 605: a new link was made (`doz ui --new-link`, `doz ui link --rotate`): every page signed out.
+    case sessionRotated = "session-rotated"
+    /// 605: this browser signed out.
+    case signedOut = "signed-out"
     case csrfRejected = "csrf-rejected"
     case notFound = "not-found"
     case tooManyStreams = "too-many-streams"
@@ -80,7 +84,7 @@ public enum WebRejection: String, Error, Equatable, Sendable {
         case .alreadyRunning, .pickerOpen: 409
         case .bodyTooLarge: 413
         case .unsupportedMediaType: 415
-        case .malformedAuthorization, .bootstrapRejected, .bootstrapUsed, .unauthenticated, .sessionExpired: 401
+        case .malformedAuthorization, .bootstrapRejected, .bootstrapUsed, .unauthenticated, .sessionExpired, .sessionRotated, .signedOut: 401
         case .ticketMissing, .ticketRejected, .ticketUsed, .ticketExpired: 401
         case .upgradeRequired: 400
         case .notFound: 404
@@ -100,7 +104,9 @@ public enum WebRejection: String, Error, Equatable, Sendable {
         case .bootstrapRejected: "this link is not valid for this server — run `doz ui link` for a new one"
         case .bootstrapUsed: "this link was already used — each link works once; run `doz ui link` for a new one"
         case .unauthenticated: "not signed in — open a link from `doz ui link`"
-        case .sessionExpired: "the session expired — run `doz ui link` for a new link"
+        case .sessionExpired: "this browser's sign-in expired (14 days unused) — run `doz ui link` for a new link"
+        case .sessionRotated: "a new link was made for this dashboard, and every page was signed out — run `doz ui link` for a new link"
+        case .signedOut: "this browser signed out — run `doz ui link` for a new link"
         case .csrfRejected: "missing or wrong CSRF token"
         case .notFound: "not found"
         case .tooManyStreams: "too many live-update streams are open"
@@ -229,8 +235,10 @@ public enum WebSecurity {
     /// 591: the page may frame ITS OWN terminal frame (`frame-src 'self'`) — the one token the
     /// terminals added to the page. `connect-src 'self'` covers the terminal WebSocket
     /// (`ws://127.0.0.1:<port>`, CSP3). The engine runs only in the frame, under `frameCSP`.
+    /// 605: the page links its web app manifest (`manifest-src 'self'`) and registers its service worker
+    /// (`worker-src 'self'` — `default-src 'none'` would forbid it); nothing else changed.
     public static let responseHeaders: [(String, String)] = [
-        ("Content-Security-Policy", "default-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'; object-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; font-src 'self'; frame-src 'self'; manifest-src 'none'"),
+        ("Content-Security-Policy", "default-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'; object-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; font-src 'self'; frame-src 'self'; manifest-src 'self'; worker-src 'self'"),
         ("X-Content-Type-Options", "nosniff"),
         ("X-Frame-Options", "DENY"),
         ("Referrer-Policy", "no-referrer"),
@@ -248,6 +256,12 @@ public enum WebSecurity {
     public static let frameHeaders: [(String, String)] = [
         ("Content-Security-Policy", "default-src 'none'; base-uri 'none'; frame-ancestors 'self'; form-action 'none'; object-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; connect-src 'none'; img-src 'none'; font-src 'none'; frame-src 'none'; manifest-src 'none'"),
         ("X-Frame-Options", "SAMEORIGIN"),
+    ]
+
+    /// 605 — the service worker script's own policy (a worker's CSP is its script's response header): it
+    /// fetches only this origin (a navigation of `/`, its precache list) and loads nothing.
+    public static let serviceWorkerHeaders: [(String, String)] = [
+        ("Content-Security-Policy", "default-src 'none'; connect-src 'self'"),
     ]
 
     /// 591 — the frame's own script and style and the engine's script are loaded by an opaque origin.

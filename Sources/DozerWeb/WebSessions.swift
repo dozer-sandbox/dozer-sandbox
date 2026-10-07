@@ -24,34 +24,81 @@ public struct WebSession: Equatable, Sendable {
 ///   · it has the trust of the store itself — whoever reads `<store>` owns the sandboxes, their keys'
 ///     policies and the host's socket already; it lives in the user's own directory, 0600;
 ///   · every request still passes the exact Host and Origin checks on loopback, and every unsafe
-///     request its CSRF token; sessions still expire (12 h, renewed only by the page), sign-out still
-///     revokes one, and `doz ui --new-link` / `doz ui link --rotate` revoke them all (as a missing
-///     file or a new port does).
+///     request its CSRF token; sessions still expire (605, owner Q8 — "remember this browser": 14 days
+///     without use, renewed by the page while it is open, so an installed app on this Mac stays signed
+///     in), sign-out still revokes one, and `doz ui --new-link` / `doz ui link --rotate` revoke them all
+///     (as a missing file or a new port does).
+///
+/// 605: a page that must sign in again is told WHY (the 401's code): `session-rotated` (a new link was
+/// made), `session-expired`, `signed-out` (this browser signed out) — from `<store>/ui.revoked` (0600:
+/// the SHA-256 of each ended cookie and the reason, kept 30 days; never a cookie) — else
+/// `unauthenticated` (unknown here: another port, a lost file).
+///
+/// 605: a `doz ui restart` that MOVES the port hands each open page over: the old process mints one
+/// one-use link per open page, sends it to that page only (its own event stream, like the CSRF token in
+/// a session answer), and writes the link's SHA-256 — never the link — into `ui.sessions` for the NEW
+/// port (`handover`, 2 minutes). The new process accepts each such link once, exactly like a link of its
+/// own.
 public actor WebSessionStore {
     private struct Stored: Codable { let csrf: String; var expiresAt: Date }
-    private struct File: Codable { var port: Int; var sessions: [String: Stored] }
+    private struct File: Codable {
+        var port: Int
+        var sessions: [String: Stored]
+        /// 605: links handed over by a restart that moved the port — their SHA-256 → until.
+        var handover: [String: Date]? = nil
+    }
+    /// 605: why a cookie no longer signs in (`ui.revoked`).
+    struct Ended: Codable { var reason: String; var until: Date }
+    private struct RevokedFile: Codable { var revoked: [String: Ended] }
+
+    public static let rotated = "rotated", expired = "expired", signedOut = "signed-out"
+    /// How long an ended cookie's reason is kept.
+    static let reasonsKept: TimeInterval = 30 * 24 * 60 * 60
+    /// How long a handed-over link works in the new process.
+    static let handoverLifetime: TimeInterval = 120
 
     private let lifetime: TimeInterval
     private let bootstrapLifetime: TimeInterval
     private let now: @Sendable () -> Date
     private let file: URL?
+    private let revokedFile: URL?
     private let port: Int
     private var pending: [String: Date] = [:]
     private var consumed: [String: Date] = [:]
     /// By the SHA-256 of the cookie value.
     private var sessions: [String: Stored] = [:]
+    /// 605: by the SHA-256 of a handed-over link's capability.
+    private var handover: [String: Date] = [:]
+    /// 605: by the SHA-256 of an ended cookie.
+    private var ended: [String: Ended] = [:]
+    /// 605: after a hand-over the file belongs to the next process — nothing here writes it again.
+    private var handedOver = false
 
     public init(bootstrap: WebBootstrapCapability, limits: WebLimits, now: @escaping @Sendable () -> Date = Date.init,
-                persist: URL? = nil, port: Int = 0) {
+                persist: URL? = nil, port: Int = 0, revoked: URL? = nil) {
         lifetime = limits.sessionLifetime
         bootstrapLifetime = limits.bootstrapLifetime
         self.now = now
         file = persist
+        revokedFile = revoked
         self.port = port
         pending[bootstrap.value] = now().addingTimeInterval(limits.bootstrapLifetime)
+        let t = now()
+        if let revoked, let d = try? Data(contentsOf: revoked), let r = try? Self.decoder.decode(RevokedFile.self, from: d) {
+            ended = r.revoked.filter { $0.value.until > t }
+        }
         if let persist, let d = try? Data(contentsOf: persist), let f = try? Self.decoder.decode(File.self, from: d), f.port == port {
-            let t = now()
             sessions = f.sessions.filter { $0.value.expiresAt > t }
+            handover = (f.handover ?? [:]).filter { $0.value > t }
+            for (k, _) in f.sessions where f.sessions[k]!.expiresAt <= t { ended[k] = Ended(reason: Self.expired, until: t.addingTimeInterval(Self.reasonsKept)) }
+            if sessions.count != f.sessions.count, let revoked {
+                // The expired ones are reasons now.
+                Self.write(try? Self.encoder.encode(RevokedFile(revoked: ended)), to: revoked)
+            }
+            if sessions.count != f.sessions.count || !(f.handover ?? [:]).isEmpty {
+                // A handed-over link is single-use: it lives in this process's memory from now on.
+                Self.write(sessions.isEmpty ? nil : try? Self.encoder.encode(File(port: port, sessions: sessions)), to: persist)
+            }
         }
     }
 
@@ -62,36 +109,63 @@ public actor WebSessionStore {
         SHA256.hash(data: Data(cookie.utf8)).map { String(format: "%02x", $0) }.joined()
     }
 
-    /// Write the sessions (0600, atomically: a new file, then a rename) — or remove the file when none.
-    private func save() {
-        guard let file else { return }
-        let live = sessions.filter { $0.value.expiresAt > now() }
-        if live.isEmpty { unlink(file.path); return }
-        guard let d = try? Self.encoder.encode(File(port: port, sessions: live)) else { return }
-        let tmp = file.deletingLastPathComponent().appendingPathComponent(".\(file.lastPathComponent).\(getpid())")
+    /// Write `data` to `url` (0600, atomically: a new file, then a rename) — or remove it when nil.
+    static func write(_ data: Data?, to url: URL) {
+        guard let data else { unlink(url.path); return }
+        let tmp = url.deletingLastPathComponent().appendingPathComponent(".\(url.lastPathComponent).\(getpid())")
         let fd = open(tmp.path, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC | O_NOFOLLOW, 0o600)
         guard fd >= 0 else { return }
-        let ok = d.withUnsafeBytes { write(fd, $0.baseAddress, d.count) } == d.count
+        let ok = data.withUnsafeBytes { Darwin.write(fd, $0.baseAddress, data.count) } == data.count
         close(fd)
-        if ok { rename(tmp.path, file.path) } else { unlink(tmp.path) }
+        if ok { rename(tmp.path, url.path) } else { unlink(tmp.path) }
+    }
+
+    /// Write the sessions — or remove the file when none.
+    private func save() {
+        guard let file, !handedOver else { return }
+        let live = sessions.filter { $0.value.expiresAt > now() }
+        let hand = handover.filter { $0.value > now() }
+        Self.write(live.isEmpty && hand.isEmpty ? nil : try? Self.encoder.encode(File(port: port, sessions: live, handover: hand.isEmpty ? nil : hand)), to: file)
+    }
+
+    private func saveRevoked() {
+        guard let revokedFile else { return }
+        let t = now()
+        ended = ended.filter { $0.value.until > t }
+        Self.write(ended.isEmpty ? nil : try? Self.encoder.encode(RevokedFile(revoked: ended)), to: revokedFile)
+    }
+
+    private func end(_ key: String, _ reason: String) {
+        ended[key] = Ended(reason: reason, until: now().addingTimeInterval(Self.reasonsKept))
     }
 
     private func prune() {
         let t = now()
         pending = pending.filter { $0.value > t }
         consumed = consumed.filter { $0.value > t }
-        sessions = sessions.filter { $0.value.expiresAt > t.addingTimeInterval(-60) }
+        handover = handover.filter { $0.value > t }
+        var changed = false
+        for (k, v) in sessions where v.expiresAt <= t.addingTimeInterval(-60) {
+            sessions[k] = nil
+            end(k, Self.expired)
+            changed = true
+        }
+        if changed { saveRevoked() }
     }
 
     /// Exchange a capability ONCE for a session. A wrong capability does not consume the real one
     /// (a typo is not a denial of service); a used one says so.
     public func exchange(_ capability: String) throws -> WebSession {
         prune()
-        guard let key = pending.keys.first(where: { constantTimeEqual(capability, $0) }) else {
+        if let key = pending.keys.first(where: { constantTimeEqual(capability, $0) }) {
+            consumed[key] = pending.removeValue(forKey: key)
+        } else if let key = handover.keys.first(where: { constantTimeEqual(Self.digest(capability), $0) }) {
+            // 605: a link the previous process handed over (only its digest was written).
+            consumed[capability] = handover.removeValue(forKey: key)
+        } else {
             if consumed.keys.contains(where: { constantTimeEqual(capability, $0) }) { throw WebRejection.bootstrapUsed }
             throw WebRejection.bootstrapRejected
         }
-        consumed[key] = pending.removeValue(forKey: key)
         let s = WebSession(cookieValue: WebRandom.token(), csrfToken: WebRandom.token(), expiresAt: now().addingTimeInterval(lifetime))
         sessions[Self.digest(s.cookieValue)] = Stored(csrf: s.csrfToken, expiresAt: s.expiresAt)
         save()
@@ -108,9 +182,19 @@ public actor WebSessionStore {
 
     public func authenticate(_ cookie: String) throws -> WebSession {
         let key = Self.digest(cookie)
-        guard let s = sessions[key] else { throw WebRejection.unauthenticated }
+        guard let s = sessions[key] else {
+            // 605: say why, when this store knows.
+            switch ended[key]?.reason {
+            case Self.rotated?: throw WebRejection.sessionRotated
+            case Self.expired?: throw WebRejection.sessionExpired
+            case Self.signedOut?: throw WebRejection.signedOut
+            default: throw WebRejection.unauthenticated
+            }
+        }
         guard s.expiresAt > now() else {
             sessions[key] = nil
+            end(key, Self.expired)
+            saveRevoked()
             save()
             throw WebRejection.sessionExpired
         }
@@ -123,7 +207,8 @@ public actor WebSessionStore {
         return s
     }
 
-    /// Rolls a live session forward (the page calls it at half-life; reads never extend it).
+    /// Rolls a live session forward (the page calls it when it loads and at half-life; reads never
+    /// extend it).
     public func renew(_ cookie: String) throws -> WebSession {
         let s = try authenticate(cookie)
         let e = now().addingTimeInterval(lifetime)
@@ -132,15 +217,44 @@ public actor WebSessionStore {
         return WebSession(cookieValue: cookie, csrfToken: s.csrfToken, expiresAt: e)
     }
 
+    /// This browser signs out.
     public func revoke(_ cookie: String) {
-        sessions[Self.digest(cookie)] = nil
+        let key = Self.digest(cookie)
+        if sessions.removeValue(forKey: key) != nil { end(key, Self.signedOut); saveRevoked() }
         save()
     }
 
     /// 594 W19: every session ends (`doz ui link --rotate`): each page must sign in with a new link.
     public func revokeAll() {
+        for k in sessions.keys { end(k, Self.rotated) }
         sessions = [:]
+        saveRevoked()
         save()
+    }
+
+    /// 605: `doz ui --new-link` when no UI runs: the kept sessions (any port) end as `rotated` — the
+    /// file goes, their reasons stay — so a page that comes back is told a new link was made.
+    public static func revokeKept(sessions file: URL, revoked: URL, now: Date = Date()) {
+        defer { unlink(file.path) }
+        guard let d = try? Data(contentsOf: file), let f = try? decoder.decode(File.self, from: d), !f.sessions.isEmpty else { return }
+        var r = (try? Data(contentsOf: revoked)).flatMap { try? decoder.decode(RevokedFile.self, from: $0) }?.revoked ?? [:]
+        r = r.filter { $0.value.until > now }
+        for k in f.sessions.keys { r[k] = Ended(reason: rotated, until: now.addingTimeInterval(reasonsKept)) }
+        write(try? encoder.encode(RevokedFile(revoked: r)), to: revoked)
+    }
+
+    /// 605: a restart that moves this UI to `newPort`: one one-use link per open page, their digests
+    /// written for the next process (and nothing more from this one). The sessions do not move — a
+    /// cookie is named for its port.
+    public func handOver(to newPort: Int, count: Int) -> [WebBootstrapCapability] {
+        let caps = (0..<max(0, count)).map { _ in WebBootstrapCapability.make() }
+        if let file {
+            let until = now().addingTimeInterval(Self.handoverLifetime)
+            let f = File(port: newPort, sessions: [:], handover: Dictionary(caps.map { (Self.digest($0.value), until) }, uniquingKeysWith: { a, _ in a }))
+            Self.write(try? Self.encoder.encode(f), to: file)
+        }
+        handedOver = true
+        return caps
     }
 
     public func isValid(_ cookie: String) -> Bool { (sessions[Self.digest(cookie)]?.expiresAt).map { $0 > now() } ?? false }

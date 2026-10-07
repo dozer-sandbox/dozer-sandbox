@@ -18,6 +18,9 @@ public struct WebTerminalTicketRequest: Equatable, Sendable {
     public var mode: WebTerminalMode
     /// The page's terminal size for the first attach (interactive only; a watcher keeps the session's).
     public var size: TermSize?
+    /// 605: the page reattaches a terminal it had (after `doz ui` restarted, or a sign-in again): the first
+    /// SNAPSHOT then keeps the terminal's scrollback, as after a boot view.
+    public var reattach: Bool = false
 
     public static let colsRange: ClosedRange<Int> = 2...1000
     public static let rowsRange: ClosedRange<Int> = 1...500
@@ -26,7 +29,7 @@ public struct WebTerminalTicketRequest: Equatable, Sendable {
         guard let obj = try? JSONSerialization.jsonObject(with: body), let d = obj as? [String: Any] else {
             throw WebAction.Invalid("the body must be a JSON object")
         }
-        let extra = Set(d.keys).subtracting(["session", "mode", "cols", "rows"])
+        let extra = Set(d.keys).subtracting(["session", "mode", "cols", "rows", "reattach"])
         guard extra.isEmpty else { throw WebAction.Invalid("unexpected field(s): \(extra.sorted().joined(separator: ", "))") }
         guard let m = d["mode"] as? String, let mode = WebTerminalMode(rawValue: m) else { throw WebAction.Invalid("mode: interactive or watch") }
         var session: String?
@@ -46,7 +49,12 @@ public struct WebTerminalTicketRequest: Equatable, Sendable {
         let cols = try dim("cols", colsRange), rows = try dim("rows", rowsRange)
         guard (cols == nil) == (rows == nil) else { throw WebAction.Invalid("cols and rows go together") }
         let size = cols.map { TermSize(cols: UInt16($0), rows: UInt16(rows!)) }
-        return WebTerminalTicketRequest(session: session, mode: mode, size: mode == .watch ? nil : size)
+        var reattach = false
+        if let v = d["reattach"] {
+            guard let n = v as? NSNumber, CFGetTypeID(n) == CFBooleanGetTypeID() else { throw WebAction.Invalid("reattach: true or false") }
+            reattach = n.boolValue
+        }
+        return WebTerminalTicketRequest(session: session, mode: mode, size: mode == .watch ? nil : size, reattach: reattach)
     }
 }
 
@@ -58,6 +66,8 @@ public struct WebTerminalGrant: Equatable, Sendable {
     public let session: String?
     public let mode: WebTerminalMode
     public let size: TermSize?
+    /// 605: see `WebTerminalTicketRequest.reattach`.
+    public var reattach: Bool = false
 }
 
 /// The ticket answer. `ticket` is a one-use capability for 30 s — it goes to the page (which keeps
@@ -97,13 +107,13 @@ public actor WebTerminalTicketStore {
     }
 
     /// A new one-use ticket for `cookie`'s browser session.
-    public func mint(cookie: String, sandbox: String, session: String?, mode: WebTerminalMode, size: TermSize?) throws -> String {
+    public func mint(cookie: String, sandbox: String, session: String?, mode: WebTerminalMode, size: TermSize?, reattach: Bool = false) throws -> String {
         prune()
         let t = now()
         let live = pending.values.filter { $0.grant.cookie == cookie && t.timeIntervalSince($0.issuedAt) < lifetime }.count
         guard live < maximumPendingPerSession else { throw WebRejection.tooManyTickets }
         let token = WebRandom.token()
-        pending[token] = Pending(grant: WebTerminalGrant(cookie: cookie, sandbox: sandbox, session: session, mode: mode, size: size), issuedAt: t)
+        pending[token] = Pending(grant: WebTerminalGrant(cookie: cookie, sandbox: sandbox, session: session, mode: mode, size: size, reattach: reattach), issuedAt: t)
         return token
     }
 

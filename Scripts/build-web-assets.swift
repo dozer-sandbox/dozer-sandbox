@@ -4,6 +4,11 @@
 // no network.
 //
 //   Sources/DozerWeb/WebSource/{index.html, app.css, app.js}   the page's OWN code (what people edit)
+//   Sources/DozerWeb/WebSource/{offline.html, offline.css, offline.js}  605: the page shown while doz ui is down
+//   Sources/DozerWeb/WebSource/{sw.js, app.webmanifest}        605: the service worker (served at /sw.js) and the
+//                                                               web app manifest (hashed, like the css/js)
+//   Sources/DozerWeb/WebSource/icons/                          605: the app icons — SVG masters + PNGs rendered
+//                                                               from them, admitted by icons/PROVENANCE.json
 //   Sources/DozerWeb/WebSource/vendor/<package>/               591: VENDORED third-party files, each
 //                                                               byte-identical to its registry tarball
 //                                                               and pinned in that directory's VENDOR.json
@@ -141,6 +146,54 @@ func iconBody(_ file: String, _ text: String) throws -> String {
     return body
 }
 
+/// 605: an app icon master (`icons/*.svg`): ONE `<svg>` holding only rect / circle / ellipse / path /
+/// polygon / g elements with geometry, literal colours (#rgb / #rrggbb, or none) and stroke widths —
+/// no text (no font), script, style, link, image, reference or event handler.
+func appIconCheck(_ file: String, _ text: String) throws {
+    let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard t.hasPrefix("<svg"), t.hasSuffix("</svg>") else { throw Failure.source("\(file): not one <svg> element") }
+    let allowedTags: Set<String> = ["svg", "rect", "circle", "ellipse", "path", "polygon", "g"]
+    let allowedAttributes: Set<String> = ["xmlns", "viewBox", "width", "height", "x", "y", "rx", "ry", "cx", "cy", "r", "d", "points",
+                                          "fill", "stroke", "stroke-width", "opacity", "fill-opacity", "transform"]
+    let tag = try NSRegularExpression(pattern: #"<\s*(/?)\s*([A-Za-z:-]+)([^<>]*)>"#)
+    let attr = try NSRegularExpression(pattern: #"([A-Za-z:_-]+)\s*=\s*"([^"]*)""#)
+    let ns = t as NSString
+    var covered = 0
+    for m in tag.matches(in: t, range: NSRange(location: 0, length: ns.length)) {
+        guard ns.substring(with: NSRange(location: covered, length: m.range.location - covered)).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw Failure.source("\(file): text outside an element")
+        }
+        covered = m.range.location + m.range.length
+        let name = ns.substring(with: m.range(at: 2))
+        guard allowedTags.contains(name) else { throw Failure.source("\(file): <\(name)> is not allowed in an app icon") }
+        let attrs = ns.substring(with: m.range(at: 3))
+        let an = attrs as NSString
+        var rest = "", at = 0
+        for a in attr.matches(in: attrs, range: NSRange(location: 0, length: an.length)) {
+            rest += an.substring(with: NSRange(location: at, length: a.range.location - at))
+            at = a.range.location + a.range.length
+            let key = an.substring(with: a.range(at: 1)), value = an.substring(with: a.range(at: 2))
+            guard allowedAttributes.contains(key) else { throw Failure.source("\(file): attribute \(key) is not allowed") }
+            switch key {
+            case "xmlns": guard value == "http://www.w3.org/2000/svg" else { throw Failure.source("\(file): xmlns is the SVG namespace") }
+            case "fill", "stroke":
+                guard value == "none" || value.range(of: #"^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$"#, options: .regularExpression) != nil else {
+                    throw Failure.source("\(file): \(key) is a literal colour or none")
+                }
+            default:
+                guard value.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber || " .,-()".contains($0)) }) else {
+                    throw Failure.source("\(file): \(key) holds more than geometry")
+                }
+            }
+        }
+        rest += an.substring(from: at)
+        guard rest.replacingOccurrences(of: "/", with: "").trimmingCharacters(in: .whitespaces).isEmpty else {
+            throw Failure.source("\(file): an attribute that is not name=\"value\"")
+        }
+    }
+    guard ns.substring(from: covered).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw Failure.source("\(file): text after the drawing") }
+}
+
 func isPlainName(_ s: String) -> Bool {
     !s.isEmpty && s != "." && s != ".." && s.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || ".-_".contains($0)) }
 }
@@ -159,10 +212,13 @@ func main() throws {
     let documents: [(file: String, publicPath: String, css: String, js: String)] = [
         ("index.html", "/", "app", "app"),
         ("terminal.html", "/terminal-frame", "frame", "frame"),
+        // 605: what the service worker shows while doz ui is not running (an installed app opened, a reload).
+        ("offline.html", "/offline", "offline", "offline"),
     ]
-    // Nothing but those files and vendor/ lives in WebSource: a stray file is a mistake.
+    // Nothing but those files, the service worker, the manifest, icons/ and vendor/ lives in WebSource:
+    // a stray file is a mistake.
     let top = Set((try? fm.contentsOfDirectory(atPath: sources.path)) ?? []).subtracting([".DS_Store"])
-    let known = Set(documents.flatMap { [$0.file, $0.css + ".css", $0.js + ".js"] } + ["vendor"])
+    let known = Set(documents.flatMap { [$0.file, $0.css + ".css", $0.js + ".js"] } + ["vendor", "icons", "sw.js", "app.webmanifest"])
     let unexpectedTop = top.subtracting(known)
     guard unexpectedTop.isEmpty else { throw Failure.source("unexpected files in WebSource: \(unexpectedTop.sorted())") }
 
@@ -195,8 +251,19 @@ func main() throws {
         styles[d.css] = try read(d.css + ".css")
         scripts[d.js] = try read(d.js + ".js")
     }
+    // 605: the service worker is page code (the same rules) — and a worker loads nothing else: no
+    // importScripts, no eval, no Function constructor. The manifest is page text too (no external URL).
+    let swText = String(decoding: try read("sw.js"), as: UTF8.self)
+    for (needle, what) in [("importScripts", "importScripts"), ("eval(", "eval"), ("Function(", "the Function constructor"), ("innerHTML", "innerHTML")]
+    where swText.contains(needle) {
+        throw Failure.source("sw.js uses \(what) — the service worker runs only its own code")
+    }
+    var manifestText = String(decoding: try read("app.webmanifest"), as: UTF8.self)
+    guard (try? JSONSerialization.jsonObject(with: Data(manifestText.utf8))) is [String: Any] else {
+        throw Failure.source("app.webmanifest is not a JSON object")
+    }
     let pageFiles = docText.map { ($0.key, $0.value) } + styles.map { ($0.key + ".css", String(decoding: $0.value, as: UTF8.self)) }
-        + scripts.map { ($0.key + ".js", String(decoding: $0.value, as: UTF8.self)) }
+        + scripts.map { ($0.key + ".js", String(decoding: $0.value, as: UTF8.self)) } + [("sw.js", swText), ("app.webmanifest", manifestText)]
     for (name, text) in pageFiles {
         // 593: the SVG namespace is a name, not a URL anything loads (createElementNS).
         let scanned = text.replacingOccurrences(of: "\"http://www.w3.org/2000/svg\"", with: "\"svg-ns\"")
@@ -288,7 +355,78 @@ func main() throws {
         }
     }
 
+    // ── 605: the app icons — admitted by PROVENANCE (the PNGs were rendered from the SVG masters by
+    //    Scripts/render-web-icons.mjs; a master or a PNG that is not the recorded one fails), the SVGs
+    //    by their content (drawing elements and literal colours only). `refs` maps what the sources
+    //    write ("/icons/icon-192.png") to the hashed public path.
+    var refs: [String: String] = [:]
+    let iconDir = sources.appendingPathComponent("icons")
+    struct Provenance: Decodable {
+        struct Source: Decodable { let file: String; let served: Bool; let sha256: String }
+        struct Rendered: Decodable { let file: String; let from: String; let size: Int; let sha256: String }
+        let renderer: String
+        let sources: [Source]
+        let files: [Rendered]
+    }
+    guard let pd = try? Data(contentsOf: iconDir.appendingPathComponent("PROVENANCE.json")) else { throw Failure.source("icons/ has no PROVENANCE.json") }
+    let prov: Provenance
+    do { prov = try JSONDecoder().decode(Provenance.self, from: pd) } catch { throw Failure.source("icons/PROVENANCE.json: \(error)") }
+    let iconListed = Set(prov.sources.map(\.file) + prov.files.map(\.file) + ["PROVENANCE.json"])
+    let iconPresent = Set(((try? fm.contentsOfDirectory(atPath: iconDir.path)) ?? []).filter { $0 != ".DS_Store" })
+    guard iconPresent == iconListed else {
+        throw Failure.source("icons/ holds \(iconPresent.subtracting(iconListed).sorted()) unlisted / misses \(iconListed.subtracting(iconPresent).sorted()) — PROVENANCE.json lists every file")
+    }
+    for src in prov.sources {
+        guard isPlainName(src.file), src.file.hasPrefix("icon"), src.file.hasSuffix(".svg") else { throw Failure.source("icons/\(src.file): a master is icon….svg") }
+        let data = try Data(contentsOf: iconDir.appendingPathComponent(src.file))
+        guard sha256(data) == src.sha256 else {
+            throw Failure.source("icons/\(src.file) is not the master the PNGs were rendered from — run node Scripts/render-web-icons.mjs")
+        }
+        try appIconCheck("icons/\(src.file)", String(decoding: data, as: UTF8.self))
+        guard src.served else { continue }
+        let path = "assets/\(src.file.dropLast(4))-\(sha256(data).prefix(16)).svg"
+        refs["/icons/\(src.file)"] = "/" + path
+        expected[path] = data
+        assets.append(Asset(publicPath: "/" + path, resourcePath: path, mimeType: "image/svg+xml", sha256: sha256(data), cachePolicy: immutable, class: "page"))
+    }
+    for f in prov.files {
+        guard isPlainName(f.file), f.file.hasPrefix("icon-"), f.file.hasSuffix(".png"), prov.sources.contains(where: { $0.file == f.from }) else {
+            throw Failure.source("icons/\(f.file): a rendered icon is icon-….png from a listed master")
+        }
+        let data = try Data(contentsOf: iconDir.appendingPathComponent(f.file))
+        guard sha256(data) == f.sha256 else { throw Failure.source("icons/\(f.file) is not the PNG PROVENANCE.json records — run node Scripts/render-web-icons.mjs") }
+        // A PNG (its signature) of exactly the recorded size (IHDR: width and height, big-endian).
+        let b = [UInt8](data)
+        let be = { (i: Int) in Int(b[i]) << 24 | Int(b[i + 1]) << 16 | Int(b[i + 2]) << 8 | Int(b[i + 3]) }
+        guard b.count > 24, b.starts(with: [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]), be(16) == f.size, be(20) == f.size else {
+            throw Failure.source("icons/\(f.file) is not a \(f.size)×\(f.size) PNG")
+        }
+        let path = "assets/\(f.file.dropLast(4))-\(f.sha256.prefix(16)).png"
+        refs["/icons/\(f.file)"] = "/" + path
+        expected[path] = data
+        assets.append(Asset(publicPath: "/" + path, resourcePath: path, mimeType: "image/png", sha256: f.sha256, cachePolicy: immutable, class: "page"))
+    }
+    func rewrite(_ text: String, _ what: String) throws -> String {
+        var t = text
+        for (k, v) in refs { t = t.replacingOccurrences(of: "\"\(k)\"", with: "\"\(v)\"") }
+        if let stray = t.range(of: #""/(icons/[^"]*|app\.webmanifest)""#, options: .regularExpression) {
+            throw Failure.source("\(what) references \(t[stray]), which nothing serves")
+        }
+        return t
+    }
+    // ── 605: the web app manifest — its icons rewritten, then content-hashed like the css/js (its `id` is
+    //    fixed, so a new hashed URL is the same app).
+    manifestText = try rewrite(manifestText, "app.webmanifest")
+    let manifestData = Data(manifestText.utf8)
+    let manifestPath = "assets/app-\(sha256(manifestData).prefix(16)).webmanifest"
+    expected[manifestPath] = manifestData
+    assets.append(Asset(publicPath: "/" + manifestPath, resourcePath: manifestPath, mimeType: "application/manifest+json",
+                        sha256: sha256(manifestData), cachePolicy: immutable, class: "page"))
+    refs["/app.webmanifest"] = "/" + manifestPath
+    for (k, t) in docText { docText[k] = try rewrite(t, k) }
+
     // ── The page's own files.
+    var hashed: [String: String] = [:]      // "/offline.css" → "/assets/offline-….css"
     for d in documents {
         let css = styles[d.css]!, js = scripts[d.js]!
         let cssPath = "assets/\(d.css)-\(sha256(css).prefix(16)).css"
@@ -304,7 +442,31 @@ func main() throws {
         expected[d.file] = docData
         expected[cssPath] = css
         expected[jsPath] = js
+        hashed["/\(d.css).css"] = "/" + cssPath
+        hashed["/\(d.js).js"] = "/" + jsPath
+        hashed[d.publicPath] = d.publicPath
     }
+
+    // ── 605: the service worker, at its STABLE path /sw.js (no-store — a browser checks it for an update
+    //    on every navigation). Its precache list (the offline page, its css/js, the icon) is written here
+    //    with the hashed names, and its cache's name carries their digest: a new build is a new worker.
+    var sw = swText
+    var precacheDigest = ""
+    for ref in ["/offline.css", "/offline.js", "/icons/icon.svg"] {
+        guard sw.contains("\"\(ref)\""), let to = hashed[ref] ?? refs[ref] else { throw Failure.source("sw.js must precache \"\(ref)\"") }
+        sw = sw.replacingOccurrences(of: "\"\(ref)\"", with: "\"\(to)\"")
+        precacheDigest += to
+    }
+    guard sw.contains("\"/offline\""), sw.contains("@build@") else { throw Failure.source("sw.js must precache \"/offline\" and name its cache with @build@") }
+    precacheDigest += sha256(expected["offline.html"]!)
+    sw = sw.replacingOccurrences(of: "@build@", with: String(sha256(Data(precacheDigest.utf8)).prefix(16)))
+    if let stray = sw.range(of: #""/(icons/[^"]*|[a-z]+\.(css|js))""#, options: .regularExpression) {
+        throw Failure.source("sw.js references \(sw[stray]), which is not precached")
+    }
+    let swData = Data(sw.utf8)
+    expected["sw.js"] = swData
+    assets.append(Asset(publicPath: "/sw.js", resourcePath: "sw.js", mimeType: "application/javascript; charset=utf-8",
+                        sha256: sha256(swData), cachePolicy: "no-store", class: "page"))
     assets.sort { $0.publicPath < $1.publicPath }
     let enc = JSONEncoder()
     enc.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]

@@ -94,8 +94,10 @@ final class WebTerminalHub: @unchecked Sendable {
         for b in all where b.grant.cookie == cookie { Task { await b.end(.policyViolation, "session-ended") } }
     }
 
-    func closeAll() async {
-        for b in all { await b.end(.goingAway, "shutdown") }
+    /// `reason`: shutdown (doz ui stops), restarting (605: `doz ui restart` — the page reattaches), or
+    /// session-ended (every session ended for a new link — the page reattaches after its sign-in).
+    func closeAll(reason: String = "shutdown") async {
+        for b in all { await b.end(reason == "session-ended" ? .policyViolation : .goingAway, reason) }
     }
 }
 
@@ -156,6 +158,8 @@ final class WebTerminalBridge: @unchecked Sendable {
         size = grant.size ?? .standard
         phase = hub.knownPhase(grant.sandbox)
         phaseSince = Date()
+        // 605: a reattach keeps what the terminal already shows above the screen (its scrollback).
+        rewriteSnapshot = grant.reattach
     }
 
     private var isEnded: Bool { lock.withLock { ended } }

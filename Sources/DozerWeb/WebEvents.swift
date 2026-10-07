@@ -24,6 +24,10 @@ enum SSEEnd: Sendable, Equatable {
     case overflow, sessionEnded, shutdown, replaced, clientGone
     /// 594 W19: every session ended for a new link (`doz ui link --rotate`).
     case rotated
+    /// 605: `doz ui restart` — the page stays calm and reconnects (same port, sessions kept).
+    case restarting
+    /// 605: `doz ui restart` moved the UI to another port: this page's one-use link to it.
+    case moved(String)
 }
 
 /// One live-update client with a BOUNDED queue. When the client cannot keep up the queue is not
@@ -127,6 +131,15 @@ enum WebJSON {
     }()
 }
 
+/// 605: who else reads each overview the monitor fetched (the operations an earlier `doz ui` left
+/// running are resolved from it). Set once, after the operations exist.
+final class OverviewHook: @unchecked Sendable {
+    private let lock = NSLock()
+    private var fn: (@Sendable (WebOverview) -> Void)?
+    func set(_ f: @escaping @Sendable (WebOverview) -> Void) { lock.withLock { fn = f } }
+    func callAsFunction(_ o: WebOverview) { lock.withLock { fn }?(o) }
+}
+
 /// Keeps the open pages current while at least one stream is open (nothing polls otherwise):
 ///   · polls the overview (short requests — they never keep the host alive), and announces
 ///     `changed` when it differs;
@@ -139,6 +152,7 @@ actor WebMonitor {
     /// 591: open terminals keep the poll going too, and are told every sandbox's phase.
     let terminals: WebTerminalHub?
     let pollInterval: Duration
+    let overviewHook = OverviewHook()
     private var task: Task<Void, Never>?
     private var events: Task<Void, Never>?
     private var lastOverview: Data?
@@ -222,6 +236,7 @@ actor WebMonitor {
             for c in watch.saw(o) { tell(c) }
         }
         terminals?.updatePhases(o.sandboxes.map { ($0.name, $0.phase) })
+        overviewHook(o)
         // A phase change the host's stream did not report (the UI follows it only while something is
         // live, so a wake from hibernation happens before it re-subscribes): note it from the poll.
         let phases = Dictionary(o.sandboxes.map { ($0.name, $0.phaseLabel) }, uniquingKeysWith: { a, _ in a })
