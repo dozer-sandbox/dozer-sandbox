@@ -277,20 +277,25 @@ public enum WebServeRules {
     }
 
     /// A LAN interface or Tailscale: `en*`, the Thunderbolt Bridge (`bridge0`…`bridge99`), and a `utun`
-    /// holding a Tailscale address. Never loopback, link-local, a vmnet bridge, or another VPN's tunnel.
+    /// holding a Tailscale address. Never loopback, a vmnet bridge, or another VPN's tunnel. A LAN interface's
+    /// LINK-LOCAL address is served too: another Mac's `<mac>.local` (mDNS) often resolves to it first (measured:
+    /// m1a's curl reached m1max.local over fe80::) — only it is never a Host literal (`directOrigins`).
     public static func isServed(_ a: WebInterfaceAddress) -> Bool {
-        guard !a.address.isLoopback, !a.address.isLinkLocal, !a.address.isUnspecified, !isSandboxBridge(a.name) else { return false }
+        guard !a.address.isLoopback, !a.address.isUnspecified, !isSandboxBridge(a.name) else { return false }
         if a.name.hasPrefix("en") { return a.name.dropFirst(2).allSatisfy(\.isNumber) }
         if a.name.hasPrefix("bridge") { return true }
-        if a.name.hasPrefix("utun") { return tailscale.contains { $0.contains(a.address) } }
+        if a.name.hasPrefix("utun") { return !a.address.isLinkLocal && tailscale.contains { $0.contains(a.address) } }
         return false
     }
 
     /// The networks a sandbox can send from: every vmnet bridge's networks; the automatic NAT range
     /// (192.168.100–199.0/24) wherever no OTHER interface of the Mac is on it (a home LAN on 192.168.150.0/24
     /// stays a LAN); and `defaults.nat_subnet`.
+    /// A bridge's LINK-LOCAL network is not one of them: fe80::/64 is every interface's, so it would take every
+    /// link-local peer for a sandbox. A guest reaches only its own link's link-local address — the bridge's own,
+    /// which `admit` drops as a local address.
     public static func sandboxNetworks(_ interfaces: [WebInterfaceAddress], natSubnet: String? = nil) -> [WebCIDR] {
-        var out = interfaces.filter { isSandboxBridge($0.name) }.map(\.network)
+        var out = interfaces.filter { isSandboxBridge($0.name) && !$0.address.isLinkLocal }.map(\.network)
         let lan = interfaces.filter { !isSandboxBridge($0.name) && $0.address.isV4 && !$0.address.isLoopback }
         for third in automaticNATRange {
             let net = WebCIDR(WebIP(bytes: [192, 168, third, 0])!, prefix: 24)
@@ -325,7 +330,7 @@ public enum WebServeRules {
     /// The local addresses served now (what `doz serve` prints, and the address literals a browser may use).
     public static func servedAddresses(_ bind: WebServeBind, _ interfaces: [WebInterfaceAddress]) -> [WebIP] {
         switch bind {
-        case .lan: return interfaces.filter(isServed).map(\.address).uniqued()
+        case .lan: return interfaces.filter { isServed($0) && !$0.address.isLinkLocal }.map(\.address).uniqued()
         case .loopback: return [WebIP("127.0.0.1")!, WebIP("::1")!]
         case .addresses(let ips): return ips
         }
@@ -378,8 +383,10 @@ public enum WebServeRules {
         var host = hostHeader
         if trusted {
             if let p = forwardedProto?.lowercased() {
-                // A list (a chain of proxies) — the first is what the browser used.
-                let first = p.split(separator: ",").first.map { $0.trimmingCharacters(in: .whitespaces) } ?? ""
+                // A list (a chain of proxies) — the first is what the browser used. A WebSocket upgrade's is ws/wss
+                // at some proxies (Traefik): the page's origin is http/https all the same.
+                var first = p.split(separator: ",").first.map { $0.trimmingCharacters(in: .whitespaces) } ?? ""
+                if first == "ws" { first = "http" } else if first == "wss" { first = "https" }
                 guard first == "http" || first == "https" else {
                     return RequestOrigin(origin: nil, secure: false, viaProxy: true, client: client)
                 }

@@ -101,6 +101,13 @@ the agent install what it needs. Turn it off with `sandbox.agent_sudo` if you pr
   **Choose…** opens your Mac's own folder picker, and the folder you pick there is what is saved
   (never a folder inside the store, never `/`).
 - A dashboard link is a key: don't paste it anywhere.
+- `doz serve` (the dashboard for your other devices — [its page](25-doz-serve.md)) is a separate process you
+  start yourself. A browser needs an invite to get in (a link, a code or a QR code — one browser each, five
+  minutes) and stays in until you remove it; every request's host and origin are checked against this Mac's names
+  and addresses (or your proxy's address, only from a proxy you named in `serve.trusted_proxies`); keys and
+  tokens are never taken over plain HTTP; and a sandbox can never reach it — a sandbox network's connection is
+  dropped, and the proxy refuses the dashboards' ports on your Mac's own addresses. What other browsers do is in
+  `doz serve log`.
 
 ## The bridges — deliberate ways in to your Mac
 

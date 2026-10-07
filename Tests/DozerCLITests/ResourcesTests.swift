@@ -131,6 +131,10 @@ final class ResourcesTests: XCTestCase {
         XCTAssertEqual(c("metrics.sqlite-wal"), "metrics")
         XCTAssertEqual(c("host.log"), "logs")
         XCTAssertEqual(c("host.sock"), "store")
+        // 606: doz serve's lock, socket and folder (devices, audit log, port); 605's doz ui files.
+        for f in ["serve.lock", "serve.sock", "serve/devices.json", "serve/audit.jsonl", "serve/port", "ui.port", "ui.sessions", "ui.revoked", "ui.operations.json"] {
+            XCTAssertEqual(c(f), "store", f)
+        }
         XCTAssertEqual(c("notes.txt"), "stray:notes.txt")
         XCTAssertEqual(c("junk/deep/file"), "stray:junk")
     }

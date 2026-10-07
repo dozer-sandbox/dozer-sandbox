@@ -1,6 +1,7 @@
 import ArgumentParser
 import Darwin
 import Foundation
+import Security
 import DozerKit
 import DozerHost
 import DozerWeb
@@ -95,7 +96,7 @@ struct ServeStart: AsyncParsableCommand {
         let server: DozerWebServer
         do {
             server = try await DozerWebServer.bindServe(data: data, assets: assets, version: DozerCommand.version,
-                                                        limits: try WebLimits(maximumConnections: 128), settings: settings, serve: state)
+                                                        limits: try WebLimits(maximumConnections: 256), settings: settings, serve: state)
         } catch {
             WebServeControl.releaseLock(lockFD)
             throw fail(HostError(.unavailable, "could not listen on port \(config.port): \(error)"), g)
@@ -369,7 +370,7 @@ struct ServeStatus: AsyncParsableCommand {
 struct ServeLog: AsyncParsableCommand {
     static let configuration = CommandConfiguration(commandName: "log", abstract: "What the other browsers did (the audit log): admissions, changes, terminals, refusals.")
     @OptionGroup var g: GlobalOptions
-    @Option(name: [.short, .customLong("lines")], help: "How many lines (newest last).") var lines = 50
+    @Option(name: [.customShort("n"), .customLong("lines")], help: "How many lines (newest last).") var lines = 50
 
     func run() async throws {
         let entries = Array(WebServeAudit.recent(WebServeControl.auditFile(root(g)), limit: max(1, min(lines, 10_000))).reversed())
@@ -441,7 +442,11 @@ enum ServeDoctor {
         final class Box: @unchecked Sendable { var data: Data?; var response: HTTPURLResponse?; var error: Error? }
         let box = Box()
         let done = DispatchSemaphore(value: 0)
-        URLSession(configuration: cfg).dataTask(with: req) { d, r, e in
+        // TEST seam (the proxy probe): DOZ_TEST_SERVE_CA=<pem> — the proxy's certificate is trusted ONLY when it chains to
+        // that CA (a scratch one; never the keychain). Without it: the system's trust, as a browser would.
+        let anchors = ProcessInfo.processInfo.environment["DOZ_TEST_SERVE_CA"].flatMap { try? String(contentsOfFile: $0, encoding: .utf8) }
+            .map(TestAnchors.certificates) ?? []
+        URLSession(configuration: cfg, delegate: anchors.isEmpty ? nil : TestAnchors(anchors), delegateQueue: nil).dataTask(with: req) { d, r, e in
             box.data = d; box.response = r as? HTTPURLResponse; box.error = e
             done.signal()
         }.resume()
@@ -468,5 +473,28 @@ enum ServeDoctor {
         default:
             return DoctorCheck(check: name, status: .fail, detail: "answered HTTP \(r.statusCode)\(code.isEmpty ? "" : " (\(code))")")
         }
+    }
+}
+
+/// `DOZ_TEST_SERVE_CA` (tests only): trust exactly these anchors for the doctor's probe.
+final class TestAnchors: NSObject, URLSessionDelegate, @unchecked Sendable {
+    let anchors: [SecCertificate]
+    init(_ anchors: [SecCertificate]) { self.anchors = anchors }
+
+    static func certificates(_ pem: String) -> [SecCertificate] {
+        pem.components(separatedBy: "-----BEGIN CERTIFICATE-----").dropFirst().compactMap { part in
+            let b64 = part.components(separatedBy: "-----END CERTIFICATE-----")[0].filter { !$0.isWhitespace }
+            return Data(base64Encoded: b64).flatMap { SecCertificateCreateWithData(nil, $0 as CFData) }
+        }
+    }
+
+    func urlSession(_ session: URLSession, didReceive challenge: URLAuthenticationChallenge,
+                    completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
+        guard challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust, let trust = challenge.protectionSpace.serverTrust else {
+            completionHandler(.performDefaultHandling, nil); return
+        }
+        SecTrustSetAnchorCertificates(trust, anchors as CFArray)
+        SecTrustSetAnchorCertificatesOnly(trust, true)
+        if SecTrustEvaluateWithError(trust, nil) { completionHandler(.useCredential, URLCredential(trust: trust)) } else { completionHandler(.cancelAuthenticationChallenge, nil) }
     }
 }

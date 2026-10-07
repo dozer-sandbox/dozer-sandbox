@@ -119,11 +119,14 @@ public final class WebServeState: @unchecked Sendable {
         return WebServeRules.admit(peer: p, local: l, bind: config.bind, interfaces: interfaces(), natSubnet: natSubnet)
     }
 
-    /// Count a connection from `address`; false when it already has as many as it may.
+    /// Count a connection from `address`; false when it already has as many as it may. A trusted proxy is every
+    /// browser behind it at once (an HTTP/2 page's ~70 module requests become as many upstream connections): only
+    /// the server's own cap applies to it.
     func open(_ address: String) -> Bool {
-        lock.withLock {
+        let proxy = WebIP(address).map(config.isTrustedProxy) ?? false
+        return lock.withLock {
             let n = perAddress[address, default: 0]
-            guard n < Self.connectionsPerAddress else { return false }
+            guard proxy || n < Self.connectionsPerAddress else { return false }
             perAddress[address] = n + 1
             return true
         }

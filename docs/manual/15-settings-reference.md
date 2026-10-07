@@ -94,6 +94,16 @@ This table is generated from `doz config show` and checked against it on every b
 | `ui.grid_tile_size` | `medium` | small \| medium \| large | at once | — | All sessions: the size of a tile. |
 | `ui.progress` | `animated` | animated \| plain | at once | `$DOZ_PROGRESS`, `--progress auto\|plain` | How a start, wake or bake shows its progress — in the web UI's boot view and in the CLI on a terminal: animated (a spinner on the step under way, download bars, the output's last lines) or plain (one line per step, and a summary line per download). Not a terminal, --json or NO_COLOR: always plain. |
 
+### `[serve]`
+
+| key | default | values | applies | overridden by | what it does |
+|---|---|---|---|---|---|
+| `serve.port` | `7443` | integer 1024–65535 | serve-restart | `$DOZ_SERVE_PORT`, `doz serve --port N` | The port doz serve listens on — the dashboard for the other browsers of your network. It stays the same (an installed app and a bookmark belong to it): when another program holds it, doz serve refuses and names it. |
+| `serve.bind` | `lan` | lan \| loopback \| the Mac's addresses, comma-separated | serve-restart | `$DOZ_SERVE_BIND`, `doz serve --bind lan\|loopback\|ADDRESSES` | Where doz serve listens: lan (every network interface of this Mac and Tailscale — never a sandbox's network), loopback (127.0.0.1 and ::1 only: for a reverse proxy on this Mac), or this Mac's own addresses separated by commas (for a reverse proxy elsewhere on your network). |
+| `serve.public_origins` | `""` | origins like https://doz.home.example, comma-separated ("" = none) | serve-restart | — | The addresses your reverse proxy serves the dashboard at, like https://doz.home.example (comma-separated). A browser may use one only through a proxy listed in serve.trusted_proxies. Over https, keys and tokens may be typed in the dashboard; over plain http they never are. |
+| `serve.trusted_proxies` | `""` | addresses or networks like 127.0.0.1, 192.168.1.0/24, comma-separated ("" = none) | serve-restart | — | The reverse proxies whose X-Forwarded-Proto, X-Forwarded-Host and X-Forwarded-For doz serve believes — their addresses or networks, comma-separated (a proxy on this Mac: 127.0.0.1, ::1). From anyone else those headers are ignored. |
+| `serve.advertise` | `true` | boolean | serve-restart | — | Announce doz serve on your network with Bonjour ("Dozer on <this Mac>", http://<this Mac>.local:<port>), so other Macs and phones can find it. |
+
 ### `[host]`
 
 | key | default | values | applies | overridden by | what it does |
