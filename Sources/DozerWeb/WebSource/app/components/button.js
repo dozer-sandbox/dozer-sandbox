@@ -5,6 +5,23 @@ import { icon, iconFor, withIcon } from '../dom/icons.js';
 /// A button: its icon (opts.icon, else the label's — `iconFor`) and its text label. 603: one family —
 /// opts.primary (one per view), quiet (dense places), danger; small (24 px) or lg (32 px); iconOnly (the
 /// label becomes its aria-label and tooltip — only where the icon is unambiguous).
+/**
+ * @typedef {object} ButtonOptions
+ * @property {boolean} [primary]   the view's one primary (the verb that moves things forward)
+ * @property {boolean} [quiet]     a quiet button (dense places)
+ * @property {boolean} [danger]    a destructive verb
+ * @property {boolean} [small]     24 px
+ * @property {boolean} [lg]        32 px
+ * @property {boolean} [iconOnly]  the label becomes its aria-label and tooltip (only where the icon is unambiguous)
+ * @property {string}  [icon]      a Lucide name (else `iconFor(label)`)
+ * @property {string}  [title]     its tooltip
+ */
+/**
+ * @param {string} label
+ * @param {(ev: MouseEvent) => void} onClick
+ * @param {ButtonOptions} [opts]
+ * @returns {HTMLButtonElement}
+ */
 export function btn(label, onClick, opts = {}) {
   const cls = ['btn'];
   if (opts.primary) cls.push('primary');

@@ -30,6 +30,25 @@ import { callout } from './callout.js';
 // setting rows below it). A failure shows its reason with Skip (keep the choice, not confirmed), Turn it off,
 // or Check again. 'settings' mode shows the last confirmation of each and "Check again", without choices.
 export const ACCESS_TITLES = { claude: 'Claude account', github: 'GitHub as you', ssh: 'SSH agent forwarding' };
+/**
+ * @typedef {{ github?: 'off' | 'read' | 'push', githubSource?: 'gh' | 'key', ssh?: 'off' | 'on' }} AccessChoices
+ * @typedef {object} AccessStepOptions
+ * @property {'onboarding' | 'sandbox' | 'settings'} [mode]   default onboarding
+ * @property {object} [state]       kept by the caller across its own re-renders (the component fills it)
+ * @property {boolean} [claude]     (onboarding) confirm the store's default Claude account too
+ * @property {AccessChoices} [choices]   the initial choices (else the settings')
+ * @property {(choices: AccessChoices) => void} [onChange]
+ * @typedef {object} AccessStep
+ * @property {() => AccessChoices} choices
+ * @property {() => boolean} resolved
+ * @property {() => Promise<boolean>} confirm
+ * @property {() => void} render
+ */
+/**
+ * @param {HTMLElement} container
+ * @param {AccessStepOptions} [opts]
+ * @returns {AccessStep}
+ */
 export function renderAccessStep(container, opts = {}) {
   const mode = opts.mode || 'onboarding';
   const st = opts.state || {};

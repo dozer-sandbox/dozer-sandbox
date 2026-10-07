@@ -5,6 +5,35 @@ import { actOrThrow } from '../core/operations.js';
 
 // ── dialogs (forms live outside the view) ───────────────────────────────────
 // fields: [{name, label, type: text|number|select|textarea|checkbox, options, value, placeholder, help, required}]
+/**
+ * @typedef {object} DialogField
+ * @property {string} name
+ * @property {string} [label]
+ * @property {'text' | 'number' | 'select' | 'textarea' | 'checkbox' | 'password' | 'custom'} [type]   default text
+ * @property {Array<string | [string, string]>} [options]   a select's values (or [value, label])
+ * @property {string | number | boolean} [value]
+ * @property {string} [placeholder]
+ * @property {string} [help]
+ * @property {boolean} [required]
+ * @property {number} [min]
+ * @property {number} [max]
+ * @property {HTMLElement} [el]          a custom field's element
+ * @property {() => unknown} [get]       a custom field's value
+ * @typedef {object} DialogOptions
+ * @property {boolean} [danger]          the submit button is destructive
+ * @property {string}  [icon]            the submit button's icon (else `iconFor(submitLabel)`)
+ * @property {string}  [confirmName]     the person types this name before submit is enabled
+ * @typedef {{ extra: HTMLElement, error: HTMLElement, submit: HTMLButtonElement }} DialogParts
+ */
+/**
+ * @param {string} title
+ * @param {string | null} intro
+ * @param {DialogField[]} fields
+ * @param {string} submitLabel
+ * @param {(values: Object<string, any>, parts: DialogParts) => Promise<unknown>} onSubmit   'keep-open' keeps it open
+ * @param {DialogOptions} [opts]
+ * @returns {HTMLDialogElement & { inputs: Object<string, HTMLInputElement>, why: HTMLElement }}
+ */
 export function dialog(title, intro, fields, submitLabel, onSubmit, opts = {}) {
   const d = h('dialog', { class: 'dlg' });
   const form = h('form', { method: 'dialog' });

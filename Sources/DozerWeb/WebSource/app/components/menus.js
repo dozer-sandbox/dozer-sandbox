@@ -27,6 +27,33 @@ function menuItemsNodes(items, close) {
     return b;
   });
 }
+/**
+ * @typedef {object} MenuItem
+ * @property {string} [label]
+ * @property {string} [icon]        a Lucide name (else `iconFor(label)`)
+ * @property {string} [desc]        its one-line description (drawn from data-desc)
+ * @property {boolean} [danger]     destructive items last
+ * @property {boolean} [disabled]
+ * @property {string} [why]         why it is disabled (its description line)
+ * @property {boolean} [check]      a checked item
+ * @property {Object<string, string>} [data]   data-* attributes
+ * @property {(ev: MouseEvent) => void} [onSelect]
+ * @property {boolean} [sep]        a separator
+ * @property {string} [heading]     a heading
+ * @typedef {object} MenuOptions
+ * @property {string} [label]       the menu's aria-label (else the trigger's)
+ * @property {HTMLElement} [wrap]   the element the menu goes in (else a span around the trigger)
+ * @property {'start' | 'end'} [align]
+ * @property {() => void} [onOpen]
+ * @property {() => void} [onClose]
+ * @property {boolean} [small]      moreMenu: a 24 px ⋯
+ * @property {Object<string, string>} [data]   moreMenu: the ⋯ button's data-*
+ */
+/**
+ * @param {HTMLElement} trigger
+ * @param {Array<MenuItem | null | false>} items
+ * @param {MenuOptions} [opts]
+ */
 export function menuButton(trigger, items, opts = {}) {
   const menu = h('div', { class: 'menu', role: 'menu', hidden: true, 'aria-label': opts.label || trigger.getAttribute('aria-label') || trigger.textContent.trim() });
   const wrap = opts.wrap || h('span', { class: 'menu-wrap' });
@@ -79,6 +106,12 @@ export function menuButton(trigger, items, opts = {}) {
   return ctl;
 }
 /// The ⋯ button: an icon-only quiet button that opens `items`.
+/**
+ * The ⋯ overflow menu.
+ * @param {string} label   its aria-label and tooltip
+ * @param {Array<MenuItem | null | false>} items
+ * @param {MenuOptions} [opts]
+ */
 export function moreMenu(label, items, opts = {}) {
   const b = h('button', { type: 'button', class: 'btn quiet icon-only' + (opts.small ? ' sm' : ''), 'aria-label': label, title: label }, icon('ellipsis'));
   if (opts.data) for (const [k, v] of Object.entries(opts.data)) b.dataset[k] = v;
