@@ -55,6 +55,12 @@ public enum SettingType: Sendable, Equatable {
     /// 599b: Mac app names, comma-separated (`Typora, Visual Studio Code`) — `WorkspaceFiles.appNames`;
     /// `""` = none.
     case appList
+    /// 606: where `doz serve` listens — `lan`, `loopback`, or the Mac's addresses separated by commas.
+    case serveBind
+    /// 606: external origins, comma-separated (`https://doz.home.example`); `""` = none.
+    case originList
+    /// 606: addresses or networks, comma-separated (`127.0.0.1, 192.168.1.0/24, fd00::/8`); `""` = none.
+    case addressList
 
     /// The variables a title may use.
     public static let titleVariables = ["sandbox", "session", "image", "time", "phase"]
@@ -93,6 +99,9 @@ public enum SettingType: Sendable, Equatable {
         case .permissions: "standard | locked | open, or permissions like +web,-error-reports (doz net permissions)"
         case .titleTemplate: "a title with {sandbox} {session} {image} {time} {phase} (\"\" = leave the title alone)"
         case .appList: "app names, comma-separated, like \"Typora, Visual Studio Code\" (\"\" = none)"
+        case .serveBind: "lan | loopback | the Mac's addresses, comma-separated"
+        case .originList: "origins like https://doz.home.example, comma-separated (\"\" = none)"
+        case .addressList: "addresses or networks like 127.0.0.1, 192.168.1.0/24, comma-separated (\"\" = none)"
         }
     }
 
@@ -121,6 +130,8 @@ public enum SettingApplies: String, Codable, Sendable, CaseIterable {
     case nextStartOrWake = "next-start-or-wake"
     /// 605: when doz ui starts again (`doz ui restart`).
     case uiRestart = "ui-restart"
+    /// 606: when doz serve starts again.
+    case serveRestart = "serve-restart"
 
     public var note: String {
         switch self {
@@ -133,6 +144,7 @@ public enum SettingApplies: String, Codable, Sendable, CaseIterable {
         case .nextBoot: "applies when the next boot of a sandbox is kept"
         case .nextStartOrWake: "applies at each sandbox's next start or wake"
         case .uiRestart: "applies when doz ui starts again (doz ui restart)"
+        case .serveRestart: "applies when doz serve starts again"
         }
     }
 }
@@ -200,6 +212,15 @@ public struct SettingDefinition: Sendable {
         case (.titleTemplate, .string(let s)):
             if let why = SettingType.titleTemplateProblem(s) { throw SettingsError("\(key): \(why)") }
             return v
+        case (.serveBind, .string(let s)):
+            guard ServeSettingValues.isBind(s) else { throw SettingsError("\(key) is lan, loopback, or the Mac's own addresses separated by commas (no wildcard, no link-local address)") }
+            return v
+        case (.originList, .string(let s)):
+            guard ServeSettingValues.isOriginList(s) else { throw SettingsError("\(key) is origins like https://doz.home.example (no path), separated by commas, or \"\"") }
+            return v
+        case (.addressList, .string(let s)):
+            guard ServeSettingValues.isAddressList(s) else { throw SettingsError("\(key) is addresses or networks like 127.0.0.1 or 192.168.1.0/24, separated by commas, or \"\"") }
+            return v
         case (.appList, .string(let s)):
             guard WorkspaceFiles.appNames(s) != nil else {
                 throw SettingsError("\(key) is app names separated by commas (at most 16, each 1–64 characters, no / or ;), or \"\"")
@@ -223,7 +244,7 @@ public struct SettingDefinition: Sendable {
         case .int:
             guard let i = Int(t) else { throw SettingsError("\(key) is a whole number") }
             return try validate(.int(i))
-        case .choice, .path, .subnet, .version, .timeZone, .permissions, .appList:
+        case .choice, .path, .subnet, .version, .timeZone, .permissions, .appList, .serveBind, .originList, .addressList:
             return try validate(.string(t))
         case .titleTemplate:
             return try validate(.string(text))          // its spaces are its own
@@ -351,6 +372,12 @@ public enum SettingKey {
     public static let openBrowser = "ui.open_browser"
     /// 605 (owner Q10): the loopback port `doz ui` listens on — 0 = automatic (the last one, when free).
     public static let uiPort = "ui.port"
+    /// 606: `doz serve`, the dashboard for the other browsers of the LAN.
+    public static let servePort = "serve.port"
+    public static let serveBind = "serve.bind"
+    public static let servePublicOrigins = "serve.public_origins"
+    public static let serveTrustedProxies = "serve.trusted_proxies"
+    public static let serveAdvertise = "serve.advertise"
     /// 594: where the UI's new sandboxes get their workspace by default (`<projects_dir>/<name>`).
     public static let projectsDir = "defaults.projects_dir"
     public static let kernelPath = "kernel.path"
@@ -427,6 +454,22 @@ public struct DozerSettings: Sendable {
             .init("ui", "progress", .choice(["animated", "plain"]), .string("animated"),
                   "How a start, wake or bake shows its progress — in the web UI's boot view and in the CLI on a terminal: animated (a spinner on the step under way, download bars, the output's last lines) or plain (one line per step, and a summary line per download). Not a terminal, --json or NO_COLOR: always plain.",
                   env: "DOZ_PROGRESS", flag: "--progress auto|plain", applies: .now),
+            // 606: doz serve. Read-only in the web UI (they decide who reaches the dashboard): doz config set on the Mac.
+            .init("serve", "port", .int(1024...65_535), .int(7443),
+                  "The port doz serve listens on — the dashboard for the other browsers of your network. It stays the same (an installed app and a bookmark belong to it): when another program holds it, doz serve refuses and names it.",
+                  env: "DOZ_SERVE_PORT", flag: "doz serve --port N", applies: .serveRestart, ui: false),
+            .init("serve", "bind", .serveBind, .string("lan"),
+                  "Where doz serve listens: lan (every network interface of this Mac and Tailscale — never a sandbox's network), loopback (127.0.0.1 and ::1 only: for a reverse proxy on this Mac), or this Mac's own addresses separated by commas (for a reverse proxy elsewhere on your network).",
+                  env: "DOZ_SERVE_BIND", flag: "doz serve --bind lan|loopback|ADDRESSES", applies: .serveRestart, ui: false),
+            .init("serve", "public_origins", .originList, .string(""),
+                  "The addresses your reverse proxy serves the dashboard at, like https://doz.home.example (comma-separated). A browser may use one only through a proxy listed in serve.trusted_proxies. Over https, keys and tokens may be typed in the dashboard; over plain http they never are.",
+                  applies: .serveRestart, ui: false),
+            .init("serve", "trusted_proxies", .addressList, .string(""),
+                  "The reverse proxies whose X-Forwarded-Proto, X-Forwarded-Host and X-Forwarded-For doz serve believes — their addresses or networks, comma-separated (a proxy on this Mac: 127.0.0.1, ::1). From anyone else those headers are ignored.",
+                  applies: .serveRestart, ui: false),
+            .init("serve", "advertise", .bool, .bool(true),
+                  "Announce doz serve on your network with Bonjour (\"Dozer on <this Mac>\", http://<this Mac>.local:<port>), so other Macs and phones can find it.",
+                  applies: .serveRestart, ui: false),
             .init("host", "idle_timeout_minutes", .int(0...10_080), .int(5),
                   "Minutes with nothing running before the host exits; 0 = never.",
                   env: "DOZ_HOST_IDLE", flag: "doz host start --idle-timeout", applies: .hostRestart),
@@ -718,6 +761,9 @@ public struct DozerSettings: Sendable {
             case .permissions: kind = "permissions"
             case .titleTemplate: kind = "template"
             case .appList: kind = "apps"
+            case .serveBind: kind = "bind"
+            case .originList: kind = "origins"
+            case .addressList: kind = "addresses"
             }
             var note: String?
             switch r.source {
@@ -729,6 +775,7 @@ public struct DozerSettings: Sendable {
                 // 599c: the projects folder has the web UI's Choose… (the Mac's folder picker) too.
                 note = d.key == SettingKey.projectsDir
                     ? "a host path — Choose… (this Mac's folder picker), or doz config set \(d.key) PATH"
+                    : d.section == "serve" ? "who reaches the dashboard is set on the Mac: doz config set \(d.key) VALUE"
                     : "a host path — set it with: doz config set \(d.key) PATH"
             }
             if fileError != nil, note == nil { note = "the settings file does not parse — fix it (or remove it) first" }

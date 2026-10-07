@@ -21,10 +21,13 @@ public struct WebRequestMetadata: Equatable, Sendable {
     public var csrfToken: String?
     public var contentType: String?
     public var bodyByteCount: Int
+    /// 606: `X-Doz-Probe` — `doz doctor`'s one-use token (doz serve's probe route only).
+    public var probeToken: String?
 
     public init(method: WebHTTPMethod, host: String?, origin: String? = nil, secFetchSite: String? = nil,
                 authorization: String? = nil, cookie: String? = nil, csrfToken: String? = nil,
-                contentType: String? = nil, bodyByteCount: Int = 0) {
+                contentType: String? = nil, bodyByteCount: Int = 0, probeToken: String? = nil) {
+        self.probeToken = probeToken
         self.method = method
         self.host = host
         self.origin = origin
@@ -76,25 +79,44 @@ public enum WebRejection: String, Error, Equatable, Sendable {
     case secretEntryOff = "secret-entry-off"
     /// 594: the Mac's folder picker is already open (one at a time).
     case pickerOpen = "picker-open"
+    // 606 — doz serve (the other browsers of the LAN).
+    /// No device cookie: this browser was never admitted (or its sign-in is unknown here).
+    case notAdmitted = "not-admitted"
+    /// This browser was removed from the devices.
+    case deviceRevoked = "device-revoked"
+    /// The link or code is not an open invite (wrong, expired, or its code was cancelled).
+    case admissionRejected = "admission-rejected"
+    /// The link or code was used already — each admits one browser.
+    case admissionUsed = "admission-used"
+    case tooManyAttempts = "too-many-attempts"
+    case tooManyDevices = "too-many-devices"
+    /// A key or token typed in a browser that reached doz serve over plain HTTP.
+    case secretOverHTTP = "secret-over-http"
+    /// Something that opens a window on the Mac's own screen (a picker, Terminal) asked from another computer.
+    case macScreen = "mac-screen"
+    /// `doz ui`'s Devices page needs a running doz serve for this.
+    case serveNotRunning = "serve-not-running"
 
     public var status: Int {
         switch self {
-        case .hostRejected, .originRejected, .crossSite, .csrfRejected, .terminalsOff, .secretEntryOff: 403
+        case .hostRejected, .originRejected, .crossSite, .csrfRejected, .terminalsOff, .secretEntryOff, .secretOverHTTP, .macScreen: 403
         case .methodNotAllowed: 405
-        case .alreadyRunning, .pickerOpen: 409
+        case .alreadyRunning, .pickerOpen, .serveNotRunning: 409
+        case .tooManyAttempts: 429
         case .bodyTooLarge: 413
         case .unsupportedMediaType: 415
         case .malformedAuthorization, .bootstrapRejected, .bootstrapUsed, .unauthenticated, .sessionExpired, .sessionRotated, .signedOut: 401
+        case .notAdmitted, .deviceRevoked, .admissionRejected, .admissionUsed: 401
         case .ticketMissing, .ticketRejected, .ticketUsed, .ticketExpired: 401
         case .upgradeRequired: 400
         case .notFound: 404
-        case .tooManyStreams, .tooManyConnections, .tooManyOperations, .unavailable, .tooManyTickets, .tooManyTerminals: 503
+        case .tooManyStreams, .tooManyConnections, .tooManyOperations, .unavailable, .tooManyTickets, .tooManyTerminals, .tooManyDevices: 503
         }
     }
 
     public var message: String {
         switch self {
-        case .hostRejected: "this server answers only to its own loopback address"
+        case .hostRejected: "this server answers only to its own addresses — not to that name"
         case .originRejected: "cross-origin requests are refused"
         case .crossSite: "cross-site requests are refused"
         case .methodNotAllowed: "method not allowed"
@@ -124,7 +146,37 @@ public enum WebRejection: String, Error, Equatable, Sendable {
         case .terminalsOff: "browser terminals are off (Settings: ui.terminals) — Open in Terminal still works"
         case .secretEntryOff: "keys and tokens are not taken in the browser (ui.allow_secret_entry = false) — in a terminal: doz account add NAME --api-key|--setup-token, or doz key set SANDBOX --anthropic"
         case .pickerOpen: "the folder picker is already open on this Mac — choose there, or cancel it"
+        case .notAdmitted: "this browser is not admitted to Dozer on this Mac — open a link or type a code from Add another browser (on a browser that is signed in) or from doz serve share (on the Mac)"
+        case .deviceRevoked: "this browser was removed from Dozer's devices — to come back, open a new link or type a new code (Add another browser on a signed-in browser, or doz serve share on the Mac)"
+        case .admissionRejected: "that link or code is not valid (or it expired after five minutes) — make a new one: Add another browser on a signed-in browser, or doz serve share on the Mac"
+        case .admissionUsed: "that link or code was already used — each one admits one browser; make a new one: Add another browser, or doz serve share"
+        case .tooManyAttempts: "too many wrong codes from this address — wait ten minutes, or open a link instead"
+        case .tooManyDevices: "this doz serve has as many browsers as it keeps — remove one in Devices (or doz serve revoke) first"
+        case .secretOverHTTP: "a key or token is never typed here over plain HTTP — the network between this browser and the Mac could read it. Add it on the Mac (doz account add NAME --api-key|--setup-token, or the Mac's own doz ui), or reach this dashboard over HTTPS through your reverse proxy (serve.public_origins)"
+        case .macScreen: "that opens a window on the Mac's own screen — from another computer, type the path instead (or use a browser terminal)"
+        case .serveNotRunning: "doz serve is not running for this store — start it in a terminal: doz serve"
         }
+    }
+}
+
+/// 606: the listener as ONE request sees it — its own origin (nil: its Host is not one this server answers
+/// to, refused first) and its session cookie's name. `doz ui`: exactly `http://127.0.0.1:<port>` (590);
+/// `doz serve`: `WebServeRules.requestOrigin`.
+public struct WebRequestView: Equatable, Sendable {
+    public var ownOrigin: String?
+    public var cookieName: String
+    /// What a request without that cookie is told (`doz serve`: not admitted).
+    public var missingCookie: WebRejection
+
+    public init(ownOrigin: String?, cookieName: String, missingCookie: WebRejection = .unauthenticated) {
+        self.ownOrigin = ownOrigin
+        self.cookieName = cookieName
+        self.missingCookie = missingCookie
+    }
+
+    /// 590's rule: the exact Host `127.0.0.1:<port>`, the exact origin.
+    public static func loopback(_ r: WebRequestMetadata, _ origin: WebOrigin) -> WebRequestView {
+        WebRequestView(ownOrigin: r.host == origin.authority ? origin.value : nil, cookieName: WebSecurity.cookieName(origin))
     }
 }
 
@@ -139,9 +191,16 @@ public enum WebSecurity {
     /// The exact-listener checks every request passes first: the Host header (DNS rebinding), the
     /// Origin when present, and Fetch Metadata when present.
     static func checkListener(_ r: WebRequestMetadata, _ origin: WebOrigin, originRequired: Bool) throws {
-        guard r.host == origin.authority else { throw WebRejection.hostRejected }
+        try checkListener(r, .loopback(r, origin), originRequired: originRequired)
+    }
+
+    /// 606: the same checks against the request's OWN origin (`WebRequestView`): nil = its Host is not one
+    /// this server answers to; an Origin, when present, must EQUAL it (a page loaded through one name never
+    /// drives the API through another); Fetch Metadata same-origin or none.
+    static func checkListener(_ r: WebRequestMetadata, _ view: WebRequestView, originRequired: Bool) throws {
+        guard let own = view.ownOrigin else { throw WebRejection.hostRejected }
         if let o = r.origin {
-            guard o == origin.value else { throw WebRejection.originRejected }
+            guard o == own else { throw WebRejection.originRejected }
         } else if originRequired {
             throw WebRejection.originRejected
         }
@@ -161,16 +220,24 @@ public enum WebSecurity {
     /// `/` and the hashed assets: no session (the page must load to perform the bootstrap), GET or
     /// HEAD only, no body, exact Host.
     public static func validateStatic(_ r: WebRequestMetadata, _ origin: WebOrigin) throws {
+        try validateStatic(r, .loopback(r, origin))
+    }
+
+    public static func validateStatic(_ r: WebRequestMetadata, _ view: WebRequestView) throws {
         guard r.method.isSafe else { throw WebRejection.methodNotAllowed }
         guard r.bodyByteCount == 0 else { throw WebRejection.bodyTooLarge }
-        try checkListener(r, origin, originRequired: false)
+        try checkListener(r, view, originRequired: false)
     }
 
     /// `POST /api/v1/session`: Origin REQUIRED and exact; the capability in `Authorization: Bearer`.
     /// Returns the presented capability.
     public static func validateBootstrap(_ r: WebRequestMetadata, _ origin: WebOrigin, limit: Int) throws -> String {
+        try validateBootstrap(r, .loopback(r, origin), limit: limit)
+    }
+
+    public static func validateBootstrap(_ r: WebRequestMetadata, _ view: WebRequestView, limit: Int) throws -> String {
         guard r.method == .post else { throw WebRejection.methodNotAllowed }
-        try checkListener(r, origin, originRequired: true)
+        try checkListener(r, view, originRequired: true)
         try checkBody(r, limit: limit)
         guard let a = r.authorization, a.hasPrefix("Bearer ") else { throw WebRejection.malformedAuthorization }
         let cap = String(a.dropFirst("Bearer ".count))
@@ -181,10 +248,14 @@ public enum WebSecurity {
     /// Any authenticated route: exact Host; a safe method may omit Origin (browsers do on a
     /// same-origin GET), an unsafe one must carry it and the CSRF header. Returns the session cookie.
     public static func validateAuthenticated(_ r: WebRequestMetadata, _ origin: WebOrigin, limit: Int) throws -> String {
-        try checkListener(r, origin, originRequired: !r.method.isSafe)
+        try validateAuthenticated(r, .loopback(r, origin), limit: limit)
+    }
+
+    public static func validateAuthenticated(_ r: WebRequestMetadata, _ view: WebRequestView, limit: Int) throws -> String {
+        try checkListener(r, view, originRequired: !r.method.isSafe)
         try checkBody(r, limit: limit)
         if !r.method.isSafe, r.csrfToken == nil { throw WebRejection.csrfRejected }
-        return try sessionCookie(r.cookie, name: cookieName(origin))
+        return try sessionCookie(r.cookie, name: view.cookieName, missing: view.missingCookie)
     }
 
     /// 591 — the subprotocol the terminal socket speaks, and the prefix that carries its ticket. The
@@ -199,10 +270,14 @@ public enum WebSecurity {
     /// exactly one ticket among the offered subprotocols, next to `terminalProtocol`. Returns the
     /// cookie and the presented ticket (the caller consumes it against the cookie's session).
     public static func validateTerminalUpgrade(_ r: WebRequestMetadata, _ origin: WebOrigin, subprotocols: [String]) throws -> (cookie: String, ticket: String) {
+        try validateTerminalUpgrade(r, .loopback(r, origin), subprotocols: subprotocols)
+    }
+
+    public static func validateTerminalUpgrade(_ r: WebRequestMetadata, _ view: WebRequestView, subprotocols: [String]) throws -> (cookie: String, ticket: String) {
         guard r.method == .get else { throw WebRejection.methodNotAllowed }
-        try checkListener(r, origin, originRequired: true)
+        try checkListener(r, view, originRequired: true)
         guard r.bodyByteCount == 0 else { throw WebRejection.bodyTooLarge }
-        let cookie = try sessionCookie(r.cookie, name: cookieName(origin))
+        let cookie = try sessionCookie(r.cookie, name: view.cookieName, missing: view.missingCookie)
         let offered = subprotocols.flatMap { $0.split(separator: ",") }.map { $0.trimmingCharacters(in: .whitespaces) }
         let tickets = offered.filter { $0.hasPrefix(ticketProtocolPrefix) }.map { String($0.dropFirst(ticketProtocolPrefix.count)) }
         guard offered.contains(terminalProtocol), tickets.count == 1, let t = tickets.first, WebRandom.isToken(t) else {
@@ -212,23 +287,24 @@ public enum WebSecurity {
     }
 
     /// The one cookie of this name; a duplicate (cookie tossing) or malformed value is refused.
-    public static func sessionCookie(_ header: String?, name: String) throws -> String {
-        guard let header else { throw WebRejection.unauthenticated }
+    public static func sessionCookie(_ header: String?, name: String, missing: WebRejection = .unauthenticated) throws -> String {
+        guard let header else { throw missing }
         let values = header.split(separator: ";", omittingEmptySubsequences: false).compactMap { part -> String? in
             let pair = part.trimmingCharacters(in: .whitespaces)
             guard pair.hasPrefix(name + "=") else { return nil }
             return String(pair.dropFirst(name.count + 1))
         }
-        guard values.count == 1, let v = values.first, WebRandom.isToken(v) else { throw WebRejection.unauthenticated }
+        guard values.count == 1, let v = values.first, WebRandom.isToken(v) else { throw missing }
         return v
     }
 
-    public static func setCookie(_ value: String, name: String, maxAge: TimeInterval) -> String {
-        "\(name)=\(value); Path=/; Max-Age=\(max(0, Int(maxAge))); HttpOnly; SameSite=Strict"
+    /// 606: `secure` (a device's cookie over https) adds `Secure` — required by its `__Host-` name.
+    public static func setCookie(_ value: String, name: String, maxAge: TimeInterval, secure: Bool = false) -> String {
+        "\(name)=\(value); Path=/; Max-Age=\(max(0, Int(maxAge))); HttpOnly; SameSite=Strict" + (secure ? "; Secure" : "")
     }
 
-    public static func clearCookie(name: String) -> String {
-        "\(name)=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict"
+    public static func clearCookie(name: String, secure: Bool = false) -> String {
+        "\(name)=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict" + (secure ? "; Secure" : "")
     }
 
     /// On EVERY response, success or refusal. No `Access-Control-Allow-*` is ever added.

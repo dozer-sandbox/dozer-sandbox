@@ -107,7 +107,7 @@ final class WebTerminalBridge: @unchecked Sendable {
     let grant: WebTerminalGrant
     private let data: DozerWebData
     private let hub: WebTerminalHub
-    private let sessions: WebSessionStore
+    private let sessions: WebAuth
     private let channel: Channel
     private let outbound: NIOAsyncChannelOutboundWriter<WebSocketFrame>
 
@@ -145,7 +145,7 @@ final class WebTerminalBridge: @unchecked Sendable {
     private let progress: ProgressTerminal
     private var progressTicker: Task<Void, Never>?
 
-    init(grant: WebTerminalGrant, data: DozerWebData, hub: WebTerminalHub, sessions: WebSessionStore, channel: Channel,
+    init(grant: WebTerminalGrant, data: DozerWebData, hub: WebTerminalHub, sessions: WebAuth, channel: Channel,
          outbound: NIOAsyncChannelOutboundWriter<WebSocketFrame>, progressMode: ProgressMode = .animated) {
         progress = ProgressTerminal(mode: progressMode, color: true, plainPrefix: "[doz] ", plainStyle: "2")
         self.grant = grant

@@ -9,6 +9,7 @@ import { opRunningFor } from '../core/sandboxes.js';
 import { saveSetting, setting } from '../core/settings.js';
 import { state } from '../core/state.js';
 import { pageTerminals, sview, terminals } from '../core/terminals.js';
+import { isRemote } from '../core/session.js';
 import { accountDialog, credentialBanner, keyEntry } from '../components/accounts.js';
 import { chip, panel, stat, table } from '../components/blocks.js';
 import { btn } from '../components/button.js';
@@ -150,8 +151,8 @@ function sandboxParts(name, d, net, accounts) {
         btn('Open', () => openTerminal(name, s.name, 'interactive'), { small: true, quiet: true, title: 'A terminal on this session, here in the browser' }),
         moreMenu('More for ' + s.name, [
           { label: 'Watch', icon: 'eye', desc: 'Read-only: nothing you type reaches it, it never resizes', onSelect: () => openTerminal(name, s.name, 'watch') },
-          { label: 'Open in Terminal', icon: 'square-terminal', desc: 'In your terminal app (doz attach)', disabled: !!whyNot, why: whyNot, onSelect: () => openInTerminal(name, s.name) },
-        ], { small: true, onClose: sbxMenuClosed }).el]))));
+          isRemote() ? null : { label: 'Open in Terminal', icon: 'square-terminal', desc: 'In your terminal app (doz attach)', disabled: !!whyNot, why: whyNot, onSelect: () => openInTerminal(name, s.name) },
+        ].filter(Boolean), { small: true, onClose: sbxMenuClosed }).el]))));
   const pointMenu = (p) => moreMenu('More for ' + p.name, [
     { label: 'Fork…', icon: 'git-fork', desc: 'A new sandbox whose disks are this point’s', onSelect: () => dialog('Fork ' + p.name, 'A new sandbox whose disks are this point’s (it cold-boots on start).',
       [{ name: 'newName', label: 'New sandbox name', required: true }], 'Fork', async (v) => { await actOrThrow({ action: 'point-fork', sandbox: name, point: p.id, newName: v.newName }); }) },

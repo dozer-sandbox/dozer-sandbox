@@ -103,6 +103,16 @@ public enum WebRoute: Equatable, Sendable {
     case access                    // GET  /api/v1/access
     case accessCheck               // POST /api/v1/access/check  ({items?, choices?: {github?, githubSource?, ssh?}})
     case accessGithubKey           // POST /api/v1/access/github-key  ({secret} | {remove: true})
+    // 606 — doz serve: this browser and the server (read), the devices and the recent remote activity (read),
+    // a new invite (link + code + QR), a device revoked or renamed; and the doctor's probe (no session: a one-use
+    // token doz serve issued over serve.sock — answered only by doz serve). In doz ui (the Mac) the device routes
+    // are answered through serve.sock.
+    case serveStatus               // GET  /api/v1/serve
+    case serveDevices              // GET  /api/v1/serve/devices
+    case serveShare                // POST /api/v1/serve/share  ({})
+    case serveRevoke(String)       // POST /api/v1/serve/devices/{id}/revoke  ({})
+    case serveRename(String)       // POST /api/v1/serve/devices/{id}/name  ({name})
+    case serveProbe                // GET  /api/v1/serve/probe  (X-Doz-Probe: <one-use token>)
 
     public var isStatic: Bool {
         switch self { case .index, .asset, .terminalFrame, .offline, .serviceWorker: true; default: false }
@@ -153,6 +163,9 @@ public enum WebRoute: Equatable, Sendable {
         case (.post, 2) where rest == ["dockerfile", "choose"]: return .dockerfileChoose
         case (.post, 2) where rest == ["access", "check"]: return .accessCheck
         case (.post, 2) where rest == ["access", "github-key"]: return .accessGithubKey
+        case (.post, 2) where rest == ["serve", "share"]: return .serveShare
+        case (.post, 4) where rest[0] == "serve" && rest[1] == "devices" && isDeviceID(rest[2]) && rest[3] == "revoke": return .serveRevoke(rest[2])
+        case (.post, 4) where rest[0] == "serve" && rest[1] == "devices" && isDeviceID(rest[2]) && rest[3] == "name": return .serveRename(rest[2])
         case (.post, 4) where rest[0] == "sandboxes" && isSandboxName(rest[1]) && rest[2] == "network" && rest[3] == "preview":
             return .policyPreview(rest[1])
         case (.post, 3) where rest[0] == "sandboxes" && isSandboxName(rest[1]) && rest[2] == "terminal":
@@ -184,10 +197,15 @@ public enum WebRoute: Equatable, Sendable {
             case "resources": return .resources
             case "bases": return .bases
             case "access": return .access
+            case "serve": return .serveStatus
             default: return nil
             }
         case 2 where rest == ["images", "tree"]:
             return .imageTree
+        case 2 where rest == ["serve", "devices"]:
+            return .serveDevices
+        case 2 where rest == ["serve", "probe"]:
+            return .serveProbe
         case 2 where rest[0] == "sandboxes" && isSandboxName(rest[1]):
             return .sandbox(rest[1])
         case 3 where rest[0] == "sandboxes" && isSandboxName(rest[1]):
@@ -217,6 +235,16 @@ public enum WebRoute: Equatable, Sendable {
     public static func isSessionName(_ s: String) -> Bool {
         (1...64).contains(s.count) && s.first != "."
             && s.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || "._-".contains($0)) }
+    }
+
+    /// 606: an action's name as the audit log may write it — 1–40 of [a-z-].
+    public static func isActionWord(_ s: String) -> Bool {
+        (1...40).contains(s.count) && s.allSatisfy { ("a"..."z").contains($0) || $0 == "-" }
+    }
+
+    /// 606: a device's id — 6 of [a-z0-9].
+    public static func isDeviceID(_ s: String) -> Bool {
+        s.count == 6 && s.allSatisfy { ("a"..."z").contains($0) || ("0"..."9").contains($0) }
     }
 
     /// The library's sandbox-name rule (`SandboxSpec.validate`).

@@ -6,6 +6,7 @@ import { refresh } from '../core/router.js';
 import { adoptSettings, resetSetting, saveSetting } from '../core/settings.js';
 import { state } from '../core/state.js';
 import { isInt } from '../core/util.js';
+import { isRemote } from '../core/session.js';
 import { renderAccessStep } from '../components/access-step.js';
 import { pageIndex } from '../components/blocks.js';
 import { btn } from '../components/button.js';
@@ -106,7 +107,7 @@ function settingControl(r) {
   if (r.key === 'defaults.projects_dir' && r.source !== 'env' && r.source !== 'flag') {
     const choose = btn('Choose…', () => chooseProjectsDir(), { small: true, icon: 'folder', title: 'Pick the folder in this Mac’s folder picker' });
     choose.dataset.projectsChoose = '';
-    return h('div', { class: 'path-setting' }, h('code', { class: 'setting-value', 'data-projects-dir': '' }, shownValue(r.value, r.type)), choose);
+    return h('div', { class: 'path-setting' }, h('code', { class: 'setting-value', 'data-projects-dir': '' }, shownValue(r.value, r.type)), isRemote() ? null : choose);
   }
   if (!r.editable) return h('code', { class: 'setting-value', title: r.note || '' }, shownValue(r.value, r.type));
   let input;

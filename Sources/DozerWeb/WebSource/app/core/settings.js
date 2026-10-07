@@ -38,7 +38,13 @@ export function bootViewOnStart() { return setting('ui.boot_view_on_start', true
 // out only in the body of one CSRF-checked POST /api/v1/accounts — never a URL, the page's state, a
 // toast or an operation. The host stores it exactly as `doz account add` does (the login keychain,
 // one check request). Off: the terminal commands instead.
-export function secretEntryAllowed() { return setting('ui.allow_secret_entry', true) === true; }
+export function secretEntryAllowed() { return setting('ui.allow_secret_entry', true) === true && !(state.serve && !state.serve.secure); }
+/// 606: why keys and tokens are not taken in this browser (the commands follow it).
+export function secretEntryWhy() {
+  return state.serve && !state.serve.secure
+    ? 'keys and tokens are never typed here over plain HTTP — the network between this browser and the Mac could read them; reach this dashboard over HTTPS through your reverse proxy, or'
+    : 'keys and tokens are not taken in this browser — ui.allow_secret_entry is off;';
+}
 
 /// The setting ui.terminals: off, the UI opens no browser terminal (and the server refuses a ticket).
 export function terminalsAllowed() {

@@ -30,6 +30,8 @@ enum SSEEnd: Sendable, Equatable {
     /// (a script navigation to another port is same-site, which the Fetch-Metadata rule refuses): the new
     /// doz ui opens a tab there, and this page says where it went.
     case moved(String)
+    /// 606: this browser was removed from doz serve's devices.
+    case revoked
 }
 
 /// One live-update client with a BOUNDED queue. When the client cannot keep up the queue is not

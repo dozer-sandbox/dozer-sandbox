@@ -2,6 +2,7 @@
 import { h } from '../dom/h.js';
 import { icon, withIcon } from '../dom/icons.js';
 import { api } from '../core/api.js';
+import { isRemote } from '../core/session.js';
 
 // ── 594: the workspace of a new sandbox ─────────────────────────────────────
 // Owner (2026-09-29): "an easier way to pick a workspace folder … a default location
@@ -25,7 +26,7 @@ export function workspaceChooser({ nameInput = null, image = () => null, name = 
   const segs = {};
   const seg = (m, label, icon) => (segs[m] = h('button', { type: 'button', class: 'seg', 'data-ws-seg': m, on: { click: () => setMode(m) } }, withIcon(icon, label)));
   const control = h('div', { class: 'segmented', role: 'group', 'aria-label': 'Workspace' }, seg('shared', 'Shared folder', 'folder'), seg('isolated', 'Isolated', 'shield'));
-  const shared = h('div', { class: 'ws-shared' }, h('div', { class: 'ws-row' }, path, choose), note);
+  const shared = h('div', { class: 'ws-shared' }, h('div', { class: 'ws-row' }, path, isRemote() ? null : choose), note);
   const isolatedNote = h('small', { class: 'ws-isolated-note', 'data-ws-isolated': '' }, ISOLATED_NOTE);
   const el = h('div', { class: 'field ws-field', 'data-ws-mode': mode },
     h('span', null, 'Workspace'), control, shared, isolatedNote);
