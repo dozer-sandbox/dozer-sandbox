@@ -161,6 +161,7 @@ struct Doctor: AsyncParsableCommand {
         out.append(DoctorCheck(check: "metrics", status: .ok, detail: metricsOK ? store.metrics.path : "none yet"))
         if claude { out += claudeChecks(store: store, keychain: SystemKeychain()) }
         out.append(codexLoginCheck(home: CodexMacLogin.resolveHome(), settings: .load()))
+        out += ServeDoctor.checks(store: store, settings: .load())
         return out
     }
 

@@ -22,4 +22,5 @@ export const state = {
   settings: null,          // 591: {report, byKey} from GET /api/v1/settings
   preps: [],               // 594: the host's image preparations (SSE `preparations`, GET /api/v1/preparations)
   wiz: null,               // 594: the onboarding wizard's state (#/onboarding)
+  serve: null,             // 606: doz serve — this browser's facts {exposure, secure, secretsAllowed, mac, device}; null on doz ui
 };

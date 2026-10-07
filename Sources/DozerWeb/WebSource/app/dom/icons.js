@@ -5,7 +5,7 @@ import { h } from './h.js';
 // asset). An icon is <svg class="icon"><use href="SPRITE#name"></svg>, made with createElementNS; its
 // colour is the button's (stroke: currentColor, in app.css) and it is hidden from assistive tech —
 // every button keeps its text (or its aria-label). One map says which icon a label gets.
-const SVG_NS = 'http://www.w3.org/2000/svg';
+export const SVG_NS = 'http://www.w3.org/2000/svg';
 const SPRITE = (() => { const m = document.querySelector('meta[name="doz-icons"]'); return m ? m.getAttribute('content') : ''; })();
 const ICON_FALLBACK = 'circle-dot';
 /// 593 (owner): Sleep and Hibernate are told apart by a second glyph — Sleep keeps the machine in

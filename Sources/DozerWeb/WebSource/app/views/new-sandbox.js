@@ -7,6 +7,7 @@ import { plural } from '../core/format.js';
 import { actOrThrow, waitOp } from '../core/operations.js';
 import { setting } from '../core/settings.js';
 import { state } from '../core/state.js';
+import { isRemote } from '../core/session.js';
 import { renderAccessStep } from '../components/access-step.js';
 import { accountChooser } from '../components/accounts.js';
 import { btn } from '../components/button.js';
@@ -284,7 +285,7 @@ function nwFolder() {
         ' — the wizard starts from it; the review shows what changes before anything is written.'] }) : null;
   const el = h('div', { class: 'wiz-choices' },
     radio('new', 'A new folder in your projects folder', h('div', { class: 'nw-sub' }, h('label', { class: 'field' }, h('span', null, 'Folder name'), name), where)),
-    radio('existing', 'A folder you have (your project)', h('div', { class: 'nw-sub' }, h('label', { class: 'field' }, h('span', null, 'Folder'), h('div', { class: 'row' }, path, choose)),
+    radio('existing', 'A folder you have (your project)', h('div', { class: 'nw-sub' }, h('label', { class: 'field' }, h('span', null, 'Folder'), h('div', { class: 'row' }, path, isRemote() ? null : choose)),
       h('small', { class: 'muted' }, 'Shared at /workspace. If it has a doz_project.yaml (or .yml), the wizard starts from it.'))),
     found);
   return {

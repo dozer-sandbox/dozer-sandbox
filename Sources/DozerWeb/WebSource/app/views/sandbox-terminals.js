@@ -10,6 +10,7 @@ import { bootViewOnStart, saveSetting, setting, terminalsAllowed } from '../core
 import { state } from '../core/state.js';
 import { pageTerminals, SPLIT_KINDS, sview, terminals, termUI } from '../core/terminals.js';
 import { splitArgs } from '../core/util.js';
+import { isRemote } from '../core/session.js';
 import { btn } from '../components/button.js';
 import { dialog } from '../components/dialog.js';
 import { lifecycle, sessionsWhyNot } from '../components/lifecycle.js';
@@ -55,7 +56,7 @@ export function renderTerminals() {
     const nsGroup = h('div', { class: 'btn-group', role: 'group', 'aria-label': 'New terminal' }, termUI.newShell, nsCaret);
     termUI.nsCtl = menuButton(nsCaret, [], { wrap: nsGroup, label: 'Other terminals' });
     termUI.openTerm = btn('Open in Terminal', () => openInTerminal(state.param, null), { small: true, quiet: true, iconOnly: true, icon: 'square-terminal' });
-    termUI.acts = h('div', { class: 'strip-acts', role: 'toolbar', 'aria-label': 'Terminals' }, nsGroup, termUI.splitBtn, termUI.openTerm);
+    termUI.acts = h('div', { class: 'strip-acts', role: 'toolbar', 'aria-label': 'Terminals' }, nsGroup, termUI.splitBtn, isRemote() ? null : termUI.openTerm);
     termUI.panes = [0, 1].map((i) => {
       const strip = h('div', { class: 'tabs', role: 'tablist', 'aria-label': 'Terminals' });
       const head = h('div', { class: 'term-strip' }, strip);

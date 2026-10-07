@@ -42,6 +42,8 @@ export function connect() {
     liveRefresh();
   });
   // 594 W19: a line from doz ui itself ("doz ui restarted — 0.12.0-rc.4").
+  // 606: a browser was let in, removed or renamed — the Devices page re-reads.
+  es.addEventListener('devices', () => { if (state.view === 'devices') refresh(false); });
   es.addEventListener('notice', (ev) => { try { toast(JSON.parse(ev.data).text, false, 'info'); } catch (_) { /* */ } });
   es.addEventListener('host', (ev) => { try { hostChanged(JSON.parse(ev.data)); } catch (_) { /* ignore a malformed line */ } });
   // 594: the host's image preparations, while any runs (and once when the last ends).
@@ -65,6 +67,8 @@ export function connect() {
     let reason = '';
     try { reason = JSON.parse(ev.data).reason; } catch (_) { /* */ }
     if (reason === 'session-ended') { signedOut('This browser’s session ended.', 'signed-out'); return; }
+    // 606: doz serve — this browser was removed from the devices (Devices, or doz serve revoke).
+    if (reason === 'revoked') { signedOut('This browser was removed from Dozer’s devices — to come back, open a new invite link or type a new code.', 'device-revoked'); return; }
     if (reason === 'shutdown') { uiLost(true); return; }
     // 605: `doz ui restart` — calm; the same port and session.
     if (reason === 'restarting') { uiLost(false, 'restarting'); return; }

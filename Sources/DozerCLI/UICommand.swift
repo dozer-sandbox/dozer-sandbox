@@ -205,17 +205,7 @@ struct UIRunner {
         do { assets = try WebAssets.load() } catch {
             throw fail(HostError(.failed, "the web UI's resources are missing or altered (\(error)) — \(WebAssets.bundleName) must sit beside the doz executable (make install-cli copies it)"), g)
         }
-        // 594: a TEST seam (the headless-browser probes): the UI then never looks at the Mac's Claude
-        // Code login (no keychain read, no `claude --version`) — the wizard shows "not signed in".
-        let probeClaude = env["DOZ_TEST_NO_MAC_LOGIN"] != "1"
-        let data = HostWebData(store: store, version: DozerCommand.version, macLogin: {
-            // 594: the onboarding wizard's account step — is Claude Code signed in on this Mac (read-only).
-            probeClaude && ClaudeLoginStatus.check(configDir: nil, keychain: SystemKeychain(), probeBinary: false).state == .signedIn
-        }) {
-            Doctor.checks(store: store, claude: probeClaude).map { WebDoctorCheck(check: $0.check, status: $0.status.rawValue, detail: $0.detail) }
-        }
-        // 599f: the New Sandbox wizard reads project files with the CLI's own parser (Yams stays here).
-        WebProjectFiles.install { text, file in try DozerProject.parse(text, file: file) }
+        let data = UIRunner.webData(store, env)
         // 591: the Settings page edits the settings file this process's environment names.
         let settings = WebSettingsStore(environment: env, flags: o.flags)
         // 605 (owner Q10): `ui.port` — 0: 594 W18's reuse (the port this store's last UI had, when free —
@@ -340,6 +330,22 @@ struct UIRunner {
         // return (that would exit before it does).
         while fds.restarting { try? await Task.sleep(for: .seconds(1)) }
         withExtendedLifetime(sources) {}
+    }
+
+    /// The dashboard's data source (shared by doz ui and doz serve).
+    static func webData(_ store: DozerStore, _ env: [String: String]) -> HostWebData {
+        // 594: a TEST seam (the headless-browser probes): the UI then never looks at the Mac's Claude
+        // Code login (no keychain read, no `claude --version`) — the wizard shows "not signed in".
+        let probeClaude = env["DOZ_TEST_NO_MAC_LOGIN"] != "1"
+        let data = HostWebData(store: store, version: DozerCommand.version, macLogin: {
+            // 594: the onboarding wizard's account step — is Claude Code signed in on this Mac (read-only).
+            probeClaude && ClaudeLoginStatus.check(configDir: nil, keychain: SystemKeychain(), probeBinary: false).state == .signedIn
+        }) {
+            Doctor.checks(store: store, claude: probeClaude).map { WebDoctorCheck(check: $0.check, status: $0.status.rawValue, detail: $0.detail) }
+        }
+        // 599f: the New Sandbox wizard reads project files with the CLI's own parser (Yams stays here).
+        WebProjectFiles.install { text, file in try DozerProject.parse(text, file: file) }
+        return data
     }
 
     /// The control socket's and the lock's descriptors, for the restart (the socket's is known only

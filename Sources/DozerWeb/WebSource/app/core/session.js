@@ -38,11 +38,16 @@ export async function bootstrap() {
 export function adopt(info) {
   state.csrf = info.csrf;
   state.expiresAt = new Date(info.expiresAt);
+  // 606: doz serve — another computer's browser: the Mac's name in the title and the brand line.
+  state.serve = info.serve || null;
+  const mac = state.serve ? (state.serve.mac || 'the Mac') : null;
   const sp = $('store-path');
-  sp.textContent = info.store;
+  sp.textContent = mac ? 'on ' + mac + ' · ' + info.store : info.store;
   sp.title = info.store;
   $('version').textContent = 'doz ' + info.version;
-  document.title = 'Dozer — ' + info.store.split('/').pop();
+  document.title = (mac ? 'Dozer on ' + mac : 'Dozer') + ' — ' + info.store.split('/').pop();
+  const k = document.querySelector('#live .foot-k');
+  if (k) k.textContent = state.serve ? 'doz serve' : 'doz ui';
   $('sign-out').hidden = false;
   state.everSignedIn = true;
   scheduleRenew();
@@ -83,8 +88,15 @@ export function signedOut(message, code) {
 }
 const SIGN_IN_TITLE = {
   'session-rotated': 'This page was signed out', 'session-expired': 'This browser’s sign-in expired', 'signed-out': 'You signed out',
+  'not-admitted': 'Let this browser in', 'device-revoked': 'This browser was removed', 'admission-rejected': 'Let this browser in',
+  'admission-used': 'Let this browser in', 'too-many-attempts': 'Let this browser in',
 };
+/// 606: what only doz serve answers (a page on another computer): it signs in with an access code or an invite link.
+const SERVE_CODES = new Set(['not-admitted', 'device-revoked', 'admission-rejected', 'admission-used', 'too-many-attempts']);
+/// 606: this page is another computer's (doz serve) — what opens a window on the Mac's own screen is not offered.
+export const isRemote = () => !!state.serve;
 function showSignIn(message, code) {
+  if (SERVE_CODES.has(code) || state.serveSignIn || state.serve) { showServeSignIn(message, code); return; }
   const o = $('ui-overlay');
   const title = SIGN_IN_TITLE[code] || (state.everSignedIn ? 'This page was signed out' : 'Sign in to Dozer');
   const field = h('input', { type: 'password', id: 'signin-link', name: 'link', autocomplete: 'off', spellcheck: 'false',
@@ -113,6 +125,75 @@ function showSignIn(message, code) {
   o.hidden = false;
   state.uiOverlay = true;
   quietly(() => field.focus());
+}
+/// 606: doz serve's sign-in — an access code (typed; 8 characters, ABCD-EFGH) or an invite link (pasted, like doz
+/// ui's). Each admits ONE browser, within five minutes; this browser then stays in until it is removed.
+function showServeSignIn(message, code) {
+  state.serveSignIn = true;
+  const k = document.querySelector('#live .foot-k');
+  if (k) k.textContent = 'doz serve';
+  const o = $('ui-overlay');
+  const title = SIGN_IN_TITLE[code] || (state.everSignedIn ? 'This browser was signed out' : 'Let this browser in');
+  const codeField = h('input', { type: 'text', id: 'signin-code', name: 'code', autocomplete: 'off', spellcheck: 'false', autocapitalize: 'characters',
+    inputmode: 'text', maxlength: '12', placeholder: 'ABCD-EFGH', 'aria-describedby': 'signin-help', class: 'mono signin-code' });
+  const field = h('input', { type: 'password', id: 'signin-link', name: 'link', autocomplete: 'off', spellcheck: 'false',
+    placeholder: location.origin + '/#cap=…', 'aria-describedby': 'signin-help' });
+  const err = h('p', { class: 'signin-err', id: 'signin-err', role: 'alert', hidden: true });
+  const go = h('button', { type: 'submit', class: 'btn primary', id: 'signin-go' }, withIcon('key-round', 'Sign in'));
+  const form = h('form', { class: 'signin-form', id: 'signin-form' },
+    h('label', { class: 'signin-label', for: 'signin-code' }, 'Access code'),
+    h('div', { class: 'signin-row' }, codeField, go),
+    h('label', { class: 'signin-label', for: 'signin-link' }, 'Or paste an invite link'),
+    h('div', { class: 'signin-row' }, field), err);
+  form.addEventListener('submit', (ev) => { ev.preventDefault(); serveSignInWith(codeField, field, err, go); });
+  o.replaceChildren(h('div', { class: 'ui-ov-card signin-card', 'data-serve-signin': code || '' },
+    h('div', { class: 'ui-ov-head' }, h('h2', { id: 'ui-ov-title' }, title)),
+    h('div', { id: 'ui-ov-desc' },
+      h('p', null, message || 'This browser is not let in to Dozer on this Mac yet.'),
+      form,
+      h('p', { class: 'muted', id: 'signin-help' }, 'An invite comes from a browser that is already in (Devices › ', h('strong', null, 'Add another browser'),
+        ') or from the Mac: ', h('code', null, 'doz serve share'), '. Scan its QR code, type its code here, or open its link — each lets ONE browser in, within five minutes.'),
+      h('p', { class: 'muted' }, 'This browser then stays in until it is removed (Devices, or doz serve revoke).'))));
+  for (const el of pausedParts()) el.inert = true;
+  document.body.classList.add('ui-paused', 'signing-in');
+  o.setAttribute('role', 'dialog');
+  o.setAttribute('aria-modal', 'true');
+  o.setAttribute('aria-labelledby', 'ui-ov-title');
+  o.setAttribute('aria-describedby', 'ui-ov-desc');
+  o.hidden = false;
+  state.uiOverlay = true;
+  quietly(() => codeField.focus());
+}
+async function serveSignInWith(codeField, field, err, go) {
+  const text = field.value.trim(), typed = codeField.value.trim();
+  field.value = '';
+  err.hidden = true;
+  const fail = (t) => { err.textContent = t; err.hidden = false; quietly(() => (text ? field : codeField).focus()); };
+  let body;
+  if (text) {
+    const m = /#cap=([A-Za-z0-9_-]{16,256})$/.exec(text);
+    if (!m) { fail('That is not an invite link — it ends #cap=… (Add another browser, or doz serve share).'); return; }
+    // An invite works on any of this Mac's names (the same doz serve): only its port must be this page's.
+    try { const u = new URL(text); if (u.port !== location.port && u.origin !== location.origin) { fail('That link is for another dashboard (' + u.origin + '); this page is ' + location.origin + '.'); return; } } catch (_) { /* the regex decides */ }
+    body = { method: 'POST', bearer: m[1] };
+  } else if (typed) {
+    if (!/^[0-9A-Za-z]{4}-?[0-9A-Za-z]{4}$/.test(typed.replace(/\s+/g, ''))) { fail('An access code is 8 letters and digits, like ABCD-EFGH.'); return; }
+    body = { method: 'POST', json: { code: typed } };
+  } else {
+    fail('Type the access code, or paste an invite link.');
+    return;
+  }
+  go.disabled = true;
+  try {
+    adopt(await api('session', body));
+  } catch (e) {
+    go.disabled = false;
+    fail(e.message || String(e));
+    return;
+  }
+  codeField.value = '';
+  state.serveSignIn = false;
+  signedIn();
 }
 /// The pasted link's `#cap=` is sent as a link's is (Authorization: Bearer, once); the field is emptied
 /// first — the link never reaches storage, a log or the address bar.

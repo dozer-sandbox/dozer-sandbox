@@ -93,3 +93,9 @@ extension HostCore {
         return ToolsLayerReport(sandbox: m.name, inputs: inputs, plan: ToolsLayer.plan(inputs), last: last, cached: toolsCache.entries())
     }
 }
+
+extension HostCore {
+    /// 606 (rc.2): the app macOS attributes THIS process to ("Name (bundle id)") — what Local Network privacy asks on
+    /// behalf of for doz serve's Bonjour announcement (it survives the detached double spawn, as the microphone's does).
+    public static var responsibleAppDescription: String? { microphoneApp?.description }
+}

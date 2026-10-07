@@ -68,6 +68,8 @@ public final class HostServer: @unchecked Sendable {
         guard store.socketPathFits else { throw StartError.socket(UnixSocket.Failure.pathTooLong(store.socket.path).localizedDescription) }
         let server = HostServer(store: store, idleTimeoutMinutes: idleTimeoutMinutes, version: version)
         try server.takeLock(waitSeconds: 60)
+        // 606: the proxy never connects a sandbox to one of Dozer's own dashboards on this Mac.
+        LocalDashboards.protect(DashboardPorts(store: store).current)
         HostLog.enabled = true
         HostLog.line("doz host \(version) (pid \(getpid())) — store \(store.root.path), idle timeout \(idleTimeoutMinutes) min")
         HostLog.line(launched ? "detached: parent \(getppid())\(getppid() == 1 ? " (launchd)" : " — NOT launchd"), session \(getsid(0))"
@@ -526,5 +528,28 @@ extension HostCore {
             throw HostError(.invalid, "\(m.name) is not proxied (network \(m.config.networkName)) — it has no connection log")
         }
         return (log, m.name)
+    }
+}
+
+
+/// 606: the ports Dozer's dashboards listen on — `doz ui`'s (`<store>/ui.port`), `doz serve`'s (`<store>/serve/port`
+/// while it runs) and the setting `serve.port` (another store's doz serve) — re-read at most every 5 s.
+final class DashboardPorts: @unchecked Sendable {
+    let store: DozerStore
+    private let lock = NSLock()
+    private var cached: (at: Date, ports: Set<UInt16>) = (.distantPast, [])
+    init(store: DozerStore) { self.store = store }
+
+    @Sendable func current() -> Set<UInt16> {
+        lock.lock(); defer { lock.unlock() }
+        if Date().timeIntervalSince(cached.at) < 5 { return cached.ports }
+        var p = Set<UInt16>()
+        for f in [store.root.appendingPathComponent("ui.port"), store.root.appendingPathComponent("serve/port")] {
+            if let s = try? String(contentsOf: f, encoding: .utf8), let n = UInt16(s.trimmingCharacters(in: .whitespacesAndNewlines)), n > 0 { p.insert(n) }
+        }
+        let sp = DozerSettings.load().int(SettingKey.servePort)
+        if (1...65_535).contains(sp) { p.insert(UInt16(sp)) }
+        cached = (Date(), p)
+        return p
     }
 }

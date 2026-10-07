@@ -223,7 +223,8 @@ function guard(root) {
     if (ev.code === 'KeyV') return;
     if (ev.code === 'KeyC' && term && quietly(() => term.hasSelection(), false)) {
       ev.preventDefault();
-      navigator.clipboard.writeText(term.getSelection()).catch(() => {});
+      // 606: an http page (doz serve on the LAN) is not a secure context — no clipboard API there.
+      if (navigator.clipboard) navigator.clipboard.writeText(term.getSelection()).catch(() => {});
     }
     ev.stopPropagation();
   }, true);

@@ -75,6 +75,12 @@ public final class WebSettingsStore: @unchecked Sendable {
         return current.int(key)
     }
 
+    /// 606: a string setting as this process sees it — its flag first (`doz serve --bind`), then the rest.
+    public func string(_ key: String) -> String? {
+        if case .string(let v)? = flags[key] { return v.isEmpty ? nil : v }
+        return current.string(key)
+    }
+
     public func report() -> SettingsReport { current.report(flags: flags) }
 
     /// Apply one change: refused when the UI may not set that key, or the environment or a flag sets
@@ -85,6 +91,8 @@ public final class WebSettingsStore: @unchecked Sendable {
         let s = current
         guard let d = DozerSettings.definition(change.key) else { throw WebAction.Invalid("unknown setting") }
         guard d.editableInUI else {
+            // 606: who may reach the dashboard is decided on the Mac, never from a browser.
+            if d.section == "serve" { throw HostError(.invalid, "\(d.key) decides who reaches the dashboard — set it on the Mac: doz config set \(d.key) VALUE") }
             throw HostError(.invalid, "\(d.key) is a host path — set it with: doz config set \(d.key) PATH")
         }
         let r = s.resolve(d.key, flag: flags[d.key])

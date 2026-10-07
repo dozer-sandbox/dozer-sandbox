@@ -5,6 +5,7 @@ import { AGENT_NAMES, AGENTS, imageNameOf, parseImageName } from '../core/agents
 import { api } from '../core/api.js';
 import { bytes } from '../core/format.js';
 import { actOrThrow, waitOps } from '../core/operations.js';
+import { isRemote } from '../core/session.js';
 import { btn } from './button.js';
 import { callout } from './callout.js';
 
@@ -54,7 +55,7 @@ export function imagePicker({ images = [], bases = null, value = 'claude-code', 
   const dfError = h('div', { class: 'dlg-error', role: 'alert', 'data-dockerfile-error': '' });
   const dfFail = (e) => { dfError.textContent = e ? e.message || String(e) : ''; };
   const dfPanel = h('div', { class: 'df-panel' },
-    h('div', { class: 'ws-row' }, dfPath, dfChoose),
+    h('div', { class: 'ws-row' }, dfPath, isRemote() ? null : dfChoose),
     h('small', { class: 'muted' }, 'Dozer builds it with Apple’s container build, then adds the developer baseline and the agent — your Dockerfile need not install Claude Code. Its folder is the build context, and the workspace unless you set one.'),
     policyNote, builderBox, dfError);
   const dfTell = () => { onDockerfile(dfPath.value.trim() ? dfPath.value.trim().replace(/\/[^/]*$/, '') || '/' : ''); };

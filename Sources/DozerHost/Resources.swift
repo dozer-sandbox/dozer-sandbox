@@ -230,6 +230,10 @@ public enum Resources {
     /// Store-root files that are Dozer's own records (never deleted here).
     static let storeRecords: Set<String> = ["accounts.json", "onboarded.json", "preparations.json", "agent-versions.json",
                                             "host.lock", "host.pid", "host.sock", "ui.lock", "ui.sock",
+                                            // 605: doz ui's port, kept sessions, ended sessions' reasons, operations.
+                                            "ui.port", "ui.sessions", "ui.revoked", "ui.operations.json",
+                                            // 606: doz serve's lock and socket (its devices, audit log and port: serve/).
+                                            "serve.lock", "serve.sock",
                                             // 596: the bases' resolved digests, the Dockerfiles and their builds.
                                             "base-digests.json", "dockerfiles.json",
                                             // 599e: the Access step's last checks (never a secret).
@@ -318,6 +322,7 @@ public enum Resources {
             return "image:lab@\(key)"
         case "content", "state.json": return "cache:downloads"
         case "tools": return "cache:tools"                       // 599h: the tools layer's downloads (gh)
+        case "serve": return "store"                             // 606: doz serve's devices, audit log, port
         case "initfs.ext4": return "initfs"
         case "kernels": return c.count >= 2 ? "kernel:\(kernelVersion(c[1]))" : "store"
         case "containers": return c.count >= 2 ? "leftover:\(c[1])" : "store"

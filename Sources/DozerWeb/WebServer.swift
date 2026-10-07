@@ -35,10 +35,23 @@ public final class DozerWebServer: @unchecked Sendable {
     public let dockerfilePicker: WebDockerfilePicker
     private let gate: UpgradeGate
     private let capability: WebBootstrapCapability
-    private let listener: NIOAsyncChannel<Accepted, Never>
+    private let listeners: [NIOAsyncChannel<Accepted, Never>]
+    /// 606: how a request signs in — doz ui's browser sessions, or doz serve's devices.
+    let auth: WebAuth
+    /// 606: doz serve's own state (nil: doz ui, loopback — 590).
+    public let serveState: WebServeState?
     private let lock = NSLock()
     private var children: [ObjectIdentifier: Channel] = [:]
     private var closing = false
+    /// 606: doz serve's connections answered with a refusal instead of served (never a silent drop but a sandbox's).
+    private var refusedConnections: [ObjectIdentifier: WebRejection] = [:]
+    func connectionRefusal(_ id: ObjectIdentifier) -> WebRejection? { lock.withLock { refusedConnections[id] } }
+    private var _advertised: String?
+    /// 606: doz serve's Bonjour name once registered (said by `GET /api/v1/serve`).
+    public var advertised: String? {
+        get { lock.withLock { _advertised } }
+        set { lock.withLock { _advertised = newValue } }
+    }
 
     public typealias Connection = NIOAsyncChannel<HTTPServerRequestPart, HTTPServerResponsePart>
     typealias Socket = NIOAsyncChannel<WebSocketFrame, WebSocketFrame>
@@ -68,7 +81,8 @@ public final class DozerWebServer: @unchecked Sendable {
             promise.completeWithTask { [self] in
                 guard let server else { return nil }
                 do {
-                    let grant = try await server.admitTerminal(head)
+                    if let r = server.connectionRefusal(id) { throw r }      // 606: a refused doz serve connection
+                    let grant = try await server.admitTerminal(head, peer: channel.remoteAddress)
                     lock.withLock { grants[id] = grant }
                     var h = HTTPHeaders()
                     for (k, v) in WebSecurity.responseHeaders { h.add(name: k, value: v) }
@@ -89,8 +103,8 @@ public final class DozerWebServer: @unchecked Sendable {
 
     private init(origin: WebOrigin, version: String, limits: WebLimits, assets: WebAssets, data: DozerWebData,
                  capability: WebBootstrapCapability, pollInterval: Duration, gate: UpgradeGate,
-                 listener: NIOAsyncChannel<Accepted, Never>, settings: WebSettingsStore, sessionsFile: URL?,
-                 revokedFile: URL?, operationsFile: URL?) {
+                 listeners: [NIOAsyncChannel<Accepted, Never>], settings: WebSettingsStore, sessionsFile: URL?,
+                 revokedFile: URL?, operationsFile: URL?, serveState: WebServeState? = nil) {
         self.origin = origin
         self.settings = settings
         folderPicker = WebFolderPicker(environment: settings.environment)
@@ -100,9 +114,11 @@ public final class DozerWebServer: @unchecked Sendable {
         self.assets = assets
         self.data = data
         self.capability = capability
-        self.listener = listener
+        self.listeners = listeners
         self.gate = gate
+        self.serveState = serveState
         sessions = WebSessionStore(bootstrap: capability, limits: limits, persist: sessionsFile, port: origin.port, revoked: revokedFile)
+        auth = serveState.map { .devices($0.devices) } ?? .browser(sessions)
         hub = SSEHub(maxClients: limits.maximumSSEClients, capacity: limits.maximumBufferedSSEEvents)
         tickets = WebTerminalTicketStore()
         terminals = WebTerminalHub()
@@ -131,28 +147,65 @@ public final class DozerWebServer: @unchecked Sendable {
         let gate = UpgradeGate()
         let listener: NIOAsyncChannel<Accepted, Never>
         do {
-            listener = try await listen(address, gate: gate, group: group)
+            listener = try await listen(host: address.host, port: address.port, gate: gate, group: group)
         } catch where address.port != 0 && !fixedPort {
             // 594 W18: the last port is taken after all (a race with its check): the OS picks.
-            listener = try await listen(WebLoopbackAddress(), gate: gate, group: group)
+            listener = try await listen(host: WebLoopbackAddress.host, port: 0, gate: gate, group: group)
         }
         guard let port = listener.channel.localAddress?.port else {
             try? await listener.channel.close()
             throw WebConfigurationError.invalidOrigin
         }
         let server = DozerWebServer(origin: try WebOrigin(port: port), version: version, limits: limits, assets: assets, data: data,
-                                     capability: capability, pollInterval: pollInterval, gate: gate, listener: listener,
+                                     capability: capability, pollInterval: pollInterval, gate: gate, listeners: [listener],
                                      settings: settings, sessionsFile: sessionsFile, revokedFile: revokedFile, operationsFile: operationsFile)
         gate.server = server
         return server
     }
 
-    private static func listen(_ address: WebLoopbackAddress, gate: UpgradeGate, group: EventLoopGroup) async throws -> NIOAsyncChannel<Accepted, Never> {
+    /// 606: `doz serve` — the same server on the LAN (`serve.bind`: the wildcard, each connection's local address
+    /// checked; loopback; or the Mac's own addresses), signed in by devices (`WebDeviceStore`), every request
+    /// judged by `WebServeRules` and `WebExposure`. `serve.port` 0 is a test's ephemeral port.
+    public static func bindServe(data: DozerWebData, assets: WebAssets, version: String, limits: WebLimits, settings: WebSettingsStore,
+                                 serve: WebServeState, pollInterval: Duration = .seconds(3), operationsFile: URL? = nil,
+                                 group: EventLoopGroup = MultiThreadedEventLoopGroup.singleton) async throws -> DozerWebServer {
+        let gate = UpgradeGate()
+        let hosts: [String] = switch serve.config.bind {
+        case .lan: ["::"]
+        case .loopback: ["127.0.0.1", "::1"]
+        case .addresses(let ips): ips.map(\.description)
+        }
+        var listeners: [NIOAsyncChannel<Accepted, Never>] = []
+        var port = serve.config.port
+        do {
+            for h in hosts {
+                let l: NIOAsyncChannel<Accepted, Never>
+                do {
+                    l = try await listen(host: h, port: port, gate: gate, group: group)
+                } catch where h == "::1" && !listeners.isEmpty {
+                    continue                                   // no IPv6 loopback on this Mac: 127.0.0.1 serves
+                }
+                listeners.append(l)
+                if port == 0 { port = l.channel.localAddress?.port ?? 0 }
+            }
+        } catch {
+            for l in listeners { try? await l.channel.close() }
+            throw error
+        }
+        serve.port = port
+        let server = DozerWebServer(origin: try WebOrigin(port: port), version: version, limits: limits, assets: assets, data: data,
+                                     capability: .make(), pollInterval: pollInterval, gate: gate, listeners: listeners,
+                                     settings: settings, sessionsFile: nil, revokedFile: nil, operationsFile: operationsFile, serveState: serve)
+        gate.server = server
+        return server
+    }
+
+    private static func listen(host: String, port: Int, gate: UpgradeGate, group: EventLoopGroup) async throws -> NIOAsyncChannel<Accepted, Never> {
         try await ServerBootstrap(group: group)
             .serverChannelOption(ChannelOptions.backlog, value: 64)
             .serverChannelOption(ChannelOptions.socketOption(.so_reuseaddr), value: 1)
             .childChannelOption(ChannelOptions.allowRemoteHalfClosure, value: false)
-            .bind(host: address.host, port: address.port) { child in
+            .bind(host: host, port: port) { child in
                 child.eventLoop.makeCompletedFuture {
                     let upgrader = NIOTypedWebSocketServerUpgrader<Upgrade>(
                         maxFrameSize: WebTerminalWire.maximumFrameBytes,
@@ -180,17 +233,28 @@ public final class DozerWebServer: @unchecked Sendable {
     /// 591 — the terminal socket's upgrade, in order (591.01-DESIGN.md §4.2): exact Host, Origin
     /// required and exact, Fetch Metadata, the route, the one cookie → a live session, the ticket
     /// in the subprotocol → consumed against that session and this sandbox, then room for one more.
-    func admitTerminal(_ head: HTTPRequestHead) async throws -> WebTerminalGrant {
+    func admitTerminal(_ head: HTTPRequestHead, peer: SocketAddress? = nil) async throws -> WebTerminalGrant {
         guard let method = WebHTTPMethod(rawValue: head.method.rawValue) else { throw WebRejection.methodNotAllowed }
         let md = metadata(head, method: method, bodyBytes: 0)
-        try WebSecurity.checkListener(md, origin, originRequired: true)
-        if head.headers["origin"].count > 1 { throw WebRejection.originRejected }
-        guard case .terminalSocket(let name)? = WebRoute.parse(method: method, target: head.uri) else { throw WebRejection.notFound }
-        let (cookie, ticket) = try WebSecurity.validateTerminalUpgrade(md, origin, subprotocols: head.headers["sec-websocket-protocol"])
-        _ = try await sessions.authenticate(cookie)
-        let grant = try await tickets.consume(ticket, cookie: cookie, sandbox: name)
-        guard terminals.hasRoom() else { throw WebRejection.tooManyTerminals }
-        return grant
+        let ctx = requestContext(head, md, peer: peer)
+        do {
+            try WebSecurity.checkListener(md, ctx.view, originRequired: true)
+            if head.headers["origin"].count > 1 { throw WebRejection.originRejected }
+            guard case .terminalSocket(let name)? = WebRoute.parse(method: method, target: head.uri) else { throw WebRejection.notFound }
+            let (cookie, ticket) = try WebSecurity.validateTerminalUpgrade(md, ctx.view, subprotocols: head.headers["sec-websocket-protocol"])
+            _ = try await auth.authenticate(cookie)
+            if let r = WebExposure.decide(.terminalSocket(name), ctx.principal) { throw r }
+            let grant = try await tickets.consume(ticket, cookie: cookie, sandbox: name)
+            guard terminals.hasRoom() else { throw WebRejection.tooManyTerminals }
+            if let s = serveState, case .devices(let d) = auth, let dev = try? await d.authenticate(cookie).1 {
+                s.audit.record(WebAuditEntry(kind: "terminal-open", device: dev.id, deviceName: dev.name, address: ctx.client,
+                                             sandbox: name, outcome: grant.mode.rawValue))
+            }
+            return grant
+        } catch let r as WebRejection {
+            serveState?.audit.record(WebAuditEntry(kind: "refused", address: ctx.client, route: "terminal-socket", outcome: r.rawValue))
+            throw r
+        }
     }
 
     /// The start-up link (its capability works once, for `limits.bootstrapLifetime`). Hand it to a
@@ -241,22 +305,68 @@ public final class DozerWebServer: @unchecked Sendable {
 
     /// Serve until `close()`.
     public func run() async throws {
+        try await withThrowingDiscardingTaskGroup { outer in
+            for l in listeners { outer.addTask { try await self.accept(l) } }
+        }
+    }
+
+    private func accept(_ listener: NIOAsyncChannel<Accepted, Never>) async throws {
         try await withThrowingDiscardingTaskGroup { group in
             try await listener.executeThenClose { inbound in
                 for try await accepted in inbound {
                     let channel = accepted.channel
+                    // 606: doz serve drops a sandbox's connection (and one that reached an address it does not
+                    // serve) before a byte is read, and caps each address's connections.
+                    var address: String?
+                    var refusal: WebRejection?
+                    if let s = serveState {
+                        let peer = channel.remoteAddress?.ipAddress.flatMap(WebIP.init)?.description ?? "?"
+                        switch s.admit(peer: channel.remoteAddress, local: channel.localAddress) {
+                        case .sandbox?:
+                            // A sandbox (Dozer's untrusted party) gets nothing at all: dropped before a byte is read.
+                            s.audit.record(WebAuditEntry(kind: "dropped", address: peer, outcome: WebServeRules.Drop.sandbox.rawValue))
+                            channel.close(promise: nil)
+                            continue
+                        case .notServed?:
+                            // Anyone else is TOLD why (rc.1: a silent drop looked like "no response" in the browser).
+                            s.audit.record(WebAuditEntry(kind: "refused", address: peer, outcome: WebServeRules.Drop.notServed.rawValue))
+                            refusal = .notServedAddress
+                        case nil:
+                            if s.open(peer) { address = peer } else {
+                                s.audit.record(WebAuditEntry(kind: "refused", address: peer, outcome: WebRejection.tooManyConnections.rawValue))
+                                refusal = .tooManyConnections
+                            }
+                        }
+                    }
                     let admitted: Bool = lock.withLock {
-                        guard !closing, children.count < limits.maximumConnections else { return false }
+                        guard !closing else { return false }
+                        if let refusal {
+                            // Answered once, then closed — not counted against the server's cap.
+                            refusedConnections[ObjectIdentifier(channel)] = refusal
+                            return true
+                        }
+                        guard children.count < limits.maximumConnections else {
+                            if serveState != nil {
+                                refusedConnections[ObjectIdentifier(channel)] = .tooManyConnections
+                                return true
+                            }
+                            return false
+                        }
                         children[ObjectIdentifier(channel)] = channel
                         return true
                     }
                     guard admitted else {
+                        if let address { serveState?.closed(address) }
                         channel.close(promise: nil)
                         continue
                     }
                     group.addTask {
                         await self.serve(accepted)
-                        _ = self.lock.withLock { self.children.removeValue(forKey: ObjectIdentifier(channel)) }
+                        _ = self.lock.withLock {
+                            self.children.removeValue(forKey: ObjectIdentifier(channel))
+                            self.refusedConnections.removeValue(forKey: ObjectIdentifier(channel))
+                        }
+                        if let address { self.serveState?.closed(address) }
                     }
                 }
             }
@@ -283,8 +393,9 @@ public final class DozerWebServer: @unchecked Sendable {
             await terminals.closeAll(reason: "restarting")
         }
         await monitor.stop()
+        if case .devices(let d) = auth { await d.flush() }
         try? await Task.sleep(for: .milliseconds(100))           // let the streams write their last frame
-        try? await listener.channel.close()
+        for l in listeners { try? await l.channel.close() }
         for c in open { c.close(promise: nil) }
     }
 
@@ -307,7 +418,7 @@ public final class DozerWebServer: @unchecked Sendable {
                 // A refused upgrade: NIO's typed upgrader does not pass the refused request's head on
                 // (only what followed it), so the refusal is answered here, from the decision itself,
                 // and the connection closed (its decoder has stopped parsing after an upgrade request).
-                if let r = gate.takeRefusal(id) { await refuse(conn, r) } else { await serve(conn) }
+                if let r = gate.takeRefusal(id) ?? connectionRefusal(id) { await refuse(conn, r) } else { await serve(conn, peer: accepted.channel.remoteAddress) }
             case .websocket(let socket, let grant):
                 await terminal(socket, grant)
             }
@@ -326,7 +437,7 @@ public final class DozerWebServer: @unchecked Sendable {
     private func terminal(_ socket: Socket, _ grant: WebTerminalGrant) async {
         try? await socket.executeThenClose { inbound, outbound in
             // 593: the boot view's progress as this UI's settings say (ui.progress; $DOZ_PROGRESS in its environment).
-            let bridge = WebTerminalBridge(grant: grant, data: data, hub: terminals, sessions: sessions, channel: socket.channel, outbound: outbound,
+            let bridge = WebTerminalBridge(grant: grant, data: data, hub: terminals, sessions: auth, channel: socket.channel, outbound: outbound,
                                            progressMode: settings.current.progressMode())
             guard terminals.add(bridge) else {
                 await bridge.end(.policyViolation, "too-many-terminals")
@@ -334,10 +445,14 @@ public final class DozerWebServer: @unchecked Sendable {
             }
             defer { terminals.remove(bridge) }
             await bridge.run(inbound)
+            if let s = serveState {
+                s.audit.record(WebAuditEntry(kind: "terminal-close", address: socket.channel.remoteAddress?.ipAddress.flatMap(WebIP.init)?.description,
+                                             sandbox: grant.sandbox))
+            }
         }
     }
 
-    private func serve(_ conn: Connection) async {
+    private func serve(_ conn: Connection, peer: SocketAddress? = nil) async {
         do {
             try await conn.executeThenClose { inbound, outbound in
                 var it = inbound.makeAsyncIterator()
@@ -361,7 +476,7 @@ public final class DozerWebServer: @unchecked Sendable {
                         try await write(outbound, head, error(.bodyTooLarge), isHead: isHead, keepAlive: false)
                         return
                     }
-                    switch await respond(head, body: Data(body.readableBytesView), connection: ObjectIdentifier(conn.channel)) {
+                    switch await respond(head, body: Data(body.readableBytesView), connection: ObjectIdentifier(conn.channel), peer: peer) {
                     case .stream(let client):
                         try await stream(client, conn: conn, outbound: outbound, head: head)
                         return
@@ -419,35 +534,51 @@ public final class DozerWebServer: @unchecked Sendable {
         return WebRequestMetadata(method: method, host: Self.header(h, "host"), origin: Self.header(h, "origin"),
                                   secFetchSite: Self.header(h, "sec-fetch-site"), authorization: Self.header(h, "authorization"),
                                   cookie: cookie, csrfToken: Self.header(h, WebSecurity.csrfHeader),
-                                  contentType: Self.header(h, "content-type"), bodyByteCount: bodyBytes)
+                                  contentType: Self.header(h, "content-type"), bodyByteCount: bodyBytes,
+                                  probeToken: Self.header(h, "x-doz-probe"))
     }
 
-    func respond(_ head: HTTPRequestHead, body: Data, connection: ObjectIdentifier? = nil) async -> Reply {
+    /// 606: the request's view of this server — doz ui: 590's exact loopback origin; doz serve: `WebServeRules`.
+    func requestContext(_ head: HTTPRequestHead, _ md: WebRequestMetadata, peer: SocketAddress?) -> WebRequestContext {
+        if let s = serveState { return s.context(HTTPHeadersView(pairs: head.headers.map { ($0.name, $0.value) }), peer: peer) }
+        return WebRequestContext(view: .loopback(md, origin), principal: .mac, client: WebLoopbackAddress.host, userAgent: nil)
+    }
+
+    func respond(_ head: HTTPRequestHead, body: Data, connection: ObjectIdentifier? = nil, peer: SocketAddress? = nil) async -> Reply {
         guard let method = WebHTTPMethod(rawValue: head.method.rawValue) else {
             let e = error(.methodNotAllowed)
             return .response(e.0, e.1, e.2)
         }
         let md = metadata(head, method: method, bodyBytes: body.count)
+        var ctx = requestContext(head, md, peer: peer)
+        var route: WebRoute?
+        var device: WebDeviceView?
+        let reply: Reply
         do {
             // 591: the sandboxed terminal frame (an opaque origin) loads its script, style and the
             // engine: exact Host, GET/HEAD, no body — the Origin and Fetch-Metadata checks cannot apply
             // to an opaque origin, and these files are public and static.
-            if md.host == origin.authority, case .asset(let p)? = WebRoute.parse(method: method, target: head.uri), WebAssets.isFrameAsset(p) {
+            if ctx.view.ownOrigin != nil, case .asset(let p)? = WebRoute.parse(method: method, target: head.uri), WebAssets.isFrameAsset(p) {
                 guard md.bodyByteCount == 0 else { throw WebRejection.bodyTooLarge }
                 guard let a = assets.assets[p] else { throw WebRejection.notFound }
                 return .response(200, [("Content-Type", a.mimeType), ("Cache-Control", a.cachePolicy)] + WebSecurity.frameAssetHeaders, a.data)
             }
             // A duplicated Host or Origin header is not "the" header: `header()` gives nil, refused here.
-            try WebSecurity.checkListener(md, origin, originRequired: false)
+            try WebSecurity.checkListener(md, ctx.view, originRequired: false)
             if head.headers["origin"].count > 1 { throw WebRejection.originRejected }
-            guard let route = WebRoute.parse(method: method, target: head.uri) else { throw WebRejection.notFound }
+            guard let r = WebRoute.parse(method: method, target: head.uri) else { throw WebRejection.notFound }
+            route = r
             // 591: the terminal socket over plain HTTP (no upgrade, or not the connection's first
             // request) is not a terminal. (A refused upgrade is answered in serve(_: Accepted).)
-            if case .terminalSocket = route {
+            if case .terminalSocket = r {
                 throw connection.flatMap { gate.takeRefusal($0) } ?? WebRejection.upgradeRequired
             }
-            return try await dispatch(route, md, body: body)
+            reply = try await dispatch(r, md, body: body, ctx: &ctx, device: &device)
         } catch let r as WebRejection {
+            if serveState != nil, r != .notAdmitted || !md.method.isSafe, route != .sessionBootstrap || r == .hostRejected || r == .originRejected {
+                serveState?.audit.record(WebAuditEntry(kind: "refused", device: device?.id, deviceName: device?.name, address: ctx.client,
+                                                       route: route.map(Self.routeLabel), outcome: r.rawValue))
+            }
             let e = error(r)
             return .response(e.0, e.1, e.2)
         } catch let e as WebAction.Invalid {
@@ -463,10 +594,38 @@ public final class DozerWebServer: @unchecked Sendable {
             case .exists: 409
             case .failed, .notImplemented: 500
             }
+            auditChange(route, md, body, ctx, device, outcome: e.code.rawValue)
             return .response(status, [("Content-Type", "application/json; charset=utf-8")], Self.errorBody(e.code.rawValue, e.message))
         } catch {
             return .response(500, [("Content-Type", "application/json; charset=utf-8")], Self.errorBody("failed", "the request failed"))
         }
+        if case .response(let status, _, _) = reply { auditChange(route, md, body, ctx, device, outcome: status < 400 ? "ok" : String(status)) }
+        return reply
+    }
+
+    /// 606: a route as the audit log names it (no value from the request but the route's own words).
+    static func routeLabel(_ r: WebRoute) -> String {
+        let m = Mirror(reflecting: r)
+        return m.children.first?.label ?? String(describing: r)
+    }
+
+    /// 606: every change a remote browser asked for, in the audit log — the route, the action and its sandbox
+    /// (decoded by the closed action types already), the outcome. Never a body.
+    private func auditChange(_ route: WebRoute?, _ md: WebRequestMetadata, _ body: Data, _ ctx: WebRequestContext, _ device: WebDeviceView?, outcome: String) {
+        guard let s = serveState, let route, !md.method.isSafe else { return }
+        if case .sessionRenew = route { return }
+        if case .sessionBootstrap = route { return }                     // admissions are their own lines
+        var action: String?, sandbox: String?
+        if case .actions = route, let d = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any] {
+            action = (d["action"] as? String).flatMap { WebRoute.isActionWord($0) ? $0 : nil }
+            sandbox = (d["sandbox"] as? String).flatMap { WebRoute.isSandboxName($0) ? $0 : nil }
+        }
+        switch route {
+        case .policyPreview(let n), .terminalTicket(let n), .sandboxKey(let n), .terminalLayoutSet(let n), .terminal(let n): sandbox = n
+        default: break
+        }
+        s.audit.record(WebAuditEntry(kind: "change", device: device?.id, deviceName: device?.name, address: ctx.client,
+                                     route: Self.routeLabel(route), action: action, sandbox: sandbox, outcome: outcome))
     }
 
     /// Actions, the preview and the terminal take a JSON object, always — never a form, never empty.
@@ -489,55 +648,104 @@ public final class DozerWebServer: @unchecked Sendable {
         return try JSONSerialization.data(withJSONObject: d)
     }
 
-    private func sessionInfo(_ s: WebSession) -> WebSessionInfo {
-        WebSessionInfo(csrf: s.csrfToken, expiresAt: s.expiresAt, serverRun: serverRun, store: data.storePath, version: version)
+    func sessionInfo(_ s: WebSession, _ ctx: WebRequestContext, _ device: WebDeviceView?) -> WebSessionInfo {
+        var info = WebSessionInfo(csrf: s.csrfToken, expiresAt: s.expiresAt, serverRun: serverRun, store: data.storePath, version: version)
+        if let st = serveState, let device {
+            info.serve = WebServeSessionInfo(exposure: "remote", secure: ctx.secure, secretsAllowed: ctx.secure && settings.secretEntryAllowed,
+                                             mac: st.names.localHostName, device: device)
+        }
+        return info
     }
 
-    private func dispatch(_ route: WebRoute, _ md: WebRequestMetadata, body: Data) async throws -> Reply {
-        let cookieName = WebSecurity.cookieName(origin)
+    /// The session cookie as this request should receive it (doz serve: the device's, `Secure` over https).
+    func sessionCookieHeader(_ s: WebSession, _ ctx: WebRequestContext) -> (String, String) {
+        if serveState != nil {
+            return ("Set-Cookie", WebSecurity.setCookie(s.cookieValue, name: ctx.view.cookieName, maxAge: WebDeviceStore.cookieMaxAge, secure: ctx.secure))
+        }
+        return ("Set-Cookie", WebSecurity.setCookie(s.cookieValue, name: ctx.view.cookieName, maxAge: s.expiresAt.timeIntervalSinceNow))
+    }
+
+    private func dispatch(_ route: WebRoute, _ md: WebRequestMetadata, body: Data, ctx: inout WebRequestContext,
+                          device: inout WebDeviceView?) async throws -> Reply {
+        let view = ctx.view
         switch route {
         case .index, .asset:
-            try WebSecurity.validateStatic(md, origin)
+            try WebSecurity.validateStatic(md, view)
             let path = if case .asset(let p) = route { p } else { "/" }
             guard let a = assets.assets[path] else { throw WebRejection.notFound }
             return .response(200, [("Content-Type", a.mimeType), ("Cache-Control", a.cachePolicy)], a.data)
         case .terminalFrame:
-            try WebSecurity.validateStatic(md, origin)
+            try WebSecurity.validateStatic(md, view)
             guard let a = assets.assets[WebAssets.frameDocument] else { throw WebRejection.notFound }
             return .response(200, [("Content-Type", a.mimeType), ("Cache-Control", a.cachePolicy)] + WebSecurity.frameHeaders, a.data)
         case .offline:
-            try WebSecurity.validateStatic(md, origin)
+            try WebSecurity.validateStatic(md, view)
             guard let a = assets.assets[WebAssets.offlineDocument] else { throw WebRejection.notFound }
             return .response(200, [("Content-Type", a.mimeType), ("Cache-Control", a.cachePolicy)], a.data)
         case .serviceWorker:
-            try WebSecurity.validateStatic(md, origin)
+            try WebSecurity.validateStatic(md, view)
             guard let a = assets.assets[WebAssets.serviceWorker] else { throw WebRejection.notFound }
             return .response(200, [("Content-Type", a.mimeType), ("Cache-Control", a.cachePolicy)] + WebSecurity.serviceWorkerHeaders, a.data)
         case .sessionBootstrap:
-            let cap = try WebSecurity.validateBootstrap(md, origin, limit: limits.maximumRequestBodyBytes)
+            if let st = serveState { return try await admit(md, body: body, ctx: ctx, serve: st, device: &device) }
+            let cap = try WebSecurity.validateBootstrap(md, view, limit: limits.maximumRequestBodyBytes)
             let s = try await sessions.exchange(cap)
-            return json(sessionInfo(s), extra: [("Set-Cookie", WebSecurity.setCookie(s.cookieValue, name: cookieName,
-                                                                                     maxAge: s.expiresAt.timeIntervalSinceNow))])
+            return json(sessionInfo(s, ctx, nil), extra: [sessionCookieHeader(s, ctx)])
+        case .serveProbe:
+            // 606: `doz doctor`'s round trip — no session; a one-use token doz serve issued over serve.sock. 404
+            // otherwise (and always on doz ui). Answers how the request arrived, nothing else.
+            guard let st = serveState else { throw WebRejection.notFound }
+            try WebSecurity.validateStatic(md, view)
+            guard st.consumeProbe(md.probeToken) else { throw WebRejection.notFound }
+            return json(["scheme": ctx.secure ? "https" : "http", "viaProxy": ctx.view.ownOrigin.map { o in st.config.publicOrigins.contains { $0.description == o } } == true ? "yes" : "no",
+                         "origin": ctx.view.ownOrigin ?? ""])
         default:
             break
         }
-        let cookie = try WebSecurity.validateAuthenticated(md, origin, limit: limits.maximumRequestBodyBytes)
-        let session = md.method.isSafe ? try await sessions.authenticate(cookie)
+        let cookie = try WebSecurity.validateAuthenticated(md, view, limit: limits.maximumRequestBodyBytes)
+        let session: WebSession
+        if case .devices(let d) = auth {
+            let (s, dev) = md.method.isSafe ? try await d.authenticate(cookie) : try await d.authenticateMutation(cookie, csrf: md.csrfToken)
+            session = s
+            device = dev
+            await d.touch(cookie, address: ctx.client, userAgent: ctx.userAgent)
+        } else {
+            session = md.method.isSafe ? try await sessions.authenticate(cookie)
                                        : try await sessions.authenticateMutation(cookie, csrf: md.csrfToken)
+        }
+        // 606: who may do what (WebExposure — the server is the wall; the page only hides).
+        if let r = WebExposure.decide(route, ctx.principal) { throw r }
         switch route {
-        case .index, .asset, .sessionBootstrap, .terminalFrame, .offline, .serviceWorker:
+        case .index, .asset, .sessionBootstrap, .terminalFrame, .offline, .serviceWorker, .serveProbe:
             throw WebRejection.notFound
         case .sessionInfo:
-            return json(sessionInfo(session))
+            return json(sessionInfo(session, ctx, device))
         case .sessionRenew:
-            let s = try await sessions.renew(cookie)
-            return json(sessionInfo(s), extra: [("Set-Cookie", WebSecurity.setCookie(s.cookieValue, name: cookieName,
-                                                                                     maxAge: s.expiresAt.timeIntervalSinceNow))])
+            let s = try await auth.renew(cookie)
+            return json(sessionInfo(s, ctx, device), extra: [sessionCookieHeader(s, ctx)])
         case .sessionEnd:
-            await sessions.revoke(cookie)
+            await auth.signOut(cookie)
+            if let st = serveState, let device {
+                st.audit.record(WebAuditEntry(kind: "sign-out", device: device.id, deviceName: device.name, address: ctx.client))
+            }
             for c in hub.all where c.cookie == cookie { c.finish(.sessionEnded) }
             terminals.closeAll(cookie: cookie)
-            return .response(204, [("Set-Cookie", WebSecurity.clearCookie(name: cookieName))], Data())
+            return .response(204, [("Set-Cookie", WebSecurity.clearCookie(name: view.cookieName, secure: ctx.secure))], Data())
+        case .serveStatus:
+            return json(try await serveStatus())
+        case .serveDevices:
+            return json(try await serveDevices(current: serveState != nil ? cookie : nil))
+        case .serveShare:
+            try Self.requireJSONBody(md)
+            return json(try await serveShare(by: device?.name ?? "the Mac", origin: serveState != nil ? ctx.view.ownOrigin : nil, ctx: ctx, device: device))
+        case .serveRevoke(let id):
+            try Self.requireJSONBody(md)
+            return json(try await serveRevoke(id, by: device?.name ?? "the Mac", ctx: ctx, asker: device))
+        case .serveRename(let id):
+            try Self.requireJSONBody(md)
+            guard let d = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any], Set(d.keys) == ["name"], let name = d["name"] as? String,
+                  (1...60).contains(name.count) else { throw WebAction.Invalid("the body is {name} (1–60 characters)") }
+            return json(try await serveRename(id, to: name, ctx: ctx, asker: device))
         case .overview:
             return json(try await data.overview())
         case .sandbox(let name):
@@ -758,7 +966,7 @@ public final class DozerWebServer: @unchecked Sendable {
                                                           style: assets.pageStyle))) ?? Data()
         try await outbound.write(.body(.byteBuffer(ByteBuffer(bytes: SSEFrame(event: "hello", id: hub.nextSeq(), json: hello).bytes))))
         conn.channel.closeFuture.whenComplete { _ in client.finish(.clientGone) }
-        let sessions = self.sessions, cookie = client.cookie, beat = limits.heartbeatInterval, channel = conn.channel
+        let auth = self.auth, cookie = client.cookie, beat = limits.heartbeatInterval, channel = conn.channel
         let heartbeat = Task {
             var overflowSince: Date?
             while !Task.isCancelled {
@@ -770,7 +978,7 @@ public final class DozerWebServer: @unchecked Sendable {
                     overflowSince = overflowSince ?? Date()
                     continue
                 }
-                guard await sessions.isValid(cookie) else { client.finish(.sessionEnded); return }
+                guard await auth.isValid(cookie) else { client.finish(.sessionEnded); return }
                 client.send(SSEFrame(comment: "ping"))
             }
         }
@@ -787,6 +995,7 @@ public final class DozerWebServer: @unchecked Sendable {
         case .replaced: "replaced"
         case .restarting: "restarting"
         case .moved(let o): { movedTo = o; return "moved" }()
+        case .revoked: "revoked"
         case .clientGone, nil: nil
         }
         if let last {

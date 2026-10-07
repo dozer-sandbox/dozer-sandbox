@@ -44,7 +44,8 @@ fail() {
 # 591: + NIOWebSocket (swift-nio's own WebSocket codec — the same package) for `doz ui`'s
 # browser terminals, confined to Sources/DozerWeb in step 1b.
 # 594: + Yams (the project file doz_project.yaml — owner ruling D9), confined to Sources/DozerCLI in step 1b.
-ALLOWED='Foundation|Darwin|os|CryptoKit|Security|NIOCore|NIOEmbedded|NIOPosix|NIOSSL|X509|SwiftASN1|Virtualization|Containerization|ContainerizationArchive|ContainerizationEXT4|SystemPackage|ContainerizationError|ContainerizationExtras|ContainerizationOCI|ContainerizationOS|DozerKit|DozerHost|DozerCLI|SQLite3|ArgumentParser|DozerWeb|NIOHTTP1|NIOWebSocket|CoreServices|Yams'
+# 606: + dnssd (the system's Bonjour client — `doz serve` announces itself), confined in step 1b.
+ALLOWED='Foundation|Darwin|os|CryptoKit|Security|NIOCore|NIOEmbedded|NIOPosix|NIOSSL|X509|SwiftASN1|Virtualization|Containerization|ContainerizationArchive|ContainerizationEXT4|SystemPackage|ContainerizationError|ContainerizationExtras|ContainerizationOCI|ContainerizationOS|DozerKit|DozerHost|DozerCLI|SQLite3|ArgumentParser|DozerWeb|NIOHTTP1|NIOWebSocket|CoreServices|Yams|dnssd'
 BAD=$(grep -rhoE --include='*.swift' '^[[:space:]]*(@[A-Za-z_]+[[:space:]]+)*(public[[:space:]]+)?import[[:space:]]+[A-Za-z_][A-Za-z0-9_.]*' \
         "$PACKAGE/Sources" \
       | sed -E 's/.*import[[:space:]]+//' \
@@ -85,6 +86,15 @@ $WS"
 CS=$(grep -rlE --include='*.swift' '^[[:space:]]*import[[:space:]]+CoreServices([[:space:]]|$)' "$PACKAGE/Sources" | grep -vE "/Sources/DozerCLI/UICommand.swift$|/Sources/DozerHost/MacDefaultApp.swift$" || true)
 [[ -z "$CS" ]] || fail "CoreServices is imported outside Sources/DozerCLI/UICommand.swift and Sources/DozerHost/MacDefaultApp.swift:
 $CS"
+# 606: Bonjour only in doz serve's announcer.
+DN=$(grep -rlE --include='*.swift' '^[[:space:]]*import[[:space:]]+dnssd([[:space:]]|$)' "$PACKAGE/Sources" | grep -vE "/Sources/DozerWeb/WebBonjour.swift$" || true)
+[[ -z "$DN" ]] || fail "dnssd is imported outside Sources/DozerWeb/WebBonjour.swift:
+$DN"
+# 606: only doz serve binds beyond loopback — doz ui (590) never constructs the network profile.
+BS=$(grep -rlE --include='*.swift' 'bindServe\(|WebServeState\(' "$PACKAGE/Sources" | grep -vE "/Sources/DozerWeb/(WebServer|WebServeState)\.swift$|/Sources/DozerCLI/ServeCommand\.swift$" || true)
+[[ -z "$BS" ]] || fail "the network (doz serve) profile is constructed outside DozerWeb and ServeCommand.swift:
+$BS"
+grep -qE 'bindServe|WebServeState|WebServeConfig' "$PACKAGE/Sources/DozerCLI/UICommand.swift" && fail "doz ui (UICommand.swift) must stay loopback-only — it may not reach the doz serve profile"
 WH=$(grep -rlE --include='*.swift' '^[[:space:]]*import[[:space:]]+DozerWeb([[:space:]]|$)' "$PACKAGE/Sources/DozerHost" || true)
 [[ -z "$WH" ]] || fail "the host imports the web UI (the UI is a client of the host):
 $WH"
@@ -167,4 +177,5 @@ printf '          depends only on apple/containerization (exact) + the apple/* p
 printf '          (TLS; ArgumentParser for the CLI targets only) and Yams (exact; the CLI'"'"'s project file only),\n'
 printf '          carries no host brand, deckhold + doznet + dozview match their provenance (no libfuse),\n'
 printf '          the web UI (NIOHTTP1, confined) ships exactly the assets its sources build,\n'
+printf '          doz ui stays loopback-only and only doz serve binds the LAN (dnssd confined to its announcer),\n'
 printf '          and no file carries the pre-592 product name\n'

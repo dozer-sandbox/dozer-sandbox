@@ -1089,4 +1089,58 @@ public struct WebSessionInfo: Codable, Equatable, Sendable {
     public var serverRun: String
     public var store: String
     public var version: String
+    /// 606: doz serve — what this browser is and may do (nil on doz ui).
+    public var serve: WebServeSessionInfo? = nil
+}
+
+/// 606: a doz serve page's own facts: this device, how it arrived, the Mac it is on.
+public struct WebServeSessionInfo: Codable, Equatable, Sendable {
+    /// remote (always, on doz serve)
+    public var exposure: String
+    /// The request arrived over https at a trusted proxy.
+    public var secure: Bool
+    /// Keys and tokens may be typed here (https through a trusted proxy, and ui.allow_secret_entry).
+    public var secretsAllowed: Bool
+    /// The Mac's name (`<LocalHostName>`), for the page's title.
+    public var mac: String?
+    public var device: WebDeviceView
+}
+
+/// 606: `GET /api/v1/serve` — the dashboard for the other browsers, as the asking page (or the Mac) sees it.
+public struct WebServeStatus: Codable, Equatable, Sendable {
+    /// running · stopped (doz ui, when no doz serve runs)
+    public var state: String
+    /// Where browsers reach it: the Mac's names and addresses, and the configured public origins.
+    public var origins: [String]
+    public var publicOrigins: [String]
+    public var port: Int?
+    public var bind: String?
+    public var devices: Int
+    public var openInvites: Int?
+    public var advertised: String?
+    /// rc.2: the running doz serve's process, since when, its build, whether it was started detached (`--detach`),
+    /// its log (detached), and the app macOS attributes it to (Local Network privacy asks on that app's behalf).
+    public var pid: Int? = nil
+    public var since: Date? = nil
+    public var version: String? = nil
+    public var detached: Bool? = nil
+    public var log: String? = nil
+    public var responsibleApp: String? = nil
+
+    public init(state: String, origins: [String], publicOrigins: [String], port: Int?, bind: String?, devices: Int, openInvites: Int?,
+                advertised: String?) {
+        self.state = state; self.origins = origins; self.publicOrigins = publicOrigins; self.port = port; self.bind = bind
+        self.devices = devices; self.openInvites = openInvites; self.advertised = advertised
+    }
+}
+
+/// 606: `GET /api/v1/serve/devices` — the devices and the recent remote activity.
+public struct WebServeDevices: Codable, Equatable, Sendable {
+    public var running: Bool
+    public var devices: [WebDeviceView]
+    public var activity: [WebAuditEntry]
+
+    public init(running: Bool, devices: [WebDeviceView], activity: [WebAuditEntry]) {
+        self.running = running; self.devices = devices; self.activity = activity
+    }
 }

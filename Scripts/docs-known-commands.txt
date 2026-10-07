@@ -82,6 +82,15 @@ ui
 ui/link
 ui/restart
 ui/start
+serve
+serve/devices
+serve/log
+serve/rename
+serve/revoke
+serve/share
+serve/start
+serve/status
+serve/stop
 template
 template/create
 template/ls

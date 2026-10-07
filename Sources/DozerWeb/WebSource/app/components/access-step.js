@@ -1,7 +1,7 @@
 // components/access-step — Access (599e): one self-contained step — the onboarding, New Sandbox and Settings › Access.
 import { h } from '../dom/h.js';
 import { api } from '../core/api.js';
-import { secretEntryAllowed } from '../core/settings.js';
+import { secretEntryAllowed, secretEntryWhy } from '../core/settings.js';
 import { btn } from './button.js';
 import { callout } from './callout.js';
 
@@ -107,7 +107,7 @@ export function renderAccessStep(container, opts = {}) {
     }
     if (!secretEntryAllowed()) {
       return h('div', { class: 'panel wiz-cmds', 'data-access-key': 'commands' },
-        h('div', null, 'In a terminal on this Mac (tokens are not taken in this browser — ui.allow_secret_entry is off):'),
+        h('div', { 'data-secret-why': '1' }, 'Not here: ' + secretEntryWhy() + ' in a terminal on this Mac:'),
         h('pre', { class: 'mono' }, 'doz access set --github-key   (paste it; not echoed)'));
     }
     const secret = h('input', { type: 'password', name: 'access-github-key', autocomplete: 'off', spellcheck: 'false', autocapitalize: 'off',

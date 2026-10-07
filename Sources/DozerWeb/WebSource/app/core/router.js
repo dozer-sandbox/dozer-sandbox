@@ -12,7 +12,7 @@ const acknowledgeOps = upcall('acknowledgeOps'), callout = upcall('callout'),
   showSandbox = upcall('showSandbox'), viewAccounts = upcall('viewAccounts'), viewActivity = upcall('viewActivity'),
   viewDoctor = upcall('viewDoctor'), viewImages = upcall('viewImages'), viewMetrics = upcall('viewMetrics'),
   viewOperations = upcall('viewOperations'), viewOverview = upcall('viewOverview'),
-  viewResources = upcall('viewResources'), viewSettings = upcall('viewSettings'),
+  viewResources = upcall('viewResources'), viewSettings = upcall('viewSettings'), viewDevices = upcall('viewDevices'),
   wizardStopPolling = upcall('wizardStopPolling');
 
 // ── routing ─────────────────────────────────────────────────────────────────
@@ -82,7 +82,7 @@ export async function refresh(scrollTop) {
   refreshing = true;
   try {
     const views = { overview: viewOverview, images: viewImages, resources: viewResources, operations: viewOperations, accounts: viewAccounts,
-                    metrics: viewMetrics, activity: viewActivity, doctor: viewDoctor, settings: viewSettings };
+                    metrics: viewMetrics, activity: viewActivity, doctor: viewDoctor, settings: viewSettings, devices: viewDevices };
     const fn = views[state.view] || viewOverview;
     const node = await fn();
     if (node && !state.signedOut) {

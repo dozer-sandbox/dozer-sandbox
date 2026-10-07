@@ -4,7 +4,7 @@ import { h } from '../dom/h.js';
 import { AGENT_NAMES, agentKey, isOpenAIAgent, KIND_LABELS } from '../core/agents.js';
 import { api } from '../core/api.js';
 import { actOrThrow } from '../core/operations.js';
-import { secretEntryAllowed } from '../core/settings.js';
+import { secretEntryAllowed, secretEntryWhy } from '../core/settings.js';
 import { state } from '../core/state.js';
 import { btn } from './button.js';
 import { callout } from './callout.js';
@@ -24,7 +24,7 @@ const ACCOUNT_COMMANDS = {
 };
 export function accountCommandsNode(kind) {
   return h('div', { class: 'panel wiz-cmds' },
-    h('div', null, 'In a terminal on this Mac' + (secretEntryAllowed() ? ':' : ' (keys and tokens are not taken in this browser — ui.allow_secret_entry is off):')),
+    h('div', { 'data-secret-why': secretEntryAllowed() ? null : '1' }, secretEntryAllowed() ? 'In a terminal on this Mac:' : 'Not here: ' + secretEntryWhy() + ' in a terminal on this Mac:'),
     h('pre', { class: 'mono' }, ACCOUNT_COMMANDS[kind].join('\n')));
 }
 /// opts: {kind (fixed) | null (a choice), name, onAdded(result, name)}.
@@ -179,7 +179,7 @@ export function keyEntry(name, proxied) {
   if (!proxied) return h('p', { class: 'muted' }, 'Not proxied: a key would have to enter the sandbox — create it with a proxied network (agent, open, …) to give it one.');
   if (!secretEntryAllowed()) {
     return h('div', { class: 'panel wiz-cmds', 'data-key-commands': name },
-      h('div', null, 'In a terminal on this Mac (keys are not taken in this browser — ui.allow_secret_entry is off):'),
+      h('div', { 'data-secret-why': '1' }, 'Not here: ' + secretEntryWhy() + ' in a terminal on this Mac:'),
       h('pre', { class: 'mono' }, ['doz key set ' + name + ' --anthropic                       (it asks for the key, not echoed)',
         'doz key set ' + name + ' --anthropic --keychain SERVICE      (read from a keychain item)'].join('\n')));
   }

@@ -346,6 +346,9 @@ public final class EgressProxy: @unchecked Sendable {
         return (p[0].lowercased(), p.count == 2 ? UInt16(p[1]) ?? defaultPort : defaultPort)
     }
 
+    /// 606: what a sandbox is told when it tries to reach one of Dozer's own dashboards on this Mac.
+    static let dashboardRefusal = "Dozer's own dashboard on this Mac is never reachable from a sandbox"
+
     /// A tunnel to host:port — through CONNECT (`connectReply`) or a redirected connection.
     func tunnel(_ fd: Int32, host: String, port: UInt16, kind: ConnectionRecord.Kind, leftover: [UInt8], connectReply: Bool,
                 connectTo: String? = nil) {
@@ -371,6 +374,14 @@ public final class EgressProxy: @unchecked Sendable {
             rec.open = false
             rec.durationMs = milliseconds(since: t0)
             log.upsert(rec)
+            return
+        }
+        if LocalDashboards.refuses(host: connectTo ?? host, port: port) {
+            rec.verdict = .denied
+            rec.open = false
+            rec.detail = Self.dashboardRefusal
+            log.upsert(rec)
+            if connectReply { _ = Wire.writeAll(fd, Self.forbidden(Self.dashboardRefusal)) }
             return
         }
         let up = Wire.connectTCP(connectTo ?? host, port)
@@ -429,6 +440,12 @@ public final class EgressProxy: @unchecked Sendable {
             out += [13, 10]
         }
         out += Array("Connection: close\r\n\r\n".utf8)
+        if LocalDashboards.refuses(host: host, port: port) {
+            rec.verdict = .denied; rec.open = false; rec.detail = Self.dashboardRefusal
+            log.upsert(rec)
+            _ = Wire.writeAll(fd, Self.forbidden(Self.dashboardRefusal))
+            return
+        }
         let up = Wire.connectTCP(host, port)
         rec.latencyMs = milliseconds(since: t0)
         guard up >= 0 else {
@@ -1042,6 +1059,8 @@ enum Wire {
         defer { freeaddrinfo(first) }
         var ai: UnsafeMutablePointer<addrinfo>? = first
         while let a = ai {
+            // 606: never one of Dozer's own dashboards on this Mac, whatever the policy says.
+            if let sa = a.pointee.ai_addr, LocalDashboards.refuses(UnsafePointer(sa), port: port) { ai = a.pointee.ai_next; continue }
             let fd = socket(a.pointee.ai_family, a.pointee.ai_socktype, a.pointee.ai_protocol)
             if fd >= 0 {
                 var one: Int32 = 1

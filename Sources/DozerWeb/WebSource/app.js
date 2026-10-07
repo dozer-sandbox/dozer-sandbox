@@ -59,6 +59,7 @@ import { closeTerminal, focusTerm, openTerminal, paintCover, reattachTerminals, 
 import './app/components/workspace-chooser.js';
 import { viewAccounts } from './app/views/accounts.js';
 import { renderActivity, viewActivity } from './app/views/activity.js';
+import { viewDevices } from './app/views/devices.js';
 import { viewDoctor } from './app/views/doctor.js';
 import { viewImages } from './app/views/images.js';
 import { viewMetrics } from './app/views/metrics.js';
@@ -86,7 +87,7 @@ $('sign-out').addEventListener('click', async () => {
 
 // ── start ───────────────────────────────────────────────────────────────────
 // The static page's own controls get their icons here (index.html holds no SVG).
-const NAV_ICONS = { overview: 'box', sessions: 'layout-grid', images: 'layers', resources: 'cylinder', operations: 'list-checks', accounts: 'key-round',
+const NAV_ICONS = { devices: 'user-round', overview: 'box', sessions: 'layout-grid', images: 'layers', resources: 'cylinder', operations: 'list-checks', accounts: 'key-round',
                     metrics: 'chart-line', activity: 'activity', onboarding: 'rocket', doctor: 'stethoscope', settings: 'settings' };
 for (const a of document.querySelectorAll('#nav > a[data-view]')) {
   if (NAV_ICONS[a.dataset.view]) a.prepend(icon(NAV_ICONS[a.dataset.view]));
@@ -134,7 +135,7 @@ provide({
   gridRefresh, hostChanged, lifecycle, modalInert, opFailed, openSavedTerminal, openWizardModal, pageFailure,
   paintCover, paintNav, paintResTotal, paintRowOps, paintSplitButton, paintTabs, paintTermEmpty, paintTransition,
   persistLayout, reattachTerminals, refresh, refreshNav, refreshSandbox, renderActivity, renderHostFoot, renderOps,
-  renderTerminals, renderWizard, showSandbox, signedOut, startApp, toast, viewAccounts, viewActivity, viewDoctor,
+  renderTerminals, renderWizard, showSandbox, signedOut, startApp, toast, viewAccounts, viewActivity, viewDevices, viewDoctor,
   viewImages, viewMetrics, viewNew, viewOnboarding, viewOperations, viewOverview, viewResources, viewSettings,
   wizardStopPolling,
 });

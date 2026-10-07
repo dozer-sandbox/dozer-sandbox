@@ -232,7 +232,11 @@ export function movedAway(to) {
   b.dataset.tone = 'calm';
   const o = $('ui-overlay');
   const copy = h('button', { type: 'button', class: 'btn', id: 'ui-copy-addr' }, withIcon('copy', 'Copy the address'));
-  copy.addEventListener('click', () => { navigator.clipboard.writeText(to).then(() => toast('Copied ' + to, false), () => toast('Copy it by hand: ' + to, true)); });
+  copy.addEventListener('click', () => {
+    // 606: an http page (doz serve on the LAN) is not a secure context — it has no clipboard API.
+    if (!navigator.clipboard) { toast('Copy it by hand: ' + to, true); return; }
+    navigator.clipboard.writeText(to).then(() => toast('Copied ' + to, false), () => toast('Copy it by hand: ' + to, true));
+  });
   o.replaceChildren(h('div', { class: 'ui-ov-card' },
     h('div', { class: 'ui-ov-head' }, h('h2', { id: 'ui-ov-title' }, 'Dozer moved to ' + addr)),
     h('div', { id: 'ui-ov-desc' },

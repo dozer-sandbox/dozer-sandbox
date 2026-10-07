@@ -85,6 +85,7 @@
   /* terminal chrome — dark in both themes (the engine's own theme) */
   --term-bg: #16171c; --term-ink: #e3e5ea; --term-muted: #a3a8b8; --term-accent: #c5cbff; --term-raise: #1d1f2b;
   --on-switch: #ffffff;                          /* a switch's knob, both themes */
+  --qr-light: #ffffff; --qr-dark: #000000;      /* an invite's QR code: dark on light in both themes (a camera needs it) */
   --term-btn: #5f6ddb; --term-on-btn: #ffffff; --term-warn: #f2d28a;
 
   /* elevation */
@@ -1016,6 +1017,20 @@ dialog.dlg form { display: flex; flex-direction: column; max-height: calc(100vh 
 @media (max-width: 760px) { .callout .c-acts { grid-column: 2; grid-row: auto; justify-content: flex-start; margin-top: 4px; } }
 .df-state .icon { width: 14px; height: 14px; vertical-align: -2px; }
 .quick-why { margin: 0; }
+/* 606: doz serve — an invite (Add another browser) and the sign-in by access code. */
+.signin-code { text-transform: uppercase; letter-spacing: 0.12em; font-size: var(--fs-lg); }
+.share-grid { display: grid; grid-template-columns: minmax(180px, 240px) 1fr; gap: var(--sp-5); align-items: start; }
+.share-qr { margin: 0; display: flex; flex-direction: column; gap: var(--sp-2); align-items: center; }
+.qr { width: 100%; height: auto; border-radius: var(--r-md); }
+.qr .qr-light { fill: var(--qr-light); }
+.qr .qr-dark { fill: var(--qr-dark); }
+.qr.expired { opacity: 0.15; }
+.share-side { display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; }
+.share-k { font-weight: var(--fw-strong); color: var(--ink); margin-top: var(--sp-2); }
+.share-code { font-size: 28px; letter-spacing: 0.12em; color: var(--ink); }
+.share-link { flex: 1; min-width: 0; }
+.share-left { display: flex; gap: var(--sp-3); align-items: center; margin-top: var(--sp-3); color: var(--ink-2); }
+@media (max-width: 640px) { .share-grid { grid-template-columns: 1fr; } }
 }
 @layer views {
 
