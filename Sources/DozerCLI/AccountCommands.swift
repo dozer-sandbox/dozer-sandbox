@@ -15,8 +15,8 @@ struct AccountCommand: AsyncParsableCommand {
         discussion: """
         mac (built in) is this Mac's own Claude Code login: nothing to add, renewed while Claude Code runs on the Mac. \
         A `claude setup-token` token lasts a year and needs no Mac: doz account add work --setup-token (paste it). \
-        Codex uses OpenAI accounts only: doz account add NAME --chatgpt (Dozer's own sign-in, in your browser — your Mac's Codex login is not touched) \
-        or --openai-key. A sandbox follows the store's default account (mac out of the box; for Codex the default OpenAI account) \
+        Codex uses OpenAI accounts only: mac — this Mac's own Codex login, read-only, nothing to add (the default when Codex is signed in \
+        on this Mac) — or doz account add NAME --chatgpt (Dozer's own sign-in, in your browser) or --openai-key. A sandbox follows the store's default account (mac out of the box; for Codex the default OpenAI account) \
         unless it pins one: doz account use NAME ACCOUNT.
         """,
         subcommands: [AccountList.self, AccountAdd.self, AccountVerify.self, AccountRemove.self, AccountDefault.self,
@@ -141,15 +141,17 @@ struct AccountRemove: AsyncParsableCommand {
 }
 
 struct AccountDefault: AsyncParsableCommand {
-    static let configuration = CommandConfiguration(commandName: "default", abstract: "The account sandboxes that follow the default use (or none).")
+    static let configuration = CommandConfiguration(commandName: "default", abstract: "The account sandboxes that follow the default use (or none). An OpenAI account sets the Codex default; --codex sets it by name (mac = this Mac's Codex login).")
     @OptionGroup var g: GlobalOptions
     @Argument var name: String
+    @Flag(name: .long, help: "Set the default of Codex sandboxes: mac (this Mac's own Codex login), an OpenAI account, or none.") var codex = false
     func run() async throws {
         var r = HostRequest(.accountDefault)
         r.account = name
+        if codex { r.accountKind = "codex" }
         let rows = try decode(try call(r, g), [AccountRow].self, g)
         if g.json { Out.json(rows) } else {
-            let openai = rows.first { $0.name == name }.flatMap { AccountKind(rawValue: $0.kind) }?.provider == "openai"
+            let openai = codex || rows.first { $0.name == name }.flatMap { AccountKind(rawValue: $0.kind) }?.provider == "openai"
             Out.stdout(openai ? "the default OpenAI account (Codex) is \(name)\n" : "the default account is \(name)\n")
         }
     }

@@ -258,6 +258,26 @@ extension HostCore {
             let why = AgentCredentials.sandboxProblem(image: sb.spec.imageSpec?.name, account: a, missing: nil)
             clearChatGPT(why)
             sb.setCredential(.openai, secret: nil, expiresAt: nil, environment: [:], notice: why)
+        case .record(let a) where a.kind == .codexMac:
+            // 599i rc.3: this Mac's own Codex login — its access token read on use (the file's identity is the
+            // provider's version: a refresh the Mac did reaches the next request); the Mac renews, never Dozer.
+            m.config.credentialSources[CredentialBinding.openai.id] = nil
+            sb.setCredential(.openai, secret: nil, expiresAt: nil, environment: [:], notice: nil)
+            let s = codexMacSession()
+            let vault = egress.vault
+            vault.setProvider(.chatgpt, ttl: 30, version: { [weak s] in s?.version ?? "" }, read: { [weak s] in
+                s?.read() ?? (nil, "Dozer: this Mac's Codex login is not loaded")
+            })
+            vault.onStale = { _ in }
+            egress.chatgptRenewal = EgressProxy.ChatGPTRenewal { [weak s, weak vault] body in
+                guard let t = OpenAIAccess.refreshToken(inRenewalBody: body), t.hasPrefix(CredentialVault.placeholderPrefix) else { return nil }
+                guard let vault, vault.binding(ofPlaceholder: t) == CredentialBinding.chatgpt.id, let s else {
+                    return OpenAIAccess.refreshAnswer(placeholder: t, guestIDToken: nil,
+                                                      problem: "this renewal carried a placeholder that is not this sandbox's")
+                }
+                return s.renewalAnswer(placeholder: t)
+            }
+            s.start()
         case .record(let a):
             m.config.credentialSources[CredentialBinding.openai.id] = nil
             if a.kind == .chatgpt {
@@ -313,6 +333,11 @@ extension HostCore {
                 }
             case .openaiKey:
                 if let t = egress.vault.mintForFile(CredentialBinding.openai.id) { data = OpenAIAccess.guestAPIKeyAuthJSON(placeholder: t) }
+            case .codexMac:
+                let s = codexMacSession()
+                if let id = s.guestIDToken, let t = egress.vault.mintForFile(CredentialBinding.chatgpt.id) {
+                    data = OpenAIAccess.guestAuthJSON(placeholder: t, guestIDToken: id, accountID: s.accountID)
+                }
             default: break
             }
             // An account whose credential cannot be used now: its placeholders already in the guest are answered

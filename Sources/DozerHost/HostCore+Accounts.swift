@@ -14,9 +14,16 @@ public struct CredentialServices: Sendable {
     public var isClaudeRunning: @Sendable () -> Bool
     /// How often a Mac login is re-read.
     public var watchInterval: Duration
+    /// 599i rc.3: the Mac's Codex home (`mac` for Codex reads its auth.json's access token) — nil: none.
+    public var codexHome: @Sendable () -> URL?
+    /// The Mac's `codex` (the keep-alive runs it) and how it is run.
+    public var codexBinary: @Sendable () -> String?
+    public var codexRunner: KeepaliveRunning
 
     public init(keychain: KeychainAccess, verifier: AccountVerifying, claudeBinary: @escaping @Sendable () -> String?, home: URL,
-                keepaliveRunner: KeepaliveRunning, isClaudeRunning: @escaping @Sendable () -> Bool, watchInterval: Duration) {
+                keepaliveRunner: KeepaliveRunning, isClaudeRunning: @escaping @Sendable () -> Bool, watchInterval: Duration,
+                codexHome: @escaping @Sendable () -> URL? = { nil }, codexBinary: @escaping @Sendable () -> String? = { nil },
+                codexRunner: KeepaliveRunning = ProcessKeepaliveRunner()) {
         self.keychain = keychain
         self.verifier = verifier
         self.claudeBinary = claudeBinary
@@ -24,12 +31,16 @@ public struct CredentialServices: Sendable {
         self.keepaliveRunner = keepaliveRunner
         self.isClaudeRunning = isClaudeRunning
         self.watchInterval = watchInterval
+        self.codexHome = codexHome
+        self.codexBinary = codexBinary
+        self.codexRunner = codexRunner
     }
 
     public static var system: CredentialServices {
         CredentialServices(keychain: SystemKeychain(), verifier: AnthropicVerifier(), claudeBinary: { ClaudeLogin.resolveBinary() },
                            home: FileManager.default.homeDirectoryForCurrentUser, keepaliveRunner: ProcessKeepaliveRunner(),
-                           isClaudeRunning: { ClaudeLogin.isClaudeRunning() }, watchInterval: .seconds(120))
+                           isClaudeRunning: { ClaudeLogin.isClaudeRunning() }, watchInterval: .seconds(120),
+                           codexHome: { CodexMacLogin.resolveHome() }, codexBinary: { CodexMacLogin.resolveBinary() })
     }
 
     /// 594, a TEST seam for real host processes (`make test-cli`, the browser probes):
@@ -38,9 +49,13 @@ public struct CredentialServices: Sendable {
     /// no keep-alive. Anything else: the real services.
     public static func forHost(environment: [String: String] = ProcessInfo.processInfo.environment) -> CredentialServices {
         guard environment["DOZ_TEST_CREDENTIALS"] == "memory" else { return .system }
+        // 599i rc.3: the Mac's Codex login only from a FAKE home (DOZ_TEST_CODEX_HOME), else none; the keep-alive
+        // only runs a FAKE codex (DOZ_TEST_CODEX_BIN).
         return CredentialServices(keychain: MemoryKeychain(), verifier: OfflineVerifier(), claudeBinary: { nil },
                                   home: URL(fileURLWithPath: "/var/empty"), keepaliveRunner: NoKeepalive(),
-                                  isClaudeRunning: { false }, watchInterval: .seconds(3600))
+                                  isClaudeRunning: { false }, watchInterval: .seconds(3600),
+                                  codexHome: { CodexMacLogin.resolveHome(environment: environment) },
+                                  codexBinary: { CodexMacLogin.resolveBinary(environment: environment) })
     }
 }
 
@@ -103,8 +118,11 @@ extension HostCore {
     func resolvedAccount(_ m: Managed, _ file: AccountsFile) -> ResolvedAccount {
         guard let a = m.config.account else { return .none }
         // 599i: Codex follows the store's OpenAI default, never the Anthropic one.
-        let name = a == "default" ? file.defaultAccount(for: m.sandbox.spec.imageSpec?.name) : a
+        let image = m.sandbox.spec.imageSpec?.name
+        let name = a == "default" ? defaultAccount(for: image, file) : a
         if name == "none" { return .none }
+        // rc.3: `mac` for Codex is this Mac's Codex login.
+        if name == "mac", AgentCredentials.provider(image) == "openai" { return .record(.codexMac) }
         return file.accounts.first { $0.name == name }.map(ResolvedAccount.record) ?? .missing(name)
     }
 
@@ -117,11 +135,16 @@ extension HostCore {
     }
 
     /// 599i: the store's OpenAI default (nil: none).
-    func openaiDefault() -> String? { accountStore.load().openaiDefault }
+    /// Only for a Codex image (it may read this Mac's Codex login).
+    func openaiDefault(for image: String?) -> String? {
+        AgentCredentials.provider(image) == "openai" ? effectiveOpenAIDefault(accountStore.load()) : nil
+    }
 
     /// 594: an existing sandbox whose account does not fit its agent — what its page says.
     func credentialProblem(_ m: Managed) -> String? {
         guard m.sandbox.egress != nil else { return nil }
+        // 599i rc.3: this Mac's Codex login that cannot be used (not signed in, the keyring, an API-key login).
+        if case .record(let a) = resolvedAccount(m, accountStore.load()), a.kind == .codexMac, let p = codexMacSignInProblem() { return "Codex: " + p }
         switch resolvedAccount(m, accountStore.load()) {
         case .none: return AgentCredentials.sandboxProblem(image: m.sandbox.spec.imageSpec?.name, account: nil, missing: nil)
         case .missing(let n): return AgentCredentials.sandboxProblem(image: m.sandbox.spec.imageSpec?.name, account: nil, missing: n)
@@ -162,6 +185,7 @@ extension HostCore {
         }
         if case .record(let a) = account, a.kind == .mac, let w = m.watcher, w.state != .ok, w.state != .unknown { return w.state.label }
         // 599i: a ChatGPT sign-in is read on use — its session says how it stands.
+        if case .record(let a) = account, a.kind == .codexMac { return codexMacSession().state.label }
         if case .record(let a) = account, a.kind == .chatgpt {
             guard let s = chatgptSessions[a.name] else { return "unknown" }
             if s.state != .ok && s.state != .unknown { return s.state.label }
@@ -275,7 +299,7 @@ extension HostCore {
                 m.watcher = w
                 w.subscribe(m.name, sb)
                 sb.egress?.vault.onStale = { [weak w] _ in w?.stale() }
-            case .openaiKey, .chatgpt:
+            case .openaiKey, .chatgpt, .codexMac:
                 break                                   // never here: an Anthropic agent does not accept them (above)
             case .setupToken, .apiKey:
                 let service = a.keychainService ?? ""
@@ -341,8 +365,11 @@ extension HostCore {
             throw HostError(.invalid, "\(m.name) is not proxied (network \(m.config.networkName)): a credential would have to enter the sandbox — create it with a proxied network (agent, open, …)")
         }
         var file = accountStore.load()
-        let target = value == "default" ? file.defaultAccount(for: m.sandbox.spec.imageSpec?.name) : value
-        if target != "none" {
+        let target = value == "default" ? defaultAccount(for: m.sandbox.spec.imageSpec?.name, file) : value
+        // 599i rc.3: `mac` for Codex is this Mac's Codex login (read-only) — usable when it is signed in.
+        let codexMac = target == "mac" && AgentCredentials.provider(m.sandbox.spec.imageSpec?.name) == "openai"
+        if codexMac, let p = codexMacSignInProblem() { throw HostError(.invalid, p) }
+        if target != "none", !codexMac {
             guard let a = file.accounts.first(where: { $0.name == target }) else { throw HostError(.notFound, "no account \(target) (doz account ls)") }
             // 594: only an account the sandbox's agent can use.
             let image = m.sandbox.spec.imageSpec?.name
@@ -359,6 +386,8 @@ extension HostCore {
                     try accountStore.save(file)
                     watchers[a.name]?.repin(id)
                 }
+            case .codexMac:
+                break
             case .setupToken, .apiKey, .openaiKey, .chatgpt:
                 let read = services.keychain.read(service: a.keychainService ?? "", account: a.adopted == true ? nil : Keychain.user)
                 guard read.value != nil else {
@@ -434,6 +463,8 @@ extension HostCore {
                 let read = services.keychain.read(service: a.keychainService ?? "", account: a.adopted == true ? nil : Keychain.user)
                 if read.value == nil { state = read == .locked ? "locked" : "missing" }
                 else if let e = a.expiresAt { state = e <= now ? "expired" : (e.timeIntervalSince(now) < 30 * 86_400 ? "expires-soon" : "ok") }
+            case .codexMac:
+                break                                   // never in accounts.json — its row is added below
             case .chatgpt:
                 // 599i: the session's state when one runs; else whether the keychain item is there.
                 identity = a.email
@@ -445,13 +476,14 @@ extension HostCore {
                     if read.value == nil { state = read == .locked ? "locked" : "missing" }
                 }
             }
-            let isDefault = a.kind.provider == "openai" ? file.openaiDefault == a.name : file.defaultAccount == a.name
+            let isDefault = a.kind.provider == "openai" ? effectiveOpenAIDefault(file) == a.name : file.defaultAccount == a.name
             rows.append(AccountRow(name: a.name, kind: a.kind.rawValue, plan: plan, identity: identity, expiresAt: expires,
                                    verification: a.verification, isDefault: isDefault,
                                    usedBy: sandboxesUsing(a.name, file).map(\.name), state: state,
                                    keychainService: a.kind == .mac ? ClaudeLogin.service(configDir: a.configDir) : a.keychainService,
                                    fingerprint: a.fingerprint))
         }
+        if let r = codexMacRow(file, now: now) { rows.append(r) }
         return rows
     }
 
@@ -471,6 +503,8 @@ extension HostCore {
         var verifySecret: String?
         var chatgptTokens: ChatGPTTokens?
         switch kind {
+        case .codexMac:
+            throw HostError(.invalid, "this Mac's Codex login is built in — a Codex sandbox uses it as the account mac (nothing to add)")
         case .mac:
             guard let dir = r.configDir, !dir.isEmpty else {
                 throw HostError(.invalid, "the Mac's default login is the built-in account mac; --config-dir names another Claude config dir")
@@ -611,8 +645,12 @@ extension HostCore {
         guard let name = r.account else { throw HostError(.invalid, "which account? (a name, or none)") }
         var file = accountStore.load()
         guard name == "none" || file.accounts.contains(where: { $0.name == name }) else { throw HostError(.notFound, "no account \(name)") }
-        // 599i: an OpenAI account is the default of Codex sandboxes; any other, of Claude Code and pi.
-        let openai = file.accounts.first { $0.name == name }?.kind.provider == "openai"
+        // 599i: an OpenAI account is the default of Codex sandboxes; any other, of Claude Code and pi. rc.3: `--codex`
+        // (`accountKind` "codex") sets the Codex default by name — `mac` (this Mac's Codex login) or none too.
+        let openai = r.accountKind == "codex" || file.accounts.first { $0.name == name }?.kind.provider == "openai"
+        if r.accountKind == "codex", name != "none", name != "mac", file.accounts.first(where: { $0.name == name })?.kind.provider != "openai" {
+            throw HostError(.invalid, "\(name) is not an OpenAI account — Codex can use mac (this Mac's Codex login), a ChatGPT sign-in or an OpenAI key")
+        }
         if openai { file.openaiDefault = name } else { file.defaultAccount = name }
         try accountStore.save(file)
         for m in managed.values where m.config.account == "default" {
@@ -630,6 +668,8 @@ extension HostCore {
         let a = file.accounts[i]
         let secret: String?
         switch a.kind {
+        case .codexMac:
+            secret = nil
         case .mac:
             secret = services.keychain.read(service: ClaudeLogin.service(configDir: a.configDir), account: Keychain.user).value
                 .flatMap(ClaudeLogin.parse)?.accessToken

@@ -45,6 +45,8 @@ public actor HostCore {
     var watchers: [String: LoginWatcher] = [:]
     /// 599i: one session per ChatGPT account (its sandboxes share it).
     var chatgptSessions: [String: ChatGPTSession] = [:]
+    /// 599i rc.3: the reader of this Mac's own Codex login (`mac` for Codex) — made on first use.
+    var codexMacReader: CodexMacSession?
 
     /// Actor-confined: one per sandbox.
     final class Managed {
@@ -800,7 +802,7 @@ public actor HostCore {
         if spec.network.policy != nil {
             let (def, kinds) = accountKinds()
             if let p = AgentCredentials.createProblem(image: spec.imageSpec?.name, account: o.account, defaultAccount: def, kinds: kinds,
-                                                      openaiDefault: openaiDefault()) {
+                                                      openaiDefault: openaiDefault(for: spec.imageSpec?.name), codexMac: AgentCredentials.provider(spec.imageSpec?.name) == "openai" && codexMacSignedIn()) {
                 throw HostError(.invalid, p)
             }
         }
@@ -1725,7 +1727,7 @@ public actor HostCore {
             // 594: the agent's credential prerequisite (a duplicate keeps the source's account unless told).
             let (def, kinds) = accountKinds()
             if let p = AgentCredentials.createProblem(image: spec.imageSpec?.name, account: o.account ?? cfg.account ?? "none", defaultAccount: def, kinds: kinds,
-                                                      openaiDefault: openaiDefault()) {
+                                                      openaiDefault: openaiDefault(for: spec.imageSpec?.name), codexMac: AgentCredentials.provider(spec.imageSpec?.name) == "openai" && codexMacSignedIn()) {
                 throw HostError(.invalid, p)
             }
         } else {

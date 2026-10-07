@@ -209,11 +209,32 @@ struct OnboardingFlow {
     /// made the store's OpenAI default; or later. Off a terminal without --openai-account: later.
     private func openAIAccountStep() throws -> String? {
         say("  Codex account (OpenAI)")
-        let options = ["Sign in with ChatGPT now — your browser opens (Codex on your ChatGPT plan)", "Add an OpenAI API key", "Decide later"]
+        // rc.3: this Mac's own Codex login, when it is signed in — the least setup (nothing to add; read-only).
+        let macState = CodexMacLogin.read(CodexMacLogin.resolveHome()).state
+        let macSignedIn = macState == .ok || macState == .expired
+        if macSignedIn { say("  Codex is signed in on this Mac — Codex sandboxes can use that login (nothing is copied; the Mac's Codex renews it).") }
+        var values = ["chatgpt", "openai-key", "later"]
+        var options = ["Sign in with ChatGPT now — your browser opens (Codex on your ChatGPT plan)", "Add an OpenAI API key", "Decide later"]
+        if macSignedIn { values.insert("mac", at: 0); options.insert("Use this Mac's Codex login (recommended)", at: 0) }
         let pick: String
         if let f = openaiFlag { pick = f } else if asker.interactive {
-            pick = ["chatgpt", "openai-key", "later"][asker.choose("  How should Codex sandboxes reach OpenAI?", options, preferred: 0)]
+            pick = values[asker.choose("  How should Codex sandboxes reach OpenAI?", options, preferred: 0)]
+        } else if macSignedIn {
+            say("  Codex sandboxes use this Mac's Codex login (mac) — the default while it is signed in; nothing written")
+            return nil
         } else { pick = "later" }
+        if pick == "mac" {
+            guard macSignedIn else {
+                say("  this Mac's Codex is not signed in (\(macState.label)) — run codex login on the Mac, or add an account later")
+                return nil
+            }
+            var r = HostRequest(.accountDefault)
+            r.account = "mac"
+            r.accountKind = "codex"
+            _ = try call(r, g)
+            say("  Codex sandboxes use this Mac's Codex login (mac) — the store's default OpenAI account")
+            return "mac"
+        }
         func later() -> String? {
             say("  decide later — a codex sandbox says what it needs; then: doz account add chatgpt --chatgpt (or NAME --openai-key), doz account default NAME")
             return nil
@@ -363,7 +384,7 @@ struct Onboard: AsyncParsableCommand {
     @Flag(name: .long, help: "Read a GitHub token from stdin as the default key (implies --github-source key).") var githubKeyStdin = false
     @Option(name: .long, help: "The Access step's SSH choice without asking: on or off (forward this Mac's ssh-agent, github.com only).") var sshAgent: String?
     @Option(name: .long, help: "The Workspace rules step without asking: lock or hide — what a .dozignore in a sandbox's folder does to the paths it lists, by default (the setting workspace.ignore_mode). Lock: listed but unreadable; hide: not there.") var ignoreMode: String?
-    @Option(name: .long, help: "Codex's OpenAI account without asking: chatgpt (sign in with ChatGPT in your browser — Dozer's own sign-in), openai-key (pasted at a no-echo prompt) or later.") var openaiAccount: String?
+    @Option(name: .long, help: "Codex's OpenAI account without asking: mac (this Mac's own Codex login, read-only), chatgpt (sign in with ChatGPT in your browser — Dozer's own sign-in), openai-key (pasted at a no-echo prompt) or later.") var openaiAccount: String?
     @Flag(name: [.short, .long], help: "Accept every default; ask nothing. A credential that cannot be confirmed is skipped with a note (exit 0).") var yes = false
 
     func validate() throws {
@@ -371,7 +392,7 @@ struct Onboard: AsyncParsableCommand {
         if let v = githubSource, !["gh", "key"].contains(v) { throw ValidationError("--github-source: gh or key") }
         if let v = sshAgent, !["on", "off"].contains(v) { throw ValidationError("--ssh-agent: on or off") }
         if let v = ignoreMode, !["lock", "hide"].contains(v) { throw ValidationError("--ignore-mode: lock or hide") }
-        if let v = openaiAccount, !["chatgpt", "openai-key", "later"].contains(v) { throw ValidationError("--openai-account: chatgpt, openai-key or later") }
+        if let v = openaiAccount, !["mac", "chatgpt", "openai-key", "later"].contains(v) { throw ValidationError("--openai-account: mac, chatgpt, openai-key or later") }
         if githubKeyStdin && secretStdin { throw ValidationError("--github-key-stdin and --secret-stdin both read stdin — add one later (doz access set --github-key / doz account add)") }
         if githubKeyStdin && githubSource == "gh" { throw ValidationError("--github-key-stdin goes with --github-source key") }
         if [status, cancel].filter({ $0 }).count + ((images != nil || allImages || noImages || account != nil || ignoreMode != nil) ? 1 : 0) > 1 {

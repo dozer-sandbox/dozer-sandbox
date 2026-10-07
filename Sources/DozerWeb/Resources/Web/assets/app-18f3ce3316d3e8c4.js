@@ -3968,7 +3968,8 @@ function accountForm(opts) {
 // key", with the masked key field right there (accountForm: the same route and guarantees) — or, with
 // ui.allow_secret_entry off, the commands. `ok()` says whether the form may create.
 const AGENT_NAMES = { 'claude-code': 'Claude Code', pi: 'pi', codex: 'Codex' };
-const KIND_LABELS = { mac: 'this Mac’s login', 'setup-token': 'setup token', 'api-key': 'API key', 'openai-key': 'OpenAI API key', chatgpt: 'ChatGPT sign-in' };
+const KIND_LABELS = { mac: 'this Mac’s login', 'setup-token': 'setup token', 'api-key': 'API key', 'openai-key': 'OpenAI API key', chatgpt: 'ChatGPT sign-in',
+  'codex-mac': 'this Mac’s Codex login' };
 /// 599i: an image name or agent → the agent the accounts table is keyed by (python-codex → codex).
 function agentKey(a, table) {
   if (!a || !table) return a;
@@ -3976,7 +3977,7 @@ function agentKey(a, table) {
   return Object.keys(table).find((k) => a.endsWith('-' + k)) || a;
 }
 /// 599i: Codex uses OpenAI accounts only (a ChatGPT sign-in or an OpenAI key).
-function isOpenAIAgent(kinds) { return !!kinds && kinds.every((k) => k === 'chatgpt' || k === 'openai-key'); }
+function isOpenAIAgent(kinds) { return !!kinds && kinds.every((k) => k === 'chatgpt' || k === 'openai-key' || k === 'codex-mac'); }
 function accountChooser({ accounts, agent, same = null, defaultValue = '', value = null, onChange = () => {} }) {
   let acc = accounts, current = agent(), chosen = value;            // 599f: `value` pre-selects (a project file's account)
   const el = h('div', { class: 'field acct-chooser', 'data-acct-chooser': '' });
@@ -3988,7 +3989,8 @@ function accountChooser({ accounts, agent, same = null, defaultValue = '', value
     const usable = fits(kinds);
     // 599i: Codex follows the store's OpenAI default (none until one is chosen), never the Anthropic one.
     const defName = isOpenAIAgent(kinds) ? (acc.openaiDefault || 'none') : acc.defaultAccount;
-    const def = acc.accounts.find((x) => x.name === defName);
+    // Two rows can be named mac (Claude's and, rc.3, this Mac's Codex login): the one this agent can use.
+    const def = acc.accounts.find((x) => x.name === defName && (!kinds || kinds.includes(x.kind)));
     const defFits = defName !== 'none' ? (!!def && (!kinds || kinds.includes(def.kind))) : !needs;
     return { kinds, needs, usable, defFits, defName };
   }
@@ -4701,6 +4703,13 @@ function wizCodexAccount(w) {
         ' added — the store’s default OpenAI account. Its secret is in the login keychain, not in this page.'] }));
       return;
     }
+    if (w.codexMac) {
+      // rc.3: Codex is signed in on this Mac — the least setup: nothing to add.
+      box.replaceChildren(callout('ok', { cls: 'notice', attrs: { 'data-codex-mac': '' }, title: 'Codex is signed in on this Mac',
+        body: [h('span', null, 'Codex sandboxes use that login (the account mac) — nothing is copied: Dozer reads only its short-lived access token, and the Mac’s Codex renews it. '
+          + 'Keep Codex running on this Mac, or turn on Settings › codex.keep_alive, so it stays fresh. Another account can still be chosen per sandbox.')] }));
+      return;
+    }
     box.replaceChildren(h('h3', null, 'Codex account (OpenAI)'),
       h('p', { class: 'muted' }, 'Codex uses your ChatGPT plan (Dozer signs in on this Mac — your Mac’s own Codex login is not touched) or an OpenAI API key. Either can be added later; a codex sandbox says what it needs.'),
       accountCommandsNode('chatgpt'),
@@ -4711,6 +4720,10 @@ function wizCodexAccount(w) {
       } }) : accountCommandsNode('openai-key'));
   };
   paint();
+  if (w.codexMac === undefined) {
+    w.codexMac = false;
+    api('accounts').then((a) => { w.codexMac = a.accounts.some((x) => x.kind === 'codex-mac' && (x.state === 'ok' || x.state === 'expired')); paint(); }).catch(() => {});
+  }
   return box;
 }
 /// 594 (owner: "more progress detail"): ONE card for a host preparation — the wizard's Preparing step and

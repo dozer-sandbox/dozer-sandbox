@@ -360,6 +360,8 @@ public enum SettingKey {
     /// 599i: Codex — its version, and whether its approvals and own sandbox are skipped (the VM is the sandbox).
     public static let codexVersion = "images.codex_version"
     public static let codexPermissions = "codex.permissions"
+    /// rc.3: run the Mac's own codex near its login's expiry while a sandbox uses it (`mac` for Codex).
+    public static let codexKeepAlive = "codex.keep_alive"
     public static func agentVersion(_ image: String) -> String? {
         switch image { case "claude-code": claudeCodeVersion; case "pi": piVersion; case "codex": codexVersion; default: nil }
     }
@@ -436,6 +438,9 @@ public struct DozerSettings: Sendable {
             .init("codex", "permissions", .choice(["skip", "ask"]), .string("skip"),
                   "Codex in a codex sandbox: skip its approvals and its own Linux sandbox (the VM is the boundary), or ask as on a Mac.",
                   flag: "-e DOZ_CODEX_PERMISSIONS=… on run/exec", applies: .nextSession),
+            .init("codex", "keep_alive", .bool, .bool(false),
+                  "Codex sandboxes on the account mac (this Mac's own Codex login): when its access token is about to expire and a sandbox used it in the last 15 minutes, run this Mac's codex doctor once — no model call — which renews the login the way Codex itself does. Off: the login renews only while Codex (the app or a codex session) runs on this Mac; when it has expired, Codex in a sandbox says so.",
+                  applies: .now),
             .init("defaults", "cpus", .int(1...64), .int(2),
                   "CPUs of a new sandbox.",
                   flag: "doz create --cpus", applies: .nextCreate),

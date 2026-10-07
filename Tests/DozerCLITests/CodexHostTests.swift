@@ -82,8 +82,9 @@ final class CodexHostTests: XCTestCase {
 
     /// Codex takes OpenAI accounts only; Claude Code and pi never get one (and Codex never an Anthropic one).
     func testTheCompatibilityTable() {
-        XCTAssertEqual(AgentCredentials.kinds("codex"), [.chatgpt, .openaiKey])
-        XCTAssertEqual(AgentCredentials.kinds("python-codex"), [.chatgpt, .openaiKey])
+        XCTAssertEqual(AgentCredentials.kinds("codex"), [.codexMac, .chatgpt, .openaiKey])
+        XCTAssertEqual(AgentCredentials.kinds("python-codex"), [.codexMac, .chatgpt, .openaiKey])
+        XCTAssertFalse(AgentCredentials.accepts("claude-code", .codexMac))
         XCTAssertEqual(AgentCredentials.provider("codex"), "openai")
         XCTAssertEqual(AgentCredentials.provider("claude-code"), "anthropic")
         for k in [AccountKind.mac, .setupToken, .apiKey] { XCTAssertFalse(AgentCredentials.accepts("codex", k), k.rawValue) }
@@ -108,7 +109,7 @@ final class CodexHostTests: XCTestCase {
         XCTAssertNotNil(AgentCredentials.createProblem(image: "claude-code", account: "plan", defaultAccount: "mac", kinds: kinds))
         XCTAssertNil(AgentCredentials.createProblem(image: "claude-code", account: nil, defaultAccount: "mac", kinds: kinds, openaiDefault: "plan"))
         XCTAssertEqual(AgentCredentials.sandboxProblem(image: "codex", account: nil, missing: nil),
-                       "Codex has no credential — Codex needs an OpenAI account: a ChatGPT sign-in or an OpenAI API key; choose an OpenAI account (a ChatGPT sign-in or an OpenAI API key)")
+                       "Codex has no credential — Codex needs an OpenAI account: this Mac's Codex login, a ChatGPT sign-in or an OpenAI API key; choose an OpenAI account (mac, a ChatGPT sign-in or an OpenAI API key)")
     }
 
     /// A ChatGPT sign-in is ONE keychain item; accounts.json holds no token; the OpenAI default is separate.
@@ -467,6 +468,11 @@ final class CodexHostTests: XCTestCase {
             let e = FileManager.default.enumerator(at: src.appendingPathComponent(dir), includingPropertiesForKeys: nil)
             while let u = e?.nextObject() as? URL {
                 guard u.pathExtension == "swift", let text = try? String(contentsOf: u, encoding: .utf8) else { continue }
+                // rc.3's ONE production exception: the reader of this Mac's Codex login (`mac` for Codex) — read-only.
+                if u.lastPathComponent == "CodexMacLogin.swift" {
+                    XCTAssertFalse(text.contains(".write(to:") || text.contains("createFile(") || text.contains("removeItem("), "the Mac's Codex home is only ever read")
+                    continue
+                }
                 for (i, line) in text.components(separatedBy: "\n").enumerated()
                     where line.range(of: #"[~/"]\.codex"#, options: .regularExpression) != nil {
                     let guest = line.contains("/home/agent/.codex") || line.contains("imageSpec.home") || line.contains("~/.codex/auth.json")

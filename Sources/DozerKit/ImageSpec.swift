@@ -270,7 +270,8 @@ public enum AgentImages {
         case .claudeCode?: [AgentCredentialSupport(provider: "anthropic", accountKinds: ["mac", "setup-token", "api-key"])]
         case .pi?: [AgentCredentialSupport(provider: "anthropic", accountKinds: ["api-key"])]
         // 599i: Codex — OpenAI only: Dozer's own ChatGPT sign-in, or an OpenAI API key.
-        case .codex?: [AgentCredentialSupport(provider: "openai", accountKinds: ["chatgpt", "openai-key"])]
+        // rc.3: and `mac` — this Mac's own Codex login (read-only), first: the least setup.
+        case .codex?: [AgentCredentialSupport(provider: "openai", accountKinds: ["codex-mac", "chatgpt", "openai-key"])]
         default: nil
         }
     }

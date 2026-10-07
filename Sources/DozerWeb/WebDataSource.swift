@@ -423,7 +423,7 @@ public final class HostWebData: DozerWebData, @unchecked Sendable {
         let rows = try await query(HostRequest(.accountList)).0.decode([AccountRow].self)
         let file = AccountStore(store: store, settings: .load()).load()
         return WebAccounts(accounts: rows.map(WebAccount.init), defaultAccount: file.defaultAccount, keepalive: file.keepalive,
-                           openaiDefault: file.openaiDefault)
+                           openaiDefault: rows.first { $0.isDefault && AccountKind(rawValue: $0.kind)?.provider == "openai" }?.name)
     }
 
     public func metrics(_ q: WebMetricsQuery) async throws -> WebMetrics {

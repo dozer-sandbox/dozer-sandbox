@@ -160,7 +160,26 @@ struct Doctor: AsyncParsableCommand {
         let metricsOK = fm.fileExists(atPath: store.metrics.path)
         out.append(DoctorCheck(check: "metrics", status: .ok, detail: metricsOK ? store.metrics.path : "none yet"))
         if claude { out += claudeChecks(store: store, keychain: SystemKeychain()) }
+        out.append(codexLoginCheck(home: CodexMacLogin.resolveHome(), settings: .load()))
         return out
+    }
+
+    /// 599i rc.3: this Mac's Codex login (`mac` for Codex) — read-only: its state and expiry, never a token.
+    static func codexLoginCheck(home: URL?, settings: DozerSettings, now: Date = Date()) -> DoctorCheck {
+        let r = CodexMacLogin.read(home, now: now)
+        let keep = settings.bool(SettingKey.codexKeepAlive)
+        switch r.state {
+        case .ok:
+            let exp = r.token?.expiresAt.map { " — access token until \(CredentialVaultClock.hm($0))" } ?? ""
+            return DoctorCheck(check: "codex login", status: .ok, detail: "this Mac's Codex is signed in (ChatGPT)\(exp) · Codex sandboxes can use it as mac · renews while Codex runs on this Mac"
+                               + (keep ? " · keep-alive on" : ""))
+        case .expired:
+            return DoctorCheck(check: "codex login", status: .warn, detail: "this Mac's Codex login has expired — run codex on the Mac (it renews it), or turn on codex.keep_alive")
+        case .signedOut:
+            return DoctorCheck(check: "codex login", status: .ok, detail: "this Mac's Codex is not signed in — Codex sandboxes need another account (doz account add NAME --chatgpt)")
+        case .keyring, .apiKey, .unreadable:
+            return DoctorCheck(check: "codex login", status: .warn, detail: CodexMacSession(codexHome: home, keepaliveEnabled: { false }).problem(now: now) ?? r.state.label)
+        }
     }
 
     /// 588: the Mac's Claude Code, its login(s), and the store's accounts. Reads only: `claude
@@ -214,6 +233,7 @@ struct Doctor: AsyncParsableCommand {
             case .apiKey: s += " (api-key)"
             case .openaiKey: s += " (openai-key)"
             case .chatgpt: s += " (chatgpt" + (a.plan.map { ", \($0)" } ?? "") + ")"
+            case .codexMac: s += " (codex-mac)"
             }
             return s
         }

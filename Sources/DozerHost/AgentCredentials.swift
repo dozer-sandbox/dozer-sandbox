@@ -32,7 +32,7 @@ public enum AgentCredentials {
         guard let k = kinds(image) else { return "" }
         if k == [.apiKey] { return "\(name) needs an Anthropic API key" }
         // 599i: Codex — an OpenAI account.
-        if provider(image) == "openai" { return "\(name) needs an OpenAI account: " + k.map(\.label).sorted().joined(separator: " or ") }
+        if provider(image) == "openai" { return "\(name) needs an OpenAI account: this Mac's Codex login, a ChatGPT sign-in or an OpenAI API key" }
         return "\(name) needs an Anthropic account: " + k.map(\.label).sorted().joined(separator: ", ")
     }
 
@@ -58,13 +58,18 @@ public enum AgentCredentials {
     /// `image` — nil when it fits. `explicitNone`: `--account none` said on purpose is allowed (the
     /// sandbox then says it has no credential); the default resolving to none is not.
     /// 599i: `openaiDefault` — the store's OpenAI default (Codex follows it, never the Anthropic one).
+    /// rc.3: `codexMac` — this Mac's Codex is signed in, so `mac` is a Codex account.
     public static func createProblem(image: String?, account: String?, defaultAccount: String, kinds accountKinds: [String: AccountKind],
-                                     openaiDefault: String? = nil) -> String? {
+                                     openaiDefault: String? = nil, codexMac: Bool = false) -> String? {
         guard let image, let _ = kinds(image) else { return nil }
         let requested = account ?? "default"
         if requested == "none" { return nil }
         let name = requested == "default" ? Self.defaultAccount(for: image, anthropic: defaultAccount, openai: openaiDefault) : requested
-        let compatible = accountKinds.filter { accepts(image, $0.value) }.keys.sorted()
+        let openai = provider(image) == "openai"
+        if openai, name == "mac" {
+            return codexMac ? nil : "Codex can't use mac: this Mac's Codex is not signed in (run codex login on the Mac) — or add an account: \(addCommand(image))"
+        }
+        let compatible = (accountKinds.filter { accepts(image, $0.value) && !(openai && $0.key == "mac") }.keys.sorted()) + (openai && codexMac ? ["mac"] : [])
         let fix = compatible.isEmpty
             ? "add one: \(addCommand(image)) (then create with --account NAME)"
             : "use one: --account \(compatible.joined(separator: " | --account ")) — or add one: \(addCommand(image))"
@@ -86,7 +91,7 @@ public enum AgentCredentials {
         guard let image, let k = kinds(image) else { return nil }
         let agent = AgentImages.agentName(image) ?? image
         let choose = k == [.apiKey] ? "choose an API-key account"
-            : provider(image) == "openai" ? "choose an OpenAI account (a ChatGPT sign-in or an OpenAI API key)" : "choose an account \(agent) can use"
+            : provider(image) == "openai" ? "choose an OpenAI account (mac, a ChatGPT sign-in or an OpenAI API key)" : "choose an account \(agent) can use"
         if let missing { return "\(agent) has no credential: the account \(missing) no longer exists — \(choose)" }
         guard let a = account else {
             return needsAccount(image) ? "\(agent) has no credential — \(requirement(image)); \(choose)" : nil
@@ -105,6 +110,7 @@ extension AccountKind {
         case .apiKey: "an Anthropic API key"
         case .openaiKey: "an OpenAI API key"
         case .chatgpt: "a ChatGPT sign-in"
+        case .codexMac: "this Mac's Codex login"
         }
     }
 }

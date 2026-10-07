@@ -23,6 +23,8 @@ public enum AccountKind: String, Codable, Sendable, CaseIterable {
     /// 599i: a ChatGPT plan through Dozer's OWN sign-in on this Mac (`doz account add NAME --chatgpt`):
     /// the tokens in `doz-chatgpt:NAME`, refreshed by the host — never the Mac's own ~/.codex login.
     case chatgpt
+    /// 599i rc.3: THIS Mac's own Codex login, read-only (the account `mac` of a Codex sandbox) — never written.
+    case codexMac = "codex-mac"
 
     /// The vault binding its secret goes in.
     public var binding: CredentialBinding {
@@ -30,12 +32,12 @@ public enum AccountKind: String, Codable, Sendable, CaseIterable {
         case .apiKey: .anthropic
         case .mac, .setupToken: .claudeOAuth
         case .openaiKey: .openai
-        case .chatgpt: .chatgpt
+        case .chatgpt, .codexMac: .chatgpt
         }
     }
 
     /// 599i: whose credential it is — `anthropic` (Claude Code, pi) or `openai` (Codex).
-    public var provider: String { self == .openaiKey || self == .chatgpt ? "openai" : "anthropic" }
+    public var provider: String { self == .openaiKey || self == .chatgpt || self == .codexMac ? "openai" : "anthropic" }
 }
 
 public struct AccountRecord: Codable, Equatable, Sendable {
@@ -83,6 +85,8 @@ public struct AccountRecord: Codable, Equatable, Sendable {
 
     /// The built-in Mac login.
     public static let mac = AccountRecord(name: "mac", kind: .mac, addedAt: Date(timeIntervalSince1970: 0))
+    /// 599i rc.3: `mac` for a Codex sandbox — this Mac's Codex login (never in accounts.json).
+    public static let codexMac = AccountRecord(name: "mac", kind: .codexMac, addedAt: Date(timeIntervalSince1970: 0))
 }
 
 public struct AccountsFile: Codable, Equatable, Sendable {

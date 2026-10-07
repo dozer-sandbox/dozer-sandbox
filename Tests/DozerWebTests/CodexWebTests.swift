@@ -11,7 +11,7 @@ final class CodexWebTests: XCTestCase {
         let row = AccountRow(name: "plan", kind: "chatgpt", plan: "plus", identity: "person@example.invalid", expiresAt: nil, verification: "verified",
                              isDefault: true, usedBy: [], state: "ok", keychainService: "doz-chatgpt:plan", fingerprint: "abc")
         let a = WebAccounts(accounts: [WebAccount(row)], defaultAccount: "mac", keepalive: false, openaiDefault: "plan")
-        XCTAssertEqual(a.agents["codex"], ["chatgpt", "openai-key"])
+        XCTAssertEqual(a.agents["codex"], ["codex-mac", "chatgpt", "openai-key"])
         XCTAssertEqual(a.agents["pi"], ["api-key"], "unchanged")
         XCTAssertEqual(a.agents["claude-code"], ["mac", "setup-token", "api-key"], "unchanged")
         let json = String(decoding: try JSONEncoder().encode(a), as: UTF8.self)

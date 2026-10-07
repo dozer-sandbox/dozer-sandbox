@@ -63,10 +63,11 @@ public enum QuickAdd {
     /// `network`: the image's network setting (nat/none: no account at all); `outOfDate`: the image's
     /// standing line when it is prepared but out of date.
     public static func requirement(image: String, network: String?, defaultAccount: String,
-                                   accountKinds: [String: AccountKind], outOfDate: String?, openaiDefault: String? = nil) -> (kind: String, text: String)? {
+                                   accountKinds: [String: AccountKind], outOfDate: String?, openaiDefault: String? = nil,
+                                   codexMac: Bool = false) -> (kind: String, text: String)? {
         if AgentCredentials.kinds(image) != nil, network != "nat", network != "none",
            let problem = AgentCredentials.createProblem(image: image, account: nil, defaultAccount: defaultAccount, kinds: accountKinds,
-                                                        openaiDefault: openaiDefault) {
+                                                        openaiDefault: openaiDefault, codexMac: codexMac) {
             return ("account", problem)
         }
         if let s = outOfDate {

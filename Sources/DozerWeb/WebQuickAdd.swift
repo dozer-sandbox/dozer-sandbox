@@ -44,12 +44,13 @@ public struct WebQuickAddQuery: Equatable, Sendable {
     public func plan(taken: Set<String>, settings: DozerSettings, images: [WebImage], accounts: WebAccounts) throws -> QuickAddPlan {
         var p = try QuickAdd.plan(image: image, name: nil, isolated: isolated, taken: taken, settings: settings)
         var kinds: [String: AccountKind] = ["mac": .mac]
-        for a in accounts.accounts { if let k = AccountKind(rawValue: a.kind) { kinds[a.name] = k } }
+        for a in accounts.accounts where a.kind != AccountKind.codexMac.rawValue { if let k = AccountKind(rawValue: a.kind) { kinds[a.name] = k } }
+        let codexMac = accounts.accounts.contains { $0.kind == AccountKind.codexMac.rawValue && ($0.state == "ok" || $0.state == "expired") }
         let row = images.first { $0.name == p.image }
         let outOfDate = row.flatMap { $0.baked ? $0.standing : nil }
         if let r = QuickAdd.requirement(image: p.image, network: QuickAdd.network(image: p.image, settings: settings),
                                         defaultAccount: accounts.defaultAccount,
-                                        accountKinds: kinds, outOfDate: outOfDate, openaiDefault: accounts.openaiDefault) {
+                                        accountKinds: kinds, outOfDate: outOfDate, openaiDefault: accounts.openaiDefault, codexMac: codexMac) {
             p.requirementKind = r.kind
             p.requirement = r.text
         }

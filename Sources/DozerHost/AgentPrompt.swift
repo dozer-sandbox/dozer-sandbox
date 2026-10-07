@@ -332,6 +332,8 @@ public enum AgentPrompt {
             v["account.name"] = "none usable (\(account ?? "none"))"
             v["credentials.description"] = "no credential you can use is attached (\(problem)), so your requests to the model will fail. "
                 + "Do not log in or ask for a key inside the sandbox — tell the user to choose an account in Dozer: `doz account use \(name) ACCOUNT` on the Mac, or the sandbox's page in `doz ui`."
+        } else if network.policy != nil, account == "mac", codex {
+            v["credentials.description"] = "the Mac's proxy puts the user's own Codex login on their Mac (the account mac) into your requests to OpenAI on the way out; the Mac's Codex renews it. The tokens in ~/.codex/auth.json and the key-like values in your environment are placeholders — that is expected; never run `codex login` or `codex logout`, and never ask the user for a key. If a request says the Mac's Codex login has expired, tell the user to run codex on their Mac."
         } else if network.policy != nil, let account, codex {
             v["credentials.description"] = "the Mac's proxy puts the account's credential (\(account)) into your requests to OpenAI on the way out (Dozer signed in on the Mac and renews it there). The tokens in ~/.codex/auth.json and the key-like values in your environment are placeholders — that is expected; never run `codex login` or `codex logout`, and never ask the user for a key."
         } else if network.policy != nil, let account {
