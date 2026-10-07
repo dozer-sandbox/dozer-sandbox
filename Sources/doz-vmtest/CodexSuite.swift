@@ -452,4 +452,111 @@ func cliCodexSuite(binary: String) async {
     check(r.out.split(separator: "\n").dropFirst(2).first == "1", "the TUI runs with its approvals off and the facts as developer instructions")
     info("sessions: " + d(["sessions", "cx"]).out.split(separator: "\n").joined(separator: " | ").prefix(300))
     noTokenInGuest("with the TUI running")
+
+    // ── 9. 608: the Codex TUI in /workspace keeps working across hibernate → wake and a host restart; Restart session ──
+    // The TUI is driven through `doz attach` on a pseudo-terminal (python3's pty on the Mac): type a prompt slowly
+    // (Codex treats a fast burst as a paste), Enter, and read until the fake model's answer — or Codex's
+    // "invalid cwd" (the 0.29.0 bug, which the control sandbox — workspace.view off — still shows).
+    try? cwdTUIDriver.write(toFile: ws + "/tui.py", atomically: true, encoding: .utf8)
+    func tui(_ name: String, _ prompt: String) -> (answered: Bool, invalidCwd: Bool, tail: String) {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
+        p.arguments = [ws + "/tui.py", prompt, "PONG-APIKEY-", "120", t.binary, "attach", name, "codex", "--store", t.store.path]
+        p.environment = t.env
+        let o = Pipe()
+        p.standardOutput = o
+        p.standardError = FileHandle.nullDevice
+        guard (try? p.run()) != nil else { return (false, false, "python3 did not start") }
+        let c = PipeCollector(o.fileHandleForReading)
+        p.waitUntilExit()
+        c.wait(5)
+        let out = c.text
+        return (out.contains("RESULT=FOUND"), out.contains("invalid cwd"), String(out.suffix(300)))
+    }
+    let key = Data("sk-proj-FAKE599iKEY0123456789\n".utf8)
+    for (name, view) in [("cw", "on"), ("cr", "off")] {
+        let dir = "/tmp/dzo-\(pid)-x\(name)"
+        try? fm.removeItem(atPath: dir)
+        try? fm.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        r = d(["create", name, "--agent", "codex", "--workspace", dir, "--account", "okey", "--workspace-view", view, "--start"], timeout: 900)
+        check(r.code == 0, "create \(name) --agent codex --workspace … --workspace-view \(view) --start")
+        check(d(["run", name, "--detach", "--session", "codex", "--", "codex"], timeout: 120).code == 0, "\(name): the Codex TUI in /workspace")
+        usleep(5_000_000)
+        let a = tui(name, "first turn")
+        check(a.answered, "\(name): a turn in the TUI is answered (\(a.tail.debugDescription))")
+    }
+    // hibernate → wake
+    for name in ["cw", "cr"] { check(d(["hibernate", name], timeout: 180).code == 0 && d(["wake", name], timeout: 300).code == 0, "\(name): hibernate → wake") }
+    var a = tui("cw", "after the wake")
+    check(a.answered && !a.invalidCwd, "cw (the live view): after hibernate → wake the same Codex is answered — no invalid cwd (\(a.tail.debugDescription))")
+    a = tui("cr", "after the wake")
+    check(a.invalidCwd && !a.answered, "control cr (workspace.view off): Codex fails with \"invalid cwd\" after the wake — the 0.29.0 bug (\(a.tail.debugDescription))")
+    // Restart session — the remedy, and the conversation continues (`codex resume --last`)
+    let before = (t.json(["sessions", "cr", "--store", t.store.path], [SessionRow].self) ?? []).first { $0.name == "codex" }?.pid
+    r = d(["sessions", "restart", "cr", "codex", "-d", "--yes", "--json"], timeout: 120)
+    let rs = try? HostWire.decoder.decode(SessionRestarted.self, from: r.outData)
+    check(r.code == 0 && rs?.resumed == true && rs?.command == "codex resume --last", "doz sessions restart cr codex → codex resume --last (\(rs.map { "\($0.command), ended \($0.ended)" } ?? r.err.suffix(200).description))")
+    let after = (t.json(["sessions", "cr", "--store", t.store.path], [SessionRow].self) ?? []).first { $0.name == "codex" }
+    check(after?.pid != nil && after?.pid != before && after?.command == "codex resume --last", "the same session, a new pid running `codex resume --last` (\(after?.command ?? "?"))")
+    usleep(5_000_000)
+    a = tui("cr", "after the restart")
+    check(a.answered && !a.invalidCwd, "cr after Restart session: answered again (\(a.tail.debugDescription))")
+    r = d(["exec", "cr", "--", "sh", "-c", "find /home/agent/.codex/sessions -name 'rollout-*.jsonl' | wc -l"])
+    info("cr: Codex's recorded sessions: \(r.out.trimmingCharacters(in: .whitespacesAndNewlines)) (resume --last continued the newest in /workspace)")
+    // a host restart (it hibernates every sandbox; a NEW host restores them on wake)
+    _ = d(["host", "stop"], timeout: 300)
+    check(startHostWithFake(), "a new host, with the fake OpenAI")
+    check(d(["account", "add", "okey", "--openai-key", "--force"], stdin: key).code == 0, "the key again (this suite's keys live in the host's memory)")
+    check(d(["wake", "cw"], timeout: 300).code == 0, "wake cw in the new host")
+    a = tui("cw", "after the host restart")
+    check(a.answered && !a.invalidCwd, "cw: after a host restart the same Codex is answered — no invalid cwd (\(a.tail.debugDescription))")
+    // End session
+    r = d(["sessions", "end", "cw", "codex", "--yes"], timeout: 60)
+    check(r.code == 0 && r.out.contains("ended session codex in cw"), "doz sessions end cw codex (\(r.out.trimmingCharacters(in: .whitespacesAndNewlines)))")
+    for name in ["cw", "cr"] { _ = d(["rm", name, "--yes"], timeout: 120) }
 }
+
+/// 608: drive a TUI through `doz attach` on a pseudo-terminal: argv[1] the prompt, argv[2] what to wait for,
+/// argv[3] seconds, the rest the command. Prints RESULT=FOUND|TIMEOUT and the screen's last text (controls removed).
+let cwdTUIDriver = #"""
+import os, pty, sys, time, select, re, fcntl, termios, struct, signal
+prompt, expect, secs, argv = sys.argv[1], sys.argv[2].encode(), float(sys.argv[3]), sys.argv[4:]
+pid, fd = pty.fork()
+if pid == 0:
+    os.execvp(argv[0], argv)
+fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", 40, 120, 0, 0))
+buf = b""; start = time.time(); sent = None; result = "TIMEOUT"
+def read(t):
+    global buf
+    r, _, _ = select.select([fd], [], [], t)
+    if r:
+        try:
+            d = os.read(fd, 65536)
+        except OSError:
+            return False
+        if not d:
+            return False
+        buf += d
+    return True
+while time.time() - start < secs:
+    if not read(0.3):
+        break
+    if sent is None and time.time() - start > 6:
+        for ch in prompt:
+            os.write(fd, ch.encode()); time.sleep(0.04)
+        time.sleep(0.8); os.write(fd, b"
+"); sent = len(buf)
+    if sent is not None and (expect in buf[sent:] or b"invalid cwd" in buf[sent:]):
+        if expect in buf[sent:]:
+            result = "FOUND"
+        time.sleep(1.0); read(0.2)
+        break
+try:
+    os.kill(pid, signal.SIGTERM)
+except OSError:
+    pass
+text = re.sub(rb"\x1b\[[0-9;?<>=]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(\x07|\x1b\\)|\x1b.|[\x00-\x08\x0b-\x1f\x7f]", b" ", buf[sent or 0:])
+text = re.sub(rb" +", b" ", text).decode("utf-8", "replace")
+print(("invalid cwd " if b"invalid cwd" in buf else "") + text[-600:])
+print("RESULT=" + result)
+"""#

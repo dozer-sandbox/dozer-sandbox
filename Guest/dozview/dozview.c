@@ -101,7 +101,7 @@
 #define RENAME_EXCHANGE (1 << 1)
 #endif
 
-#define DOZVIEW_VERSION "1.1.0"
+#define DOZVIEW_VERSION "1.1.1"
 #define VIRTIOFS_MAGIC 0x65735546UL /* FUSE_SUPER_MAGIC — virtio-fs is a FUSE file system */
 #define PATHMAX 4096
 #define BUFSZ ((size_t)(1 << 20) + 8192)
@@ -498,6 +498,35 @@ static int reopen_base_locked(const char *why) {
     logm("re-open (%s): base re-opened from %s", why, raw_path);
     return 1;
 }
+/* 1.1.1: the base is dead AND RAW is not the share again yet — the wake's re-mount is between its umount and
+ * its bind (a request arrived before SIGUSR1). Hold the request until RAW is back (≤ 5 s, every 50 ms) rather
+ * than answer ENOENT now: a LOOKUP answered ENOENT makes the kernel drop that dentry, and a program whose
+ * current folder it is loses it ("/workspace/sub (deleted)", getcwd fails) — the bug the view exists to
+ * prevent. 1 when the base is healthy again (retry the request). */
+static int wait_for_base(int err) {
+    if (err != ENOENT && err != ESTALE && err != EIO && err != ENOTCONN) return 0;
+    /* An ordinary ENOENT (a name that is not there) costs one health check per 50 ms at most. */
+    static double healthy_at;
+    pthread_mutex_lock(&base_mu);
+    double t0 = now_ms();
+    int dead = t0 - healthy_at >= 50 && !base_healthy();
+    if (!dead) healthy_at = t0;
+    pthread_mutex_unlock(&base_mu);
+    if (!dead) return 0;
+    for (int i = 0; i < 100; i++) {
+        struct timespec ts = {0, 50 * 1000 * 1000};
+        nanosleep(&ts, NULL);
+        pthread_mutex_lock(&base_mu);
+        int ok = base_healthy();
+        if (!ok) { int nfd = open(raw_path, O_RDONLY | O_DIRECTORY | O_CLOEXEC); if (nfd >= 0) { int sh = is_share(nfd); close(nfd); if (sh) ok = reopen_base_locked("a request waited"); } }
+        if (ok) n_repair++;
+        pthread_mutex_unlock(&base_mu);
+        if (ok) { if (i > 0) logm("a request waited %d ms for the share to come back", (i + 1) * 50); return 1; }
+    }
+    logm("a request waited 5 s for the share — answering its error");
+    return 0;
+}
+
 /* A request's syscall failed in a way a dead base explains: repair (at most every 50 ms). */
 static int maybe_repair(int err) {
     if (err != ENOENT && err != ESTALE && err != EIO && err != ENOTCONN) return 0;
@@ -1199,7 +1228,7 @@ static void dispatch(req_t *q) {
         default: e = ENOSYS; break;
         }
         if (!e) return;
-        if (attempt == 0 && sys_err && maybe_repair(e)) continue;
+        if (attempt == 0 && sys_err && (maybe_repair(e) || wait_for_base(e))) continue;
         reply_err(q->in->unique, e);
         return;
     }
