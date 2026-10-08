@@ -18,3 +18,4 @@ Guest/dozview/out/
 
 # Codex hook state (per machine; never tracked)
 .codex/hooks/.history-state.json
+Guest/deckhold/test/out/

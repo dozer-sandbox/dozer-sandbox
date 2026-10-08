@@ -89,6 +89,16 @@ func upgradeSuite() async throws {
         }
     }
     for b in boxes { wakeIntact(new, b.name, "\(newVersion) (slept by \(oldVersion))") }
+    // 610: the wake brought THIS build's deckhold to the guest's disk (sessions opened from now on run it); the running
+    // session kept its own holder (the same pid, above).
+    if let bin = DeckholdBinary.locate(), let want = Sandbox.digest(bin) {
+        for b in boxes {
+            let have = new.run(["exec", b.name, "--", "sh", "-c", GuestCommand.deckholdDigestScript], timeout: 60).out.trimmingCharacters(in: .whitespacesAndNewlines)
+            check(have == want, "\(b.name): the wake put this build's deckhold in the guest (\(have.prefix(12)) vs \(want.prefix(12)))")
+        }
+    } else {
+        check(false, "this build's deckhold resource is found")
+    }
     // The layout this build records, on its own next wake.
     for b in boxes {
         check(new.run(["hibernate", b.name], timeout: 120).code == 0, "\(newVersion): hibernate \(b.name)")

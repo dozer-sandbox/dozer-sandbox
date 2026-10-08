@@ -74,6 +74,19 @@ func cliSessionsSuite(binary: String) async {
     check(screen.contains("started-\(row?.pid ?? -1)"), "its screen is the new program's (\(screen.split(separator: "\n").first ?? ""))")
     check(ex("ps -o args | grep -c '^sh -c trap'") == "1", "the old program is gone (one left: \(ex("ps -o pid,args | grep '^ *[0-9]* sh -c trap' | tr '\\n' ';'")))")
 
+    // 610 (609.B2): from a script — stdin/stdout not a terminal, no -d — a restart restarts and RETURNS (it attached
+    // and never returned); --json answers with the result and returns too.
+    let t0 = Date()
+    r = t.run(["sessions", "restart", "s1", "loop", "--yes"], timeout: 60)
+    check(r.code == 0 && r.out.contains("restarted session loop in s1") && Date().timeIntervalSince(t0) < 30,
+          String(format: "no terminal, no -d: doz sessions restart s1 loop --yes restarts and returns (exit %d, %.1f s: %@)", r.code,
+                 Date().timeIntervalSince(t0), r.out.trimmingCharacters(in: .whitespacesAndNewlines)))
+    let p2 = t.sessions("s1").first { $0.name == "loop" }?.pid
+    r = t.run(["sessions", "restart", "s1", "loop", "--json"], timeout: 60)
+    let rj = try? HostWire.decoder.decode(SessionRestarted.self, from: r.outData)
+    let p3 = t.sessions("s1").first { $0.name == "loop" }?.pid
+    check(r.code == 0 && rj != nil && p3 != nil && p3 != p2, "--json (no -d): the result as JSON, and it returns (pid \(p2.map(String.init) ?? "?") → \(p3.map(String.init) ?? "?"))")
+
     // a session inside tmux: the old program goes with its tmux server
     check(t.run(["config", "set", "--sandbox", "s1", "sessions.tmux", "true"]).code == 0, "s1's sessions run inside tmux")
     check(t.run(["run", "s1", "-d", "--session", "tm", "--", "sh", "-c", "echo tm-$$; exec sleep 7777"]).code == 0, "session tm (in tmux)")

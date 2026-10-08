@@ -77,6 +77,8 @@ public actor HostCore {
     private var creating: Set<String> = []
     /// 590: `open-session` is serialized per sandbox.
     let sessionGate = KeyedGate()
+    /// 610: the cold starts under way (an open, an attach, an exec or a second start JOINS one — `ensureRunning`).
+    nonisolated let coldStarts = ColdStarts()
     /// 599: the session bridges' limits and recent actions (`HostCore+Bridges`).
     nonisolated let bridgeState = BridgeState()
     /// 609: which viewer set each session's size last (the attach relay re-applies the typist's).
@@ -908,6 +910,38 @@ public actor HostCore {
     /// Start-or-wake, and every other lifecycle operation, in the owner's vocabulary. An operation
     /// that finds the sandbox already where it leads does nothing (`changed: false`).
     private func lifecycle(_ op: HostOp, name: String?, emit: @escaping @Sendable (HostEvent) -> Void) async throws -> LifecycleResult {
+        guard op == .start else { return try await lifecycleBody(op, name: name, emit: emit) }
+        // 610 (590.B3): a cold start is recorded from here — its image's preparation included — to its end, so
+        // what needs the sandbox running meanwhile (an open-session, an attach, an exec) JOINS it instead of
+        // finding it "off"; and a second start joins the first instead of booting it twice.
+        let first = try get(name)
+        let key = first.name
+        let cold = [.off, .failed].contains(await effectivePhase(first))
+        guard cold || coldStarts.isRunning(key) else {
+            return try await lifecycleBody(op, name: key, emit: emit)
+        }
+        guard coldStarts.begin(key) else {
+            emit(HostEvent(kind: .note, sandbox: key, text: "\(key) is already starting — joining that start"))
+            try await coldStarts.wait(key)
+            return try await lifecycleBody(op, name: key, emit: emit)      // running now: nothing to do
+        }
+        do {
+            let r = try await lifecycleBody(op, name: key, emit: emit)
+            coldStarts.finish(key, error: nil)
+            return r
+        } catch {
+            coldStarts.finish(key, error: Self.joinedStartFailed(key, error))
+            throw error
+        }
+    }
+
+    /// 610: what a caller that joined a cold start is told when that start failed — the start's own reason.
+    static func joinedStartFailed(_ name: String, _ error: Error) -> HostError {
+        let e = HostError.from(error)
+        return HostError(e.code, "\(name) did not start — \(e.message)")
+    }
+
+    private func lifecycleBody(_ op: HostOp, name: String?, emit: @escaping @Sendable (HostEvent) -> Void) async throws -> LifecycleResult {
         var m = try get(name)
         // 594 (D4): a cold start that needs an image being prepared — or never prepared — joins that
         // preparation (one download, one bake, whoever asks), its progress on this caller's stream.
@@ -1087,6 +1121,14 @@ public actor HostCore {
                        emit: @escaping @Sendable (HostEvent) -> Void = { _ in }) async throws -> EnsureOutcome {
         // 594 W10: a wake by use (an attach, a terminal) follows the Mac's zone as it is now.
         m.sandbox.setTimeZone(Self.guestTimeZone())
+        // 610 (590.B3): a cold start under way (a first start's preparation takes minutes, and the sandbox is OFF
+        // all that time) is JOINED: wait for its end, then go on — or fail with its reason. Then look again from the
+        // sandbox's current record (a Dockerfile sandbox is re-adopted with its built image during its start).
+        if coldStarts.isRunning(m.name) {
+            emit(HostEvent(kind: .note, sandbox: m.name, text: "\(m.name) is starting — waiting for it to run"))
+            try await coldStarts.wait(m.name)
+            return try await ensureRunning(try get(m.name), wake: wake, start: start, emit: emit)
+        }
         let deadline = ContinuousClock.now + .seconds(300)
         while true {
             let p = await effectivePhase(m)
@@ -1320,8 +1362,15 @@ public actor HostCore {
     /// serve`, and one failed "Address in use". Serialized, the second sees the first's session and
     /// answers "already running".
     private func openSession(_ r: HostRequest, emit: @escaping @Sendable (HostEvent) -> Void = { _ in }) async throws -> SessionOpened {
-        let m = try get(r.name)
+        var m = try get(r.name)
         let key = m.name
+        // 610 (590.B3): join a cold start under way BEFORE queueing at the gate, so every open made during it —
+        // not only the first in the queue — ends with the start (and fails with its reason when it fails).
+        if coldStarts.isRunning(key) {
+            emit(HostEvent(kind: .note, sandbox: key, text: "\(key) is starting — the session opens when it runs"))
+            try await coldStarts.wait(key)
+            m = try get(key)
+        }
         await sessionGate.lock(key)
         defer { sessionGate.unlock(key) }
         // 594 W27: an off sandbox is cold-started first when the caller asks (`doz run` does).

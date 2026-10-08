@@ -51,8 +51,9 @@ conversation instead. Use it when a program is stuck, or after a wake left it in
 
 `doz sessions end NAME SESSION` only ends it. Both hang the program up the way closing its terminal does,
 then terminate it, then kill it if they must; anything attached sees it end. Both ask first on a terminal
-(`--yes` does not), need the sandbox **running** (they never wake it), and `restart` attaches afterwards
-unless `-d`.
+(`--yes` does not), need the sandbox **running** (they never wake it). `restart` then attaches when you run it
+in a terminal; from a script (stdin or stdout not a terminal), with `--json` or with `-d` it restarts the
+session and returns (`--json` answers with the result) — `--attach` attaches even without a terminal.
 
 What a restart runs is what the session was opened with, as Dozer recorded it then; variables given with
 `-e` are not kept (it says so), and a session opened by an older doz cannot be restarted — end it and

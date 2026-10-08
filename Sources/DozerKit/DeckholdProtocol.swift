@@ -168,6 +168,20 @@ public struct SessionInfo: Sendable, Equatable {
 public enum GuestCommand {
     /// Where the library installs deckhold in the guest on every start.
     public static let deckholdPath = "/usr/local/bin/deckhold"
+    /// 610: where a wake copies this build's deckhold before it is renamed over `deckholdPath`.
+    public static let deckholdStagingPath = "/usr/local/bin/.deckhold.doz-new"
+
+    /// 610: the guest's deckhold's sha256 (empty when it has none) — one line, for `refreshDeckholdScript`'s caller.
+    public static let deckholdDigestScript = "sha256sum \(deckholdPath) 2>/dev/null | cut -d' ' -f1"
+
+    /// 610: put the staged deckhold in place — only when it is exactly `sha256` — by RENAME: a session's running
+    /// holder keeps its own (old) file, a session opened from now on runs the new one. Answers `deckhold=updated`
+    /// or `deckhold=refused` (the staged copy is removed).
+    public static func refreshDeckholdScript(sha256: String) -> String {
+        let n = deckholdStagingPath, p = deckholdPath
+        return "if [ \"$(sha256sum \(n) 2>/dev/null | cut -d' ' -f1)\" = \(sha256) ]; then chmod 755 \(n) && mv -f \(n) \(p) && echo deckhold=updated; "
+            + "else rm -f \(n); echo deckhold=refused; fi"
+    }
     public static let path = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
     public static func validateSessionName(_ name: String) throws {

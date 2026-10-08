@@ -155,4 +155,23 @@ final class SessionRestartTests: XCTestCase {
         XCTAssertThrowsError(try DozerCommand.parseAsRoot(["sessions", "end", "box"]), "the session is required")
         XCTAssertEqual(SessionsEnd.howText("terminate"), "it did not hang up — terminated")
     }
+
+    /// 610 (609.B2): a script's `doz sessions restart NAME SESSION --yes` restarted and then ATTACHED, never returning.
+    /// It attaches only on a terminal (stdin AND stdout) or with --attach; never with -d or --json.
+    func testARestartAttachesOnlyOnATerminalOrWhenAsked() throws {
+        func a(_ detach: Bool = false, _ attach: Bool = false, json: Bool = false, stdin: Bool, stdout: Bool) -> Bool {
+            SessionsRestart.attaches(detach: detach, attach: attach, json: json, stdinTTY: stdin, stdoutTTY: stdout)
+        }
+        XCTAssertTrue(a(stdin: true, stdout: true), "a person at a terminal: attach, as before")
+        XCTAssertFalse(a(stdin: false, stdout: false), "a script: return")
+        XCTAssertFalse(a(stdin: false, stdout: true), "stdin not a terminal (piped, </dev/null): return")
+        XCTAssertFalse(a(stdin: true, stdout: false), "stdout captured: return")
+        XCTAssertFalse(a(json: true, stdin: true, stdout: true), "--json answers and returns, even on a terminal")
+        XCTAssertFalse(a(true, stdin: true, stdout: true), "-d returns")
+        XCTAssertTrue(a(false, true, stdin: false, stdout: false), "--attach attaches without a terminal")
+        let r = try XCTUnwrap(DozerCommand.parseAsRoot(["sessions", "restart", "box", "s", "--attach"]) as? SessionsRestart)
+        XCTAssertTrue(r.attach)
+        XCTAssertThrowsError(try DozerCommand.parseAsRoot(["sessions", "restart", "box", "s", "--attach", "-d"]), "--attach with -d")
+        XCTAssertThrowsError(try DozerCommand.parseAsRoot(["sessions", "restart", "box", "s", "--attach", "--json"]), "--attach with --json")
+    }
 }

@@ -105,14 +105,32 @@ struct SessionsEnd: AsyncParsableCommand {
 struct SessionsRestart: AsyncParsableCommand {
     static let configuration = CommandConfiguration(commandName: "restart",
         abstract: "Restart a session: end its program and start the same one again, in the same folder. An agent's own session continues its last conversation (Claude Code, Codex, pi) — only the turn in progress is lost.",
-        discussion: "A running sandbox only — this never wakes one. Then it attaches, as doz run does (-d: not). --fresh starts a new conversation instead.")
+        discussion: """
+            A running sandbox only — this never wakes one. --fresh starts a new conversation instead. \
+            Afterwards it attaches, as doz run does, when stdin and stdout are a terminal; from a script \
+            (no terminal), with --json or with -d it restarts the session and returns. --attach attaches \
+            even without a terminal.
+            """)
     @OptionGroup var g: GlobalOptions
     @Argument var name: String
     @Argument var session: String
     @Flag(name: .long, help: "A new conversation instead of continuing the last one (agent sessions).") var fresh = false
     @Flag(name: [.short, .customLong("detach")], help: "Restart it and return; attach later.") var detach = false
+    @Flag(name: .long, help: "Attach afterwards even when stdin or stdout is not a terminal.") var attach = false
     @Flag(name: [.short, .long], help: "Do not ask.") var yes = false
     @Option(name: .long, help: "The key that detaches: ctrl-] (default), ctrl-<letter>, or none.") var detachKey = "ctrl-]"
+    func validate() throws {
+        if attach && detach { throw ValidationError("--attach and -d/--detach contradict each other — pick one") }
+        if attach && g.json { throw ValidationError("--attach and --json contradict each other — --json answers and returns") }
+    }
+
+    /// Whether the restart attaches afterwards (610, issue 609.B2: a script's `doz sessions restart … --yes` attached and
+    /// never returned). Only on a terminal — stdin AND stdout — unless asked for with --attach; never with -d or --json.
+    static func attaches(detach: Bool, attach: Bool, json: Bool, stdinTTY: Bool, stdoutTTY: Bool) -> Bool {
+        if detach || json { return false }
+        return attach || (stdinTTY && stdoutTTY)
+    }
+
     func run() async throws {
         let key = try parseDetachKey(detachKey)
         try await requireSandbox(name, g)
@@ -127,7 +145,8 @@ struct SessionsRestart: AsyncParsableCommand {
         if g.json { Out.json(s); return }
         if let n = s.notice { Out.stderr("[doz] \(n)\n") }
         Out.stdout("restarted session \(session) in \(name)" + (s.resumed ? " — its conversation continues" : "") + "\n")
-        if detach { return }
+        guard Self.attaches(detach: detach, attach: attach, json: g.json,
+                            stdinTTY: isatty(STDIN_FILENO) != 0, stdoutTTY: isatty(STDOUT_FILENO) != 0) else { return }
         AttachClient.run(store: g.dozerStore, sandbox: name, session: session, wake: false, detachKey: key, quiet: g.quiet)
     }
 }
