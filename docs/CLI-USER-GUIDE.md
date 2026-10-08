@@ -274,7 +274,7 @@ doz new [--image I] [--name N] [--isolated] [-d]
 - **`doz new` — the quickest way in (599c).** Every default: the image `defaults.image`, the image's
   name (`claude-sandbox`; `-2`, `-3` when a sandbox has it or its folder is not empty), its workspace
   `<defaults.projects_dir>/<name>` (made), the default account and permissions. It prints what it
-  chose (`claude-sandbox-2 · claude-code · ~/Developer/dozer-sandbox-projects/claude-sandbox-2`),
+  chose (`claude-sandbox-2 · claude-code · ~/dozer-sandbox-workspaces/claude-sandbox-2`),
   starts it and attaches. `--image`, `--name`, `--isolated` and `-d` change just that one thing;
   `--json` answers `{name, image, workspace, phase, session, milliseconds}` without attaching. The
   prerequisites are `doz create`'s: pi's API-key account (on a terminal: chosen or added; off one: the
@@ -320,7 +320,7 @@ doz new [--image I] [--name N] [--isolated] [-d]
   `isolated` (`--json`: `"workspace": null, "isolated": true`), and the agent is told.
   `--isolated` asks for it on purpose (no note; not together with `--workspace`). The web UI's New
   sandbox, Duplicate and the wizard default to a **Shared folder** instead —
-  `<defaults.projects_dir>/<name>`, `~/Developer/dozer-sandbox-projects/<name>` unless you set
+  `<defaults.projects_dir>/<name>`, `~/dozer-sandbox-workspaces/<name>` unless you set
   `defaults.projects_dir` (`doz config set defaults.projects_dir PATH`, or Settings › **Choose…** in
   the web UI — the Mac's folder picker, whose answer the server writes) — with **Isolated** one
   click away; `doz new` uses the same folder; `doz create` has no default folder, and `doz init`
@@ -951,7 +951,7 @@ host's progress, a card per image: Step N of M, the step under way, a download b
 output, estimates from this store's last run, the finished steps with their times;
 **Continue in the background** leaves it running, **Cancel preparation** stops it) **→ First
 sandbox** (optional: a name from the image — `claude-sandbox`, `pi-sandbox`, `lab-sandbox`, `-2`
-when taken — and its workspace: **Shared folder** `~/Developer/dozer-sandbox-projects/<name>` by
+when taken — and its workspace: **Shared folder** `~/dozer-sandbox-workspaces/<name>` by
 default, made when it does not exist, typed, pasted or picked with **Choose…** (the Mac's own folder
 picker) — or **Isolated**) **→ Done**. The settings file
 and your prompt template are written only when missing. The wizard is always reachable again from

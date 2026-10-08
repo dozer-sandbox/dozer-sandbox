@@ -75,10 +75,10 @@ final class QuickAddTests: XCTestCase {
     }
 
     func testTheLine() {
-        let p = QuickAddPlan(name: "claude-sandbox-2", image: "claude-code", workspace: "/Users/me/Developer/dozer-sandbox-projects/claude-sandbox-2",
-                             projectsDir: "/Users/me/Developer/dozer-sandbox-projects")
-        XCTAssertEqual(p.line(home: "/Users/me"), "claude-sandbox-2 · claude-code · ~/Developer/dozer-sandbox-projects/claude-sandbox-2")
-        XCTAssertEqual(p.line(home: "/Users/other"), "claude-sandbox-2 · claude-code · /Users/me/Developer/dozer-sandbox-projects/claude-sandbox-2")
+        let p = QuickAddPlan(name: "claude-sandbox-2", image: "claude-code", workspace: "/Users/me/dozer-sandbox-workspaces/claude-sandbox-2",
+                             projectsDir: "/Users/me/dozer-sandbox-workspaces")
+        XCTAssertEqual(p.line(home: "/Users/me"), "claude-sandbox-2 · claude-code · ~/dozer-sandbox-workspaces/claude-sandbox-2")
+        XCTAssertEqual(p.line(home: "/Users/other"), "claude-sandbox-2 · claude-code · /Users/me/dozer-sandbox-workspaces/claude-sandbox-2")
     }
 
     /// What one click cannot decide: the New Sandbox form opens with it said (the CLI asks, as create does).

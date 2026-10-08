@@ -12,7 +12,7 @@ import { renderAccessStep } from '../components/access-step-8a3dfa651b81d1a1.js'
 import { accountChooser } from '../components/accounts-b0f80747a1924e95.js';
 import { btn } from '../components/button-8e61dd531eed2262.js';
 import { callout } from '../components/callout-295f8e0570c7e239.js';
-import { createDialog } from '../components/create-dialog-8c6533626d26d14a.js';
+import { createDialog } from '../components/create-dialog-2f1bed7f0e6e5b6f.js';
 import { dialog } from '../components/dialog-d48442e03113646f.js';
 import { imagePicker } from '../components/image-picker-cffe066c76f6fa60.js';
 import { renderModal, wizHead, wizMount } from '../components/modal-a2bc09c77b545337.js';
@@ -45,7 +45,7 @@ export function newSandboxWizard(start = {}) {
 export async function viewNew() {
   if (!state.nw) {
     const [images, accounts, bases] = await Promise.all([api('images').catch(() => []), api('accounts').catch(() => ({ accounts: [] })), api('bases').catch(() => null)]);
-    let newName = 'my-project', projectsDir = setting('defaults.projects_dir', '~/Developer/dozer-sandbox-projects');
+    let newName = 'my-project', projectsDir = setting('defaults.projects_dir', '~/dozer-sandbox-workspaces');
     try { const qa = await api('quick-add', { method: 'POST', json: {} }); newName = qa.name; projectsDir = qa.projectsDir; } catch (_) { /* the defaults */ }
     const start = state.nwStart || {};
     // The steps are the host's (the list doz init walks); asking about the default folder changes nothing.

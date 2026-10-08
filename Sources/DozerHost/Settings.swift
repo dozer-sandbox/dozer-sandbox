@@ -511,7 +511,7 @@ public struct DozerSettings: Sendable {
             .init("defaults", "image", .choice(["lab", "claude-code", "pi", "codex"]), .string("lab"),
                   "The image of a new sandbox when none is named (doz up NAME, doz init, the UI's New sandbox). doz onboard writes the one you chose.",
                   flag: "doz create --image", applies: .nextCreate),
-            .init("defaults", "projects_dir", .path, .string("~/Developer/dozer-sandbox-projects"),
+            .init("defaults", "projects_dir", .path, .string("~/dozer-sandbox-workspaces"),
                   "The base folder of new sandboxes' workspaces: the web UI's New sandbox and Quick add, and doz new, share <projects_dir>/<sandbox name> (created when missing, like any workspace). doz create is isolated unless --workspace; doz init uses the folder it runs in. In the web UI, Settings › Choose… sets it with the Mac's folder picker.",
                   applies: .nextCreate, ui: false),
             .init("defaults", "account", .choice(["mac", "none"]), .string("mac"),

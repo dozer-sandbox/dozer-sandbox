@@ -20,7 +20,7 @@ import { statusPill } from '../components/pills-cc8cdee2b0253bea.js';
 import { prepCard } from '../components/prep-card-42c7941886b50ba4.js';
 import { rulesStep } from '../components/rules-step-caa581df445e9800.js';
 import { stepperNode } from '../components/stepper-19d0f8aab00bfb93.js';
-import { workspaceChooser } from '../components/workspace-chooser-d9e6b5ed4d23d130.js';
+import { workspaceChooser } from '../components/workspace-chooser-f6907863038dbeff.js';
 import { renderOps } from './operations-d0e50cf0a3a9b7e7.js';
 
 let wizTimer = null;
@@ -390,7 +390,7 @@ function wizStep6(d, w) {
       c ? fileLine('Settings', c.settings, c.settingsPath) : null,
       c ? fileLine('Your environment prompt template', c.promptTemplate, c.promptTemplatePath) : null,
       // 599c: where Quick add, New sandbox and doz new put each sandbox's workspace folder.
-      h('li', { 'data-wiz-projects': '' }, 'Workspace folders of new sandboxes: ', h('code', null, setting('defaults.projects_dir', '~/Developer/dozer-sandbox-projects') + '/<name>'),
+      h('li', { 'data-wiz-projects': '' }, 'Workspace folders of new sandboxes: ', h('code', null, setting('defaults.projects_dir', '~/dozer-sandbox-workspaces') + '/<name>'),
         ' — Quick add and doz new use it; Settings › Choose… moves it'),
       h('li', null, 'Images: ' + (wizChosenImages().join(', ') || 'none now (each is prepared by its first start)')),
       w.created ? h('li', null, 'First sandbox: ', h('a', { href: '#/sandbox/' + w.created }, w.created)) : null),

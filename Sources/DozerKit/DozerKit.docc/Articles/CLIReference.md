@@ -126,7 +126,7 @@ doz up NAME [same options] [--session S] [-d] [-- CMD …]
 - **599c: `doz new` — the quickest way in.** The image is `defaults.image`; the name is the image's
   (`claude-sandbox`, then `-2`, `-3`, … when a sandbox has it or its folder under the projects folder
   is not empty); the workspace is `<defaults.projects_dir>/<name>`, made now; the default account and
-  permissions. It prints what it chose (`claude-sandbox-2 · claude-code · ~/Developer/dozer-sandbox-projects/claude-sandbox-2`),
+  permissions. It prints what it chose (`claude-sandbox-2 · claude-code · ~/dozer-sandbox-workspaces/claude-sandbox-2`),
   starts it and attaches. `--image`, `--name`, `--isolated` and `-d` change just that one thing;
   `--json` answers `{name, image, workspace, phase, session, milliseconds}` without attaching. The
   prerequisites are `doz create`'s (pi's API-key account, an out-of-date image) — asked on a terminal.

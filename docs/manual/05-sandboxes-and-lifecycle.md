@@ -81,8 +81,8 @@ One click in the dashboard, or one command, makes a sandbox with every default a
 - the name is the image's — `claude-sandbox`, `pi-sandbox`, `lab-sandbox` — or the next free one
   (`claude-sandbox-2`, …) when a sandbox has that name, or its folder already has something in it;
 - its workspace is a folder of its own in your **projects folder**, the setting
-  `defaults.projects_dir` (`~/Developer/dozer-sandbox-projects` unless you change it):
-  `~/Developer/dozer-sandbox-projects/claude-sandbox`, made for it;
+  `defaults.projects_dir` (`~/dozer-sandbox-workspaces` unless you change it):
+  `~/dozer-sandbox-workspaces/claude-sandbox`, made for it;
 - the account and what the agent can do are the defaults.
 
 **In the dashboard**, **Sandboxes** › **Quick add** (or the **+** beside **Sandboxes** in the
@@ -97,7 +97,7 @@ then becomes the sandbox's own session. A note says what it chose.
 doz new
 ```
 
-It prints what it chose — `claude-sandbox-2 · claude-code · ~/Developer/dozer-sandbox-projects/claude-sandbox-2`
+It prints what it chose — `claude-sandbox-2 · claude-code · ~/dozer-sandbox-workspaces/claude-sandbox-2`
 — then creates it, starts it and attaches you to its session (**Ctrl-]** twice detaches; it keeps
 running). Each option changes just that one thing:
 
@@ -250,7 +250,7 @@ newer doz fixes, without a restart.
 |---|---|---|
 | `defaults.cpus` | `2` | CPUs of a new sandbox (`--cpus`). |
 | `images.lab.memory_mib` · `images.claude-code.memory_mib` · `images.pi.memory_mib` | `1024` · `2048` · `2048` | Memory of a new sandbox of each image (`--memory`); other images follow the one they're based on. |
-| `defaults.projects_dir` | `~/Developer/dozer-sandbox-projects` | Your projects folder: where Quick add, `doz new` and the dashboard's New sandbox make a new sandbox's own folder (`<projects_dir>/NAME`). **Settings** › **Choose…** picks it. |
+| `defaults.projects_dir` | `~/dozer-sandbox-workspaces` | Your projects folder: where Quick add, `doz new` and the dashboard's New sandbox make a new sandbox's own folder (`<projects_dir>/NAME`). **Settings** › **Choose…** picks it. |
 | `sandbox.timezone` | `mac` | `mac` (follow this Mac) or a zone like `Australia/Sydney`. Applies at each start or wake. |
 | `host.idle_timeout_minutes` | `5` | Minutes with nothing running before the host exits; `0` = never (`$DOZ_HOST_IDLE`). |
 | `host.screen_capture_minutes` | `5` | How often a running sandbox's changed screens are saved; `0` = only at pause, sleep and hibernate. |

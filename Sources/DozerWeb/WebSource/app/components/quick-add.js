@@ -15,7 +15,7 @@ import { openTerminal } from './terminal.js';
 // created, started with the boot view, its page open. What one click cannot decide (the agent's
 // account, an out-of-date image) opens New sandbox with the requirement said.
 function quickAddTitle() {
-  return 'One click: a ' + setting('defaults.image', 'lab') + ' sandbox with a free name, its folder in ' + setting('defaults.projects_dir', '~/Developer/dozer-sandbox-projects') + ' — started and opened';
+  return 'One click: a ' + setting('defaults.image', 'lab') + ' sandbox with a free name, its folder in ' + setting('defaults.projects_dir', '~/dozer-sandbox-workspaces') + ' — started and opened';
 }
 export function quickAddButton() {
   const b = btn('Quick add', (ev) => quickAdd(ev.currentTarget), { icon: 'rocket', title: quickAddTitle() });

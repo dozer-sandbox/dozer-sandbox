@@ -21,11 +21,11 @@ import { sessionMenuItems } from '../components/session-actions-74fd0e21efde055c
 import { failureFor, pageFailure, paintRowOps } from '../components/notices-89b8886740537e92.js';
 import { sandboxPill } from '../components/pills-cc8cdee2b0253bea.js';
 import { bootLogDialog, focusTerm, openTerminal, PHASE_WORD } from '../components/terminal-154bdbfa793b8202.js';
-import { ISOLATED_NOTE } from '../components/workspace-chooser-d9e6b5ed4d23d130.js';
-import { duplicateDialog, openInTerminal, policyDialog, runDetachedDialog, takePointDialog, templateDialog } from './sandbox-dialogs-766b6d935999bba9.js';
-import { openSavedTerminal, promoteSaved, restorePanes, savedRows } from './sandbox-layout-f938e70e889e611f.js';
+import { ISOLATED_NOTE } from '../components/workspace-chooser-f6907863038dbeff.js';
+import { duplicateDialog, openInTerminal, policyDialog, runDetachedDialog, takePointDialog, templateDialog } from './sandbox-dialogs-3b4fc4f66d2633b0.js';
+import { openSavedTerminal, promoteSaved, restorePanes, savedRows } from './sandbox-layout-aa96e1919ea72662.js';
 import { networkPanel } from './sandbox-network-9d881ca6cfefcecc.js';
-import { paintStripActs, paintTabs, paintTermEmpty, renderTerminals } from './sandbox-terminals-ff8992c8ac6c2673.js';
+import { paintStripActs, paintTabs, paintTermEmpty, renderTerminals } from './sandbox-terminals-eb41db68820b218c.js';
 
 // ── a sandbox's page (593): a control bar, the terminal area, a collapsible details panel ──────
 // #sbx is persistent: refreshSandbox() re-renders the bar and the details, never #terminals.

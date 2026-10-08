@@ -17,7 +17,7 @@ import { lifecycle, sessionsWhyNot } from '../components/lifecycle-fb038e14f2670
 import { menuButton } from '../components/menus-95968d15addcffdf.js';
 import { failureFor, pageFailure } from '../components/notices-89b8886740537e92.js';
 import { bootTerm, closeTerminal, focusTerm, openDefaultTerminal, openTerminal, terminalTitle } from '../components/terminal-154bdbfa793b8202.js';
-import { openInTerminal, runDetachedDialog } from './sandbox-dialogs-766b6d935999bba9.js';
+import { openInTerminal, runDetachedDialog } from './sandbox-dialogs-3b4fc4f66d2633b0.js';
 import { sessionMenuItems } from '../components/session-actions-74fd0e21efde055c.js';
 // Calls up the layers (provided by app.js — core/hooks.js):
 const openSavedTerminal = upcall('openSavedTerminal'), persistLayout = upcall('persistLayout');

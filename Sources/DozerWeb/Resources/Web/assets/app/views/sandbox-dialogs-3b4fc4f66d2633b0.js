@@ -8,7 +8,7 @@ import { lines, splitArgs } from '../core/util-1195caf40612902f.js';
 import { accountChooser } from '../components/accounts-b0f80747a1924e95.js';
 import { dialog } from '../components/dialog-d48442e03113646f.js';
 import { failureFor, toast } from '../components/notices-89b8886740537e92.js';
-import { workspaceChooser } from '../components/workspace-chooser-d9e6b5ed4d23d130.js';
+import { workspaceChooser } from '../components/workspace-chooser-f6907863038dbeff.js';
 
 /// 603: a sandbox's terminal in the user's own terminal app (doz attach), from the bar, the strip or a session row.
 export async function openInTerminal(name, session) {

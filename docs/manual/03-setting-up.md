@@ -141,10 +141,10 @@ across the top; **✕** or **Escape** closes it, asking first once you have chos
    the dashboard meanwhile (the preparation shows under **Operations**); **Cancel preparation** stops
    it.
 7. **First sandbox** (optional) — pick the agent; it suggests a name (`claude-sandbox`) and a project
-   folder (`~/Developer/dozer-sandbox-projects/claude-sandbox`, made if it doesn't exist).
+   folder (`~/dozer-sandbox-workspaces/claude-sandbox`, made if it doesn't exist).
    **Choose…** opens the Mac's own folder picker. Or pick **Isolated** to share no folder.
 8. **Done** — what was written where, and your **projects folder**
-   (`~/Developer/dozer-sandbox-projects`): each new sandbox from **Quick add**, **New sandbox** or
+   (`~/dozer-sandbox-workspaces`): each new sandbox from **Quick add**, **New sandbox** or
    `doz new` gets its own folder there. **Settings** › **Choose…** moves it.
 
 ![The wizard's checks](images/wizard-checks.png)
@@ -181,7 +181,7 @@ again**; the choices themselves are the settings `defaults.github`, `github.cred
 | key | default | what it does |
 |---|---|---|
 | `defaults.image` | `lab` | The image `doz up NAME`, `doz init` and the dashboard's New sandbox use when you don't name one. Onboarding sets it to the image you chose. |
-| `defaults.projects_dir` | `~/Developer/dozer-sandbox-projects` | Your projects folder: Quick add, `doz new` and New sandbox make each new sandbox's folder in it. `doz onboard` says where it is; the dashboard's **Settings** › **Choose…** or `doz config set defaults.projects_dir DIR` moves it. |
+| `defaults.projects_dir` | `~/dozer-sandbox-workspaces` | Your projects folder: Quick add, `doz new` and New sandbox make each new sandbox's folder in it. `doz onboard` says where it is; the dashboard's **Settings** › **Choose…** or `doz config set defaults.projects_dir DIR` moves it. |
 | `defaults.account` | `mac` | The account of a store that hasn't chosen one. `doz account default` decides for a store once it has. |
 | `defaults.github` | `off` | "GitHub as you" for new sandboxes: `off`, `read` or `push`. The Access step's choice. |
 | `github.credentials` | `gh` | Where the GitHub token comes from: `gh` (this Mac's login), `key` (a token you gave), `off`. |

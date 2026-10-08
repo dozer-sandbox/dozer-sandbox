@@ -353,12 +353,12 @@ final class WebSettingsHTTPTests: XCTestCase {
         }
         XCTAssertFalse(server.folderPicker.isOpen)
 
-        // Unset, the projects folder is ~/Developer/dozer-sandbox-projects (whatever this Mac has in it).
+        // Unset, the projects folder is ~/dozer-sandbox-workspaces (whatever this Mac has in it).
         var r = try post("/api/v1/workspace/check", #"{"image":"claude-code","name":"my-box"}"#, csrf: csrf)
         XCTAssertEqual(r.status, 200, r.text)
         var o = object(r)
-        XCTAssertEqual(o["defaultPath"] as? String, home + "/Developer/dozer-sandbox-projects/my-box", "the path follows the name")
-        XCTAssertEqual(o["projectsDir"] as? String, home + "/Developer/dozer-sandbox-projects")
+        XCTAssertEqual(o["defaultPath"] as? String, home + "/dozer-sandbox-workspaces/my-box", "the path follows the name")
+        XCTAssertEqual(o["projectsDir"] as? String, home + "/dozer-sandbox-workspaces")
         // defaults.projects_dir moves it (a path: doz config set, not the browser — like kernel.path).
         XCTAssertEqual(try change(#"{"key":"defaults.projects_dir","value":"\#(scratch)/projects"}"#, cookie, csrf).status, 400)
         try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)

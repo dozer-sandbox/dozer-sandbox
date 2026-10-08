@@ -390,7 +390,7 @@ function wizStep6(d, w) {
       c ? fileLine('Settings', c.settings, c.settingsPath) : null,
       c ? fileLine('Your environment prompt template', c.promptTemplate, c.promptTemplatePath) : null,
       // 599c: where Quick add, New sandbox and doz new put each sandbox's workspace folder.
-      h('li', { 'data-wiz-projects': '' }, 'Workspace folders of new sandboxes: ', h('code', null, setting('defaults.projects_dir', '~/Developer/dozer-sandbox-projects') + '/<name>'),
+      h('li', { 'data-wiz-projects': '' }, 'Workspace folders of new sandboxes: ', h('code', null, setting('defaults.projects_dir', '~/dozer-sandbox-workspaces') + '/<name>'),
         ' — Quick add and doz new use it; Settings › Choose… moves it'),
       h('li', null, 'Images: ' + (wizChosenImages().join(', ') || 'none now (each is prepared by its first start)')),
       w.created ? h('li', null, 'First sandbox: ', h('a', { href: '#/sandbox/' + w.created }, w.created)) : null),

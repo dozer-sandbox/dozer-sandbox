@@ -34,7 +34,7 @@ public struct QuickAddPlan: Codable, Equatable, Sendable {
         self.projectsDir = projectsDir
     }
 
-    /// "claude-sandbox-2 · claude-code · ~/Developer/dozer-sandbox-projects/claude-sandbox-2".
+    /// "claude-sandbox-2 · claude-code · ~/dozer-sandbox-workspaces/claude-sandbox-2".
     public func line(home: String = FileManager.default.homeDirectoryForCurrentUser.path) -> String {
         let ws = workspace.map { $0.hasPrefix(home + "/") ? "~" + $0.dropFirst(home.count) : $0 } ?? "isolated"
         return "\(name) · \(image) · \(ws)"

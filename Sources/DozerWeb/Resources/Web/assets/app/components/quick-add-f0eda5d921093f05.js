@@ -4,7 +4,7 @@ import { act, actOrThrow, waitOp } from '../core/operations-d824956fc29841f7.js'
 import { bootViewOnStart, setting, terminalsAllowed } from '../core/settings-171e705abeccb983.js';
 import { state } from '../core/state-6efaa5d4aa08116b.js';
 import { btn } from './button-8e61dd531eed2262.js';
-import { createDialog } from './create-dialog-8c6533626d26d14a.js';
+import { createDialog } from './create-dialog-2f1bed7f0e6e5b6f.js';
 import { startWithBootView } from './lifecycle-fb038e14f2670db4.js';
 import { pageFailure, toast } from './notices-89b8886740537e92.js';
 import { openTerminal } from './terminal-154bdbfa793b8202.js';
@@ -15,7 +15,7 @@ import { openTerminal } from './terminal-154bdbfa793b8202.js';
 // created, started with the boot view, its page open. What one click cannot decide (the agent's
 // account, an out-of-date image) opens New sandbox with the requirement said.
 function quickAddTitle() {
-  return 'One click: a ' + setting('defaults.image', 'lab') + ' sandbox with a free name, its folder in ' + setting('defaults.projects_dir', '~/Developer/dozer-sandbox-projects') + ' — started and opened';
+  return 'One click: a ' + setting('defaults.image', 'lab') + ' sandbox with a free name, its folder in ' + setting('defaults.projects_dir', '~/dozer-sandbox-workspaces') + ' — started and opened';
 }
 export function quickAddButton() {
   const b = btn('Quick add', (ev) => quickAdd(ev.currentTarget), { icon: 'rocket', title: quickAddTitle() });

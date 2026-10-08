@@ -17,7 +17,7 @@ export function workspaceChooser({ nameInput = null, image = () => null, name = 
   let mode = initialIsolated ? 'isolated' : 'shared', nameEdited = false, pathEdited = !!initialPath, seq = 0, lastError = null, timer = null;
   // 596 (B6): a folder the page chose (a Dockerfile's) — replaced by the next one, never over a typed or picked folder.
   let autoPath = null;
-  const path = h('input', { type: 'text', name: 'workspace', 'data-ws-path': '', placeholder: '~/Developer/dozer-sandbox-projects/NAME',
+  const path = h('input', { type: 'text', name: 'workspace', 'data-ws-path': '', placeholder: '~/dozer-sandbox-workspaces/NAME',
                             autocomplete: 'off', spellcheck: 'false', 'aria-label': 'Workspace folder' });
   path.value = initialPath;
   const note = h('small', { class: 'ws-note', 'data-ws-note': '', 'aria-live': 'polite' });

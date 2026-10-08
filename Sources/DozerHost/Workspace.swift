@@ -151,7 +151,7 @@ public enum Workspace {
 
     /// `<projects_dir>/<name>` (the setting, `~` expanded).
     public static func defaultPath(name: String, settings: DozerSettings = .load()) -> String {
-        let dir = settings.string(SettingKey.projectsDir) ?? "~/Developer/dozer-sandbox-projects"
+        let dir = settings.string(SettingKey.projectsDir) ?? "~/dozer-sandbox-workspaces"
         return URL(fileURLWithPath: (dir as NSString).expandingTildeInPath).appendingPathComponent(name).standardizedFileURL.path
     }
 

@@ -14,7 +14,7 @@ doz ui                                         # opens the dashboard — a new i
 
 The dashboard's setup wizard checks this Mac, chooses how your agent signs in, and prepares an image; then
 **New sandbox** (or Quick add) makes one. Each sandbox's workspace is a folder on your Mac, shared at
-`/workspace` inside it — by default `~/Developer/dozer-sandbox-projects/<sandbox name>`, made when missing.
+`/workspace` inside it — by default `~/dozer-sandbox-workspaces/<sandbox name>`, made when missing.
 Keep them there unless you have a reason not to; Settings › Choose… (or `doz config set
 defaults.projects_dir PATH`) moves the default.
 

@@ -45,7 +45,7 @@ export function newSandboxWizard(start = {}) {
 export async function viewNew() {
   if (!state.nw) {
     const [images, accounts, bases] = await Promise.all([api('images').catch(() => []), api('accounts').catch(() => ({ accounts: [] })), api('bases').catch(() => null)]);
-    let newName = 'my-project', projectsDir = setting('defaults.projects_dir', '~/Developer/dozer-sandbox-projects');
+    let newName = 'my-project', projectsDir = setting('defaults.projects_dir', '~/dozer-sandbox-workspaces');
     try { const qa = await api('quick-add', { method: 'POST', json: {} }); newName = qa.name; projectsDir = qa.projectsDir; } catch (_) { /* the defaults */ }
     const start = state.nwStart || {};
     // The steps are the host's (the list doz init walks); asking about the default folder changes nothing.
