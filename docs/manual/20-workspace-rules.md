@@ -11,7 +11,8 @@ wade through. Two files at the root of the shared folder say so:
 - **`.dozreadonly`** lists paths the agent may read but not change.
 
 Your Mac is never touched: you keep editing every file as before, and the sandbox sees your changes. With
-neither file, the folder is shared exactly as it always was — nothing runs and nothing slows down.
+neither file, every file is there as it is on your Mac (the folder still goes through
+[the workspace view](21-the-workspace-view.md), which keeps programs in it working across a wake).
 
 > **A convenience, not a security boundary.** The rules keep an agent from stumbling into files. Root in
 > the sandbox — and the agent has `sudo` by default — can get around them. Anything that must not reach

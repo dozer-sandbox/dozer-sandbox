@@ -151,6 +151,15 @@ struct Doctor: AsyncParsableCommand {
                 detail += " but it does not answer its socket"
             }
             out.append(DoctorCheck(check: "host", status: status, detail: detail))
+            // 608: a sandbox whose live view of its workspace could not start is shared directly — say so.
+            var ls = HostRequest(.ls); ls.withSessions = false
+            if let m = try? HostClient.request(ls, store: store, autostart: false), let rows = try? m.result?.decode([SandboxInfo].self) {
+                let fb = rows.filter { $0.workspaceView == "fallback" }.map(\.name)
+                if !fb.isEmpty {
+                    out.append(DoctorCheck(check: "workspace view", status: .warn,
+                                           detail: "\(fb.joined(separator: ", ")): the live view of /workspace could not start, so the folder is shared directly — a program working there loses its folder at a wake from hibernation. The sandbox's boot log says why; a restart (doz shutdown + start) tries again"))
+                }
+            }
         } else {
             let recover = store.needsRecovery()
             out.append(DoctorCheck(check: "host", status: recover.isEmpty ? .ok : .warn,

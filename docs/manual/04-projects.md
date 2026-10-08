@@ -147,6 +147,7 @@ open_files: on              # or off
 ssh_agent: off              # or on
 github: off                 # read or push: git and gh signed in as you
 tmux: false                 # or true
+workspace_view: on          # off: share the folder directly (programs in it lose their folder at a wake)
 ```
 
 | key | value | default | when a change applies |

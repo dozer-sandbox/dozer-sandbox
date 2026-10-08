@@ -459,6 +459,22 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   allowlisted, paths quoted) and `open`s it, so the user's DEFAULT app for `.command` files runs it
   (Terminal, iTerm2, Ghostty). No AppleScript, so no Automation permission and no second window
   (the AppleScript version opened two when Terminal was not running). Never a command from the browser.
+- **End / Restart session (608, `SessionRestart.swift`)**: host ops `session-end` / `session-restart`, held under
+  the SAME `sessionGate` as `open-session`, RUNNING sandboxes only (never a wake). Ending is
+  `GuestCommand.endSession` (root): the session's tmux server (`/tmp/tmux-*/doz-NAME`) killed first, then
+  HUP → TERM → KILL of the program's PROCESS GROUP (forkpty made it a leader), done when deckhold's socket is
+  gone (`doz-end hangup|terminate|kill|not-running|stuck`). A restart reopens through `openSessionLocked` from
+  `<sandbox>/sessions.json` (`SessionRecords`: argv as CHOSEN — before pi's prompt file, tmux and a resume —
+  workdir, user, variable NAMES only; ≤ 64; 0600; cleared with the sessions: shutdown, reset, died-with-host;
+  fields only ever added). No record: the default session's argv, else refused. The default session of an agent
+  image (argv == the default) gets `SessionResume.arguments` as `extraArguments` (never recorded): Claude Code
+  `--continue` (only after `SessionResume.check` finds ~/.claude/projects/<cwd, non-alnum→'-'>/*.jsonl — it
+  refuses without one), Codex `resume --last` (0.160.1: newest in the cwd, else a new one; `--all` would ignore
+  the folder), pi `--continue` (newest else new); `fresh` = none. CLI `doz sessions end|restart NAME SESSION`
+  (`sessions` became a group whose default subcommand `ls` keeps `doz sessions NAME`); web actions
+  `session-end` / `session-restart` (one HostOp each; `components/session-actions.js`: a tab's ⋯ and the
+  Sessions tab's ⋯; a restarting pane (`t.restarting`) ignores the `ended` frame and the socket's close, shows
+  "Restarting the session…", and reattaches with its scrollback when the operation is done).
 - **`open-session` is serialized per sandbox** (`HostCore.sessionGate`, a `KeyedGate` held across
   its awaits — the actor alone is re-entrant) and idempotent: a concurrent or repeated open of one
   session answers "already running", and a deckhold "Address in use" re-lists and answers with the
@@ -1200,11 +1216,22 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
 
 ### Workspace rules — `.dozignore` / `.dozreadonly` (599g) — design: workspace `changes/599g-*/` (01 feasibility, 02 plan, 03 spike)
 
-- **No rule file → no view, no daemon, nothing changed.** A share whose MAC folder holds `.dozignore` or
-  `.dozreadonly` (`WorkspaceRules.present`) is served through `dozview`; the decision is re-made at every
-  fresh boot, wake and session start (`Sandbox.wantedViews`, `refreshWorkspaceViews` from the host's
-  open-session). Turning a view OFF waits for the next cold start (a running view with no rule file shows
-  everything).
+- **Every share is served through `dozview`** (BUG cwd-after-wake, workspace `changes/BUG-cwd-after-wake.md`): a
+  hibernation's re-mount detaches the RAW share and the new virtio-fs server knows none of the old node ids, so a
+  program whose cwd was inside got ENOENT from getcwd (Codex: "invalid cwd"); the view is never re-mounted.
+  A share whose MAC folder holds `.dozignore` or `.dozreadonly` (`WorkspaceRules.present`) gets a view WITH rules;
+  any other a PASSTHROUGH one (`WorkspaceViewConfig.passthrough`; dozview ≥ 1.1.0 applies nothing — not even the
+  implicit read-only names — until a rule file exists; one that cannot start leaves the share bound, never an
+  empty folder). `Sandbox.passthroughViews = false` is 599g's old rule (no rule file → no view, no daemon).
+  The decision is re-made at every fresh boot, wake and session start (`Sandbox.wantedViews`,
+  `refreshWorkspaceViews` from the host's open-session) — but a passthrough view is started only at a fresh
+  boot or a hibernation's wake, never live under a running program (it would cut that program's cwd). Turning
+  a view OFF waits for the next cold start. The facts' rules line ignores passthrough views. `make test-vm-cwd`.
+  608: the knob is the setting **`workspace.view`** (on|off, per sandbox: `--workspace-view`, `workspace_view` in
+  doz_project.yaml; `HostCore.workspaceViewOn` → `Sandbox.passthroughViews`, read at load and per request,
+  applies `.nextStart`). `SandboxInfo.workspaceView` (`HostCore.workspaceViewState`, pure): live | rules | direct |
+  next-start | fallback — a passthrough view that failed to start is `Sandbox.viewFallbacks` (the boot says so,
+  `doctor` warns "workspace view"). The manual's cost table (21-the-workspace-view.md) is from `make test-vm-cwd`.
 - **Semantics are Docker's, and ONE contract in two languages**: `DockerIgnore` (Swift) and
   `Guest/dozview/match` (C) both pass `Tests/Fixtures/dozignore-vectors.json` (real moby/BuildKit output) and
   agree on `WorkspaceRulesTests.testSwiftAndCAgreeOnADifferentialFuzz`. BuildKit's walker (D1: `d`, `!d/f`, `d`
@@ -1479,6 +1506,7 @@ make test-cli-agentsudo # 594 W23: the agent's sudo in a fresh claude-code sandb
 make test-cli-codex # 599i: Codex through seams (a fake OpenAI over TLS, the browser seam): Dozer's own ChatGPT sign-in, the swap, the Mac's renewal, no token in the guest, an API key, Alpine (prepares codex + alpine-codex)
 make test-cli-github # 599d: GitHub as the user through seams (a fake GitHub, a fake gh, a throwaway ssh-agent): swap, read-only, push, no leak, identity, key source, off, SSH
 make test-cli-openfiles # 599b: workspace files opened on the Mac through the opener seam — every refusal, isolated, off, --app, URLs as before
+make test-vm-cwd     # BUG cwd-after-wake: a program's cwd in /workspace across sleep, hibernate and a new-process restore (the raw share as the control); the passthrough view's cost
 make test-vm-ignore  # 599g: workspace rules (.dozignore lock/hide, .dozreadonly) across boot/pause/sleep/hibernate/new-process restore, reload, folding, kills (scratch store)
 make dozview / dozview-verify # 599g: rebuild the guest view daemon (pinned Zig) / check the committed bytes
 make test-cli-hoststop # 594 W22: test-cli's host-stop part alone (per-sandbox progress plain/animated, --json, nothing running, a host killed mid-stop)

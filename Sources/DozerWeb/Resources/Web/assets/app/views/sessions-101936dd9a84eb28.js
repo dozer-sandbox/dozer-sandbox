@@ -7,10 +7,10 @@ import { SAVED_PHASES, VERBS } from '../core/sandboxes-31b203bfcabfe221.js';
 import { saveSetting, setting } from '../core/settings-265e96add2494862.js';
 import { state } from '../core/state-d393c12b794a3f10.js';
 import { btn } from '../components/button-8e61dd531eed2262.js';
-import { lifecycle } from '../components/lifecycle-9307e49bb0c3be84.js';
+import { lifecycle } from '../components/lifecycle-cbef20377b2138bf.js';
 import { renderNavSandboxes } from '../components/nav-207ac9e8f8879ea1.js';
 import { pageFailure } from '../components/notices-0170b06a2323aa78.js';
-import { bootTerm, closeTerminal, goLive, newTerm, paintCover } from '../components/terminal-8accd4d583784e48.js';
+import { bootTerm, closeTerminal, goLive, newTerm, paintCover } from '../components/terminal-b5dc79288fb2c3bb.js';
 
 // ── All sessions: the grid (593) ────────────────────────────────────────────
 // A tile per session of every RUNNING sandbox — a live, read-only (watch) view: the same ticket,

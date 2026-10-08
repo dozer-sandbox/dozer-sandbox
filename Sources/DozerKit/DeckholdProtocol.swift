@@ -476,6 +476,30 @@ public enum GuestCommand {
     /// doz's tmux configuration (root-owned, rewritten at each tmux session start).
     public static let tmuxConfPath = "/usr/local/lib/doz/tmux.conf"
 
+    /// 608: end session NAME's program the way a terminal hangup does, then harder — a ROOT script.
+    /// The program deckhold runs is its own session and process-group leader (forkpty), so its group is
+    /// signalled: SIGHUP (≤ `hupSeconds`), then SIGTERM (≤ `termSeconds`), then SIGKILL (≤ 2 s). A tmux
+    /// server of the session (`-L doz-NAME`, any user's) is killed first — otherwise the next
+    /// `new-session -A` would attach the OLD program again. Done = the holder's socket is gone (deckhold
+    /// removes it when its program has exited, after telling every viewer EXIT). Prints ONE
+    /// `doz-end hangup|terminate|kill|not-running|stuck` line. The name is validated by the caller.
+    public static func endSession(name: String, hupSeconds: Int = 3, termSeconds: Int = 3) -> String {
+        let tn = name.replacingOccurrences(of: ".", with: "_")
+        return """
+        n='\(name)'; d=${DECKHOLD_DIR:-/run/deckhold}
+        pid=$(\(deckholdPath) ls 2>/dev/null | awk -F'\\t' -v n="$n" '$1==n && $2 ~ /^pid=/ { sub(/^pid=/, "", $2); print $2; exit }')
+        if [ -z "$pid" ] || [ ! -S "$d/$n.sock" ]; then echo 'doz-end not-running'; exit 0; fi
+        for s in /tmp/tmux-*/doz-\(tn); do [ -S "$s" ] && tmux -S "$s" kill-server 2>/dev/null; done
+        gone() { [ ! -S "$d/$n.sock" ]; }
+        hit() { kill -s "$1" -- "-$pid" 2>/dev/null || kill -s "$1" "$pid" 2>/dev/null; }
+        waitgone() { i=0; while [ $i -lt $(($1 * 10)) ]; do gone && return 0; sleep 0.1; i=$((i + 1)); done; gone; }
+        hit HUP; if waitgone \(hupSeconds); then echo 'doz-end hangup'; exit 0; fi
+        hit TERM; if waitgone \(termSeconds); then echo 'doz-end terminate'; exit 0; fi
+        hit KILL; if waitgone 2; then echo 'doz-end kill'; exit 0; fi
+        echo 'doz-end stuck'
+        """
+    }
+
     /// What a session inside tmux needs to keep doz's features: the mouse (the web terminal's reports,
     /// W14), OSC 52 passed OUT to deckhold (the clipboard bridge), titles, extended keys where tmux has
     /// them, a TERM the image knows; `update-environment` is not needed — one tmux server per session.

@@ -27,6 +27,8 @@ function engineBytes() {
   if (!engineWasm) engineWasm = fetch(wasmURL(), { credentials: 'omit' }).then((r) => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.arrayBuffer(); });
   return engineWasm;
 }
+/// 608: scroll what the pane shows into its scrollback (a restarted session's new screen then starts below it).
+export function keepScrollback(t) { toFrame(t, { t: 'keep-scrollback' }); }
 function toFrame(t, msg, transfer) {
   if (t.frame && t.frame.contentWindow) t.frame.contentWindow.postMessage(msg, '*', transfer || []);
 }
@@ -232,6 +234,8 @@ function onTerminalMessage(t, ev) {
     toFrame(t, { t: 'keep-scrollback' });           // the boot log's end scrolls into the scrollback
     return;
   } else if (m.t === 'ended') {
+    // 608: a restart under way (session-actions.js) — the pane waits for the session to come back.
+    if (t.restarting) { paintCover(t); return; }
     t.ended = true;
     t.endText = m.text || (m.ending === 'exited' ? 'exit ' + m.code : m.ending);
   } else if (m.t === 'error') {
@@ -245,6 +249,7 @@ function onTerminalClose(t, ws, ev) {
   if (t.ws === ws) t.ws = null;
   clearInterval(t.pinger);
   if (t.closed || t.ended || t.errorText) return;
+  if (t.restarting) { paintCover(t); paintTabs(); return; }       // 608: it reattaches when the restart is done
   // 605: a terminal that was attached comes back by itself — when doz ui restarts or stops (it reattaches
   // on the next `hello`), when this page must sign in again (after the sign-in), or when the socket
   // dropped while doz ui still answers (now). Never after an end, a long silence or a refusal.
@@ -358,6 +363,7 @@ export function paintCover(t) {
   else if (t.bootIntent && !t.ended && (!t.state || ['shutDown', 'failed', 'reattaching'].includes(t.state.cover.kind))) {
     kind = 'working'; headline = 'Starting the sandbox…'; spinner = true;
   }
+  else if (t.restarting) { kind = 'reattaching'; headline = 'Restarting the session…'; detail = 'it comes back here when it is running again'; spinner = true; }
   else if (t.ended) { kind = 'ended'; headline = 'The session ended'; detail = t.endText; }
   else if (t.reattach) {
     kind = 'reattaching'; headline = 'Reconnecting…'; spinner = true;

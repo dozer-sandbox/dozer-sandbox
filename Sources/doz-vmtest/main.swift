@@ -955,6 +955,10 @@ Task {
             // 599 (594.B3): sessions inside tmux.
             let binary = args.firstIndex(of: "--doz").flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil } ?? ".build/debug/doz"
             await cliTmuxSuite(binary: URL(fileURLWithPath: binary).standardizedFileURL.path)
+        case "cli-sessions":
+            // 608: sessions survive every wake; End / Restart session (SessionsSuite.swift).
+            let binary = args.firstIndex(of: "--doz").flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil } ?? ".build/debug/doz"
+            await cliSessionsSuite(binary: URL(fileURLWithPath: binary).standardizedFileURL.path)
         case "cli-timezone":
             // 594 W10: the sandbox follows the Mac's time zone at boot and wake.
             let binary = args.firstIndex(of: "--doz").flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil } ?? ".build/debug/doz"
@@ -985,6 +989,11 @@ Task {
         case "ignore":
             // 599g: workspace rules (.dozignore / .dozreadonly) — IgnoreSuite.swift (`make test-vm-ignore`).
             try await ignoreSuite()
+        case "cwd-wake":
+            // BUG cwd-after-wake: a program's cwd in /workspace across sleep, hibernate and a new-process restore — CwdWakeSuite.swift (`make test-vm-cwd`).
+            try await cwdWakeSuite()
+        case "cwd-wake-save":
+            exit(try await cwdWakeSave())
         case "ignore-crash-save":
             exit(try await ignoreCrashSave())
         case "ignore-crash-restore":

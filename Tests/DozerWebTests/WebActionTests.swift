@@ -51,6 +51,8 @@ final class WebActionTests: XCTestCase {
         "builder-install": #"{"action":"builder-install"}"#,
         // 599h: the tools layer again (the wizard's Retry).
         "tools-apply": #"{"action":"tools-apply","sandbox":"web"}"#,
+        "session-end": #"{"action":"session-end","sandbox":"web","session":"codex"}"#,
+        "session-restart": #"{"action":"session-restart","sandbox":"web","session":"codex","fresh":false}"#,
     ]
 
     /// Everything the web layer may send to the host — and, as important, what it may never.
@@ -63,6 +65,8 @@ final class WebActionTests: XCTestCase {
         .builderStart, .builderInstall,
         // 599h: set a sandbox's tools layer up again (it installs only what its settings already call for).
         .toolsApply,
+        // 608: End session / Restart session (a running sandbox only; never a wake).
+        .sessionEnd, .sessionRestart,
         // 594 W20: only as Restart host, which the data source refuses unless the host is OLDER.
         .hostStop,
     ]
@@ -245,6 +249,16 @@ final class WebActionTests: XCTestCase {
         XCTAssertEqual(try decode(Self.samples["point-revert"]!).hostRequest.point, "rp-20260927-094949-330-bc2e")
         XCTAssertEqual(try decode(Self.samples["hibernate"]!).sandbox, "a")
         XCTAssertNil(try decode(Self.samples["image-bake"]!).sandbox)
+        let restart = try decode(Self.samples["session-restart"]!)
+        XCTAssertEqual(restart.hostRequest.session, "codex")
+        XCTAssertNil(restart.hostRequest.fresh, "fresh: false is not sent")
+        XCTAssertEqual(try decode(#"{"action":"session-restart","sandbox":"web","session":"codex","fresh":true}"#).hostRequest.fresh, true)
+        XCTAssertEqual(try decode(Self.samples["session-end"]!).hostRequest.op, .sessionEnd)
+        XCTAssertEqual(try decode(Self.samples["session-end"]!).sandbox, "web")
+        // 608: the session is required and a valid name; nothing else is taken.
+        invalid(#"{"action":"session-end","sandbox":"web"}"#)
+        invalid(#"{"action":"session-restart","sandbox":"web","session":"../x"}"#)
+        invalid(#"{"action":"session-restart","sandbox":"web","session":"codex","argv":["sh"]}"#)
     }
 
     func testDecodingIsStrict() throws {

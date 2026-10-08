@@ -1,12 +1,49 @@
 # The workspace view (`dozview`)
 
-When a sandbox's shared folder holds a `.dozignore` or a `.dozreadonly`, `/workspace` inside the sandbox is
-not the shared folder itself: it is a filtering view of it, served by a small Dozer program, **`dozview`**.
-This page is what that program is, what it does, and how to look inside it. What the rules mean is in
-[Workspace rules](20-workspace-rules.md).
+`/workspace` inside a sandbox is not your shared folder itself: it is a live view of it, served by a small
+Dozer program, **`dozview`**. This page is what that program is, what it does, and how to look inside it.
+When the folder holds a `.dozignore` or a `.dozreadonly`, the view also applies those rules — see
+[Workspace rules](20-workspace-rules.md). Without either file it applies nothing: every file is there, as on
+your Mac.
 
-**No rule file, no view.** Without a `.dozignore` or `.dozreadonly`, the folder is shared exactly as it
-always was: `dozview` does not run and nothing costs anything.
+## Why every workspace goes through it
+
+A program working inside `/workspace` — an agent, a shell, a dev server — **keeps its folder when the
+sandbox wakes from hibernation** (and after a host restart, which hibernates). The plain share cannot do
+that: a hibernation disconnects it, and the sandbox has to connect it again on wake, so a program that was
+inside it is left in a folder that no longer exists. Codex then fails every turn with
+`invalid cwd: No such file or directory`; a shell says `No such file or directory` for `ls .`. The view is
+never disconnected — it reconnects to your folder underneath — so nothing inside notices the wake.
+
+**What it costs.** Most of the time nothing you would notice. The first look at many files after a start or
+a wake is slower — measured on 2,000 small files:
+
+| | through the view | the plain share |
+|---|---|---|
+| the first `find` of the tree after a start | about 0.19 s | about 0.02 s |
+| `stat` of 1,000 files not looked at in the last second | about 0.1 s | about 0.02 s |
+| reading every file | about 0.4 s | about 0.25 s |
+| the same `find` again, or 8 programs reading at once | about the same | |
+
+So a `git status` on a big repository, right after a start or a wake, takes noticeably longer the first
+time; after that it is about as fast as before.
+
+**Turning it off.** `doz config set workspace.view off` (every sandbox), or for one sandbox
+`doz create … --workspace-view off`, `workspace_view: off` in its `doz_project.yaml`, or
+`doz config set --sandbox NAME workspace.view off`. The folder is then shared directly — a little faster,
+but a program working inside `/workspace` loses its folder at every wake from hibernation and has to be
+restarted ([Restart session](07-terminals-and-sessions.md#restarting-or-ending-a-session)). A folder with a
+`.dozignore` or `.dozreadonly` always uses the view.
+
+**When it takes effect.** At the sandbox's next start — never under programs that are running. A sandbox
+that was already running when you upgraded (or turned the setting on) changes over at its next start, or at
+its next wake from hibernation (whose wake would have cut its programs off anyway). Its first such wake is
+still the old one; restart the session if a program complains.
+
+**If the view cannot start**, the folder is shared directly instead (never an empty `/workspace`): the
+start says so, and `doz doctor` warns "workspace view" for that sandbox. `doz ls --json` reports how each
+running sandbox's workspace is served (`workspaceView`: `live`, `rules`, `direct`, `next-start` or
+`fallback`).
 
 ## What it does
 
@@ -58,9 +95,9 @@ A wake takes no measurably longer with the view than without.
 
 ## Cost
 
-Looking at many files for the first time is slower than the plain share — a tree of 2,000 files takes about
-0.1 s more to walk the first time. Once looked at (for about a second), names are close to the plain share's
-speed. Hiding a big folder often makes a whole-tree walk faster than before.
+As above: looking at many files for the first time is slower than the plain share — a tree of 2,000 files
+takes about 0.1–0.2 s more to walk the first time. Once looked at (for about a second), names are close to the
+plain share's speed. With rules, hiding a big folder often makes a whole-tree walk faster than before.
 
 ## Looking inside
 

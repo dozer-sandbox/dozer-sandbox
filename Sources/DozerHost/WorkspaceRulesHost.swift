@@ -55,6 +55,19 @@ public struct WorkspaceRulesReport: Codable, Equatable, Sendable {
 }
 
 extension HostCore {
+    /// 608: `workspace.view` for a sandbox (its own value wins) — on unless it says off.
+    static func workspaceViewOn(_ cfg: SandboxConfig, settings: @autoclosure () -> DozerSettings = .load()) -> Bool {
+        sandboxValue(cfg, SettingKey.workspaceView, settings: settings()) != .string("off")
+    }
+
+    /// 608: `SandboxInfo.workspaceView` — pure, so it is unit-tested.
+    static func workspaceViewState(running: Bool, workspace: Bool, active: [WorkspaceViewConfig], fallbacks: Set<String>, viewOn: Bool) -> String? {
+        guard running, workspace else { return nil }
+        if !active.isEmpty { return active.contains { !$0.isPassthrough } ? "rules" : "live" }
+        if !fallbacks.isEmpty { return "fallback" }
+        return viewOn ? "next-start" : "direct"
+    }
+
     /// The mode for a sandbox and where it comes from.
     static func ruleMode(_ cfg: SandboxConfig, settings: DozerSettings = .load()) -> (mode: WorkspaceRuleMode, source: String) {
         if case .string(let s)? = cfg.settings?[SettingKey.ignoreMode], let m = WorkspaceRuleMode(rawValue: s) { return (m, "sandbox") }

@@ -132,6 +132,8 @@ public enum SettingApplies: String, Codable, Sendable, CaseIterable {
     case uiRestart = "ui-restart"
     /// 606: when doz serve starts again.
     case serveRestart = "serve-restart"
+    /// 608: at each sandbox's next start (a cold boot — never under running programs).
+    case nextStart = "next-start"
 
     public var note: String {
         switch self {
@@ -145,6 +147,7 @@ public enum SettingApplies: String, Codable, Sendable, CaseIterable {
         case .nextStartOrWake: "applies at each sandbox's next start or wake"
         case .uiRestart: "applies when doz ui starts again (doz ui restart)"
         case .serveRestart: "applies when doz serve starts again"
+        case .nextStart: "applies at each sandbox's next start (a running one keeps what it has)"
         }
     }
 }
@@ -364,6 +367,8 @@ public enum SettingKey {
     public static let sshAgent = "sandbox.ssh_agent"
     /// 599g: what a workspace's `.dozignore` does to the paths it selects — `lock` or `hide` (per sandbox).
     public static let ignoreMode = "workspace.ignore_mode"
+    /// 608: every share through the live view (on) or the plain share without rules (off).
+    public static let workspaceView = "workspace.view"
     /// 599e: "Use GitHub as you" for NEW sandboxes — `off`, `read` or `push` (the Access step's choice).
     public static let defaultGithub = "defaults.github"
     /// 594 (owner ruling): the web UI may take an API key or a setup token (a masked field).
@@ -546,6 +551,9 @@ public struct DozerSettings: Sendable {
             .init("workspace", "ignore_mode", .choice(["lock", "hide"]), .string("lock"),
                   "What a .dozignore at the root of a sandbox's workspace folder does to the paths it lists (Docker's .dockerignore syntax): lock (they stay listed, shown with no permissions, and every read, write, rename or delete of them is refused — so a program that bumps into one by name sees why) or hide (they are not there at all). A .dozreadonly beside it (same syntax) makes paths visible but read-only; doz_project.yaml, .git/hooks and the two rule files are read-only too. Without either file the folder is shared as it is. A convenience mask, not a security boundary: root in the sandbox can get around it. A sandbox's own choice (doz create --ignore-mode, ignore_mode in doz_project.yaml, doz config set --sandbox NAME) wins over this.",
                   flag: "doz create --ignore-mode lock|hide", applies: .nextStartOrWake),
+            .init("workspace", "view", .choice(["on", "off"]), .string("on"),
+                  "How a sandbox's workspace folder reaches it. on: through Dozer's live view of the folder, so a program working in /workspace (an agent, a shell) keeps its folder when the sandbox wakes from hibernation or after a host restart. The view costs a little: the first scan of a big folder after a start or a wake is slower (e.g. git status on a large repository, or find), later ones are about as fast as without it. off: the folder is shared directly (a little faster) — but a program working inside /workspace loses its folder at such a wake and must be restarted (Codex says \"invalid cwd\"). A folder with a .dozignore or .dozreadonly always uses the view. Changes take effect at the sandbox's next start. A sandbox's own choice (doz create --workspace-view, workspace_view in doz_project.yaml, doz config set --sandbox NAME) wins over this.",
+                  flag: "doz create --workspace-view on|off", applies: .nextStart),
             .init("defaults", "github", .choice(["off", "read", "push"]), .string("off"),
                   "\"Use GitHub as you\" for new sandboxes: off, read (git and gh signed in as you on GitHub, read-only) or push (also push and make changes) — the Access step's choice (doz access set --github). A sandbox can differ: doz create --github, github: in doz_project.yaml, or its permissions later (doz net allow|deny NAME github:as-you). Proxied sandboxes only.",
                   flag: "doz create --github off|read|push", applies: .nextCreate),
@@ -584,7 +592,8 @@ public struct DozerSettings: Sendable {
     /// 599: the settings a sandbox can also have its own value of (`doz config set --sandbox NAME KEY V`,
     /// `doz create`, `doz_project.yaml`) — the sandbox's value wins over the file's.
     public static let perSandbox: [String] = [SettingKey.clipboard, SettingKey.browserBridge, SettingKey.openFiles, SettingKey.sshAgent,
-                                              SettingKey.tmux, SettingKey.agentSudo, SettingKey.ignoreMode]
+                                              SettingKey.tmux, SettingKey.agentSudo, SettingKey.ignoreMode,
+                                              SettingKey.workspaceView]
 
     /// What cannot be set here, by design, and why — printed in the file and the docs.
     public static let notSettable: [String] = [

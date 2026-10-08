@@ -33,7 +33,7 @@ both.
 | [GitHub as you](18-github.md) | let git and gh in a sandbox use your GitHub login — read-only or with push — without the token entering it |
 | [The tools layer](19-the-tools-layer.md) | know which tools Dozer puts in a sandbox for its settings (gh, the ssh client, tmux …) and check them |
 | [Workspace rules](20-workspace-rules.md) | keep the agent out of some files in your shared folder (`.dozignore`), or let it read but not change them (`.dozreadonly`) |
-| [The workspace view](21-the-workspace-view.md) | `dozview`, the small program in the sandbox that enforces those rules: what it does, its two processes, sleep and wake, how to look inside |
+| [The workspace view](21-the-workspace-view.md) | `dozview`, the small program in the sandbox every workspace goes through: why (programs keep their folder across a wake), what it costs, `workspace.view`, the rules it enforces, its two processes, sleep and wake, how to look inside. |
 | [Prompts for your agent](22-prompts-for-your-agent.md) | prompts to paste into Claude Code, Codex or Cursor on your Mac: install, set up, and three uses — a risky change, jailing an untrusted agent, a project with secrets |
 | [Restore points, duplicates and templates](12-restore-points-duplicates-templates.md) | undo, copy a sandbox, make your own starting image |
 | [Resources and disk space](13-resources-and-disk-space.md) | see where the disk went and free some |

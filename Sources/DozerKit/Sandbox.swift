@@ -1224,6 +1224,7 @@ public actor Sandbox {
             // 599g: workspace rules — a share whose Mac folder holds .dozignore/.dozreadonly is served
             // through the view. Never fatal: a failure is said (and the share is then EMPTY, not open).
             setActiveViews([:])
+            fallbackBox.withLock { $0 = [] }
             let views = wantedViews(shareTags: identity.shareTags)
             if !views.isEmpty { await startViews(views, on: c, quiet: false) }
         } else if let egress, egress.ca == nil {
@@ -1592,15 +1593,34 @@ public actor Sandbox {
     /// The guest paths (e.g. /workspace) that are served through a view right now.
     public nonisolated var viewedGuestPaths: [String] { activeViews.values.map(\.guestPath).sorted() }
 
-    /// The views the host wants now: every share whose Mac folder holds a rule file (two `stat`s each).
-    nonisolated func wantedViews(shareTags: [String: String]) -> [String: WorkspaceViewConfig] {
+    /// Serve EVERY share through the view, a passthrough one where the folder has no rule file (BUG
+    /// cwd-after-wake): a hibernation's re-mount detaches the raw share at its guest path and gives the
+    /// fresh mount new node ids, so a program whose cwd was inside (Codex validates its cwd per turn) gets
+    /// ENOENT from getcwd. The view is never re-mounted — its daemon lives in guest memory and re-opens its
+    /// link to the share — so a cwd inside it survives. Default true; false = 599g's rule (views only with
+    /// rule files).
+    public nonisolated var passthroughViews: Bool {
+        get { passthroughBox.withLock { $0 } }
+        set { passthroughBox.withLock { $0 = newValue } }
+    }
+    private nonisolated let passthroughBox = LockedBox<Bool>(true)
+
+    /// 608: the guest paths whose PASSTHROUGH view could not start this boot — served as the plain share
+    /// instead (the host's `SandboxInfo.workspaceView` = "fallback", and doctor warns). Cleared at a fresh boot.
+    public nonisolated var viewFallbacks: Set<String> { fallbackBox.withLock { $0 } }
+    private nonisolated let fallbackBox = LockedBox<Set<String>>([])
+
+    /// The views the host wants now: every share whose Mac folder holds a rule file (two `stat`s each), and
+    /// — `includePassthrough` and `passthroughViews` — every other share as a passthrough view.
+    nonisolated func wantedViews(shareTags: [String: String], includePassthrough: Bool = true) -> [String: WorkspaceViewConfig] {
         var out: [String: WorkspaceViewConfig] = [:]
         for share in spec.shares {
             guard let tag = shareTags[share.guestPath] else { continue }
             let folder = URL(fileURLWithPath: share.hostPath)
-            guard WorkspaceRules.present(in: folder) else { continue }
+            let rules = WorkspaceRules.present(in: folder)
+            guard rules || (includePassthrough && passthroughViews) else { continue }
             out[tag] = WorkspaceViewConfig(tag: tag, guestPath: share.guestPath, mode: workspaceRuleMode,
-                                           fold: WorkspaceRules.caseInsensitive(folder))
+                                           fold: WorkspaceRules.caseInsensitive(folder), passthrough: !rules)
         }
         return out
     }
@@ -1619,7 +1639,7 @@ public actor Sandbox {
             return
         }
         let label = views.values.sorted { $0.guestPath < $1.guestPath }
-            .map { "\($0.guestPath) (\($0.mode.rawValue)\($0.fold ? ", case-insensitive" : ""))" }.joined(separator: ", ")
+            .map { $0.isPassthrough ? "\($0.guestPath) (no rules)" : "\($0.guestPath) (\($0.mode.rawValue)\($0.fold ? ", case-insensitive" : ""))" }.joined(separator: ", ")
         let work: () async throws -> String = {
             try await c.copyIn(from: bin, to: URL(fileURLWithPath: WorkspaceView.binaryGuestPath), mode: 0o755)
             let script = views.values.sorted { $0.guestPath < $1.guestPath }.map(WorkspaceView.startScript).joined(separator: "; ")
@@ -1627,7 +1647,10 @@ public actor Sandbox {
             return r.output + r.errorOutput
         }
         do {
-            let out = quiet ? try await work() : try await timed("workspace rules: \(label) served through the view", work)
+            let title = views.values.allSatisfy(\.isPassthrough)
+                ? "workspace: \(views.values.map(\.guestPath).sorted().joined(separator: ", ")) through the live view (programs there keep their folder across a wake)"
+                : "workspace rules: \(label) served through the view"
+            let out = quiet ? try await work() : try await timed(title, work)
             recordViewStatus(out, wanted: views, guestPaths: [:])
         } catch {
             note("workspace rules: the view could not start: \(error.localizedDescription)")
@@ -1642,11 +1665,17 @@ public actor Sandbox {
             case .running, .started, .restarted:
                 let gp = wanted[st.tag]?.guestPath ?? active[st.tag]?.guestPath ?? guestPaths[st.tag] ?? "?"
                 active[st.tag] = wanted[st.tag] ?? active[st.tag] ?? WorkspaceViewConfig(tag: st.tag, guestPath: gp, mode: workspaceRuleMode, fold: true)
+                fallbackBox.withLock { _ = $0.remove(gp) }
                 if st.state == .restarted { note("workspace rules: the view of \(gp) was not running — started it again") }
             case .failed:
                 let gp = wanted[st.tag]?.guestPath ?? guestPaths[st.tag] ?? st.tag
                 active[st.tag] = nil
-                note("workspace rules: the view of \(gp) could not start — \(gp) is EMPTY in the sandbox until it does (the next wake or start tries again)")
+                if wanted[st.tag]?.isPassthrough == true {
+                    fallbackBox.withLock { _ = $0.insert(gp) }
+                    note("workspace: the view of \(gp) could not start — \(gp) is the share as it is (a program inside loses its directory at a hibernation)")
+                } else {
+                    note("workspace rules: the view of \(gp) could not start — \(gp) is EMPTY in the sandbox until it does (the next wake or start tries again)")
+                }
             case .off:
                 active[st.tag] = nil
             }
@@ -1661,7 +1690,9 @@ public actor Sandbox {
         guard phase == .running, let c = container else { return }
         let wanted = wantedViews(shareTags: identity?.shareTags ?? [:])
         let active = activeViews
-        let new = wanted.filter { active[$0.key] == nil }
+        // A passthrough view is started only at a fresh boot or a hibernation's wake (where the raw share's
+        // cwds are cut anyway) — never live under a running program, whose cwd it would cut.
+        let new = wanted.filter { active[$0.key] == nil && !$0.value.isPassthrough }
         if !new.isEmpty {
             note("workspace rules: a rule file appeared — serving \(new.values.map(\.guestPath).sorted().joined(separator: ", ")) through the view (a program already inside keeps what it has open until it changes directory)")
             await startViews(new, on: c, quiet: true)
@@ -1935,6 +1966,30 @@ public actor Sandbox {
     }
 
     /// The guest's sessions (`deckhold ls`), live and ended.
+    /// 608: how `endSession` ended a session's program.
+    public enum SessionEnd: String, Codable, Sendable {
+        case hangup, terminate, kill
+        /// It was not running (ended already, or never opened).
+        case notRunning = "not-running"
+        /// Even SIGKILL did not end it within the time (a process stuck in the kernel).
+        case stuck
+    }
+
+    /// 608: end session `name`'s program (its process group: HUP, then TERM, then KILL — `GuestCommand.endSession`).
+    /// Viewers get the program's EXIT, as when it exits by itself. Running sandboxes only — ending a program
+    /// is never a reason to wake one.
+    public func endSession(_ name: String) async throws -> SessionEnd {
+        try GuestCommand.validateSessionName(name)
+        guard phase == .running else { throw SandboxError.notRunning(phase) }
+        let r = try await execInContainer(["sh", "-c", GuestCommand.endSession(name: name)], privileged: true, timeout: 20)
+        let word = r.output.split(separator: "\n").last { $0.hasPrefix("doz-end ") }.map { String($0.dropFirst(8)) }
+        guard let w = word, let how = SessionEnd(rawValue: w.trimmingCharacters(in: .whitespaces)) else {
+            throw SandboxError.commandFailed(command: "end session \(name)", exitCode: r.exitCode, output: r.output + r.errorOutput)
+        }
+        note("session \(name): " + (how == .notRunning ? "was not running" : how == .stuck ? "did NOT end (stuck)" : "ended (\(how.rawValue))"))
+        return how
+    }
+
     public func sessions() async throws -> [SessionInfo] {
         let r = try await exec(GuestCommand.list(), timeoutSeconds: 15)
         return SessionInfo.parseList(r.output)

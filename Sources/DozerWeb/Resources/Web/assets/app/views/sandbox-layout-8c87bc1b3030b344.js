@@ -4,8 +4,8 @@ import { opRunningFor, sandboxBusy, sandboxPhase, SAVED_PHASES } from '../core/s
 import { setting, terminalsAllowed } from '../core/settings-265e96add2494862.js';
 import { state } from '../core/state-d393c12b794a3f10.js';
 import { pageTerminals, sview, terminals } from '../core/terminals-fa5cf7fc28fdb48f.js';
-import { closeTerminal, goLive, newTerm, paintCover } from '../components/terminal-8accd4d583784e48.js';
-import { renderTerminals } from './sandbox-terminals-df0077c15a9d376b.js';
+import { closeTerminal, goLive, newTerm, paintCover } from '../components/terminal-b5dc79288fb2c3bb.js';
+import { renderTerminals } from './sandbox-terminals-49156c561af0259c.js';
 
 // ── the terminal layout (593 §9 — S1): the HOST keeps each sandbox's panes (`terminal-layout`, beside
 // its doz.json), so a UI restart, a reload or another browser shows the same ones. The page writes it

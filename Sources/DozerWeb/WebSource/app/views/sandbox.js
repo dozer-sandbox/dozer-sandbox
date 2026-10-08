@@ -17,6 +17,7 @@ import { callout } from '../components/callout.js';
 import { confirmAction, dialog } from '../components/dialog.js';
 import { lifecycle, lifecycleBar, sessionsWhyNot } from '../components/lifecycle.js';
 import { moreMenu } from '../components/menus.js';
+import { sessionMenuItems } from '../components/session-actions.js';
 import { failureFor, pageFailure, paintRowOps } from '../components/notices.js';
 import { sandboxPill } from '../components/pills.js';
 import { bootLogDialog, focusTerm, openTerminal, PHASE_WORD } from '../components/terminal.js';
@@ -152,6 +153,7 @@ function sandboxParts(name, d, net, accounts) {
         moreMenu('More for ' + s.name, [
           { label: 'Watch', icon: 'eye', desc: 'Read-only: nothing you type reaches it, it never resizes', onSelect: () => openTerminal(name, s.name, 'watch') },
           isRemote() ? null : { label: 'Open in Terminal', icon: 'square-terminal', desc: 'In your terminal app (doz attach)', disabled: !!whyNot, why: whyNot, onSelect: () => openInTerminal(name, s.name) },
+          ...(running ? sessionMenuItems(name, s.name, whyNot) : []),
         ].filter(Boolean), { small: true, onClose: sbxMenuClosed }).el]))));
   const pointMenu = (p) => moreMenu('More for ' + p.name, [
     { label: 'Fork…', icon: 'git-fork', desc: 'A new sandbox whose disks are this point’s', onSelect: () => dialog('Fork ' + p.name, 'A new sandbox whose disks are this point’s (it cold-boots on start).',

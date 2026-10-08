@@ -66,8 +66,74 @@ struct Inspect: AsyncParsableCommand {
     }
 }
 
+/// `doz sessions NAME` (the list — the default) and, since 0.30.0, `doz sessions end|restart NAME SESSION`.
 struct Sessions: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
+        abstract: "The sandbox's terminal sessions: list them (the default), end one, or restart one.",
+        subcommands: [SessionsList.self, SessionsEnd.self, SessionsRestart.self], defaultSubcommand: SessionsList.self)
+}
+
+struct SessionsEnd: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(commandName: "end",
+        abstract: "End a session's program: it is hung up (as when its terminal closes), then terminated, then killed if it must be. Its viewers see it end.",
+        discussion: "A running sandbox only — this never wakes one. What the program was doing is lost.")
+    @OptionGroup var g: GlobalOptions
+    @Argument var name: String
+    @Argument var session: String
+    @Flag(name: [.short, .long], help: "Do not ask.") var yes = false
+    func run() async throws {
+        try await requireSandbox(name, g)
+        try confirm("End session \(session) in \(name)? Its program stops; what it is doing now is lost.", yes: yes || g.json, g)
+        var r = HostRequest(.sessionEnd, name: name)
+        r.session = session
+        let e = try decode(try call(r, g), SessionEnded.self, g)
+        if g.json { Out.json(e); return }
+        Out.stdout(e.how == "not-running" ? "session \(session) in \(name) was not running\n"
+                   : "ended session \(session) in \(name) (\(SessionsEnd.howText(e.how)))\n")
+    }
+
+    static func howText(_ how: String) -> String {
+        switch how {
+        case "hangup": "it hung up"
+        case "terminate": "it did not hang up — terminated"
+        case "kill": "it ignored hangup and terminate — killed"
+        default: how
+        }
+    }
+}
+
+struct SessionsRestart: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(commandName: "restart",
+        abstract: "Restart a session: end its program and start the same one again, in the same folder. An agent's own session continues its last conversation (Claude Code, Codex, pi) — only the turn in progress is lost.",
+        discussion: "A running sandbox only — this never wakes one. Then it attaches, as doz run does (-d: not). --fresh starts a new conversation instead.")
+    @OptionGroup var g: GlobalOptions
+    @Argument var name: String
+    @Argument var session: String
+    @Flag(name: .long, help: "A new conversation instead of continuing the last one (agent sessions).") var fresh = false
+    @Flag(name: [.short, .customLong("detach")], help: "Restart it and return; attach later.") var detach = false
+    @Flag(name: [.short, .long], help: "Do not ask.") var yes = false
+    @Option(name: .long, help: "The key that detaches: ctrl-] (default), ctrl-<letter>, or none.") var detachKey = "ctrl-]"
+    func run() async throws {
+        let key = try parseDetachKey(detachKey)
+        try await requireSandbox(name, g)
+        try confirm("Restart session \(session) in \(name)? Its program stops and starts again; what it is doing now is lost.", yes: yes || g.json, g)
+        var r = HostRequest(.sessionRestart, name: name)
+        r.session = session
+        r.fresh = fresh ? true : nil
+        let size = terminalSize()
+        r.cols = size.cols
+        r.rows = size.rows
+        let s = try decode(try call(r, g), SessionRestarted.self, g)
+        if g.json { Out.json(s); return }
+        if let n = s.notice { Out.stderr("[doz] \(n)\n") }
+        Out.stdout("restarted session \(session) in \(name)" + (s.resumed ? " — its conversation continues" : "") + "\n")
+        if detach { return }
+        AttachClient.run(store: g.dozerStore, sandbox: name, session: session, wake: false, detachKey: key, quiet: g.quiet)
+    }
+}
+
+struct SessionsList: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(commandName: "ls",
         abstract: "The sandbox's terminal sessions (they survive pause, sleep and hibernate).",
         discussion: """
             While the sandbox is paused, asleep or hibernated, its sessions are listed from their saved screens \

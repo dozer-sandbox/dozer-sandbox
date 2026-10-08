@@ -271,6 +271,12 @@ final class WebOperations: @unchecked Sendable {
             return s?.state == "ready" ? "Apple's container services are running — Dockerfiles can be built" : (s?.note ?? "Apple's container services started")
         case .builderInstall:
             return "Apple's installer package was opened in macOS Installer — approve it there, then start its services"
+        case .sessionEnd(let name, let session):
+            let r = try? v.decode(SessionEnded.self)
+            return r?.how == "not-running" ? "session \(session) in \(name) was not running" : "ended session \(session) in \(name)"
+        case .sessionRestart(let name, let session, _):
+            guard let r = try? v.decode(SessionRestarted.self) else { return "restarted session \(session) in \(name)" }
+            return "restarted session \(session) in \(name)" + (r.resumed ? " — its conversation continues" : "") + (r.notice.map { " (\($0))" } ?? "")
         case .toolsApply(let name):
             let r = (try? v.decode(ToolsLayerReport.self))?.last
             return "\(name): tools — " + (r?.summary ?? "set up")

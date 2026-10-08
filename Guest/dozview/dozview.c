@@ -101,7 +101,7 @@
 #define RENAME_EXCHANGE (1 << 1)
 #endif
 
-#define DOZVIEW_VERSION "1.0.1"
+#define DOZVIEW_VERSION "1.1.1"
 #define VIRTIOFS_MAGIC 0x65735546UL /* FUSE_SUPER_MAGIC — virtio-fs is a FUSE file system */
 #define PATHMAX 4096
 #define BUFSZ ((size_t)(1 << 20) + 8192)
@@ -246,9 +246,14 @@ static rules_t *rules_build(void) {
     rules_t *r = calloc(1, sizeof *r);
     if (!r) { dm_free_lines(ip, il, ni); dm_free_lines(rp, rl, nr); return NULL; }
     conf_read(&r->hide, &r->fold);
+    /* No rule file = a PASSTHROUGH view (the host serves every share through one, so a process whose cwd
+     * is in the share survives a hibernation): nothing is excluded or read-only, not even the implicit
+     * read-only names — `git init` must still make .git/hooks. The implicit names and the rule files'
+     * own protection apply once a rule file exists. */
+    int any = fi.present || fr.present;
     for (int k = 0; k < (r->fold ? 2 : 1); k++) {
         build_set(&r->ign[k], ip, ni, NULL, 0, k, &r->n_bad);
-        build_set(&r->ro[k], rp, nr, implicit_ro, N_IMPLICIT, k, &r->n_bad);
+        build_set(&r->ro[k], rp, nr, any ? implicit_ro : NULL, any ? N_IMPLICIT : 0, k, &r->n_bad);
     }
     r->n_ign = ni; r->n_ro = nr; r->ign_present = fi.present; r->ro_present = fr.present;
     fid_ign = fi; fid_ro = fr;
@@ -394,7 +399,7 @@ static int classify_with(const char *rel, int isdir, const uint8_t *pinfo, uint8
         o += s->n; if (pi) pi += s->n;
     }
     free(folded);
-    if (is_rule_file(rel, r->fold)) return C_RO;
+    if ((r->ign_present || r->ro_present) && is_rule_file(rel, r->fold)) return C_RO;
     if ((excl && !isdir) || skip) return C_EXCL;
     return ro ? C_RO : C_NONE;
 }
@@ -412,7 +417,8 @@ static int classify_node(node *n, char *pathbuf) {
     int pcls; const uint8_t *pi = parent_info(n->parent, &pcls);
     if (node_path(n, pathbuf, PATHMAX) < 0) return C_EXCL;
     int sz = info_size(R);
-    if (n->info_len != sz) { free(n->info); n->info = calloc((size_t)(sz ? sz : 1), 1); n->info_len = sz; }
+    /* `!n->info` too: with no pattern at all (a passthrough view) sz is 0 == a new node's info_len */
+    if (n->info_len != sz || !n->info) { free(n->info); n->info = calloc((size_t)(sz ? sz : 1), 1); n->info_len = sz; }
     if (!n->info) return C_EXCL;
     n->cls = pcls == C_EXCL ? C_EXCL : classify_with(pathbuf, S_ISDIR(n->mode), pi, n->info);
     n->rgen = R->gen; n->sgen = struct_gen;
@@ -492,6 +498,35 @@ static int reopen_base_locked(const char *why) {
     logm("re-open (%s): base re-opened from %s", why, raw_path);
     return 1;
 }
+/* 1.1.1: the base is dead AND RAW is not the share again yet — the wake's re-mount is between its umount and
+ * its bind (a request arrived before SIGUSR1). Hold the request until RAW is back (≤ 5 s, every 50 ms) rather
+ * than answer ENOENT now: a LOOKUP answered ENOENT makes the kernel drop that dentry, and a program whose
+ * current folder it is loses it ("/workspace/sub (deleted)", getcwd fails) — the bug the view exists to
+ * prevent. 1 when the base is healthy again (retry the request). */
+static int wait_for_base(int err) {
+    if (err != ENOENT && err != ESTALE && err != EIO && err != ENOTCONN) return 0;
+    /* An ordinary ENOENT (a name that is not there) costs one health check per 50 ms at most. */
+    static double healthy_at;
+    pthread_mutex_lock(&base_mu);
+    double t0 = now_ms();
+    int dead = t0 - healthy_at >= 50 && !base_healthy();
+    if (!dead) healthy_at = t0;
+    pthread_mutex_unlock(&base_mu);
+    if (!dead) return 0;
+    for (int i = 0; i < 100; i++) {
+        struct timespec ts = {0, 50 * 1000 * 1000};
+        nanosleep(&ts, NULL);
+        pthread_mutex_lock(&base_mu);
+        int ok = base_healthy();
+        if (!ok) { int nfd = open(raw_path, O_RDONLY | O_DIRECTORY | O_CLOEXEC); if (nfd >= 0) { int sh = is_share(nfd); close(nfd); if (sh) ok = reopen_base_locked("a request waited"); } }
+        if (ok) n_repair++;
+        pthread_mutex_unlock(&base_mu);
+        if (ok) { if (i > 0) logm("a request waited %d ms for the share to come back", (i + 1) * 50); return 1; }
+    }
+    logm("a request waited 5 s for the share — answering its error");
+    return 0;
+}
+
 /* A request's syscall failed in a way a dead base explains: repair (at most every 50 ms). */
 static int maybe_repair(int err) {
     if (err != ENOENT && err != ESTALE && err != EIO && err != ENOTCONN) return 0;
@@ -1193,7 +1228,7 @@ static void dispatch(req_t *q) {
         default: e = ENOSYS; break;
         }
         if (!e) return;
-        if (attempt == 0 && sys_err && maybe_repair(e)) continue;
+        if (attempt == 0 && sys_err && (maybe_repair(e) || wait_for_base(e))) continue;
         reply_err(q->in->unique, e);
         return;
     }
@@ -1235,6 +1270,11 @@ static void invalidate_all(void) {
         struct fuse_out_header oh; struct fuse_notify_inval_entry_out ie; memset(&ie, 0, sizeof ie);
         size_t nl = strlen(v[i].name);
         ie.parent = v[i].parent; ie.namelen = (uint32_t)nl;
+        /* 1.1.1: EXPIRE, never drop: a dropped (unhashed) dentry is "(deleted)" to every program whose
+         * current folder it is — getcwd fails (Codex: "invalid cwd"). Expired, the kernel asks LOOKUP again on
+         * the next walk and gets the new rules' answer (a hidden name: ENOENT, which drops it then). A kernel
+         * before FUSE 7.38 ignores the flag (it was padding) and drops as before. */
+        ie.flags = FUSE_EXPIRE_ONLY;
         struct iovec iov[3] = {{&oh, sizeof oh}, {&ie, sizeof ie}, {v[i].name, nl + 1}};
         oh.len = (uint32_t)(sizeof oh + sizeof ie + nl + 1); oh.error = FUSE_NOTIFY_INVAL_ENTRY; oh.unique = 0;
         (void)!writev(fusefd, iov, 3);
@@ -1247,9 +1287,15 @@ static void invalidate_all(void) {
     free(v);
 }
 
+static int same_file(const fileid_t *a, const fileid_t *b) {
+    return a->present == b->present && (!a->present || (a->ino == b->ino && a->size == b->size
+        && a->mt.tv_sec == b->mt.tv_sec && a->mt.tv_nsec == b->mt.tv_nsec));
+}
+
 static void reload(const char *why) {
     double t0 = now_ms();
     static int kept_logged;
+    fileid_t was_ign = fid_ign, was_ro = fid_ro, was_conf = fid_conf;
     rules_t *nr = rules_build();
     if (!nr) { if (!kept_logged++) logm("rules (%s): the base is not reachable — keeping the last rules", why); return; }
     kept_logged = 0;
@@ -1258,8 +1304,12 @@ static void reload(const char *why) {
     nr->gen = ++rules_gen_counter;
     R = nr;
     pthread_mutex_unlock(&mu);
+    /* The same files and conf as before (a wake's SIGUSR1, a poll that found nothing new): nothing to tell the
+     * kernel. */
+    int same = old && same_file(&was_ign, &fid_ign) && same_file(&was_ro, &fid_ro) && same_file(&was_conf, &fid_conf)
+               && old->hide == nr->hide && old->fold == nr->fold;
     rules_free(old);
-    if (old) invalidate_all();
+    if (old && !same) invalidate_all();
     logm("rules (%s): .dozignore %s (%d), .dozreadonly %s (%d), %d dropped, mode %s, fold %s — %.1f ms", why,
          nr->ign_present ? "present" : "absent", nr->n_ign, nr->ro_present ? "present" : "absent", nr->n_ro, nr->n_bad,
          nr->hide ? "hide" : "lock", nr->fold ? "on" : "off", now_ms() - t0);
