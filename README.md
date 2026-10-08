@@ -7,14 +7,24 @@ disk to give its memory back — then wakes with every program still running whe
 policy you can read, and your keys never enter the sandbox.
 
 ```sh
-brew trust --tap dozer-sandbox/tap   # once per Mac: Homebrew loads a third-party tap's formulas only once trusted
-brew install dozer-sandbox/tap/doz
+brew trust --tap dozer-sandbox/tap             # once per Mac: Homebrew loads a third-party tap only once trusted
+brew install dozer-sandbox/tap/doz-canary      # the canary channel, until the first stable release
+doz ui                                         # opens the dashboard — a new install starts on its setup wizard
+```
+
+The dashboard's setup wizard checks this Mac, chooses how your agent signs in, and prepares an image; then
+**New sandbox** (or Quick add) makes one. Each sandbox's workspace is a folder on your Mac, shared at
+`/workspace` inside it — by default `~/Developer/dozer-sandbox-projects/<sandbox name>`, made when missing.
+Keep them there unless you have a reason not to; Settings › Choose… (or `doz config set
+defaults.projects_dir PATH`) moves the default.
+
+Prefer the terminal? The same setup, without the dashboard:
+
+```sh
 doz onboard                 # once: checks this Mac, your agent's account, and prepares an image
 cd ~/code/my-project
 doz up                      # a sandbox for this folder (at /workspace), its agent running, your terminal attached
 ```
-
-`doz ui` opens the dashboard: every sandbox, its terminals in the browser, images, resources, settings.
 
 ## Requirements
 
