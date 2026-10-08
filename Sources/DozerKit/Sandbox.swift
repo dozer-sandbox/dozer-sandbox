@@ -1639,7 +1639,12 @@ public actor Sandbox {
         do {
             let have = try await execInContainer(["sh", "-c", GuestCommand.deckholdDigestScript], privileged: true, timeout: 10)
             guard have.output.trimmingCharacters(in: .whitespacesAndNewlines) != want else { return }
-            try await container!.copyIn(from: bin, to: URL(fileURLWithPath: GuestCommand.deckholdStagingPath), mode: 0o755)
+            // Through an exec's stdin, not copyIn: copyIn needs vminitd's own agent, and a VM a NEW host restored (an
+            // upgrade's first wake — exactly when this matters) is adopted through AdoptingAgent.
+            let data = try Data(contentsOf: bin)
+            let staged = try await Self.exec(on: container!, ["sh", "-c", "umask 022; cat > \(GuestCommand.deckholdStagingPath)"], environment: [:],
+                                             workingDirectory: "/", privileged: true, timeout: 30, stdin: data)
+            guard staged.exitCode == 0 else { throw SandboxError.commandFailed(command: "stage deckhold", exitCode: staged.exitCode, output: staged.output + staged.errorOutput) }
             let r = try await execInContainer(["sh", "-c", GuestCommand.refreshDeckholdScript(sha256: want)], privileged: true, timeout: 10)
             note(r.output.contains("deckhold=updated")
                  ? "updated deckhold (the guest's session holder) to this build's — sessions opened from now on use it; a running session keeps its own until it restarts"
@@ -1827,10 +1832,19 @@ public actor Sandbox {
 
     static func exec(on container: LinuxContainer, _ argv: [String], environment: [String: String],
                      workingDirectory: String, privileged: Bool, timeout: Int64, user: String? = nil,
-                     onOutput: (@Sendable (Data) -> Void)? = nil) async throws -> ExecResult {
+                     onOutput: (@Sendable (Data) -> Void)? = nil, stdin: Data? = nil) async throws -> ExecResult {
         let out = OutputCollector(onData: onOutput), err = OutputCollector(onData: onOutput)
+        // 610: bytes for the program's stdin, then EOF (what copyIn cannot do in a VM a new host adopted).
+        let input: AsyncStream<Data>? = stdin.map { bytes in
+            let (stream, cont) = AsyncStream<Data>.makeStream(bufferingPolicy: .unbounded)
+            var at = 0
+            while at < bytes.count { let end = min(at + 65_536, bytes.count); cont.yield(bytes.subdata(in: at..<end)); at = end }
+            cont.finish()
+            return stream
+        }
         let p = try await container.exec("x-\(UUID().uuidString.prefix(12).lowercased())") { cfg in
             cfg.arguments = argv
+            if let input { cfg.stdin = ConnectionReader(source: input) }
             cfg.environmentVariables = GuestCommand.environment(environment)
             cfg.workingDirectory = workingDirectory
             cfg.stdout = out
