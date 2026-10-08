@@ -1016,8 +1016,9 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   unnotarised (`TEST_BUILD=1` is a local test build, never published); a preflight asks the keychain for
   the identity and the profile authenticates BEFORE the build; the signed binary is checked for the
   authority, the team id, the hardened-runtime flag, a secure timestamp and both entitlements
-  (virtualization, audio-input); notarisation must answer `Accepted` (else its log is fetched) and `spctl`
-  "Notarized Developer ID"; and the TARBALL is unpacked afresh and checked (`codesign --verify --strict`,
+  (virtualization, audio-input); notarisation must answer `Accepted` (else its log is fetched) and Apple's ticket service must hold a ticket for
+  the binary's CDHash (`Scripts/notary-ticket.sh` — NOT `spctl`: a bare CLI cannot be stapled, and spctl answers from a
+  stapled ticket or Gatekeeper's local cache, "Unnotarized Developer ID" for a freshly notarised tool — 0.31.0); and the TARBALL is unpacked afresh and checked (`codesign --verify --strict`,
   `doz --version`). Never edit sources while `make release` builds (SwiftPM stops: "modified during the build").
 - **Resources are found beside the RESOLVED executable** (`DeckholdBinary.candidateBundleDirectories`,
   `WebAssets`, `HostLauncher.executablePath`): the Homebrew keg (`Cellar/doz/V/libexec/doz`, reached

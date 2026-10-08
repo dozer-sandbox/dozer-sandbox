@@ -210,7 +210,7 @@ if [[ -n "$SIGN_IDENTITY" && -n "$NOTARY_PROFILE" ]]; then
     run ditto -c -k --keepParent "$STAGE/libexec/doz" "$ZIP"
     if [[ -n "$DRY_RUN" ]]; then
         run xcrun notarytool submit "$ZIP" --keychain-profile "$NOTARY_PROFILE" --wait --output-format json
-        run spctl --assess --type install --verbose=4 "$STAGE/libexec/doz/doz"
+        run Scripts/notary-ticket.sh "$STAGE/libexec/doz/doz" 600
     else
         say "  notarising (Apple's notary service; usually a few minutes)…"
         result="$(xcrun notarytool submit "$ZIP" --keychain-profile "$NOTARY_PROFILE" --wait --output-format json 2>"$OUT/notarytool.err" || true)"
@@ -222,11 +222,12 @@ if [[ -n "$SIGN_IDENTITY" && -n "$NOTARY_PROFILE" ]]; then
         fi
         rm -f "$OUT/notarytool.err"
         say "  notarised: Accepted (submission $sid)"
-        # Gatekeeper's verdict on the executable (it asks Apple for the ticket: a bare CLI cannot be stapled).
-        verdict="$(spctl --assess --type install --verbose=4 "$STAGE/libexec/doz/doz" 2>&1 || true)"
-        grep -q 'accepted' <<<"$verdict" && grep -q 'Notarized Developer ID' <<<"$verdict" \
-            || fail "Gatekeeper does not accept the notarised doz: $verdict"
-        say "  spctl: accepted — source=Notarized Developer ID"
+        # A bare CLI cannot be stapled, so spctl answers from a stapled ticket or its local cache ("Unnotarized
+        # Developer ID" for a freshly notarised tool — 0.31.0). Gatekeeper's first run looks the ticket up online by
+        # CDHash: prove exactly that (Scripts/notary-ticket.sh).
+        Scripts/notary-ticket.sh "$STAGE/libexec/doz/doz" 600 >/dev/null \
+            || fail "Apple's ticket service has no ticket for the notarised doz (submission $sid) after 10 minutes"
+        say "  notary ticket: published for this binary (what Gatekeeper checks on first run)"
     fi
     run rm -f "$ZIP"
     say "  ${DRY_RUN:+[dry-run] would be }notarised (a command-line tool cannot be stapled: Gatekeeper checks its ticket online on first run)"
