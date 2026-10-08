@@ -49,7 +49,8 @@ func cliBrowserSuite(binary: String) async {
         // 1. A plain page.
         c.type("xdg-open 'https://example.com/docs?x=1'; echo OPEN-$((1+1))\r")
         check(c.wait(15) { $0.text.contains("OPEN-2") }, "xdg-open ran (OPEN-2)")
-        check(c.text.contains("Asking your Mac to open: https://example.com/docs?x=1"), "the session shows the URL in plain text")
+        // 609 (owner): the shim prints nothing a person sees — the notice says it; the screen stays the program's.
+        check(!c.text.contains("Asking your Mac"), "the session shows nothing of the shim (no line written behind the program)")
         check(c.wait(5) { _ in log().contains("open https://example.com/docs?x=1\n") }, "the Mac opened it (the opener seam: \(log().suffix(120).debugDescription))")
         check(c.wait(5) { $0.text.contains("doz: bb opened https://example.com/docs in your browser") }, "the notice: \"bb opened https://example.com/docs in your browser\"")
         check(!c.text.contains("\(esc)]6340"), "the marker never reached the outer terminal")

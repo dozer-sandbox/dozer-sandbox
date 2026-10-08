@@ -79,6 +79,8 @@ public actor HostCore {
     let sessionGate = KeyedGate()
     /// 599: the session bridges' limits and recent actions (`HostCore+Bridges`).
     nonisolated let bridgeState = BridgeState()
+    /// 609: which viewer set each session's size last (the attach relay re-applies the typist's).
+    nonisolated let sizeOwners = SessionSizeOwners()
     /// 599d: GitHub tokens given with `doz key set NAME --github` from stdin — in this host's MEMORY only
     /// (never written: a new host needs them given again, or a keychain item).
     var githubKeys: [String: String] = [:]

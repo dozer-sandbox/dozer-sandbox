@@ -306,9 +306,9 @@ final class OpenFilesTests: XCTestCase {
 
     func testTheShimTakesFilesAndIsValidShell() throws {
         let shim = GuestCommand.openShim
-        XCTAssertTrue(shim.contains("# doz:open-url-shim:v5"), "a new stamp: a wake re-installs it")
-        XCTAssertTrue(GuestCommand.openShimInstall.contains("doz:open-url-shim:v5"))
-        XCTAssertTrue(shim.contains("send \"doz-reveal;$abs\"") && shim.contains("send \"doz-file;;$abs\" \"Asking your Mac to open in the Finder"))
+        XCTAssertTrue(shim.contains("# doz:open-url-shim:v6"), "a new stamp: a wake re-installs it")
+        XCTAssertTrue(GuestCommand.openShimInstall.contains("doz:open-url-shim:v6"))
+        XCTAssertTrue(shim.contains("send \"doz-reveal;$abs\"") && shim.contains("send \"doz-file;;$abs\""))
         XCTAssertTrue(GuestCommand.openShimAliases.contains("doz-open"))
         XCTAssertTrue(shim.contains("send \"doz-file;$app;$abs\""))
         XCTAssertTrue(shim.contains("*.command|") && shim.contains("*.html|"), "the type lists are in the shim")
