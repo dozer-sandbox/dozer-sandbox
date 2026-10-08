@@ -8,7 +8,7 @@ policy you can read, and your keys never enter the sandbox.
 
 ```sh
 brew trust --tap dozer-sandbox/tap             # once per Mac: Homebrew loads a third-party tap only once trusted
-brew install dozer-sandbox/tap/doz-canary      # the canary channel, until the first stable release
+brew install dozer-sandbox/tap/doz             # stable; doz-beta and doz-canary are the other channels
 doz ui                                         # opens the dashboard — a new install starts on its setup wizard
 ```
 
