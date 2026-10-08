@@ -988,11 +988,12 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   command is printed, never run. A publish refuses a key that doz does not trust. Seams: `TEST_PUBLISH`,
   `UPDATE_KEY_FILE`, `UPDATE_PUBLIC_KEY`, `ARCHIVE_BASE`; client `DOZ_TEST_UPDATE_{FEED,KEY,EXECUTABLE,TTY,ALLOW_ADHOC}`,
   `DOZ_TEST_BREW`.
-- **Two eras, one switch** (the workspace's `Scripts/doz-rc` and `Scripts/ship`, `_ship_common.dozer_profile`): until
-  the final push, releases go to the private prelaunch repo + tap, built `PUBLIC=0 NOTARY_PROFILE=`; with `DOZ_PUBLIC=1`,
-  `doz-rc` publishes to CANARY (public flavor, signed + notarised, a pre-release on the public repo, `make publish
-  CHANNEL=canary PUSH=1`) and the ship releases on the public repo, then `make publish` + `make promote VERSION=…
-  CHANNEL=stable` (`PUSH=1` refuses UPDATES_DIR/TAP_DIR that are not git checkouts with an origin).
+- **Channels in practice**: stable (`doz`) is the published, recommended channel; development happens on canary. The
+  workspace's `Scripts/doz-rc` (an rc) and `Scripts/ship` (a shipped version, a GitHub PRE-release) both publish to
+  CANARY only (`make publish CHANNEL=canary PUSH=1`); stable moves only when the owner says so: `make promote
+  VERSION=… CHANNEL=stable PUSH=1`, then `gh release edit vX.Y.Z --prerelease=false --latest`. (`PUSH=1` refuses
+  UPDATES_DIR/TAP_DIR that are not git checkouts with an origin.) Before the unveil, releases went to a private
+  prelaunch repo + tap (now archived; `DOZ_PUBLIC=0` in `_ship_common.dozer_profile` still names that era).
 - **Tests**: `UpdatesTests` (unit), `make test-updates` (the real binary: release-shaped tarballs → publish → promote →
   a local feed server → check/notify/silence/off/channels/downgrade/tampered/auto swap/fake brew).
 
