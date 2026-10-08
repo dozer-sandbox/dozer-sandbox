@@ -2,6 +2,7 @@ import Containerization
 import ContainerizationEXT4
 import ContainerizationExtras
 import ContainerizationOCI
+import CryptoKit
 import Darwin
 import Foundation
 import SystemPackage
@@ -873,6 +874,8 @@ public actor Sandbox {
             } catch {
                 note("could not apply the guest fixes: \(error.localizedDescription) — the wake goes on")
             }
+            // 610: this build's deckhold on the guest's disk for the sessions opened from now on.
+            await refreshDeckhold()
             // 599h: the tools layer, re-checked quietly (a setting switched on while it slept arrives now).
             await applyToolsLayer()
         case .remountShares:
@@ -1625,6 +1628,38 @@ public actor Sandbox {
         return out
     }
 
+    /// 610: a wake brings THIS build's deckhold to the guest's disk. deckhold is copied in at every fresh boot only, so
+    /// a sandbox that slept under an older doz kept that doz's holder for every session opened after the wake, until a
+    /// shutdown — and a deckhold fix (610's snapshot) reached it only then. A session's RUNNING holder is a process
+    /// in the guest's memory: it keeps its own binary (the rename leaves its file alone) until the session restarts
+    /// (`doz sessions restart`) or ends. Best effort: a wake never fails for it; nothing runs when the guest's
+    /// deckhold is already this one (one sha256sum).
+    private func refreshDeckhold() async {
+        guard container != nil, let bin = DeckholdBinary.locate(), let want = Self.digest(bin) else { return }
+        do {
+            let have = try await execInContainer(["sh", "-c", GuestCommand.deckholdDigestScript], privileged: true, timeout: 10)
+            guard have.output.trimmingCharacters(in: .whitespacesAndNewlines) != want else { return }
+            // Through an exec's stdin, not copyIn: copyIn needs vminitd's own agent, and a VM a NEW host restored (an
+            // upgrade's first wake — exactly when this matters) is adopted through AdoptingAgent.
+            let data = try Data(contentsOf: bin)
+            let staged = try await Self.exec(on: container!, ["sh", "-c", "umask 022; cat > \(GuestCommand.deckholdStagingPath)"], environment: [:],
+                                             workingDirectory: "/", privileged: true, timeout: 30, stdin: data)
+            guard staged.exitCode == 0 else { throw SandboxError.commandFailed(command: "stage deckhold", exitCode: staged.exitCode, output: staged.output + staged.errorOutput) }
+            let r = try await execInContainer(["sh", "-c", GuestCommand.refreshDeckholdScript(sha256: want)], privileged: true, timeout: 10)
+            note(r.output.contains("deckhold=updated")
+                 ? "updated deckhold (the guest's session holder) to this build's — sessions opened from now on use it; a running session keeps its own until it restarts"
+                 : "could not update deckhold in the guest (\(String((r.output + r.errorOutput).suffix(120)))) — the wake goes on")
+        } catch {
+            note("could not update deckhold in the guest: \(error.localizedDescription) — the wake goes on")
+        }
+    }
+
+    /// The sha256 of a local file, hex (~5 ms for deckhold's 1.6 MB — once per wake).
+    public static func digest(_ url: URL) -> String? {
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    }
+
     private func copyViewBinary() async {
         guard let container else { return }
         guard let bin = DozviewBinary.locate() else { note("workspace rules: the dozview guest binary is missing from the resource bundle"); return }
@@ -1797,10 +1832,19 @@ public actor Sandbox {
 
     static func exec(on container: LinuxContainer, _ argv: [String], environment: [String: String],
                      workingDirectory: String, privileged: Bool, timeout: Int64, user: String? = nil,
-                     onOutput: (@Sendable (Data) -> Void)? = nil) async throws -> ExecResult {
+                     onOutput: (@Sendable (Data) -> Void)? = nil, stdin: Data? = nil) async throws -> ExecResult {
         let out = OutputCollector(onData: onOutput), err = OutputCollector(onData: onOutput)
+        // 610: bytes for the program's stdin, then EOF (what copyIn cannot do in a VM a new host adopted).
+        let input: AsyncStream<Data>? = stdin.map { bytes in
+            let (stream, cont) = AsyncStream<Data>.makeStream(bufferingPolicy: .unbounded)
+            var at = 0
+            while at < bytes.count { let end = min(at + 65_536, bytes.count); cont.yield(bytes.subdata(in: at..<end)); at = end }
+            cont.finish()
+            return stream
+        }
         let p = try await container.exec("x-\(UUID().uuidString.prefix(12).lowercased())") { cfg in
             cfg.arguments = argv
+            if let input { cfg.stdin = ConnectionReader(source: input) }
             cfg.environmentVariables = GuestCommand.environment(environment)
             cfg.workingDirectory = workingDirectory
             cfg.stdout = out

@@ -52,7 +52,11 @@
  *     rows to push them all into the viewer's own scrollback; (2) CSI H and the active area,
  *     with every extra (modes, SGR, hyperlink, cursor, charsets, kitty keyboard, scrolling
  *     region, tabstops, pwd). Pass 2 positions rows from the top of the viewport, so trimming
- *     no longer matters.
+ *     no longer matters. Since 610 pass 2 goes out in RUNS — a row with text and the rows with
+ *     text it soft-wraps into — each placed with its own CUP: the formatter's `unwrap` loses a
+ *     newline when a wrap meets an empty row (see send_snapshot), and a viewer then drew every
+ *     row below it one row high. Guest/deckhold/test/snapshot-check.c replays snapshots and
+ *     compares them with the holder's screen cell by cell (`make deckhold-snapshot-check`).
  *   - Two formatter extras are replaced by hand: `palette` emits all 256 OSC 4 entries (~6 KB,
  *     and it would repaint the viewer's own theme), so only entries a program changed are sent;
  *     and the terminal-level extras (DECSTBM homes the cursor, tabstops move it) come AFTER the
@@ -314,8 +318,51 @@ static bool select_rows(GhosttyPointTag tag, uint32_t y0, uint32_t y1, GhosttySe
            ghostty_terminal_grid_ref(S.term, b, &sel->end) == GHOSTTY_SUCCESS;
 }
 
-/* One formatter pass over `sel` as VT. extras=true reproduces the terminal state around it. */
-static bool format_into(struct buf *out, const GhosttySelection *sel, bool extras) {
+/* Whether row `y` (in `tag` coordinates) is soft-wrapped into the next. */
+static bool row_wraps(GhosttyPointTag tag, uint32_t y) {
+    GhosttyPoint p = { .tag = tag, .value.coordinate = { .x = 0, .y = y } };
+    GhosttyGridRef r;
+    memset(&r, 0, sizeof r);
+    r.size = sizeof r;
+    GhosttyRow row = 0;
+    bool w = false;
+    if (ghostty_terminal_grid_ref(S.term, p, &r) == GHOSTTY_SUCCESS && ghostty_grid_ref_row(&r, &row) == GHOSTTY_SUCCESS)
+        ghostty_row_get(row, GHOSTTY_ROW_DATA_WRAP, &w);
+    return w;
+}
+
+/* The width class of cell (x, y) of the active area (narrow, wide, spacer tail, spacer head). */
+static int cell_wide(uint16_t x, uint32_t y) {
+    GhosttyPoint p = { .tag = GHOSTTY_POINT_TAG_ACTIVE, .value.coordinate = { .x = x, .y = y } };
+    GhosttyGridRef r;
+    memset(&r, 0, sizeof r);
+    r.size = sizeof r;
+    GhosttyCell c = 0;
+    GhosttyCellWide w = GHOSTTY_CELL_WIDE_NARROW;
+    if (ghostty_terminal_grid_ref(S.term, p, &r) == GHOSTTY_SUCCESS && ghostty_grid_ref_cell(&r, &c) == GHOSTTY_SUCCESS)
+        ghostty_cell_get(c, GHOSTTY_CELL_DATA_WIDE, &w);
+    return (int)w;
+}
+
+/* Whether any cell of row `y` (active area) has text — what the formatter's "blank row" test asks. */
+static bool row_has_text(uint32_t y) {
+    for (uint16_t x = 0; x < S.cols; x++) {
+        GhosttyPoint p = { .tag = GHOSTTY_POINT_TAG_ACTIVE, .value.coordinate = { .x = x, .y = y } };
+        GhosttyGridRef r;
+        memset(&r, 0, sizeof r);
+        r.size = sizeof r;
+        GhosttyCell c = 0;
+        bool t = false;
+        if (ghostty_terminal_grid_ref(S.term, p, &r) == GHOSTTY_SUCCESS && ghostty_grid_ref_cell(&r, &c) == GHOSTTY_SUCCESS &&
+            ghostty_cell_get(c, GHOSTTY_CELL_DATA_HAS_TEXT, &t) == GHOSTTY_SUCCESS && t) return true;
+    }
+    return false;
+}
+
+/* One formatter pass over `sel` as VT. `modes` emits the terminal modes BEFORE the content (the formatter
+ * always puts them first); `extras` the rest of the state, which the formatter puts AFTER the content
+ * (cursor, pen, charsets, kitty keyboard; scrolling region, tabstops, pwd, keyboard). */
+static bool format_into(struct buf *out, const GhosttySelection *sel, bool modes, bool extras) {
     GhosttyFormatterScreenExtra se;
     memset(&se, 0, sizeof se);
     se.size = sizeof se;                     /* every options struct is size-versioned */
@@ -325,7 +372,8 @@ static bool format_into(struct buf *out, const GhosttySelection *sel, bool extra
     te.size = sizeof te;
     /* `palette` is left off: it emits all 256 entries (~6 KB), which would also overwrite the
      * viewer's own theme. send_snapshot emits only the entries a program actually changed. */
-    te.modes = te.scrolling_region = te.tabstops = te.pwd = te.keyboard = extras;
+    te.modes = modes;
+    te.scrolling_region = te.tabstops = te.pwd = te.keyboard = extras;
     te.screen = se;
     GhosttyFormatterTerminalOptions o;
     memset(&o, 0, sizeof o);
@@ -363,14 +411,59 @@ static void send_snapshot(struct client *c, const char *why) {
     GhosttySelection sel;
     if (history > 0 && select_rows(GHOSTTY_POINT_TAG_HISTORY, 0, (uint32_t)(history - 1), &sel)) {
         /* Pass 1: scrollback. Then scroll it all off the viewport into the viewer's scrollback. */
-        format_into(&s, &sel, false);
+        format_into(&s, &sel, false, false);
         buf_str(&s, "\x1b[0m");
         for (unsigned i = 0; i < S.rows; i++) buf_str(&s, "\r\n");
     }
-    /* Pass 2: the active area from the top-left, with every piece of terminal state. */
+    const size_t active_at = s.len;
+    /* Pass 2: the active area from the top-left, with every piece of terminal state — in RUNS placed at
+     * their own rows (610). The formatter's `unwrap` joins a soft-wrapped row with the next and counts the
+     * line's newline only at its last row; but an empty row (no text) is a "blank row" to it, counted
+     * before that test — so a wrap into or out of an empty row lost a newline and everything below it
+     * landed a row high on the viewer (609: after a narrowing reflow a TUI's prompt sat a row off in the
+     * web pane until it redrew). A run is a row with text and the rows with text it soft-wraps into; each
+     * starts with a CUP to its own row, so the viewer's rows are the holder's whatever the formatter
+     * counts, and within a run the viewer still wraps the line itself (its later reflow knows it was one
+     * line). Empty rows need nothing: the viewer was cleared. The modes go out with the first run (before
+     * any content: ?1049h must come before the alt screen's rows), the rest of the state with the last
+     * (after all content: it ends with the cursor and the pen). */
     buf_str(&s, "\x1b[H");
-    if (select_rows(GHOSTTY_POINT_TAG_ACTIVE, 0, (uint32_t)(S.rows - 1), &sel)) format_into(&s, &sel, true);
-    else format_into(&s, NULL, true);
+    uint32_t starts[1001], nstarts = 0;
+    bool text_above = false;
+    for (uint32_t y = 0; y < S.rows && nstarts < 1001; y++) {
+        bool text = row_has_text(y);
+        /* A row ending in a spacer head whose wide character is no longer at the start of the next row
+         * (erased or overwritten since it wrapped) also breaks a run: the formatter skips the spacer
+         * without counting it, and the blanks that follow it would land one column early. */
+        bool orphan_head = y > 0 && cell_wide((uint16_t)(S.cols - 1), y - 1) == GHOSTTY_CELL_WIDE_SPACER_HEAD &&
+                           cell_wide(0, y) != GHOSTTY_CELL_WIDE_WIDE;
+        if (y == 0 || orphan_head || !(text && text_above && row_wraps(GHOSTTY_POINT_TAG_ACTIVE, y - 1))) starts[nstarts++] = y;
+        text_above = text;
+    }
+    bool ok = nstarts > 0;
+    for (uint32_t i = 0; ok && i < nstarts; i++) {
+        uint32_t a = starts[i], b = i + 1 < nstarts ? starts[i + 1] - 1 : (uint32_t)(S.rows - 1);
+        if (i > 0) {
+            char at[32];
+            snprintf(at, sizeof at, "\x1b[0m\x1b[%u;1H", a + 1);
+            buf_str(&s, at);
+        }
+        ok = select_rows(GHOSTTY_POINT_TAG_ACTIVE, a, b, &sel);
+        /* A run that ends on a spacer head (an orphan — see above): the formatter, unwrapping, would extend
+         * the selection to the first cell of the next row (where it expects the wide character); stop it at
+         * the cell before. */
+        if (ok && S.cols > 1 && cell_wide((uint16_t)(S.cols - 1), b) == GHOSTTY_CELL_WIDE_SPACER_HEAD) {
+            GhosttyPoint e = { .tag = GHOSTTY_POINT_TAG_ACTIVE, .value.coordinate = { .x = (uint16_t)(S.cols - 2), .y = b } };
+            ok = ghostty_terminal_grid_ref(S.term, e, &sel.end) == GHOSTTY_SUCCESS;
+        }
+        ok = ok && format_into(&s, &sel, i == 0, i + 1 == nstarts);
+    }
+    if (!ok) {
+        /* A row could not be addressed (never seen): the whole area in one pass, as before 610. */
+        s.len = active_at;
+        if (select_rows(GHOSTTY_POINT_TAG_ACTIVE, 0, (uint32_t)(S.rows - 1), &sel)) format_into(&s, &sel, true, true);
+        else format_into(&s, NULL, true, true);
+    }
 
     /* The terminal-level extras (DECSTBM homes the cursor; tabstops move it with CHA) are
      * emitted AFTER the screen's cursor CUP, so the cursor must be put back last. */

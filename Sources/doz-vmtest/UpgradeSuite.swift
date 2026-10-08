@@ -56,7 +56,11 @@ func upgradeSuite() async throws {
     // ── A. the previous release sleeps them.
     var pids: [String: Int] = [:]
     for b in boxes {
-        check(old.run(["create", b.name, "--image", b.image], timeout: 60).code == 0, "\(oldVersion): create \(b.name) (\(b.image))")
+        // 610: `--account none` — nothing here calls a model, and a scratch store must never bind the Mac's Claude login
+        // (the store's default, `mac`, made the host read the login keychain's access token for upl); pi also needs it
+        // (594: an API-key account, or `none` chosen explicitly).
+        let c = old.run(["create", b.name, "--image", b.image, "--account", "none"], timeout: 60)
+        check(c.code == 0, "\(oldVersion): create \(b.name) (\(b.image))" + (c.code == 0 ? "" : " — \(c.err.suffix(200))"))
         let s = old.run(["start", b.name], timeout: 1500)            // a first start bakes the image (minutes, network)
         check(s.code == 0, "\(oldVersion): start \(b.name)")
         let r = old.run(["run", b.name, "--session", "keep", "-d", "--", "sh", "-c", "echo SCREEN-\(marker); exec sleep 1000000"], timeout: 60)
@@ -89,6 +93,16 @@ func upgradeSuite() async throws {
         }
     }
     for b in boxes { wakeIntact(new, b.name, "\(newVersion) (slept by \(oldVersion))") }
+    // 610: the wake brought THIS build's deckhold to the guest's disk (sessions opened from now on run it); the running
+    // session kept its own holder (the same pid, above).
+    if let bin = DeckholdBinary.locate(), let want = Sandbox.digest(bin) {
+        for b in boxes {
+            let have = new.run(["exec", b.name, "--", "sh", "-c", GuestCommand.deckholdDigestScript], timeout: 60).out.trimmingCharacters(in: .whitespacesAndNewlines)
+            check(have == want, "\(b.name): the wake put this build's deckhold in the guest (\(have.prefix(12)) vs \(want.prefix(12)))")
+        }
+    } else {
+        check(false, "this build's deckhold resource is found")
+    }
     // The layout this build records, on its own next wake.
     for b in boxes {
         check(new.run(["hibernate", b.name], timeout: 120).code == 0, "\(newVersion): hibernate \(b.name)")

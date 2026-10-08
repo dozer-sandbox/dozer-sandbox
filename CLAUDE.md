@@ -471,7 +471,9 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   `--continue` (only after `SessionResume.check` finds ~/.claude/projects/<cwd, non-alnum→'-'>/*.jsonl — it
   refuses without one), Codex `resume --last` (0.160.1: newest in the cwd, else a new one; `--all` would ignore
   the folder), pi `--continue` (newest else new); `fresh` = none. CLI `doz sessions end|restart NAME SESSION`
-  (`sessions` became a group whose default subcommand `ls` keeps `doz sessions NAME`); web actions
+  (`sessions` became a group whose default subcommand `ls` keeps `doz sessions NAME`; 610: `restart` attaches afterwards
+  only when stdin AND stdout are a terminal — a script's `--yes` restarted and then attached forever — never with `-d` or
+  `--json`, and `--attach` forces it: `SessionsRestart.attaches`); web actions
   `session-end` / `session-restart` (one HostOp each; `components/session-actions.js`: a tab's ⋯ and the
   Sessions tab's ⋯; a restarting pane (`t.restarting`) ignores the `ended` frame and the socket's close, shows
   "Restarting the session…", and reattaches with its scrollback when the operation is done).
@@ -480,6 +482,15 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   session answers "already running", and a deckhold "Address in use" re-lists and answers with the
   session that won. (590: two clicks during a first boot started two `deckhold serve`s.)
   `KeyedGateTests`, and `test-cli`'s "concurrent opens of one session".
+- **A cold start is JOINED, never raced** (610, 590.B3: an open during a first start's image preparation ran while the
+  sandbox was still OFF and failed "… is off"). `HostCore.coldStarts` (`ColdStarts`, a lock like `KeyedGate`) holds a
+  sandbox from the moment `start` decides to boot it from off/failed — its preparation included — to the boot's end.
+  `ensureRunning` (open-session, attach with wake, exec/run) waits for it and then looks again (a fresh `get`: a
+  Dockerfile sandbox is re-adopted mid-start); `open-session` joins it BEFORE queueing at `sessionGate`, so every open
+  made during it ends with the start; a second `start` joins the first. A failed start fails every joiner with
+  "NAME did not start — <the start's reason>". With no start under way an off sandbox is refused as before (nothing
+  starts unless asked). `ColdStartJoinTests` (no VM: a gated preparation); `probes/590-*/browser-repro-open-during-boot.mjs`
+  (a real claude-code first start, two opens during it: both wait, one session).
 - **A poller never counts sessions**: `ls` with `withSessions: false`. Counting runs `deckhold ls`,
   which connects to every session's holder — each connect is a line in the guest's
   `/run/deckhold/NAME.log` (tmpfs); the UI's 3 s poll grew one by 600 KB in 9 hours. A repeat of an
@@ -1438,9 +1449,21 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   to send one set it; `doz attach` from a terminal of another size left a web pane showing a TUI drawn for the
   other width (stray text, stale glyphs where it draws blanks) until the pane's own size changed. The relay
   (`HostServer`'s attach, `HostCore.sizeOwners`, `SessionSizeOwners`) re-applies a viewer's size before its
-  keys when another viewer sized the session since (a watcher's 0×0 never owns it). Known residue: deckhold's
-  snapshot right after a narrowing reflow can drop an EMPTY soft-wrapped row (its model is right — a fresh
-  attach is clean); a TUI's next relative moves then land a row off on that viewer until it redraws.
+  keys when another viewer sized the session since (a watcher's 0×0 never owns it). 609's residue — deckhold's snapshot after a narrowing reflow
+  dropped an EMPTY soft-wrapped row, so a TUI's prompt sat a row off on that viewer — is fixed in deckhold (610, below).
+- **deckhold's SNAPSHOT is placed run by run** (610): libghostty-vt's formatter, unwrapping, counts a line's newline only at
+  its last row, but counts an EMPTY row (no text) as blank before that — a wrap into or out of an empty row lost a
+  newline and every row below landed one high on the viewer. `send_snapshot` now formats the active area in runs (a row
+  with text and the rows with text it soft-wraps into; a run also ends at an orphaned spacer head, and stops its
+  selection before it), each after a CUP to its own row; the modes go with the first run, every other extra with the
+  last. `make deckhold-snapshot-check` (`Guest/deckhold/test/`: deckhold.c itself against a Mac build of the SAME
+  ghostty commit) replays every snapshot on a fresh emulator and compares cell by cell (fixed cases + a seeded fuzz of
+  screens × size changes; 0.30.1's source failed ~45 %). Run it on any change to `send_snapshot` or the ghostty pin.
+- **A wake brings this build's deckhold** (610, `Sandbox.refreshDeckhold` in `.applyGuestFixes`): deckhold is copied in at
+  a fresh boot; a wake compares the guest's `sha256sum` with this build's and, when they differ, stages it beside
+  (`GuestCommand.deckholdStagingPath`) and RENAMES it over (only when the staged copy is exactly this build's). A
+  session's running holder keeps its own binary (the old inode) until it restarts (`doz sessions restart`) or ends;
+  sessions opened after the wake run the new one. Best effort — a wake never fails for it. `test-vm-upgrade` checks it.
 - **The 541 rule lives in the UI process** (`TerminalInputClassifier`, SandboxLab's cases as tests):
   while not running, a keystroke starts `resume`/`wake` as an ordinary operation and is DROPPED; a
   control report is dropped and counted. Input for a running sandbox goes straight through. Phases come
@@ -1522,6 +1545,7 @@ make test-cli-openfiles # 599b: workspace files opened on the Mac through the op
 make test-vm-cwd     # BUG cwd-after-wake: a program's cwd in /workspace across sleep, hibernate and a new-process restore (the raw share as the control); the passthrough view's cost
 make test-vm-ignore  # 599g: workspace rules (.dozignore lock/hide, .dozreadonly) across boot/pause/sleep/hibernate/new-process restore, reload, folding, kills (scratch store)
 make dozview / dozview-verify # 599g: rebuild the guest view daemon (pinned Zig) / check the committed bytes
+make deckhold / deckhold-verify / deckhold-snapshot-check # the guest PTY holder: rebuild (pinned Zig + ghostty) / check the committed bytes / 610: its snapshot equals its screen, cell by cell
 make test-cli-hoststop # 594 W22: test-cli's host-stop part alone (per-sandbox progress plain/animated, --json, nothing running, a host killed mid-stop)
 make pullbench       # 594 D12: the node base pulled with 3 vs 6 concurrent layer downloads, fresh stores (network)
 ```
