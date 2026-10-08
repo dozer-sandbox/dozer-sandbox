@@ -299,3 +299,24 @@ final class BridgeState: @unchecked Sendable {
     func firstUse(_ sandbox: String, _ what: String) -> Bool { lock.withLock { announced.insert(sandbox + "|" + what).inserted } }
     func resetFirstUse(_ sandbox: String) { lock.withLock { announced = announced.filter { !$0.hasPrefix(sandbox + "|") } } }
 }
+
+/// 609: which viewer set each session's size last. A session has ONE size, and the attach relay's viewers
+/// each send theirs (an attach's HELLO, a RESIZE when their terminal changes) — the last one wins. A viewer
+/// that types while another viewer's size is in force first re-applies its own (`takeForInput`): the
+/// terminal a person types in is the one the program draws for. Keyed "sandbox|session"; a watcher (0×0)
+/// never claims. Same-size re-applies are harmless (no SIGWINCH; the viewer gets a fresh snapshot).
+public final class SessionSizeOwners: @unchecked Sendable {
+    private let lock = NSLock()
+    private var owners: [String: ObjectIdentifier] = [:]
+    public init() {}
+    /// `who` just set `key`'s size.
+    public func claim(_ key: String, _ who: ObjectIdentifier) { lock.withLock { owners[key] = who } }
+    /// `who` is about to type into `key`: true (and `who` now owns it) when someone else set the size since.
+    public func takeForInput(_ key: String, _ who: ObjectIdentifier) -> Bool {
+        lock.withLock {
+            if owners[key] == who { return false }
+            owners[key] = who
+            return true
+        }
+    }
+}

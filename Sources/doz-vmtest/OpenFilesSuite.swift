@@ -54,8 +54,8 @@ func cliOpenFilesSuite(binary: String) async {
     check(t.run(["config", "set", "defaults.projects_dir", "/tmp/dzo-\(pid)-fp"]).code == 0, "defaults.projects_dir is a scratch path")
     var r = t.run(["up", "of", "--image", "lab", "--workspace", ws.path, "--memory", "512M", "--network", "none", "--detach"], timeout: 600)
     check(r.code == 0, "up of --image lab --workspace \(ws.path) --detach (exit \(r.code))")
-    r = t.run(["exec", "of", "--", "sh", "-c", "ls -l /usr/local/lib/doz/bin/ | grep -c 'doz-open -> xdg-open'; grep -c 'open-url-shim:v5' /usr/local/lib/doz/bin/xdg-open"])
-    check(r.out.split(separator: "\n").map(String.init) == ["1", "1"], "the v5 shim and its doz-open link are in the guest (\(r.out.debugDescription))")
+    r = t.run(["exec", "of", "--", "sh", "-c", "ls -l /usr/local/lib/doz/bin/ | grep -c 'doz-open -> xdg-open'; grep -c 'open-url-shim:v6' /usr/local/lib/doz/bin/xdg-open"])
+    check(r.out.split(separator: "\n").map(String.init) == ["1", "1"], "the v6 shim and its doz-open link are in the guest (\(r.out.debugDescription))")
 
     do {
         let c = try PTYClient(t, ["run", "of", "--session", "files", "--", "bash", "--norc", "-i"])
@@ -67,7 +67,7 @@ func cliOpenFilesSuite(binary: String) async {
         // 1. An html and a markdown file → opened in the Mac's default app; relative and from a sub folder.
         c.type("xdg-open report.html; open notes.md; (cd sub && xdg-open page.htm); echo F1-$((1+1))\r")
         check(c.wait(15) { $0.text.contains("F1-2") }, "xdg-open, open and a relative path ran (F1-2)")
-        check(c.text.contains("Asking your Mac to open: /workspace/report.html"), "the session shows the guest path")
+        check(!c.text.contains("Asking your Mac"), "the session shows nothing of the shim (609: the notice says it)")
         check(c.wait(10) { _ in log().contains("open-file default \(real)/report.html\n") }, "report.html opened on the Mac, by its Mac path (\(log().debugDescription))")
         check(c.wait(5) { _ in log().contains("open-file default \(real)/notes.md\n") }, "notes.md opened (open FILE)")
         check(c.wait(5) { _ in log().contains("open-file default \(real)/sub/page.htm\n") }, "sub/page.htm opened (a relative path in a sub folder)")
@@ -126,8 +126,7 @@ func cliOpenFilesSuite(binary: String) async {
         //     the Finder").
         c.type("xdg-open .; open docs; doz-open --reveal notes.md; echo D1-$((1+20))\r")
         check(c.wait(15) { $0.text.contains("D1-21") }, "folders and a reveal asked for (D1-21)")
-        check(c.text.contains("Asking your Mac to open in the Finder: /workspace\r") || c.text.contains("Asking your Mac to open in the Finder: /workspace\n"),
-              "the shim: open . is the workspace")
+        check(!c.text.contains("Asking your Mac"), "the shim prints nothing for a folder either (609)")
         check(c.wait(10) { _ in log().contains("open-folder \(real)\n") }, "open . → the workspace in the Finder (\(log().suffix(160).debugDescription))")
         check(c.wait(5) { _ in log().contains("open-folder \(real)/docs\n") }, "open docs → a child folder in the Finder")
         check(c.wait(5) { _ in log().contains("reveal \(real)/notes.md\n") }, "doz-open --reveal notes.md → shown selected in its folder")

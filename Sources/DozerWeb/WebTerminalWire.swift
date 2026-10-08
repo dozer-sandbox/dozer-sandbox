@@ -54,23 +54,8 @@ public enum WebTerminalWire {
     /// so the notice is recognised even when a read splits it). The CLI's `AttachClient.holdBack`,
     /// plus the `ESC[0m` the notice starts with (so no piece of the notice reaches the screen; what
     /// is held is at most an SGR reset, sent with the next read).
-    public static func holdBack(_ bytes: [UInt8]) -> Int {
-        // 599: a bridge's notice not finished yet; and the start of either notice (they share `dozPrefix`).
-        let unfinished = ClientWire.unfinishedNotice(bytes)
-        if unfinished > 0 { return unfinished }
-        let sentinel = Array(ClientWire.dozPrefix.utf8)
-        let patterns = [[0x1B, 0x5B, 0x30, 0x6D] + sentinel, sentinel]
-        let window = min(bytes.count, ClientWire.sentinelPrefix.utf8.count + 28)
-        guard window > 0 else { return 0 }
-        for i in (bytes.count - window)..<bytes.count where bytes[i] == 0x1B {
-            let tail = Array(bytes[i...])
-            for p in patterns {
-                let n = min(tail.count, p.count)
-                if Array(tail.prefix(n)) == Array(p.prefix(n)) { return bytes.count - i }
-            }
-        }
-        return 0
-    }
+    /// 609: the one rule every viewer uses (`ClientWire.holdBack`).
+    public static func holdBack(_ bytes: [UInt8]) -> Int { ClientWire.holdBack(bytes) }
 
     // MARK: 591 — the boot view
 
@@ -105,11 +90,7 @@ public enum WebTerminalWire {
     }
 
     /// The host's line after the notice ("[doz] the shell session has ended (exit 0)"), without the tag.
-    public static func endingText(_ bytes: ArraySlice<UInt8>) -> String {
-        guard let bel = bytes.firstIndex(of: 0x07) else { return "" }
-        let s = String(decoding: bytes[(bel + 1)...], as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
-        return s.hasPrefix("[doz] ") ? String(s.dropFirst("[doz] ".count)) : s
-    }
+    public static func endingText(_ bytes: ArraySlice<UInt8>) -> String { ClientWire.endingText(bytes) }
 }
 
 /// 591 — the inbound byte budget of one terminal: a burst, refilled at a steady rate. Paste goes

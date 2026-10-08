@@ -427,33 +427,30 @@ enum AttachClient {
             }
             setSocket(client.fd)
             UnixSocket.writeAll(client.fd, Data(ClientWire.resize(terminalSize())))
-            var pending = [UInt8](client.reader.takeRemainder())
+            // 609: the host → client stream as every viewer reads it (`ClientWire.ViewerStream`, shared with
+            // each web pane): notices out, the end found, a notice's start held for the next read.
+            var stream = ClientWire.ViewerStream()
+            var chunk = [UInt8](client.reader.takeRemainder())
             var buf = [UInt8](repeating: 0, count: 65536)
             var ending: ClientWire.Ending?
             while true {
                 // 599: a bridge's notice (removed from the bytes; drawn once they are written).
-                let notices = ClientWire.takeNotices(&pending)
-                if let (e, start) = ClientWire.findEnding(in: pending) {
-                    writeOut(pending[..<start])
-                    let rest = pending[start...]
+                let step = stream.feed(chunk)
+                if let e = step.ending {
+                    writeOut(step.screen[...])
                     // The session is over: the terminal is put back before the host's last word.
                     restoreTerminal()
-                    for n in notices { say(n.text) }
-                    if let bel = rest.firstIndex(of: 0x07) {
-                        let text = String(decoding: rest[(bel + 1)...], as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
-                        if !quiet && !text.isEmpty { say(text.replacingOccurrences(of: "[doz] ", with: "")) }
-                    }
+                    for n in step.notices { say(n.text) }
+                    if !quiet && !step.endingText.isEmpty { say(step.endingText) }
                     ending = e
                     break
                 }
-                let hold = holdBack(pending)
-                writeOut(pending[..<(pending.count - hold)])
-                pending = Array(pending.suffix(hold))
-                for n in notices { showNotice(n) }
+                writeOut(step.screen[...])
+                for n in step.notices { showNotice(n) }
                 let n = read(client.fd, &buf, buf.count)
-                if n < 0 && errno == EINTR { continue }
+                if n < 0 && errno == EINTR { chunk = []; continue }
                 if n <= 0 { break }
-                pending += buf[0..<n]
+                chunk = Array(buf[0..<n])
             }
             setSocket(-1)
             // 599 (594.B4): the menu switched sessions — attach there (the same client, the same terminal).
@@ -469,7 +466,7 @@ enum AttachClient {
                 case .stopped: finish(DozerExit.failed)
                 }
             }
-            writeOut(pending[...])
+            writeOut(stream.flush()[...])
             if !quiet && !announcedHeld { say("connection closed (\(sandbox) is asleep or stopping) — reattaching when it runs…") }
             announcedHeld = true
             usleep(300_000)
@@ -481,19 +478,7 @@ enum AttachClient {
 
     private static func writeOut(_ bytes: ArraySlice<UInt8>) { writeSession(bytes) }
 
-    /// How many trailing bytes might be the start of the ended notice (hold them for the next read).
-    static func holdBack(_ bytes: [UInt8]) -> Int {
-        // 599: either of the host's notices (`ended`, and a bridge's `notice`) — they share this start.
-        let prefix = Array(ClientWire.dozPrefix.utf8)
-        let unfinished = ClientWire.unfinishedNotice(bytes)
-        if unfinished > 0 { return unfinished }
-        let window = min(bytes.count, ClientWire.sentinelPrefix.utf8.count + 24)
-        guard window > 0 else { return 0 }
-        for i in (bytes.count - window)..<bytes.count where bytes[i] == 0x1B {
-            let tail = Array(bytes[i...])
-            let n = min(tail.count, prefix.count)
-            if Array(tail.prefix(n)) == Array(prefix.prefix(n)) { return bytes.count - i }
-        }
-        return 0
-    }
+    /// How many trailing bytes might be the start of either host notice (hold them for the next read).
+    /// 609: the one rule every viewer uses (`ClientWire.holdBack`).
+    static func holdBack(_ bytes: [UInt8]) -> Int { ClientWire.holdBack(bytes) }
 }

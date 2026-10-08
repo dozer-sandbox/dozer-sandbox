@@ -14,8 +14,9 @@ a cloud CLI, a SaaS tool's CLI, an MCP server's OAuth.
 - **The browser bridge.** Inside every sandbox, `xdg-open` — and `$BROWSER`, `open`,
   `sensible-browser`, `www-browser` — is Dozer's own small program. It hands an **http or https**
   address to your Mac, which opens it in your default browser. You're told every time:
-  `my-app opened https://example.com/docs in your browser`. The session shows the address in plain
-  text too. (Given a document in `/workspace` instead of an address, the same program opens that file
+  `my-app opened https://example.com/docs in your browser`. Nothing is printed into the session itself
+  — the agent's screen stays exactly as it drew it; when an address is refused, the program that asked
+  hears why (its error output and exit status). (Given a document in `/workspace` instead of an address, the same program opens that file
   on your Mac — see [Opening workspace files on your Mac](07-terminals-and-sessions.md#opening-workspace-files-on-your-mac).)
 - **The sign-in callback.** When the address asks the provider to send the browser back to the
   sandbox's `localhost:PORT` (its `redirect_uri`), Dozer first opens your Mac's `localhost:PORT` and

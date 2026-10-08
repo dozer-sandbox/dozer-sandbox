@@ -360,14 +360,19 @@ public final class HostServer: @unchecked Sendable {
         private let lock = NSLock()
         private var _size: TermSize
         private var _session: SessionConnection?
+        private var _key: String?
         private var _gone = false
         init(size: TermSize) { _size = size }
         var size: TermSize { lock.withLock { _size } }
         var gone: Bool { lock.withLock { _gone } }
         var session: SessionConnection? { lock.withLock { _session } }
+        /// 609: "sandbox|session" once attached (the size registry's key).
+        var key: String? { lock.withLock { _key } }
         func setSize(_ s: TermSize) -> SessionConnection? { lock.withLock { _size = s; return _session } }
         /// False when the client left meanwhile.
-        func adopt(_ c: SessionConnection) -> Bool { lock.withLock { if _gone { return false }; _session = c; return true } }
+        func adopt(_ c: SessionConnection, key: String) -> Bool {
+            lock.withLock { if _gone { return false }; _session = c; _key = key; return true }
+        }
         func release(_ c: SessionConnection) { lock.withLock { if _session === c { _session = nil } } }
         func markGone() -> SessionConnection? { lock.withLock { _gone = true; let s = _session; _session = nil; return s } }
     }
@@ -421,7 +426,9 @@ public final class HostServer: @unchecked Sendable {
                     do {
                         let c = try await sandbox.attach(session, size: state.size)
                         // Adopted BEFORE the answer: the client sends what it typed ahead as soon as it reads it.
-                        guard state.adopt(c) else { c.close(); return }
+                        guard state.adopt(c, key: name + "|" + session) else { c.close(); return }
+                        // 609: its HELLO sized the session (a watcher's 0×0 keeps the size — it never owns it).
+                        if state.size.cols > 0, state.size.rows > 0 { core.sizeOwners.claim(name + "|" + session, ObjectIdentifier(state)) }
                         if !announced {
                             conn.send(.success(.object(["state": .string("attached"), "session": .string(session), "sandbox": .string(name),
                                                         "defaultSession": defaultSession, "image": imageName])))
@@ -463,8 +470,22 @@ public final class HostServer: @unchecked Sendable {
         func feed(_ bytes: [UInt8]) {
             for f in parser.feed(bytes) {
                 switch f {
-                case .hello(let s), .resize(let s): state.setSize(s)?.resize(s)
-                case .input(let d): state.session?.send(d)       // dropped while held: nobody to type to
+                case .hello(let s), .resize(let s):
+                    let c = state.setSize(s)
+                    c?.resize(s)
+                    if c != nil, s.cols > 0, s.rows > 0, let key = state.key { core.sizeOwners.claim(key, ObjectIdentifier(state)) }
+                case .input(let d):
+                    // 609: a session has ONE size — the last viewer to send one set it. When another viewer
+                    // (`doz attach` from another terminal, another pane) resized it since this one did, this
+                    // viewer's keys would reach a program drawing for the OTHER size: an agent's TUI then
+                    // draws past this screen's edge and leaves stale glyphs where it means blanks (the web
+                    // pane's "space doesn't work"). The viewer a person types in owns the size: re-apply it.
+                    let size = state.size
+                    if let c = state.session, size.cols > 0, size.rows > 0, let key = state.key,
+                       core.sizeOwners.takeForInput(key, ObjectIdentifier(state)) {
+                        c.resize(size)
+                    }
+                    state.session?.send(d)       // dropped while held: nobody to type to
                 case .repaint: state.session?.repaint()           // 599: a fresh snapshot (a notice or menu drawn over it)
                 }
             }

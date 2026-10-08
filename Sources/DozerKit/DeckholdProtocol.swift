@@ -299,7 +299,7 @@ public enum GuestCommand {
     public static let openShimPath = openShimDirectory + "/xdg-open"
     /// The other names a program reaches for (links to the shim). 599b: `doz-open` (`--app NAME FILE`).
     public static let openShimAliases = ["open", "sensible-browser", "www-browser", "x-www-browser", "doz-open"]
-    static let openShimStamp = "doz:open-url-shim:v5"
+    static let openShimStamp = "doz:open-url-shim:v6"
 
     /// 599b: the document types a /workspace file may have to be opened on the Mac (lowercased
     /// extensions). The host (`WorkspaceFiles`) decides; the shim checks the same lists first so the
@@ -333,20 +333,29 @@ public enum GuestCommand {
 
     /// The shim (DeckStack's technique, 535/539 — read, not depended on): this sandbox has no browser,
     /// so the URL is handed to the Mac as a private OSC 6340 marker on the session's terminal, which the
-    /// host's attach relay takes out and decides on (http/https only, the setting, a notice); plus a
-    /// line a person can read. The marker goes to the controlling terminal, else the session's own
-    /// (`$DOZ_TTY`, exported by deckhold — an opener that `setsid`s its child has no controlling
-    /// terminal), else stdout. `2>/dev/null` BEFORE `>`: a failed rung prints nothing (DeckStack's lesson).
+    /// host's attach relay takes out and decides on (http/https only, the setting, a notice). The marker
+    /// goes to the controlling terminal, else the session's own (`$DOZ_TTY`, exported by deckhold — an
+    /// opener that `setsid`s its child has no controlling terminal), else stdout when stdout IS a
+    /// terminal; with none of them it refuses (exit 1). `2>/dev/null` BEFORE `>`: a failed rung prints
+    /// nothing (DeckStack's lesson).
+    /// 609 (owner: "I dont actually think we need to show any output in the terminal"): the shim writes
+    /// NOTHING a person sees — only the marker, which every viewer has taken out. Up to v5 it also wrote
+    /// "Asking your Mac to open: URL" to the terminal, behind the program that owns the screen: an agent's
+    /// TUI (Claude Code) redraws relative to where it believes its cursor is and draws blank cells as
+    /// cursor jumps, so the inserted rows (a sign-in URL wraps over several) left stray text on screen and
+    /// under the spaces the TUI drew afterwards — "space doesn't work" — until something made the TUI
+    /// redraw all of it (`doz attach` from a terminal of another size does: a resize). The person is told
+    /// by the Dozer notice; the program that ran the shim hears a refusal on stderr and the exit status.
     /// 599b: a FILE as well — `doz-file;APP;/workspace/…` (the path made absolute and resolved HERE, in
     /// the caller's directory; the host resolves it again on the Mac and decides). The shim's own checks
     /// (in /workspace, a document type, not executable, not `#!`) only tell the agent why at once — the
     /// notice goes to the person's terminal, not the agent's. `-a`/`--app NAME` (`doz-open --app`).
     /// 599b, later: a FOLDER in /workspace (`open .` too) opens in the Finder (the same `doz-file;;PATH` —
     /// the host sees it is a folder); `-R`/`--reveal PATH` sends `doz-reveal;PATH` (shown selected in its
-    /// folder). A package folder (`*.app`, …) is refused unless revealed. Stamp v5.
+    /// folder). A package folder (`*.app`, …) is refused unless revealed. Stamp v5; 609: v6 (silent).
     public static let openShim = #"""
     #!/bin/sh
-    # doz:open-url-shim:v5
+    # doz:open-url-shim:v6
     # Dozer Sandbox's bridge to the Mac. This sandbox has no browser and no desktop, so an http(s) URL,
     # or a document or folder in /workspace (the folder shared with the Mac), is handed to the Mac
     # through the session's terminal: doz shows it and opens it (the URL in the Mac's default browser,
@@ -381,23 +390,22 @@ public enum GuestCommand {
         [ "$capp" = "$app" ] && [ "${#app}" -le 64 ] || { echo "$me: \"$capp\" is not an app name" >&2; exit 1; }
     fi
     refuse() { echo "$me: $*" >&2; status=1; }
-    # The marker on the session's terminal ($1: its body) and a line a person can read ($2).
+    # The marker on the session's terminal ($1: its body) — and nothing else: the person is told by Dozer
+    # (a notice), never by text written behind the program that owns the screen (an agent's TUI).
     send() {
         # Inside tmux (sessions.tmux) the pane's terminal is tmux's, which drops a sequence it does not
-        # know: the marker goes to the session's own terminal ($DOZ_TTY, tmux's client), the line to the pane.
+        # know: the marker goes to the session's own terminal ($DOZ_TTY, tmux's client).
         if [ -n "${TMUX:-}" ] && [ -n "${DOZ_TTY:-}" ] && [ -w "$DOZ_TTY" ] \
-            && printf '\033]6340;%s\007' "$1" 2>/dev/null > "$DOZ_TTY"; then
-            printf '%s\n' "$2" 2>/dev/null > /dev/tty || printf '%s\n' "$2"
-            return 0
-        fi
-        if [ -w /dev/tty ] 2>/dev/null && printf '%s\r\n\033]6340;%s\007' "$2" "$1" 2>/dev/null > /dev/tty; then return 0; fi
-        if [ -n "${DOZ_TTY:-}" ] && [ -w "$DOZ_TTY" ] && printf '%s\r\n\033]6340;%s\007' "$2" "$1" 2>/dev/null > "$DOZ_TTY"; then return 0; fi
-        printf '%s\r\n\033]6340;%s\007' "$2" "$1"
+            && printf '\033]6340;%s\007' "$1" 2>/dev/null > "$DOZ_TTY"; then return 0; fi
+        if [ -w /dev/tty ] 2>/dev/null && printf '\033]6340;%s\007' "$1" 2>/dev/null > /dev/tty; then return 0; fi
+        if [ -n "${DOZ_TTY:-}" ] && [ -w "$DOZ_TTY" ] && printf '\033]6340;%s\007' "$1" 2>/dev/null > "$DOZ_TTY"; then return 0; fi
+        if [ -t 1 ]; then printf '\033]6340;%s\007' "$1"; return 0; fi
+        refuse "no terminal of a Dozer session to reach your Mac through (run it in a session: doz attach, or the dashboard)"
     }
     open_url() {
         [ -z "$app" ] || { refuse "--app is for files; a URL opens in your Mac's default browser: $1"; return; }
         [ -z "$reveal" ] || { refuse "--reveal is for files and folders in /workspace, not a URL: $1"; return; }
-        send "doz-open;$1" "Asking your Mac to open: $1"
+        send "doz-open;$1"
     }
     open_file() {
         t=$1
@@ -415,14 +423,14 @@ public enum GuestCommand {
         lower=$(printf '%s' "$name" | tr 'A-Z' 'a-z')
         if [ -n "$reveal" ]; then
             [ -z "$app" ] || { refuse "--app with --reveal: it is shown in the Finder"; return; }
-            send "doz-reveal;$abs" "Asking your Mac to show: $abs"; return
+            send "doz-reveal;$abs"; return
         fi
         if [ -d "$abs" ]; then
             [ -z "$app" ] || { refuse "--app is for files; a folder opens in the Finder: $t"; return; }
             case "$lower" in
                 \#(casePatterns(openFileNeverTypes))) refuse "$name is an app or package: never opened on your Mac ($me --reveal shows it in its folder)"; return ;;
             esac
-            send "doz-file;;$abs" "Asking your Mac to open in the Finder: $abs"; return
+            send "doz-file;;$abs"; return
         fi
         case "$lower" in
             \#(casePatterns(openFileNeverTypes))) refuse "$name is a program, script or installer type: never opened on your Mac"; return ;;
@@ -431,7 +439,7 @@ public enum GuestCommand {
         esac
         [ -x "$abs" ] && { refuse "$name is executable: never opened on your Mac"; return; }
         [ "$(head -c 2 "$abs" 2>/dev/null)" = '#!' ] && { refuse "$name is a script: never opened on your Mac"; return; }
-        send "doz-file;$app;$abs" "Asking your Mac to open: $abs${app:+ in $app}"
+        send "doz-file;$app;$abs"
     }
     for target in "$@"; do
         if [ "${#target}" -gt 2048 ]; then refuse "the URL or file name is longer than 2048 bytes: not sent to the Mac"; continue; fi

@@ -260,6 +260,80 @@ public enum ClientWire {
         return found
     }
 
+    /// How many trailing bytes might be the start of either host notice (held for the next read, so a
+    /// notice is recognised even when a read splits it): an unfinished notice, else a tail that may begin
+    /// one — `ESC]777;doz;`, or the ended notice's `ESC[0m` in front of it (so no piece of a notice
+    /// reaches a screen; what is held is at most an SGR reset, sent with the next read).
+    public static func holdBack(_ bytes: [UInt8]) -> Int {
+        let unfinished = unfinishedNotice(bytes)
+        if unfinished > 0 { return unfinished }
+        let sentinel = Array(dozPrefix.utf8)
+        let patterns = [[0x1B, 0x5B, 0x30, 0x6D] + sentinel, sentinel]
+        let window = min(bytes.count, sentinelPrefix.utf8.count + 28)
+        guard window > 0 else { return 0 }
+        for i in (bytes.count - window)..<bytes.count where bytes[i] == 0x1B {
+            let tail = Array(bytes[i...])
+            for p in patterns {
+                let n = min(tail.count, p.count)
+                if Array(tail.prefix(n)) == Array(p.prefix(n)) { return bytes.count - i }
+            }
+        }
+        return 0
+    }
+
+    /// The host's line after the ended notice ("[doz] the shell session has ended (exit 0)"), without the tag
+    /// (a read that cut the tag itself leaves nothing of it either).
+    public static func endingText(_ bytes: ArraySlice<UInt8>) -> String {
+        guard let bel = bytes.firstIndex(of: 0x07) else { return "" }
+        let s = String(decoding: bytes[(bel + 1)...], as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+        if "[doz]".hasPrefix(s) { return "" }
+        return s.hasPrefix("[doz] ") ? String(s.dropFirst("[doz] ".count)) : s
+    }
+
+    /// 609: what EVERY viewer of a session does with the host → client stream, in one place — `doz attach`
+    /// (and run/up), each web pane and each All-sessions tile: a bridge's notice is taken out (never drawn,
+    /// even when a read cuts it anywhere), the ended notice is found (nothing of it drawn), and the start
+    /// of either is held for the next read. The session's own bridge sequences (OSC 52, OSC 6340) never
+    /// get here: the host's `SessionBridgeScanner` took them out, once, for every viewer.
+    public struct ViewerStream: Sendable {
+        /// One read's worth: what goes on the screen, the notices for the person, and the end when it came
+        /// (then nothing after it is drawn).
+        public struct Step: Sendable {
+            public var screen: [UInt8] = []
+            public var notices: [BridgeNotice] = []
+            public var ending: Ending?
+            /// The host's last word after the ended notice (without `[doz] `).
+            public var endingText = ""
+        }
+        private var pending: [UInt8] = []
+        public init() {}
+        public init(pending: [UInt8]) { self.pending = pending }
+
+        /// The next bytes from the host → what to draw now (anything that may start a notice is held).
+        public mutating func feed<S: Sequence>(_ bytes: S) -> Step where S.Element == UInt8 {
+            pending += bytes
+            var step = Step()
+            step.notices = ClientWire.takeNotices(&pending)
+            if let (e, start) = ClientWire.findEnding(in: pending) {
+                step.screen = Array(pending[..<start])
+                step.ending = e
+                step.endingText = ClientWire.endingText(pending[start...])
+                pending = []
+                return step
+            }
+            let hold = ClientWire.holdBack(pending)
+            step.screen = Array(pending[..<(pending.count - hold)])
+            pending = Array(pending.suffix(hold))
+            return step
+        }
+
+        /// The connection closed without an end: what was held goes on the screen (it was not a notice).
+        public mutating func flush() -> [UInt8] {
+            defer { pending = [] }
+            return pending
+        }
+    }
+
     /// Finds a notice in `bytes` (which may hold more): the ending and where the notice starts.
     public static func findEnding(in bytes: [UInt8]) -> (Ending, Int)? {
         let prefix = Array(sentinelPrefix.utf8)

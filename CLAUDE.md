@@ -1107,9 +1107,15 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   synced by `doz up`). `sandbox.agent_sudo` keeps its own field.
 - **The browser bridge (B2)** is DeckStack's technique, re-done (never a DeckStack dependency): the
   guest shim (`GuestCommand.openShim`, `/usr/local/lib/doz/bin`, written by `prepareGuest` AND at each
-  session open — a woken sandbox predates it) prints a human line + `ESC]6340;doz-open;URL BEL` to
-  `/dev/tty`, else `$DOZ_TTY` (deckhold exports the session's pty: a `setsid` opener has no ctty),
-  else stdout — `2>/dev/null` BEFORE `>` on each rung. `BrowserBridge.check` = http/https only, never
+  session open — a woken sandbox predates it) writes ONLY `ESC]6340;doz-open;URL BEL` to `/dev/tty`, else
+  `$DOZ_TTY` (deckhold exports the session's pty: a `setsid` opener has no ctty), else stdout when it IS a
+  terminal, else refuses (exit 1) — `2>/dev/null` BEFORE `>` on each rung. **Never a line a person sees**
+  (609, owner: "I dont actually think we need to show any output in the terminal"): text written behind an
+  agent's TUI desynchronises its cursor-relative redraw (Claude Code draws blanks as cursor jumps — the
+  shim's leftovers showed where spaces should be: "space doesn't work" in the web pane, which attaches at
+  the session's size and so never makes the TUI redraw); the Dozer notice tells the person, stderr + the
+  exit status tell the caller. Every viewer reads the host's stream through ONE `ClientWire.ViewerStream`
+  (notices out, the end found, a notice's start held — `XdgOpenSilenceTests` cuts at every offset). `BrowserBridge.check` = http/https only, never
   the Mac's loopback; `callback(in:)` reads ONLY `redirect_uri` (http, `localhost`/`127.0.0.1` exactly,
   explicit port ≥ 1024). `LoopbackForward` binds the Mac's 127.0.0.1 (+ [::1]) BEFORE the URL opens,
   relays each connection through `Sandbox.openGuestStream([deckhold, connect, -p, PORT])` (no NIC
@@ -1428,6 +1434,13 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   keep the session's size), relays PULLED reads (backpressure — no queue grows), strips `0xFF` from
   input (the attach wire's frame byte), turns the host's end notice into an `ended` frame (never on
   screen — `holdBack` covers the `ESC[0m` in front), and reattaches across a hibernation.
+- **The viewer a person types in owns the session's size** (609): a session has ONE size and the last viewer
+  to send one set it; `doz attach` from a terminal of another size left a web pane showing a TUI drawn for the
+  other width (stray text, stale glyphs where it draws blanks) until the pane's own size changed. The relay
+  (`HostServer`'s attach, `HostCore.sizeOwners`, `SessionSizeOwners`) re-applies a viewer's size before its
+  keys when another viewer sized the session since (a watcher's 0×0 never owns it). Known residue: deckhold's
+  snapshot right after a narrowing reflow can drop an EMPTY soft-wrapped row (its model is right — a fresh
+  attach is clean); a TUI's next relative moves then land a row off on that viewer until it redraws.
 - **The 541 rule lives in the UI process** (`TerminalInputClassifier`, SandboxLab's cases as tests):
   while not running, a keystroke starts `resume`/`wake` as an ordinary operation and is DROPPED; a
   control report is dropped and counted. Input for a running sandbox goes straight through. Phases come

@@ -262,22 +262,22 @@ final class WebTerminalBridge: @unchecked Sendable {
             }
             first = false
             await pushState()
-            var pending: [UInt8] = []
+            // 609: the host → client stream as every viewer reads it (`ClientWire.ViewerStream`, shared with
+            // `doz attach`): notices out, the end found, a notice's start held for the next read.
+            var stream = ClientWire.ViewerStream()
             while let chunk = await att.read() {
-                pending += chunk
+                let step = stream.feed(chunk)
                 // 599 (594.B1/B2): what a bridge did — a toast on the page, never bytes on the screen.
-                for n in ClientWire.takeNotices(&pending) {
+                for n in step.notices {
                     await sendText(WebTerminalMessage.encode(WebTerminalMessage.Notice(kind: n.kind, text: n.text)))
                 }
-                if let (ending, start) = ClientWire.findEnding(in: pending) {
-                    if start > 0 { await sendBinary(pending[..<start]) }
-                    let text = WebTerminalWire.endingText(pending[start...])
-                    await sendText(WebTerminalMessage.encode(WebTerminalMessage.ended(ending, text: text)))
+                if let ending = step.ending {
+                    if !step.screen.isEmpty { await sendBinary(step.screen[...]) }
+                    await sendText(WebTerminalMessage.encode(WebTerminalMessage.ended(ending, text: step.endingText)))
                     await end(.normalClosure, "ended")
                     return
                 }
-                let hold = WebTerminalWire.holdBack(pending)
-                let out = pending[..<(pending.count - hold)]
+                let out = step.screen[...]
                 if !out.isEmpty {
                     // After a boot view, the first SNAPSHOT keeps the boot log in the scrollback.
                     let keep: Bool = lock.withLock {
@@ -297,9 +297,9 @@ final class WebTerminalBridge: @unchecked Sendable {
                     }
                     if lifted { await pushState() }
                 }
-                pending = Array(pending.suffix(hold))
             }
-            if !pending.isEmpty { await sendBinary(pending[...]) }
+            let held = stream.flush()
+            if !held.isEmpty { await sendBinary(held[...]) }
             // Closed without the end notice: a hibernation (the guest session lives on) or a lost
             // transport. Reattach — the host holds us until the sandbox runs.
             lock.withLock {
