@@ -22,12 +22,14 @@ machines. You install it with Homebrew.
 You need a Mac with Apple silicon and macOS 26 or later.
 
 ```sh
+brew trust --tap dozer-sandbox/tap   # once per Mac: Homebrew loads a third-party tap's formulas only once trusted
 brew install dozer-sandbox/tap/doz
 doz --version
 ```
 
-Homebrew adds Dozer's tap and installs a prebuilt, signed and notarised `doz` in seconds — no compiler
-is needed. It ends with a hint: run `doz onboard` ([Setting up](03-setting-up.md)).
+Recent Homebrew loads formulas from a third-party tap only after you trust it — `brew trust` is needed
+once per Mac (without it `brew install` refuses the formula). Homebrew then adds Dozer's tap and installs
+a prebuilt, signed and notarised `doz` in seconds — no compiler is needed. It ends with a hint: run `doz onboard` ([Setting up](03-setting-up.md)).
 
 ### Release channels
 
@@ -166,4 +168,4 @@ Don't have a Homebrew `doz` and a source-built one on your `PATH` at the same ti
 | `doz: command not found` | `brew list doz`, then open a new terminal window. |
 | "this host's program … is gone — an upgrade removed it" | `doz host stop`, then run your command again. |
 | "cannot boot a VM" or a message about the entitlement | `doz doctor`. Reinstall: `brew reinstall doz`. |
-| Start over from nothing | `doz uninstall`, `brew uninstall doz`, then `brew install dozer-sandbox/tap/doz` and `doz onboard`. |
+| Start over from nothing | `doz uninstall`, `brew uninstall doz`, then `brew trust --tap dozer-sandbox/tap`, `brew install dozer-sandbox/tap/doz` and `doz onboard`. |

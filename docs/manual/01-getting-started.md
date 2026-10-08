@@ -29,6 +29,7 @@ Most of that is a one-off download that you can leave running in the background.
 With [Homebrew](https://brew.sh):
 
 ```sh
+brew trust --tap dozer-sandbox/tap   # once per Mac: Homebrew loads a third-party tap's formulas only once trusted
 brew install dozer-sandbox/tap/doz
 doz --version
 ```

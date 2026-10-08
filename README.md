@@ -7,6 +7,7 @@ disk to give its memory back — then wakes with every program still running whe
 policy you can read, and your keys never enter the sandbox.
 
 ```sh
+brew trust --tap dozer-sandbox/tap   # once per Mac: Homebrew loads a third-party tap's formulas only once trusted
 brew install dozer-sandbox/tap/doz
 doz onboard                 # once: checks this Mac, your agent's account, and prepares an image
 cd ~/code/my-project
