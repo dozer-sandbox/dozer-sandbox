@@ -11,7 +11,7 @@
 #
 #   1. the exact tarball dist/doz-V-macos-arm64.tar.gz: its .sha256 matches, it unpacks to a doz that says V,
 #      carries the RELEASE marker, verifies (codesign --strict) and — unless TEST_PUBLISH=1 — is the public flavor,
-#      signed by Dozer's Developer ID team and notarised (spctl);
+#      signed by Dozer's Developer ID team and notarised (its ticket published — Scripts/notary-ticket.sh);
 #   2. the entry is signed with Dozer's update key (the login keychain; a test passes UPDATE_KEY_FILE) and the
 #      signature is checked against the public key doz carries (Distribution.updatePublicKey; a test:
 #      UPDATE_PUBLIC_KEY) — a key that does not match what doz trusts is refused before anything is written;
@@ -73,7 +73,7 @@ codesign --verify --strict "$doz" || fail "the tarball's doz does not verify"
 if [[ -z "$TEST_PUBLISH" ]]; then
     [[ "$(cat "$work/doz-$VERSION/libexec/doz/RELEASE")" == public ]] || fail "the tarball is not the PUBLIC flavor (make release PUBLIC=1)"
     codesign -dv --verbose=2 "$doz" 2>&1 | grep -q "^TeamIdentifier=$TEAM_ID\$" || fail "the tarball's doz is not signed by team $TEAM_ID"
-    spctl --assess --type install --verbose=4 "$doz" 2>&1 | grep -q 'Notarized Developer ID' || fail "the tarball's doz is not notarised (spctl)"
+    "$ROOT/Scripts/notary-ticket.sh" "$doz" 60 >/dev/null || fail "the tarball's doz has no published notary ticket (Scripts/notary-ticket.sh)"
 fi
 say "  ✓ tarball: doz $VERSION, verifies$([[ -z "$TEST_PUBLISH" ]] && echo ", public, Developer ID $TEAM_ID, notarised")"
 
