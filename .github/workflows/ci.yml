@@ -1,0 +1,142 @@
+# DozerKit CI — feature 578. Runs on the SELF-HOSTED Mac runner (label `deck-mac`, as
+# DeckStack does), never a GitHub-hosted image: macOS minutes bill 10x, the hosted image ships an
+# older Swift, and a VM needs a real Mac with Virtualization.framework.
+#
+# macOS ONLY — there is no Linux job: the package is built on Virtualization.framework and vmnet.
+#
+# Jobs:
+#   package  every push/PR: audit, build, unit tests (no VM).
+#   vm       the entitled VM integration suite (`make test-vm`). Runs only when asked for
+#            (workflow_dispatch `vm: true`) or when the repository variable DOZ_VM_CI is "1" —
+#            set that once the runner is verified to boot VMs (logged-in user session; network
+#            for the first kernel fetch and image pull — no `container` CLI needed).
+#   deckhold workflow_dispatch `deckhold: true` only: rebuild the guest binary from the pinned
+#            Zig + ghostty and check it matches the committed bytes (~3.5 min cold).
+# No concurrency group: the self-hosted runner runs one job at a time, and every job here is
+# read-only (`permissions: contents: read`).
+#
+# PUBLIC-REPO SAFETY (611): a pull request from a FORK runs code nobody here has reviewed, so it must never reach the
+# self-hosted Macs. Every self-hosted job carries the guard
+#     github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+# (a fork's PR: the job is skipped), version-check runs a fork's PR on a GitHub-hosted Ubuntu runner (it only reads
+# two VERSION files), and `fork-pr` says what happens instead. There is no `pull_request_target` anywhere (it would
+# run with this repository's token and secrets) — `make audit` (Scripts/audit.sh) fails if either rule is broken.
+# A maintainer builds a fork's change by pushing it to a branch of this repository. Repository setting, too: Actions
+# → "Require approval for all outside collaborators".
+name: DozerKit
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      vm:
+        description: Run the VM integration suite (needs a runner that can boot VMs)
+        type: boolean
+        default: true
+      deckhold:
+        description: Rebuild deckhold from source and verify the committed binary
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  version-check:
+    name: version-check
+    if: github.event_name == 'pull_request'
+    # This repository's own branches: the Mac runner; a fork's PR: a GitHub-hosted runner (never self-hosted).
+    runs-on: ${{ github.event.pull_request.head.repo.full_name == github.repository && fromJSON('["self-hosted","deck-mac"]') || 'ubuntu-latest' }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          set-safe-directory: false
+      - name: VERSION strictly greater than the base branch's
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch -q --depth=1 origin "$GITHUB_BASE_REF"
+          HEAD_V=$(cat VERSION)
+          BASE_V=$(git show "origin/$GITHUB_BASE_REF:VERSION" 2>/dev/null || echo "")
+          echo "head $HEAD_V · base ${BASE_V:-none}"
+          if [ -n "$BASE_V" ]; then
+            [ "$HEAD_V" != "$BASE_V" ] && [ "$(printf '%s\n%s\n' "$BASE_V" "$HEAD_V" | sort -V | tail -1)" = "$HEAD_V" ] \
+              || { echo "x VERSION $HEAD_V must be strictly greater than $BASE_V" >&2; exit 1; }
+          fi
+          echo "ok version-check"
+
+  fork-pr:
+    name: Fork pull request (no self-hosted CI)
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: |
+          echo "This pull request comes from a fork. The build, tests and VM suite run only on this repository's own"
+          echo "Mac runners, which never run a fork's code: a maintainer runs them by pushing the change to a branch here."
+
+  package:
+    name: Swift package (Mac runner)
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, deck-mac]
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          set-safe-directory: false    # 558 §D: the runner's ~/.gitconfig is a relative symlink
+      - name: Assert the toolchain
+        run: |
+          swift --version
+          swift --version 2>&1 | grep -q '6\.4' || { echo "x expected Swift 6.4 on the runner" >&2; exit 1; }
+      - name: Neutrality audit
+        run: Scripts/audit.sh
+      - name: Per-job SwiftPM security directory
+        run: echo "DECK_SWIFTPM_SECURITY_DIR=$RUNNER_TEMP/swiftpm-security" >> "$GITHUB_ENV"
+      - name: Build and unit-test (serialised across repos on the runner)
+        shell: bash
+        run: |
+          set -euo pipefail
+          LOCK="$HOME/Developer/bin/ci-build-lock"
+          if [ -x "$LOCK" ]; then
+            "$LOCK" --name "$GITHUB_REPOSITORY#$GITHUB_JOB" -- bash -c 'make build && make test'
+          else
+            echo "! $LOCK missing — building unserialised"
+            make build && make test
+          fi
+
+  vm:
+    name: VM integration suite (entitled test host)
+    needs: package
+    if: (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && ((github.event_name == 'workflow_dispatch' && inputs.vm) || vars.DOZ_VM_CI == '1')
+    runs-on: [self-hosted, deck-mac]
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          set-safe-directory: false
+      - name: The pinned Linux kernel (fetched once per host, then a verified cache hit)
+        # The library owns its kernel (KernelProvider): kata-containers 3.28.0's vmlinux-6.18.15-186,
+        # sha256-pinned. The cache lives under the runner user's home so it persists between runs and
+        # is shared with SandboxLab's CI on the same host; concurrent fillers are safe (atomic rename).
+        run: make kernel KERNEL_CACHE="$HOME/Library/Caches/DozerKit-ci/kernels" VMTEST_STORE="$RUNNER_TEMP/doz-vmtest-store"
+      - name: make test-vm (scratch store under the runner's temp dir)
+        shell: bash
+        run: |
+          set -euo pipefail
+          LOCK="$HOME/Developer/bin/ci-build-lock"
+          RUN='make test-vm VMTEST_STORE="$RUNNER_TEMP/doz-vmtest-store" KERNEL_CACHE="$HOME/Library/Caches/DozerKit-ci/kernels"'
+          if [ -x "$LOCK" ]; then "$LOCK" --name "$GITHUB_REPOSITORY#vm" -- bash -c "$RUN"; else bash -c "$RUN"; fi
+
+  deckhold:
+    name: Rebuild deckhold and verify the committed binary
+    if: (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && github.event_name == 'workflow_dispatch' && inputs.deckhold
+    runs-on: [self-hosted, deck-mac]
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          set-safe-directory: false
+      - run: make deckhold-verify

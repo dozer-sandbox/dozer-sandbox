@@ -1,0 +1,17 @@
+{
+  "id": "/?app=dozer",
+  "name": "Dozer Sandbox",
+  "short_name": "Dozer",
+  "description": "Your sandboxes, sessions and images.",
+  "start_url": "/#/overview",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#131312",
+  "theme_color": "#1b1b1a",
+  "icons": [
+    {"src": "/assets/icon-192-574d4c0403e40a58.png", "sizes": "192x192", "type": "image/png", "purpose": "any"},
+    {"src": "/assets/icon-512-a4352d6d216ea39c.png", "sizes": "512x512", "type": "image/png", "purpose": "any"},
+    {"src": "/assets/icon-maskable-512-3e4d1a2a93dde703.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"},
+    {"src": "/assets/icon-d1299237fa178c3d.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any"}
+  ]
+}

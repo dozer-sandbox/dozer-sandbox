@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f6f6f4">
+  <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#131312">
+  <meta name="apple-mobile-web-app-title" content="Dozer">
+  <link rel="icon" href="/assets/icon-d1299237fa178c3d.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/assets/icon-180-05b92a010472981a.png">
+  <link rel="manifest" href="/assets/app-6ffe72642ff9c76d.webmanifest">
+  <title>Dozer Sandbox</title>
+  <meta name="doz-ghostty-wasm" content="/assets/vendor-ghostty-vt-d6f0326f1874ad2c.wasm">
+  <meta name="doz-icons" content="/assets/vendor-lucide-icons-d98f46e1d07aa6c2.svg">
+  <link rel="stylesheet" href="/assets/app-944b02c785ebfa56.css">
+  <script type="module" src="/assets/app-254668fa34521977.js"></script>
+</head>
+<body>
+  <div class="shell">
+    <aside class="side" aria-label="Sections">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">z</span>
+        <div>
+          <div class="brand-name">Dozer Sandbox</div>
+          <div class="brand-store" id="store-path">—</div>
+        </div>
+        <button type="button" class="btn sm quiet icon-only nav-toggle" id="nav-toggle" aria-label="Show the menu" aria-expanded="false" aria-controls="nav"></button>
+      </div>
+      <nav id="nav" aria-label="Pages">
+        <div class="nav-group"><span class="ng-label">Sandboxes</span><button type="button" class="btn sm quiet icon-only nav-quick" id="nav-quick-add" data-quick-add title="Quick add: a sandbox with every default, started and opened" aria-label="Quick add a sandbox"></button></div>
+        <a href="#/overview" data-view="overview"><span class="lbl">All sandboxes</span><span class="trail" id="nav-count"></span></a>
+        <div class="nav-children" id="nav-sandboxes" role="list" aria-label="Sandboxes"></div>
+        <a href="#/sessions" data-view="sessions"><span class="lbl">All sessions</span></a>
+        <div class="nav-group"><span class="ng-label">Store</span></div>
+        <a href="#/images" data-view="images"><span class="lbl">Images</span></a>
+        <a href="#/resources" data-view="resources" id="nav-resources"><span class="lbl">Resources</span><span class="trail"><span class="nav-size" id="res-total" hidden></span></span></a>
+        <div class="nav-group"><span class="ng-label">Activity</span></div>
+        <a href="#/operations" data-view="operations" id="nav-operations"><span class="lbl">Operations</span><span class="trail"><span class="nav-badge" id="ops-badge" hidden></span><span class="nav-alert" id="ops-alert" hidden role="img" aria-label="An operation failed" title="An operation failed"></span></span></a>
+        <a href="#/activity" data-view="activity"><span class="lbl">Activity</span></a>
+        <a href="#/metrics" data-view="metrics"><span class="lbl">Metrics</span></a>
+        <div class="nav-group"><span class="ng-label">Setup</span></div>
+        <a href="#/accounts" data-view="accounts"><span class="lbl">Accounts &amp; keys</span></a>
+        <a href="#/settings" data-view="settings"><span class="lbl">Settings</span></a>
+        <a href="#/devices" data-view="devices"><span class="lbl">Devices</span></a>
+        <a href="#/doctor" data-view="doctor"><span class="lbl">Doctor</span></a>
+        <a href="#/onboarding" data-view="onboarding" id="nav-onboarding"><span class="lbl">Onboarding</span><span class="trail"><span class="nav-alert nav-todo" id="onb-dot" hidden role="img" aria-label="Setup is not finished" title="Setup is not finished"></span></span></a>
+      </nav>
+      <div class="side-foot">
+        <div class="live" id="live" title="This page's link to the doz ui server"><span class="dot" aria-hidden="true"></span><span class="foot-k">doz ui</span><span id="live-text">connecting…</span></div>
+        <div class="live" id="host-live" title="The store's host"><span class="dot" aria-hidden="true"></span><span class="foot-k">host</span><span id="host-text">—</span></div>
+        <div class="version" id="version"></div>
+        <button type="button" class="btn sm quiet sign-out" id="sign-out" hidden>Sign out</button>
+      </div>
+    </aside>
+    <main id="main" tabindex="-1">
+      <div class="banners" id="banners" aria-live="polite"></div>
+      <div class="page-notices" id="notice" aria-live="polite" hidden></div>
+      <section id="view"></section>
+      <section id="sbx" class="sbx" hidden>
+        <div id="sbx-bar" class="sbx-bar"></div>
+        <div class="sbx-body" id="sbx-body">
+          <section id="terminals" class="terms"></section>
+          <aside id="sbx-details" class="sbx-details" aria-label="Details"></aside>
+        </div>
+      </section>
+      <section id="grid" class="grid-view" hidden></section>
+      <div class="wiz-modal" id="wiz-modal" hidden>
+        <div class="wm-scrim" id="wm-scrim"></div>
+        <div class="wm-box" id="wm-box" role="dialog" aria-modal="true" aria-labelledby="wm-title" tabindex="-1"></div>
+      </div>
+    </main>
+  </div>
+  <div class="ui-overlay" id="ui-overlay" tabindex="-1" hidden></div>
+  <div class="toasts" id="toasts" aria-live="assertive"></div>
+</body>
+</html>

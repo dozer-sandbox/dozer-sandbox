@@ -1,0 +1,19 @@
+# Copy this file to Makefile.config (gitignored — never commit it) to sign releases with a Developer ID and
+# notarise them. A public release (`make release`, PUBLIC=1 — the default) REFUSES to build without both;
+# `TEST_BUILD=1` makes a local test build that is never published (signed ad hoc, or Developer ID without
+# notarising). A formula's download is never quarantined, but a tarball fetched in a browser is: Gatekeeper
+# then needs the notarisation (a bare command-line tool cannot be stapled — it is looked up online once).
+
+# Your "Developer ID Application: Name (TEAMID)" identity, as `security find-identity -v -p codesigning` lists it.
+# An "Apple Development: …" identity is NOT accepted: Apple notarises Developer ID only.
+# SIGN_IDENTITY = Developer ID Application: Your Name (XXXXXXXXXX)
+
+# A notarytool keychain profile (the password lives in the keychain, never here). Create it once:
+#   xcrun notarytool store-credentials "Dozer" --apple-id you@example.com --team-id XXXXXXXXXX
+#   (it asks for an app-specific password from account.apple.com — never your Apple ID password)
+# An existing profile of the same team works as well (any app of the team notarises through it).
+# NOTARY_PROFILE = Dozer
+
+# Where `make publish` / `make promote` write (local checkouts; nothing is pushed unless PUSH=1):
+# UPDATES_DIR = /path/to/a/checkout/of/the/updates-site    (the GitHub Pages repo behind updates.dozersandbox.com)
+# TAP_DIR     = /path/to/a/checkout/of/homebrew-tap         (the Homebrew tap: Formula/doz.rb, doz-beta.rb, doz-canary.rb)

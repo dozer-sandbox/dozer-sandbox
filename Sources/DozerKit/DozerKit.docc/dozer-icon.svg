@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 160" width="240" height="160">
+  <rect width="240" height="160" fill="#1c1c1e"/>
+  <rect x="24" y="40" width="80" height="80" rx="10" fill="#30d158"/>
+  <text x="64" y="90" font-family="Menlo, monospace" font-size="34" fill="#0b3d17" text-anchor="middle">Z</text>
+  <rect x="136" y="40" width="80" height="80" rx="10" fill="#0a84ff" opacity="0.25"/>
+  <text x="176" y="90" font-family="Menlo, monospace" font-size="34" fill="#0a84ff" text-anchor="middle">z</text>
+</svg>

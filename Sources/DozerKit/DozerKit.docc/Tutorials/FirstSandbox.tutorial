@@ -1,0 +1,162 @@
+@Tutorial(time: 20) {
+    @Intro(title: "A first sandbox, to Claude Code and back") {
+        A first run of the `doz` CLI, start to finish. Most of the 20 minutes is one-time image
+        bakes. By the end you will have booted, paused, slept and woken a sandbox, used a restore
+        point, run Claude Code with a key the sandbox never sees, and stopped the host and come
+        back to the same conversation. You need an Apple-silicon Mac on macOS 26 or later, network
+        access for the first bakes, and an Anthropic API key for the Claude Code section.
+    }
+
+    @Section(title: "Install and onboard") {
+        @ContentAndMedia {
+            `brew install dozer-sandbox/tap/doz` installs the prebuilt, signed `doz` from the Dozer tap in seconds
+            (from a source checkout, contributors use `make install-cli`). Nothing is ever
+            installed in `~/Library/LaunchAgents`. `doz onboard` sets up this Mac, once:
+            the doctor's checks (a required one that fails stops it), which Claude account
+            sandboxes use (this Mac's Claude Code login, or the command to add a key later — it
+            never logs in for you), the settings file, and the images, prepared **in the host** in
+            the background: Ctrl-C detaches, `--status` follows it again, and a start of that image
+            meanwhile joins the same preparation.
+        }
+
+        @Steps {
+            @Step {
+                Install with Homebrew, and onboard.
+
+                @Code(name: "Terminal", file: "00-install.sh")
+            }
+        }
+    }
+
+    @Section(title: "A first sandbox") {
+        @ContentAndMedia {
+            `up` creates the sandbox, boots it and attaches your terminal to a shell in it. The
+            first time, it also bakes the `lab` image (Alpine + bash, ~40 s); later starts take
+            about 0.4 s.
+        }
+
+        @Steps {
+            @Step {
+                Create, boot and attach to a first sandbox.
+
+                @Code(name: "Terminal", file: "01-first-sandbox.sh")
+            }
+            @Step {
+                Leave a program running inside it, then detach with **Ctrl-]**. Your terminal
+                comes back; `top` keeps running in the sandbox.
+
+                @Code(name: "Terminal (inside lab1)", file: "01-inside.sh")
+            }
+            @Step {
+                Check what is running, from the Mac side. The first command also started the
+                **host** — one background process per user that owns the running VMs; it started
+                itself and will exit by itself.
+
+                @Code(name: "Terminal", file: "01-check.sh")
+            }
+        }
+    }
+
+    @Section(title: "The lifecycle") {
+        @ContentAndMedia {
+            Try each step and watch `doz ls` between them. `top` never stops counting from its
+            own point of view: same process, same PID, same screen, even across a hibernation.
+        }
+
+        @Steps {
+            @Step {
+                Pause, sleep and hibernate the sandbox, then reattach.
+
+                @Code(name: "Terminal", file: "02-lifecycle.sh")
+            }
+            @Step {
+                Commands without a terminal pass exit codes straight through.
+
+                @Code(name: "Terminal", file: "02-exec.sh")
+            }
+        }
+    }
+
+    @Section(title: "Restore points") {
+        @ContentAndMedia {
+            A restore point is an instant, disk-only APFS clone. Reverting shuts the sandbox down
+            first (and takes a "before revert" point automatically); forking makes a whole new
+            sandbox from the same point.
+        }
+
+        @Steps {
+            @Step {
+                Take a point, break something, then revert to it — and fork a second sandbox from
+                it.
+
+                @Code(name: "Terminal", file: "03-restore-points.sh")
+            }
+        }
+    }
+
+    @Section(title: "Claude Code, with a key it never sees") {
+        @ContentAndMedia {
+            `doz onboard` prepared the `claude-code` image, so no bake happens inside `up`.
+            The folder you create the sandbox on is shared at `/workspace`, and Claude is told so:
+            every session starts with a short facts block about the sandbox appended to its system
+            prompt, and a `dozer` skill with the details. If you are already
+            signed in to Claude Code on this Mac with a subscription, there is nothing to do — a
+            new sandbox uses the Mac's own login. Otherwise, give it an API key with one of the two
+            options below; the key is **never** typed as a command-line argument.
+        }
+
+        @Steps {
+            @Step {
+                Check the image is prepared, create a sandbox on a folder of yours, and see what
+                Claude will be told about it.
+
+                @Code(name: "Terminal", file: "04-bake-and-create.sh")
+            }
+            @Step {
+                Give the sandbox a key — pick (a) or (b). With (a) the host holds it in memory
+                only, so it is gone once the host stops.
+
+                @Code(name: "Terminal", file: "04-key.sh")
+            }
+            @Step {
+                Start Claude Code and ask it something. The file it creates appears in
+                `~/doz-try` on your Mac. Then check what the sandbox actually has: a
+                placeholder, never the real key, and a network log that shows nothing else
+                resolves.
+
+                @Code(name: "Terminal", file: "04-up-and-check.sh")
+            }
+        }
+    }
+
+    @Section(title: "Quit and come back") {
+        @ContentAndMedia {
+            Hibernate keeps the running program itself, not just its files. Stopping the host
+            hibernates everything still running first.
+        }
+
+        @Steps {
+            @Step {
+                Stop the host, confirm nothing is running, then bring it all back.
+
+                @Code(name: "Terminal", file: "05-quit-and-resume.sh")
+            }
+        }
+    }
+
+    @Section(title: "Numbers and clean-up") {
+        @ContentAndMedia {
+            The baked images stay after you remove the sandboxes made from them, so the next
+            sandbox still starts in under a second. The host exits by itself 5 minutes after
+            nothing is running.
+        }
+
+        @Steps {
+            @Step {
+                Look at the store's metrics, then remove the sandboxes you made.
+
+                @Code(name: "Terminal", file: "06-numbers-and-cleanup.sh")
+            }
+        }
+    }
+}

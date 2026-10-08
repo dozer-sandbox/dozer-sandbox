@@ -1,0 +1,26 @@
+.build/
+.build-remote/
+.swiftpm/
+.tools/
+Guest/deckhold/out/
+/*.xcodeproj
+Guest/doznet/out/
+Guest/dozview/out/
+
+# The built docs site — reproducible from DozerKit.docc + source in under two minutes (`make docs`);
+# not committed.
+.docc-build/
+
+# 598: `make release` output, and the signing configuration (credentials — never committed).
+/dist/
+/Makefile.config
+
+# Codex hook state (per machine; never tracked)
+.codex/hooks/.history-state.json
+Guest/deckhold/test/out/
+
+# Never commit a signing key or its backup (611: the update key is never rotated).
+*PRIVATE_KEY*
+*private-key*
+*.p8
+*.p12

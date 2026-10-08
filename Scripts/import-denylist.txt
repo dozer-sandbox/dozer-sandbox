@@ -1,0 +1,14 @@
+# Modules DozerKit must never import (Scripts/audit.sh). One per line; # and blank ignored.
+# The package runs a VM for any host — an app, a CLI, a test runner — so no UI framework, and no
+# module of any Deck app or library.
+SwiftUI
+AppKit
+UIKit
+Metal
+MetalKit
+WebKit
+Combine
+GhosttyKit
+GhosttyTerminalKit
+DeckKit
+DeckStack

@@ -1,0 +1,394 @@
+{
+  "package": "lucide-static",
+  "version": "1.48.0",
+  "homepage": "https://lucide.dev",
+  "tarball": "https://registry.npmjs.org/lucide-static/-/lucide-static-1.48.0.tgz",
+  "tarballIntegrity": "sha512-ZUGgZ4rzlLfVbhN2Zi37TMrTaSpXAbWx6Y/xZxKSDLPiqxtTK7Mw2M+oBJa0gjV8p3+CWBHh48u+IC9+jKlUjA==",
+  "tarballSha256": "3c2ecda3d25f6a9692d83f8036d9a526f7da584a51af74cd16eda4498c5c33d8",
+  "licence": "ISC",
+  "licenceFile": "LICENSE",
+  "sprite": {
+    "publicName": "vendor-lucide-icons",
+    "indexReference": "/vendor/lucide-icons.svg"
+  },
+  "files": [
+    {
+      "file": "activity.svg",
+      "fromTarball": "package/icons/activity.svg",
+      "sha256": "605f560e014f1d8b86eaf194f221a2051f58bb9ea2705bc0ccd1455d75e25aaf",
+      "serve": "icon"
+    },
+    {
+      "file": "arrow-left-right.svg",
+      "fromTarball": "package/icons/arrow-left-right.svg",
+      "sha256": "b4faf3b17ed5507b185b70de8bac273dcec0e2a5264ef7b886fad371b5843b74",
+      "serve": "icon"
+    },
+    {
+      "file": "badge-check.svg",
+      "fromTarball": "package/icons/badge-check.svg",
+      "sha256": "cbd52b56e79539b61fb7bd6f27bde878e181696898a94bca5c41b25cbd3f92cd",
+      "serve": "icon"
+    },
+    {
+      "file": "ban.svg",
+      "fromTarball": "package/icons/ban.svg",
+      "sha256": "32e3d42a1f24a59f87fe946afab53d9a89b49ea32c8a683fb28f6f2c01daa839",
+      "serve": "icon"
+    },
+    {
+      "file": "box.svg",
+      "fromTarball": "package/icons/box.svg",
+      "sha256": "500c9c5b333b9d2f824ae09807f9a354d60935092b58fa6903366f938dea389b",
+      "serve": "icon"
+    },
+    {
+      "file": "camera.svg",
+      "fromTarball": "package/icons/camera.svg",
+      "sha256": "d98078b8d9ac3372166f07f886195162c33a62705e2e87698488da29db871094",
+      "serve": "icon"
+    },
+    {
+      "file": "chart-line.svg",
+      "fromTarball": "package/icons/chart-line.svg",
+      "sha256": "49fdaf9aa7821ea93b0c5d8d197d42a6ffbffbd0735a4f9d24be04b798bdf943",
+      "serve": "icon"
+    },
+    {
+      "file": "check.svg",
+      "fromTarball": "package/icons/check.svg",
+      "sha256": "e4bab3ed87dca8961e94a4e72ce23c17a674bebcb72bbbbe5eff4ef41532aa83",
+      "serve": "icon"
+    },
+    {
+      "file": "chevron-down.svg",
+      "fromTarball": "package/icons/chevron-down.svg",
+      "sha256": "55b8aeca5b777fd17f0e7a100da6e20ad7305f9ba65b09502c373b795bf5a030",
+      "serve": "icon"
+    },
+    {
+      "file": "circle-dot.svg",
+      "fromTarball": "package/icons/circle-dot.svg",
+      "sha256": "97e2393826a236598ba850c48e8d3a5b86acc46424c9487f7106a0843a2b2482",
+      "serve": "icon"
+    },
+    {
+      "file": "clipboard.svg",
+      "fromTarball": "package/icons/clipboard.svg",
+      "sha256": "0ee406213b1de43bd9c0d28071a79239ebd76de276ced32e7fad375cfd1366a2",
+      "serve": "icon"
+    },
+    {
+      "file": "clipboard-paste.svg",
+      "fromTarball": "package/icons/clipboard-paste.svg",
+      "sha256": "1ac65c4dcbc17245eef58c18970da572e52b3b01ae100addea5decf576b11ced",
+      "serve": "icon"
+    },
+    {
+      "file": "columns-2.svg",
+      "fromTarball": "package/icons/columns-2.svg",
+      "sha256": "1a398b981097c737758f70e935a027c435d5ade4bddadea683f726dbc1b6791f",
+      "serve": "icon"
+    },
+    {
+      "file": "copy.svg",
+      "fromTarball": "package/icons/copy.svg",
+      "sha256": "d522b8400f8a7e1f0ab05478053f26f890e38a6baa8f4fa9eabc4c7610e48b3f",
+      "serve": "icon"
+    },
+    {
+      "file": "download.svg",
+      "fromTarball": "package/icons/download.svg",
+      "sha256": "1318575c24f840dc9b2ea0be003b460daa0f4c316fd5468792753e8b072327a1",
+      "serve": "icon"
+    },
+    {
+      "file": "eye.svg",
+      "fromTarball": "package/icons/eye.svg",
+      "sha256": "8154f830f389e14d550fe0451fa336dee579a0455133408728e0206553fab562",
+      "serve": "icon"
+    },
+    {
+      "file": "flame.svg",
+      "fromTarball": "package/icons/flame.svg",
+      "sha256": "be5afad35c622c3baa9a4ef3a68d7098713c590aae7bfc7aaa342f239f70e2d5",
+      "serve": "icon"
+    },
+    {
+      "file": "git-fork.svg",
+      "fromTarball": "package/icons/git-fork.svg",
+      "sha256": "bbb8de8a56b65d26dd4dfcf2d0604e16cbdc9e176a4f8dd88f651a43194de749",
+      "serve": "icon"
+    },
+    {
+      "file": "heart-pulse.svg",
+      "fromTarball": "package/icons/heart-pulse.svg",
+      "sha256": "f508a4f543eeaeb7952bb8dbab9fddcccaa6f92902192a2371dab3270500489a",
+      "serve": "icon"
+    },
+    {
+      "file": "history.svg",
+      "fromTarball": "package/icons/history.svg",
+      "sha256": "3f825baf8e28920ed3cf5f124bbbd0b504e16512408c8f7f6f22e047d1364c91",
+      "serve": "icon"
+    },
+    {
+      "file": "key-round.svg",
+      "fromTarball": "package/icons/key-round.svg",
+      "sha256": "d15c80ea08aacae42dc8596198eeee7e85aaaacbfb78b90d706e59001766740e",
+      "serve": "icon"
+    },
+    {
+      "file": "layers.svg",
+      "fromTarball": "package/icons/layers.svg",
+      "sha256": "473868ad15d0e74599dc5c562639355b8ddb6c7ad957ae43d579d9217c35f041",
+      "serve": "icon"
+    },
+    {
+      "file": "layout-grid.svg",
+      "fromTarball": "package/icons/layout-grid.svg",
+      "sha256": "15847126a5da66227940878fc1832bddc8882fc7233bfad8e86fe2fa0f4e95a3",
+      "serve": "icon"
+    },
+    {
+      "file": "layout-template.svg",
+      "fromTarball": "package/icons/layout-template.svg",
+      "sha256": "38b738d638334ca2725efd8210a37645aa7888314b977ab1aae62617679bd815",
+      "serve": "icon"
+    },
+    {
+      "file": "link.svg",
+      "fromTarball": "package/icons/link.svg",
+      "sha256": "94bf3a445ad5fbeb090c6040c89f03dcd5973031f29a6437ada1961e8bf05a37",
+      "serve": "icon"
+    },
+    {
+      "file": "list-checks.svg",
+      "fromTarball": "package/icons/list-checks.svg",
+      "sha256": "4dd751536caf91a9f5913acc85226a189c55055b432134b2bcd174be67a9e86f",
+      "serve": "icon"
+    },
+    {
+      "file": "list-tree.svg",
+      "fromTarball": "package/icons/list-tree.svg",
+      "sha256": "60c469cf845b0105ad7d3b2f5b3da8a15a6baa55c40af6e555b0dae78ab78eda",
+      "serve": "icon"
+    },
+    {
+      "file": "log-out.svg",
+      "fromTarball": "package/icons/log-out.svg",
+      "sha256": "9da67f219f7662732fce31e8591491484bc70f43c861aec8d9641efe7f66a3e3",
+      "serve": "icon"
+    },
+    {
+      "file": "maximize-2.svg",
+      "fromTarball": "package/icons/maximize-2.svg",
+      "sha256": "4e06b4a114a6bae75176ebcfb986c6bfe898732f860a3c2cfde431c3e101461f",
+      "serve": "icon"
+    },
+    {
+      "file": "moon.svg",
+      "fromTarball": "package/icons/moon.svg",
+      "sha256": "658aac5edb0f3ea5c5b2f792132f41a33a1e72840ea506c88f69fa1948048484",
+      "serve": "icon"
+    },
+    {
+      "file": "moon-star.svg",
+      "fromTarball": "package/icons/moon-star.svg",
+      "sha256": "4398b9d04a2075584cfc22353b90d473a5d309f521bf48ecffa63b5890841a3e",
+      "serve": "icon"
+    },
+    {
+      "file": "panel-right.svg",
+      "fromTarball": "package/icons/panel-right.svg",
+      "sha256": "6c77328cbbd94df60a86cf5b37bc5b9f1788bf0d14cc28dfdc79fda2167e4059",
+      "serve": "icon"
+    },
+    {
+      "file": "pause.svg",
+      "fromTarball": "package/icons/pause.svg",
+      "sha256": "51e2a1dc0be52d6c682b0d149d07c1863357f203e2a9b054e74c8597d5498fdd",
+      "serve": "icon"
+    },
+    {
+      "file": "play.svg",
+      "fromTarball": "package/icons/play.svg",
+      "sha256": "5525570680b5b5706c045815a49ead15114cb4939a8bce77170cccf534c1f9a9",
+      "serve": "icon"
+    },
+    {
+      "file": "plus.svg",
+      "fromTarball": "package/icons/plus.svg",
+      "sha256": "b19dd6e1e82c82baf5e4c19deca9f1ba5de4580e1094670ff00b134ef9886ce9",
+      "serve": "icon"
+    },
+    {
+      "file": "power.svg",
+      "fromTarball": "package/icons/power.svg",
+      "sha256": "a6444e9281bc624c4c9cb4775a6d4c680c84a9f45dc880d55a769dd3dd5ee471",
+      "serve": "icon"
+    },
+    {
+      "file": "refresh-cw.svg",
+      "fromTarball": "package/icons/refresh-cw.svg",
+      "sha256": "99d49e196c743393d0f8ba10b08b060b36cd4299ea557c3685d596b14f079fed",
+      "serve": "icon"
+    },
+    {
+      "file": "rotate-ccw.svg",
+      "fromTarball": "package/icons/rotate-ccw.svg",
+      "sha256": "aa1887394571288045795243a98cacb3355e4ffab2c08e26b60c500383dddbf1",
+      "serve": "icon"
+    },
+    {
+      "file": "settings.svg",
+      "fromTarball": "package/icons/settings.svg",
+      "sha256": "f887bd4e496572d61583c045f416e93e27130321a75be857006c6f2cb93d556f",
+      "serve": "icon"
+    },
+    {
+      "file": "shield.svg",
+      "fromTarball": "package/icons/shield.svg",
+      "sha256": "9781c2b5ce99dc5b99ccb1cbfd46f635e3dc7b7f8e84720c740dbe487254c11c",
+      "serve": "icon"
+    },
+    {
+      "file": "square-terminal.svg",
+      "fromTarball": "package/icons/square-terminal.svg",
+      "sha256": "d1a2b584ac1dbf76d5670202c859d81b718d2efb12a9f33b46fc03e6c16504ef",
+      "serve": "icon"
+    },
+    {
+      "file": "star.svg",
+      "fromTarball": "package/icons/star.svg",
+      "sha256": "45cd544dd7b2e5bc25e67f92c851228c9ff6e089360ce73867759911ec8153d2",
+      "serve": "icon"
+    },
+    {
+      "file": "stethoscope.svg",
+      "fromTarball": "package/icons/stethoscope.svg",
+      "sha256": "ffdb58ed103921c26713a4f32514b7ee814dc74877c44273b80bd527f40cd174",
+      "serve": "icon"
+    },
+    {
+      "file": "sun.svg",
+      "fromTarball": "package/icons/sun.svg",
+      "sha256": "b521c27be18f3a734cbbae2c579519fa22236b5b990ccc5ee0f4274b86bcee5a",
+      "serve": "icon"
+    },
+    {
+      "file": "table.svg",
+      "fromTarball": "package/icons/table.svg",
+      "sha256": "44e3674ffb733244b6bce1751865574ec2a2608a1763c24cd1eeb1624008dc59",
+      "serve": "icon"
+    },
+    {
+      "file": "terminal.svg",
+      "fromTarball": "package/icons/terminal.svg",
+      "sha256": "3b59ea5818213919e38bcd677606f369a3f930dc694cc2efe6ee4754eacca3d2",
+      "serve": "icon"
+    },
+    {
+      "file": "trash-2.svg",
+      "fromTarball": "package/icons/trash-2.svg",
+      "sha256": "0de8b67392eab0ddcf82731189544169f778f6aa7f8e89151bd85545beaae9e0",
+      "serve": "icon"
+    },
+    {
+      "file": "user-round.svg",
+      "fromTarball": "package/icons/user-round.svg",
+      "sha256": "33b81dbe60c0a9439995e1c29f32489e16ca5c050d95183eb0f5b23706494732",
+      "serve": "icon"
+    },
+    {
+      "file": "x.svg",
+      "fromTarball": "package/icons/x.svg",
+      "sha256": "2b24855a933d5f929ebb10c9e8e012c150e505064e00897380ad4e25a5a60965",
+      "serve": "icon"
+    },
+    {
+      "file": "cpu.svg",
+      "fromTarball": "package/icons/cpu.svg",
+      "sha256": "87050f03a1bd4a9879c55aa717b58549cb52a9a26b59baca753c5f236d1480ec",
+      "serve": "icon"
+    },
+    {
+      "file": "cylinder.svg",
+      "fromTarball": "package/icons/cylinder.svg",
+      "sha256": "f75fb884d773162479e2e4270337e6fd778f85081a2631fdfd701bbbecb93d00",
+      "serve": "icon"
+    },
+    {
+      "file": "arrow-right.svg",
+      "fromTarball": "package/icons/arrow-right.svg",
+      "sha256": "0a3d3733645e158219bf0d3478895a53d70ab2572075bb4cb54d5f229cba5210",
+      "serve": "icon"
+    },
+    {
+      "file": "arrow-left.svg",
+      "fromTarball": "package/icons/arrow-left.svg",
+      "sha256": "db02bc350fd7d18cf5bd92441e10d9159e16518a05f27c921f0f4ae634c35db9",
+      "serve": "icon"
+    },
+    {
+      "file": "rocket.svg",
+      "fromTarball": "package/icons/rocket.svg",
+      "sha256": "402ae322c6647d11f72fe1ef5184a088a22a96e4eb3b6a6c81a30b8c0adaa7e8",
+      "serve": "icon"
+    },
+    {
+      "file": "folder.svg",
+      "fromTarball": "package/icons/folder.svg",
+      "sha256": "f205d7d6bf3ae16724ff3668347c65a318b11442a314d989a873abf173a6d8f6",
+      "serve": "icon"
+    },
+    {
+      "file": "skip-forward.svg",
+      "fromTarball": "package/icons/skip-forward.svg",
+      "sha256": "83af2d93c05050dd6aec3ef741471add639b1cbe8fae37d7441958fd3669dc26",
+      "serve": "icon"
+    },
+    {
+      "file": "ellipsis.svg",
+      "fromTarball": "package/icons/ellipsis.svg",
+      "sha256": "75622b4c6d2c42393aabdc07d997d4b0c61798ec3e582c40a47ac8ee16358f8f",
+      "serve": "icon"
+    },
+    {
+      "file": "search.svg",
+      "fromTarball": "package/icons/search.svg",
+      "sha256": "4c9a79296cd8835fd7ec8a33083f9f8f3166b27754ef65a9edbbc0eaa4e2d76a",
+      "serve": "icon"
+    },
+    {
+      "file": "info.svg",
+      "fromTarball": "package/icons/info.svg",
+      "sha256": "af880f5f1040830c149e539600fa62aee9d78ea231b03f9fb2eef78eaddb1d74",
+      "serve": "icon"
+    },
+    {
+      "file": "triangle-alert.svg",
+      "fromTarball": "package/icons/triangle-alert.svg",
+      "sha256": "1635aa7fa1b680d238da60d3d770a10cc8d3e5f32486a7c83ded62aaefe1ee37",
+      "serve": "icon"
+    },
+    {
+      "file": "circle-check.svg",
+      "fromTarball": "package/icons/circle-check.svg",
+      "sha256": "e89cf92a3e173a9e9b23d424d124e75a4ad5c2af91cd47c22ca661ab8a4ba29c",
+      "serve": "icon"
+    },
+    {
+      "file": "circle-x.svg",
+      "fromTarball": "package/icons/circle-x.svg",
+      "sha256": "427a018b280f1e023e16f6400232735373971a06952b9deffeef6f104e12a8d5",
+      "serve": "icon"
+    },
+    {
+      "file": "LICENSE",
+      "fromTarball": "package/LICENSE",
+      "sha256": "b495047bd93a9b06913511076f504daba17d5bbeb3e0650f3bb53a4220329c57",
+      "serve": "licence"
+    }
+  ]
+}

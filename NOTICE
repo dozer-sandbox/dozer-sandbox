@@ -1,0 +1,32 @@
+Dozer Sandbox (doz)
+Copyright (c) 2026 Johno Scott. Licensed under the MIT License (see LICENSE).
+
+The doz program is built with third-party software. Most of it is licensed under the Apache License,
+Version 2.0, and several of those components carry NOTICE files whose attribution notices must be
+reproduced with any distribution of a binary that contains them. Every release of doz therefore ships,
+in libexec/doz/licences/, the complete licence text and the verbatim NOTICE file of each component, taken
+from the exact sources the release was built from (THIRD-PARTY-LICENSES.txt, written by
+Scripts/third-party-licences.sh). The components and their licences are listed in LICENCES.md.
+
+Among the attributions those NOTICE files require:
+
+- SwiftNIO, SwiftNIO SSL, SwiftNIO HTTP/2, SwiftNIO Extras, AsyncHTTPClient, Swift Crypto, Swift
+  Certificates, Swift ASN.1, Swift Log, Swift HTTP Types, Swift Service Context, Swift Service Lifecycle,
+  Swift Configuration and gRPC Swift — Copyright Apple Inc. and the SwiftNIO / Swift Server / gRPC
+  project authors (Apache-2.0).
+- SwiftNIO SSL contains code from BoringSSL (a combination of the ISC and OpenSSL licences);
+  Swift Crypto (its _CryptoExtras, through Swift Certificates) contains BoringSSL as well.
+- SwiftNIO contains NodeJS's llhttp (MIT), "sha1.c"/"sha1.h" from FreeBSD (Copyright (C) 1995-1998
+  WIDE Project, BSD) and "cpp_magic.h" from uSHET (MIT), and is heavily influenced by Netty (Apache-2.0).
+- Swift Certificates contains code derived from musl libc (MIT).
+- Docker's .dockerignore semantics (Sources/DozerKit/DockerIgnore.swift and dozview's match/dozmatch.c) are ports of
+  moby/patternmatcher v0.6.1 — "Docker. Copyright 2012-2017 Docker, Inc. This product includes software developed
+  at Docker, Inc. (https://www.docker.com)." (Apache-2.0) — and of tonistiigi/fsutil (MIT, Copyright 2017 Tõnis Tiigi).
+- dozview's regular-expression engine (match/dozre.c) and the path functions beside it are ports of Go's
+  regexp/syntax, path and path/filepath — Copyright 2009 The Go Authors (BSD-3-Clause).
+- BoringSSL's licence texts (OpenSSL, SSLeay, ISC, MIT for third_party/fiat), LibYAML's (MIT, Copyright (c) 2006 Kirill
+  Simonov) and the above are in Licences/, fetched at the exact revisions Licences/SOURCES.md names.
+
+The guest programs doz copies into each sandbox (deckhold, doznet, dozview) statically link musl libc
+(MIT); deckhold also links libghostty-vt from Ghostty (MIT) and its bundled simdutf, Highway and LLVM
+libc++ (see LICENCES.md). The dashboard serves ghostty-web (MIT) and Lucide icons (ISC) to your browser.
