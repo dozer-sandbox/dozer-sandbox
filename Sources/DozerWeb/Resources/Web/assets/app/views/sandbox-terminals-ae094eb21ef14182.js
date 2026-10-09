@@ -13,12 +13,13 @@ import { splitArgs } from '../core/util-1195caf40612902f.js';
 import { isRemote } from '../core/session-545fa19d53ba02cc.js';
 import { btn } from '../components/button-8e61dd531eed2262.js';
 import { dialog } from '../components/dialog-d48442e03113646f.js';
-import { lifecycle, sessionsWhyNot } from '../components/lifecycle-fb038e14f2670db4.js';
+import { lifecycle, sessionsWhyNot } from '../components/lifecycle-79b5f1ef7313bbc0.js';
 import { menuButton } from '../components/menus-95968d15addcffdf.js';
-import { failureFor, pageFailure } from '../components/notices-89b8886740537e92.js';
-import { bootTerm, closeTerminal, focusTerm, openDefaultTerminal, openTerminal, terminalTitle } from '../components/terminal-154bdbfa793b8202.js';
-import { openInTerminal, runDetachedDialog } from './sandbox-dialogs-3b4fc4f66d2633b0.js';
-import { sessionMenuItems } from '../components/session-actions-74fd0e21efde055c.js';
+import { agentChip } from '../components/agent-status-ebfb70d5a2a35264.js';
+import { failureFor, pageFailure } from '../components/notices-688e5d5eba5dbe51.js';
+import { bootTerm, closeTerminal, focusTerm, openDefaultTerminal, openTerminal, terminalTitle } from '../components/terminal-c13dcc4c5b747b61.js';
+import { openInTerminal, runDetachedDialog } from './sandbox-dialogs-4d4765888ed00db0.js';
+import { sessionMenuItems } from '../components/session-actions-0e89b24ac6ecd876.js';
 // Calls up the layers (provided by app.js — core/hooks.js):
 const openSavedTerminal = upcall('openSavedTerminal'), persistLayout = upcall('persistLayout');
 
@@ -199,6 +200,7 @@ function tabElement(t, pane) {
                                on: { click: () => { v.selected[pane] = t.id; v.focusedPane = pane; renderTerminals(); focusTerm(t); } } },
     h('span', { class: 'tab-dot ph-' + phase, 'aria-hidden': 'true' }), icon(t.mode === 'watch' ? 'eye' : 'terminal'), label,
     t.mode === 'watch' ? h('span', { class: 'tag' }, 'watch') : null,
+    t.session && !t.bootlog ? agentChip(t.sandbox, t.session) : null,     // 612: what its agent is doing
     t.saved ? h('span', { class: 'tag saved', title: 'Its last saved screen (' + (t.saved.reason || 'saved') + ', ' + when(t.saved.savedAt) + ') — it goes live when the sandbox runs' }, 'saved') : null,
     shared);
   const move = v.split ? h('button', { type: 'button', class: 'tab-x', title: 'Move to the other pane', 'aria-label': 'Move ' + label + ' to the other pane',

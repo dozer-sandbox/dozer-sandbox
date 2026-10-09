@@ -863,6 +863,24 @@ dialog.dlg:has(.image-picker) { width: min(780px, calc(100vw - 32px)); }
 :is(.dot, .ph-dot, .tab-dot).ph-failed { border-radius: var(--r-xs); }
 :is(.dot, .ph-dot, .tab-dot):is(.ph-booting, .ph-busy) { background: transparent; border: 2px solid var(--ph); border-top-color: transparent; animation: spin 0.9s linear infinite; }
 
+/* 612: what the agent is doing (OSC 7501) — a chip on a session's tab, tile and row; a dot on the sidebar's sandbox.
+   The colour says the state (working = info, blocked = warn, done = ok, error = bad, idle = quiet); the word says it too. */
+.ag-working { --ag: var(--info); --ag-t: var(--info-tint); }
+.ag-blocked { --ag: var(--warn); --ag-t: var(--warn-tint); }
+.ag-done    { --ag: var(--ok);   --ag-t: var(--ok-tint); }
+.ag-error   { --ag: var(--bad);  --ag-t: var(--bad-tint); }
+.ag-idle    { --ag: var(--ink-2); --ag-t: var(--surface-2); }
+.ag-chip { display: inline-flex; align-items: center; gap: var(--sp-1); height: 18px; padding: 0 var(--sp-2) 0 var(--sp-1); border-radius: var(--r-pill);
+  font: var(--fw-medium) var(--fs-xs)/1 var(--font); white-space: nowrap; flex: none; color: var(--ag, var(--ink-2)); background: var(--ag-t, var(--surface-2)); }
+.ag-chip[hidden] { display: none; }
+.ag-mark { width: 6px; height: 6px; border-radius: 50%; flex: none; background: currentColor; }
+.ag-working .ag-mark { background: transparent; border: 1.5px solid currentColor; border-top-color: transparent; width: 7px; height: 7px; animation: spin 0.9s linear infinite; }
+.ag-blocked .ag-mark { border-radius: var(--r-xs); }
+.ag-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; margin-left: auto; background: var(--ag); }
+.ag-dot.ag-blocked { border-radius: var(--r-xs); }
+.ag-dot.ag-working { background: transparent; box-shadow: inset 0 0 0 2px var(--ag); }
+.ag-msg { color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 48ch; }
+
 /* Tags (an attribute: square-ish, quiet) and counts (a number on a nav item or a tab). */
 .tag { display: inline-flex; align-items: center; gap: 4px; height: 18px; padding: 0 6px; border-radius: var(--r-xs); vertical-align: middle; margin-right: 4px;
   font: var(--fw-medium) var(--fs-xs)/1 var(--font); background: var(--surface-2); color: var(--ink-2); white-space: nowrap; }

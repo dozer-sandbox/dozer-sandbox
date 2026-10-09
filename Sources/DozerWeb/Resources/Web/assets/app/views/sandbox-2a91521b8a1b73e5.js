@@ -10,22 +10,23 @@ import { saveSetting, setting } from '../core/settings-171e705abeccb983.js';
 import { state } from '../core/state-6efaa5d4aa08116b.js';
 import { pageTerminals, sview, terminals } from '../core/terminals-fa5cf7fc28fdb48f.js';
 import { isRemote } from '../core/session-545fa19d53ba02cc.js';
-import { accountDialog, credentialBanner, keyEntry } from '../components/accounts-b0f80747a1924e95.js';
+import { accountDialog, credentialBanner, keyEntry } from '../components/accounts-82ffc2d668ed27ac.js';
 import { chip, panel, stat, table } from '../components/blocks-53c969feeec8fe89.js';
 import { btn } from '../components/button-8e61dd531eed2262.js';
 import { callout } from '../components/callout-295f8e0570c7e239.js';
 import { confirmAction, dialog } from '../components/dialog-d48442e03113646f.js';
-import { lifecycle, lifecycleBar, sessionsWhyNot } from '../components/lifecycle-fb038e14f2670db4.js';
+import { lifecycle, lifecycleBar, sessionsWhyNot } from '../components/lifecycle-79b5f1ef7313bbc0.js';
 import { moreMenu } from '../components/menus-95968d15addcffdf.js';
-import { sessionMenuItems } from '../components/session-actions-74fd0e21efde055c.js';
-import { failureFor, pageFailure, paintRowOps } from '../components/notices-89b8886740537e92.js';
-import { sandboxPill } from '../components/pills-cc8cdee2b0253bea.js';
-import { bootLogDialog, focusTerm, openTerminal, PHASE_WORD } from '../components/terminal-154bdbfa793b8202.js';
+import { sessionMenuItems } from '../components/session-actions-0e89b24ac6ecd876.js';
+import { failureFor, pageFailure, paintRowOps } from '../components/notices-688e5d5eba5dbe51.js';
+import { sandboxPill } from '../components/pills-1563abe498b6c549.js';
+import { agentChip } from '../components/agent-status-ebfb70d5a2a35264.js';
+import { bootLogDialog, focusTerm, openTerminal, PHASE_WORD } from '../components/terminal-c13dcc4c5b747b61.js';
 import { ISOLATED_NOTE } from '../components/workspace-chooser-f6907863038dbeff.js';
-import { duplicateDialog, openInTerminal, policyDialog, runDetachedDialog, takePointDialog, templateDialog } from './sandbox-dialogs-3b4fc4f66d2633b0.js';
-import { openSavedTerminal, promoteSaved, restorePanes, savedRows } from './sandbox-layout-aa96e1919ea72662.js';
+import { duplicateDialog, openInTerminal, policyDialog, runDetachedDialog, takePointDialog, templateDialog } from './sandbox-dialogs-4d4765888ed00db0.js';
+import { openSavedTerminal, promoteSaved, restorePanes, savedRows } from './sandbox-layout-8c53a13d0eee186f.js';
 import { networkPanel } from './sandbox-network-9d881ca6cfefcecc.js';
-import { paintStripActs, paintTabs, paintTermEmpty, renderTerminals } from './sandbox-terminals-eb41db68820b218c.js';
+import { paintStripActs, paintTabs, paintTermEmpty, renderTerminals } from './sandbox-terminals-ae094eb21ef14182.js';
 
 // ── a sandbox's page (593): a control bar, the terminal area, a collapsible details panel ──────
 // #sbx is persistent: refreshSandbox() re-renders the bar and the details, never #terminals.
@@ -143,7 +144,9 @@ function sandboxParts(name, d, net, accounts) {
   const live = (d.sessions || []).filter((s) => !s.ended && !s.saved);
   const sessions = (d.sessions || []).map((s) => h('tr', { 'data-session': s.name },
     h('td', null, h('div', { class: 'cell-name' }, h('span', { class: 'dot ph-' + (s.saved ? i.phase : s.ended ? 'off' : 'running'), 'aria-hidden': 'true' }),
-        h('span', { class: 'nm' }, s.name), s.name === d.defaultSession ? h('span', { class: 'tag' }, 'default') : null),
+        h('span', { class: 'nm' }, s.name), s.name === d.defaultSession ? h('span', { class: 'tag' }, 'default') : null,
+        agentChip(name, s.name)),                                  // 612: what its agent is doing
+      s.status && s.status.message ? h('div', { class: 'sub2 ag-msg', title: s.status.message }, s.status.message) : null,
       h('div', { class: 'sub2' }, s.saved ? savedState(s) : s.ended ? 'ended (exit ' + s.exitCode + ')' : 'running' + (s.cols ? ' · ' + s.cols + '×' + s.rows : '') + ' · ' + plural(s.clients, 'viewer', 'viewers'))),
     h('td', { class: 'mono trunc', title: s.command }, s.command),
     h('td', { class: 'row-acts-cell' }, h('div', { class: 'row-acts' }, s.saved

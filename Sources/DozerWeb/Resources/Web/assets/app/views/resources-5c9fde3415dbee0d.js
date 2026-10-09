@@ -10,8 +10,8 @@ import { state } from '../core/state-6efaa5d4aa08116b.js';
 import { meter, pageIndex, panel, table } from '../components/blocks-53c969feeec8fe89.js';
 import { btn } from '../components/button-8e61dd531eed2262.js';
 import { dialog } from '../components/dialog-d48442e03113646f.js';
-import { pageFailure, toast } from '../components/notices-89b8886740537e92.js';
-import { phasePill } from '../components/pills-cc8cdee2b0253bea.js';
+import { pageFailure, toast } from '../components/notices-688e5d5eba5dbe51.js';
+import { phasePill } from '../components/pills-1563abe498b6c549.js';
 
 // ── 595: Resources ──────────────────────────────────────────────────────────
 // Owner (2026-09-30): "the Resources section should break down ALL the usage". An ACCOUNT first: every

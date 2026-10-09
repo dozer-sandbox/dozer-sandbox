@@ -11,7 +11,7 @@ import { renderAccessStep } from '../components/access-step-8a3dfa651b81d1a1.js'
 import { pageIndex } from '../components/blocks-53c969feeec8fe89.js';
 import { btn } from '../components/button-8e61dd531eed2262.js';
 import { callout } from '../components/callout-295f8e0570c7e239.js';
-import { pageFailure, toast } from '../components/notices-89b8886740537e92.js';
+import { pageFailure, toast } from '../components/notices-688e5d5eba5dbe51.js';
 import { confirmWeb, isAgentModel, permissionSwitches } from '../components/permissions-2d2cf511e6aa7261.js';
 
 const SETTING_SECTIONS = {

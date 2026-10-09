@@ -4,6 +4,7 @@ import { $, h } from '../dom/h.js';
 import { api } from '../core/api.js';
 import { bytes } from '../core/format.js';
 import { state } from '../core/state.js';
+import { agentDot, paintAgentStatuses } from './agent-status.js';
 // Calls up the layers (provided by app.js — core/hooks.js):
 const renderHostFoot = upcall('renderHostFoot');
 
@@ -29,8 +30,10 @@ export function renderNavSandboxes() {
     const here = !state.modal && state.view === 'sandbox' && state.param === s.name;
     return h('a', { href: '#/sandbox/' + s.name, class: 'nav-child child' + (here ? ' active' : ''), 'aria-current': here ? 'page' : null,
       role: 'listitem', 'data-sandbox': s.name, title: s.name + ' — ' + s.phaseLabel },
-      h('span', { class: 'ph-dot ph-' + s.phase, role: 'img', 'aria-label': s.phaseLabel }), h('span', { class: 'nav-name' }, s.name));
+      h('span', { class: 'ph-dot ph-' + s.phase, role: 'img', 'aria-label': s.phaseLabel }), h('span', { class: 'nav-name' }, s.name),
+      agentDot(s));                                  // 612: its most urgent agent, when one says something
   }));
+  paintAgentStatuses();                              // 612: the chips on screen, and a notice per change
 }
 export function paintNav() {
   for (const a of document.querySelectorAll('#nav > a')) {

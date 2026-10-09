@@ -1596,12 +1596,14 @@ public actor HostCore {
     private func detail(_ m: Managed) async throws -> SandboxDetail {
         let i = await info(m, sessions: false)
         var sessions: [SessionRow]?
-        if i.phase == Phase.running.rawValue, !i.busy, let list = try? await m.sandbox.sessions() { sessions = list.map(SessionRow.init) }
+        var live: [SessionInfo]?
+        if i.phase == Phase.running.rawValue, !i.busy, let list = try? await m.sandbox.sessions() { sessions = list.map(SessionRow.init); live = list }
         // 593 §9: paused, asleep or hibernated — the sessions as last saved (`saved: true`), from the
         // sandbox's directory. Shut down: none (owner, 2026-09-30).
         if let p = Phase(rawValue: i.phase), Self.wakeable(p), case let saved = m.sandbox.savedScreens(), !saved.isEmpty {
             sessions = saved.map(SessionRow.init(saved:))
         }
+        sessions = sessions.map { withStatuses(m.name, $0, live: live) }      // 612
         let status = await m.sandbox.status
         return SandboxDetail(info: i, spec: m.sandbox.spec, policy: m.sandbox.egress?.policy, sessions: sessions,
                              restorePoints: m.sandbox.restorePoints(), credentials: credentials(m),

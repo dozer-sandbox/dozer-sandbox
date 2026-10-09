@@ -20,6 +20,7 @@ import { moreMenu } from '../components/menus.js';
 import { sessionMenuItems } from '../components/session-actions.js';
 import { failureFor, pageFailure, paintRowOps } from '../components/notices.js';
 import { sandboxPill } from '../components/pills.js';
+import { agentChip } from '../components/agent-status.js';
 import { bootLogDialog, focusTerm, openTerminal, PHASE_WORD } from '../components/terminal.js';
 import { ISOLATED_NOTE } from '../components/workspace-chooser.js';
 import { duplicateDialog, openInTerminal, policyDialog, runDetachedDialog, takePointDialog, templateDialog } from './sandbox-dialogs.js';
@@ -143,7 +144,9 @@ function sandboxParts(name, d, net, accounts) {
   const live = (d.sessions || []).filter((s) => !s.ended && !s.saved);
   const sessions = (d.sessions || []).map((s) => h('tr', { 'data-session': s.name },
     h('td', null, h('div', { class: 'cell-name' }, h('span', { class: 'dot ph-' + (s.saved ? i.phase : s.ended ? 'off' : 'running'), 'aria-hidden': 'true' }),
-        h('span', { class: 'nm' }, s.name), s.name === d.defaultSession ? h('span', { class: 'tag' }, 'default') : null),
+        h('span', { class: 'nm' }, s.name), s.name === d.defaultSession ? h('span', { class: 'tag' }, 'default') : null,
+        agentChip(name, s.name)),                                  // 612: what its agent is doing
+      s.status && s.status.message ? h('div', { class: 'sub2 ag-msg', title: s.status.message }, s.status.message) : null,
       h('div', { class: 'sub2' }, s.saved ? savedState(s) : s.ended ? 'ended (exit ' + s.exitCode + ')' : 'running' + (s.cols ? ' · ' + s.cols + '×' + s.rows : '') + ' · ' + plural(s.clients, 'viewer', 'viewers'))),
     h('td', { class: 'mono trunc', title: s.command }, s.command),
     h('td', { class: 'row-acts-cell' }, h('div', { class: 'row-acts' }, s.saved

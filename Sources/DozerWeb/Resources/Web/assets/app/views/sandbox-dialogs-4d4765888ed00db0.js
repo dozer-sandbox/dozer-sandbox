@@ -5,9 +5,9 @@ import { AGENT_NAMES } from '../core/agents-66154a04b9c4696c.js';
 import { api } from '../core/api-1817573a49f0ab85.js';
 import { actOrThrow } from '../core/operations-d824956fc29841f7.js';
 import { lines, splitArgs } from '../core/util-1195caf40612902f.js';
-import { accountChooser } from '../components/accounts-b0f80747a1924e95.js';
+import { accountChooser } from '../components/accounts-82ffc2d668ed27ac.js';
 import { dialog } from '../components/dialog-d48442e03113646f.js';
-import { failureFor, toast } from '../components/notices-89b8886740537e92.js';
+import { failureFor, toast } from '../components/notices-688e5d5eba5dbe51.js';
 import { workspaceChooser } from '../components/workspace-chooser-f6907863038dbeff.js';
 
 /// 603: a sandbox's terminal in the user's own terminal app (doz attach), from the bar, the strip or a session row.

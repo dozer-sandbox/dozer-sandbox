@@ -7,8 +7,8 @@ import { state } from '../core/state-6efaa5d4aa08116b.js';
 import { card } from './blocks-53c969feeec8fe89.js';
 import { btn } from './button-8e61dd531eed2262.js';
 import { dialog } from './dialog-d48442e03113646f.js';
-import { refreshNav } from './nav-3b52fa2a6a2a895b.js';
-import { banner, dropBanner } from './notices-89b8886740537e92.js';
+import { refreshNav } from './nav-9d72b156617bcf50.js';
+import { banner, dropBanner } from './notices-688e5d5eba5dbe51.js';
 
 function sandboxLinks(names) {
   return names.map((n) => h('a', { href: '#/sandbox/' + n, 'data-sandbox-link': n }, n));

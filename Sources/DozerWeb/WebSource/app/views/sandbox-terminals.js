@@ -15,6 +15,7 @@ import { btn } from '../components/button.js';
 import { dialog } from '../components/dialog.js';
 import { lifecycle, sessionsWhyNot } from '../components/lifecycle.js';
 import { menuButton } from '../components/menus.js';
+import { agentChip } from '../components/agent-status.js';
 import { failureFor, pageFailure } from '../components/notices.js';
 import { bootTerm, closeTerminal, focusTerm, openDefaultTerminal, openTerminal, terminalTitle } from '../components/terminal.js';
 import { openInTerminal, runDetachedDialog } from './sandbox-dialogs.js';
@@ -199,6 +200,7 @@ function tabElement(t, pane) {
                                on: { click: () => { v.selected[pane] = t.id; v.focusedPane = pane; renderTerminals(); focusTerm(t); } } },
     h('span', { class: 'tab-dot ph-' + phase, 'aria-hidden': 'true' }), icon(t.mode === 'watch' ? 'eye' : 'terminal'), label,
     t.mode === 'watch' ? h('span', { class: 'tag' }, 'watch') : null,
+    t.session && !t.bootlog ? agentChip(t.sandbox, t.session) : null,     // 612: what its agent is doing
     t.saved ? h('span', { class: 'tag saved', title: 'Its last saved screen (' + (t.saved.reason || 'saved') + ', ' + when(t.saved.savedAt) + ') — it goes live when the sandbox runs' }, 'saved') : null,
     shared);
   const move = v.split ? h('button', { type: 'button', class: 'tab-x', title: 'Move to the other pane', 'aria-label': 'Move ' + label + ' to the other pane',

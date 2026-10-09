@@ -21,7 +21,7 @@ st() { printf '\033]7501;%s\033\\' "$1"; }
 gate() { while [ ! -e "/tmp/go$1" ]; do sleep 0.2; done; }
 stty raw -echo
 printf '\033]7501;?\033\\'
-ans=$(timeout 5 dd bs=1 count=11 2>/dev/null | od -An -c | tr -d ' \n')
+ans=$(timeout 5 dd bs=1 count=10 2>/dev/null | od -An -c | tr -d ' \n')
 stty sane
 case "$ans" in *7501*) echo "ANSWERED";; *) echo "NO-ANSWER [$ans]"; sleep 600; exit 1;; esac
 st "state=working:app=fake-agent:msg=$(printf 'thinking hard' | base64)"

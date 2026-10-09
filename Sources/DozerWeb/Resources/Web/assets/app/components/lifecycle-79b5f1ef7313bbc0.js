@@ -8,8 +8,8 @@ import { terminals } from '../core/terminals-fa5cf7fc28fdb48f.js';
 import { btn } from './button-8e61dd531eed2262.js';
 import { confirmAction, dialog } from './dialog-d48442e03113646f.js';
 import { moreMenu } from './menus-95968d15addcffdf.js';
-import { pageFailure } from './notices-89b8886740537e92.js';
-import { openTerminal } from './terminal-154bdbfa793b8202.js';
+import { pageFailure } from './notices-688e5d5eba5dbe51.js';
+import { openTerminal } from './terminal-c13dcc4c5b747b61.js';
 
 /// Shut Down keeps the disk, so it asks with a plain confirmation (and can stop asking); Reset and
 /// Remove destroy data and keep the typed name. "Don't ask again" is the setting ui.confirm_shutdown

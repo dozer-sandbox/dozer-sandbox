@@ -22,7 +22,7 @@ state.failures = new Map();
 export function pageFailure(text, opts = {}) {
   const key = opts.key || String(text);
   state.failures.delete(key);
-  state.failures.set(key, { text: String(text), tone: opts.tone || 'bad', title: opts.title || null });
+  state.failures.set(key, { text: String(text), tone: opts.tone || 'bad', title: opts.title || null, actions: opts.actions || null });
   while (state.failures.size > 5) state.failures.delete(state.failures.keys().next().value);
   paintFailures();
 }
@@ -30,7 +30,11 @@ function paintFailures() {
   const box = $('notice');
   box.hidden = state.failures.size === 0;
   box.replaceChildren(...[...state.failures.entries()].map(([key, f]) => callout(f.tone, { compact: true, title: f.title, body: f.text,
-    attrs: { 'data-failure': key }, dismiss: () => { state.failures.delete(key); paintFailures(); } })));
+    actions: f.actions, attrs: { 'data-failure': key }, dismiss: () => { state.failures.delete(key); paintFailures(); } })));
+}
+/// A page notice that is no longer true (612: an agent that was blocked works again) goes without a click.
+export function dropPageNotice(key) {
+  if (state.failures.delete(key)) paintFailures();
 }
 /// A failure about a sandbox: its status line when one is on screen (it stays there until dismissed, or until
 /// the next operation on it), else the page notices.

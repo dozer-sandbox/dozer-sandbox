@@ -5,7 +5,7 @@ import { icon, PHASE_GLYPH } from '../dom/icons-8392ebb8cb8879e3.js';
 import { TRANSITION_LABEL, transitionOf } from '../core/operations-d824956fc29841f7.js';
 import { state } from '../core/state-6efaa5d4aa08116b.js';
 import { terminals } from '../core/terminals-fa5cf7fc28fdb48f.js';
-import { paintCover } from './terminal-154bdbfa793b8202.js';
+import { paintCover } from './terminal-c13dcc4c5b747b61.js';
 // Calls up the layers (provided by app.js — core/hooks.js):
 const paintTermEmpty = upcall('paintTermEmpty');
 

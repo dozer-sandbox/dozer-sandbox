@@ -9,6 +9,7 @@ import { state } from '../core/state.js';
 import { btn } from '../components/button.js';
 import { lifecycle } from '../components/lifecycle.js';
 import { renderNavSandboxes } from '../components/nav.js';
+import { agentChip } from '../components/agent-status.js';
 import { pageFailure } from '../components/notices.js';
 import { bootTerm, closeTerminal, goLive, newTerm, paintCover } from '../components/terminal.js';
 
@@ -136,13 +137,14 @@ function makeTile(w) {
   const title = h('span', { class: 'tile-title' });
   const phase = h('span', { class: 'tile-phase' });
   const act = h('span', { class: 'tile-act' });
+  const agent = w.session ? agentChip(w.sandbox, w.session) : h('span');   // 612: what its agent is doing
   const screen = h('div', { class: 'tile-screen' });
   const note = h('div', { class: 'tile-note', hidden: true });
   const hit = h('button', { type: 'button', class: 'tile-hit', title: 'Open on its sandbox’s page',
                             'aria-label': 'Open ' + (w.session ? w.sandbox + ' · ' + w.session : w.sandbox) + ' on its page' },
     h('span', { class: 'tile-hit-icon' }, icon('maximize-2')));
   const el = h('div', { class: 'tile', 'data-key': w.key, 'data-sandbox': w.sandbox, 'data-session': w.session || '' },
-    h('div', { class: 'tile-head' }, dot, title, phase, act),
+    h('div', { class: 'tile-head' }, dot, title, agent, phase, act),
     h('div', { class: 'tile-body' }, screen, note, hit));
   const tile = { key: w.key, sandbox: w.sandbox, session: w.session, el, dot, title, phase, act, screen, note, hit, term: null, visible: false, liveable: !!w.session };
   hit.addEventListener('click', () => { location.hash = '#/sandbox/' + w.sandbox + (tile.session ? '/' + tile.session : ''); });

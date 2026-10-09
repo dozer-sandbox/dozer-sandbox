@@ -269,8 +269,16 @@ public struct WebSandboxRow: Codable, Equatable, Sendable {
     /// force"), and whether the guest serves them (`running`, `pending`, `stopped`). nil: no rule file.
     public var workspaceRules: String?
     public var workspaceRulesView: String?
+    /// 612: each session's program status (from the host's memory — no guest call), the most urgent one (the
+    /// sidebar's dot), and whether any is working. nil: no program reported anything.
+    public var sessionStatuses: [WebAgentStatus]?
+    public var agentStatus: WebAgentStatus?
+    public var agentWorking: Bool?
 
     public init(_ i: SandboxInfo) {
+        sessionStatuses = i.sessionStatuses.map { $0.map(WebAgentStatus.init) }
+        agentStatus = i.agentStatus.map(WebAgentStatus.init)
+        agentWorking = i.agentWorking
         workspaceRules = i.workspaceRules?.line
         workspaceRulesView = i.workspaceRules?.view
         accountApplies = ["agent", "open", "custom"].contains(i.network)
@@ -303,6 +311,40 @@ public struct WebSandboxRow: Codable, Equatable, Sendable {
         credentialPolicy = i.credentialPolicy
         foreignCredentials = i.foreignCredentials
     }
+}
+
+/// 612: what a session's program says it is doing (OSC 7501), for the page. `message` and `title` are the
+/// PROGRAM's text — untrusted guest text: capped here, rendered with textContent only.
+public struct WebAgentStatus: Codable, Equatable, Sendable {
+    public var session: String
+    /// idle | working | done | blocked | error
+    public var state: String
+    /// For people: "working 40%", "blocked: needs permission", "done", …
+    public var label: String
+    /// permission | question | auth (blocked only)
+    public var kind: String?
+    public var progress: Int?
+    public var app: String?
+    public var message: String?
+    public var title: String?
+    public var updatedAt: Date
+
+    public static let maximumMessage = 300
+    public static let maximumTitle = 100
+
+    public init(_ s: SessionStatus) {
+        session = s.session
+        state = s.state.rawValue
+        label = s.label
+        kind = s.kind?.rawValue
+        progress = s.progress
+        app = s.app
+        message = s.message.map { Self.cap($0, Self.maximumMessage) }
+        title = s.title.map { Self.cap($0, Self.maximumTitle) }
+        updatedAt = s.updatedAt
+    }
+
+    static func cap(_ s: String, _ n: Int) -> String { s.count <= n ? s : String(s.prefix(n - 1)) + "…" }
 }
 
 public struct WebTotals: Codable, Equatable, Sendable {
@@ -348,8 +390,11 @@ public struct WebSessionRow: Codable, Equatable, Sendable {
     public var saved: Bool
     public var savedAt: Date?
     public var savedReason: String?
+    /// 612: what its program says it is doing.
+    public var status: WebAgentStatus?
 
     public init(_ s: SessionRow) {
+        status = s.status.map(WebAgentStatus.init)
         name = s.name
         pid = s.pid
         cols = s.cols

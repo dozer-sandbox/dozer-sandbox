@@ -13,7 +13,7 @@ import { btn } from '../components/button-8e61dd531eed2262.js';
 import { callout } from '../components/callout-295f8e0570c7e239.js';
 import { dialog } from '../components/dialog-d48442e03113646f.js';
 import { moreMenu } from '../components/menus-95968d15addcffdf.js';
-import { toast } from '../components/notices-89b8886740537e92.js';
+import { toast } from '../components/notices-688e5d5eba5dbe51.js';
 import { shareDialog } from '../components/share-e51445a098fde7f2.js';
 
 const KIND_WORDS = {

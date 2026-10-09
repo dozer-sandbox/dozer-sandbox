@@ -10,7 +10,7 @@ import { setting, terminalsAllowed } from '../core/settings-171e705abeccb983.js'
 import { state } from '../core/state-6efaa5d4aa08116b.js';
 import { INPUT_CHUNK, PASTE_CONFIRM_BYTES, PASTE_MAX_BYTES, sview, terminals, termUI } from '../core/terminals-fa5cf7fc28fdb48f.js';
 import { isInt, quietly, utf8 } from '../core/util-1195caf40612902f.js';
-import { bridgeNotice, failureFor } from './notices-89b8886740537e92.js';
+import { bridgeNotice, failureFor } from './notices-688e5d5eba5dbe51.js';
 // Calls up the layers (provided by app.js — core/hooks.js):
 const lifecycle = upcall('lifecycle'), paintTabs = upcall('paintTabs'), renderTerminals = upcall('renderTerminals');
 

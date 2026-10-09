@@ -7,10 +7,11 @@ import { SAVED_PHASES, VERBS } from '../core/sandboxes-d24059f81c7268c1.js';
 import { saveSetting, setting } from '../core/settings-171e705abeccb983.js';
 import { state } from '../core/state-6efaa5d4aa08116b.js';
 import { btn } from '../components/button-8e61dd531eed2262.js';
-import { lifecycle } from '../components/lifecycle-fb038e14f2670db4.js';
-import { renderNavSandboxes } from '../components/nav-3b52fa2a6a2a895b.js';
-import { pageFailure } from '../components/notices-89b8886740537e92.js';
-import { bootTerm, closeTerminal, goLive, newTerm, paintCover } from '../components/terminal-154bdbfa793b8202.js';
+import { lifecycle } from '../components/lifecycle-79b5f1ef7313bbc0.js';
+import { renderNavSandboxes } from '../components/nav-9d72b156617bcf50.js';
+import { agentChip } from '../components/agent-status-ebfb70d5a2a35264.js';
+import { pageFailure } from '../components/notices-688e5d5eba5dbe51.js';
+import { bootTerm, closeTerminal, goLive, newTerm, paintCover } from '../components/terminal-c13dcc4c5b747b61.js';
 
 // ── All sessions: the grid (593) ────────────────────────────────────────────
 // A tile per session of every RUNNING sandbox — a live, read-only (watch) view: the same ticket,
@@ -136,13 +137,14 @@ function makeTile(w) {
   const title = h('span', { class: 'tile-title' });
   const phase = h('span', { class: 'tile-phase' });
   const act = h('span', { class: 'tile-act' });
+  const agent = w.session ? agentChip(w.sandbox, w.session) : h('span');   // 612: what its agent is doing
   const screen = h('div', { class: 'tile-screen' });
   const note = h('div', { class: 'tile-note', hidden: true });
   const hit = h('button', { type: 'button', class: 'tile-hit', title: 'Open on its sandbox’s page',
                             'aria-label': 'Open ' + (w.session ? w.sandbox + ' · ' + w.session : w.sandbox) + ' on its page' },
     h('span', { class: 'tile-hit-icon' }, icon('maximize-2')));
   const el = h('div', { class: 'tile', 'data-key': w.key, 'data-sandbox': w.sandbox, 'data-session': w.session || '' },
-    h('div', { class: 'tile-head' }, dot, title, phase, act),
+    h('div', { class: 'tile-head' }, dot, title, agent, phase, act),
     h('div', { class: 'tile-body' }, screen, note, hit));
   const tile = { key: w.key, sandbox: w.sandbox, session: w.session, el, dot, title, phase, act, screen, note, hit, term: null, visible: false, liveable: !!w.session };
   hit.addEventListener('click', () => { location.hash = '#/sandbox/' + w.sandbox + (tile.session ? '/' + tile.session : ''); });

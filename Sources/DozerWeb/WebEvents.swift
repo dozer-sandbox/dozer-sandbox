@@ -298,6 +298,9 @@ actor WebMonitor {
     }
 
     private func hostEvent(_ e: HostEvent) {
+        // 612: an agent's status changed — look now (the overview carries it; the page's chips and notices follow).
+        // Not an Activity line: an agent goes working → done every turn.
+        if e.kind == .sessionStatus { poke(); return }
         guard e.kind != .progress || (e.completedBytes ?? 0) == (e.totalBytes ?? -1) else { return }   // progress: only its end
         guard e.kind != .output, e.kind != .started else { return }     // 593: live-only lines (the boot view shows them)
         record(WebActivity(seq: hub.nextSeq(), e))
