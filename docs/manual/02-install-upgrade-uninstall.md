@@ -41,7 +41,7 @@ There is one formula per release channel; they install the same `doz` command, s
 | `dozer-sandbox/tap/doz-beta` | beta | beta builds first, and every release |
 | `dozer-sandbox/tap/doz-canary` | canary | every build, first |
 
-`doz update --channel beta` switches: it asks, then Homebrew uninstalls one formula and installs the other.
+`doz upgrade --channel beta` switches: it asks, then Homebrew uninstalls one formula and installs the other.
 Your store, sandboxes and settings are not Homebrew's and stay. doz never installs an older build — switching
 to a channel whose newest build is older than yours waits until that channel catches up.
 
@@ -49,7 +49,7 @@ to a channel whose newest build is older than yours waits until that channel cat
 
 Each release also has a tarball on the project's GitHub releases page: `doz-VERSION-macos-arm64.tar.gz` (and
 its `.sha256`). Unpack it anywhere and put its `bin` on your `PATH`; keep the folder as it is (`bin/doz` is a
-link into `libexec/doz`, where doz finds its parts). `doz update` updates such an install itself: it downloads
+link into `libexec/doz`, where doz finds its parts). `doz upgrade -y` updates such an install itself: it downloads
 the new tarball, checks it against the signed feed and Apple's signature, and swaps it in, keeping the
 previous version as `libexec/doz.previous`.
 
@@ -58,14 +58,16 @@ previous version as `libexec/doz.previous`.
 doz tells you when a new release is out — one line after a command on your terminal, and a banner on the
 dashboard:
 
-> doz 0.31.1 is available — upgrade: doz update (notes: https://updates.dozersandbox.com/v1/notes/0.31.1.html)
+> doz 0.31.1 is available — upgrade: doz upgrade -y (notes: https://updates.dozersandbox.com/v1/notes/0.31.1.html)
 
 ```sh
-doz update
+doz upgrade -y            # or doz upgrade: it shows the version and the notes, and asks first
 doz host restart
 ```
 
-`doz update` refreshes Dozer's tap first, then runs `brew upgrade` for your channel's formula. Homebrew refreshes
+`doz upgrade` refreshes Dozer's tap first, then runs `brew upgrade` for your channel's formula. It always asks the
+feed itself (past any cached copy), so a release is there the minute it is published. Its first name, `doz update`,
+still works. Homebrew refreshes
 its taps only now and then, so a plain `brew upgrade doz` can say there is nothing new for up to a day; with brew
 directly, run `brew update` first.
 
@@ -75,7 +77,7 @@ directly, run `brew update` first.
   in its user agent. Offline, it says nothing. Never with `--json` or `-q`, or when not on a terminal.
 - **The setting `updates.mode`**: `notify` (the default), `auto` — doz also installs the update itself (through
   Homebrew for a Homebrew install), but only while no sandbox is running and no session is attached, and then says
-  `Updated to 0.31.1 — restart to apply: doz host restart` — or `off` (never look). `doz update --check` looks
+  `Updated to 0.31.1 — restart to apply: doz host restart` — or `off` (never look). `doz upgrade --check` looks
   now, whatever the mode.
 - Homebrew installs the new version beside the old one, then removes the old one.
 - **A running host keeps its old version.** After an upgrade, Homebrew runs `doz host upgrade-check`,
@@ -167,7 +169,7 @@ Don't have a Homebrew `doz` and a source-built one on your `PATH` at the same ti
 
 | symptom | what to do |
 |---|---|
-| `brew install` says another doz formula is installed | One channel at a time: `doz update --channel …` switches (or `brew uninstall` the other first). |
+| `brew install` says another doz formula is installed | One channel at a time: `doz upgrade --channel …` switches (or `brew uninstall` the other first). |
 | "the update feed was ignored" / "do not verify" | Nothing is installed from it; doz keeps working. If it persists, check your network isn't rewriting `updates.dozersandbox.com`. |
 | `doz: command not found` | `brew list doz`, then open a new terminal window. |
 | "this host's program … is gone — an upgrade removed it" | `doz host stop`, then run your command again. |

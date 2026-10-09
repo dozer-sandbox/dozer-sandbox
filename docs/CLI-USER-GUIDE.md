@@ -26,7 +26,7 @@ brew install dozer-sandbox/tap/doz
 doz onboard                       # once: set up this Mac
 ```
 
-Afterwards: `brew upgrade doz` (or `doz update`) for a new release — doz tells you when one is out — safe with a host running (below) — and `brew uninstall doz` to remove it.
+Afterwards: `brew upgrade doz` (or `doz upgrade -y`) for a new release — doz tells you when one is out — safe with a host running (below) — and `brew uninstall doz` to remove it.
 
 A VM can only be booted by a binary signed with Apple's virtualization entitlement; the release is
 signed with it (ad hoc today — enough for Homebrew, which never quarantines a formula's download;

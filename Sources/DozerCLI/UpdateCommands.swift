@@ -4,11 +4,14 @@ import DozerHost
 import DozerKit
 import Foundation
 
-// 611 — `doz update [--check] [--channel X]`, the after-command notice/auto-update, and `doz host restart`.
+// 611 — `doz upgrade [-y] [--check] [--channel X]` (`doz update`, its first name, still works), the after-command
+// notice/auto-update, and `doz host restart`.
 
 struct UpdateCommand: AsyncParsableCommand {
-    static let configuration = CommandConfiguration(commandName: "update",
-        abstract: "Look for a newer doz on your channel and install it (Homebrew: brew upgrade; a tarball install: the signed download). --check only looks; --channel switches channel.",
+    // Owner, 2026-10-09: "i think it should be called `doz upgrade -y`" — `update` reads as "refresh the list" (what it
+    // means to Homebrew); this installs. `update` stays as an alias (a note, then as before: no question).
+    static let configuration = CommandConfiguration(commandName: "upgrade",
+        abstract: "Look for a newer doz on your channel and install it (Homebrew: brew upgrade; a tarball install: the signed download) — asks first; -y does not. --check only looks; --channel switches channel.",
         discussion: """
         The feed is signed with Dozer's own key, and doz installs only what verifies — never an older build. \
         Channels: stable, beta (beta and stable releases), canary (every build first). A Homebrew install has one \
@@ -16,12 +19,18 @@ struct UpdateCommand: AsyncParsableCommand {
         installs the other; your store, sandboxes and settings stay. A running host keeps its build until \
         doz host restart. The setting updates.mode decides what doz does by itself: notify (default), auto or off. \
         Exit codes: 0 · 10 with --check when an update is available.
-        """)
+        """,
+        aliases: ["update"])
 
     @OptionGroup var g: GlobalOptions
     @Flag(name: .long, help: "Only look: say whether a newer doz is available (exit 10 when it is).") var check = false
     @Option(name: .long, help: "Switch to this channel: stable, beta or canary (asks first; --yes skips the question).") var channel: String?
-    @Flag(name: [.short, .long], help: "Do not ask.") var yes = false
+    @Flag(name: [.short, .long], help: "Do not ask (needed off a terminal).") var yes = false
+
+    /// Run as `doz update` (the first name): said once, and it never asks — as it did.
+    var asUpdate: Bool {
+        CommandLine.arguments.dropFirst().first(where: { !$0.hasPrefix("-") }) == "update"
+    }
 
     struct Answer: Encodable {
         var current: String
@@ -65,6 +74,9 @@ struct UpdateCommand: AsyncParsableCommand {
             if g.json { Out.json(a) } else { Out.stdout(UpdateChecker.noticeLine(e, ctx) + "\n") }
             throw ExitCode(10)
         }
+        if asUpdate, !g.json, !g.quiet { Out.stderr("note: doz update is now doz upgrade (doz upgrade -y does not ask)\n") }
+        try confirm("Upgrade doz \(ctx.current) → \(e.version) (\(ctx.channel.rawValue))? Notes: \(e.notes ?? "on the release page")",
+                    yes: yes || asUpdate, g)
         do {
             let line = try await UpdateHook.install(e, ctx, store: g.dozerStore, quiet: g.json)
             a.installed = e.version
@@ -95,7 +107,7 @@ struct UpdateCommand: AsyncParsableCommand {
         if newest == nil {
             Out.stdout("updates.channel = \(c.rawValue). The \(c.rawValue) channel has nothing newer than doz \(before.current), so "
                        + "\(formula) stays installed for now (doz never installs an older build); doz offers the switch "
-                       + "(doz update --channel \(c.rawValue)) once \(c.rawValue) passes \(before.current).\n")
+                       + "(doz upgrade --channel \(c.rawValue)) once \(c.rawValue) passes \(before.current).\n")
             return
         }
         guard let brew = UpdateInstaller.brew() else { throw fail(HostError(.failed, "Homebrew's brew was not found"), g) }
@@ -131,7 +143,7 @@ enum UpdateHook {
             throw UpdateInstaller.Failure("this doz is a development build — it is not updated (a release install is: Homebrew, or the release tarball)")
         case .homebrew(let formula):
             if let f = ctx.method.formulaChannel, f != ctx.channel {
-                throw UpdateInstaller.Failure("this doz is the \(f.rawValue) formula (\(formula)) and updates.channel is \(ctx.channel.rawValue) — doz update --channel \(ctx.channel.rawValue) switches")
+                throw UpdateInstaller.Failure("this doz is the \(f.rawValue) formula (\(formula)) and updates.channel is \(ctx.channel.rawValue) — doz upgrade --channel \(ctx.channel.rawValue) switches")
             }
             guard let brew = UpdateInstaller.brew() else { throw UpdateInstaller.Failure("Homebrew's brew was not found — upgrade with: brew upgrade \(formula)") }
             say("updating doz to \(e.version): brew upgrade \(formula)\n")
@@ -181,7 +193,7 @@ enum UpdateHook {
         let tty = env["DOZ_TEST_UPDATE_TTY"] == "1" || (isatty(STDOUT_FILENO) == 1 && isatty(STDERR_FILENO) == 1)
         guard tty else { return false }
         let first = words(args).first ?? ""
-        return !["update", "host", "serve", "uninstall", "help", "config"].contains(first)
+        return !["upgrade", "update", "host", "serve", "uninstall", "help", "config"].contains(first)
     }
 
     /// After a command: the daily check, and what its mode says to do — one line (notify), or an install when

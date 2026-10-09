@@ -949,7 +949,7 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
 - Every decision takes a `BuildFlavor` (`HostCore.setBuildFlavor`, `OpenAIChoices`); a real process can be told with
   the TEST seam `DOZ_TEST_PUBLIC_BUILD=1|0`. `BuildFlavorTests` runs both modes in one `swift test`.
 
-### Updates: the signed feed, channels, `doz update`
+### Updates: the signed feed, channels, `doz upgrade`
 
 - **ONE feed, frozen, compiled in**: `https://updates.dozersandbox.com/v1/feed.json` (`Distribution.feedURL` in
   `Sources/DozerHost/Updates.swift` — with `tap`, `repository`, `teamID` and `updatePublicKey`, the ONE place these
@@ -978,7 +978,7 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   the previous kept as `libexec/doz.previous` (a running host keeps its inode — the 591 rule). Then "Updated to X —
   restart to apply: doz host restart" (`doz host restart` = stop with progress + start). The dashboard's banner reads
   `UpdateChecker.remembered` (no network per page) via `WebSessionInfo.update`.
-- **`doz update [--check] [--channel X]`**: `--check` exits 10 when one is available; `--channel` writes the setting
+- **`doz upgrade [--check] [--channel X]`**: `--check` exits 10 when one is available; `--channel` writes the setting
   and, for Homebrew, switches formulas (`brew uninstall` then `brew install <tap>/<formula>`, reinstalling the old one
   if that fails) — refused when the new channel's newest is not newer (never a downgrade).
 - **Publishing** (`make publish VERSION= NOTES= CHANNEL=canary`, `make promote BUILD= CHANNEL=`; `Scripts/publish.sh`,

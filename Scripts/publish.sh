@@ -130,6 +130,20 @@ commit() {
 commit "$UPDATES_DIR" "publish doz $VERSION (build $NEXT) → $CHANNEL"
 commit "$TAP_DIR" "doz $VERSION (build $NEXT) on $CHANNEL"
 
+# 6. With PUSH=1: wait until the LIVE feed lists it (GitHub Pages builds for a minute or so) — asked with a unique
+#    query, past the CDN's 10-minute copy, as doz upgrade asks — so "published" means a person can upgrade now.
+if [[ -n "$PUSH" && -z "$TEST_PUBLISH" ]]; then
+    say "  … waiting for the live feed to list $VERSION ($FEED_URL)"
+    live=""
+    for _ in $(seq 1 40); do
+        if curl -fsS -m 10 "$FEED_URL?t=$(date +%s)" 2>/dev/null | python3 -c 'import json,sys; v=sys.argv[1]; d=json.load(sys.stdin); sys.exit(0 if any(i.get("version")==v for i in d.get("entries",[])) else 1)' "$VERSION" 2>/dev/null; then
+            live=1; break
+        fi
+        sleep 15
+    done
+    [[ -n "$live" ]] && say "  ✓ the live feed lists $VERSION" || say "  ! the live feed does not list $VERSION after 10 minutes — check the updates repo's Pages build"
+fi
+
 cat <<DONE
 
 ✓ doz $VERSION (build $NEXT) is in the feed on $CHANNEL.

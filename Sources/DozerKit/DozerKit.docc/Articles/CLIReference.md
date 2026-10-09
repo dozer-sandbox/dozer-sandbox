@@ -561,9 +561,9 @@ ones are reported as died with their disk checked at the next start.
 ### Updates
 
 ```bash
-doz update --check                               # is a newer doz available on your channel? (exit 10 when it is)
-doz update                                       # install it: brew upgrade for Homebrew, the signed download for a tarball install
-doz update --channel beta                        # switch channel (stable, beta, canary) — for Homebrew, the formula
+doz upgrade --check                               # is a newer doz available on your channel? (exit 10 when it is)
+doz upgrade -y                                       # install it: brew upgrade for Homebrew, the signed download for a tarball install
+doz upgrade --channel beta                        # switch channel (stable, beta, canary) — for Homebrew, the formula
 ```
 
 doz looks for a newer release at most once a day (and when `doz ui` starts) in a feed signed with Dozer's own
@@ -571,7 +571,7 @@ key, and installs only what verifies — never an older build. The setting `upda
 `notify` (the default — one line on your terminal and a banner on the dashboard, with the command to run), `auto`
 (it also installs the update, only while no sandbox runs and no session is attached; then: restart to apply,
 `doz host restart`) or `off`. `updates.channel` is stable, beta (beta and stable releases) or canary (every build
-first); a Homebrew install has one formula per channel — `doz`, `doz-beta`, `doz-canary` — and `doz update
+first); a Homebrew install has one formula per channel — `doz`, `doz-beta`, `doz-canary` — and `doz upgrade -y
 --channel` switches between them, keeping your store, sandboxes and settings. Never with `--json`, `-q`, or when
 not on a terminal.
 

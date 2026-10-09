@@ -66,7 +66,7 @@ dashboard) from a feed signed with the project's own key, and never installs any
 | `brew install dozer-sandbox/tap/doz-beta` | beta (and stable) |
 | `brew install dozer-sandbox/tap/doz-canary` | every build, first |
 
-`doz update --channel beta` switches; your store, sandboxes and settings stay. See
+`doz upgrade --channel beta` switches; your store, sandboxes and settings stay. See
 [Installing, upgrading and uninstalling](docs/manual/02-install-upgrade-uninstall.md).
 
 ## Documentation

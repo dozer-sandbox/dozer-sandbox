@@ -658,7 +658,7 @@ public final class DozerWebServer: @unchecked Sendable {
         }
         guard let e = available else { return nil }
         let line = UpdateChecker.noticeLine(e, ctx)
-        let command = line.components(separatedBy: "upgrade: ").last.map { $0.components(separatedBy: " (notes:").first ?? $0 } ?? "doz update"
+        let command = line.components(separatedBy: "upgrade: ").last.map { $0.components(separatedBy: " (notes:").first ?? $0 } ?? "doz upgrade -y"
         return WebUpdateNotice(kind: "available", version: e.version, command: command, notes: e.notes,
                                text: "doz \(e.version) is available")
     }

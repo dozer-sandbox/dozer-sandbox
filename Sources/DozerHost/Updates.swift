@@ -188,9 +188,9 @@ public enum InstallMethod: Equatable, Sendable {
     public var upgradeCommand: String? {
         switch self {
         // Not `brew upgrade FORMULA`: Homebrew refreshes its taps only now and then, so that alone can miss the
-        // release the feed names; `doz update` refreshes Dozer's tap first.
-        case .homebrew: "doz update"
-        case .tarball: "doz update"
+        // release the feed names; `doz upgrade -y` refreshes Dozer's tap first.
+        case .homebrew: "doz upgrade -y"
+        case .tarball: "doz upgrade -y"
         case .development: nil
         }
     }
@@ -298,7 +298,7 @@ public struct UpdateContext: Sendable {
                              testWithoutFeed: TestSafety.guarded(env) && testFeed == nil, allowLoopbackHTTP: testFeed != nil)
     }
 
-    /// Why this doz does not look for updates (nil: it does). `manual`: `doz update` asked — even with mode off.
+    /// Why this doz does not look for updates (nil: it does). `manual`: `doz upgrade -y` asked — even with mode off.
     public func disabledReason(manual: Bool) -> String? {
         if testWithoutFeed { return "not in a test run (no DOZ_TEST_UPDATE_FEED)" }
         if mode == .off && !manual { return "updates.mode is off" }
@@ -326,7 +326,7 @@ public enum UpdateChecker {
     }
 
     /// Check: from the remembered feed when the last check is under a day old (unless `force`), else ask the feed
-    /// (conditionally). `manual` (`doz update`) works even with mode off. Writes the state back.
+    /// (conditionally). `manual` (`doz upgrade -y`) works even with mode off. Writes the state back.
     public static func check(_ ctx: UpdateContext, force: Bool = false, manual: Bool = false, network: Bool = true, now: Date = Date(),
                              fetch: UpdateFetch = urlSessionFetch) async -> UpdateCheck {
         if let why = ctx.disabledReason(manual: manual) { return UpdateCheck(disabled: why) }
@@ -338,7 +338,15 @@ public enum UpdateChecker {
                 && (state.lastAttempt.map { now.timeIntervalSince($0) >= retryAfterFailure } ?? true)
             || network && (state.lastAttempt.map { $0 > now } ?? false)           // a clock that went back
         if due {
-            var req = URLRequest(url: ctx.feedURL)
+            // A check a person asked for (doz upgrade, --check, doz ui's start) goes past the CDN's copy: GitHub Pages
+            // serves the feed with max-age=600 through its CDN, so a release published minutes ago was invisible to
+            // `doz update` (owner, on 0.32.0-rc.3). A unique query is a new cache key; the daily check stays cacheable.
+            var url = ctx.feedURL
+            if force || manual, var c = URLComponents(url: url, resolvingAgainstBaseURL: false), c.scheme == "https" {
+                c.queryItems = [URLQueryItem(name: "t", value: String(Int(now.timeIntervalSince1970)))]
+                url = c.url ?? url
+            }
+            var req = URLRequest(url: url)
             req.setValue("doz/\(ctx.current) (\(ctx.channel.rawValue))", forHTTPHeaderField: "User-Agent")
             if state.feed != nil {
                 if let e = state.etag { req.setValue(e, forHTTPHeaderField: "If-None-Match") }
@@ -395,9 +403,9 @@ public enum UpdateChecker {
 
     /// The one line a terminal shows (stderr): `doz X is available — upgrade: brew upgrade doz (notes: URL)`.
     public static func noticeLine(_ e: UpdateEntry, _ ctx: UpdateContext) -> String {
-        var how = ctx.method.upgradeCommand ?? "doz update"
+        var how = ctx.method.upgradeCommand ?? "doz upgrade -y"
         // A Homebrew install of another channel's formula switches formulas to follow the channel setting.
-        if let f = ctx.method.formulaChannel, f != ctx.channel { how = "doz update --channel \(ctx.channel.rawValue)" }
+        if let f = ctx.method.formulaChannel, f != ctx.channel { how = "doz upgrade --channel \(ctx.channel.rawValue)" }
         return "doz \(e.version) is available — upgrade: \(how)" + (e.notes.map { " (notes: \($0))" } ?? "")
     }
 

@@ -129,6 +129,21 @@ final class UpdatesTests: XCTestCase {
 
     // MARK: the check
 
+    /// GitHub Pages serves the feed through its CDN with max-age=600: a check a person asked for must not get a copy
+    /// from before the last publish (owner, on 0.32.0-rc.3), while the daily check stays cacheable.
+    func testAManualCheckGoesPastTheCDNsCopyTheDailyOneDoesNot() async {
+        let server = FakeFeed()
+        server.body = feed([entry("0.31.1", build: 2, channel: "stable")])
+        let c = ctx()
+        let t0 = Date(timeIntervalSince1970: 1_791_500_000)
+        _ = await UpdateChecker.check(c, now: t0, fetch: server.fetch)
+        XCTAssertEqual(server.requests.last?.url?.absoluteString, "https://updates.dozersandbox.com/v1/feed.json", "the daily check: the plain URL")
+        _ = await UpdateChecker.check(c, manual: true, now: t0, fetch: server.fetch)
+        XCTAssertEqual(server.requests.last?.url?.absoluteString, "https://updates.dozersandbox.com/v1/feed.json?t=1791500000", "doz upgrade: a cache key of its own")
+        _ = await UpdateChecker.check(c, force: true, now: t0.addingTimeInterval(7), fetch: server.fetch)
+        XCTAssertEqual(server.requests.last?.url?.query, "t=1791500007", "doz ui's start too")
+    }
+
     func testTheCheckIsDailyConditionalAndOfflineIsSilent() async {
         let server = FakeFeed()
         server.body = feed([entry("0.31.1", build: 2, channel: "stable")])
@@ -211,11 +226,11 @@ final class UpdatesTests: XCTestCase {
         let set = UpdateContext.current(version: "0.32.0-rc.1", executable: cellar, settings: s, env: [:])
         XCTAssertEqual(set.channel, .stable)
         XCTAssertEqual(UpdateChecker.noticeLine(entry("0.32.0", build: 9, channel: "stable"), set),
-                       "doz 0.32.0 is available — upgrade: doz update --channel stable (notes: https://updates.dozersandbox.com/v1/notes/0.32.0.html)",
+                       "doz 0.32.0 is available — upgrade: doz upgrade --channel stable (notes: https://updates.dozersandbox.com/v1/notes/0.32.0.html)",
                        "another channel's formula: the switch, not brew upgrade")
         XCTAssertEqual(UpdateChecker.noticeLine(entry("0.32.0", build: 9, channel: "stable"), ctx(method: .homebrew(formula: "doz"))),
-                       "doz 0.32.0 is available — upgrade: doz update (notes: https://updates.dozersandbox.com/v1/notes/0.32.0.html)",
-                       "doz update, which refreshes Dozer's tap first — a bare brew upgrade can miss the release")
+                       "doz 0.32.0 is available — upgrade: doz upgrade -y (notes: https://updates.dozersandbox.com/v1/notes/0.32.0.html)",
+                       "doz upgrade -y, which refreshes Dozer's tap first — a bare brew upgrade can miss the release")
         XCTAssertEqual(UpdateChecker.installedLine("0.32.0"), "Updated to 0.32.0 — restart to apply: doz host restart")
     }
 
@@ -232,7 +247,7 @@ final class UpdatesTests: XCTestCase {
         try "public\n".write(to: lib.appendingPathComponent(UpdateInstaller.releaseMarker), atomically: true, encoding: .utf8)
         guard case .tarball(let p) = InstallMethod.detect(executable: lib.appendingPathComponent("doz").path) else { return XCTFail("a tarball install") }
         XCTAssertEqual(p.standardizedFileURL.path, prefix.resolvingSymlinksInPath().standardizedFileURL.path)
-        XCTAssertEqual(InstallMethod.homebrew(formula: "doz-canary").upgradeCommand, "doz update", "it refreshes Dozer's tap first")
+        XCTAssertEqual(InstallMethod.homebrew(formula: "doz-canary").upgradeCommand, "doz upgrade -y", "it refreshes Dozer's tap first")
     }
 
     func testTheNotifyLineIsSaidOncePerVersionADayAndTheBannerReadsNoNetwork() async {

@@ -5,7 +5,7 @@
 onboard
 init
 uninstall
-update
+upgrade
 new
 create
 up

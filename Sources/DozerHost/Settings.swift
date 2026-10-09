@@ -525,7 +525,7 @@ public struct DozerSettings: Sendable {
                   "Updates: notify (at most once a day, and when doz ui opens, look for a newer doz and say how to upgrade — one line on a terminal, a banner on the dashboard), auto (also install it: brew upgrade, or the signed download for a tarball install — only while no sandbox runs and no session is attached, else it notifies; then: restart to apply, doz host restart), or off (never look). Never a downgrade; a feed that does not verify is ignored.",
                   env: "DOZ_UPDATES", applies: .nextCommand),
             .init("updates", "channel", .choice(["stable", "beta", "canary"]), .string("stable"),
-                  "Which releases you are offered: stable, beta (beta and stable) or canary (every build, first). A Homebrew install's own formula (doz, doz-beta, doz-canary) decides while this is not set; doz update --channel switches both.",
+                  "Which releases you are offered: stable, beta (beta and stable) or canary (every build, first). A Homebrew install's own formula (doz, doz-beta, doz-canary) decides while this is not set; doz upgrade --channel switches both.",
                   applies: .nextCommand),
             .init("resources", "clean_unused_days", .int(1...3650), .int(30),
                   "Clean up (the Resources page, doz resources clean) removes a prepared image no sandbox was created from in this many days; it is prepared again when next needed.",

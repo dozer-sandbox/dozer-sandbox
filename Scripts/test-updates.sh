@@ -85,8 +85,8 @@ export DOZ_TEST_UPDATE_FEED="http://127.0.0.1:$PORT/v1/feed.json" DOZ_TEST_UPDAT
 mkdir -p "$R/codex" "$R/xdg"
 requests() { grep -c 'GET /v1/feed.json' "$R/server.log" || true; }
 
-out="$("$DOZ" update --check --store "$R/store" 2>&1)" && rc=0 || rc=$?
-check "update --check (stable): $B available, exit 10" bash -c "[ $rc = 10 ] && grep -q 'doz $B is available — upgrade: doz update' <<<'$out'"
+out="$("$DOZ" upgrade --check --store "$R/store" 2>&1)" && rc=0 || rc=$?
+check "upgrade --check (stable): $B available, exit 10" bash -c "[ $rc = 10 ] && grep -q 'doz $B is available — upgrade: doz upgrade -y' <<<'$out'"
 check "  … the notice links the notes" grep -q "notes: https://updates.dozersandbox.com/v1/notes/$B.html" <<<"$out"
 n0=$(requests)
 err="$(DOZ_TEST_UPDATE_TTY=1 "$DOZ" ls --store "$R/store" 2>&1 >/dev/null)"
@@ -105,21 +105,21 @@ check "never off a terminal" bash -c "! grep -q 'is available' <<<'$err'"
 n1=$(requests)
 err="$(DOZ_TEST_UPDATE_TTY=1 "$DOZ" ls --store "$R/store" 2>&1 >/dev/null)"
 check "mode off: nothing said, nothing asked" bash -c "! grep -q 'is available' <<<'$err' && [ $(requests) = $n1 ]"
-"$DOZ" update --check --store "$R/store" >/dev/null 2>&1 && rc=0 || rc=$?
-check "mode off: doz update --check still looks (exit 10)" [ "$rc" = 10 ]
+"$DOZ" upgrade --check --store "$R/store" >/dev/null 2>&1 && rc=0 || rc=$?
+check "mode off: doz upgrade --check still looks (exit 10)" [ "$rc" = 10 ]
 "$DOZ" config set updates.mode notify --store "$R/store" >/dev/null
 "$DOZ" config set updates.channel canary --store "$R/store" >/dev/null
-out="$("$DOZ" update --check --store "$R/store" 2>&1)" || true
+out="$("$DOZ" upgrade --check --store "$R/store" 2>&1)" || true
 check "canary: $C (every build)" grep -q "doz $C is available" <<<"$out"
 "$DOZ" config set updates.channel beta --store "$R/store" >/dev/null
-out="$("$DOZ" update --check --store "$R/store" 2>&1)" || true
+out="$("$DOZ" upgrade --check --store "$R/store" 2>&1)" || true
 check "beta: $B (beta + stable, not canary)" grep -q "doz $B is available" <<<"$out"
-out="$(DOZ_TEST_UPDATE_EXECUTABLE="$R/zzz/libexec/doz/doz" "$DOZ" update --check --store "$R/store" 2>&1)" || true
+out="$(DOZ_TEST_UPDATE_EXECUTABLE="$R/zzz/libexec/doz/doz" "$DOZ" upgrade --check --store "$R/store" 2>&1)" || true
 check "a development build is never updated" grep -q "development build" <<<"$out"
 
 # Never a downgrade: an install newer than everything is "the newest".
 mkdir -p "$R/newer/bin" "$R/newer/libexec/doz" && cp -cR "$R/prefix/libexec/doz/." "$R/newer/libexec/doz/" && printf '%s\n' $Z > "$R/newer/libexec/doz/VERSION" && ln -s ../libexec/doz/doz "$R/newer/bin/doz"
-out="$("$R/newer/bin/doz" update --check --store "$R/store" 2>&1)" && rc=0 || rc=$?
+out="$("$R/newer/bin/doz" upgrade --check --store "$R/store" 2>&1)" && rc=0 || rc=$?
 check "never a downgrade: $Z is the newest (exit 0)" bash -c "[ $rc = 0 ] && grep -q 'is the newest' <<<'$out'"
 
 # A tampered entry: dropped, said ONCE; the other entry still offered.
@@ -131,14 +131,14 @@ for e in f["entries"]:
 json.dump(f, open(p, "w"), indent=2)
 PY
 "$DOZ" config set updates.channel canary --store "$R/store" >/dev/null
-err="$(DOZ_TEST_UPDATE_TTY=1 "$DOZ" update --check --store "$R/store" 2>&1)" || true
+err="$(DOZ_TEST_UPDATE_TTY=1 "$DOZ" upgrade --check --store "$R/store" 2>&1)" || true
 check "a tampered entry is ignored (canary falls back to $B)" bash -c "grep -q 'doz $B is available' <<<'$err' && ! grep -q 'doz $C is available' <<<'$err'"
 check "  … and said" grep -q "do not verify" <<<"$err"
 err2="$(DOZ_TEST_UPDATE_TTY=1 "$DOZ" ls --store "$R/store" 2>&1 >/dev/null)"
 check "  … once (not again after the next command)" bash -c "! grep -q 'do not verify' <<<'$err2'"
 printf 'not json' > "$R/www/v1/feed.json"
 touch -t 202901010000 "$R/www/v1/feed.json"     # a new Last-Modified (the tampered one was written this same second)
-err="$("$DOZ" update --check --store "$R/store" 2>&1)" || true
+err="$("$DOZ" upgrade --check --store "$R/store" 2>&1)" || true
 check "a feed that is not a feed is ignored, said" grep -q "the update feed was ignored" <<<"$err"
 cp "$R/site/v1/feed.json" "$R/www/v1/feed.json"
 touch -t 203001010000 "$R/www/v1/feed.json"     # a new Last-Modified: not a 304
@@ -177,21 +177,26 @@ chmod +x "$R/brew"
 export DOZ_TEST_BREW="$R/brew" DOZ_TEST_UPDATE_EXECUTABLE="$R/Cellar/doz/$A/libexec/doz/doz"
 "$DOZ" config unset updates.channel --store "$R/store" >/dev/null
 "$DOZ" config set updates.mode notify --store "$R/store" >/dev/null
-out="$("$DOZ" update --check --store "$R/store" 2>&1)" || true
-check "homebrew: the notice says doz update" grep -q "doz $B is available — upgrade: doz update " <<<"$out"
+out="$("$DOZ" upgrade --check --store "$R/store" 2>&1)" || true
+check "homebrew: the notice says doz upgrade -y" grep -q "doz $B is available — upgrade: doz upgrade -y " <<<"$out"
 git -C "$R/brew-tap-origin" -c user.email=t@t -c user.name=t commit -q --allow-empty -m two
-"$DOZ" update --store "$R/store" >/dev/null 2>&1 || true
-check "homebrew: doz update runs brew upgrade doz" grep -qx "upgrade doz" "$R/brew.log"
+"$DOZ" upgrade --store "$R/store" >/dev/null 2>&1 < /dev/null && rc=0 || rc=$?
+check "homebrew: doz upgrade with no terminal and no -y asks nothing and does nothing" bash -c "[ $rc != 0 ] && [ ! -s '$R/brew.log' ]"
+"$DOZ" upgrade -y --store "$R/store" >/dev/null 2>&1 || true
+check "homebrew: doz upgrade -y runs brew upgrade doz" grep -qx "upgrade doz" "$R/brew.log"
+: > "$R/brew.log"
+out="$("$DOZ" update --store "$R/store" 2>&1 < /dev/null)" || true
+check "homebrew: doz update (the first name) still upgrades, without asking, and says it is doz upgrade now" bash -c "grep -qx 'upgrade doz' '$R/brew.log' && grep -q 'doz update is now doz upgrade' <<<\"\$1\"" _ "$out"
 check "  … after fast-forwarding Dozer's tap" [ "$(git -C "$R/brew-tap-clone" rev-parse HEAD)" = "$(git -C "$R/brew-tap-origin" rev-parse HEAD)" ]
 check "  … and Homebrew is never left asking [y/n]" bash -c "! grep -qv '^no-ask=1\$' '$R/brew-env.log'"
 : > "$R/brew.log"
-"$DOZ" update --channel canary --yes --store "$R/store" >/dev/null 2>&1 || true
+"$DOZ" upgrade --channel canary --yes --store "$R/store" >/dev/null 2>&1 || true
 check "homebrew: --channel canary = uninstall doz, install the tap's doz-canary" bash -c "[ \"\$(cat '$R/brew.log')\" = \$'uninstall doz\ninstall dozer-sandbox/tap/doz-canary' ]"
 check "  … the setting follows" grep -q '^channel = "canary"' "$R/xdg/dozer-sandbox/doz.toml"
 : > "$R/brew.log"
 export DOZ_TEST_UPDATE_EXECUTABLE="$R/Cellar/doz-canary/$Z/libexec/doz/doz"
 mkdir -p "$(dirname "$DOZ_TEST_UPDATE_EXECUTABLE")" && cp -cR "$R/newer/libexec/doz/." "$(dirname "$DOZ_TEST_UPDATE_EXECUTABLE")/"
-out="$("$R/newer/bin/doz" update --channel stable --yes --store "$R/store" 2>&1)" || true
+out="$("$R/newer/bin/doz" upgrade --channel stable --yes --store "$R/store" 2>&1)" || true
 check "homebrew: a switch that would install an OLDER build is not made" bash -c "[ ! -s '$R/brew.log' ] && grep -q 'never installs an older build' <<<'$out'"
 unset DOZ_TEST_UPDATE_EXECUTABLE
 export DOZ_TEST_UPDATE_EXECUTABLE="$R/Cellar/doz/$A/libexec/doz/doz"
