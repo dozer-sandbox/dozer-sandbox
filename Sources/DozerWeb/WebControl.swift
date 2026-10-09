@@ -90,8 +90,20 @@ public enum WebControl {
         return "\(who) holds this store but is not answering — \(pid.map { "kill \($0)" } ?? "quit it"), then run doz ui again"
     }
 
+    /// The pid of the process holding the store's UI lock; nil when nobody holds it (or no pid was recorded).
+    public static func lockHolder(_ store: DozerStore) -> pid_t? {
+        let fd = open(lockFile(store).path, O_RDONLY | O_CLOEXEC)
+        guard fd >= 0 else { return nil }
+        defer { close(fd) }
+        if flock(fd, LOCK_SH | LOCK_NB) == 0 { flock(fd, LOCK_UN); return nil }
+        var buf = [UInt8](repeating: 0, count: 32)
+        let n = pread(fd, &buf, buf.count, 0)
+        guard n > 0, let pid = Int32(String(decoding: buf[0..<n], as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)), pid > 0 else { return nil }
+        return pid
+    }
+
     /// True when `pid` is stopped (SSTOP — Ctrl-Z, or SIGSTOP).
-    static func processIsStopped(_ pid: Int32) -> Bool {
+    public static func processIsStopped(_ pid: Int32) -> Bool {
         var info = kinfo_proc()
         var size = MemoryLayout<kinfo_proc>.stride
         var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, pid]

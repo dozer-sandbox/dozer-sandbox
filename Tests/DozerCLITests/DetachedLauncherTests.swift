@@ -13,4 +13,14 @@ final class DetachedLauncherTests: XCTestCase {
         XCTAssertTrue(p.contains("--no-invite"), "no terminal: no invite printed into a log")
         XCTAssertEqual(DetachedLauncher.serveLog(URL(fileURLWithPath: "/tmp/s")).path, "/tmp/s/serve/serve.log")
     }
+
+    func testTheIntermediateAndTheDetachedUI() {
+        XCTAssertEqual(DetachedLauncher.uiIntermediateArgs(executable: "/opt/doz", store: "/tmp/s", extra: ["--port", "17614"]),
+                       ["/opt/doz", "ui", "start", "--launch-detached", "--store", "/tmp/s", "--port", "17614"])
+        let p = DetachedLauncher.uiProcessArgs(executable: "/opt/doz", store: "/tmp/s")
+        XCTAssertEqual(p, ["/opt/doz", "ui", "start", "--launched", "--no-open", "--store", "/tmp/s"])
+        XCTAssertFalse(p.contains("--detach"), "the detached one never detaches again")
+        XCTAssertTrue(p.contains("--no-open"), "no terminal: the doz ui --detach that started it opens the tab")
+        XCTAssertEqual(DetachedLauncher.uiLog(URL(fileURLWithPath: "/tmp/s")).path, "/tmp/s/ui.log")
+    }
 }

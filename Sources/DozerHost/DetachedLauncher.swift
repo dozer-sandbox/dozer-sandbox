@@ -18,6 +18,17 @@ public enum DetachedLauncher {
         [executable, "serve", "start", "--launched", "--no-invite", "--store", store] + extra
     }
 
+    /// `doz ui --detach`'s intermediate: `<doz> ui start --launch-detached --store S [extra…]`.
+    public static func uiIntermediateArgs(executable: String, store: String, extra: [String] = []) -> [String] {
+        [executable, "ui", "start", "--launch-detached", "--store", store] + extra
+    }
+    /// The detached `doz ui`: `<doz> ui start --launched --no-open --store S [extra…]` — it never opens a tab itself
+    /// (no terminal); the `doz ui --detach` that started it hands the link over.
+    public static func uiProcessArgs(executable: String, store: String, extra: [String] = []) -> [String] {
+        [executable, "ui", "start", "--launched", "--no-open", "--store", store] + extra
+    }
+    /// A detached `doz ui`'s log (`<store>/ui.log`).
+    public static func uiLog(_ root: URL) -> URL { root.appendingPathComponent("ui.log") }
     /// `doz serve`'s log (`<store>/serve/serve.log`).
     public static func serveLog(_ root: URL) -> URL { root.appendingPathComponent("serve/serve.log") }
 

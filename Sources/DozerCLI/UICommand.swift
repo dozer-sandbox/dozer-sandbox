@@ -24,9 +24,10 @@ struct UICommand: AsyncParsableCommand {
         opens (ui.open_browser: auto | always | never; --open, --no-open). Running `doz ui` while one runs reuses it: \
         a tab opens only when none of its pages is open. `doz ui link` opens another browser (or tab); \
         `doz ui restart` restarts the running one (open pages and their terminals carry on by themselves); \
+        --detach runs it in the background (its log: <store>/ui.log) until doz ui stop; \
         --new-link (or doz ui link --rotate) signs every page out for a new link.
         """,
-        subcommands: [UIStart.self, UILink.self, UIRestart.self, UIServe.self],
+        subcommands: [UIStart.self, UILink.self, UIRestart.self, UIStop.self, UIServe.self],
         defaultSubcommand: UIStart.self)
 }
 
@@ -83,6 +84,11 @@ struct UIStartOptions: ParsableArguments {
     @Option(name: .long, help: "The port, on 127.0.0.1 only: 1024–65535, or 0 = automatic (default: the setting ui.port, $DOZ_UI_PORT).") var port: Int?
     /// `doz ui restart`'s own re-start (no tab, no printed link: the open pages reconnect by themselves).
     @Flag(name: .customLong("restarted"), help: .hidden) var restarted = false
+    @Flag(name: [.customShort("d"), .long], help: "Run it in the background, detached from this terminal (its log: <store>/ui.log), open the dashboard, and return. Stop it with doz ui stop.") var detach = false
+    /// The detached start's intermediate (its own session): spawn the detached doz ui, print its pid, exit.
+    @Flag(name: .customLong("launch-detached"), help: .hidden) var launchDetached = false
+    /// The detached doz ui itself (its parent is launchd; no terminal).
+    @Flag(name: .customLong("launched"), help: .hidden) var launched = false
 
     func validate() throws {
         try delivery.validate(json: g.json)
@@ -158,6 +164,30 @@ struct UIRestart: AsyncParsableCommand {
     }
 }
 
+/// `doz ui stop`: the store's running doz ui quits as on Ctrl-C (SIGTERM — its pages are told it stopped). It finds
+/// the process by the pid its lock records; a suspended one (Ctrl-Z) is continued first so it can quit.
+struct UIStop: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(commandName: "stop",
+        abstract: "Stop the running UI of this store (a detached one, or one in another terminal); its open pages say it stopped.")
+    @OptionGroup var g: GlobalOptions
+
+    func run() async throws {
+        let store = g.dozerStore
+        guard let pid = WebControl.lockHolder(store) else {
+            if !g.quiet { Out.stdout("no doz ui is running for \(store.root.path)\n") }
+            return
+        }
+        if WebControl.processIsStopped(pid) { kill(pid, SIGCONT) }
+        guard kill(pid, SIGTERM) == 0 else { throw fail(HostError(.failed, "could not stop doz ui (pid \(pid)): \(String(cString: strerror(errno)))"), g) }
+        let end = Date().addingTimeInterval(10)
+        while Date() < end, WebControl.lockHolder(store) != nil { try? await Task.sleep(for: .milliseconds(100)) }
+        guard WebControl.lockHolder(store) == nil else {
+            throw fail(HostError(.failed, "doz ui (pid \(pid)) did not stop within 10 s — kill \(pid)"), g)
+        }
+        if !g.quiet { Out.stdout("doz ui stopped (pid \(pid))\n") }
+    }
+}
+
 /// The body of `doz ui start` (and `serve`).
 struct UIRunner {
     let o: UIStartOptions
@@ -171,6 +201,42 @@ struct UIRunner {
         }
         let env = ProcessInfo.processInfo.environment
         let mode = delivery.openMode(WebSettingsStore(environment: env, flags: o.flags).current)
+        let passthrough = o.port.map { ["--port", String($0)] } ?? []
+        if o.launchDetached {
+            // The intermediate: the detached doz ui in a session of its own; its pid on stdout; exit (its parent → launchd).
+            let pid = try DetachedLauncher.spawnDetached(
+                DetachedLauncher.uiProcessArgs(executable: HostLauncher.executablePath, store: store.root.path, extra: passthrough),
+                log: DetachedLauncher.uiLog(store.root))
+            Out.stdout("\(pid)\n")
+            return
+        }
+        // --detach (owner, 2026-10-09: "doz ui runs in the background now?"): the host's double spawn, as doz serve
+        // --detach does; this process waits until the detached one answers, then goes on below as for a running UI
+        // (which opens the tab — the detached one has no terminal and never opens one itself).
+        if o.detach && !o.launched && WebControl.requestStatus(store) == nil {
+            let log = DetachedLauncher.uiLog(store.root)
+            let pid: pid_t
+            do {
+                pid = try DetachedLauncher.spawnViaIntermediate(
+                    DetachedLauncher.uiIntermediateArgs(executable: HostLauncher.executablePath, store: store.root.path, extra: passthrough), log: log)
+            } catch let e as HostError { throw fail(e, g) }
+            var up: (origin: String, pages: Int)?
+            let end = Date().addingTimeInterval(20)
+            while Date() < end {
+                if let s = WebControl.requestStatus(store) { up = s; break }
+                if kill(pid, 0) != 0 { break }
+                try? await Task.sleep(for: .milliseconds(150))
+            }
+            guard let up else {
+                throw fail(HostError(.unavailable, "doz ui did not start in the background — its log: \(log.path)"), g)
+            }
+            if !g.quiet && !g.json {
+                Out.stdout("doz ui is running in the background (pid \(pid)) on \(up.origin) — its log: \(log.path); stop it: doz ui stop\(g.store.map { " --store \($0)" } ?? "")\n")
+            }
+            if o.newLink, let url = WebControl.requestRotate(store) { try delivery.deliver(url, g); return }
+            if mode != "never" || delivery.printURL, let url = WebControl.requestLink(store) { try delivery.deliver(url, g) }
+            return
+        }
         // 594 W19: one UI per store — a running one is reused, never a second started; and a tab is
         // opened only when none of its pages is open (owner: "a new web page opening up every time").
         if let running = WebControl.requestStatus(store) {
@@ -288,7 +354,8 @@ struct UIRunner {
         } else {
             // The origin, never the link: the link is a key (a browser gets it, or --print-url's TTY).
             Out.stdout("doz ui on \(server.origin.value) — store \(store.root.path)\n")
-            Out.stdout("Ctrl-C stops it. Another browser or tab: doz ui link\(g.store.map { " --store \($0)" } ?? "")\n")
+            Out.stdout(o.launched ? "Running detached (pid \(getpid())): doz ui stop stops it. A browser or tab: doz ui link\n"
+                                  : "Ctrl-C stops it. Another browser or tab: doz ui link\(g.store.map { " --store \($0)" } ?? "")\n")
         }
         let serving = Task { try await server.run() }
         // 611: doz ui looks for an update when it starts (whatever the day's check said), then once a day while it runs;

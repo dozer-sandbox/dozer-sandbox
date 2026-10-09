@@ -25,9 +25,12 @@ doz ui --print-url        # print the link instead of opening a browser
 doz ui link               # another browser or tab on the dashboard that runs
 doz ui restart            # restart the running dashboard: open pages carry on by themselves
 doz ui --new-link         # sign every page out and make a new link
+doz ui --detach           # run it in the background (no terminal needed), open it, and return
+doz ui stop               # stop the running dashboard — a detached one, or one in another terminal
 ```
 
-Stop it with **Ctrl-C** in its terminal. The address is `http://127.0.0.1:PORT` — this Mac only. The
+Stop it with **Ctrl-C** in its terminal, or `doz ui stop` from any terminal. `doz ui --detach` keeps it running
+without a terminal (its log is the file ui.log in the store) until `doz ui stop`; `doz ui restart` keeps it in the background. The address is `http://127.0.0.1:PORT` — this Mac only. The
 port is the setting `ui.port`: `0` (the default) means the port this store's last dashboard used, when
 it's free, so a page left open reconnects by itself — still signed in — when you start `doz ui` again,
 and no new tab opens. If another program took that port, `doz ui` says which and listens elsewhere. For

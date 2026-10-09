@@ -87,6 +87,7 @@ ui
 ui/link
 ui/restart
 ui/start
+ui/stop
 serve
 serve/devices
 serve/log

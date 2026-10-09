@@ -580,6 +580,8 @@ not on a terminal.
 ```bash
 doz ui [serve] [--open | --no-open | --print-url] [--new-link] [--store DIR]   # a local dashboard for everything above; Ctrl-C stops it
 doz ui link [--rotate] [--store DIR]                  # a fresh one-use sign-in link for the running UI
+doz ui --detach [--store DIR]                         # run it in the background (log: <store>/ui.log), open it, return
+doz ui stop [--store DIR]                             # stop the store's running UI (detached, or in another terminal)
 ```
 
 One UI per store, one tab (594 W19): `doz ui` while one runs reuses it, opening a tab only when none
