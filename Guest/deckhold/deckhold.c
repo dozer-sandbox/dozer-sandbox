@@ -72,11 +72,21 @@
  *        'Q' QUERY  (no payload) — `deckhold ls`; answered with one 'I' INFO frame, then closed
  *        'P' DUMP   (no payload) — `deckhold dump`; one 'I' frame: the active screen as plain
  *                   text (one line per row) + a final "cursor=X,Y size=CxR screen=…" line
+ *        'W' WATCH  (no payload; 612) — a status watcher: answered with one 'T' STATUS frame now and
+ *                   another each time the program's root status record changes; it gets the EXIT
+ *                   too, but never DATA or a SNAPSHOT, has no size and is not a viewer (not counted
+ *                   in `clients`, never decides who answers a query). An older holder drops a client
+ *                   that sends it (an unknown frame): the watcher then sees its pipe end with no
+ *                   STATUS frame at all.
  *   H→C  'S' SNAPSHOT  VT bytes that reproduce the holder's screen on a blank terminal
  *        'D' DATA      the program's raw output
  *        'X' EXIT      {code u32}
  *        'I' INFO      one text line
  *        'N' NOSESSION (no payload) — sent by `deckhold pipe` only: no such session, never was
+ *        'T' STATUS    (612) text: the root record's fields as in INFO
+ *                      (`status=<report body>\tstatus_age=<seconds>`), or empty: no record
+ * The protocol only ever grows by appending frame types; INFO lines only gain `key=value` fields placed
+ * before the command (an older parser takes an unknown field for the command, which comes last).
  *
  * THE HOST TRANSPORT (`deckhold pipe -s NAME`): a verbatim byte relay between the pipe's stdio
  * and the session socket, so a host that runs it as a NON-terminal exec speaks this frame
@@ -147,8 +157,8 @@
 #define CLIENT_OUT_LIMIT (16u << 20)   /* a viewer this far behind is dropped; it reattaches */
 #define RESNAP_DELAY_MS 120            /* a resize is followed by a fresh snapshot once it settles */
 
-enum { F_HELLO = 'H', F_DATA = 'D', F_RESIZE = 'R', F_QUERY = 'Q', F_DUMP = 'P',
-       F_SNAPSHOT = 'S', F_EXIT = 'X', F_INFO = 'I', F_NOSESSION = 'N' };
+enum { F_HELLO = 'H', F_DATA = 'D', F_RESIZE = 'R', F_QUERY = 'Q', F_DUMP = 'P', F_WATCH = 'W',
+       F_SNAPSHOT = 'S', F_EXIT = 'X', F_INFO = 'I', F_NOSESSION = 'N', F_STATUS = 'T' };
 
 /* ── small helpers ──────────────────────────────────────────────────────────────────────── */
 
@@ -251,6 +261,7 @@ struct client {
     bool hello;          /* attached: receives DATA */
     bool primary_stale;  /* snapshotted while the alt screen was active: resend on leaving it */
     bool closing;        /* flush `out`, then close (QUERY answers) */
+    bool watch;          /* sent WATCH: receives STATUS frames (never DATA — it is not a viewer) */
     int64_t resnap_at;   /* 0, or when to send a post-resize snapshot */
     struct buf in, out;
 };
@@ -297,6 +308,324 @@ static int attached_count(void) {
 static void on_write_pty(GhosttyTerminal t, void *ud, const uint8_t *d, size_t n) {
     (void)t; (void)ud;
     if (attached_count() == 0) buf_add(&S.master_out, d, n);
+}
+
+/* ── program status (OSC 7501) ──────────────────────────────────────────────────────────────
+ *
+ * A program reports what it is doing over its own pty: ESC ] 7501 ; key=value:key=value… ST (ST = ESC \
+ * or BEL) — https://www.superlogical.com/rex/docs/build/program-status . Claude Code and pi report only
+ * after the terminal answers the support query ESC ] 7501 ; ? ST, so deckhold is the consumer: it reads
+ * every byte the program writes (attached or not), answers the query at once — always, whoever else
+ * may — and keeps the session's records by the spec's rules. The bytes themselves are untouched: they
+ * still reach the emulator and every viewer exactly as written.
+ *
+ * Rules kept (the spec's): a report REPLACES its record (keys left out are gone); `state=clear` removes the
+ * record and everything under it, or every record with no id; a full reset (RIS, ESC c) removes every
+ * record; ≤ 256 records, the least recently updated one dropped when full; a malformed pair is skipped, a
+ * report over a limit, with bad base64 or control characters in its text, is discarded whole, as is one
+ * with no known state or a bad id; unknown keys are ignored, the last of a duplicate key wins. `working`
+ * and `blocked` end at the program's exit (the host drops them when the session ends).
+ *
+ * NOT handled: OSC 133 `A` (a new shell prompt also ends `working`/`blocked` in the spec). Claude Code
+ * itself writes OSC 133 A when a turn starts — the same moment it reports `working` — and it sends a
+ * report only when its status CHANGES, so dropping `working` at that A could lose a report the program
+ * will not repeat. A session here runs one program (the agent), not a shell prompt.
+ *
+ * What is exposed: the ROOT record (no id) — in `deckhold ls`'s INFO line, and as STATUS frames pushed to
+ * a client that sent WATCH (see WIRE above). Child records are kept (their clears and limits apply) but
+ * not exposed. The text form (`status_fields`) is `status=<the record as a report body>\tstatus_age=<s>`,
+ * the body canonical: state, app, kind, progress, msg, title, in that order, base64 padded. */
+
+#define PS_MAX_RECORDS 256
+#define PS_MAX_SEQUENCE 4096            /* the whole sequence, ESC ] … ST */
+#define PS_MAX_BODY (PS_MAX_SEQUENCE - 9) /* minus "ESC ] 7501 ;" and the longest ST */
+
+enum { PS_IDLE = 1, PS_WORKING, PS_DONE, PS_BLOCKED, PS_ERROR, PS_CLEAR };
+static const char *const ps_states[] = { "", "idle", "working", "done", "blocked", "error", "clear" };
+static const char *const ps_kinds[] = { "", "permission", "question", "auth" };
+
+struct ps_record {
+    bool used;
+    char id[129];
+    uint8_t state, kind;            /* kind: 0 none, else an index into ps_kinds */
+    int progress;                   /* -1: none */
+    char app[33];
+    uint16_t msg_len;
+    uint8_t title_len;
+    char msg[2048], title[192];
+    uint64_t seq;                   /* when it was last updated, as a counter (for the LRU drop) */
+    double updated;                 /* the same, as monotonic seconds (for the age) */
+};
+
+static struct {
+    struct ps_record r[PS_MAX_RECORDS];
+    uint64_t seq;
+    /* the scanner: where in an escape sequence the program's output is, across reads */
+    enum { SC_GROUND, SC_ESC, SC_NUM, SC_BODY, SC_BODY_ESC } st;
+    char num[8];
+    uint8_t numlen;
+    bool ours, over;                /* this OSC is 7501; it went over the limit */
+    uint8_t body[PS_MAX_BODY];
+    size_t len;
+    uint64_t answered, applied, discarded;
+} PS;
+
+static void ps_root_changed(void);
+
+static struct ps_record *ps_root(void) {
+    for (int i = 0; i < PS_MAX_RECORDS; i++)
+        if (PS.r[i].used && PS.r[i].id[0] == 0) return &PS.r[i];
+    return NULL;
+}
+
+static void ps_clear_all(void) {
+    bool had_root = ps_root() != NULL;
+    for (int i = 0; i < PS_MAX_RECORDS; i++) PS.r[i].used = false;
+    if (had_root) ps_root_changed();
+}
+
+static bool ps_in(uint8_t c, const char *set) { return c && strchr(set, c) != NULL; }
+static bool ps_alnum(uint8_t c) { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9'); }
+/* [A-Za-z0-9_.+-] — an app name, an id segment */
+static bool ps_name_char(uint8_t c) { return ps_alnum(c) || ps_in(c, "_.+-"); }
+
+/* Standard base64, padding optional. Returns the decoded length, or -1 (bad input, or more than `cap`). */
+static int ps_base64(const uint8_t *s, size_t n, char *out, size_t cap) {
+    while (n && s[n - 1] == '=') n--;
+    if (n % 4 == 1) return -1;
+    uint32_t acc = 0;
+    int bits = 0;
+    size_t o = 0;
+    for (size_t i = 0; i < n; i++) {
+        uint8_t c = s[i];
+        int v = c >= 'A' && c <= 'Z' ? c - 'A' : c >= 'a' && c <= 'z' ? c - 'a' + 26 : c >= '0' && c <= '9' ? c - '0' + 52
+              : c == '+' ? 62 : c == '/' ? 63 : -1;
+        if (v < 0) return -1;
+        acc = acc << 6 | (uint32_t)v;
+        bits += 6;
+        if (bits >= 8) {
+            bits -= 8;
+            if (o >= cap) return -1;
+            out[o++] = (char)(acc >> bits & 0xFF);
+        }
+    }
+    return (int)o;
+}
+
+/* Decoded text may hold no control character: U+0000–U+001F, U+007F, U+0080–U+009F (C2 80–C2 9F). */
+static bool ps_text_ok(const char *t, int n) {
+    for (int i = 0; i < n; i++) {
+        uint8_t c = (uint8_t)t[i];
+        if (c < 0x20 || c == 0x7F) return false;
+        if (c == 0xC2 && i + 1 < n && (uint8_t)t[i + 1] >= 0x80 && (uint8_t)t[i + 1] <= 0x9F) return false;
+    }
+    return true;
+}
+
+static bool ps_id_ok(const uint8_t *s, size_t n) {
+    if (n == 0 || n > 128) return false;
+    size_t seg = 0, levels = 1;
+    for (size_t i = 0; i < n; i++) {
+        if (s[i] == '/') {
+            if (seg == 0 || ++levels > 8) return false;
+            seg = 0;
+        } else if (!ps_name_char(s[i]) || ++seg > 32) return false;
+    }
+    return seg > 0;
+}
+
+static void ps_trim(const uint8_t **s, size_t *n) {
+    while (*n && ((*s)[0] == ' ' || (*s)[0] == '\t')) { (*s)++; (*n)--; }
+    while (*n && ((*s)[*n - 1] == ' ' || (*s)[*n - 1] == '\t')) (*n)--;
+}
+
+static int ps_lookup(const uint8_t *v, size_t n, const char *const *names, int count) {
+    for (int i = 1; i < count; i++)
+        if (strlen(names[i]) == n && memcmp(names[i], v, n) == 0) return i;
+    return 0;
+}
+
+/* One report (the body between "7501;" and ST). Every pair is checked before any record changes. */
+struct ps_value { const uint8_t *v; size_t n; bool set; };
+
+static void ps_report(const uint8_t *body, size_t len) {
+    struct ps_value state = {0}, id = {0}, app = {0}, kind = {0}, progress = {0}, msg = {0}, title = {0};
+    size_t at = 0;
+    while (at <= len) {
+        size_t end = at;
+        while (end < len && body[end] != ':') end++;
+        const uint8_t *p = body + at;
+        size_t pn = end - at;
+        at = end + 1;
+        const uint8_t *eq = memchr(p, '=', pn);
+        if (!eq) continue;                                  /* malformed: no '=' — skipped */
+        const uint8_t *k = p, *v = eq + 1;
+        size_t kn = (size_t)(eq - p), vn = pn - kn - 1;
+        ps_trim(&k, &kn);
+        ps_trim(&v, &vn);
+        if (kn > 16) { PS.discarded++; return; }            /* a limit: the report is discarded whole */
+        bool ok = kn > 0;
+        for (size_t i = 0; i < kn; i++) ok = ok && k[i] >= 'a' && k[i] <= 'z';
+        for (size_t i = 0; i < vn; i++) ok = ok && (ps_alnum(v[i]) || ps_in(v[i], "_.,+/=-"));
+        if (!ok) continue;                                  /* malformed: skipped, the rest still counts */
+        struct ps_value *slot = NULL;
+        if (kn == 5 && !memcmp(k, "state", 5)) slot = &state;
+        else if (kn == 2 && !memcmp(k, "id", 2)) slot = &id;
+        else if (kn == 3 && !memcmp(k, "app", 3)) slot = &app;
+        else if (kn == 4 && !memcmp(k, "kind", 4)) slot = &kind;
+        else if (kn == 8 && !memcmp(k, "progress", 8)) slot = &progress;
+        else if (kn == 3 && !memcmp(k, "msg", 3)) slot = &msg;
+        else if (kn == 5 && !memcmp(k, "title", 5)) slot = &title;
+        if (slot) { slot->v = v; slot->n = vn; slot->set = true; }    /* unknown keys ignored; the last one wins */
+    }
+    int st = state.set ? ps_lookup(state.v, state.n, ps_states, 7) : 0;
+    if (!st) { PS.discarded++; return; }                    /* no known state: ignored */
+    if (id.set && !ps_id_ok(id.v, id.n)) { PS.discarded++; return; }   /* a bad id never falls back to the root */
+    if (app.set && app.n > 32) { PS.discarded++; return; }
+    if (msg.set && msg.n > 2732) { PS.discarded++; return; }
+    if (title.set && title.n > 256) { PS.discarded++; return; }
+    char mbuf[2048], tbuf[192];
+    int ml = 0, tl = 0;
+    if (msg.set && ((ml = ps_base64(msg.v, msg.n, mbuf, sizeof mbuf)) < 0 || !ps_text_ok(mbuf, ml))) { PS.discarded++; return; }
+    if (title.set && ((tl = ps_base64(title.v, title.n, tbuf, sizeof tbuf)) < 0 || !ps_text_ok(tbuf, tl))) { PS.discarded++; return; }
+    PS.applied++;
+
+    if (st == PS_CLEAR) {
+        if (!id.set) { ps_clear_all(); return; }
+        for (int i = 0; i < PS_MAX_RECORDS; i++) {
+            struct ps_record *r = &PS.r[i];
+            size_t rl = strlen(r->id);
+            if (r->used && rl >= id.n && memcmp(r->id, id.v, id.n) == 0 && (rl == id.n || r->id[id.n] == '/')) r->used = false;
+        }
+        return;                                             /* an id is never the root: the root is unchanged */
+    }
+    struct ps_record *r = NULL, *lru = NULL;
+    for (int i = 0; i < PS_MAX_RECORDS && !r; i++) {
+        struct ps_record *x = &PS.r[i];
+        if (x->used && strlen(x->id) == (id.set ? id.n : 0) && (!id.set || memcmp(x->id, id.v, id.n) == 0)) r = x;
+    }
+    for (int i = 0; i < PS_MAX_RECORDS && !r; i++) {
+        struct ps_record *x = &PS.r[i];
+        if (!x->used) r = x;
+        else if (!lru || x->seq < lru->seq) lru = x;
+    }
+    bool dropped_root = false;
+    if (!r) { r = lru; dropped_root = r->id[0] == 0; }      /* full: the least recently updated record goes */
+    memset(r, 0, sizeof *r);
+    r->used = true;
+    if (id.set) memcpy(r->id, id.v, id.n);
+    r->state = (uint8_t)st;
+    r->progress = -1;
+    if (app.set && app.n > 0) {
+        bool ok = true;
+        for (size_t i = 0; i < app.n; i++) ok = ok && ps_name_char(app.v[i]);
+        if (ok) memcpy(r->app, app.v, app.n);               /* outside its set: as if absent */
+    }
+    if (kind.set && st == PS_BLOCKED) r->kind = (uint8_t)ps_lookup(kind.v, kind.n, ps_kinds, 4);
+    if (progress.set && (st == PS_WORKING || st == PS_BLOCKED) && progress.n >= 1 && progress.n <= 3) {
+        int pv = 0;
+        bool digits = true;
+        for (size_t i = 0; i < progress.n; i++) { digits = digits && progress.v[i] >= '0' && progress.v[i] <= '9'; pv = pv * 10 + (progress.v[i] - '0'); }
+        if (digits && pv <= 100) r->progress = pv;
+    }
+    memcpy(r->msg, mbuf, (size_t)ml);
+    r->msg_len = (uint16_t)ml;
+    memcpy(r->title, tbuf, (size_t)tl);
+    r->title_len = (uint8_t)tl;
+    r->seq = ++PS.seq;
+    r->updated = now_s();
+    if (!id.set || dropped_root) ps_root_changed();
+}
+
+/* The query (a body starting with '?'): answered at once with the same body, whether or not a viewer's
+ * terminal answers too (a program takes the first answer). */
+static void ps_sequence_end(void) {
+    if (PS.ours && !PS.over) {
+        if (PS.len >= 1 && PS.body[0] == '?') {
+            buf_str(&S.master_out, "\x1b]7501;?\x1b\\");
+            PS.answered++;
+        } else {
+            ps_report(PS.body, PS.len);
+        }
+    } else if (PS.ours) {
+        PS.discarded++;
+    }
+    PS.st = SC_GROUND;
+}
+
+/* Every byte the program writes, in order, across reads — a sequence may be cut anywhere. */
+static void ps_scan(const uint8_t *b, size_t n) {
+    for (size_t i = 0; i < n; i++) {
+        uint8_t c = b[i];
+        switch (PS.st) {
+        case SC_GROUND:
+            if (c == 0x1B) PS.st = SC_ESC;
+            break;
+        case SC_ESC:
+            if (c == ']') { PS.st = SC_NUM; PS.numlen = 0; PS.len = 0; PS.over = false; PS.ours = false; }
+            else if (c == 'c') { PS.st = SC_GROUND; ps_clear_all(); }       /* RIS removes every record */
+            else if (c != 0x1B) PS.st = SC_GROUND;
+            break;
+        case SC_NUM:
+            if (c >= '0' && c <= '9') { if (PS.numlen < sizeof PS.num - 1) PS.num[PS.numlen++] = (char)c; else PS.numlen = sizeof PS.num; }
+            else if (c == ';') { PS.ours = PS.numlen == 4 && memcmp(PS.num, "7501", 4) == 0; PS.st = SC_BODY; }
+            else if (c == 0x07 || c == 0x18 || c == 0x1A) PS.st = SC_GROUND;
+            else if (c == 0x1B) PS.st = SC_BODY_ESC;
+            else PS.st = SC_BODY;                           /* not a number we know: skipped to its end */
+            break;
+        case SC_BODY:
+            if (c == 0x07) ps_sequence_end();
+            else if (c == 0x1B) PS.st = SC_BODY_ESC;
+            else if (c == 0x18 || c == 0x1A) PS.st = SC_GROUND; /* CAN / SUB cancel the sequence */
+            else if (PS.ours) { if (PS.len < PS_MAX_BODY) PS.body[PS.len++] = c; else PS.over = true; }
+            break;
+        case SC_BODY_ESC:
+            if (c == '\\') ps_sequence_end();
+            else { PS.st = SC_ESC; i--; }                   /* ESC + something else: the OSC is cut off; reread it */
+            break;
+        }
+    }
+}
+
+/* The root record as INFO fields (`\tstatus=…\tstatus_age=…`, nothing when there is none). */
+static void ps_fields(struct buf *out, bool leading_tab) {
+    struct ps_record *r = ps_root();
+    if (!r) return;
+    static const char b64[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    char tmp[64];
+    if (leading_tab) buf_str(out, "\t");
+    buf_str(out, "status=state=");
+    buf_str(out, ps_states[r->state]);
+    if (r->app[0]) { buf_str(out, ":app="); buf_str(out, r->app); }
+    if (r->kind) { buf_str(out, ":kind="); buf_str(out, ps_kinds[r->kind]); }
+    if (r->progress >= 0) { snprintf(tmp, sizeof tmp, ":progress=%d", r->progress); buf_str(out, tmp); }
+    for (int which = 0; which < 2; which++) {
+        const uint8_t *t = (const uint8_t *)(which ? r->title : r->msg);
+        size_t n = which ? r->title_len : r->msg_len;
+        if (!n) continue;
+        buf_str(out, which ? ":title=" : ":msg=");
+        for (size_t i = 0; i < n; i += 3) {
+            uint32_t v = (uint32_t)t[i] << 16 | (i + 1 < n ? (uint32_t)t[i + 1] << 8 : 0) | (i + 2 < n ? t[i + 2] : 0);
+            char q[4] = { b64[v >> 18 & 63], b64[v >> 12 & 63], i + 1 < n ? b64[v >> 6 & 63] : '=', i + 2 < n ? b64[v & 63] : '=' };
+            buf_add(out, q, 4);
+        }
+    }
+    snprintf(tmp, sizeof tmp, "\tstatus_age=%.0f", now_s() - r->updated);
+    buf_str(out, tmp);
+}
+
+/* A STATUS frame: the root record's fields, or an empty payload (no record). */
+static void ps_frame(struct buf *out) {
+    struct buf s = {0};
+    ps_fields(&s, false);
+    frame(out, F_STATUS, s.p, (uint32_t)s.len);
+    buf_free(&s);
+}
+
+/* The root record changed (set, replaced, cleared): every watcher is told at once. */
+static void ps_root_changed(void) {
+    for (int i = 0; i < S.nclients; i++)
+        if (S.c[i].watch) ps_frame(&S.c[i].out);
 }
 
 static void resize_to(uint16_t cols, uint16_t rows) {
@@ -519,11 +848,16 @@ static void info_line(struct buf *out) {
     size_t history = 0;
     ghostty_terminal_get(S.term, GHOSTTY_TERMINAL_DATA_SCROLLBACK_ROWS, &history);
     char line[512];
-    int n = snprintf(line, sizeof line, "%s\tpid=%d\tsize=%ux%u\tclients=%d\tscreen=%s\thistory=%zu\tbytes=%llu\t%s",
-                     S.name, (int)S.child, S.cols, S.rows, attached_count(),
-                     scr == GHOSTTY_TERMINAL_SCREEN_ALTERNATE ? "alt" : "primary", history,
-                     (unsigned long long)S.bytes_in, S.cmdline);
-    frame(out, F_INFO, line, (uint32_t)n);
+    snprintf(line, sizeof line, "%s\tpid=%d\tsize=%ux%u\tclients=%d\tscreen=%s\thistory=%zu\tbytes=%llu",
+             S.name, (int)S.child, S.cols, S.rows, attached_count(),
+             scr == GHOSTTY_TERMINAL_SCREEN_ALTERNATE ? "alt" : "primary", history, (unsigned long long)S.bytes_in);
+    struct buf s = {0};
+    buf_str(&s, line);
+    ps_fields(&s, true);              /* 612: the program's status — BEFORE the command, which is the last field */
+    buf_str(&s, "\t");
+    buf_str(&s, S.cmdline);
+    frame(out, F_INFO, s.p, (uint32_t)s.len);
+    buf_free(&s);
 }
 
 /* The active screen as plain text, row by row — for tests and for eyeballing the model. */
@@ -598,6 +932,11 @@ static bool client_frames(struct client *c) {
             info_line(&c->out);
             c->closing = true;
             break;
+        case F_WATCH:                 /* 612: a status watcher — the current root record now, then every change */
+            c->watch = true;
+            ps_frame(&c->out);
+            logf_("watch fd %d", c->fd);
+            break;
         default:
             return false;
         }
@@ -628,7 +967,7 @@ static void finish(int status) {
     }
     uint8_t cb[4] = { (uint8_t)(code >> 24), (uint8_t)(code >> 16), (uint8_t)(code >> 8), (uint8_t)code };
     for (int i = 0; i < S.nclients; i++) {
-        if (S.c[i].hello) frame(&S.c[i].out, F_EXIT, cb, 4);
+        if (S.c[i].hello || S.c[i].watch) frame(&S.c[i].out, F_EXIT, cb, 4);
         write_all(S.c[i].fd, S.c[i].out.p, S.c[i].out.len);
         close(S.c[i].fd);
     }
@@ -644,6 +983,7 @@ static bool pump_master(void) {
         if (n < 0 && (errno == EAGAIN || errno == EINTR)) return true;
         if (n <= 0) return false;        /* EIO: every slave fd closed */
         S.bytes_in += (uint64_t)n;
+        ps_scan(b, (size_t)n);        /* 612: OSC 7501 — reads the bytes, changes none of them */
         ghostty_terminal_vt_write(S.term, b, (size_t)n);
         GhosttyTerminalScreen scr = GHOSTTY_TERMINAL_SCREEN_PRIMARY;
         ghostty_terminal_get(S.term, GHOSTTY_TERMINAL_DATA_ACTIVE_SCREEN, &scr);
@@ -1078,8 +1418,8 @@ static int usage(void) {
             "usage: deckhold serve -s NAME [-x COLS -y ROWS] [--scrollback BYTES] [-f] -- CMD [ARGS...]\n"
             "       deckhold attach -s NAME\n"
             "       deckhold pipe -s NAME       relay stdio ⇄ the session socket verbatim (host transport)\n"
-            "       deckhold ls                 sessions: name, pid, size, clients, screen, history rows;\n"
-            "                                   ended ones as NAME<TAB>ended=CODE\n"
+            "       deckhold ls                 sessions: name, pid, size, clients, screen, history rows, the\n"
+            "                                   program's status (OSC 7501); ended ones as NAME<TAB>ended=CODE\n"
             "       deckhold dump -s NAME       the holder's active screen as plain text + cursor\n"
             "       deckhold exec -- CMD [ARGS...]   reset every signal to default, then exec CMD\n"
             "       deckhold connect -p PORT    stdio ⇄ TCP localhost:PORT in this guest (the browser bridge)\n"

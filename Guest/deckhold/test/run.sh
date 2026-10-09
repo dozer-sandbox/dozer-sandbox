@@ -3,7 +3,11 @@
 # built for aarch64-macos from the SAME pinned ghostty commit and Zig as the guest binary (build.sh's
 # toolchain in .tools/, run that first — `make deckhold`). Nothing here goes into the guest binary.
 #
+# Also its OSC 7501 consumer (status-check.c, 612): the query answered, the records' rules and limits, invalid
+# input discarded, the same state however the reads are cut — run first, it takes a second.
+#
 # Usage: Guest/deckhold/test/run.sh [fuzz-iterations] [seed]      (make deckhold-snapshot-check)
+#        ONLY=status Guest/deckhold/test/run.sh                    (make deckhold-status-check)
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 PKG="$(cd "$HERE/../../.." && pwd)"
@@ -27,6 +31,10 @@ fi
 OUT="$HERE/out"
 mkdir -p "$OUT"
 # The Mac's own clang and libc++: this harness runs here, nothing of it goes into the guest binary.
+cc -O1 -g -Wall -Wextra -Wno-unused-parameter -Wno-unused-function -I"$XC/Headers" \
+  "$HERE/status-check.c" "$XC/libghostty-vt.a" -lc++ -o "$OUT/status-check"
+"$OUT/status-check"
+[ "${ONLY:-}" = status ] && exit 0
 cc -O1 -g -Wall -Wextra -Wno-unused-parameter -Wno-unused-function -I"$XC/Headers" \
   "$HERE/snapshot-check.c" "$XC/libghostty-vt.a" -lc++ -o "$OUT/snapshot-check"
 "$OUT/snapshot-check" "$@"

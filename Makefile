@@ -65,7 +65,7 @@ DOCC_OUT         ?= .docc-build
 DOCC_BASE_PATH   ?= /DozerKit/
 DOCC_PREVIEW_PORT ?= 8000
 
-.PHONY: help build test test-safety test-updates doz-update-keys publish promote audit audit-resolved web-assets web-assets-check test-cli-onboarding test-cli-terminal test-cli-hoststop test-cli-agentsudo test-cli-points test-cli-timezone test-cli-sessions test-cli-images test-cli-bases test-cli-permissions test-cli-clipboard test-cli-browser test-cli-openfiles test-cli-github test-cli-codex test-cli-access test-cli-tools tools-fixture test-cli-quickadd test-cli-projectwizard test-cli-tmux pullbench test-vm test-vm-agents test-vm-network test-vm-hardening test-vm-lineage prev-cli test-vm-upgrade vmtest-host kernel deckhold deckhold-snapshot-check deckhold-verify doznet doznet-verify dozview dozview-verify test-vm-ignore test-vm-cwd cli install-cli test-cli test-vm-claude test-vm-templates docs docs-preview docs-drift-check release bump bump-minor
+.PHONY: help build test test-safety test-updates doz-update-keys publish promote audit audit-resolved web-assets web-assets-check test-cli-onboarding test-cli-terminal test-cli-hoststop test-cli-agentsudo test-cli-points test-cli-timezone test-cli-sessions test-cli-images test-cli-bases test-cli-permissions test-cli-clipboard test-cli-browser test-cli-openfiles test-cli-github test-cli-codex test-cli-access test-cli-tools tools-fixture test-cli-quickadd test-cli-projectwizard test-cli-tmux pullbench test-vm test-vm-agents test-vm-network test-vm-hardening test-vm-lineage prev-cli test-vm-upgrade vmtest-host kernel deckhold deckhold-snapshot-check deckhold-status-check deckhold-verify doznet doznet-verify dozview dozview-verify test-vm-ignore test-vm-cwd cli install-cli test-cli test-vm-claude test-vm-templates docs docs-preview docs-drift-check release bump bump-minor
 
 help: ## Show this help
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) | sed 's/:.*## /\t/' | expand -t 22
@@ -336,6 +336,9 @@ deckhold: ## Rebuild the deckhold guest binary, install it as the committed reso
 
 deckhold-snapshot-check: ## 610: deckhold's SNAPSHOT replayed on a fresh emulator equals its own screen, cell by cell, after resizes (fixed cases + a seeded fuzz; on the Mac, the pinned ghostty)
 	Guest/deckhold/test/run.sh $(or $(ITERATIONS),20000)
+
+deckhold-status-check: ## 612: deckhold's OSC 7501 consumer — the query answered, the records' rules and limits, invalid input discarded, cut at every offset + a seeded fuzz (on the Mac, the pinned ghostty)
+	ONLY=status Guest/deckhold/test/run.sh
 
 deckhold-verify: ## Rebuild deckhold from scratch and check the committed bytes match (slow: pinned Zig + ghostty)
 	FORCE=1 Guest/deckhold/build.sh
