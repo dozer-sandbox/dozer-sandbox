@@ -165,7 +165,7 @@ public final class ProgressBoard: @unchecked Sendable {
                 return []
             case .note, .host:
                 return text.isEmpty ? [] : [.note(text)]
-            case .phase, .connection, .console:
+            case .phase, .connection, .console, .sessionStatus:
                 return []
             }
         }

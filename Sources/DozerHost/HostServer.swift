@@ -266,7 +266,10 @@ public final class HostServer: @unchecked Sendable {
         case .events:
             stream(conn, reader: reader) { [core] in
                 let name = req.name
-                return core.subscribe().filter { name == nil || $0.sandbox == name }.map { HostMessage(event: $0) }
+                // 612: `session-status` only to a client that asked (an older one cannot decode the kind).
+                let statuses = req.sessionStatus == true
+                return core.subscribe().filter { (name == nil || $0.sandbox == name) && (statuses || $0.kind != .sessionStatus) }
+                    .map { HostMessage(event: $0) }
             }
         case .netLog where req.follow == true:
             netLogFollow(conn, reader: reader, request: req)
@@ -536,6 +539,8 @@ public final class HostServer: @unchecked Sendable {
                 conn.shutdownIO()
             case .detached(.closedByClient):
                 break
+            case .status:
+                break                               // 612: a viewer never gets one (only a status watcher)
             }
         }
         state.release(c)

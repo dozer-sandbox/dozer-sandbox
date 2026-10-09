@@ -12,7 +12,7 @@ struct List: AsyncParsableCommand {
         let rows = try decode(try await query(HostRequest(.ls), g), [SandboxInfo].self, g)
         if g.json { Out.json(rows); return }
         if rows.isEmpty { Out.stdout("no sandboxes — doz up NAME --image lab|claude-code|pi\n"); return }
-        var t = [["NAME", "IMAGE", "PHASE", "RAM", "DISK", "SESSIONS", "NETWORK", "ACCOUNT", "WORKSPACE"]]
+        var t = [["NAME", "IMAGE", "PHASE", "RAM", "DISK", "SESSIONS", "AGENT", "NETWORK", "ACCOUNT", "WORKSPACE"]]
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         for r in rows {
             var phase = Out.phaseLabel(r.phase) + (r.busy ? "…" : "")
@@ -25,7 +25,7 @@ struct List: AsyncParsableCommand {
             // 594 (D17): no workspace is said, not left blank.
             let ws = r.workspace.map { $0.hasPrefix(home + "/") ? "~" + $0.dropFirst(home.count) : $0 } ?? "isolated"
             t.append([r.name, r.image, phase, Out.mib(r.ramHeldMiB), DozerImages.formatBytes(r.diskBytes),
-                      r.sessions.map(String.init) ?? "—", net, account, ws])
+                      r.sessions.map(String.init) ?? "—", r.agentStatus?.label ?? "—", net, account, ws])
         }
         Out.stdout(Out.table(t, rightAligned: [3, 4, 5]))
         // 594 W28: a sandbox whose system disk came from an image an older doz made.
@@ -182,7 +182,7 @@ struct SessionsList: AsyncParsableCommand {
             }
             return
         }
-        var t = [["SESSION", "PID", "SIZE", "CLIENTS", "STATE", "COMMAND"]]
+        var t = [["SESSION", "PID", "SIZE", "CLIENTS", "STATE", "AGENT", "COMMAND"]]
         for s in rows {
             let state: String
             if s.saved == true {
@@ -190,7 +190,8 @@ struct SessionsList: AsyncParsableCommand {
             } else {
                 state = s.ended ? "ended (exit \(s.exitCode.map(String.init) ?? "?"))" : "running"
             }
-            t.append([s.name, s.pid.map(String.init) ?? "—", s.cols.map { "\($0)×\(s.rows ?? 0)" } ?? "—", "\(s.clients)", state, s.command])
+            t.append([s.name, s.pid.map(String.init) ?? "—", s.cols.map { "\($0)×\(s.rows ?? 0)" } ?? "—", "\(s.clients)", state,
+                      s.status?.label ?? "—", s.command])
         }
         if rows.contains(where: { $0.saved == true }) {
             Out.stderr("\(name) is not running: its sessions as last saved (doz sessions \(name) --screen SESSION shows one)\n")

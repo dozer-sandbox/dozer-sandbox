@@ -504,7 +504,9 @@ public final class HostWebData: DozerWebData, @unchecked Sendable {
 
     public func hostEvents() -> AsyncStream<HostEvent>? {
         guard store.hostIsRunning(), let client = try? HostClient.connect(store: store, autostart: false) else { return nil }
-        do { try client.send(HostRequest(.events)) } catch { return nil }
+        var request = HostRequest(.events)
+        request.sessionStatus = true                     // 612: the agents' status changes (the page's chips and notices)
+        do { try client.send(request) } catch { return nil }
         let (stream, cont) = AsyncStream<HostEvent>.makeStream(bufferingPolicy: .bufferingNewest(256))
         let fd = client.fd
         cont.onTermination = { _ in Darwin.shutdown(fd, SHUT_RDWR) }

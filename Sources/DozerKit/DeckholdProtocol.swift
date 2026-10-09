@@ -7,12 +7,16 @@ public enum DeckholdFrame: Equatable, Sendable {
     case hello(TermSize)
     case data(Data)
     case resize(TermSize)
+    /// 612: become a status watcher — answered with STATUS frames, never DATA (deckhold's 'W').
+    case watch
     // holder → client
     case snapshot(Data)
     case output(Data)
     case exit(Int32)
     case info(String)
     case noSession
+    /// 612: the program's root status record as text (`ProgramStatus.parse(frame:)`), or "" — none.
+    case status(String)
 
     /// Frames larger than this are a protocol error (deckhold drops such a client too).
     public static let maxPayload = 1 << 24
@@ -31,6 +35,8 @@ public enum DeckholdFrame: Equatable, Sendable {
         case .exit: UInt8(ascii: "X")
         case .info: UInt8(ascii: "I")
         case .noSession: UInt8(ascii: "N")
+        case .watch: UInt8(ascii: "W")
+        case .status: UInt8(ascii: "T")
         }
     }
 
@@ -45,9 +51,9 @@ public enum DeckholdFrame: Equatable, Sendable {
         case .exit(let code):
             let u = UInt32(bitPattern: code)
             payload.append(contentsOf: [UInt8(u >> 24), UInt8((u >> 16) & 0xFF), UInt8((u >> 8) & 0xFF), UInt8(u & 0xFF)])
-        case .info(let s):
+        case .info(let s), .status(let s):
             payload = Data(s.utf8)
-        case .noSession:
+        case .noSession, .watch:
             break
         }
         let n = UInt32(payload.count)
@@ -89,6 +95,7 @@ public struct DeckholdFrameDecoder: Sendable {
                 frames.append(.exit(code))
             case UInt8(ascii: "I"): frames.append(.info(String(decoding: payload, as: UTF8.self)))
             case UInt8(ascii: "N"): frames.append(.noSession)
+            case UInt8(ascii: "T"): frames.append(.status(String(decoding: payload, as: UTF8.self)))
             default: throw DecodeError.unknownType(type)
             }
         }
@@ -112,6 +119,8 @@ public struct SessionInfo: Sendable, Equatable {
     public var command: String
     /// Set once the program has exited: its exit code.
     public var exitCode: Int32?
+    /// 612: what the program says it is doing (OSC 7501's root record), when it said anything.
+    public var status: ProgramStatus?
 
     public var isEnded: Bool { exitCode != nil }
 
@@ -128,7 +137,8 @@ public struct SessionInfo: Sendable, Equatable {
         self.exitCode = exitCode
     }
 
-    /// Parses `deckhold ls` output. Live: `NAME\tpid=…\tsize=CxR\tclients=…\tscreen=…\thistory=…\tbytes=…\tCMD`;
+    /// Parses `deckhold ls` output. Live: `NAME\tpid=…\tsize=CxR\tclients=…\tscreen=…\thistory=…\tbytes=…\tCMD`
+    /// (612: `status=…\tstatus_age=…` before CMD when the program reported a status);
     /// ended: `NAME\tended=CODE`; a dead socket: `NAME\t(stale socket)` (skipped).
     public static func parseList(_ text: String) -> [SessionInfo] {
         var out: [SessionInfo] = []
@@ -141,6 +151,7 @@ public struct SessionInfo: Sendable, Equatable {
             }
             guard f[1].hasPrefix("pid=") else { continue }
             var info = SessionInfo(name: name)
+            var status: [String: String] = [:]
             for field in f.dropFirst() {
                 let kv = field.split(separator: "=", maxSplits: 1).map(String.init)
                 switch kv.first {
@@ -152,9 +163,11 @@ public struct SessionInfo: Sendable, Equatable {
                 case "screen": info.screen = kv.count > 1 ? kv[1] : nil
                 case "history": info.historyRows = kv.count > 1 ? Int(kv[1]) ?? 0 : 0
                 case "bytes": info.bytesOut = kv.count > 1 ? UInt64(kv[1]) ?? 0 : 0
+                case "status", "status_age": status[kv[0]] = kv.count > 1 ? kv[1] : ""
                 default: info.command = field
                 }
             }
+            info.status = ProgramStatus(fields: status)
             out.append(info)
         }
         return out.sorted { $0.name < $1.name }

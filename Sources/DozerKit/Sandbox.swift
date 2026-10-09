@@ -1948,9 +1948,19 @@ public actor Sandbox {
     /// Attach a viewer to session `name` at `size`. The first output is the session's current
     /// screen (a SNAPSHOT), then live output. See `SessionConnection`.
     public func attach(_ name: String, size: TermSize) async throws -> SessionConnection {
+        try await connect(name, SessionConnection(session: name, size: size))
+    }
+
+    /// 612: watch session `name`'s program status (OSC 7501, as deckhold keeps it): the connection's output is
+    /// `.status` — now, then at each change — and one final `ended`/`detached`, like a viewer's. It is not a
+    /// viewer (no size, no screen, no keys) and, like a viewer, is detached when the sandbox sleeps or stops.
+    public func watchStatus(_ name: String) async throws -> SessionConnection {
+        try await connect(name, SessionConnection(statusOf: name))
+    }
+
+    private func connect(_ name: String, _ conn: SessionConnection) async throws -> SessionConnection {
         try GuestCommand.validateSessionName(name)
         guard phase == .running, let container else { throw SandboxError.notRunning(phase) }
-        let conn = SessionConnection(session: name, size: size)
         conn.setOnClose { [weak self] c in
             Task { await self?.forget(c) }
         }

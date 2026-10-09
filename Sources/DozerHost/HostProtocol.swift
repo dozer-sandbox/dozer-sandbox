@@ -317,6 +317,8 @@ public struct HostRequest: Codable, Equatable, Sendable {
     public var warnings: Bool?
     /// 608 `session-restart`: a new conversation instead of continuing the last one.
     public var fresh: Bool?
+    /// 612 `events`: include `session-status` events (an older client could not decode them).
+    public var sessionStatus: Bool?
 
     public init(_ op: HostOp, name: String? = nil) {
         v = HostProtocol.version
@@ -385,7 +387,12 @@ public struct HostEvent: Codable, Equatable, Sendable {
     /// 591: `console` — one line of a sandbox's boot console (guest-written text: display it as data).
     /// 593: `started` — a timed step began (`step` or `failed` ends it, same text); `failed` — it failed
     /// (`error` says why); `output` — a line a bake step printed (guest text, already inert).
-    public enum Kind: String, Codable, Sendable { case phase, step, note, progress, connection, host, console, started, failed, output }
+    /// 612: `session-status` — a session's program reported a new status (`session`, `sessionStatus`); sent only to
+    /// an `events` stream that asked for them (`HostRequest.sessionStatus`): an older client cannot decode the kind.
+    public enum Kind: String, Codable, Sendable {
+        case phase, step, note, progress, connection, host, console, started, failed, output
+        case sessionStatus = "session-status"
+    }
     public var kind: Kind
     public var time: Date
     public var sandbox: String?
@@ -402,6 +409,9 @@ public struct HostEvent: Codable, Equatable, Sendable {
     /// 594 W22: a `step`/`failed` whose text differs from the `started` it ends ("hibernating X" →
     /// "hibernated X"): the started text, so a progress view ends the right line.
     public var startedAs: String?
+    /// 612: `session-status` — the session, and its status (nil: the program has none now).
+    public var session: String?
+    public var sessionStatus: SessionStatus?
 
     public init(kind: Kind, sandbox: String?, text: String? = nil, phase: String? = nil, milliseconds: Double? = nil,
                 completedBytes: Int64? = nil, totalBytes: Int64? = nil, connection: ConnectionRecord? = nil, time: Date = Date()) {
@@ -453,7 +463,7 @@ public struct HostEvent: Codable, Equatable, Sendable {
         case .connection:
             guard let c = connection else { return who }
             return who + "\(c.verdict.rawValue) \(c.kind.rawValue) \(c.target)" + (c.method.map { " \($0) \(c.path ?? "")" } ?? "")
-        case .note, .host, .console: return who + (text ?? "")
+        case .note, .host, .console, .sessionStatus: return who + (text ?? "")
         }
     }
 }
@@ -539,6 +549,12 @@ public struct SandboxInfo: Codable, Equatable, Sendable {
     /// `create` with `prepare`: `prepared` (its image's preparation ran, or was joined, to the end) or
     /// `ready` (nothing to prepare: prepared before, a kept disk, a custom image). nil otherwise.
     public var imagePreparation: String? = nil
+    /// 612: each session's program status the host holds (from its watchers — never a guest exec), the most
+    /// urgent of them (`SessionStatus.mostUrgent`), and whether any session's program is `working` (the signal
+    /// an idle sleep must respect). nil: no program reported anything.
+    public var sessionStatuses: [SessionStatus]? = nil
+    public var agentStatus: SessionStatus? = nil
+    public var agentWorking: Bool? = nil
 
     /// 594 W28: the notice for `olderImage` (`doz ls`, the sandbox's page, create).
     public var olderImageLine: String? {
@@ -559,6 +575,7 @@ public struct SandboxInfo: Codable, Equatable, Sendable {
         case workspaceRules                               // 599g
         case workspaceView                                // 608
         case imagePreparation                             // create --prepare
+        case sessionStatuses, agentStatus, agentWorking   // 612
     }
 
     public init(from decoder: Decoder) throws {
@@ -594,6 +611,9 @@ public struct SandboxInfo: Codable, Equatable, Sendable {
         workspaceRules = try c.decodeIfPresent(WorkspaceRulesInfo.self, forKey: .workspaceRules)
         workspaceView = try c.decodeIfPresent(String.self, forKey: .workspaceView)
         imagePreparation = try c.decodeIfPresent(String.self, forKey: .imagePreparation)
+        sessionStatuses = try c.decodeIfPresent([SessionStatus].self, forKey: .sessionStatuses)
+        agentStatus = try c.decodeIfPresent(SessionStatus.self, forKey: .agentStatus)
+        agentWorking = try c.decodeIfPresent(Bool.self, forKey: .agentWorking)
     }
 
     /// `workspace` is written even when null (with `isolated: true`), so a reader never has to guess.
@@ -632,6 +652,9 @@ public struct SandboxInfo: Codable, Equatable, Sendable {
         try c.encodeIfPresent(olderImageLine, forKey: .olderImageLine)
         try c.encodeIfPresent(imageNotice, forKey: .imageNotice)
         try c.encodeIfPresent(imagePreparation, forKey: .imagePreparation)
+        try c.encodeIfPresent(sessionStatuses, forKey: .sessionStatuses)
+        try c.encodeIfPresent(agentStatus, forKey: .agentStatus)
+        try c.encodeIfPresent(agentWorking, forKey: .agentWorking)
     }
 
     public init(name: String, image: String, phase: String, busy: Bool, cpus: Int, memoryMiB: UInt64, ramHeldMiB: UInt64,
@@ -699,6 +722,8 @@ public struct SessionRow: Codable, Equatable, Sendable {
     /// `periodic`) — nil when it has none.
     public var savedAt: Date?
     public var savedReason: String?
+    /// 612: what the session's program says it is doing (OSC 7501), when it said anything.
+    public var status: SessionStatus?
 
     public init(_ s: SessionInfo) {
         name = s.name

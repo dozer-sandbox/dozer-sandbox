@@ -813,6 +813,7 @@ struct Events: AsyncParsableCommand {
         do { client = try HostClient.connect(store: g.dozerStore, autostart: true) } catch let e as HostError { throw fail(e, g) }
         var r = HostRequest(.events)
         r.name = name
+        r.sessionStatus = true
         try client.send(r)
         while let m = try client.next() {
             if let e = m.error { throw fail(e, g) }

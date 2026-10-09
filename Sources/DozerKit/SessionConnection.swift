@@ -12,6 +12,9 @@ public enum SessionOutput: Sendable, Equatable {
     /// The program exited with this code — or nil: there is no such session (it never existed
     /// in this sandbox). Do not reattach.
     case ended(exitCode: Int32?)
+    /// 612: a STATUS WATCHER's only output (`Sandbox.watchStatus`): the program's status now, then each change
+    /// (nil: it has none). A viewer never gets one.
+    case status(ProgramStatus?)
     /// The connection is gone but the session is not: reattach when the sandbox runs again
     /// (`sandboxSleeping`), or never (`sandboxStopped` — the session died with the VM).
     case detached(DetachReason)
@@ -53,12 +56,29 @@ public final class SessionConnection: @unchecked Sendable, Identifiable {
     private var _final: SessionOutput?
     private var _onClose: (@Sendable (SessionConnection) -> Void)?
 
+    /// 612: a status watcher — WATCH instead of HELLO: no size, not a viewer, STATUS frames only.
+    public let isStatusWatch: Bool
+    private var _sawStatus = false
+
     init(session: String, size: TermSize) {
         self.session = session
+        isStatusWatch = false
         (output, outputContinuation) = AsyncStream<SessionOutput>.makeStream(bufferingPolicy: .unbounded)
         (input, inputContinuation) = AsyncStream<Data>.makeStream(bufferingPolicy: .unbounded)
         inputContinuation.yield(DeckholdFrame.hello(size).encoded)
     }
+
+    init(statusOf session: String) {
+        self.session = session
+        isStatusWatch = true
+        (output, outputContinuation) = AsyncStream<SessionOutput>.makeStream(bufferingPolicy: .unbounded)
+        (input, inputContinuation) = AsyncStream<Data>.makeStream(bufferingPolicy: .unbounded)
+        inputContinuation.yield(DeckholdFrame.watch.encoded)
+    }
+
+    /// 612: whether the holder ever answered WATCH. A watcher that ends WITHOUT one met a holder too old to
+    /// know it (a session started before an update keeps its own deckhold) — do not ask that session again.
+    public var sawStatus: Bool { lock.lock(); defer { lock.unlock() }; return _sawStatus }
 
     /// True once the connection has ended or detached.
     public var isClosed: Bool { lock.lock(); defer { lock.unlock() }; return closed }
@@ -116,7 +136,10 @@ public final class SessionConnection: @unchecked Sendable, Identifiable {
             case .output(let d): outputContinuation.yield(.data(d))
             case .exit(let code): last = .ended(exitCode: code)
             case .noSession: last = .ended(exitCode: nil)
-            case .info, .hello, .data, .resize: break
+            case .status(let s):
+                _sawStatus = true
+                outputContinuation.yield(.status(ProgramStatus.parse(frame: s)))
+            case .info, .hello, .data, .resize, .watch: break
             }
             if last != nil { break }
         }
@@ -178,7 +201,7 @@ final class ScreenCollector: Writer, @unchecked Sendable {
                     case .info(let s): dump = s
                     case .exit(let c): exitCode = c
                     case .noSession: noSession = true
-                    case .output, .hello, .data, .resize: break
+                    case .output, .hello, .data, .resize, .watch, .status: break
                     }
                 }
             } catch {

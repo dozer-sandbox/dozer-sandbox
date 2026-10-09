@@ -86,6 +86,13 @@ public actor HostCore {
     nonisolated let bridgeState = BridgeState()
     /// 609: which viewer set each session's size last (the attach relay re-applies the typist's).
     nonisolated let sizeOwners = SessionSizeOwners()
+    /// 612: the programs' status per sandbox and session, the status watchers (keyed sandbox NUL session), the
+    /// ones being opened, the sessions whose holder cannot answer, and a lost watcher's retries (`HostCore+Status`).
+    var statuses: [String: [String: SessionStatus]] = [:]
+    var statusWatches: [String: SessionConnection] = [:]
+    var statusOpening: Set<String> = []
+    var statusUnsupported: Set<String> = []
+    var statusRetries: [String: Int] = [:]
     /// 599d: GitHub tokens given with `doz key set NAME --github` from stdin — in this host's MEMORY only
     /// (never written: a new host needs them given again, or a keychain item).
     var githubKeys: [String: String] = [:]
@@ -248,6 +255,11 @@ public actor HostCore {
     }
 
     private func handleEvent(_ name: String, _ e: SandboxEvent) {
+        // 612: a sandbox that comes to run gets its sessions' status watchers again; one that is off has no programs.
+        if case .phase(let p) = e {
+            if p == .running { Task { await self.refreshStatusWatches(name) } }
+            if p == .off { clearStatuses(name) }
+        }
         if let he = HostEvent(e, sandbox: name) {
             managed[name]?.boot?.record(he)
             hub.yield(he)
@@ -407,6 +419,7 @@ public actor HostCore {
                            foreignCredentials: egress.map { $0.vault.foreignSightings.count }.flatMap { $0 == 0 ? nil : $0 })
         i.agent = m.sandbox.spec.imageSpec?.name
         i.credentialProblem = credentialProblem(m)
+        statusFields(m.name, into: &i)                                 // 612: from memory, never the guest
         i.workspaceRules = workspaceRulesInfo(m, phase: phase)       // 599g: two stats when there are no rules
         i.workspaceView = Self.workspaceViewState(running: phase == .running, workspace: m.config.workspace != nil,
                                                   active: Array(m.sandbox.activeViews.values), fallbacks: m.sandbox.viewFallbacks,
@@ -1080,6 +1093,7 @@ public actor HostCore {
         }
         if op == .rm {
             detachWatcher(m)
+            clearStatuses(m.name)                                       // 612
             m.eventTask?.cancel()
             m.networkTask?.cancel()
             managed[m.name] = nil
@@ -1204,6 +1218,7 @@ public actor HostCore {
     }
 
     func sessionAttached(_ name: String, session: String, ms: Double) {
+        Task { await self.watchStatus(name, session: session) }       // 612: a session the host had not opened
         guard let m = managed[name], let id = m.sessionRows[session] else { return }
         metrics?.sessionFirstAttach(id, ms: ms)
     }
@@ -1297,10 +1312,11 @@ public actor HostCore {
         guard await m.sandbox.phase == .running else {
             // Only a sandbox one wakes back into has sessions to show (owner, 2026-09-30): shut down,
             // failed or booting — none.
-            return Self.wakeable(await effectivePhase(m)) ? saved.map(SessionRow.init(saved:)) : []
+            return withStatuses(m.name, Self.wakeable(await effectivePhase(m)) ? saved.map(SessionRow.init(saved:)) : [], live: nil)
         }
         let byName = Dictionary(saved.map { ($0.session, $0) }, uniquingKeysWith: { a, _ in a })
-        return try await m.sandbox.sessions().map { s in
+        let list = try await m.sandbox.sessions()
+        let rows = list.map { s in
             var row = SessionRow(s)
             if let i = byName[s.name] {
                 row.savedAt = i.savedAt
@@ -1308,6 +1324,9 @@ public actor HostCore {
             }
             return row
         }
+        // 612: a live session the host does not watch yet (opened from inside the guest, or before a host restart).
+        for s in list where !s.isEnded { Task { await self.watchStatus(m.name, session: s.name) } }
+        return withStatuses(m.name, rows, live: list)
     }
 
     /// The phases one wakes (or resumes) back into — the only ones with saved screens.
@@ -1392,6 +1411,12 @@ public actor HostCore {
     /// `extraArguments` (608): appended to the program's argv after everything the host adds (pi's prompt
     /// file) and NOT recorded — a restart's resume arguments (`SessionResume`).
     func openSessionLocked(_ r: HostRequest, extraArguments: [String] = []) async throws -> SessionOpened {
+        let opened = try await openSessionBody(r, extraArguments: extraArguments)
+        await watchStatus(opened.name, session: opened.session)      // 612: what the program says it is doing
+        return opened
+    }
+
+    private func openSessionBody(_ r: HostRequest, extraArguments: [String]) async throws -> SessionOpened {
         let m = try get(r.name)
         try await ensureRunning(m, wake: r.wake ?? true)
         // 599g: a rule file that appeared since the boot gets its view before the program starts (nothing
