@@ -955,6 +955,10 @@ Task {
             // 599 (594.B3): sessions inside tmux.
             let binary = args.firstIndex(of: "--doz").flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil } ?? ".build/debug/doz"
             await cliTmuxSuite(binary: URL(fileURLWithPath: binary).standardizedFileURL.path)
+        case "cli-status":
+            // 612: what the agent is doing — OSC 7501 through deckhold, the host and the CLI (StatusSuite.swift).
+            let binary = args.firstIndex(of: "--doz").flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil } ?? ".build/debug/doz"
+            await cliStatusSuite(binary: URL(fileURLWithPath: binary).standardizedFileURL.path)
         case "cli-sessions":
             // 608: sessions survive every wake; End / Restart session (SessionsSuite.swift).
             let binary = args.firstIndex(of: "--doz").flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil } ?? ".build/debug/doz"

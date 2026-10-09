@@ -65,7 +65,7 @@ DOCC_OUT         ?= .docc-build
 DOCC_BASE_PATH   ?= /DozerKit/
 DOCC_PREVIEW_PORT ?= 8000
 
-.PHONY: help build test test-safety test-updates doz-update-keys publish promote audit audit-resolved web-assets web-assets-check test-cli-onboarding test-cli-terminal test-cli-hoststop test-cli-agentsudo test-cli-points test-cli-timezone test-cli-sessions test-cli-images test-cli-bases test-cli-permissions test-cli-clipboard test-cli-browser test-cli-openfiles test-cli-github test-cli-codex test-cli-access test-cli-tools tools-fixture test-cli-quickadd test-cli-projectwizard test-cli-tmux pullbench test-vm test-vm-agents test-vm-network test-vm-hardening test-vm-lineage prev-cli test-vm-upgrade vmtest-host kernel deckhold deckhold-snapshot-check deckhold-status-check deckhold-verify doznet doznet-verify dozview dozview-verify test-vm-ignore test-vm-cwd cli install-cli test-cli test-vm-claude test-vm-templates docs docs-preview docs-drift-check release bump bump-minor
+.PHONY: help build test test-safety test-updates doz-update-keys publish promote audit audit-resolved web-assets web-assets-check test-cli-onboarding test-cli-terminal test-cli-hoststop test-cli-agentsudo test-cli-points test-cli-timezone test-cli-sessions test-cli-images test-cli-bases test-cli-permissions test-cli-clipboard test-cli-browser test-cli-openfiles test-cli-github test-cli-codex test-cli-access test-cli-tools tools-fixture test-cli-quickadd test-cli-projectwizard test-cli-tmux pullbench test-vm test-vm-agents test-vm-network test-vm-hardening test-vm-lineage prev-cli test-vm-upgrade vmtest-host kernel deckhold deckhold-snapshot-check deckhold-status-check deckhold-verify doznet doznet-verify dozview dozview-verify test-vm-ignore test-vm-cwd test-vm-status cli install-cli test-cli test-vm-claude test-vm-templates docs docs-preview docs-drift-check release bump bump-minor
 
 help: ## Show this help
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) | sed 's/:.*## /\t/' | expand -t 22
@@ -265,6 +265,9 @@ test-cli-agentsudo: cli vmtest-host ## 594 W23: only test-cli's agent-sudo part 
 
 test-cli-points: cli vmtest-host ## 594 W25–W27: restore point names never cut + lookup by name/id/prefix, check before asking (W26), exec/run start an off sandbox
 	perl -e 'alarm shift; exec @ARGV' 900 $(VMTEST_BIN) cli-points --doz $(CLI_BIN)
+
+test-vm-status: cli vmtest-host ## 612: what the agent is doing (OSC 7501) — a FAKE agent in a lab asks, deckhold answers, it reports working → blocked → done → working → error: the host's status per step (sessions, ls, events, doz ls/sessions), no viewer and a viewer (the bytes unchanged), sleep and hibernate with their wakes, the exit, host.log without the program's text, shutdown (scratch store)
+	perl -e 'alarm shift; exec @ARGV' 1500 $(VMTEST_BIN) cli-status --doz $(CLI_BIN)
 
 test-cli-sessions: cli vmtest-host ## 608: a program in /workspace keeps its folder across hibernate and a host restart; doz sessions restart|end (SIGHUP ignored → TERM, tmux, a missing session, never a wake, a racing open, the record), workspace.view off and on
 	perl -e 'alarm shift; exec @ARGV' 1500 $(VMTEST_BIN) cli-sessions --doz $(CLI_BIN)

@@ -131,6 +131,8 @@ int main(int argc, char **argv) {
     every_cut("\x1b]7501;?\x1b\\", one_answer, "query (ESC \\) is answered once");
     every_cut("abc\x1b]7501;?\x07xyz", one_answer, "query (BEL) is answered once");
     reset(); feed("\x1b]7501;?\x1b\\\x1b]7501;?\x07"); check(answers() == 2, "two queries, two answers");
+    reset(); for (int i = 0; i < 40; i++) feed("\x1b]7501;?\x07");
+    check(answers() == PS_ANSWERS_PER_SECOND, "a flood of queries (an echoed answer): at most 16 answers a second");
     reset(); feed("\x1b]7502;?\x1b\\\x1b]750;?\x1b\\\x1b]17501;?\x07"); check(answers() == 0, "other OSC numbers are not ours");
 
     /* Reports, cut anywhere. */

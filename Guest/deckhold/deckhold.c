@@ -368,7 +368,13 @@ static struct {
     uint8_t body[PS_MAX_BODY];
     size_t len;
     uint64_t answered, applied, discarded;
+    double window;                  /* the answers' rate limit: this second's start, and how many so far */
+    int window_answers;
 } PS;
+
+/* At most this many answers a second: an answer that a terminal echoes back as OUTPUT (a pty with echo on and
+ * no ECHOCTL) would be read as a new query — this keeps that loop from spinning. A program asks once. */
+#define PS_ANSWERS_PER_SECOND 16
 
 static void ps_root_changed(void);
 
@@ -542,8 +548,13 @@ static void ps_report(const uint8_t *body, size_t len) {
 static void ps_sequence_end(void) {
     if (PS.ours && !PS.over) {
         if (PS.len >= 1 && PS.body[0] == '?') {
-            buf_str(&S.master_out, "\x1b]7501;?\x1b\\");
-            PS.answered++;
+            double t = now_s();
+            if (t - PS.window >= 1.0) { PS.window = t; PS.window_answers = 0; }
+            if (PS.window_answers < PS_ANSWERS_PER_SECOND) {
+                buf_str(&S.master_out, "\x1b]7501;?\x1b\\");
+                PS.window_answers++;
+                PS.answered++;
+            }
         } else {
             ps_report(PS.body, PS.len);
         }

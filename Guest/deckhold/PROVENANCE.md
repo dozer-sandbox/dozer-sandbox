@@ -8,8 +8,8 @@ what produced it; `make deckhold` rewrites the two lines marked (auto) after a r
 
 | | |
 |---|---|
-| sha256 (auto) | `d603b2aac843b77ea6a4725dbffed5507baba91cb5023ea0c0d4050beb2fb7fb` |
-| size (auto) | 1611944 bytes |
+| sha256 (auto) | `0c97b92a912e9eab2163e1e2a07fdc04e49c633511e93ce307f856418358608b` |
+| size (auto) | 1612072 bytes |
 | format | ELF 64-bit LSB executable, ARM aarch64, statically linked (musl), stripped |
 | source | [`deckhold.c`](deckhold.c) (this directory) |
 | Zig | 0.16.0 — `zig-aarch64-macos-0.16.0.tar.xz`, sha256 `b23d70deaa879b5c2d486ed3316f7eaa53e84acf6fc9cc747de152450d401489` |
