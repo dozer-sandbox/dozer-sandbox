@@ -187,7 +187,9 @@ public enum InstallMethod: Equatable, Sendable {
     /// The command a person runs to upgrade.
     public var upgradeCommand: String? {
         switch self {
-        case .homebrew(let f): "brew upgrade \(f)"
+        // Not `brew upgrade FORMULA`: Homebrew refreshes its taps only now and then, so that alone can miss the
+        // release the feed names; `doz update` refreshes Dozer's tap first.
+        case .homebrew: "doz update"
         case .tarball: "doz update"
         case .development: nil
         }

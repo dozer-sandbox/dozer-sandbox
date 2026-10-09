@@ -161,9 +161,16 @@ check "the doz asking is $A" [ "$("$DOZ" --version)" = "$A" ]
 mkdir -p "$R/Cellar/doz/$A/libexec/doz"
 cp -cR "$R/newer/libexec/doz/." "$R/Cellar/doz/$A/libexec/doz/"
 printf '%s\n' $A > "$R/Cellar/doz/$A/libexec/doz/VERSION"
+# Homebrew's clone of Dozer's tap: a scratch git clone whose origin moves on after the clone — doz update must
+# fast-forward it before `brew upgrade` (Homebrew refreshes taps only now and then). The fake brew answers
+# --repository with it.
+git init -q -b main "$R/brew-tap-origin" && git -C "$R/brew-tap-origin" -c user.email=t@t -c user.name=t commit -q --allow-empty -m one
+git clone -q "$R/brew-tap-origin" "$R/brew-tap-clone"
 cat > "$R/brew" <<SH
 #!/bin/bash
+if [ "\$1" = --repository ]; then echo "$R/brew-tap-clone"; exit 0; fi
 echo "\$*" >> "$R/brew.log"
+echo "no-ask=\${HOMEBREW_NO_ASK:-unset}" >> "$R/brew-env.log"
 echo "==> fake brew \$*"
 SH
 chmod +x "$R/brew"
@@ -171,9 +178,12 @@ export DOZ_TEST_BREW="$R/brew" DOZ_TEST_UPDATE_EXECUTABLE="$R/Cellar/doz/$A/libe
 "$DOZ" config unset updates.channel --store "$R/store" >/dev/null
 "$DOZ" config set updates.mode notify --store "$R/store" >/dev/null
 out="$("$DOZ" update --check --store "$R/store" 2>&1)" || true
-check "homebrew: the notice says brew upgrade doz" grep -q "doz $B is available — upgrade: brew upgrade doz" <<<"$out"
+check "homebrew: the notice says doz update" grep -q "doz $B is available — upgrade: doz update " <<<"$out"
+git -C "$R/brew-tap-origin" -c user.email=t@t -c user.name=t commit -q --allow-empty -m two
 "$DOZ" update --store "$R/store" >/dev/null 2>&1 || true
 check "homebrew: doz update runs brew upgrade doz" grep -qx "upgrade doz" "$R/brew.log"
+check "  … after fast-forwarding Dozer's tap" [ "$(git -C "$R/brew-tap-clone" rev-parse HEAD)" = "$(git -C "$R/brew-tap-origin" rev-parse HEAD)" ]
+check "  … and Homebrew is never left asking [y/n]" bash -c "! grep -qv '^no-ask=1\$' '$R/brew-env.log'"
 : > "$R/brew.log"
 "$DOZ" update --channel canary --yes --store "$R/store" >/dev/null 2>&1 || true
 check "homebrew: --channel canary = uninstall doz, install the tap's doz-canary" bash -c "[ \"\$(cat '$R/brew.log')\" = \$'uninstall doz\ninstall dozer-sandbox/tap/doz-canary' ]"

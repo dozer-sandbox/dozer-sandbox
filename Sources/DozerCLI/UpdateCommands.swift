@@ -135,6 +135,7 @@ enum UpdateHook {
             }
             guard let brew = UpdateInstaller.brew() else { throw UpdateInstaller.Failure("Homebrew's brew was not found — upgrade with: brew upgrade \(formula)") }
             say("updating doz to \(e.version): brew upgrade \(formula)\n")
+            UpdateInstaller.refreshTap(brew: brew, output: say)
             guard UpdateInstaller.runBrew(brew, ["upgrade", formula], output: say) == 0 else {
                 throw UpdateInstaller.Failure("brew upgrade \(formula) failed — doz \(ctx.current) is unchanged")
             }

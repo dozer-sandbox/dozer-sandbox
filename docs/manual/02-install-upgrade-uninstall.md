@@ -58,22 +58,26 @@ previous version as `libexec/doz.previous`.
 doz tells you when a new release is out — one line after a command on your terminal, and a banner on the
 dashboard:
 
-> doz 0.31.1 is available — upgrade: brew upgrade doz (notes: https://updates.dozersandbox.com/v1/notes/0.31.1.html)
+> doz 0.31.1 is available — upgrade: doz update (notes: https://updates.dozersandbox.com/v1/notes/0.31.1.html)
 
 ```sh
-brew upgrade doz          # or: doz update
+doz update
 doz host restart
 ```
+
+`doz update` refreshes Dozer's tap first, then runs `brew upgrade` for your channel's formula. Homebrew refreshes
+its taps only now and then, so a plain `brew upgrade doz` can say there is nothing new for up to a day; with brew
+directly, run `brew update` first.
 
 - **How it knows.** At most once a day (and when `doz ui` starts), doz reads one small file,
   `https://updates.dozersandbox.com/v1/feed.json`, signed with Dozer's own key; anything that doesn't verify
   is ignored. Nothing about you or your sandboxes is sent — only the request, with doz's version and channel
   in its user agent. Offline, it says nothing. Never with `--json` or `-q`, or when not on a terminal.
-- **The setting `updates.mode`**: `notify` (the default), `auto` — doz also installs the update itself (with
-  `brew upgrade` for Homebrew), but only while no sandbox is running and no session is attached, and then says
+- **The setting `updates.mode`**: `notify` (the default), `auto` — doz also installs the update itself (through
+  Homebrew for a Homebrew install), but only while no sandbox is running and no session is attached, and then says
   `Updated to 0.31.1 — restart to apply: doz host restart` — or `off` (never look). `doz update --check` looks
   now, whatever the mode.
-- `brew upgrade doz` installs the new version beside the old one, then removes the old one.
+- Homebrew installs the new version beside the old one, then removes the old one.
 - **A running host keeps its old version.** After an upgrade, Homebrew runs `doz host upgrade-check`,
   which says when a host of the previous version is still running. You can run it yourself at any time;
   it never starts or stops anything.
