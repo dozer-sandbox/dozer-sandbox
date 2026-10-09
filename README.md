@@ -1,6 +1,6 @@
 # Dozer Sandbox
 
-**Secure, suspendable Linux sandboxes for AI coding agents on your Mac — your API keys never go inside.**
+**Fast, resumable, secure Linux sandboxes for AI coding agents on your Mac — your API keys never go inside.**
 [dozersandbox.com](https://dozersandbox.com)
 
 Each sandbox is a small Linux virtual machine with your
