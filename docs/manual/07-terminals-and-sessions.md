@@ -16,6 +16,9 @@ sandbox sleeps or hibernates.
   your clipboard, and opening a web page in your browser. Both are shown to you every time and can be
   turned off. See [the clipboard](#the-clipboard) below and
   [Signing in from a sandbox](11-signing-in-from-a-sandbox.md).
+- **The agent says what it is doing.** Claude Code and pi tell Dozer when they are working, waiting
+  for you or done, and the dashboard and `doz ls` show it. See
+  [what the agent is doing](#what-the-agent-is-doing).
 
 ## In the terminal
 
@@ -139,6 +142,54 @@ A program that doesn't track the mouse gets nothing: the wheel scrolls the pane'
 into a program that didn't ask for bracketed paste, or one over 64 KiB, asks first; over 1 MiB is
 refused. **Cmd-C** copies a selection, **Cmd-V** pastes; other Cmd shortcuts belong to the browser
 (Cmd-W closes the tab — the session runs on).
+
+## What the agent is doing
+
+Claude Code and pi say what they are doing — **working**, **blocked** (waiting for you), **done**, or
+stopped with an **error** — and Dozer shows it, whether or not a terminal is attached:
+
+- **The dashboard**: a chip on each session's tab, on its tile in **All sessions** and on its row in the
+  **Sessions** tab (with the agent's own one-line message under it); a dot beside the sandbox in the
+  sidebar for its most urgent session (blocked, then error, working, done).
+- **A notice** at the top of every dashboard page when an agent finishes, gets blocked or fails — it
+  names the sandbox and the session and says what it waits for: "needs permission", "has a question"
+  or "needs sign-in". **Open** goes to the session; the notice goes when you dismiss it, or by itself
+  once the agent is working again.
+- **The terminal**: `doz ls` has an AGENT column (each sandbox's most urgent session), and
+  `doz sessions NAME` one for each session:
+
+```sh
+$ doz sessions my-app
+SESSION  PID  SIZE    CLIENTS  STATE    AGENT                      COMMAND
+claude   41   120×36  1        running  blocked: needs permission  claude --dangerously-skip-permissions
+shell    88   120×36  0        running  —                          bash -l
+```
+
+`doz events` prints each change as it happens; `--json` on `ls`, `sessions` and `inspect` carries the
+full status.
+
+Which agents say it:
+
+| agent | reports its status |
+|---|---|
+| Claude Code | 2.1.295 and later (images install the newest by default) |
+| pi | 1.1.0 and later |
+| Codex | no — its sessions show nothing, and everything else works as usual |
+
+How it works: a program reports its state with a terminal escape sequence (the *program status*
+protocol, OSC 7501) — but only after the terminal answers that it understands it. Dozer's session
+keeper inside the sandbox answers and keeps the latest report of each session, so the status is
+there while you are detached, and after a sleep or a hibernation the agent carries on reporting. The
+sequence itself still reaches your terminal unchanged when you are attached. A session's status ends
+with its program, except **done** and **error**, which stay until the session starts something new
+or the sandbox shuts down.
+
+Limits:
+
+- the agent's message is its own text, shown as plain text and never written to Dozer's log;
+- tmux does not pass the status through, so a session running inside tmux shows none;
+- a session started before an update keeps the session keeper it started with and shows no status
+  until it is restarted (`doz sessions restart NAME SESSION`).
 
 ## The clipboard
 

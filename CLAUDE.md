@@ -88,6 +88,7 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
 | `Sources/DozerKit/OpenAIAccess.swift`; `Sources/DozerHost/ChatGPTAccounts.swift`, `ChatGPTSignIn.swift`; `Sources/doz-vmtest/CodexSuite.swift` | Codex — the proxy's OpenAI side (claims, the guest's auth.json, the renewal answer, `HTTPSOnce`, the sign-in's and refresh's requests); the host's sessions, `applyOpenAIAccount`, the guest auth.json; Dozer's own ChatGPT sign-in; `make test-cli-codex` |
 | `Sources/DozerKit/AgentPermissions.swift`; `Sources/DozerHost/Permissions.swift`; `Sources/DozerCLI/NetPermissionCommands.swift`; `Sources/doz-vmtest/PermissionsSuite.swift` | agent permissions — the catalogue and presets per base, `NetworkPolicy.permissions` (stored by name, `effectiveRules`); edits/report/suggestions/facts; `doz net NAME/allow/deny/permissions`, `--allow`; `make test-cli-permissions` |
 | `Sources/DozerWeb/WebServe*.swift`, `WebExposure.swift`, `WebQR.swift`, `WebBonjour.swift`; `Sources/DozerCLI/ServeCommand.swift`; `Sources/DozerKit/LocalDashboards.swift` | `doz serve` — the rules (`WebServe`: addresses, the accept gate, the request's own origin), devices + invites (`WebServeDevices`), the audit log, `serve.sock` (`WebServeControl`), the server's serve side (`WebServeServer`, `WebServeState`), the capability table, our QR encoder, Bonjour; the CLI (`doz serve …`, doctor's public-origin check); the egress proxy's refusal of the dashboards' ports |
+| `Guest/deckhold/deckhold.c` (`ps_*`), `Sources/DozerKit/ProgramStatus.swift`; `Sources/DozerHost/SessionStatus.swift`, `HostCore+Status.swift`; `Sources/DozerWeb/WebSource/app/components/agent-status.js`; `Sources/doz-vmtest/StatusSuite.swift` | 612: what the agent is doing (OSC 7501) — deckhold's consumer (answers the query, keeps the records, WATCH/STATUS), the parsed record, the host's model + watchers + events, the page's chips and notices; `make test-vm-status`, `make deckhold-status-check` |
 | `Tests/DozerWebTests/` | the security rules one by one, and a real listener driven with raw HTTP; `Serve*Tests` |
 | `Tests/DozerKitTests/` | Unit tests — no VM |
 
@@ -1246,6 +1247,38 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   workspace file is recorded there as `open-file APP|default MACPATH`.
   A fake OAuth server must READ before it answers (busybox `nc -e`), as a real one does.
 
+### What the agent is doing (OSC 7501)
+
+- **deckhold is the consumer of the program-status protocol** (OSC 7501 —
+  https://www.superlogical.com/rex/docs/build/program-status). Claude Code (≥ 2.1.295) and pi (≥ 1.1.0) report
+  ONLY after the terminal answers `ESC]7501;?ST`; deckhold reads every byte its program writes (attached or not), so
+  `ps_scan` in `pump_master` answers the query at once — always (a viewer's own terminal may answer too: a program
+  takes the first), at most 16 answers a second (an answer echoed back as output must not loop) — and keeps the
+  records by the spec (a report REPLACES its record; clear by id and below, or all; RIS clears; ≤ 256, LRU; a
+  malformed pair skipped, a report over a limit / bad base64 / control characters discarded whole). The bytes are
+  NOT changed: the emulator and every viewer get them as written (`SessionBridgeScanner` does not own 7501 —
+  `SessionStatusTests` cuts it at every offset). OSC 133 `A` deliberately does NOT end working/blocked: Claude
+  Code writes it at its own turn start and reports only on change. Codex does not report (nothing shown).
+- **What deckhold exposes is the ROOT record**: in `deckhold ls`'s INFO (`status=<canonical report body>\tstatus_age=S`,
+  BEFORE the command — an older parser takes an unknown field for the command, which comes last) and as STATUS
+  ('T') frames to a client that sent WATCH ('W'). Frame types are only ever appended (the header comment). An
+  older holder (a session started before an update keeps its binary) drops a WATCH client: the host's watcher then
+  ends with no STATUS frame (`SessionConnection.sawStatus`) and that session is not asked again until the next run.
+- **The host holds it in memory** (`HostCore+Status`): one watcher per session of a RUNNING sandbox
+  (`Sandbox.watchStatus` — `deckhold pipe` + WATCH: not a viewer, no size), opened on open-session, on an attach,
+  and for every live session when the sandbox comes to run (ONE `deckhold ls` per transition — never on a poll);
+  the library detaches it with the viewers on sleep/stop. `ls` reads memory only (`sessionStatuses`,
+  `agentStatus` = `SessionStatus.mostUrgent`: blocked > error > working > done > idle, `agentWorking` — the
+  signal an idle sleep must respect). working/blocked end with the program; done/error survive it until the
+  session is opened again or the sandbox stops. Each change is ONE `session-status` HostEvent (deduplicated:
+  `sameReport`), sent only to an `events` stream that set `HostRequest.sessionStatus` (an older client cannot
+  decode the kind). **The program's `msg`/`title` are untrusted guest text: never in host.log** (`logLine` is
+  metadata only), capped in `WebAgentStatus`, textContent only on the page.
+- **The page** (`components/agent-status.js`): chips on tabs, tiles and the Sessions tab's rows (`data-agent-for`,
+  painted in place after every overview), the sidebar's dot, and a page notice per transition to done / blocked /
+  error (dropped when no longer true). The UI's monitor pokes its poll on a `session-status` event; it is not an
+  Activity line. `probes/612-*/browser-status.mjs` checks it in a real Chrome (scratch store and profile).
+
 ### GitHub as the user
 
 - **Proxy insertion, like the Anthropic credential — and nothing more.** `CredentialBinding.github`
@@ -1602,6 +1635,8 @@ make test-vm-cwd     # BUG cwd-after-wake: a program's cwd in /workspace across 
 make test-vm-ignore  # 599g: workspace rules (.dozignore lock/hide, .dozreadonly) across boot/pause/sleep/hibernate/new-process restore, reload, folding, kills (scratch store)
 make dozview / dozview-verify # 599g: rebuild the guest view daemon (pinned Zig) / check the committed bytes
 make deckhold / deckhold-verify / deckhold-snapshot-check # the guest PTY holder: rebuild (pinned Zig + ghostty) / check the committed bytes / 610: its snapshot equals its screen, cell by cell
+make deckhold-status-check # 612: deckhold's OSC 7501 consumer — the query answered, the records' rules and limits, invalid input, every cut offset + a fuzz
+make test-vm-status  # 612: a FAKE agent's status through deckhold, the host and the CLI — no viewer and a viewer, sleep/hibernate + wake, the exit, shutdown (scratch store)
 make test-cli-hoststop # 594 W22: test-cli's host-stop part alone (per-sandbox progress plain/animated, --json, nothing running, a host killed mid-stop)
 make pullbench       # 594 D12: the node base pulled with 3 vs 6 concurrent layer downloads, fresh stores (network)
 ```

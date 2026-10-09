@@ -14,7 +14,7 @@ both.
 
 1. [Getting started](01-getting-started.md) — install, set up, and talk to Claude in a sandbox in 15 minutes.
 2. [Sandboxes and their lifecycle](05-sandboxes-and-lifecycle.md) — pause, sleep, hibernate, wake; what's kept where.
-3. [Terminals and sessions](07-terminals-and-sessions.md) — attaching, the Ctrl-] menu, the clipboard, tmux.
+3. [Terminals and sessions](07-terminals-and-sessions.md) — attaching, the Ctrl-] menu, what the agent is doing, the clipboard, tmux.
 4. [What the agent can do](10-permissions-and-network.md) — permissions and the network.
 
 **Then, as you need them:**
