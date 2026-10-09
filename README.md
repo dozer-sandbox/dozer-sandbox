@@ -1,6 +1,9 @@
 # Dozer Sandbox
 
-**Fast, suspendable Linux sandboxes for your Mac.** Each sandbox is a small Linux virtual machine with your
+**Secure, suspendable Linux sandboxes for AI coding agents on your Mac — your API keys never go inside.**
+[dozersandbox.com](https://dozersandbox.com)
+
+Each sandbox is a small Linux virtual machine with your
 project folder inside it. It starts in about a third of a second, pauses in a millisecond, and hibernates to
 disk to give its memory back — then wakes with every program still running where it was. Run a coding agent
 (Claude Code, Codex, pi) with its permission prompts off: the VM is the boundary, the network goes through a
