@@ -130,7 +130,7 @@ struct UIRestart: AsyncParsableCommand {
     func run() async throws {
         let store = g.dozerStore
         guard let r = WebControl.requestRestart(store) else {
-            throw fail(HostError(.unavailable, "no doz ui is running for \(store.root.path) — start one: doz ui"), g)
+            throw fail(HostError(.unavailable, WebControl.holderNote(store) ?? "no doz ui is running for \(store.root.path) — start one: doz ui"), g)
         }
         let old: String
         switch r {
@@ -197,7 +197,7 @@ struct UIRunner {
         let lockFD: Int32
         do {
             guard let fd = try WebControl.takeLock(store) else {
-                throw fail(HostError(.unavailable, "another doz ui is starting for this store — try doz ui link"), g)
+                throw fail(HostError(.unavailable, WebControl.holderNote(store) ?? "another doz ui is starting for this store — try doz ui link"), g)
             }
             lockFD = fd
         } catch let e as HostError { throw fail(e, g) }
@@ -427,7 +427,7 @@ struct UILink: AsyncParsableCommand {
 
     func run() async throws {
         guard let url = rotate ? WebControl.requestRotate(g.dozerStore) : WebControl.requestLink(g.dozerStore) else {
-            throw fail(HostError(.unavailable, "no doz ui is running for \(g.dozerStore.root.path) — start one: doz ui"), g)
+            throw fail(HostError(.unavailable, WebControl.holderNote(g.dozerStore) ?? "no doz ui is running for \(g.dozerStore.root.path) — start one: doz ui"), g)
         }
         try delivery.deliver(url, g)
     }

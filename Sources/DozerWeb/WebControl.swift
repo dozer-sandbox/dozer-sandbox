@@ -61,7 +61,42 @@ public enum WebControl {
             close(fd)
             return nil
         }
+        // Who holds the lock — for `holderNote` when this UI stops answering (a Ctrl-Z'd one held it and every
+        // later `doz ui` waited on it forever). Informational: the flock is what decides.
+        let pid = Data("\(getpid())\n".utf8)
+        _ = ftruncate(fd, 0)
+        _ = pid.withUnsafeBytes { pwrite(fd, $0.baseAddress, pid.count, 0) }
         return fd
+    }
+
+    /// How long a client waits for the running UI to answer one line on ui.sock (it answers at once).
+    public static let answerTimeoutSeconds = 3
+
+    /// When the store's UI lock is HELD but ui.sock gave no answer: one line naming the holder and what to do —
+    /// nil when no UI holds the lock (then "no doz ui is running" is the truth). A process stopped with Ctrl-Z
+    /// still has its socket accepted by the kernel, so only a timeout tells it apart from a live one.
+    public static func holderNote(_ store: DozerStore) -> String? {
+        let fd = open(lockFile(store).path, O_RDONLY | O_CLOEXEC)
+        guard fd >= 0 else { return nil }
+        defer { close(fd) }
+        if flock(fd, LOCK_SH | LOCK_NB) == 0 { flock(fd, LOCK_UN); return nil }      // nobody holds it
+        var buf = [UInt8](repeating: 0, count: 32)
+        let n = pread(fd, &buf, buf.count, 0)
+        let pid = n > 0 ? Int32(String(decoding: buf[0..<n], as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)) : nil
+        let who = pid.map { "a doz ui (pid \($0))" } ?? "a doz ui"
+        if let pid, processIsStopped(pid) {
+            return "\(who) holds this store but is suspended (Ctrl-Z) — type fg in its terminal and quit it, or: kill -CONT \(pid); kill \(pid) — then run doz ui again"
+        }
+        return "\(who) holds this store but is not answering — \(pid.map { "kill \($0)" } ?? "quit it"), then run doz ui again"
+    }
+
+    /// True when `pid` is stopped (SSTOP — Ctrl-Z, or SIGSTOP).
+    static func processIsStopped(_ pid: Int32) -> Bool {
+        var info = kinfo_proc()
+        var size = MemoryLayout<kinfo_proc>.stride
+        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, pid]
+        guard sysctl(&mib, 4, &info, &size, nil, 0) == 0, size > 0 else { return false }
+        return info.kp_proc.p_stat == SSTOP
     }
 
     /// 605: what `restart` does — answers nil to go ahead (then `restart()` runs after the answer is
@@ -133,6 +168,10 @@ public enum WebControl {
     private static func ask(_ store: DozerStore, _ command: String) -> String? {
         guard let fd = UnixSocket.connect(socket(store).path) else { return nil }
         defer { close(fd) }
+        // Never wait forever: a suspended UI's socket is still accepted by the kernel, and nothing ever answers.
+        var tv = timeval(tv_sec: answerTimeoutSeconds, tv_usec: 0)
+        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
+        setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
         guard UnixSocket.writeAll(fd, Data((command + "\n").utf8)), let line = LineReader(fd: fd).readLine(limit: 1024) else { return nil }
         return String(decoding: line, as: UTF8.self)
     }
