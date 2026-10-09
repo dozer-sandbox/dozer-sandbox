@@ -109,7 +109,8 @@ if [[ -n "$SIGN_IDENTITY" && -z "$DRY_RUN" ]]; then
     # Preflight, before a 10-minute build: the identity is in the keychain, and the notary profile authenticates.
     # (Only names are read: `find-identity` lists certificates; `notarytool history` uses the profile's stored
     # credential itself — nothing secret is printed or kept.)
-    security find-identity -v -p codesigning | grep -qF "\"$SIGN_IDENTITY\"" \
+    identities="$(security find-identity -v -p codesigning)"   # not piped into grep -q: SIGPIPE under pipefail
+    grep -qF "\"$SIGN_IDENTITY\"" <<<"$identities" \
         || fail "the identity \"$SIGN_IDENTITY\" is not in the keychain (security find-identity -v -p codesigning)"
     if [[ -n "$NOTARY_PROFILE" ]]; then
         xcrun notarytool history --keychain-profile "$NOTARY_PROFILE" --output-format json >/dev/null 2>&1 \
@@ -154,7 +155,7 @@ run Scripts/third-party-licences.sh "$STAGE/libexec/doz/licences"
 #    are left alone), then the executable with the virtualization entitlement.
 if [[ -z "$DRY_RUN" ]]; then
     while IFS= read -r -d '' f; do
-        if file -b "$f" | grep -q '^Mach-O'; then
+        if [[ "$(file -b "$f")" == Mach-O* ]]; then
             say "  signing $f (Mach-O)"
             codesign "${SIGN_ARGS[@]}" "$f"
         fi

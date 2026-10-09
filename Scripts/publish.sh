@@ -72,7 +72,10 @@ doz="$work/doz-$VERSION/libexec/doz/doz"
 codesign --verify --strict "$doz" || fail "the tarball's doz does not verify"
 if [[ -z "$TEST_PUBLISH" ]]; then
     [[ "$(cat "$work/doz-$VERSION/libexec/doz/RELEASE")" == public ]] || fail "the tarball is not the PUBLIC flavor (make release PUBLIC=1)"
-    codesign -dv --verbose=2 "$doz" 2>&1 | grep -q "^TeamIdentifier=$TEAM_ID\$" || fail "the tarball's doz is not signed by team $TEAM_ID"
+    # Never `codesign … | grep -q` under pipefail: grep exits at the first match, codesign can then die of SIGPIPE
+    # and the pipeline FAILS on a correctly signed binary (0.32.0-rc.1's publish stopped on exactly that).
+    sig="$(codesign -dv --verbose=2 "$doz" 2>&1)"
+    grep -q "^TeamIdentifier=$TEAM_ID\$" <<<"$sig" || fail "the tarball's doz is not signed by team $TEAM_ID"
     "$ROOT/Scripts/notary-ticket.sh" "$doz" 60 >/dev/null || fail "the tarball's doz has no published notary ticket (Scripts/notary-ticket.sh)"
 fi
 say "  ✓ tarball: doz $VERSION, verifies$([[ -z "$TEST_PUBLISH" ]] && echo ", public, Developer ID $TEAM_ID, notarised")"
