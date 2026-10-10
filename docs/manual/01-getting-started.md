@@ -98,8 +98,11 @@ Details: [Setting up](03-setting-up.md).
 **Official builds** (Homebrew, the release download) **send anonymous usage statistics**, so we can see
 what to fix and improve: at most once a day, counts and ranges about how Dozer itself is used — which
 commands ran and how often they failed (by exit code), which agents, bases and network presets new
-sandboxes use, the size of your setup as ranges, typical start and wake times rounded to 50 ms, and
-your Mac's macOS version, chip family, memory and cores as ranges — with a random install id. **Never**
+sandboxes use, the size of your setup as ranges, typical start and wake times rounded to 50 ms, how long
+sandboxes ran and slept and how long agents worked (as ranges), which features you used (the dashboard,
+the installed app, `doz serve`, workspace rules, GitHub access, restore points, templates), which built-in
+image-preparation step failed, and your Mac's macOS version, chip family, memory and cores as ranges — with
+a random install id. **Never**
 a sandbox, image or project name, a file or folder name or path, anything inside a sandbox, anything
 you type or a program prints, a command's arguments, a host or website, an account, email or key.
 Our server adds your country from the connection and does not keep your IP address.

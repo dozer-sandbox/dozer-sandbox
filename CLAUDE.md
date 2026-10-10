@@ -966,8 +966,21 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   template is not counted; network presets). `UsageSchema.problems` is the receiving side's validator ported, and
   `UsageRecorder.handOver` drops any message it does not accept. A new field is a schema change on BOTH sides and in
   the privacy policy — never just a new key here.
-- **Nothing new is collected for it**: the day's numbers come from what the host already records (`metrics.sqlite`
-  action rows, the store's sandboxes and restore points, `onboarded.json`) and the commands' own counts.
+- **Nothing private is collected for it**: the day's numbers come from what the host already records (`metrics.sqlite`
+  action rows — phases with their times, creates, removals, preparations; the network table's minutes; the store's
+  sandboxes, restore points, workspace rule files, permissions, doz serve's devices; `onboarded.json`) and the commands'
+  own counts, computed on the Mac (`UsageStoreFacts`, `UsageTimeline`, `UsageDailyBuilder` — pure, tested on a fixed
+  history). What the host did not record before, it now writes to the SAME local metrics, as times only: rows `attach`,
+  `exec` (activity), `agent status` / `agent working` (612's status; working time from when `working` began), the create
+  row's detail `account` (the KIND: mac, api-key, setup-token, none — never a name), and a failed preparation's
+  `failedStep` (`PreparationStepID`: the metrics' fixed step keys, a recipe's bake step only as `bake-step`). The page sends
+  `X-Doz-Display: standalone|browser` with its page-load renewal; only `standalone` is recorded (`app`), only while on.
+- **How the time block reads**: a running or asleep stretch is counted ONCE, on the day it ends, by its whole length (a
+  host crash ends one when the next host notices; a stretch still open is counted when it ends); `running_total` is the
+  running time within the day; `removed_age` is from the sandbox's create row; `idle_running_8h` counts sandboxes with a gap
+  of 8 h or more between activity (attach, exec, a session opened or restarted, agent status, network use) inside a running
+  stretch, ending that day — an attach held open for hours counts only at its start. `first_sandbox` and
+  `time_to_first_session` (from `firstSeen` in usage.json) are each sent once.
 - **The off switches, checked before anything is recorded** (`UsageSwitches.decide`): not official → off; a guarded test
   run → off; a development build (`InstallMethod.development`) → off; `DO_NOT_TRACK` (anything but empty/0/false) →
   off, even against the flag; else the setting `telemetry.send_anonymous_usage_stats` (flag > `$DOZ_SEND_ANONYMOUS_USAGE_STATS`

@@ -383,6 +383,15 @@ public final class MetricsStore: @unchecked Sendable {
     // MARK: 595 — Resources
 
     /// Proxy traffic per sandbox: since `sinceMinute` (minutes since 1970), and in all.
+    /// The minutes in [from, to) in which each sandbox's network was used (any connection) — activity, for the usage
+    /// statistics' "left running with no activity" count. When only, never where.
+    public func activeMinutes(fromMinute: Int64, toMinute: Int64) -> [String: [Int64]] {
+        let rows = (try? query("""
+            SELECT sandbox, minute FROM network WHERE minute >= ? AND minute < ? AND (allowed + denied + failed) > 0 ORDER BY minute
+            """, [.int(fromMinute), .int(toMinute)]) { st in (Self.text(st, 0) ?? "", Self.int(st, 1) ?? 0) }) ?? []
+        return Dictionary(grouping: rows, by: \.0).mapValues { $0.map(\.1) }
+    }
+
     public func networkTotals(sinceMinute: Int64) -> [ResourceNetwork] {
         let rows = (try? query("""
             SELECT sandbox, SUM(bytes_up), SUM(bytes_down), SUM(allowed + denied + failed),

@@ -571,7 +571,8 @@ extension HostCore {
         if preparations[p.image] === p { preparations[p.image] = nil }
         let i = p.info
         note(nil, "preparation of \(p.image) \(i.state)" + (i.error.map { ": \($0)" } ?? "") + String(format: " (%.0f s)", i.seconds))
-        recordPreparation(p.image, started: started, t0: t0, ok: ok, error: i.error)
+        let failed = ok ? nil : p.finishedSteps.last(where: { $0.kind == "failed" }).map { PreparationStepID.of($0.label) }
+        recordPreparation(p.image, started: started, t0: t0, ok: ok, error: i.error, failedStep: failed)
         // The next preparation's plan and estimates: this run's steps and times (successful runs only).
         let steps = p.finishedSteps.filter { $0.kind == "step" }
         if ok, !steps.isEmpty {
@@ -849,5 +850,15 @@ extension HostCore {
         for p in running { p.markCancelling(); p.task?.cancel() }
         let deadline = Date().addingTimeInterval(seconds)
         while Date() < deadline, running.contains(where: \.isRunning) { try? await Task.sleep(for: .milliseconds(100)) }
+    }
+}
+
+/// A preparation step as a FIXED id (the usage statistics' `prep_failed`): the metrics' step keys, kebab-cased — a bake
+/// step of an image recipe is `bake-step` (its label can carry a package or a version), anything else `other`.
+public enum PreparationStepID {
+    public static func of(_ label: String) -> String {
+        let k = String(MetricsStepKey.key(for: label).dropFirst("step: ".count))
+        if k.hasPrefix("bake step ") { return "bake-step" }
+        return k.replacingOccurrences(of: " ", with: "-").replacingOccurrences(of: "(", with: "").replacingOccurrences(of: ")", with: "")
     }
 }

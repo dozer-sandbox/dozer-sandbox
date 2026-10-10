@@ -77,6 +77,7 @@ extension HostCore {
         }
         statuses[name, default: [:]][session] = s
         if statuses[name]?.isEmpty == true { statuses[name] = nil }
+        statusTimes(name, session: session, from: old?.state, to: s?.state)
         var e = HostEvent(kind: .sessionStatus, sandbox: name, text: s?.logLine ?? "session \(session): no status")
         e.session = session
         e.sessionStatus = s
@@ -109,8 +110,24 @@ extension HostCore {
         }
     }
 
+    /// For the usage statistics' agent status and working time — written to the local metrics: a status was reported
+    /// ("agent status"), and how long a program stayed `working` ("agent working", from when it began).
+    private func statusTimes(_ name: String, session: String, from: ProgramStatus.State?, to: ProgramStatus.State?) {
+        guard let metrics, let m = managed[name] else { return }
+        let key = Self.key(name, session)
+        if from == nil, to != nil {
+            _ = metrics.record(run: metricsRun, action: "agent status", sandbox: name, image: m.config.image, startedAt: Date(), durationMs: 0)
+        }
+        if to == .working, from != .working { workingSince[key] = Date() }
+        if from == .working, to != .working, let since = workingSince.removeValue(forKey: key) {
+            _ = metrics.record(run: metricsRun, action: "agent working", sandbox: name, image: m.config.image, startedAt: since,
+                               durationMs: Date().timeIntervalSince(since) * 1000)
+        }
+    }
+
     /// The sandbox stopped (or was deleted): its programs are gone, and so is what they said.
     func clearStatuses(_ name: String) {
+        for (session, s) in statuses[name] ?? [:] where s.state == .working { statusTimes(name, session: session, from: .working, to: nil) }
         statuses[name] = nil
         for k in statusUnsupported where k.hasPrefix(name + "\u{0}") { statusUnsupported.remove(k) }
         for k in statusRetries.keys where k.hasPrefix(name + "\u{0}") { statusRetries[k] = nil }

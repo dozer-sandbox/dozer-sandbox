@@ -89,6 +89,8 @@ public actor HostCore {
     /// 612: the programs' status per sandbox and session, the status watchers (keyed sandbox NUL session), the
     /// ones being opened, the sessions whose holder cannot answer, and a lost watcher's retries (`HostCore+Status`).
     var statuses: [String: [String: SessionStatus]] = [:]
+    /// Since when a session's program has reported `working` (its metrics row "agent working" is written when it stops).
+    var workingSince: [String: Date] = [:]
     var statusWatches: [String: SessionConnection] = [:]
     var statusOpening: Set<String> = []
     var statusUnsupported: Set<String> = []
@@ -357,9 +359,22 @@ public actor HostCore {
     }
 
     /// 594: a preparation's metrics row (no sandbox: the image's).
-    func recordPreparation(_ image: String, started: Date, t0: ContinuousClock.Instant, ok: Bool, error: String?) {
+    func recordPreparation(_ image: String, started: Date, t0: ContinuousClock.Instant, ok: Bool, error: String?, failedStep: String? = nil) {
         metrics?.record(run: metricsRun, action: "prepare", sandbox: nil, image: image, startedAt: started, durationMs: ms(since: t0),
-                        ok: ok, error: error)
+                        ok: ok, error: error, detail: failedStep.map { ["failedStep": $0] } ?? [:])
+    }
+
+    /// A new sandbox's account as its KIND (mac, api-key, setup-token, none) — nil when it is none of those.
+    func createdAccountKind(_ account: String?) -> String? {
+        guard let account else { return "none" }
+        let (def, kinds) = accountKinds()
+        switch kinds[account == "default" ? def : account] {
+        case .mac?, .codexMac?: return "mac"
+        case .apiKey?, .openaiKey?: return "api-key"
+        case .setupToken?: return "setup-token"
+        case nil: return account == "default" && (def.isEmpty || def == "none") ? "none" : nil
+        default: return nil
+        }
     }
 
     private func finishAction(_ m: Managed, _ row: Int64?, _ t0: ContinuousClock.Instant, ok: Bool, error: Error? = nil,
@@ -872,8 +887,10 @@ public actor HostCore {
         if let s = o.settings, !s.isEmpty { cfg.settings = try Self.checkedSandboxSettings(s) }
         try cfg.write(store.configFile(name))
         let m = try adopt(cfg)
+        var createDetail = ["network": cfg.networkName]
+        if let kind = createdAccountKind(cfg.account) { createDetail["account"] = kind }     // the KIND only, never a name
         metrics?.record(run: metricsRun, action: "create", sandbox: name, image: image, phaseAfter: "off", startedAt: Date(), durationMs: 0,
-                        detail: ["network": cfg.networkName])
+                        detail: createDetail)
         made = true
         note(name, "created (\(image), \(spec.cpus) CPUs, \(spec.memoryMiB) MiB, network \(cfg.networkName)"
              + (prepared?.created == true ? ", workspace \(cfg.workspace ?? "") created" : cfg.workspace == nil ? ", isolated" : "") + ")")
@@ -1203,6 +1220,8 @@ public actor HostCore {
         if wake { try await ensureRunning(m, wake: true) }
         let session = session ?? m.config.defaultSession.name
         try GuestCommand.validateSessionName(session)
+        // Activity for the "left running with no activity" count: when, never what.
+        metrics?.record(run: metricsRun, action: "attach", sandbox: m.name, image: m.config.image, startedAt: Date(), durationMs: 0)
         return (m.sandbox, session)
     }
 
@@ -1551,6 +1570,8 @@ public actor HostCore {
             throw error
         }
         var out = ExecOutput(exitCode: res.exitCode, stdout: res.stdout, stderr: res.stderr, milliseconds: ms(since: t0))
+        // Activity (when, never what): the "left running with no activity" count.
+        metrics?.record(run: metricsRun, action: "exec", sandbox: m.name, image: m.config.image, startedAt: Date(), durationMs: out.milliseconds)
         if first.started { out.started = true }
         if first.woke { out.woke = true }
         out.bootMilliseconds = first.milliseconds

@@ -587,9 +587,11 @@ public struct UsageDay: Codable, Equatable, Sendable {
     public var commands: [String: Int] = [:]
     public var failed: [String: Int] = [:]
     public var onboarding: UsageDaily.Onboarding?
+    /// Features seen that day that nothing else records (`app`: the installed dashboard app was used).
+    public var features: [String]?
 
     public init(day: String) { self.day = day }
-    public var isEmpty: Bool { commands.isEmpty && failed.isEmpty && onboarding == nil }
+    public var isEmpty: Bool { commands.isEmpty && failed.isEmpty && onboarding == nil && (features ?? []).isEmpty }
 }
 
 /// `<settings dir>/usage.json`.
@@ -602,6 +604,11 @@ public struct UsageState: Codable, Equatable, Sendable {
     /// The version that last ran (an `installed` or `upgraded` is due when this one differs).
     public var lastVersion: String?
     public var noticeShown: Bool?
+    /// When statistics first recorded anything on this Mac (the start of "time to first session") — a time, nothing else.
+    public var firstSeen: Date?
+    /// `first_sandbox` / `time_to_first_session` were sent (each is sent once).
+    public var firstSandboxSent: Bool?
+    public var firstSessionSent: Bool?
 
     public init() {}
 }
@@ -683,38 +690,94 @@ public struct UsageFiles: Sendable {
 
 // MARK: - the day's numbers
 
-/// What the host already recorded about one day, read from the store (nothing new is collected for this).
+/// What the host already recorded, read from the store for one day (nothing new is collected for this). Sandbox names
+/// are only used HERE, on the Mac, to follow one sandbox through its phases — never in a message.
 public struct UsageStoreFacts: Equatable, Sendable {
-    /// The metrics rows of that day (actions only).
+    /// The metrics action rows of that day.
     public var events: [MetricsEvent] = []
+    /// Every metrics action row before the day's end (phases, creates and removals go back further than a day).
+    public var history: [MetricsEvent] = []
+    /// The minutes each sandbox's network was used (activity), from a month before the day to its end.
+    public var activeMinutes: [String: [Date]] = [:]
     public var sandboxes: Int?
     public var points: Int?
+    /// Bytes the store's files take on disk (clones counted per file — a coarse range is all that is sent).
+    public var storeBytes: UInt64?
+    /// doz serve's admitted devices.
+    public var serveDevices: Int?
+    /// Some sandbox's workspace has a .dozignore or .dozreadonly.
+    public var rules: Bool?
+    /// The most open "Use GitHub as you" among the sandboxes: off, read, push.
+    public var github: String?
     /// The store's onboarding record says it finished that day.
     public var onboardedThatDay = false
+    /// The day's end, or now when the day is not over (`doz telemetry show`).
+    public var until: Date?
 
-    public init(events: [MetricsEvent] = [], sandboxes: Int? = nil, points: Int? = nil, onboardedThatDay: Bool = false) {
+    public init(events: [MetricsEvent] = [], history: [MetricsEvent]? = nil, activeMinutes: [String: [Date]] = [:], sandboxes: Int? = nil,
+                points: Int? = nil, storeBytes: UInt64? = nil, serveDevices: Int? = nil, rules: Bool? = nil, github: String? = nil,
+                onboardedThatDay: Bool = false, until: Date? = nil) {
         self.events = events
+        self.history = history ?? events
+        self.activeMinutes = activeMinutes
         self.sandboxes = sandboxes
         self.points = points
+        self.storeBytes = storeBytes
+        self.serveDevices = serveDevices
+        self.rules = rules
+        self.github = github
         self.onboardedThatDay = onboardedThatDay
+        self.until = until
     }
 
     /// Read from `store` for the local day `day` (yyyy-MM-dd). Never creates anything in the store.
-    public static func read(_ store: DozerStore, day: String, calendar: Calendar = .current) -> UsageStoreFacts {
+    public static func read(_ store: DozerStore, day: String, now: Date = Date(), calendar: Calendar = .current) -> UsageStoreFacts {
         var f = UsageStoreFacts()
         guard let (start, end) = UsageClock.range(of: day, calendar: calendar) else { return f }
+        f.until = min(end, now)
         if FileManager.default.fileExists(atPath: store.metrics.path), let m = try? MetricsStore(url: store.metrics) {
-            f.events = m.events(MetricsFilter(since: start, includeSteps: false)).filter { $0.startedAt < end && $0.kind == .action }
+            f.history = m.events(MetricsFilter(includeSteps: false)).filter { $0.startedAt < end && $0.kind == .action }
+            f.events = f.history.filter { $0.startedAt >= start }
+            let from = Int64(start.addingTimeInterval(-30 * 86_400).timeIntervalSince1970 / 60), to = Int64(end.timeIntervalSince1970 / 60)
+            f.activeMinutes = m.activeMinutes(fromMinute: from, toMinute: to).mapValues { $0.map { Date(timeIntervalSince1970: Double($0) * 60) } }
         }
         let names = store.sandboxNames()
         f.sandboxes = names.count
-        f.points = names.reduce(0) { n, name in
+        var points = 0, rules = false, github = 0
+        for name in names {
             let dir = store.layout(name).sandboxDirectory.appendingPathComponent("restore-points")
             let ids = (try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []
-            return n + ids.filter { FileManager.default.fileExists(atPath: dir.appendingPathComponent("\($0)/meta.json").path) }.count
+            points += ids.filter { FileManager.default.fileExists(atPath: dir.appendingPathComponent("\($0)/meta.json").path) }.count
+            guard let cfg = SandboxConfig.read(store.configFile(name)) else { continue }
+            if let w = cfg.workspace, !rules {
+                rules = [".dozignore", ".dozreadonly"].contains { FileManager.default.fileExists(atPath: (w as NSString).appendingPathComponent($0)) }
+            }
+            if case .proxied(let p) = cfg.spec.network, let perms = p.permissions {
+                github = max(github, perms.contains(AgentPermissions.gitHubPush) ? 2 : perms.contains(AgentPermissions.gitHubAsYou) ? 1 : 0)
+            }
+        }
+        f.points = points
+        f.rules = rules
+        f.github = ["off", "read", "push"][github]
+        f.storeBytes = allocatedBytes(store.root)
+        if let d = try? Data(contentsOf: store.root.appendingPathComponent("serve/devices.json")),
+           let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any], let list = o["devices"] as? [Any] {
+            f.serveDevices = list.count
         }
         if let r = OnboardingRecord.read(store), r.date >= start, r.date < end { f.onboardedThatDay = true }
         return f
+    }
+
+    /// What the files under `root` take on disk.
+    static func allocatedBytes(_ root: URL) -> UInt64? {
+        guard let e = FileManager.default.enumerator(at: root, includingPropertiesForKeys: [.totalFileAllocatedSizeKey, .isRegularFileKey],
+                                                     options: [], errorHandler: { _, _ in true }) else { return nil }
+        var n: UInt64 = 0
+        for case let u as URL in e {
+            guard let v = try? u.resourceValues(forKeys: [.totalFileAllocatedSizeKey, .isRegularFileKey]), v.isRegularFile == true else { continue }
+            n += UInt64(v.totalFileAllocatedSize ?? 0)
+        }
+        return n
     }
 }
 
@@ -740,10 +803,122 @@ public enum UsageClock {
     }
 }
 
+/// Sandboxes' phases over time, from the metrics' action rows (each row's end and the phase it left the sandbox in).
+public enum UsageTimeline {
+    public enum Kind: Equatable, Sendable { case running, asleep, other }
+
+    public struct Stretch: Equatable, Sendable {
+        public var sandbox: String
+        public var kind: Kind
+        public var start: Date
+        /// nil: still in it at the last row.
+        public var end: Date?
+    }
+
+    static func end(_ e: MetricsEvent) -> Date { e.startedAt.addingTimeInterval((e.durationMs ?? 0) / 1000) }
+
+    static func kind(_ phase: String) -> Kind {
+        switch phase {
+        case "running": .running
+        case "asleep", "hibernated": .asleep
+        default: .other
+        }
+    }
+
+    /// Every sandbox's stretches, in order. A removal ends the last one; a row without a phase changes nothing.
+    public static func stretches(_ history: [MetricsEvent]) -> [Stretch] {
+        var out: [Stretch] = []
+        for (name, rows) in Dictionary(grouping: history.filter { $0.sandbox != nil }, by: { $0.sandbox! }) {
+            var open: Stretch?
+            for e in rows.sorted(by: { end($0) < end($1) }) {
+                let t = end(e)
+                let next: Kind?
+                if e.action == "delete sandbox", e.ok == true { next = nil }
+                else if let p = e.phaseAfter { next = kind(p) }
+                else { continue }
+                if let o = open, o.kind == next { continue }
+                if var o = open { o.end = t; out.append(o) }
+                open = next.map { Stretch(sandbox: name, kind: $0, start: t, end: nil) }
+            }
+            if let o = open { out.append(o) }
+        }
+        return out.sorted { ($0.start, $0.sandbox) < ($1.start, $1.sandbox) }
+    }
+
+    public static func bucket(_ seconds: TimeInterval, _ edges: [TimeInterval], _ names: [String]) -> String {
+        for (i, e) in edges.enumerated() where seconds < e { return names[i] }
+        return names[names.count - 1]
+    }
+    static let m: TimeInterval = 60, h: TimeInterval = 3600, d: TimeInterval = 86_400
+    public static func running(_ s: TimeInterval) -> String { bucket(s, [5 * m, 30 * m, 2 * h, 8 * h], UsageSchema.Ranges.running) }
+    public static func asleep(_ s: TimeInterval) -> String { bucket(s, [h, 8 * h, 24 * h, 7 * d], UsageSchema.Ranges.asleep) }
+    public static func removedAge(_ s: TimeInterval) -> String { bucket(s, [h, d, 7 * d, 30 * d], UsageSchema.Ranges.removedAge) }
+    public static func total(_ s: TimeInterval) -> String { bucket(s, [30 * m, 2 * h, 8 * h], UsageSchema.Ranges.total) }
+    public static func firstSession(_ s: TimeInterval) -> String { bucket(s, [5 * m, 30 * m], UsageSchema.Ranges.firstSession) }
+
+    /// The `time` block and the day's most sandboxes running at once, for [dayStart, until).
+    public static func day(_ history: [MetricsEvent], activeMinutes: [String: [Date]], dayStart: Date, until: Date)
+        -> (time: UsageDaily.Time?, runningMax: Int) {
+        let all = stretches(history)
+        var t = UsageDaily.Time()
+        func inDay(_ d: Date) -> Bool { d >= dayStart && d < until }
+        // Running and asleep stretches, counted once — on the day they end — by their whole length.
+        for s in all {
+            guard let e = s.end, inDay(e) else { continue }
+            switch s.kind {
+            case .running: t.running = UsageDailyBuilder.bump(t.running, running(e.timeIntervalSince(s.start)))
+            case .asleep: t.asleep = UsageDailyBuilder.bump(t.asleep, asleep(e.timeIntervalSince(s.start)))
+            case .other: break
+            }
+        }
+        // Sandboxes removed that day: their age (from their create).
+        let byName = Dictionary(grouping: history.filter { $0.sandbox != nil }, by: { $0.sandbox! })
+        for e in history where e.action == "delete sandbox" && e.ok == true && inDay(end(e)) {
+            let created = byName[e.sandbox!]?.filter { $0.action == "create" && $0.startedAt <= e.startedAt }.map(\.startedAt).max()
+            if let c = created { t.removedAge = UsageDailyBuilder.bump(t.removedAge, removedAge(end(e).timeIntervalSince(c))) }
+        }
+        // Running time within the day, the most at once, and the sandboxes left running 8 h with no activity.
+        let runs = all.filter { $0.kind == .running }.compactMap { s -> (String, Date, Date)? in
+            let a = max(s.start, dayStart), b = min(s.end ?? until, until)
+            return a < b ? (s.sandbox, a, b) : nil
+        }
+        let total = runs.reduce(0) { $0 + $1.2.timeIntervalSince($1.1) }
+        if total > 0 { t.runningTotal = Self.total(total) }
+        var sweep = runs.flatMap { [($0.1, 1), ($0.2, -1)] }.sorted { ($0.0, $0.1) < ($1.0, $1.1) }
+        var now = 0, most = 0
+        for (_, step) in sweep { now += step; most = max(most, now) }
+        sweep = []
+        // Idle: a gap of 8 h or more between activity (an attach, an exec, a session opened or restarted, the agent's
+        // status, network use) inside a running stretch, ending within the day.
+        let marks: Set<String> = ["attach", "exec", "session open", "session restart", "agent status", "agent working"]
+        var idle: Set<String> = []
+        for s in all where s.kind == .running {
+            let stop = min(s.end ?? until, until)
+            guard stop > dayStart else { continue }
+            var points = (byName[s.sandbox] ?? []).filter { marks.contains($0.action) }.flatMap { [$0.startedAt, end($0)] }
+            points += activeMinutes[s.sandbox] ?? []
+            let inside = ([s.start] + points.filter { $0 > s.start && $0 < stop } + [stop]).sorted()
+            for (a, b) in zip(inside, inside.dropFirst()) where b.timeIntervalSince(a) >= 8 * h && b > dayStart { idle.insert(s.sandbox) }
+        }
+        if !idle.isEmpty { t.idleRunning8h = idle.count }
+        // The agents' working time within the day (612's status: claude-code and pi).
+        var working: [String: TimeInterval] = [:]
+        for e in history where e.action == "agent working" {
+            guard let a = UsageSchema.agent(image: e.image ?? ""), ["claude-code", "pi"].contains(a) else { continue }
+            let from = max(e.startedAt, dayStart), to = min(end(e), until)
+            if to > from { working[a, default: 0] += to.timeIntervalSince(from) }
+        }
+        if !working.isEmpty { t.agentWorking = working.mapValues(Self.total) }
+        let empty = t.running == nil && t.asleep == nil && t.removedAge == nil && t.runningTotal == nil && t.agentWorking == nil && t.idleRunning8h == nil
+        return (empty ? nil : t, most)
+    }
+}
+
 public enum UsageDailyBuilder {
     /// The `daily` fields of one day — a pure function of what was recorded (the day's counts), what the host
-    /// recorded (`facts`), this Mac and two settings.
-    public static func build(_ day: UsageDay, facts: UsageStoreFacts, machine: UsageMachine, upgradeMode: String) -> UsageDaily {
+    /// recorded (`facts`), this Mac, a setting, and when statistics first recorded anything here.
+    public static func build(_ day: UsageDay, facts: UsageStoreFacts, machine: UsageMachine, upgradeMode: String,
+                             firstSeen: Date? = nil, calendar: Calendar = .current) -> UsageDaily {
         var d = UsageDaily()
         d.macos = machine.macos
         d.chip = machine.chip
@@ -755,20 +930,34 @@ public enum UsageDailyBuilder {
             if facts.onboardedThatDay { o.step = "done"; o.completed = true }
             d.onboarding = o
         }
+        let range = UsageClock.range(of: day.day, calendar: calendar)
+        let dayStart = range?.0 ?? .distantPast, dayEnd = range?.1 ?? .distantFuture
+        let until = min(facts.until ?? dayEnd, dayEnd)
 
         let ev = facts.events
-        // Sandboxes created that day: agent, base (catalogue ids; a Dockerfile counted only as such), network preset.
+        // Sandboxes created that day: agent, base (catalogue ids; a Dockerfile counted only as such), account kind,
+        // network preset.
         var created = UsageDaily.Created()
         for e in ev where e.action == "create" && e.ok != false {
             let image = e.image ?? ""
             if let a = UsageSchema.agent(image: image) { created.agent = bump(created.agent, a) }
             if let b = UsageSchema.base(image: image) { created.base = bump(created.base, b) }
-            if let n = network(of: e) { created.network = bump(created.network, UsageSchema.network(n)) }
+            let detail = details(e)
+            if let n = detail["network"] { created.network = bump(created.network, UsageSchema.network(n)) }
+            if let a = detail["account"], UsageSchema.accounts.contains(a) { created.account = bump(created.account, a) }
         }
         if !created.isEmpty { d.created = created }
+        // The store's first sandbox, and the time from the first use here to the first session — each on its day.
+        let firstCreate = facts.history.filter { $0.action == "create" && $0.ok != false }.map(\.startedAt).min()
+        if let f = firstCreate, f >= dayStart, f < dayEnd { d.firstSandbox = true }
+        let firstSession = facts.history.filter { $0.action == "session open" && $0.ok != false }.map(\.startedAt).min()
+        if let f = firstSession, f >= dayStart, f < dayEnd, let seen = firstSeen, seen <= f {
+            d.timeToFirstSession = UsageTimeline.firstSession(f.timeIntervalSince(seen))
+        }
 
         if let n = facts.sandboxes { d.sandboxes = UsageSchema.count(n) }
         if let n = facts.points { d.points = UsageSchema.count(n) }
+        if let b = facts.storeBytes { d.storeGB = UsageSchema.storeGB(bytes: b) }
 
         // Lifecycle timings: p50/p90 of the day's successful ones, rounded to 50 ms; with the day's most-used agent.
         var timing = UsageDaily.Timing()
@@ -797,16 +986,35 @@ public enum UsageDailyBuilder {
         if wakeFailed > 0 { d.wakeFailed = wakeFailed }
         if restores > 0 { d.crashRestores = restores }
         if crashes > 0 { d.hostCrashes = crashes }
+        var prep: [String: Int] = [:]
+        for e in ev where e.action == "prepare" && e.ok == false {
+            if let step = details(e)["failedStep"], step.range(of: #"^[a-z0-9][a-z0-9._-]{0,47}$"#, options: .regularExpression) != nil {
+                prep[step, default: 0] += 1
+            }
+        }
+        d.prepFailed = UsageSchema.limited(prep)
 
         // Features.
         let names = Set(day.commands.keys)
         if names.contains(where: { $0 == "ui" || $0.hasPrefix("ui ") }) { d.ui = true }
         if names.contains(where: { $0 == "serve" || $0.hasPrefix("serve ") }) { d.serve = true }
+        if (day.features ?? []).contains("app") { d.app = true }
+        if let n = facts.serveDevices { d.serveDevices = UsageSchema.serveDevices(n) }
+        if facts.rules == true { d.rules = true }
+        if let g = facts.github, UsageSchema.githubModes.contains(g) { d.github = g }
+        if ev.contains(where: { $0.action == "agent status" || $0.action == "agent working" }) { d.agentStatus = true }
         let taken = ev.filter { $0.action == "take restore point" && $0.ok == true }.count
         let templates = ev.filter { $0.action == "save as template" && $0.ok == true }.count
         if taken > 0 { d.pointsTaken = taken }
         if templates > 0 { d.templatesMade = templates }
         if UsageSchema.upgradeModes.contains(upgradeMode) { d.upgradeMode = upgradeMode }
+
+        // Time, and the most running at once.
+        if until > dayStart {
+            let (time, most) = UsageTimeline.day(facts.history, activeMinutes: facts.activeMinutes, dayStart: dayStart, until: until)
+            d.time = time
+            d.runningMax = UsageSchema.count(most)
+        }
         return d
     }
 
@@ -816,10 +1024,10 @@ public enum UsageDailyBuilder {
         return m
     }
 
-    /// The network preset a create row recorded (`detailJSON` {"network": …}).
-    static func network(of e: MetricsEvent) -> String? {
-        guard let j = e.detailJSON, let d = try? JSONSerialization.jsonObject(with: Data(j.utf8)) as? [String: Any] else { return nil }
-        return d["network"] as? String
+    /// A row's detail (`detailJSON`), as strings.
+    static func details(_ e: MetricsEvent) -> [String: String] {
+        guard let j = e.detailJSON, let d = try? JSONSerialization.jsonObject(with: Data(j.utf8)) as? [String: Any] else { return [:] }
+        return d.compactMapValues { $0 as? String }
     }
 }
 
@@ -851,6 +1059,12 @@ public struct UsageRecorder: Sendable {
         try update { day in day.failed["\(name):\(exitCode)", default: 0] += 1 }
     }
 
+    /// A feature nothing else records was used (a closed list: `app` — the installed dashboard app).
+    public func recordFeature(_ f: String) throws {
+        guard ["app"].contains(f) else { return }
+        try update { day in if !(day.features ?? []).contains(f) { day.features = (day.features ?? []) + [f] } }
+    }
+
     /// The setup wizard or `doz onboard` reached `step` (a later step, or completion, is never overwritten by an earlier one).
     public func recordOnboarding(via: String, step: String, completed: Bool) throws {
         guard UsageSchema.onboardingVia.contains(via), UsageSchema.onboardingSteps.contains(step) else { return }
@@ -865,6 +1079,7 @@ public struct UsageRecorder: Sendable {
         try files.withLock {
             var s = files.load()
             roll(&s)
+            if s.firstSeen == nil { s.firstSeen = now }
             var day = s.current ?? UsageDay(day: today)
             change(&day)
             s.current = day
@@ -904,7 +1119,12 @@ public struct UsageRecorder: Sendable {
         if let closed = s.closed {
             s.closed = nil
             if let age = UsageClock.daysBetween(closed.day, today, calendar: calendar), (1...7).contains(age), s.lastDaily != closed.day {
-                out.append(.daily(common, UsageDailyBuilder.build(closed, facts: facts(closed.day), machine: machine, upgradeMode: upgradeMode)))
+                var d = UsageDailyBuilder.build(closed, facts: facts(closed.day), machine: machine, upgradeMode: upgradeMode,
+                                                firstSeen: s.firstSeen, calendar: calendar)
+                // Each of these is sent once, ever.
+                if s.firstSandboxSent == true { d.firstSandbox = nil } else if d.firstSandbox == true { s.firstSandboxSent = true }
+                if s.firstSessionSent == true { d.timeToFirstSession = nil } else if d.timeToFirstSession != nil { s.firstSessionSent = true }
+                out.append(.daily(common, d))
                 s.lastDaily = closed.day
             }
         }
@@ -916,7 +1136,11 @@ public struct UsageRecorder: Sendable {
     public func todaySoFar(_ common: UsageCommon, facts: UsageStoreFacts, machine: UsageMachine, upgradeMode: String) -> UsageMessage {
         var s = files.load()
         roll(&s)
-        return .daily(common, UsageDailyBuilder.build(s.current ?? UsageDay(day: today), facts: facts, machine: machine, upgradeMode: upgradeMode))
+        var d = UsageDailyBuilder.build(s.current ?? UsageDay(day: today), facts: facts, machine: machine, upgradeMode: upgradeMode,
+                                        firstSeen: s.firstSeen, calendar: calendar)
+        if s.firstSandboxSent == true { d.firstSandbox = nil }
+        if s.firstSessionSent == true { d.timeToFirstSession = nil }
+        return .daily(common, d)
     }
 
     /// Statistics were turned off (the setting, its variable, DO_NOT_TRACK): forget the days recorded while they were
@@ -978,6 +1202,12 @@ public enum UsageRuntime {
         let method: InstallMethod = official ? InstallMethod.detect(executable: HostLauncher.executablePath) : .development
         return UsageSwitches.decide(official: official, method: method, settings: settings ?? .load(environment: env), env: env,
                                     flag: flag ?? self.flag, guarded: TestSafety.guarded(env))
+    }
+
+    /// A feature only the web layer sees (the installed dashboard app) — recorded only while statistics are on.
+    public static func recordFeature(_ f: String) {
+        guard decide().on, let files = UsageFiles.current() else { return }
+        try? UsageRecorder(files: files).recordFeature(f)
     }
 
     /// The setup wizard (the web) reached a step — recorded only while statistics are on.

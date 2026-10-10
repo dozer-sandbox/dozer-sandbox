@@ -143,7 +143,8 @@ final class UsageTests: XCTestCase {
             event("restore after crash"), event("died with host", run: 3), event("died with host", run: 3), event("died with host", run: 4),
             event("take restore point", ms: 20), event("take restore point", ok: false), event("save as template", ms: 900),
         ]
-        let d = UsageDailyBuilder.build(day, facts: UsageStoreFacts(events: ev, sandboxes: 3, points: 7), machine: machine, upgradeMode: "auto")
+        let d = UsageDailyBuilder.build(day, facts: UsageStoreFacts(events: ev, sandboxes: 3, points: 7), machine: machine, upgradeMode: "auto",
+                                        calendar: utc)
         XCTAssertEqual(d.commands, ["create": 2, "ui start": 1, "ls": 4])
         XCTAssertEqual(d.failed, ["create:4": 1])
         XCTAssertEqual(d.created?.agent, ["claude-code": 1, "pi": 1], "a template's agent is unknown: not counted")
@@ -420,5 +421,148 @@ final class UsageTests: XCTestCase {
         XCTAssertTrue(o.official)
         XCTAssertFalse(o.on)
         XCTAssertEqual(o.why, "off in a test run")
+    }
+
+    // MARK: reports 1–9: the rest of the daily, from a fixed history
+
+    func at(_ s: String) -> Date {            // "2026-10-09 09:04" (UTC)
+        let p = s.split(whereSeparator: { $0 == "-" || $0 == " " || $0 == ":" }).map { Int($0)! }
+        return utc.date(from: DateComponents(year: p[0], month: p[1], day: p[2], hour: p[3], minute: p[4]))!
+    }
+    /// An action row that ENDS at `end` (the timeline uses a row's end) and leaves the sandbox in `phase`.
+    func row(_ action: String, _ sandbox: String, _ image: String, end: String, phase: String? = nil, ok: Bool? = true,
+             ms: Double = 1000, detail: String? = nil) -> MetricsEvent {
+        MetricsEvent(id: 1, run: 1, parent: nil, kind: .action, sandbox: sandbox, image: image, action: action, phaseBefore: nil,
+                     phaseAfter: phase, startedAt: at(end).addingTimeInterval(-ms / 1000), durationMs: ms, ok: ok, error: nil, bytes: nil,
+                     detailJSON: detail, appVersion: nil, machine: nil, macOS: nil)
+    }
+
+    /// The fixed history (UTC): the reported day is 2026-10-09.
+    ///   a  claude-code  created 10-08 09:00; running from 10-08 22:00, hibernated 10-09 01:00 (3 h, across midnight); asleep
+    ///      until 09:00 (8 h, an edge); running again, removed 09:04 (4 min; 1 day 4 min old).
+    ///   b  pi            created 10-09 10:00 (api-key); running from 10:00; its agent working 10:05–12:05; then nothing until
+    ///      it is removed at 20:10 — 8 h 05 with no activity: left running idle. Created and removed the same day.
+    ///   c  claude-code  running since 10-07 08:00, all day, its network used every hour: never idle, never ended.
+    var history: [MetricsEvent] {
+        [
+            row("create", "c", "claude-code", end: "2026-10-07 07:00", phase: "off", ms: 0, detail: #"{"network":"agent","account":"mac"}"#),
+            row("start", "c", "claude-code", end: "2026-10-07 08:00", phase: "running"),
+            row("create", "a", "claude-code", end: "2026-10-08 09:00", phase: "off", ms: 0, detail: #"{"network":"agent","account":"mac"}"#),
+            row("start", "a", "claude-code", end: "2026-10-08 22:00", phase: "running", ms: 1240),
+            row("hibernate", "a", "claude-code", end: "2026-10-09 01:00", phase: "hibernated", ms: 880),
+            row("wake", "a", "claude-code", end: "2026-10-09 09:00", phase: "running", ms: 340),
+            row("delete sandbox", "a", "claude-code", end: "2026-10-09 09:04", phase: "off"),
+            row("create", "b", "pi", end: "2026-10-09 10:00", phase: "off", ms: 0, detail: #"{"network":"locked","account":"api-key"}"#),
+            row("start", "b", "pi", end: "2026-10-09 10:00", phase: "running", ms: 2100),
+            row("session open", "b", "pi", end: "2026-10-09 10:02"),
+            row("agent status", "b", "pi", end: "2026-10-09 10:05", ms: 0),
+            row("agent working", "b", "pi", end: "2026-10-09 12:05", ms: 7_200_000),
+            row("delete sandbox", "b", "pi", end: "2026-10-09 20:10", phase: "off"),
+            row("prepare", "x", "claude-code", end: "2026-10-09 11:00", ok: false, detail: #"{"failedStep":"bake-step"}"#),
+            row("prepare", "x", "claude-code", end: "2026-10-09 11:30", ok: false, detail: #"{"failedStep":"kernel-download"}"#),
+        ]
+    }
+    var facts: UsageStoreFacts {
+        let h = history
+        let day = h.filter { $0.startedAt >= at("2026-10-09 00:00") }
+        let hourly = (0..<64).map { at("2026-10-07 08:00").addingTimeInterval(Double($0) * 3600 + 1800) }
+        return UsageStoreFacts(events: day, history: h, activeMinutes: ["c": hourly], sandboxes: 1, points: 0, storeBytes: 25_000_000_000,
+                               serveDevices: 3, rules: true, github: "read", until: at("2026-10-10 00:00"))
+    }
+
+    func testTheTimeBlockFromAFixedHistory() throws {
+        var day = UsageDay(day: "2026-10-09")
+        day.commands = ["ui start": 1]
+        day.features = ["app"]
+        let d = UsageDailyBuilder.build(day, facts: facts, machine: machine, upgradeMode: "notify", firstSeen: at("2026-10-09 09:50"), calendar: utc)
+        let t = try XCTUnwrap(d.time)
+        XCTAssertEqual(t.running, ["2-8h": 1, "<5m": 1, "8h+": 1], "a's 3 h across midnight and its 4 min; b's 10 h 10")
+        XCTAssertEqual(t.asleep, ["8-24h": 1], "a asleep exactly 8 h: the lower edge is inclusive")
+        XCTAssertEqual(t.removedAge, ["1-7d": 1, "1h-1d": 1], "a: 1 d 4 min; b: created and removed the same day, 10 h 10")
+        XCTAssertEqual(t.runningTotal, "8h+")
+        XCTAssertEqual(t.agentWorking, ["pi": "2-8h"])
+        XCTAssertEqual(t.idleRunning8h, 1, "b only: c's network was in use every hour")
+        XCTAssertEqual(d.runningMax, "2-5", "c with a, then c with b")
+        XCTAssertEqual(d.created?.account, ["api-key": 1])
+        XCTAssertEqual(d.created?.network, ["locked": 1])
+        XCTAssertNil(d.firstSandbox, "the store's first sandbox was made on another day")
+        XCTAssertEqual(d.timeToFirstSession, "5-30m", "first seen 09:50, first session 10:02")
+        XCTAssertEqual(d.prepFailed, ["bake-step": 1, "kernel-download": 1])
+        XCTAssertEqual(d.storeGB, "20-100")
+        XCTAssertEqual(d.serveDevices, "2-5")
+        XCTAssertEqual(d.rules, true)
+        XCTAssertEqual(d.github, "read")
+        XCTAssertEqual(d.agentStatus, true)
+        XCTAssertEqual(d.app, true)
+        XCTAssertEqual(d.timingMs?.wake, .init(p50: 350, p90: 350))
+        let m = UsageMessage.daily(UsageCommon(id: id, v: "0.33.0", channel: "stable", install: "homebrew"), d)
+        XCTAssertEqual(UsageSchema.problems(m.encoded(), commandNames: UsageCommandName.all), [])
+        let text = String(decoding: m.encoded(), as: UTF8.self)
+        for leak in ["\"a\"", "\"b\"", "\"c\"", "\"x\"", "2026"] { XCTAssertFalse(text.contains(leak), "\(leak) in \(text)") }
+    }
+
+    func testTheDayBeforeAndTheFirstSandbox() throws {
+        // 10-08: a created (the store's second sandbox), running 22:00 → past midnight — not ended, so not counted yet,
+        // but 2 h of running time and c alongside it.
+        let d = UsageDailyBuilder.build(UsageDay(day: "2026-10-08"), facts: UsageStoreFacts(events: history.filter {
+            $0.startedAt >= at("2026-10-08 00:00") && $0.startedAt < at("2026-10-09 00:00") }, history: history.filter { $0.startedAt < at("2026-10-09 00:00") },
+            until: at("2026-10-09 00:00")), machine: machine, upgradeMode: "notify", calendar: utc)
+        XCTAssertNil(d.time?.running, "a's stretch ends tomorrow; c's never")
+        XCTAssertEqual(d.time?.runningTotal, "8h+", "c all day")
+        XCTAssertEqual(d.runningMax, "2-5")
+        XCTAssertNil(d.firstSandbox)
+        let first = UsageDailyBuilder.build(UsageDay(day: "2026-10-07"), facts: UsageStoreFacts(events: Array(history.prefix(2)), until: at("2026-10-08 00:00")),
+                                            machine: machine, upgradeMode: "notify", calendar: utc)
+        XCTAssertEqual(first.firstSandbox, true)
+        XCTAssertEqual(first.time?.runningTotal, "8h+", "c from 08:00")
+        XCTAssertNil(first.timeToFirstSession, "no session yet")
+        // A stretch still open when the day is looked at mid-day (`telemetry show`): counted up to now.
+        let partial = UsageTimeline.day(history, activeMinutes: [:], dayStart: at("2026-10-09 00:00"), until: at("2026-10-09 00:20"))
+        XCTAssertEqual(partial.time?.runningTotal, "30m-2h", "a 20 min + c 20 min")
+        XCTAssertEqual(partial.runningMax, 2)
+    }
+
+    func testTheBucketEdges() {
+        let m: TimeInterval = 60, h: TimeInterval = 3600, d: TimeInterval = 86_400
+        XCTAssertEqual([0, 5 * m - 1, 5 * m, 30 * m, 2 * h, 8 * h - 1, 8 * h].map(UsageTimeline.running), ["<5m", "<5m", "5-30m", "30m-2h", "2-8h", "2-8h", "8h+"])
+        XCTAssertEqual([h - 1, h, 8 * h, 24 * h, 7 * d - 1, 7 * d].map(UsageTimeline.asleep), ["<1h", "1-8h", "8-24h", "1-7d", "1-7d", "7d+"])
+        XCTAssertEqual([h - 1, h, d, 7 * d, 30 * d].map(UsageTimeline.removedAge), ["<1h", "1h-1d", "1-7d", "7-30d", "30d+"])
+        XCTAssertEqual([1, 30 * m, 2 * h, 8 * h].map(UsageTimeline.total), ["<30m", "30m-2h", "2-8h", "8h+"])
+        XCTAssertEqual([0, 5 * m, 30 * m].map(UsageTimeline.firstSession), ["<5m", "5-30m", "30m+"])
+        XCTAssertEqual(["step: apt-get install -y my-secret-package", "downloaded vmlinux (12 MB)", "VM created and booted", "something new"]
+                        .map(PreparationStepID.of), ["bake-step", "kernel-download", "vm-boot", "other"])
+        for id in ["image-pull", "bake-vm-boot", "restore-point-clone-running"] {
+            XCTAssertNotNil(id.range(of: #"^[a-z0-9][a-z0-9._-]{0,47}$"#, options: .regularExpression), id)
+        }
+    }
+
+    func testFirstSandboxAndFirstSessionAreSentOnce() throws {
+        let created = [row("create", "c", "lab", end: "2026-10-09 10:00", phase: "off", ms: 0),
+                       row("session open", "c", "lab", end: "2026-10-09 10:40")]
+        let f: (String) -> UsageStoreFacts = { _ in UsageStoreFacts(events: created, until: self.at("2026-10-10 00:00")) }
+        func due(_ day: String) throws -> [UsageMessage] {
+            try recorder(day).due(version: "0.33.0", channel: "stable", install: "homebrew", id: id, facts: f, machine: machine, upgradeMode: "notify")
+        }
+        try UsageRecorder(files: files, now: at("2026-10-09 10:05"), calendar: utc).recordCommand("new")
+        _ = try due("2026-10-09")
+        try recorder("2026-10-10").recordCommand("ls")
+        guard case .daily(_, let d) = try XCTUnwrap(try due("2026-10-10").first) else { return XCTFail() }
+        XCTAssertEqual(d.firstSandbox, true)
+        XCTAssertEqual(d.timeToFirstSession, "30m+", "first seen 10:05, first session 10:40")
+        XCTAssertEqual(files.load().firstSandboxSent, true)
+        // Were the same day reported again (history cleared and re-made), neither goes twice.
+        var s = files.load(); s.closed = UsageDay(day: "2026-10-09"); s.closed?.commands = ["ls": 1]; s.lastDaily = nil
+        try files.save(s)
+        guard case .daily(_, let again) = try XCTUnwrap(try due("2026-10-10").first) else { return XCTFail() }
+        XCTAssertNil(again.firstSandbox)
+        XCTAssertNil(again.timeToFirstSession)
+    }
+
+    func testTheAppFeatureIsAClosedWord() throws {
+        let r = recorder("2026-10-09")
+        try r.recordFeature("app")
+        try r.recordFeature("app")
+        try r.recordFeature("/Users/me")
+        XCTAssertEqual(files.load().current?.features, ["app"])
     }
 }

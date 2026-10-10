@@ -531,11 +531,13 @@ public final class DozerWebServer: @unchecked Sendable {
         // Several Cookie headers are legal (HTTP/2 → 1 proxies split them); join them so a duplicate
         // session cookie is still seen as a duplicate.
         let cookie = h["cookie"].isEmpty ? nil : h["cookie"].joined(separator: "; ")
-        return WebRequestMetadata(method: method, host: Self.header(h, "host"), origin: Self.header(h, "origin"),
-                                  secFetchSite: Self.header(h, "sec-fetch-site"), authorization: Self.header(h, "authorization"),
-                                  cookie: cookie, csrfToken: Self.header(h, WebSecurity.csrfHeader),
-                                  contentType: Self.header(h, "content-type"), bodyByteCount: bodyBytes,
-                                  probeToken: Self.header(h, "x-doz-probe"))
+        var md = WebRequestMetadata(method: method, host: Self.header(h, "host"), origin: Self.header(h, "origin"),
+                                    secFetchSite: Self.header(h, "sec-fetch-site"), authorization: Self.header(h, "authorization"),
+                                    cookie: cookie, csrfToken: Self.header(h, WebSecurity.csrfHeader),
+                                    contentType: Self.header(h, "content-type"), bodyByteCount: bodyBytes,
+                                    probeToken: Self.header(h, "x-doz-probe"))
+        md.displayMode = Self.header(h, "x-doz-display")
+        return md
     }
 
     /// 606: the request's view of this server — doz ui: 590's exact loopback origin; doz serve: `WebServeRules`.
@@ -739,6 +741,8 @@ public final class DozerWebServer: @unchecked Sendable {
         case .sessionInfo:
             return json(sessionInfo(session, ctx, device))
         case .sessionRenew:
+            // The installed dashboard app was used (a fixed word; recorded only while statistics are on).
+            if serveState == nil, md.displayMode == "standalone" { UsageRuntime.recordFeature("app") }
             let s = try await auth.renew(cookie)
             return json(sessionInfo(s, ctx, device), extra: [sessionCookieHeader(s, ctx)])
         case .sessionEnd:

@@ -1,6 +1,6 @@
 // core/api — The server: one typed request (fetch, the CSRF header, the error shape).
-import { upcall } from './hooks.js';
-import { state } from './state.js';
+import { upcall } from './hooks-a4b871a481b363cd.js';
+import { state } from './state-c0289349b457ba56.js';
 // Calls up the layers (provided by app.js — core/hooks.js):
 const signedOut = upcall('signedOut');
 

@@ -24,6 +24,8 @@ public struct WebRequestMetadata: Equatable, Sendable {
     public var bodyByteCount: Int
     /// 606: `X-Doz-Probe` — `doz doctor`'s one-use token (doz serve's probe route only).
     public var probeToken: String?
+    /// `X-Doz-Display` — `standalone` when the page runs as the installed dashboard app (the usage statistics' `app`).
+    public var displayMode: String? = nil
 
     public init(method: WebHTTPMethod, host: String?, origin: String? = nil, secFetchSite: String? = nil,
                 authorization: String? = nil, cookie: String? = nil, csrfToken: String? = nil,
