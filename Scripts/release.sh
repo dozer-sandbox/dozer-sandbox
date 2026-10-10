@@ -31,9 +31,14 @@
 # online the first time. Without SIGN_IDENTITY it signs ad hoc, as today, and says so — which is
 # enough for Homebrew (a formula's download is never quarantined).
 #
+# THE OFFICIAL BUILD. DOZ_CLOUD_PACKAGE (Makefile.config) names the closed package of anonymous usage statistics and
+# the sign-up (a path, or a git URL + DOZ_CLOUD_REF); Package.swift adds it to this build only. A PUBLIC release refuses
+# to build without it (TEST_BUILD=1 excepted), the packed doz must say `"official": true` in `doz telemetry show --json`
+# (run in a scratch settings folder and store; looking never sends), and the RELEASE marker records `public+cloud`.
+#
 # Inputs (environment; the Makefile passes them): PUBLIC (default 1), VERSION (default: the exact vX.Y.Z tag at HEAD),
 # OUT (default dist), JOBS (default 4), SWIFT_BUILD_SYSTEM, SIGN_IDENTITY, NOTARY_PROFILE,
-# HARDENED=1 (the hardened runtime even when signing ad hoc — to test the entitlement under it),
+# DOZ_CLOUD_PACKAGE, DOZ_CLOUD_REF, HARDENED=1 (the hardened runtime even when signing ad hoc — to test the entitlement under it),
 # DRY_RUN=1, SKIP_BUILD=1 (package the release build already in .build/release).
 # It never reads, prints or stores a password, and never calls notarytool without a profile.
 set -euo pipefail
@@ -49,6 +54,8 @@ ENTITLEMENTS="Scripts/doz.entitlements"
 PUBLIC="${PUBLIC:-1}"
 [[ "$PUBLIC" == 1 || "$PUBLIC" == 0 ]] || { printf 'x release: PUBLIC is 1 (a public release, the default) or 0 (a private rc), not %s\n' "$PUBLIC" >&2; exit 1; }
 SOUND_KERNEL="${SOUND_KERNEL:-}"
+DOZ_CLOUD_PACKAGE="${DOZ_CLOUD_PACKAGE:-}"
+DOZ_CLOUD_REF="${DOZ_CLOUD_REF:-}"
 # A public build never carries the sound kernel.
 if [[ "$PUBLIC" == 1 ]]; then NO_SOUND_KERNEL=1; fi
 SOUND_KERNEL_NAME="$(sed -n 's/.*static let fileName = "\(vmlinux-[^"]*\)".*/\1/p' Sources/DozerKit/Audio.swift)"
@@ -103,6 +110,13 @@ if [[ "$PUBLIC" == 1 && -z "${TEST_BUILD:-}" ]]; then
     upk="$(sed -n 's/.*static let updatePublicKey = "\([^"]*\)".*/\1/p' Sources/DozerHost/Updates.swift | head -1)"
     [[ -n "$upk" ]] || fail "doz carries no update public key (Distribution.updatePublicKey is empty) — make doz-update-keys once, commit the key it prints"
 fi
+# 614: an official public release carries the statistics/sign-up package. A local path must be a package.
+if [[ "$PUBLIC" == 1 && -z "${TEST_BUILD:-}" && -z "$DOZ_CLOUD_PACKAGE" ]]; then
+    fail "a public release is the official build: set DOZ_CLOUD_PACKAGE in Makefile.config (see Makefile.config.example), or TEST_BUILD=1 for a local test build"
+fi
+if [[ -n "$DOZ_CLOUD_PACKAGE" && "$DOZ_CLOUD_PACKAGE" != *://* && "$DOZ_CLOUD_PACKAGE" != git@* && ! -f "$DOZ_CLOUD_PACKAGE/Package.swift" ]]; then
+    fail "DOZ_CLOUD_PACKAGE ($DOZ_CLOUD_PACKAGE) is not a Swift package (no Package.swift)"
+fi
 # The team the identity belongs to — "Developer ID Application: Name (TEAMID)" — checked on the signed binary.
 TEAM_ID="$(sed -n -E 's/^Developer ID Application: .* \(([A-Z0-9]{10})\)$/\1/p' <<<"$SIGN_IDENTITY")"
 if [[ -n "$SIGN_IDENTITY" && -z "$DRY_RUN" ]]; then
@@ -119,6 +133,8 @@ if [[ -n "$SIGN_IDENTITY" && -z "$DRY_RUN" ]]; then
 fi
 
 FLAVOR="$([[ "$PUBLIC" == 1 ]] && echo public || echo private)"
+# The marker says when the closed package is in (publish.sh accepts public and public+cloud).
+[[ -n "$DOZ_CLOUD_PACKAGE" ]] && FLAVOR="$FLAVOR+cloud"
 say "release: doz $VERSION ($FLAVOR build) → $TARBALL ($MODE signature${NOTARY_PROFILE:+, notarised with profile $NOTARY_PROFILE})"
 [[ -n "$DRY_RUN" ]] && say "release: DRY RUN — every command is printed, none is run"
 
@@ -127,7 +143,14 @@ if [[ -z "${SKIP_BUILD:-}" ]]; then
     # shellcheck disable=SC2086 — SWIFT_BUILD_SYSTEM is empty or two words, on purpose.
     PUBLIC_FLAGS=()
     [[ "$PUBLIC" == 1 ]] && PUBLIC_FLAGS=(-Xswiftc -DDOZ_PUBLIC_BUILD)
-    run swift build ${SWIFT_BUILD_SYSTEM:-} -j "$JOBS" -c release --product doz ${PUBLIC_FLAGS[@]+"${PUBLIC_FLAGS[@]}"}
+    resolved_before="$(git status --porcelain -- Package.resolved)"
+    run env DOZ_CLOUD_PACKAGE="$DOZ_CLOUD_PACKAGE" DOZ_CLOUD_REF="$DOZ_CLOUD_REF" \
+        swift build ${SWIFT_BUILD_SYSTEM:-} -j "$JOBS" -c release --product doz ${PUBLIC_FLAGS[@]+"${PUBLIC_FLAGS[@]}"}
+    # A git URL pins the private package in Package.resolved: that pin never belongs in the public repository.
+    if [[ -z "$DRY_RUN" && -z "$resolved_before" && -n "$(git status --porcelain -- Package.resolved)" ]]; then
+        git checkout -- Package.resolved
+        say "  Package.resolved restored (the closed package's pin is not committed)"
+    fi
 fi
 
 # 2. The install layout.
@@ -198,6 +221,18 @@ if [[ -z "$DRY_RUN" ]]; then
         rm -rf "$chk"
         grep -q -- "--chatgpt" <<<"$help" || fail "PUBLIC=0 but the packed doz is the public flavor (no --chatgpt in doz account add --help)"
         say "  flavor: private"
+    fi
+    # 614: the official build — as the binary itself says it (`doz telemetry show` never sends; scratch folders).
+    chk="$(mktemp -d "${TMPDIR:-/tmp/}doz-release-check.XXXXXX")"
+    shown="$(env -u DOZ_TEST_GUARD XDG_CONFIG_HOME="$chk/xdg" DOZ_STORE="$chk/store" "$STAGE/bin/doz" telemetry show --json --store "$chk/store" 2>&1 </dev/null || true)"
+    rm -rf "$chk"
+    official="$(python3 -c 'import json,sys; print(str(json.loads(sys.stdin.read()).get("official")).lower())' <<<"$shown" 2>/dev/null || echo unreadable)"
+    if [[ -n "$DOZ_CLOUD_PACKAGE" ]]; then
+        [[ "$official" == true ]] || fail "DOZ_CLOUD_PACKAGE is set but the packed doz is not the official build (doz telemetry show --json: official=$official)"
+        say "  official build: the statistics and sign-up package is in (doz telemetry show: official true)"
+    else
+        [[ "$official" == false ]] || fail "the packed doz should send nothing without DOZ_CLOUD_PACKAGE (official=$official)"
+        say "  not the official build: no statistics or sign-up package (it sends nothing)"
     fi
     if [[ -z "${NO_SOUND_KERNEL:-}" ]]; then
         [[ "$(shasum -a 256 "$STAGE/libexec/doz/kernels/$SOUND_KERNEL_NAME" | cut -d' ' -f1)" == "$SOUND_KERNEL_SHA" ]] || fail "the staged sound kernel's sha256 is wrong"

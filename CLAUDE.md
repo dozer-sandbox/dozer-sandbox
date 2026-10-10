@@ -89,6 +89,7 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
 | `Sources/DozerKit/AgentPermissions.swift`; `Sources/DozerHost/Permissions.swift`; `Sources/DozerCLI/NetPermissionCommands.swift`; `Sources/doz-vmtest/PermissionsSuite.swift` | agent permissions — the catalogue and presets per base, `NetworkPolicy.permissions` (stored by name, `effectiveRules`); edits/report/suggestions/facts; `doz net NAME/allow/deny/permissions`, `--allow`; `make test-cli-permissions` |
 | `Sources/DozerWeb/WebServe*.swift`, `WebExposure.swift`, `WebQR.swift`, `WebBonjour.swift`; `Sources/DozerCLI/ServeCommand.swift`; `Sources/DozerKit/LocalDashboards.swift` | `doz serve` — the rules (`WebServe`: addresses, the accept gate, the request's own origin), devices + invites (`WebServeDevices`), the audit log, `serve.sock` (`WebServeControl`), the server's serve side (`WebServeServer`, `WebServeState`), the capability table, our QR encoder, Bonjour; the CLI (`doz serve …`, doctor's public-origin check); the egress proxy's refusal of the dashboards' ports |
 | `Guest/deckhold/deckhold.c` (`ps_*`), `Sources/DozerKit/ProgramStatus.swift`; `Sources/DozerHost/SessionStatus.swift`, `HostCore+Status.swift`; `Sources/DozerWeb/WebSource/app/components/agent-status.js`; `Sources/doz-vmtest/StatusSuite.swift` | 612: what the agent is doing (OSC 7501) — deckhold's consumer (answers the query, keeps the records, WATCH/STATUS), the parsed record, the host's model + watchers + events, the page's chips and notices; `make test-vm-status`, `make deckhold-status-check` |
+| `Sources/DozerHost/Usage.swift`; `Sources/DozerCLI/UsageCommands.swift`; `Sources/doz/DozerMain.swift` | anonymous usage statistics and the sign-up — the open half: the closed list, the switches, the local record, `doz telemetry`, `doz signup`, the hook; the bridge to the official builds' closed package (`#if DOZ_CLOUD`) |
 | `Tests/DozerWebTests/` | the security rules one by one, and a real listener driven with raw HTTP; `Serve*Tests` |
 | `Tests/DozerKitTests/` | Unit tests — no VM |
 
@@ -948,6 +949,49 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   kernel: `--audio` is refused with `BuildFlavor.audioMissing`. `release.sh` proves the flavor on the packed binary.
 - Every decision takes a `BuildFlavor` (`HostCore.setBuildFlavor`, `OpenAIChoices`); a real process can be told with
   the TEST seam `DOZ_TEST_PUBLIC_BUILD=1|0`. `BuildFlavorTests` runs both modes in one `swift test`.
+
+### Anonymous usage statistics and the sign-up — the open half
+
+- **This repository holds the open half ONLY**: `Sources/DozerHost/Usage.swift` decides WHAT may be sent and WHETHER;
+  the official builds' closed package (statistics sender + sign-up client, private, Foundation-only) only SENDS what
+  it is handed. Never put the sender, an endpoint, a key or any closed code here. It joins a build only through
+  `DOZ_CLOUD_PACKAGE` (Package.swift adds the dependency and defines `DOZ_CLOUD`; `Sources/doz/DozerMain.swift` calls
+  `Usage.install(send:flush:signup:)` under `#if DOZ_CLOUD` — `canImport` alone is wrong: a module left in `.build` by
+  an earlier official build makes it true in a build that does not link it). The audit allows `DozerCloud` in that
+  file only. Without it (`make cli`, `make test`, CI, forks) `Usage.isOfficial` is false: nothing is recorded or sent.
+- **The closed list** (`UsageSchema`): messages `installed`, `upgraded`, `daily`; every key in `UsageSchema.keys`/`nested`,
+  every value a count, an ASCII range (`<=8`, `9-11`, `5-30m`), a time rounded to 50 ms (≤ 1 h, p50 ≤ p90) or a word of
+  Dozer's own vocabulary (command names from the CLI's own tree — `UsageCommandName`, never an argument; agent ids;
+  base CATALOGUE ids — a Dockerfile base is `dockerfile`, never its `df-<hash>` (a hash of the user's path), a
+  template is not counted; network presets). `UsageSchema.problems` is the receiving side's validator ported, and
+  `UsageRecorder.handOver` drops any message it does not accept. A new field is a schema change on BOTH sides and in
+  the privacy policy — never just a new key here.
+- **Nothing new is collected for it**: the day's numbers come from what the host already records (`metrics.sqlite`
+  action rows, the store's sandboxes and restore points, `onboarded.json`) and the commands' own counts.
+- **The off switches, checked before anything is recorded** (`UsageSwitches.decide`): not official → off; a guarded test
+  run → off; a development build (`InstallMethod.development`) → off; `DO_NOT_TRACK` (anything but empty/0/false) →
+  off, even against the flag; else the setting `telemetry.send_anonymous_usage_stats` (flag > `$DOZ_SEND_ANONYMOUS_USAGE_STATS`
+  > file > default true). Turned off for good (setting/env/DNT), the recorded days are forgotten.
+- **What is kept**: `<settings dir>/usage-id` (random lower-case UUID, `doz telemetry reset`) and `usage.json` (today's
+  counts, a closed day, the last version, the notice) under a `flock`. **When**: `DozerEntry` counts the command BEFORE
+  it runs (`UsageHook.before`) and after it records a failure's exit code and hands over what is due — `installed` /
+  `upgraded` once per version, the `daily` of a closed day (≤ 7 days old) on the first command of a later day — then
+  `flush(1 s)` only when something was handed over. Never for `telemetry`, help/`--version`, internal re-launches
+  (`--launched`, `--launch-detached`, `--restarted`) or `host upgrade-check`. The one-line notice: once, official and
+  on, stderr on a terminal, never `--json`/`-q`.
+- **The sign-up** (`SignupRequest`: email + `release-news`/`early-access`/`support` + source): `doz signup`, `doz onboard`'s
+  Stay in touch (terminal only; `--yes` skips), the wizard's Stay in touch step → `POST /api/v1/signup` (strict
+  `{email, interests}`, CSRF; the source is the server's; a failure is ONE fixed message; 404 `signup-unavailable` in an
+  open build, whose page hides the step and shows `sessionInfo.signupPage`). The email is never logged, echoed or kept;
+  `SignupRequest`'s description is redacted. Independent of the statistics switch and never linked to them.
+- **Release**: `make release` passes `DOZ_CLOUD_PACKAGE`/`DOZ_CLOUD_REF` from `Makefile.config` (never exported to other
+  targets); `release.sh` refuses a PUBLIC release without it (TEST_BUILD=1 excepted), checks the packed binary's
+  `doz telemetry show --json` says `"official": true` (scratch folders; looking never sends), restores
+  `Package.resolved` if a URL pinned the package, and writes `RELEASE` = `public+cloud` (`publish.sh` accepts `public*`).
+- **Tests**: `UsageTests` (the encoder vs the list byte for byte, refusals, buckets, the daily from metrics rows, the
+  switches, once a day/version, the notice, a FAKE installed sender), `WebSignupTests`. A fake closed package for an
+  end-to-end look lives in the workspace's probes (`DOZ_CLOUD_PACKAGE=<it> swift build --product doz`); never point a
+  test at the live endpoint.
 
 ### Updates: the signed feed, channels, `doz upgrade`
 

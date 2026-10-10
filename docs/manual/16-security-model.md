@@ -139,6 +139,18 @@ fully resolved path.
   logged like any sandbox.
 - **Keep-alive**, when you turn it on, runs your Mac's own `claude` once near expiry.
 
+## What leaves your Mac
+
+- **Anonymous usage statistics**, in official builds only: counts and ranges about how Dozer is used,
+  at most once a day, with a random install id — never anything from inside a sandbox, a name, path,
+  host, command argument, account or key. Off with `doz config set telemetry.send_anonymous_usage_stats
+  false`, `DO_NOT_TRACK=1`, or `--no-send-anonymous-usage-stats`; `doz telemetry show` prints exactly what
+  would be sent. Builds from the open-source repository send nothing. See
+  [Usage statistics and sign-up](01-getting-started.md#usage-statistics-and-sign-up).
+- **The sign-up**, only if you sign up: your email and what you ticked.
+- **The update check**: Dozer's version and channel, at most once a day (`updates.mode off` stops it).
+- **Your agent's own traffic**, through the proxy, to what you allow.
+
 ## What Dozer can't protect
 
 - **Your shared folder.** It's the agent's to change. Commit often. [Workspace rules](20-workspace-rules.md)
@@ -167,3 +179,4 @@ fully resolved path.
 | `sandbox.agent_sudo` | `true` | The agent's sudo inside its sandbox. |
 | `ui.allow_secret_entry` | `true` | The dashboard may take a key or token. |
 | `claude.permissions` | `skip` | Claude Code's own permission prompts (`ask` to keep them). |
+| `telemetry.send_anonymous_usage_stats` | `true` | Official builds: anonymous usage statistics (`false`, or `DO_NOT_TRACK=1`, turns them off). |

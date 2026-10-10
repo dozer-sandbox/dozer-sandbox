@@ -666,7 +666,7 @@ doz config show|get|set|unset --sandbox NAME …   # 599: one sandbox's own valu
 ```
 
 One settings file, `doz.toml`, lists every setting grouped in sections (`[ui]`, `[host]`,
-`[store]`, `[claude]`, `[defaults]`, `[agent]`, `[resources]`, `[sandbox]`, `[images.lab]`, `[images.claude-code]`, `[images.pi]`,
+`[store]`, `[claude]`, `[defaults]`, `[agent]`, `[telemetry]`, `[resources]`, `[sandbox]`, `[images.lab]`, `[images.claude-code]`, `[images.pi]`,
 `[kernel]`), each with a description and `# key = default` commented out; only what you set is
 uncommented. Precedence: a command-line flag, then its environment variable, then the file, then
 the default. `ui.boot_view_on_start` (default `true`) makes Start in the web UI open a terminal on
@@ -675,6 +675,25 @@ sets, is read-only there). The file is written whole, atomically, `0600`; an unk
 warning, and a file that doesn't parse is ignored (and never overwritten) until it's fixed. Not
 settable, by design: the web UI's security limits and checks, the terminal's paste cap and tickets,
 the guest binaries, and credentials.
+
+### Usage statistics and sign-up
+
+```bash
+doz telemetry [show] [--json]   # whether this doz sends anonymous usage statistics, why, the install id,
+                                # and exactly what it would send (after the next command, and today so far)
+doz telemetry reset             # a new random install id; the day's counts forgotten
+doz signup [--email ADDRESS] [--interest release-news|early-access|support …] [-y]
+                                # optional: news from Dozer by email (asked on a terminal); confirmed first
+```
+
+Official builds (Homebrew, the release download) send anonymous usage statistics: at most once a
+day, counts and ranges about how Dozer itself is used, with a random install id — never a name,
+path, host, command argument, file or anything from inside a sandbox. Any one of these turns them
+off: `doz config set telemetry.send_anonymous_usage_stats false` (or `$DOZ_SEND_ANONYMOUS_USAGE_STATS`),
+`DO_NOT_TRACK=1` (always wins), or `--no-send-anonymous-usage-stats` on one command
+(`--send-anonymous-usage-stats` turns them on for one). Builds from the open-source repository send
+nothing and have no sign-up of their own (`doz signup` names the website). `doz telemetry` itself
+never sends.
 
 ### Numbers and diagnostics
 
@@ -692,7 +711,8 @@ Every command takes `--json` (machine-readable output; errors as
 `{"error":{"code","message"}}`), `--store DIR` (default `$DOZ_STORE`, else the settings'
 `store.path`, else `~/Library/Application Support/dozer-sandbox`), `-v` (every progress step),
 `-q` (none) and `--progress auto|plain` (on a terminal: a spinner and download bars, or one line
-per step; not a terminal, `--json` or `NO_COLOR`: always plain).
+per step; not a terminal, `--json` or `NO_COLOR`: always plain) and `--[no-]send-anonymous-usage-stats`
+(official builds: usage statistics for this command, or not).
 JSON documents only ever gain fields.
 
 | exit code | meaning |
@@ -715,6 +735,8 @@ JSON documents only ever gain fields.
 | `DOZ_KERNEL_CACHE` / `DOZ_KERNEL` | `kernel.cache` / `kernel.path` | a shared kernel cache / an explicit kernel |
 | `DOZ_SUBNET` | `defaults.nat_subnet` | default subnet for `--network nat` |
 | `DOZ_PROGRESS` | `ui.progress` | `animated` or `plain` progress |
+| `DOZ_SEND_ANONYMOUS_USAGE_STATS` | `telemetry.send_anonymous_usage_stats` | official builds: anonymous usage statistics on or off |
+| `DO_NOT_TRACK` | — | `1`: no usage statistics, whatever the setting or a flag says |
 | `XDG_CONFIG_HOME` | — | where `dozer-sandbox/doz.toml` is (default `~/.config`) |
 
 ### Troubleshooting

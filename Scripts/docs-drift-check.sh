@@ -15,7 +15,7 @@ set -euo pipefail
 PACKAGE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 KNOWN="$PACKAGE/Scripts/docs-known-commands.txt"
 BIN="$PACKAGE/.build/debug/doz"
-CMD_GROUPS="sessions image base builder template point net key account access host ui serve config resources ignore"   # NOT "GROUPS" — bash reserves that name for the
+CMD_GROUPS="sessions image base builder template point net key account access host ui serve config resources ignore telemetry"   # NOT "GROUPS" — bash reserves that name for the
                                                   # caller's group-membership array; assigning to
                                                   # it silently no-ops and $GROUPS then reads back
                                                   # as one numeric gid (macOS: 20, "staff").

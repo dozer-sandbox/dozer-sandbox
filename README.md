@@ -72,6 +72,17 @@ dashboard) from a feed signed with the project's own key, and never installs any
 `doz upgrade --channel beta` switches; your store, sandboxes and settings stay. See
 [Installing, upgrading and uninstalling](docs/manual/02-install-upgrade-uninstall.md).
 
+## Usage statistics
+
+Official builds (Homebrew, the release download) send anonymous usage statistics — at most once a day, counts
+and ranges about how Dozer itself is used, never a name, path, host, command argument or anything from inside a
+sandbox — and include an optional sign-up for news. `doz telemetry show` prints exactly what would be sent; turn
+it off with `doz config set telemetry.send_anonymous_usage_stats false`, `DO_NOT_TRACK=1`, or
+`--no-send-anonymous-usage-stats` on one command. Builds from this repository send nothing; the statistics and
+sign-up code is not open source (what may be sent, and every switch, is: `Sources/DozerHost/Usage.swift`). See
+[Usage statistics and sign-up](docs/manual/01-getting-started.md#usage-statistics-and-sign-up) and
+[dozersandbox.com/privacy](https://dozersandbox.com/privacy).
+
 ## Documentation
 
 - **[The user manual](docs/manual/README.md)** — start here: getting started, projects, the lifecycle, the

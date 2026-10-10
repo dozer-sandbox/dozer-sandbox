@@ -71,7 +71,8 @@ doz="$work/doz-$VERSION/libexec/doz/doz"
 [[ -f "$work/doz-$VERSION/libexec/doz/RELEASE" ]] || fail "the tarball has no RELEASE marker (an older release.sh?)"
 codesign --verify --strict "$doz" || fail "the tarball's doz does not verify"
 if [[ -z "$TEST_PUBLISH" ]]; then
-    [[ "$(cat "$work/doz-$VERSION/libexec/doz/RELEASE")" == public ]] || fail "the tarball is not the PUBLIC flavor (make release PUBLIC=1)"
+    # public, or public+cloud: the official build with the closed statistics/sign-up package (release.sh proves it).
+    [[ "$(cat "$work/doz-$VERSION/libexec/doz/RELEASE")" == public* ]] || fail "the tarball is not the PUBLIC flavor (make release PUBLIC=1)"
     # Never `codesign … | grep -q` under pipefail: grep exits at the first match, codesign can then die of SIGPIPE
     # and the pipeline FAILS on a correctly signed binary (0.32.0-rc.1's publish stopped on exactly that).
     sig="$(codesign -dv --verbose=2 "$doz" 2>&1)"

@@ -59,7 +59,9 @@ At each question the recommended answer is already selected: press **Enter** to 
    *Decide later*.
 3. **Images.** **Claude Code** is ticked; **pi** and the plain **lab** shell are optional. Anything
    you leave out is prepared the first time you use it.
-4. **Preparing.** Dozer downloads the base system and installs the agent and its tools inside a VM.
+4. **Stay in touch (optional).** Release news, early access and support by email — skip it with
+   **Enter**. See [Usage statistics and sign-up](#usage-statistics-and-sign-up).
+5. **Preparing.** Dozer downloads the base system and installs the agent and its tools inside a VM.
    It takes a few minutes. **You don't have to wait:** press **Ctrl-C** and it carries on in the
    background; `doz onboard --status` shows it again.
 
@@ -70,7 +72,7 @@ doz ui
 ```
 
 The dashboard opens on the **setup wizard**: the same steps, and at the end an optional **First
-sandbox**.
+sandbox** and an optional **Stay in touch**.
 
 ![The setup wizard's first step](images/wizard-welcome.png)
 
@@ -90,6 +92,36 @@ Details: [Setting up](03-setting-up.md).
   login as each request leaves for Anthropic.
 - **Two files hold your choices:** `~/.config/dozer-sandbox/doz.toml` (your settings for this Mac)
   and a project's `doz_project.yaml` (its sandbox). Everything else is kept by the host.
+
+## Usage statistics and sign-up
+
+**Official builds** (Homebrew, the release download) **send anonymous usage statistics**, so we can see
+what to fix and improve: at most once a day, counts and ranges about how Dozer itself is used — which
+commands ran and how often they failed (by exit code), which agents, bases and network presets new
+sandboxes use, the size of your setup as ranges, typical start and wake times rounded to 50 ms, and
+your Mac's macOS version, chip family, memory and cores as ranges — with a random install id. **Never**
+a sandbox, image or project name, a file or folder name or path, anything inside a sandbox, anything
+you type or a program prints, a command's arguments, a host or website, an account, email or key.
+Our server adds your country from the connection and does not keep your IP address.
+
+The first time an official build runs it says so in one line. See exactly what would be sent, and
+turn it off with any one of these:
+
+```sh
+doz telemetry show                                      # on or off, why, and the exact messages
+doz config set telemetry.send_anonymous_usage_stats false   # off (or the switch in the dashboard's Settings)
+DO_NOT_TRACK=1 doz ls                                   # off whenever DO_NOT_TRACK is set
+doz ls --no-send-anonymous-usage-stats                  # off for one command
+doz telemetry reset                                     # a new random install id
+```
+
+**Signing up is optional**: `doz signup` (or the setup's *Stay in touch*) asks for an email and what you
+want — release news, early access, support. A confirmation email comes first; every email has a
+one-click unsubscribe, and your email is never linked to the statistics.
+
+**Builds from the open-source repository send nothing.** The statistics and sign-up code is part of the
+official builds only and is not open source; this repository holds the list of what may be sent and
+every switch. The full policy: [dozersandbox.com/privacy](https://dozersandbox.com/privacy).
 
 ## Your first project
 

@@ -14,6 +14,13 @@
 # An existing profile of the same team works as well (any app of the team notarises through it).
 # NOTARY_PROFILE = Dozer
 
+# The official builds' closed package — anonymous usage statistics and the optional sign-up (private; not open source).
+# `make release` builds with it (Package.swift adds it, `doz`'s main installs it) and a PUBLIC release refuses to build
+# without it; `make cli`, `make test` and CI never use it. A local checkout's path, or a git URL with DOZ_CLOUD_REF
+# (an exact version or a commit). Leave it unset in a fork: that build sends nothing.
+# DOZ_CLOUD_PACKAGE = /path/to/a/checkout/of/dozer-cloud
+# DOZ_CLOUD_REF     =
+
 # Where `make publish` / `make promote` write (local checkouts; nothing is pushed unless PUSH=1):
 # UPDATES_DIR = /path/to/a/checkout/of/the/updates-site    (the GitHub Pages repo behind updates.dozersandbox.com)
 # TAP_DIR     = /path/to/a/checkout/of/homebrew-tap         (the Homebrew tap: Formula/doz.rb, doz-beta.rb, doz-canary.rb)

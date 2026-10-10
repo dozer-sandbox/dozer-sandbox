@@ -109,6 +109,10 @@ config/set
 config/unset
 config/init
 config/path
+telemetry
+telemetry/show
+telemetry/reset
+signup
 resources
 resources/ls
 resources/rm

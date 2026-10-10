@@ -218,13 +218,18 @@ SIGN_IDENTITY  ?=
 NOTARY_PROFILE ?=
 # 611: a real release is the PUBLIC flavor (no sound kernel, no Dozer-own ChatGPT sign-in); PUBLIC=0 for a private rc.
 PUBLIC         ?= 1
+# The official builds' closed package (anonymous usage statistics, the sign-up): a path or git URL (+ DOZ_CLOUD_REF),
+# from Makefile.config. Passed to the RELEASE build only — never exported, so `make cli`, `make test` and CI never see it.
+DOZ_CLOUD_PACKAGE ?=
+DOZ_CLOUD_REF     ?=
 DIST           ?= dist
 
 release: ## 598/611: build (PUBLIC=1 by default; PUBLIC=0 a private rc) + sign (+ notarise when configured) + pack dist/doz-VERSION-macos-arm64.tar.gz and its SHA-256 (VERSION=X.Y.Z; DRY_RUN=1 prints the plan)
 	@VERSION="$(VERSION)" OUT="$(DIST)" JOBS="$(JOBS)" SWIFT_BUILD_SYSTEM="$(SWIFT_BUILD_SYSTEM)" \
 	  SIGN_IDENTITY="$(SIGN_IDENTITY)" NOTARY_PROFILE="$(NOTARY_PROFILE)" HARDENED="$(HARDENED)" \
 	  PUBLIC="$(PUBLIC)" TEST_BUILD="$(TEST_BUILD)" SOUND_KERNEL="$(SOUND_KERNEL)" NO_SOUND_KERNEL="$(NO_SOUND_KERNEL)" \
-	  DRY_RUN="$(DRY_RUN)" SKIP_BUILD="$(SKIP_BUILD)" Scripts/release.sh
+	  DRY_RUN="$(DRY_RUN)" SKIP_BUILD="$(SKIP_BUILD)" DOZ_CLOUD_PACKAGE="$(DOZ_CLOUD_PACKAGE)" DOZ_CLOUD_REF="$(DOZ_CLOUD_REF)" \
+	  Scripts/release.sh
 
 # ── Updates: the signed feed and the Homebrew channels (611) ─────────────────
 # The feed is https://updates.dozersandbox.com/v1/feed.json (Distribution in Sources/DozerHost/Updates.swift — the
