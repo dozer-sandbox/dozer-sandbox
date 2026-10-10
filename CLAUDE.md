@@ -992,8 +992,8 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   `flush(1 s)` only when something was handed over. Never for `telemetry`, help/`--version`, internal re-launches
   (`--launched`, `--launch-detached`, `--restarted`) or `host upgrade-check`. The one-line notice: once, official and
   on, stderr on a terminal, never `--json`/`-q`.
-- **The sign-up** (`SignupRequest`: email + `release-news`/`early-access`/`support` + source): `doz signup`, `doz onboard`'s
-  Stay in touch (terminal only; `--yes` skips), the wizard's Stay in touch step → `POST /api/v1/signup` (strict
+- **The sign-up** (`SignupRequest`: email + `release-news`/`early-access`/`tips` + source; the Worker reads an older build's `support` as `tips`): `doz signup`, `doz onboard`'s
+  Stay in touch (its LAST step, terminal only, default No; `--yes` skips), the wizard's Stay in touch step → `POST /api/v1/signup` (strict
   `{email, interests}`, CSRF; the source is the server's; a failure is ONE fixed message; 404 `signup-unavailable` in an
   open build, whose page hides the step and shows `sessionInfo.signupPage`). The email is never logged, echoed or kept;
   `SignupRequest`'s description is redacted. Independent of the statistics switch and never linked to them.

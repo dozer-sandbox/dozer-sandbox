@@ -59,11 +59,11 @@ At each question the recommended answer is already selected: press **Enter** to 
    *Decide later*.
 3. **Images.** **Claude Code** is ticked; **pi** and the plain **lab** shell are optional. Anything
    you leave out is prepared the first time you use it.
-4. **Stay in touch (optional).** Release news, early access and support by email — skip it with
-   **Enter**. See [Usage statistics and sign-up](#usage-statistics-and-sign-up).
-5. **Preparing.** Dozer downloads the base system and installs the agent and its tools inside a VM.
+4. **Preparing.** Dozer downloads the base system and installs the agent and its tools inside a VM.
    It takes a few minutes. **You don't have to wait:** press **Ctrl-C** and it carries on in the
    background; `doz onboard --status` shows it again.
+5. **Stay in touch (optional).** Release news, early access and tips and tricks by email — skip it
+   with **Enter**. See [Usage statistics and sign-up](#usage-statistics-and-sign-up).
 
 **In your browser:**
 
@@ -119,7 +119,7 @@ doz telemetry reset                                     # a new random install i
 ```
 
 **Signing up is optional**: `doz signup` (or the setup's *Stay in touch*) asks for an email and what you
-want — release news, early access, support. A confirmation email comes first; every email has a
+want — release news, early access, tips and tricks. A confirmation email comes first; every email has a
 one-click unsubscribe, and your email is never linked to the statistics.
 
 **Builds from the open-source repository send nothing.** The statistics and sign-up code is part of the

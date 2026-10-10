@@ -198,10 +198,6 @@ struct OnboardingFlow {
         let projects = (Workspace.defaultPath(name: "x") as NSString).deletingLastPathComponent
         say("  new sandboxes' workspace folders: \(projects)/<name> (defaults.projects_dir — doz config set defaults.projects_dir DIR moves it)")
 
-        // Stay in touch (optional): the sign-up, asked only on a terminal (--yes and --json skip it). A build from the
-        // open-source repository has no sign-up of its own: it names the website.
-        await stayInTouch()
-
         // 6. The preparation (D3): in the host; Ctrl-C detaches.
         var result: PrepareResult?
         let todo = chosen.filter { !prepared.contains($0) }
@@ -222,6 +218,10 @@ struct OnboardingFlow {
             say("\nDone — this Mac is onboarded (\(rec.images.isEmpty ? "no image prepared yet" : rec.images.joined(separator: ", ") + " ready")).")
             say("Next: doz new (a sandbox with every default, attached) · doz init in a project folder (then doz up there) · the UI: doz ui")
         }
+        // Stay in touch (optional), LAST — after the preparation, so it never stands between a person and a ready Mac
+        // (owner, 2026-10-10: "at the end with the option to skip"): asked only on a terminal, default No (--yes and
+        // --json skip it). A build from the open-source repository has no sign-up of its own: it names the website.
+        await stayInTouch()
         return OnboardReport(store: store.root.path, checks: checks, account: choice.rawValue, accountAdded: added, openaiAccountAdded: openaiAdded,
                              accountCommands: added == nil ? Onboarding.accountCommands(choice) : [],
                              settings: settings.rawValue, settingsPath: settingsPath, promptTemplate: template.rawValue,
