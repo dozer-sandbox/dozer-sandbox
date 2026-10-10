@@ -1,18 +1,18 @@
 // views/settings — Settings (591).
-import { h } from '../dom/h.js';
-import { icon } from '../dom/icons.js';
-import { api } from '../core/api.js';
-import { refresh } from '../core/router.js';
-import { adoptSettings, resetSetting, saveSetting } from '../core/settings.js';
-import { state } from '../core/state.js';
-import { isInt } from '../core/util.js';
-import { isRemote } from '../core/session.js';
-import { renderAccessStep } from '../components/access-step.js';
-import { pageIndex } from '../components/blocks.js';
-import { btn } from '../components/button.js';
-import { callout } from '../components/callout.js';
-import { pageFailure, toast } from '../components/notices.js';
-import { confirmWeb, isAgentModel, permissionSwitches } from '../components/permissions.js';
+import { h } from '../dom/h-d909ae8eb40113fe.js';
+import { icon } from '../dom/icons-75c107270d336b51.js';
+import { api } from '../core/api-129e35835156aceb.js';
+import { refresh } from '../core/router-007bb37dea7abb80.js';
+import { adoptSettings, resetSetting, saveSetting } from '../core/settings-4557874815573b31.js';
+import { state } from '../core/state-c0289349b457ba56.js';
+import { isInt } from '../core/util-1195caf40612902f.js';
+import { isRemote } from '../core/session-dadf7d9e3e1cb59e.js';
+import { renderAccessStep } from '../components/access-step-17bcd211ef1212a8.js';
+import { pageIndex } from '../components/blocks-53c969feeec8fe89.js';
+import { btn } from '../components/button-72d87e1085f00b4e.js';
+import { callout } from '../components/callout-48fdacc012091bbe.js';
+import { pageFailure, toast } from '../components/notices-4ade591a3c0f51da.js';
+import { confirmWeb, isAgentModel, permissionSwitches } from '../components/permissions-e9607edc7162cb98.js';
 
 const SETTING_SECTIONS = {
   ui: 'This UI', host: 'The host', store: 'The store', claude: 'Claude Code', defaults: 'New sandboxes', agent: 'The agent', sandbox: 'Inside every sandbox',

@@ -667,6 +667,7 @@ public final class DozerWebServer: @unchecked Sendable {
         var info = WebSessionInfo(csrf: s.csrfToken, expiresAt: s.expiresAt, serverRun: serverRun, store: data.storePath, version: version)
         info.chatgptSignIn = BuildFlavor.current.chatgptSignIn          // 611
         info.update = updateNotice
+        info.signup = Usage.isOfficial
         if let st = serveState, let device {
             info.serve = WebServeSessionInfo(exposure: "remote", secure: ctx.secure, secretsAllowed: ctx.secure && settings.secretEntryAllowed,
                                              mac: st.names.localHostName, device: device)
@@ -846,7 +847,20 @@ public final class DozerWebServer: @unchecked Sendable {
             return json(o)
         case .onboardingConfig:
             try Self.requireJSONBody(md)
-            return json(try settings.writeOnboardingConfig(try WebOnboardingConfig.decode(body)))
+            let written = try settings.writeOnboardingConfig(try WebOnboardingConfig.decode(body))
+            UsageRuntime.recordOnboarding(via: "web", step: "settings", completed: false)   // only while statistics are on
+            return json(written)
+        case .signup:
+            // CSRF-checked (an unsafe method, above), a strict body, the official build's package. The email is in this
+            // request's body only: never logged, never in an answer, never in an error (one fixed message).
+            try Self.requireJSONBody(md)
+            guard Usage.isOfficial else { throw WebRejection.signupUnavailable }
+            let r = try WebSignup.decode(body)
+            do {
+                return json(try await Usage.signup(r))
+            } catch {
+                throw HostError(.failed, WebSignup.failure)
+            }
         case .preparations:
             return json(try await data.preparations())
         case .accountAdd:

@@ -107,6 +107,9 @@ public enum WebRoute: Equatable, Sendable {
     // a new invite (link + code + QR), a device revoked or renamed; and the doctor's probe (no session: a one-use
     // token doz serve issued over serve.sock — answered only by doz serve). In doz ui (the Mac) the device routes
     // are answered through serve.sock.
+    // The optional sign-up (the setup wizard's Stay in touch): an email and its interests, handed to the official
+    // build's package (`Usage.signup`). Never logged, never echoed; a build from the repository answers 404.
+    case signup                    // POST /api/v1/signup  ({email, interests})
     case serveStatus               // GET  /api/v1/serve
     case serveDevices              // GET  /api/v1/serve/devices
     case serveShare                // POST /api/v1/serve/share  ({})
@@ -163,6 +166,7 @@ public enum WebRoute: Equatable, Sendable {
         case (.post, 2) where rest == ["dockerfile", "choose"]: return .dockerfileChoose
         case (.post, 2) where rest == ["access", "check"]: return .accessCheck
         case (.post, 2) where rest == ["access", "github-key"]: return .accessGithubKey
+        case (.post, 1) where rest[0] == "signup": return .signup
         case (.post, 2) where rest == ["serve", "share"]: return .serveShare
         case (.post, 4) where rest[0] == "serve" && rest[1] == "devices" && isDeviceID(rest[2]) && rest[3] == "revoke": return .serveRevoke(rest[2])
         case (.post, 4) where rest[0] == "serve" && rest[1] == "devices" && isDeviceID(rest[2]) && rest[3] == "name": return .serveRename(rest[2])

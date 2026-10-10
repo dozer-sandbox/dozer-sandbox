@@ -372,3 +372,25 @@ public struct WebOnboardingConfig: Equatable, Sendable {
         return c
     }
 }
+
+/// `POST /api/v1/signup`, decoded STRICTLY: exactly {email, interests} — the source is the server's (the setup wizard),
+/// never the body's. A refusal never echoes the email (and `SignupRequest`'s description is redacted).
+public enum WebSignup {
+    public static let failure = "the sign-up could not be sent — try again later, or at \(Usage.signupPage)"
+
+    public static func decode(_ body: Data) throws -> SignupRequest {
+        guard let obj = try? JSONSerialization.jsonObject(with: body), let d = obj as? [String: Any] else {
+            throw WebAction.Invalid("the body must be a JSON object")
+        }
+        guard Set(d.keys) == ["email", "interests"] else { throw WebAction.Invalid("exactly email and interests") }
+        guard let email = d["email"] as? String, SignupRequest.emailProblem(email.trimmingCharacters(in: .whitespacesAndNewlines)) == nil else {
+            throw WebAction.Invalid("email: an email address (name@example.com)")
+        }
+        guard let list = d["interests"] as? [Any], list.count <= 3, let interests = list as? [String] else {
+            throw WebAction.Invalid("interests: a list of release-news, early-access, support")
+        }
+        do { return try SignupRequest.make(email: email, interests: interests, source: "onboarding-web") } catch {
+            throw WebAction.Invalid("interests: at least one of release-news, early-access, support (each once)")
+        }
+    }
+}

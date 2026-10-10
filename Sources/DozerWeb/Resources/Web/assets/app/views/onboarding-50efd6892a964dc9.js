@@ -1,28 +1,28 @@
 // views/onboarding — Onboarding (594): Welcome → Checks → Access → Workspace rules → Images → Preparing → First sandbox →
 // Stay in touch (the optional sign-up — an official build only) → Done.
-import { $, h } from '../dom/h.js';
-import { AGENT_NAMES } from '../core/agents.js';
-import { api } from '../core/api.js';
-import { bytes, full } from '../core/format.js';
-import { act, actOrThrow, loadPreparations, prepRunning } from '../core/operations.js';
-import { loadSettings, secretEntryAllowed, setting } from '../core/settings.js';
-import { state } from '../core/state.js';
-import { WIZ, WIZ_ORDER, WIZ_STEPS } from '../core/wizards.js';
-import { ACCESS_TITLES, renderAccessStep } from '../components/access-step.js';
-import { accountChooser, accountCommandsNode, accountForm } from '../components/accounts.js';
-import { table } from '../components/blocks.js';
-import { btn } from '../components/button.js';
-import { callout } from '../components/callout.js';
-import { imagePicker, pickerNameHint } from '../components/image-picker.js';
-import { wizHead, wizMount } from '../components/modal.js';
-import { refreshNav } from '../components/nav.js';
-import { pageFailure, toast } from '../components/notices.js';
-import { statusPill } from '../components/pills.js';
-import { prepCard } from '../components/prep-card.js';
-import { rulesStep } from '../components/rules-step.js';
-import { stepperNode } from '../components/stepper.js';
-import { workspaceChooser } from '../components/workspace-chooser.js';
-import { renderOps } from './operations.js';
+import { $, h } from '../dom/h-d909ae8eb40113fe.js';
+import { AGENT_NAMES } from '../core/agents-66154a04b9c4696c.js';
+import { api } from '../core/api-129e35835156aceb.js';
+import { bytes, full } from '../core/format-b2e68384da8d2f36.js';
+import { act, actOrThrow, loadPreparations, prepRunning } from '../core/operations-24912c84c13d7e09.js';
+import { loadSettings, secretEntryAllowed, setting } from '../core/settings-4557874815573b31.js';
+import { state } from '../core/state-c0289349b457ba56.js';
+import { WIZ, WIZ_ORDER, WIZ_STEPS } from '../core/wizards-e3999d6ea48c0026.js';
+import { ACCESS_TITLES, renderAccessStep } from '../components/access-step-17bcd211ef1212a8.js';
+import { accountChooser, accountCommandsNode, accountForm } from '../components/accounts-0163894cf98f27a3.js';
+import { table } from '../components/blocks-53c969feeec8fe89.js';
+import { btn } from '../components/button-72d87e1085f00b4e.js';
+import { callout } from '../components/callout-48fdacc012091bbe.js';
+import { imagePicker, pickerNameHint } from '../components/image-picker-d15ab7a3129ec3c3.js';
+import { wizHead, wizMount } from '../components/modal-dc7becbd881e4fe2.js';
+import { refreshNav } from '../components/nav-d7f524cafd4ab419.js';
+import { pageFailure, toast } from '../components/notices-4ade591a3c0f51da.js';
+import { statusPill } from '../components/pills-5d9961b7c3bb32b1.js';
+import { prepCard } from '../components/prep-card-7b7f710f7b5f41a8.js';
+import { rulesStep } from '../components/rules-step-124b3dfb793c8146.js';
+import { stepperNode } from '../components/stepper-eb70a810bda2f73e.js';
+import { workspaceChooser } from '../components/workspace-chooser-230a56e0dc237932.js';
+import { renderOps } from './operations-4599794813474853.js';
 
 let wizTimer = null;
 export function wizardStopPolling() { clearInterval(wizTimer); wizTimer = null; }

@@ -49,7 +49,7 @@ public enum WebExposure {
              .onboarding, .preparations, .resources, .bases, .access:
             return .read
         case .actions, .policyPreview, .terminalTicket, .terminalSocket, .settingsChange, .terminalLayoutSet, .onboardingConfig,
-             .workspaceCheck, .quickAdd, .projectOpen, .projectPreview, .projectWrite, .resourcesPreview, .accessCheck:
+             .workspaceCheck, .quickAdd, .projectOpen, .projectPreview, .projectWrite, .resourcesPreview, .accessCheck, .signup:
             return .change
         case .accountAdd, .sandboxKey, .accessGithubKey:
             return .secretEntry

@@ -1,12 +1,12 @@
 // core/session — The session: the link exchanged once, renewal, the service worker, signing in again inside the page (605).
-import { upcall } from './hooks.js';
-import { $, h } from '../dom/h.js';
-import { withIcon } from '../dom/icons.js';
-import { api } from './api.js';
-import { loadSettings } from './settings.js';
-import { state } from './state.js';
-import { terminals } from './terminals.js';
-import { quietly } from './util.js';
+import { upcall } from './hooks-a4b871a481b363cd.js';
+import { $, h } from '../dom/h-d909ae8eb40113fe.js';
+import { withIcon } from '../dom/icons-75c107270d336b51.js';
+import { api } from './api-129e35835156aceb.js';
+import { loadSettings } from './settings-4557874815573b31.js';
+import { state } from './state-c0289349b457ba56.js';
+import { terminals } from './terminals-fa5cf7fc28fdb48f.js';
+import { quietly } from './util-1195caf40612902f.js';
 // Calls up the layers (provided by app.js — core/hooks.js):
 const banner = upcall('banner'), connect = upcall('connect'), dropBanner = upcall('dropBanner'), modalInert = upcall('modalInert'),
   paintCover = upcall('paintCover'), startApp = upcall('startApp');

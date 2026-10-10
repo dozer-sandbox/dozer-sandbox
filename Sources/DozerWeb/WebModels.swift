@@ -1108,6 +1108,10 @@ public struct WebSessionInfo: Codable, Equatable, Sendable {
     public var chatgptSignIn: Bool = true
     /// 611: a newer doz (the banner), or one an automatic update installed that this doz ui is older than.
     public var update: WebUpdateNotice? = nil
+    /// This build has the sign-up (an official build): the setup wizard offers Stay in touch. Else the page shows
+    /// `signupPage` (the website's form) instead.
+    public var signup: Bool = false
+    public var signupPage: String = Usage.signupPage
 }
 
 /// 611: the dashboard's update banner — from the last check doz ui (or a command) made; never a network call per page.

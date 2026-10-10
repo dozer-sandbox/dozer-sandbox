@@ -1,4 +1,5 @@
 import Foundation
+import DozerHost
 
 // 590 — the request checks of `doz ui`, as pure functions over a small request view so every
 // rule is a unit test (the HTTP adapter fills `WebRequestMetadata` before it decodes a body or
@@ -98,6 +99,8 @@ public enum WebRejection: String, Error, Equatable, Sendable {
     case serveNotRunning = "serve-not-running"
     /// 606: the connection reached an address doz serve does not serve (another VPN's tunnel) — said, never a silent drop.
     case notServedAddress = "not-served"
+    /// A build from the open-source repository has no sign-up of its own.
+    case signupUnavailable = "signup-unavailable"
 
     public var status: Int {
         switch self {
@@ -111,7 +114,7 @@ public enum WebRejection: String, Error, Equatable, Sendable {
         case .notAdmitted, .deviceRevoked, .admissionRejected, .admissionUsed: 401
         case .ticketMissing, .ticketRejected, .ticketUsed, .ticketExpired: 401
         case .upgradeRequired: 400
-        case .notFound: 404
+        case .notFound, .signupUnavailable: 404
         case .tooManyStreams, .tooManyConnections, .tooManyOperations, .unavailable, .tooManyTickets, .tooManyTerminals, .tooManyDevices: 503
         }
     }
@@ -157,6 +160,7 @@ public enum WebRejection: String, Error, Equatable, Sendable {
         case .secretOverHTTP: "a key or token is never typed here over plain HTTP — the network between this browser and the Mac could read it. Add it on the Mac (doz account add NAME --api-key|--setup-token, or the Mac's own doz ui), or reach this dashboard over HTTPS through your reverse proxy (serve.public_origins)"
         case .macScreen: "that opens a window on the Mac's own screen — from another computer, type the path instead (or use a browser terminal)"
         case .serveNotRunning: "doz serve is not running for this store — start it in a terminal: doz serve"
+        case .signupUnavailable: "this build (from the open-source repository) does not include the sign-up — sign up at \(Usage.signupPage)"
         case .notServedAddress: "doz serve does not answer on this network address — open it at http://<this Mac>.local or one of the addresses doz serve prints (serve.bind decides where it listens)"
         }
     }

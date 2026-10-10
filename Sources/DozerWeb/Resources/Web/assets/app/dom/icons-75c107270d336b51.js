@@ -1,5 +1,5 @@
 // dom/icons — Icons (593): Lucide symbols from the one generated sprite; one map says which icon a label gets.
-import { h } from './h.js';
+import { h } from './h-d909ae8eb40113fe.js';
 
 // ── icons (593): Lucide (lucide-static, ISC — vendored and pinned; one generated sprite, a same-origin
 // asset). An icon is <svg class="icon"><use href="SPRITE#name"></svg>, made with createElementNS; its
