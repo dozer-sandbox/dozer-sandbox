@@ -45,7 +45,9 @@ fail() {
 # browser terminals, confined to Sources/DozerWeb in step 1b.
 # 594: + Yams (the project file doz_project.yaml — owner ruling D9), confined to Sources/DozerCLI in step 1b.
 # 606: + dnssd (the system's Bonjour client — `doz serve` announces itself), confined in step 1b.
-ALLOWED='Foundation|Darwin|os|CryptoKit|Security|NIOCore|NIOEmbedded|NIOPosix|NIOSSL|X509|SwiftASN1|Virtualization|Containerization|ContainerizationArchive|ContainerizationEXT4|SystemPackage|ContainerizationError|ContainerizationExtras|ContainerizationOCI|ContainerizationOS|DozerKit|DozerHost|DozerCLI|SQLite3|ArgumentParser|DozerWeb|NIOHTTP1|NIOWebSocket|CoreServices|Yams|dnssd'
+# 614: + DozerCloud (the official builds' closed package — statistics and sign-up), confined in step 1b to the
+# executable's main, under #if DOZ_CLOUD — a build from the repository never has it.
+ALLOWED='Foundation|Darwin|os|CryptoKit|Security|NIOCore|NIOEmbedded|NIOPosix|NIOSSL|X509|SwiftASN1|Virtualization|Containerization|ContainerizationArchive|ContainerizationEXT4|SystemPackage|ContainerizationError|ContainerizationExtras|ContainerizationOCI|ContainerizationOS|DozerKit|DozerHost|DozerCLI|SQLite3|ArgumentParser|DozerWeb|NIOHTTP1|NIOWebSocket|CoreServices|Yams|dnssd|DozerCloud'
 BAD=$(grep -rhoE --include='*.swift' '^[[:space:]]*(@[A-Za-z_]+[[:space:]]+)*(public[[:space:]]+)?import[[:space:]]+[A-Za-z_][A-Za-z0-9_.]*' \
         "$PACKAGE/Sources" \
       | sed -E 's/.*import[[:space:]]+//' \
@@ -98,6 +100,14 @@ grep -qE 'bindServe|WebServeState|WebServeConfig' "$PACKAGE/Sources/DozerCLI/UIC
 WH=$(grep -rlE --include='*.swift' '^[[:space:]]*import[[:space:]]+DozerWeb([[:space:]]|$)' "$PACKAGE/Sources/DozerHost" || true)
 [[ -z "$WH" ]] || fail "the host imports the web UI (the UI is a client of the host):
 $WH"
+
+# 614: the official builds' closed package is reached from ONE place: the executable's main, under
+#      `#if DOZ_CLOUD` (Usage.install; Package.swift defines it only with the package). Nothing else may name it.
+DC=$(grep -rlE --include='*.swift' 'DozerCloud' "$PACKAGE/Sources" | grep -vE "/Sources/doz/DozerMain.swift$" || true)
+[[ -z "$DC" ]] || fail "DozerCloud is named outside Sources/doz/DozerMain.swift:
+$DC"
+[[ "$(grep -cE '^[[:space:]]*#if DOZ_CLOUD$' "$PACKAGE/Sources/doz/DozerMain.swift")" == 2 ]] \
+    || fail "Sources/doz/DozerMain.swift must reach DozerCloud only under #if DOZ_CLOUD (the import and the install)"
 
 # ── 2. Denylist ──────────────────────────────────────────────────────────────
 ALTS=$(grep -v '^#' "$DENYLIST" | grep -v '^$' | paste -sd'|' -)

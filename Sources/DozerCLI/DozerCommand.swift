@@ -49,7 +49,7 @@ public struct DozerCommand: AsyncParsableCommand {
             List.self, Inspect.self, Sessions.self, Attach.self, Run.self, Exec.self,
             ImageCommand.self, BaseCommand.self, BuilderCommand.self, ResourcesCommand.self, TemplateCommand.self, Duplicate.self, PointCommand.self, NetCommand.self, KeyCommand.self, AccountCommand.self, AccessCommand.self, ToolsCommand.self, IgnoreCommand.self,
             MetricsCommand.self, Doctor.self, HostCommand.self, Events.self, Console.self, UICommand.self, ServeCommand.self, ConfigCommand.self,
-            UpdateCommand.self, Uninstall.self,
+            TelemetryCommand.self, SignupCommand.self, UpdateCommand.self, Uninstall.self,
         ]
     )
 
@@ -96,6 +96,12 @@ public struct GlobalOptions: ParsableArguments {
 
     @Option(name: .long, help: "How progress shows on a terminal: auto (animated: a spinner, download bars) or plain (one line per step). Default $DOZ_PROGRESS, else the settings' ui.progress. Not a terminal, --json or NO_COLOR: always plain.")
     public var progress: ProgressFlag?
+
+    /// dbt's spelling: this command only (the setting telemetry.send_anonymous_usage_stats is the lasting switch). Read
+    /// by `DozerEntry` from the command line itself — before the command runs — and also accepted before the command.
+    @Flag(name: .customLong("send-anonymous-usage-stats"), inversion: .prefixedNo,
+          help: "Official builds: send anonymous usage statistics for this command, or not (--no-…). The lasting switch: the setting telemetry.send_anonymous_usage_stats; DO_NOT_TRACK=1 always turns them off. Builds from the open-source repository send nothing.")
+    public var sendAnonymousUsageStats: Bool?
 
     public init() {}
 

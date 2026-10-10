@@ -392,6 +392,8 @@ public enum SettingKey {
     /// 611: updates — off | notify | auto, and the channel (stable | beta | canary).
     public static let updatesMode = "updates.mode"
     public static let updatesChannel = "updates.channel"
+    /// Anonymous usage statistics of an official build (on by default; a build from the repository sends nothing).
+    public static let sendUsageStats = "telemetry.send_anonymous_usage_stats"
     /// `images.<lab|claude-code|pi>.memory_mib` / `.network`.
     public static func memory(_ image: String) -> String { "images.\(image).memory_mib" }
     public static func network(_ image: String) -> String { "images.\(image).network" }
@@ -527,6 +529,10 @@ public struct DozerSettings: Sendable {
             .init("updates", "channel", .choice(["stable", "beta", "canary"]), .string("stable"),
                   "Which releases you are offered: stable, beta (beta and stable) or canary (every build, first). A Homebrew install's own formula (doz, doz-beta, doz-canary) decides while this is not set; doz upgrade --channel switches both.",
                   applies: .nextCommand),
+            // Anonymous usage statistics (Usage.swift): the off switch — with DO_NOT_TRACK and the flags, checked before anything is recorded.
+            .init("telemetry", "send_anonymous_usage_stats", .bool, .bool(true),
+                  "Official builds send anonymous usage statistics: at most once a day, counts and ranges about how Dozer itself is used (commands by name, failures by exit code, which agents, bases and network presets new sandboxes use, setup sizes as ranges, start and wake times rounded to 50 ms, this Mac's macOS version, chip family, memory and cores as ranges) with a random install id — never a name, path, host, command argument, file or anything from inside a sandbox. false (or DO_NOT_TRACK=1, or --no-send-anonymous-usage-stats on one command) sends nothing and records nothing. doz telemetry show prints exactly what would be sent. Builds from the open-source repository send nothing whatever this says.",
+                  env: "DOZ_SEND_ANONYMOUS_USAGE_STATS", flag: "--no-send-anonymous-usage-stats / --send-anonymous-usage-stats", applies: .nextCommand),
             .init("resources", "clean_unused_days", .int(1...3650), .int(30),
                   "Clean up (the Resources page, doz resources clean) removes a prepared image no sandbox was created from in this many days; it is prepared again when next needed.",
                   applies: .now),

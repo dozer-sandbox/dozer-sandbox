@@ -50,6 +50,26 @@ struct OnboardingFlow {
     var githubKeyStdin = false
     /// 599g: the Workspace rules step's flag (nil: asked on a terminal, else the settings are left as they are).
     var ignoreModeFlag: String? = nil
+    /// The optional sign-up — release news, early access, support. Never blocks the onboarding: skipped by default,
+    /// and a failure is one line.
+    private func stayInTouch() async {
+        guard talk else { return }
+        guard Usage.isOfficial else {
+            say("\nStay in touch (optional): release news, early access and support — sign up at \(Usage.signupPage)")
+            return
+        }
+        guard asker.interactive else { return }
+        say("\nStay in touch (optional) — release news, early access, support; your email is confirmed first and never linked to the usage statistics")
+        guard asker.yesNo("  Sign up?", default: false) else { say("  skipped — doz signup any time"); return }
+        do {
+            guard let r = try SignupCommand.ask(asker, email: nil, interests: [], source: "onboarding-cli", g) else { return }
+            let result = try await Usage.signup(r)
+            say("  " + SignupCommand.answerLine(result, email: r.email))
+        } catch {
+            say("  the sign-up did not go through — doz signup tries again, or \(Usage.signupPage)")
+        }
+    }
+
     /// 599i: Codex's OpenAI account step — chatgpt, openai-key or later (nil: asked on a terminal when codex is chosen).
     var openaiFlag: String? = nil
 
@@ -177,6 +197,10 @@ struct OnboardingFlow {
         // 599c: where doz new and the UI's Quick add / New sandbox put each new sandbox's workspace folder.
         let projects = (Workspace.defaultPath(name: "x") as NSString).deletingLastPathComponent
         say("  new sandboxes' workspace folders: \(projects)/<name> (defaults.projects_dir — doz config set defaults.projects_dir DIR moves it)")
+
+        // Stay in touch (optional): the sign-up, asked only on a terminal (--yes and --json skip it). A build from the
+        // open-source repository has no sign-up of its own: it names the website.
+        await stayInTouch()
 
         // 6. The preparation (D3): in the host; Ctrl-C detaches.
         var result: PrepareResult?

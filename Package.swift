@@ -15,6 +15,25 @@
 // proxy's TLS; Scripts/audit.sh holds the allowlist.
 import PackageDescription
 
+// The official builds' closed package (anonymous usage statistics and the sign-up — Sources/DozerHost/Usage.swift is
+// the open half and decides everything that may be sent). It joins ONLY when DOZ_CLOUD_PACKAGE names it — a local
+// path, or a git URL with DOZ_CLOUD_REF (an exact version, or a commit) — which `make release` passes from the
+// gitignored Makefile.config. Every other build (contributors, CI, forks, `make cli`) has no such dependency, its
+// `doz` installs no sender, and nothing is ever sent. The package must depend on Foundation only.
+let cloudSource = Context.environment["DOZ_CLOUD_PACKAGE"].flatMap { $0.isEmpty ? nil : $0 }
+let cloudPackage: Package.Dependency? = cloudSource.map { src in
+    guard src.contains("://") || src.hasPrefix("git@") else { return .package(path: src) }
+    let ref = Context.environment["DOZ_CLOUD_REF"] ?? ""
+    if let v = Version(ref) { return .package(url: src, exact: v) }
+    return .package(url: src, revision: ref.isEmpty ? "main" : ref)
+}
+/// SwiftPM's identity of that package: the last path component, without `.git`, lower-cased.
+let cloudIdentity: String? = cloudSource.map { src in
+    var last = src.split(separator: "/").last.map(String.init) ?? src
+    if last.hasSuffix(".git") { last = String(last.dropLast(4)) }
+    return last.lowercased()
+}
+
 let package = Package(
     name: "DozerKit",
     platforms: [.macOS("26.0")],
@@ -43,7 +62,7 @@ let package = Package(
         // YAML, parsed with Yams (MIT; libyaml inside), pinned EXACTLY. The one dependency that is not
         // an apple/* package; only the CLI's command target imports it (Scripts/audit.sh).
         .package(url: "https://github.com/jpsim/Yams.git", exact: "6.2.2"),
-    ],
+    ] + [cloudPackage].compactMap { $0 },
     targets: [
         .target(
             name: "DozerKit",
@@ -123,8 +142,13 @@ let package = Package(
         ),
         .executableTarget(
             name: "doz",
-            dependencies: ["DozerCLI", .product(name: "ArgumentParser", package: "swift-argument-parser")],
-            path: "Sources/doz"
+            // DozerHost: `Usage.install` — the bridge `main` builds when the official package is present.
+            dependencies: ["DozerCLI", "DozerHost", .product(name: "ArgumentParser", package: "swift-argument-parser")]
+                + (cloudIdentity.map { [.product(name: "DozerCloud", package: $0)] } ?? []),
+            path: "Sources/doz",
+            // The bridge in main is compiled ONLY with the package (`#if DOZ_CLOUD`): `canImport` alone is not enough —
+            // a module left in .build by an earlier official build would make it true in a build that does not link it.
+            swiftSettings: cloudIdentity == nil ? [] : [.define("DOZ_CLOUD")]
         ),
         .testTarget(
             name: "DozerCLITests",

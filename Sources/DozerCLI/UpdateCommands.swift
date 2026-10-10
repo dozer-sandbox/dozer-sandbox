@@ -193,7 +193,7 @@ enum UpdateHook {
         let tty = env["DOZ_TEST_UPDATE_TTY"] == "1" || (isatty(STDOUT_FILENO) == 1 && isatty(STDERR_FILENO) == 1)
         guard tty else { return false }
         let first = words(args).first ?? ""
-        return !["upgrade", "update", "host", "serve", "uninstall", "help", "config"].contains(first)
+        return !["upgrade", "update", "host", "serve", "uninstall", "help", "config", "telemetry"].contains(first)
     }
 
     /// After a command: the daily check, and what its mode says to do — one line (notify), or an install when
@@ -256,16 +256,22 @@ struct HostRestart: AsyncParsableCommand {
 }
 
 /// The program's entry (`doz`): ArgumentParser's own parse-and-run, then the update hook after a command that
-/// finished normally.
+/// finished normally. Around it, the usage statistics' hook (`UsageHook` — an official build only; a build from
+/// the repository records and sends nothing): the command counted before it runs, a failure's exit code and
+/// whatever is due handed over after it.
 public enum DozerEntry {
     public static func main() async -> Never {
         let args = Array(CommandLine.arguments.dropFirst())
+        let usage = UsageHook(args)
+        usage.before()
         do {
-            var command = try DozerCommand.parseAsRoot(args)
+            var command = try DozerCommand.parseAsRoot(UsageHook.parserArguments(args))
             if var a = command as? AsyncParsableCommand { try await a.run() } else { try command.run() }
             await UpdateHook.afterCommand(args)
+            usage.after(exitCode: 0)
             DozerCommand.exit()
         } catch {
+            usage.after(exitCode: DozerCommand.exitCode(for: error).rawValue)
             DozerCommand.exit(withError: error)
         }
     }
