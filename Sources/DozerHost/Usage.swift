@@ -29,7 +29,7 @@ import DozerKit
 /// One sign-up: an email and what it is for. Nothing else is ever sent with it — not the install id. Its description
 /// is redacted (a log line or an interpolation never shows the address).
 public struct SignupRequest: Codable, Sendable, Equatable, CustomStringConvertible, CustomDebugStringConvertible, CustomReflectable {
-    public static let interestValues = ["release-news", "early-access", "support"]
+    public static let interestValues = ["release-news", "early-access", "tips"]
     public static let sourceValues = ["cli", "onboarding-web", "onboarding-cli", "website"]
 
     public var email: String

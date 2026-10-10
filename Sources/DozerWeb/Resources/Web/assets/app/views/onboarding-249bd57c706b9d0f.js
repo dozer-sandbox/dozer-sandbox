@@ -376,7 +376,7 @@ function wizStep5(d, w) {
 /// moves on. The address is never kept in the page after the request.
 const SIGNUP_INTERESTS = [['release-news', 'Release news', 'A short email when a new version is out.'],
   ['early-access', 'Early access', 'Try new features before they are released.'],
-  ['support', 'Support', 'Help from the people who make Dozer, by email.']];
+  ['tips', 'Tips and tricks', 'Ways to get more out of Dozer, now and then.']];
 function wizStepSignup(d, w) {
   if (w.signedUp) {
     return [
@@ -410,7 +410,7 @@ function wizStepSignup(d, w) {
   }, { primary: true });
   return [
     h('h2', null, 'Stay in touch (optional)'),
-    h('p', { class: 'sub' }, 'Release news, early access and support from the people who make Dozer — by email, only what you tick. A confirmation email comes first; every email has a one-click unsubscribe. Your address is never linked to the usage statistics.'),
+    h('p', { class: 'sub' }, 'Release news, early access and tips and tricks from the people who make Dozer — by email, only what you tick. A confirmation email comes first; every email has a one-click unsubscribe. Your address is never linked to the usage statistics.'),
     h('label', { class: 'field' }, h('span', null, 'Email'), email),
     h('fieldset', { class: 'wiz-choices' }, h('legend', null, 'What would you like?'), boxes.map((x) => x.el)),
     error,
@@ -445,7 +445,7 @@ function wizStep6(d, w) {
       h('li', null, 'Images: ' + (wizChosenImages().join(', ') || 'none now (each is prepared by its first start)')),
       w.created ? h('li', null, 'First sandbox: ', h('a', { href: '#/sandbox/' + w.created }, w.created)) : null),
     h('p', { class: 'muted' }, 'From a terminal: doz init in a project folder, then doz up there. This wizard is always here: Doctor › Run onboarding again.'),
-    !state.signup && state.signupPage ? h('p', { class: 'muted', 'data-signup-link': '' }, 'Stay in touch (optional) — release news, early access and support: sign up at ',
+    !state.signup && state.signupPage ? h('p', { class: 'muted', 'data-signup-link': '' }, 'Stay in touch (optional) — release news, early access and tips and tricks: sign up at ',
       h('a', { href: state.signupPage, target: '_blank', rel: 'noopener noreferrer' }, state.signupPage), '.') : null,
     wizButtons(w.created ? btn('Open ' + w.created, () => { location.hash = '#/sandbox/' + w.created; }, { icon: 'box' }) : null,
       btn('Open Sandboxes', () => { state.wiz = null; location.hash = '#/overview'; }, { primary: true })),

@@ -50,16 +50,16 @@ struct OnboardingFlow {
     var githubKeyStdin = false
     /// 599g: the Workspace rules step's flag (nil: asked on a terminal, else the settings are left as they are).
     var ignoreModeFlag: String? = nil
-    /// The optional sign-up — release news, early access, support. Never blocks the onboarding: skipped by default,
+    /// The optional sign-up — release news, early access, tips and tricks. Never blocks the onboarding: skipped by default,
     /// and a failure is one line.
     private func stayInTouch() async {
         guard talk else { return }
         guard Usage.isOfficial else {
-            say("\nStay in touch (optional): release news, early access and support — sign up at \(Usage.signupPage)")
+            say("\nStay in touch (optional): release news, early access and tips and tricks — sign up at \(Usage.signupPage)")
             return
         }
         guard asker.interactive else { return }
-        say("\nStay in touch (optional) — release news, early access, support; your email is confirmed first and never linked to the usage statistics")
+        say("\nStay in touch (optional) — release news, early access, tips and tricks; your email is confirmed first and never linked to the usage statistics")
         guard asker.yesNo("  Sign up?", default: false) else { say("  skipped — doz signup any time"); return }
         do {
             guard let r = try SignupCommand.ask(asker, email: nil, interests: [], source: "onboarding-cli", g) else { return }

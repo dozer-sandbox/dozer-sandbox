@@ -250,7 +250,7 @@ struct TelemetryReset: AsyncParsableCommand {
 
 struct SignupCommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(commandName: "signup",
-        abstract: "Sign up for news from Dozer — release news, early access, support (optional; an email, confirmed before anything is sent).",
+        abstract: "Sign up for news from Dozer — release news, early access, tips and tricks (optional; an email, confirmed before anything is sent).",
         discussion: """
         Asks for your email and what you want on a terminal (or --email and --interest). A confirmation email comes \
         first; nothing else is sent until you confirm, and every email has a one-click unsubscribe. Your email is \
@@ -259,14 +259,14 @@ struct SignupCommand: AsyncParsableCommand {
 
     @OptionGroup var g: GlobalOptions
     @Option(name: .long, help: "Your email address.") var email: String?
-    @Option(name: .customLong("interest"), help: "release-news, early-access or support (repeat it for more than one).") var interests: [String] = []
+    @Option(name: .customLong("interest"), help: "release-news, early-access or tips (repeat it for more than one).") var interests: [String] = []
     @Flag(name: [.short, .long], help: "Do not ask (needs --email and at least one --interest).") var yes = false
 
-    static let labels = ["release news", "early access to new features", "support"]
+    static let labels = ["release news", "early access to new features", "tips and tricks"]
 
     func validate() throws {
         for i in interests where !SignupRequest.interestValues.contains(i) {
-            throw ValidationError("--interest: release-news, early-access or support")
+            throw ValidationError("--interest: release-news, early-access or tips")
         }
     }
 
@@ -279,7 +279,7 @@ struct SignupCommand: AsyncParsableCommand {
         }
         let asker = Asker(yes: yes, json: g.json)
         guard let request = try Self.ask(asker, email: email, interests: interests, source: "cli", g) else {
-            throw fail(HostError(.invalid, "off a terminal: doz signup --email ADDRESS --interest release-news|early-access|support"), g)
+            throw fail(HostError(.invalid, "off a terminal: doz signup --email ADDRESS --interest release-news|early-access|tips"), g)
         }
         let result = try await Self.send(request, g)
         if g.json { Out.json(result); return }

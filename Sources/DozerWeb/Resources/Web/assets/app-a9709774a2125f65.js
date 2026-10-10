@@ -64,7 +64,7 @@ import { viewDoctor } from './app/views/doctor-91aacd7198851258.js';
 import { viewImages } from './app/views/images-3ccbb1634fcfded9.js';
 import { viewMetrics } from './app/views/metrics-0a8f8dda29e1fd4e.js';
 import { newSandboxWizard, viewNew } from './app/views/new-sandbox-32b9adf5a7927e90.js';
-import { renderWizard, viewOnboarding, wizardStopPolling, wizGo } from './app/views/onboarding-114fea4070eab4c3.js';
+import { renderWizard, viewOnboarding, wizardStopPolling, wizGo } from './app/views/onboarding-249bd57c706b9d0f.js';
 import { acknowledgeOps, renderOperations, renderOps, viewOperations } from './app/views/operations-cbabf449e0c789d0.js';
 import { viewOverview } from './app/views/overview-6066ea8122cdd92a.js';
 import { viewResources } from './app/views/resources-1474541546d0f91d.js';

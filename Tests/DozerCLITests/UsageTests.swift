@@ -345,18 +345,18 @@ final class UsageTests: XCTestCase {
     // MARK: the sign-up
 
     func testTheSignupRequest() async throws {
-        let r = try SignupRequest.make(email: "  me@example.com ", interests: ["support", "release-news"], source: "cli")
+        let r = try SignupRequest.make(email: "  me@example.com ", interests: ["tips", "release-news"], source: "cli")
         XCTAssertEqual(r.email, "me@example.com")
-        XCTAssertEqual(r.interests, ["release-news", "support"], "the list's order")
+        XCTAssertEqual(r.interests, ["release-news", "tips"], "the list's order")
         XCTAssertFalse("\(r)".contains("me@example.com"), "the description is redacted")
         XCTAssertFalse(String(reflecting: r).contains("me@example.com"))
         for e in ["", "me", "me@", "@x.com", "me@x", "me @x.com", "me@x..com", "<me>@x.com", "a@b@c.com"] {
-            XCTAssertThrowsError(try SignupRequest.make(email: e, interests: ["support"], source: "cli"), e)
+            XCTAssertThrowsError(try SignupRequest.make(email: e, interests: ["tips"], source: "cli"), e)
         }
-        for i in [[], ["news"], ["support", "support"]] {
+        for i in [[], ["news"], ["tips", "tips"]] {
             XCTAssertThrowsError(try SignupRequest.make(email: "me@example.com", interests: i, source: "cli"), "\(i)")
         }
-        XCTAssertThrowsError(try SignupRequest.make(email: "me@example.com", interests: ["support"], source: "elsewhere"))
+        XCTAssertThrowsError(try SignupRequest.make(email: "me@example.com", interests: ["tips"], source: "elsewhere"))
         // No package: refused, pointing at the website — the address is never in the message.
         do { _ = try await Usage.signup(r); XCTFail() } catch {
             XCTAssertTrue("\(error)".contains(Usage.signupPage))
@@ -365,9 +365,9 @@ final class UsageTests: XCTestCase {
         final class Got: @unchecked Sendable { var r: SignupRequest? }
         let got = Got()
         Usage.install(send: { _ in }, flush: { _ in }, signup: { req in got.r = req; return SignupResult(status: "confirmation-sent") })
-        let answer = try await Usage.signup(SignupRequest(email: "me@example.com", interests: ["support"], source: "onboarding-cli"))
+        let answer = try await Usage.signup(SignupRequest(email: "me@example.com", interests: ["tips"], source: "onboarding-cli"))
         XCTAssertEqual(answer.status, "confirmation-sent")
-        XCTAssertEqual(got.r, SignupRequest(email: "me@example.com", interests: ["support"], source: "onboarding-cli"))
+        XCTAssertEqual(got.r, SignupRequest(email: "me@example.com", interests: ["tips"], source: "onboarding-cli"))
         Usage.install(send: { _ in }, flush: { _ in }, signup: { _ in SignupResult(status: "something-else") })
         do { _ = try await Usage.signup(r); XCTFail("an unknown answer") } catch {}
     }

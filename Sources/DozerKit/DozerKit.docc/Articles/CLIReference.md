@@ -682,7 +682,7 @@ the guest binaries, and credentials.
 doz telemetry [show] [--json]   # whether this doz sends anonymous usage statistics, why, the install id,
                                 # and exactly what it would send (after the next command, and today so far)
 doz telemetry reset             # a new random install id; the day's counts forgotten
-doz signup [--email ADDRESS] [--interest release-news|early-access|support …] [-y]
+doz signup [--email ADDRESS] [--interest release-news|early-access|tips …] [-y]
                                 # optional: news from Dozer by email (asked on a terminal); confirmed first
 ```
 

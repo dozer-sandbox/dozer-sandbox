@@ -69,7 +69,7 @@ final class WebSignupTests: XCTestCase {
         return try request("/api/v1/signup", h, method: "POST", body: body)
     }
 
-    let good = #"{"email":"me@example.com","interests":["release-news","support"]}"#
+    let good = #"{"email":"me@example.com","interests":["release-news","tips"]}"#
 
     func testTheRouteAndItsExposure() {
         XCTAssertEqual(WebRoute.parse(method: .post, target: "/api/v1/signup"), .signup)
@@ -79,11 +79,11 @@ final class WebSignupTests: XCTestCase {
 
     func testTheBodyIsDecodedStrictlyAndNeverEchoed() throws {
         let r = try WebSignup.decode(Data(good.utf8))
-        XCTAssertEqual(r, SignupRequest(email: "me@example.com", interests: ["release-news", "support"], source: "onboarding-web"))
-        for body in [#"{"email":"me@example.com"}"#, #"{"email":"me@example.com","interests":["support"],"source":"cli"}"#,
-                     #"{"email":"secret-me@","interests":["support"]}"#, #"{"email":"secret-me@example.com","interests":[]}"#,
-                     #"{"email":"secret-me@example.com","interests":["support","support"]}"#,
-                     #"{"email":"secret-me@example.com","interests":["everything"]}"#, #"{"email":7,"interests":["support"]}"#, "[]", "nope"] {
+        XCTAssertEqual(r, SignupRequest(email: "me@example.com", interests: ["release-news", "tips"], source: "onboarding-web"))
+        for body in [#"{"email":"me@example.com"}"#, #"{"email":"me@example.com","interests":["tips"],"source":"cli"}"#,
+                     #"{"email":"secret-me@","interests":["tips"]}"#, #"{"email":"secret-me@example.com","interests":[]}"#,
+                     #"{"email":"secret-me@example.com","interests":["tips","tips"]}"#,
+                     #"{"email":"secret-me@example.com","interests":["everything"]}"#, #"{"email":7,"interests":["tips"]}"#, "[]", "nope"] {
             XCTAssertThrowsError(try WebSignup.decode(Data(body.utf8)), body) { e in
                 XCTAssertFalse("\(e)".contains("secret-me"), "never echoes the address: \(body)")
             }
@@ -112,8 +112,8 @@ final class WebSignupTests: XCTestCase {
         XCTAssertEqual(r.status, 200, r.text)
         XCTAssertEqual((try JSONSerialization.jsonObject(with: r.body) as? [String: Any])?["status"] as? String, "confirmation-sent")
         XCTAssertFalse(r.text.contains("me@example.com"), "the answer never carries the address")
-        XCTAssertEqual(got.requests, [SignupRequest(email: "me@example.com", interests: ["release-news", "support"], source: "onboarding-web")])
-        XCTAssertEqual(try post(#"{"email":"me@example.com","interests":["support"],"extra":1}"#, cookie, csrf).status, 400)
+        XCTAssertEqual(got.requests, [SignupRequest(email: "me@example.com", interests: ["release-news", "tips"], source: "onboarding-web")])
+        XCTAssertEqual(try post(#"{"email":"me@example.com","interests":["tips"],"extra":1}"#, cookie, csrf).status, 400)
         // A failure is one fixed message — the package's own error (which names the address here) never reaches the page.
         got.fail = true
         let f = try post(good, cookie, csrf)
