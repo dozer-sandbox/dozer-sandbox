@@ -164,7 +164,7 @@ extension WebTryCatalog {
             a.tags = r.capabilityTags.filter { ["documented", "verified"].contains($0.level) }.map(\.tag)
             a.openSource = r.hasTag("open-source")
             a.headless = r.hasTag("headless")
-            a.gateway = r.gateways.contains { ["documented", "verified"].contains($0.level) }
+            a.gateway = r.throughGateway          // 618: a try can go through one (models@1 offers it)
             a.current = r.lifecycle?.isCurrent ?? true
             a.ready = p.map { card == nil && !$0.problems.contains { $0.code != "key" } } ?? false
             // What a try installs (`installs`), else the recipe's pin; its release date only when it IS the latest the

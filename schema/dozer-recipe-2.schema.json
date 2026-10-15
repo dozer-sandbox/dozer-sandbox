@@ -103,14 +103,16 @@
               "properties": {
                 "shape": { "enum": ["openai-chat", "openai-responses", "anthropic-messages", "gemini"] },
                 "env": { "$ref": "#/$defs/stringMap" },
-                "key_env": { "$ref": "#/$defs/strings" }
+                "key_env": { "$ref": "#/$defs/strings" },
+                "source": { "type": "string", "pattern": "^https://" }
               } } },
             "native": { "type": "array", "items": {
               "type": "object", "additionalProperties": false, "required": ["source", "env"],
               "properties": {
                 "source": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
                 "env": { "$ref": "#/$defs/stringMap" },
-                "key_env": { "$ref": "#/$defs/strings" }
+                "key_env": { "$ref": "#/$defs/strings" },
+                "docs": { "type": "string", "pattern": "^https://" }
               } } },
             "except": { "$ref": "#/$defs/strings" },
             "models": { "$ref": "#/$defs/stringMap" }

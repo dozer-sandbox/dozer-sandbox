@@ -856,11 +856,12 @@ extension AgentRecipe {
                 RecipeTag(tag: id, level: unknown ? "unknown" : yes ? level : "no", evidence: "the recipe's \(what)", checked: checked)
             }
             if id.hasPrefix("gateway:") {
-                guard let s = gateways.first(where: { "gateway:" + $0.gateway == id }) else { return nil }
+                guard let s = gatewaySupport.first(where: { "gateway:" + $0.gateway == id }) else { return nil }
                 return RecipeTag(tag: id, level: s.level, evidence: s.evidence ?? s.reason, source: s.source, notes: s.limits, checked: s.checked)
             }
             switch id {
             case "multi-vendor-models":
+                let gateways = gatewaySupport
                 let best = gateways.min { rank[$0.level, default: 9] < rank[$1.level, default: 9] }
                 let level = gateways.contains(where: \.isApplicable) ? best!.level : gateways.allSatisfy { $0.level == "no" } ? "no" : "unknown"
                 let via = gateways.filter { $0.level == level }.map(\.gateway)
@@ -1410,13 +1411,26 @@ extension AgentRecipe {
         // 617 (owner): what it is — a kind and its categories, declared.
         try Categories.validate(kind: catalogKind, categories: categories, what: "recipe \(id)")
         // gateways (owner, 617): one entry per catalogue gateway, each with its evidence and machine-applicable how.
+        // 618: a gateway models@1 offers is derived (gatewaySupport) — an entry for it only overrides; every other
+        // catalogue gateway is said explicitly. What a try can do and what the entry says never disagree.
         let catalogue = Gateways.all.map(\.id)
-        guard gateways.map(\.gateway).sorted() == catalogue.sorted() else {
-            throw bad("gateways: one entry for each of \(catalogue.joined(separator: ", ")) (unknown is allowed, said explicitly)")
+        let entries = gateways.map(\.gateway)
+        guard Set(entries).count == entries.count, Set(entries).isSubset(of: catalogue) else {
+            throw bad("gateways: at most one entry for each of \(catalogue.joined(separator: ", "))")
+        }
+        for g in catalogue where !entries.contains(g) && derivedGateway(g) == nil {
+            throw bad(offersGateway(g)
+                ? "gateways[\(g)]: models@1 offers it — cite where the tool documents it (the shape's source, the native entry's docs) or give an entry"
+                : "gateways: one entry for each of \(catalogue.joined(separator: ", ")) that models@1 does not offer (unknown is allowed, said explicitly)")
         }
         for s in gateways {
             let at = "gateways[\(s.gateway)]"
             guard GatewaySupport.levels.contains(s.level) else { throw bad("\(at).level: \(GatewaySupport.levels.joined(separator: ", "))") }
+            if models != nil {
+                let offered = offersGateway(s.gateway)
+                if offered, !s.isApplicable { throw bad("\(at): models@1 offers it, so it is not \(s.level)") }
+                if !offered, s.isApplicable { throw bad("\(at): \(s.level), but models@1 does not offer it — add it to models@1, or say no and why") }
+            }
             if let d = s.checked, !Self.isISODate(d) { throw bad("\(at).checked is not an ISO date") }
             if let u = s.source, !u.hasPrefix("https://") { throw bad("\(at).source is an https URL") }
             if let sh = s.shape, !Gateway.shapes.contains(sh) { throw bad("\(at).shape \(sh)") }
@@ -1426,7 +1440,9 @@ extension AgentRecipe {
             }
             switch s.level {
             case "documented", "verified", "experimental":
-                guard let how = s.how, !(how.env ?? [:]).isEmpty || !(how.config ?? []).isEmpty else { throw bad("\(at): how (env or config) is required") }
+                // models@1 says how a try reaches an offered gateway; `how` is then optional.
+                let how = s.how ?? GatewayHow()
+                if !offersGateway(s.gateway), (how.env ?? [:]).isEmpty, (how.config ?? []).isEmpty { throw bad("\(at): how (env or config) is required") }
                 guard s.checked != nil else { throw bad("\(at): checked is required") }
                 if s.level == "documented", s.source == nil { throw bad("\(at): a documented entry cites its source") }
                 if s.level != "documented", s.evidence?.isEmpty != false { throw bad("\(at): a \(s.level) entry says its evidence") }

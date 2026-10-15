@@ -32,8 +32,13 @@ extension AgentRecipe {
             public var env: [String: String]
             /// Where the tool reads the key for this shape — the placeholder is put there too.
             public var keyEnv: [String]?
-            enum CodingKeys: String, CodingKey { case shape, env, keyEnv = "key_env" }
-            public init(shape: String, env: [String: String], keyEnv: [String]? = nil) { self.shape = shape; self.env = env; self.keyEnv = keyEnv }
+            /// Where the tool documents taking this shape's base URL, key and model (an https page) — what makes a gateway
+            /// it offers count as `documented` without a gateways@1 entry of its own.
+            public var source: String?
+            enum CodingKeys: String, CodingKey { case shape, env, keyEnv = "key_env", source }
+            public init(shape: String, env: [String: String], keyEnv: [String]? = nil, source: String? = nil) {
+                self.shape = shape; self.env = env; self.keyEnv = keyEnv; self.source = source
+            }
         }
 
         public struct NativeEntry: Codable, Sendable, Equatable {
@@ -41,8 +46,12 @@ extension AgentRecipe {
             /// `{model}` only (a native client has no base URL).
             public var env: [String: String]
             public var keyEnv: [String]?
-            enum CodingKeys: String, CodingKey { case source, env, keyEnv = "key_env" }
-            public init(source: String, env: [String: String], keyEnv: [String]? = nil) { self.source = source; self.env = env; self.keyEnv = keyEnv }
+            /// Where the tool documents this source (an https page), as `ShapeEntry.source`.
+            public var docs: String?
+            enum CodingKeys: String, CodingKey { case source, env, keyEnv = "key_env", docs }
+            public init(source: String, env: [String: String], keyEnv: [String]? = nil, docs: String? = nil) {
+                self.source = source; self.env = env; self.keyEnv = keyEnv; self.docs = docs
+            }
         }
     }
 
@@ -59,6 +68,40 @@ extension AgentRecipe {
         }
         guard out.contains(m.default) else { return out }
         return [m.default] + out.filter { $0 != m.default }
+    }
+
+    /// 618 (owner: "openrouter can behave as an openai compatible model API"): how it works through each catalogue
+    /// gateway — THE list the plan's offer, `doz search`, the tags and the Quick try's "Through a gateway" read. A gateway
+    /// models@1 offers (a shape the gateway serves, or a native entry) needs no gateways@1 entry: it is derived, as
+    /// `documented` from the entry's own `source`. A gateways@1 entry overrides it — `verified` once `make recipe-check`
+    /// has run the tool through it (its evidence), or the levels of a tool without models@1. Catalogue order.
+    public var gatewaySupport: [GatewaySupport] {
+        Gateways.all.compactMap { g in
+            if let e = gateways.first(where: { $0.gateway == g.id }) { return e }
+            return derivedGateway(g.id)
+        }
+    }
+
+    /// True when a try can go through `gateway` (models@1 offers it).
+    public func offersGateway(_ gateway: String) -> Bool { models != nil && offeredSources.contains(gateway) }
+
+    /// A try through some gateway is possible — the Quick try's "Through a gateway".
+    public var throughGateway: Bool { Gateways.all.contains { offersGateway($0.id) } }
+
+    /// The entry models@1 implies for an offered gateway (nil: not offered, or no source to cite).
+    func derivedGateway(_ gateway: String) -> GatewaySupport? {
+        guard offersGateway(gateway), let m = models else { return nil }
+        if let n = m.native?.first(where: { $0.source == gateway }) {
+            guard let d = n.docs else { return nil }
+            return GatewaySupport(gateway: gateway, level: "documented", evidence: "offered through its own client (models@1)", source: d, checked: checked)
+        }
+        for e in m.shapes ?? [] {
+            guard let ep = ModelSources.endpoints(gateway).first(where: { $0.shapes.contains(e.shape) }) else { continue }
+            guard let d = e.source else { return nil }
+            return GatewaySupport(gateway: gateway, level: "documented", shape: e.shape, endpoint: ep.id,
+                                  evidence: "offered through its \(e.shape) base URL (models@1)", source: d, checked: checked)
+        }
+        return nil
     }
 
     /// 617: what a choice of `source` (and `model`, else the default) does — nil when the source is not offered, or the
@@ -89,11 +132,13 @@ extension AgentRecipe {
         var shapes = Set<String>()
         for e in m.shapes ?? [] {
             guard Gateway.shapes.contains(e.shape), shapes.insert(e.shape).inserted else { throw bad("models shape \(e.shape): a known shape, once") }
+            if let u = e.source, !u.hasPrefix("https://") { throw bad("models shape \(e.shape): source is an https URL") }
             try Self.validateSelectionEnv(e.env, keyEnv: e.keyEnv, baseURL: true, recipe: self, bad)
         }
         var natives = Set<String>()
         for n in m.native ?? [] {
             guard ids.contains(n.source), natives.insert(n.source).inserted else { throw bad("models native \(n.source): a provider or gateway, once") }
+            if let u = n.docs, !u.hasPrefix("https://") { throw bad("models native \(n.source): docs is an https URL") }
             try Self.validateSelectionEnv(n.env, keyEnv: n.keyEnv, baseURL: false, recipe: self, bad)
         }
         for x in m.except ?? [] where !ids.contains(x) { throw bad("models except \(x) is not a provider or gateway") }

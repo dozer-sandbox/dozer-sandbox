@@ -251,6 +251,43 @@ final class ModelSourcesTests: XCTestCase {
         b.models = AgentRecipe.Models(default: "anthropic")
         XCTAssertThrowsError(try b.validate(), "the built-in agents keep their own accounts")
     }
+
+    /// 618: an OpenAI-compatible shape is offered the gateways without listing them; what a try can do and what the
+    /// gateway entries say never disagree; `verified` only from an entry that says its evidence.
+    func testTheGatewaysFollowFromTheShapes() throws {
+        var r = sgpt
+        r.gateways = []
+        r.models?.shapes?[0].source = "https://example.com/docs#base-url"
+        XCTAssertNoThrow(try r.validate(), "an offered gateway needs no entry")
+        XCTAssertEqual(r.gatewaySupport.map(\.gateway), ["openrouter", "vercel-ai-gateway"])
+        XCTAssertEqual(r.gatewaySupport.map(\.level), ["documented", "documented"], "documented, never verified, without evidence")
+        XCTAssertEqual(r.gatewaySupport.first?.source, "https://example.com/docs#base-url")
+        XCTAssertEqual(r.gatewaySupport.first?.endpoint, "v1")
+        XCTAssertTrue(r.throughGateway)
+        XCTAssertTrue(r.capabilityTags.contains { $0.tag == "gateway:openrouter" && $0.level == "documented" })
+        // An entry overrides (the evidence of a recipe-check run).
+        r.gateways = [AgentRecipe.GatewaySupport(gateway: "openrouter", level: "verified", evidence: "make recipe-check", checked: "2026-10-16")]
+        XCTAssertNoThrow(try r.validate(), "an override needs no how: models@1 says it")
+        XCTAssertEqual(r.gatewaySupport.map(\.level), ["verified", "documented"])
+        // Never a contradiction.
+        r.gateways = [AgentRecipe.GatewaySupport(gateway: "openrouter", level: "no", reason: "x")]
+        XCTAssertThrowsError(try r.validate(), "offered, so not no")
+        r.gateways = []
+        r.models?.shapes?[0].source = nil
+        XCTAssertThrowsError(try r.validate(), "an offered gateway with nothing to cite") { XCTAssertTrue("\($0)".contains("cite"), "\($0)") }
+        r.models?.shapes?[0].source = "http://example.com"
+        XCTAssertThrowsError(try r.validate(), "an https source")
+        // A tool with models@1 that is not offered a gateway says so; it cannot claim one.
+        var n = sgpt
+        n.models?.except = ["openrouter"]
+        n.network.model.hosts?.removeAll { $0.host == "openrouter.ai" }
+        n.gateways = sgpt.gateways
+        XCTAssertThrowsError(try n.validate(), "verified, but not offered")
+        XCTAssertFalse(n.offersGateway("openrouter"))
+        // Without models@1 nothing is offered, whatever the entries document (the built-ins).
+        let cc = try XCTUnwrap(AgentRecipes.recipe("claude-code"))
+        XCTAssertFalse(cc.throughGateway)
+    }
 }
 
 extension HostCore {

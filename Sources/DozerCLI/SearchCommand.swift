@@ -140,7 +140,10 @@ func searchDetails(_ e: DirectoryIndex.Entry) -> String {
             + (a.note.map { " — \($0)" } ?? "") + "\n"
     }
     for l in e.limits { s += "  limit: \(l.with.map { "\($0.key) \($0.value)" }.sorted().joined(separator: ", ")) — \(l.reason)\n" }
-    if !e.gateways.isEmpty { s += "  model gateways: " + e.gateways.map { "\($0.gateway) \($0.level)" }.joined(separator: " · ") + "\n" }
+    if !e.gateways.isEmpty {
+        s += "  model gateways: " + e.gateways.map { "\($0.gateway) \($0.level)" + ($0.offered == true ? " (doz try --gateway \($0.gateway))" : "") }
+            .joined(separator: " · ") + "\n"
+    }
     let tags = e.tags.filter { ["documented", "verified"].contains($0.level) }.map(\.tag)
     if let k = e.catalogKind { s += "  what it is: " + categoryLine(kind: k, categories: e.categories) + "\n" }
     if !tags.isEmpty { s += "  tags: \(tags.joined(separator: ", "))\n" }

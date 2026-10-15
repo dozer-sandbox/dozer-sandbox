@@ -220,10 +220,14 @@ is the program. Its sha512 is checked against `integrity`; it is placed under `/
 `{kind, provider?, account?, accounts?, keys_page?, free_tier?, free_tier_note?, in_sandbox?, gateways?, note?,
 checked?}`; `kind` is `api-key`, `vendor-sign-in`, `none` or `gateway`.
 
-**`com.dozersandbox/gateways@1`** — `entries`: one per model gateway in Dozer's catalogue: `{gateway, level (documented
-| verified | experimental | no | unknown), shape?, endpoint?, how?, proxy_route?, limits?, notes?, evidence?,
-source?, checked?, reason?}`. `how` is `{env?, config?, args?, model_args?}`, whose values may hold
-`${{ dozer.placeholder }}`, `${{ dozer.model }}` and `${{ dozer.gateway.endpoint.ID }}`.
+**`com.dozersandbox/gateways@1`** — `entries`: how it works through each model gateway in Dozer's catalogue: `{gateway,
+level (documented | verified | experimental | no | unknown), shape?, endpoint?, how?, proxy_route?, limits?, notes?,
+evidence?, source?, checked?, reason?}`. `how` is `{env?, config?, args?, model_args?}`, whose values may hold
+`${{ dozer.placeholder }}`, `${{ dozer.model }}` and `${{ dozer.gateway.endpoint.ID }}`. A gateway that `models@1` offers
+needs no entry: it is `documented`, citing the shape's `source` (or the native entry's `docs`). An entry for it only
+overrides that — `verified` with its evidence once `make recipe-check` has run the tool through it — and needs no `how`.
+Every gateway models@1 does not offer has an entry (`no` with its reason, or `unknown`); a recipe with models@1 may not
+call one `documented`/`verified`/`experimental` that a try cannot use, nor `no` one it offers.
 
 **`com.dozersandbox/models@1`** — which model sources it can be tried with, and how a choice reaches its own settings.
 See [Model sources](#model-sources-providers-and-gateways).
@@ -378,9 +382,11 @@ A recipe says what it can speak, and nothing about keys:
     - shape: openai-chat
       env: {API_BASE_URL: '${{ dozer.base_url }}', DEFAULT_MODEL: '${{ dozer.model }}'}
       key_env: [OPENAI_API_KEY]          # where it reads the key for this shape
+      source: https://…                  # where the tool documents taking a base URL, key and model
     native:                              # the sources it reaches through its own client (no base URL)
     - source: anthropic
       env: {DEFAULT_MODEL: 'anthropic/${{ dozer.model }}'}
+      docs: https://…                    # optional: where the tool documents this source
     models:                              # optional: a default model per source, over the source's own
       openrouter: openai/gpt-5.4-mini
 ```
@@ -389,7 +395,9 @@ A recipe says what it can speak, and nothing about keys:
 recipe is offered (in a fresh try with that source's fake key) and puts that source's model there.
 
 - **What it is offered:** every source with an endpoint speaking one of `shapes` (the first shape listed that the source
-  serves wins), and every source named in `native`. `except` (a list of source ids) leaves sources out a shape would
+  serves wins), and every source named in `native`. So a tool that takes an OpenAI-compatible base URL (`openai-chat`
+  or `openai-responses`) is offered OpenRouter and Vercel AI Gateway without naming them; its gateway entries follow
+  (see `gateways@1`), and so do `--gateway`, the plan, the Quick try's "Through a gateway" and `doz search`. `except` (a list of source ids) leaves sources out a shape would
   offer. The try setup, New Sandbox, `doz try --provider SOURCE` (`--gateway` is the same flag) and `doz create` offer
   exactly these.
 - **What a choice does:** at every session open and every `doz exec`, Dozer sets the chosen entry's `env` (never over a

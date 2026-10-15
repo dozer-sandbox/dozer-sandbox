@@ -1672,7 +1672,11 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   that source's key), the plan's `model` (+ every offered source), the Quick try setup's Model section, New Sandbox's
   chooser (`WebAccounts.sources`). **A recipe agent's sandbox decrypts every model source's hosts**
   (`EgressProxy.leakGuardHosts`) so a placeholder sent to another source is refused, never tunnelled unseen. Codex keeps
-  its own flow (`AgentCredentials.codexFlow` — never "provider == openai"). `make recipe-check` runs a models@1 recipe
+  its own flow (`AgentCredentials.codexFlow` — never "provider == openai"). 618 (owner: "openrouter can behave as an openai compatible model API"): a gateway models@1
+  offers needs no gateways@1 entry — `AgentRecipe.gatewaySupport` derives it (`documented`, citing the shape's `source` /
+  the native entry's `docs`); an entry only overrides (`verified` + evidence once recipe-check ran it, no `how` needed),
+  and a models@1 recipe's entries may never contradict what a try can do (`offersGateway`). The Quick try's "Through a
+  gateway" is `throughGateway`; `doz search` marks the offered ones; the tags read `gatewaySupport`. `make recipe-check` runs a models@1 recipe
   once per offered source (`RECIPE_SELECTIONS`), `ModelSourcesTests`, `probes/617-*/recipes/models/browser-try-models.mjs`.
 - **The guide** (617.11, owner: "i tried fabric and it just gave me a terminal … our companion guide"; `RecipeGuide.swift`,
   `SandboxGuide.swift`, `components/try-guide.js`, RECIPE-FORMAT.md "The guide"): `guide@1` = intro, ≤ 8 steps
