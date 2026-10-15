@@ -151,12 +151,14 @@ final class ModelSourcesTests: XCTestCase {
         let back = try ChoiceOptions.from(Array(p.argv.dropFirst(3)) + ["--agent", "shell-gpt"]).planChoices()
         XCTAssertEqual(back.modelSource, "openrouter")
         XCTAssertEqual(back.model, "anthropic/claude-sonnet-4.6")
-        // 618: pi on a gateway reaches that gateway, not Anthropic's model; on Anthropic it keeps that line.
+        // 618: pi on a gateway: its key goes to that gateway; Anthropic's hosts stay reachable with no key; on Anthropic the line is as before.
         let model = AgentPermissions.permission("model")!.title
         let pg = CreatePlanner.plan(PlanRequest(purpose: "try", create: try ChoiceOptions.from(["--agent", "pi", "--gateway", "openrouter",
                                                                                                  "--model", "anthropic/claude-sonnet-4.5"]).planChoices()), facts: facts)
         XCTAssertEqual(pg.reach.first?.text, "Model: anthropic/claude-sonnet-4.5 through OpenRouter (openrouter.ai) — its key only ever goes there")
         XCTAssertFalse(pg.reach.contains { $0.text.hasPrefix(model) }, pg.reach.map(\.text).joined(separator: " | "))
+        XCTAssertTrue(pg.reach.contains { $0.kind == "model" && $0.text == "Anthropic, pi's default provider (api.anthropic.com, statsig.anthropic.com): reachable; no key goes there on this run" },
+                      "still reachable (the permission stays), and said so")
         let pa = CreatePlanner.plan(PlanRequest(purpose: "try", create: try ChoiceOptions.from(["--agent", "pi"]).planChoices()), facts: facts)
         XCTAssertTrue(pa.reach.contains { $0.text.hasPrefix(model) }, pa.reach.map(\.text).joined(separator: " | "))
         // No key of the chosen source: no account, the problem names the fix.
@@ -233,6 +235,10 @@ final class ModelSourcesTests: XCTestCase {
         XCTAssertTrue(v.hasSecret("key:openrouter"))
         XCTAssertFalse(v.hasSecret("anthropic"))
         XCTAssertEqual(Set(v.sessionEnvironment().keys), ["OPENROUTER_API_KEY"], "pi reads OPENROUTER_API_KEY itself")
+        // Anthropic's hosts stay reachable (its shared model permission) but no key goes there: no Anthropic binding, and
+        // the OpenRouter placeholder sent there is refused by the leak guard.
+        let guarded = try await XCTUnwrapAsync(await c.leakGuardHosts(of: "p"))
+        XCTAssertTrue(guarded.contains("api.anthropic.com"))
         let perms = try await c.permissionsOf("p")
         XCTAssertTrue(perms?.contains("sources:pi") == true)
         let args = try await c.builtinModelArguments(of: "p")

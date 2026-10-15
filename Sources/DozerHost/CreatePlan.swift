@@ -362,10 +362,14 @@ public enum CreatePlanner {
                                newFolder: newFolder, settings: f.settings,
                                bridgeSettings: o.settings, agent: choice?.agent)
         if let m = planModel {
-            // 618: a built-in agent (pi) on another source than Anthropic talks to that source only — its shared
-            // Anthropic model permission is not what it reaches (the source's line below is), as for a recipe agent.
-            if m.source != "anthropic", choice?.agent.recipe?.isBuiltin == true, let t = AgentPermissions.permission("model")?.title {
-                reach.removeAll { $0.kind == "model" && $0.text.hasPrefix(t) }
+            // 618: a built-in agent (pi) on another source than Anthropic keeps its shared Anthropic model permission (an
+            // account switched back needs it), so those hosts stay reachable — but this run's key is the source's, which the
+            // proxy swaps in only on that source's hosts, and the Anthropic binding is gone: say exactly that.
+            if m.source != "anthropic", let r = choice?.agent.recipe, r.isBuiltin, let perm = AgentPermissions.permission("model") {
+                let hosts = perm.hosts.map(\.host).joined(separator: ", ")
+                for i in reach.indices where reach[i].kind == "model" && reach[i].text.hasPrefix(perm.title) {
+                    reach[i].text = "Anthropic, \(r.title)'s default provider (\(hosts)): reachable; no key goes there on this run"
+                }
             }
             let hosts = ModelSources.hosts(m.source).joined(separator: ", ")
             reach.insert(ReachLine("model", "Model: \(m.model) through \(m.title) (\(hosts)) — its key only ever goes there"), at: 0)
