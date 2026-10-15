@@ -113,15 +113,21 @@ final class AgentRecipeTests: XCTestCase {
 
     func test_everyRecipeHasAnEntryForEveryGateway() {
         for r in AgentRecipes.all {
-            XCTAssertEqual(r.gateways.map(\.gateway).sorted(), Gateways.all.map(\.id).sorted(), r.id)
+            // 618: an entry, or derived from models@1 (gatewaySupport).
+            XCTAssertEqual(r.gatewaySupport.map(\.gateway).sorted(), Gateways.all.map(\.id).sorted(), r.id)
         }
     }
 
     /// Every applicable entry's templates resolve against the catalogue with no unknown placeholder.
     func test_everyApplicableHowResolves() throws {
         for r in AgentRecipes.all {
-            for s in r.gateways where s.isApplicable {
-                let how = try XCTUnwrap(try s.resolved(placeholder: "doz_cred_PLACEHOLDER", model: "anthropic/claude-x"), "\(r.id) × \(s.gateway)")
+            for s in r.gatewaySupport where s.isApplicable {
+                // 618: a gateway models@1 offers needs no how — models@1 says it.
+                guard let how = try s.resolved(placeholder: "doz_cred_PLACEHOLDER", model: "anthropic/claude-x") else {
+                    XCTAssertTrue(r.offersGateway(s.gateway), "\(r.id) × \(s.gateway): a how, or offered by models@1")
+                    XCTAssertNotNil(s.checked, "\(r.id) × \(s.gateway)")
+                    continue
+                }
                 let strings = (how.env.map { Array($0.values) } ?? []) + (how.args ?? []) + (how.modelArgs ?? [])
                     + (how.config ?? []).flatMap { $0.set.values.flatMap(\.strings) }
                 for v in strings { XCTAssertFalse(v.contains("{"), "\(r.id) × \(s.gateway): \(v)") }
@@ -141,7 +147,7 @@ final class AgentRecipeTests: XCTestCase {
         var unknown: [String] = [], experimental: [String] = []
         // 617 (models@1): a recipe that declares its model sources says yes or no to every gateway (checked below).
         for r in AgentRecipes.all where r.models != nil {
-            for s in r.gateways {
+            for s in r.gatewaySupport {
                 XCTAssertNotEqual(s.level, "unknown", "\(r.id) × \(s.gateway)")
                 XCTAssertEqual(s.isApplicable, r.offeredSources.contains(s.gateway), "\(r.id) × \(s.gateway): verified exactly when offered")
             }
@@ -153,7 +159,7 @@ final class AgentRecipeTests: XCTestCase {
             }
         }
         // Antigravity CLI names undocumented AGY_LLM_GATEWAY_* settings — not checked yet.
-        XCTAssertEqual(unknown, ["antigravity × openrouter", "antigravity × vercel-ai-gateway", "tgpt × openrouter", "tgpt × vercel-ai-gateway", "adk × openrouter", "adk × vercel-ai-gateway", "clai × openrouter", "clai × vercel-ai-gateway", "goose × vercel-ai-gateway", "kilo × vercel-ai-gateway", "mistral-vibe × openrouter", "mistral-vibe × vercel-ai-gateway", "droid × openrouter", "droid × vercel-ai-gateway", "dirac × openrouter", "dirac × vercel-ai-gateway", "kimi-code × openrouter", "kimi-code × vercel-ai-gateway", "cline × openrouter", "cline × vercel-ai-gateway", "openhands × openrouter", "openhands × vercel-ai-gateway", "letta-code × openrouter", "letta-code × vercel-ai-gateway", "docker-agent × openrouter", "docker-agent × vercel-ai-gateway", "nanocoder × openrouter", "nanocoder × vercel-ai-gateway", "mini-swe-agent × openrouter", "mini-swe-agent × vercel-ai-gateway", "open-interpreter × openrouter", "open-interpreter × vercel-ai-gateway", "crush × openrouter", "crush × vercel-ai-gateway", "mimo-code × openrouter", "mimo-code × vercel-ai-gateway", "codewhale × openrouter", "codewhale × vercel-ai-gateway", "maki × openrouter", "maki × vercel-ai-gateway", "omp × openrouter", "omp × vercel-ai-gateway", "tau × openrouter", "tau × vercel-ai-gateway"])
+        XCTAssertEqual(unknown, ["antigravity × openrouter", "antigravity × vercel-ai-gateway", "tgpt × openrouter", "tgpt × vercel-ai-gateway", "adk × openrouter", "adk × vercel-ai-gateway", "clai × openrouter", "clai × vercel-ai-gateway", "goose × vercel-ai-gateway", "kilo × vercel-ai-gateway", "droid × openrouter", "droid × vercel-ai-gateway", "dirac × openrouter", "dirac × vercel-ai-gateway", "cline × openrouter", "cline × vercel-ai-gateway", "letta-code × openrouter", "letta-code × vercel-ai-gateway", "docker-agent × openrouter", "docker-agent × vercel-ai-gateway", "nanocoder × openrouter", "nanocoder × vercel-ai-gateway", "mini-swe-agent × openrouter", "mini-swe-agent × vercel-ai-gateway", "open-interpreter × openrouter", "open-interpreter × vercel-ai-gateway", "crush × openrouter", "crush × vercel-ai-gateway", "mimo-code × openrouter", "mimo-code × vercel-ai-gateway", "codewhale × openrouter", "codewhale × vercel-ai-gateway", "maki × openrouter", "maki × vercel-ai-gateway", "omp × openrouter", "omp × vercel-ai-gateway", "tau × openrouter", "tau × vercel-ai-gateway"])
         XCTAssertEqual(experimental, ["grok × openrouter"])
     }
 
@@ -215,7 +221,7 @@ final class AgentRecipeTests: XCTestCase {
         XCTAssertEqual(level("grok", "headless"), "verified")
         XCTAssertTrue(AgentRecipes.recipe("codex")!.hasTag("multi-vendor-models"))
         XCTAssertFalse(AgentRecipes.recipe("gemini")!.hasTag("multi-vendor-models"))
-        XCTAssertEqual(AgentRecipes.all.filter { $0.models == nil && $0.hasTag("gateway:openrouter") }.map(\.id), ["claude-code", "pi", "codex", "opencode", "copilot", "qwen-code", "goose", "kilo"])
+        XCTAssertEqual(AgentRecipes.all.filter { $0.models == nil && $0.hasTag("gateway:openrouter") }.map(\.id), ["claude-code", "pi", "codex", "opencode", "copilot", "goose", "kilo"])
         XCTAssertEqual(AgentRecipes.all.filter { $0.models != nil }.filter { $0.hasTag("gateway:openrouter") }.map(\.id),
                        AgentRecipes.all.filter { $0.offeredSources.contains("openrouter") && $0.models != nil }.map(\.id), "617: offered = the tag")
     }

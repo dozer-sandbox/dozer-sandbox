@@ -162,7 +162,8 @@ extension AgentRecipe {
             }
             if !baseURL, v.contains("{base_url}") { throw bad("models native env \(k): no {base_url} (a native client has none)") }
             let stripped = v.replacingOccurrences(of: "{base_url}", with: "").replacingOccurrences(of: "{model}", with: "")
-            if stripped.contains("{") { throw bad("models env \(k): only {base_url} and {model}") }
+            // 618: a JSON value may hold braces (Mistral Vibe's VIBE_PROVIDERS); a template other than these two may not.
+            if stripped.range(of: "\\{[A-Za-z_][A-Za-z0-9_.]*\\}", options: .regularExpression) != nil { throw bad("models env \(k): only {base_url} and {model}") }
         }
         var seen = Set<String>()
         for a in keyEnv ?? [] {

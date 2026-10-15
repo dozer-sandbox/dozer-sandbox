@@ -18,16 +18,37 @@
           "model" : {
             "hosts" : [
               {
+                "host" : "api.anthropic.com",
+                "reason" : "Anthropic — when the sandbox's key is Anthropic's"
+              },
+              {
+                "host" : "api.openai.com",
+                "reason" : "OpenAI — when the sandbox's key is OpenAI's"
+              },
+              {
                 "host" : "api.x.ai",
                 "paths" : [
                   "/v1/chat/completions"
-                ]
+                ],
+                "reason" : "xAI — when the sandbox's key is xAI's"
+              },
+              {
+                "host" : "generativelanguage.googleapis.com",
+                "reason" : "Google AI — when the sandbox's key is Google AI's"
+              },
+              {
+                "host" : "openrouter.ai",
+                "reason" : "OpenRouter — when the sandbox's key is OpenRouter's"
+              },
+              {
+                "host" : "ai-gateway.vercel.sh",
+                "reason" : "Vercel AI Gateway — when the sandbox's key is Vercel AI Gateway's"
               }
             ],
             "id" : "model:kimi-code",
-            "phrase" : "talk to your AI model (xAI)",
-            "summary" : "Kimi Code's model here (the xAI API, with your key) — needed for it to answer.",
-            "title" : "Talk to xAI"
+            "phrase" : "talk to your AI model",
+            "summary" : "Kimi Code's model — the provider or gateway its key is for (Anthropic, OpenAI, xAI, Google AI, OpenRouter or Vercel AI Gateway), with an API key. Needed for Kimi Code to answer.",
+            "title" : "Talk to its model provider"
           },
           "quiet" : [
             {
@@ -41,7 +62,12 @@
         },
         "runtime" : {
           "allow" : [
-            "api.x.ai:443"
+            "api.anthropic.com:443",
+            "api.openai.com:443",
+            "api.x.ai:443",
+            "generativelanguage.googleapis.com:443",
+            "openrouter.ai:443",
+            "ai-gateway.vercel.sh:443"
           ],
           "deny" : [
             "api.kimi.com:443"
@@ -185,18 +211,61 @@
             "accounts" : [
               "key"
             ],
-            "checked" : "2026-10-14",
+            "checked" : "2026-10-16",
             "keys_page" : "https://console.x.ai/",
             "kind" : "api-key",
-            "note" : "Kimi Code takes any OpenAI-compatible provider in its config.toml; Dozer names xAI's API (api_key_env XAI_API_KEY, so the key is read per request and never written there), model grok-build-0.1.",
+            "note" : "Kimi Code's model from the environment (KIMI_MODEL_NAME, KIMI_MODEL_PROVIDER_TYPE, KIMI_MODEL_BASE_URL; the key's placeholder under KIMI_MODEL_API_KEY), pointed at the chosen provider or gateway. On xAI (the default) the model is grok-build-0.1. Moonshot's own sign-in and keys Dozer does not offer yet.",
             "provider" : "xai"
           },
           {
-            "account" : "a Kimi account (kimi login, a device code) or a Moonshot platform key",
-            "checked" : "2026-10-14",
-            "in_sandbox" : false,
-            "kind" : "vendor-sign-in",
-            "note" : "Kimi's own models need Moonshot's sign-in or key, which Dozer does not hold yet."
+            "accounts" : [
+              "api-key"
+            ],
+            "checked" : "2026-10-16",
+            "keys_page" : "https://console.anthropic.com/settings/keys",
+            "kind" : "api-key",
+            "note" : "Kimi Code through Anthropic: doz try kimi-code --provider anthropic (or choose it in the try setup); the model with --model.",
+            "provider" : "anthropic"
+          },
+          {
+            "accounts" : [
+              "openai-key"
+            ],
+            "checked" : "2026-10-16",
+            "keys_page" : "https://platform.openai.com/api-keys",
+            "kind" : "api-key",
+            "note" : "Kimi Code through OpenAI: doz try kimi-code --provider openai (or choose it in the try setup); the model with --model.",
+            "provider" : "openai"
+          },
+          {
+            "accounts" : [
+              "key"
+            ],
+            "checked" : "2026-10-16",
+            "keys_page" : "https://aistudio.google.com/apikey",
+            "kind" : "api-key",
+            "note" : "Kimi Code through Google AI: doz try kimi-code --provider google (or choose it in the try setup); the model with --model.",
+            "provider" : "google"
+          },
+          {
+            "accounts" : [
+              "key"
+            ],
+            "checked" : "2026-10-16",
+            "keys_page" : "https://openrouter.ai/keys",
+            "kind" : "api-key",
+            "note" : "Kimi Code through OpenRouter: doz try kimi-code --gateway openrouter (or choose it in the try setup); the model with --model.",
+            "provider" : "openrouter"
+          },
+          {
+            "accounts" : [
+              "key"
+            ],
+            "checked" : "2026-10-16",
+            "keys_page" : "https://vercel.com/docs/ai-gateway/authentication-and-byok",
+            "kind" : "api-key",
+            "note" : "Kimi Code through Vercel AI Gateway: doz try kimi-code --gateway vercel-ai-gateway (or choose it in the try setup); the model with --model.",
+            "provider" : "vercel-ai-gateway"
           }
         ]
       },
@@ -206,20 +275,57 @@
       "config" : {
         "entries" : [
           {
-            "checked" : "2026-10-14",
+            "checked" : "2026-10-16",
+            "evidence" : "make recipe-check: its check turn through a stand-in OpenRouter (doz try with --gateway openrouter; models@1)",
             "gateway" : "openrouter",
-            "level" : "unknown",
-            "reason" : "Kimi Code takes any OpenAI-compatible provider; OpenRouter was not checked"
+            "level" : "verified"
           },
           {
-            "checked" : "2026-10-14",
+            "checked" : "2026-10-16",
+            "evidence" : "make recipe-check: its check turn through a stand-in Vercel AI Gateway (doz try with --gateway vercel-ai-gateway; models@1)",
             "gateway" : "vercel-ai-gateway",
-            "level" : "unknown",
-            "reason" : "not checked against Kimi Code"
+            "level" : "verified"
           }
         ]
       },
       "type" : "com.dozersandbox/gateways@1"
+    },
+    {
+      "config" : {
+        "default" : "xai",
+        "models" : {
+          "xai" : "grok-build-0.1"
+        },
+        "shapes" : [
+          {
+            "env" : {
+              "KIMI_MODEL_BASE_URL" : "${{ dozer.base_url }}",
+              "KIMI_MODEL_MAX_CONTEXT_SIZE" : "256000",
+              "KIMI_MODEL_NAME" : "${{ dozer.model }}",
+              "KIMI_MODEL_PROVIDER_TYPE" : "openai"
+            },
+            "key_env" : [
+              "KIMI_MODEL_API_KEY"
+            ],
+            "shape" : "openai-chat",
+            "source" : "https://moonshotai.github.io/kimi-code/en/configuration/env-vars"
+          },
+          {
+            "env" : {
+              "KIMI_MODEL_BASE_URL" : "${{ dozer.base_url }}",
+              "KIMI_MODEL_MAX_CONTEXT_SIZE" : "200000",
+              "KIMI_MODEL_NAME" : "${{ dozer.model }}",
+              "KIMI_MODEL_PROVIDER_TYPE" : "anthropic"
+            },
+            "key_env" : [
+              "KIMI_MODEL_API_KEY"
+            ],
+            "shape" : "anthropic-messages",
+            "source" : "https://moonshotai.github.io/kimi-code/en/configuration/env-vars"
+          }
+        ]
+      },
+      "type" : "com.dozersandbox/models@1"
     },
     {
       "config" : {
@@ -259,7 +365,7 @@
             "tag" : "headless"
           }
         ],
-        "terms" : "Your xAI API key — a key from console.x.ai. Kimi's own models (a Kimi account or Moonshot key) are not offered yet."
+        "terms" : "Your API key of the provider or gateway you choose (xAI by default)."
       },
       "type" : "com.dozersandbox/directory@1"
     },
@@ -288,7 +394,7 @@
       "type" : "com.dozersandbox/guide@1"
     }
   ],
-  "description" : "Moonshot AI's coding agent for the terminal (the successor to kimi-cli), here on an xAI API key.",
+  "description" : "Moonshot AI's coding agent for the terminal (the successor to kimi-cli), on the key of the provider or gateway you choose (xAI by default).",
   "displayName" : "Kimi Code",
   "id" : "moonshotai/kimi-code",
   "kind" : "workload",

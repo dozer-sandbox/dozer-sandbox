@@ -18,16 +18,37 @@
           "model" : {
             "hosts" : [
               {
+                "host" : "api.anthropic.com",
+                "reason" : "Anthropic — when the sandbox's key is Anthropic's"
+              },
+              {
+                "host" : "api.openai.com",
+                "reason" : "OpenAI — when the sandbox's key is OpenAI's"
+              },
+              {
                 "host" : "api.x.ai",
                 "paths" : [
                   "/v1/chat/completions"
-                ]
+                ],
+                "reason" : "xAI — when the sandbox's key is xAI's"
+              },
+              {
+                "host" : "generativelanguage.googleapis.com",
+                "reason" : "Google AI — when the sandbox's key is Google AI's"
+              },
+              {
+                "host" : "openrouter.ai",
+                "reason" : "OpenRouter — when the sandbox's key is OpenRouter's"
+              },
+              {
+                "host" : "ai-gateway.vercel.sh",
+                "reason" : "Vercel AI Gateway — when the sandbox's key is Vercel AI Gateway's"
               }
             ],
             "id" : "model:mistral-vibe",
-            "phrase" : "talk to your AI model (xAI)",
-            "summary" : "Mistral Vibe's model here (the xAI API, with your key) — needed for it to answer.",
-            "title" : "Talk to xAI"
+            "phrase" : "talk to your AI model",
+            "summary" : "Mistral Vibe's model — the provider or gateway its key is for (Anthropic, OpenAI, xAI, Google AI, OpenRouter or Vercel AI Gateway), with an API key. Needed for Mistral Vibe to answer.",
+            "title" : "Talk to its model provider"
           },
           "update" : [
 
@@ -35,7 +56,12 @@
         },
         "runtime" : {
           "allow" : [
-            "api.x.ai:443"
+            "api.anthropic.com:443",
+            "api.openai.com:443",
+            "api.x.ai:443",
+            "generativelanguage.googleapis.com:443",
+            "openrouter.ai:443",
+            "ai-gateway.vercel.sh:443"
           ]
         }
       },
@@ -194,12 +220,9 @@
           "vibe"
         ],
         "env" : {
-          "VIBE_ACTIVE_MODEL" : "grok-build",
           "VIBE_ENABLE_AUTO_UPDATE" : "false",
           "VIBE_ENABLE_TELEMETRY" : "false",
-          "VIBE_ENABLE_UPDATE_CHECKS" : "false",
-          "VIBE_MODELS" : "[{\"name\":\"grok-build-0.1\",\"provider\":\"xai\",\"alias\":\"grok-build\"}]",
-          "VIBE_PROVIDERS" : "[{\"name\":\"xai\",\"api_base\":\"https://api.x.ai/v1\",\"api_key_env_var\":\"XAI_API_KEY\"}]"
+          "VIBE_ENABLE_UPDATE_CHECKS" : "false"
         },
         "no_prompts_args" : [
           "--auto-approve",
@@ -241,18 +264,61 @@
             "accounts" : [
               "key"
             ],
-            "checked" : "2026-10-14",
+            "checked" : "2026-10-16",
             "keys_page" : "https://console.x.ai/",
             "kind" : "api-key",
-            "note" : "Vibe is made for Mistral's models; Dozer offers it on an xAI key for now (VIBE_PROVIDERS names api.x.ai as an OpenAI-compatible provider, model grok-build-0.1), until it holds a Mistral key.",
+            "note" : "Mistral Vibe's own provider settings (VIBE_PROVIDERS, VIBE_MODELS), pointed at the chosen provider or gateway: an OpenAI-compatible base URL, or Anthropic's Messages API. On xAI (the default) the model is grok-build-0.1. Mistral's own keys Dozer does not offer yet.",
             "provider" : "xai"
           },
           {
-            "account" : "a Mistral account (MISTRAL_API_KEY or vibe --setup)",
-            "checked" : "2026-10-14",
-            "in_sandbox" : false,
-            "kind" : "vendor-sign-in",
-            "note" : "Vibe's own key and sign-in are for Mistral's API, which Dozer does not hold yet."
+            "accounts" : [
+              "api-key"
+            ],
+            "checked" : "2026-10-16",
+            "keys_page" : "https://console.anthropic.com/settings/keys",
+            "kind" : "api-key",
+            "note" : "Mistral Vibe through Anthropic: doz try mistral-vibe --provider anthropic (or choose it in the try setup); the model with --model.",
+            "provider" : "anthropic"
+          },
+          {
+            "accounts" : [
+              "openai-key"
+            ],
+            "checked" : "2026-10-16",
+            "keys_page" : "https://platform.openai.com/api-keys",
+            "kind" : "api-key",
+            "note" : "Mistral Vibe through OpenAI: doz try mistral-vibe --provider openai (or choose it in the try setup); the model with --model.",
+            "provider" : "openai"
+          },
+          {
+            "accounts" : [
+              "key"
+            ],
+            "checked" : "2026-10-16",
+            "keys_page" : "https://aistudio.google.com/apikey",
+            "kind" : "api-key",
+            "note" : "Mistral Vibe through Google AI: doz try mistral-vibe --provider google (or choose it in the try setup); the model with --model.",
+            "provider" : "google"
+          },
+          {
+            "accounts" : [
+              "key"
+            ],
+            "checked" : "2026-10-16",
+            "keys_page" : "https://openrouter.ai/keys",
+            "kind" : "api-key",
+            "note" : "Mistral Vibe through OpenRouter: doz try mistral-vibe --gateway openrouter (or choose it in the try setup); the model with --model.",
+            "provider" : "openrouter"
+          },
+          {
+            "accounts" : [
+              "key"
+            ],
+            "checked" : "2026-10-16",
+            "keys_page" : "https://vercel.com/docs/ai-gateway/authentication-and-byok",
+            "kind" : "api-key",
+            "note" : "Mistral Vibe through Vercel AI Gateway: doz try mistral-vibe --gateway vercel-ai-gateway (or choose it in the try setup); the model with --model.",
+            "provider" : "vercel-ai-gateway"
           }
         ]
       },
@@ -262,20 +328,55 @@
       "config" : {
         "entries" : [
           {
-            "checked" : "2026-10-14",
+            "checked" : "2026-10-16",
+            "evidence" : "make recipe-check: its check turn through a stand-in OpenRouter (doz try with --gateway openrouter; models@1)",
             "gateway" : "openrouter",
-            "level" : "unknown",
-            "reason" : "Vibe takes any OpenAI-compatible provider in its settings; OpenRouter was not checked"
+            "level" : "verified"
           },
           {
-            "checked" : "2026-10-14",
+            "checked" : "2026-10-16",
+            "evidence" : "make recipe-check: its check turn through a stand-in Vercel AI Gateway (doz try with --gateway vercel-ai-gateway; models@1)",
             "gateway" : "vercel-ai-gateway",
-            "level" : "unknown",
-            "reason" : "not checked against Vibe"
+            "level" : "verified"
           }
         ]
       },
       "type" : "com.dozersandbox/gateways@1"
+    },
+    {
+      "config" : {
+        "default" : "xai",
+        "models" : {
+          "xai" : "grok-build-0.1"
+        },
+        "shapes" : [
+          {
+            "env" : {
+              "VIBE_ACTIVE_MODEL" : "dozer",
+              "VIBE_MODELS" : "[{\"name\":\"${{ dozer.model }}\",\"provider\":\"dozer\",\"alias\":\"dozer\"}]",
+              "VIBE_PROVIDERS" : "[{\"name\":\"dozer\",\"api_base\":\"${{ dozer.base_url }}\",\"api_key_env_var\":\"OPENAI_API_KEY\",\"api_style\":\"openai\"}]"
+            },
+            "key_env" : [
+              "OPENAI_API_KEY"
+            ],
+            "shape" : "openai-chat",
+            "source" : "https://docs.mistral.ai/vibe/code/cli/configuration"
+          },
+          {
+            "env" : {
+              "VIBE_ACTIVE_MODEL" : "dozer",
+              "VIBE_MODELS" : "[{\"name\":\"${{ dozer.model }}\",\"provider\":\"dozer\",\"alias\":\"dozer\"}]",
+              "VIBE_PROVIDERS" : "[{\"name\":\"dozer\",\"api_base\":\"${{ dozer.base_url }}\",\"api_key_env_var\":\"ANTHROPIC_API_KEY\",\"api_style\":\"anthropic\"}]"
+            },
+            "key_env" : [
+              "ANTHROPIC_API_KEY"
+            ],
+            "shape" : "anthropic-messages",
+            "source" : "https://docs.mistral.ai/vibe/code/cli/configuration"
+          }
+        ]
+      },
+      "type" : "com.dozersandbox/models@1"
     },
     {
       "config" : {
@@ -309,7 +410,7 @@
             "tag" : "headless"
           }
         ],
-        "terms" : "Your xAI API key — a key from console.x.ai. Vibe runs on Mistral's models with a Mistral key, which Dozer does not offer yet."
+        "terms" : "Your API key of the provider or gateway you choose (xAI by default)."
       },
       "type" : "com.dozersandbox/directory@1"
     },
@@ -338,7 +439,7 @@
       "type" : "com.dozersandbox/guide@1"
     }
   ],
-  "description" : "Mistral AI's coding agent for the terminal, here on an xAI API key (Vibe's own OpenAI-compatible provider setting).",
+  "description" : "Mistral AI's coding agent for the terminal, on the key of the provider or gateway you choose (xAI by default; Vibe's own provider settings).",
   "displayName" : "Mistral Vibe",
   "id" : "mistralai/mistral-vibe",
   "kind" : "workload",

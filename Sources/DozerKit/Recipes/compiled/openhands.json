@@ -18,16 +18,37 @@
           "model" : {
             "hosts" : [
               {
+                "host" : "api.anthropic.com",
+                "reason" : "Anthropic — when the sandbox's key is Anthropic's"
+              },
+              {
+                "host" : "api.openai.com",
+                "reason" : "OpenAI — when the sandbox's key is OpenAI's"
+              },
+              {
                 "host" : "api.x.ai",
                 "paths" : [
                   "/v1/chat/completions"
-                ]
+                ],
+                "reason" : "xAI — when the sandbox's key is xAI's"
+              },
+              {
+                "host" : "generativelanguage.googleapis.com",
+                "reason" : "Google AI — when the sandbox's key is Google AI's"
+              },
+              {
+                "host" : "openrouter.ai",
+                "reason" : "OpenRouter — when the sandbox's key is OpenRouter's"
+              },
+              {
+                "host" : "ai-gateway.vercel.sh",
+                "reason" : "Vercel AI Gateway — when the sandbox's key is Vercel AI Gateway's"
               }
             ],
             "id" : "model:openhands",
-            "phrase" : "talk to your AI model (xAI)",
-            "summary" : "OpenHands' model here (the xAI API, with your key) — needed for it to answer.",
-            "title" : "Talk to xAI"
+            "phrase" : "talk to your AI model",
+            "summary" : "OpenHands' model — the provider or gateway its key is for (Anthropic, OpenAI, xAI, Google AI, OpenRouter or Vercel AI Gateway), with an API key. Needed for OpenHands to answer.",
+            "title" : "Talk to its model provider"
           },
           "update" : [
 
@@ -51,7 +72,12 @@
         },
         "runtime" : {
           "allow" : [
+            "api.anthropic.com:443",
+            "api.openai.com:443",
             "api.x.ai:443",
+            "generativelanguage.googleapis.com:443",
+            "openrouter.ai:443",
+            "ai-gateway.vercel.sh:443",
             "github.com:443",
             "pypi.org:443"
           ]
@@ -75,9 +101,6 @@
         "dozer" : {
           "accounts" : [
             "key"
-          ],
-          "env_aliases" : [
-            "LLM_API_KEY"
           ]
         },
         "phase" : "runtime",
@@ -123,8 +146,6 @@
         ],
         "env" : {
           "LITELLM_LOCAL_MODEL_COST_MAP" : "True",
-          "LLM_BASE_URL" : "https://api.x.ai/v1",
-          "LLM_MODEL" : "openai/grok-build-0.1",
           "OPENHANDS_SUPPRESS_BANNER" : "1"
         },
         "no_prompts_args" : [
@@ -168,18 +189,61 @@
             "accounts" : [
               "key"
             ],
-            "checked" : "2026-10-14",
+            "checked" : "2026-10-16",
             "keys_page" : "https://console.x.ai/",
             "kind" : "api-key",
-            "note" : "OpenHands reads LLM_API_KEY, LLM_MODEL and LLM_BASE_URL only with --override-with-envs (in Dozer's command); xAI's API as an OpenAI-compatible endpoint, model grok-build-0.1. Nothing is written to its settings.",
+            "note" : "OpenHands' LLM settings from the environment (--override-with-envs: LLM_MODEL, LLM_BASE_URL; the key's placeholder under LLM_API_KEY), pointed at the chosen provider or gateway. On xAI (the default) the model is grok-build-0.1. OpenHands Cloud Dozer does not offer.",
             "provider" : "xai"
           },
           {
-            "account" : "an OpenHands Cloud account (openhands login)",
-            "checked" : "2026-10-14",
-            "in_sandbox" : false,
-            "kind" : "vendor-sign-in",
-            "note" : "OpenHands Cloud needs its own sign-in; Dozer does not offer it yet."
+            "accounts" : [
+              "api-key"
+            ],
+            "checked" : "2026-10-16",
+            "keys_page" : "https://console.anthropic.com/settings/keys",
+            "kind" : "api-key",
+            "note" : "OpenHands through Anthropic: doz try openhands --provider anthropic (or choose it in the try setup); the model with --model.",
+            "provider" : "anthropic"
+          },
+          {
+            "accounts" : [
+              "openai-key"
+            ],
+            "checked" : "2026-10-16",
+            "keys_page" : "https://platform.openai.com/api-keys",
+            "kind" : "api-key",
+            "note" : "OpenHands through OpenAI: doz try openhands --provider openai (or choose it in the try setup); the model with --model.",
+            "provider" : "openai"
+          },
+          {
+            "accounts" : [
+              "key"
+            ],
+            "checked" : "2026-10-16",
+            "keys_page" : "https://aistudio.google.com/apikey",
+            "kind" : "api-key",
+            "note" : "OpenHands through Google AI: doz try openhands --provider google (or choose it in the try setup); the model with --model.",
+            "provider" : "google"
+          },
+          {
+            "accounts" : [
+              "key"
+            ],
+            "checked" : "2026-10-16",
+            "keys_page" : "https://openrouter.ai/keys",
+            "kind" : "api-key",
+            "note" : "OpenHands through OpenRouter: doz try openhands --gateway openrouter (or choose it in the try setup); the model with --model.",
+            "provider" : "openrouter"
+          },
+          {
+            "accounts" : [
+              "key"
+            ],
+            "checked" : "2026-10-16",
+            "keys_page" : "https://vercel.com/docs/ai-gateway/authentication-and-byok",
+            "kind" : "api-key",
+            "note" : "OpenHands through Vercel AI Gateway: doz try openhands --gateway vercel-ai-gateway (or choose it in the try setup); the model with --model.",
+            "provider" : "vercel-ai-gateway"
           }
         ]
       },
@@ -189,20 +253,53 @@
       "config" : {
         "entries" : [
           {
-            "checked" : "2026-10-14",
+            "checked" : "2026-10-16",
+            "evidence" : "make recipe-check: its check turn through a stand-in OpenRouter (doz try with --gateway openrouter; models@1)",
             "gateway" : "openrouter",
-            "level" : "unknown",
-            "reason" : "OpenHands takes any LiteLLM model and base URL; OpenRouter was not checked"
+            "level" : "verified"
           },
           {
-            "checked" : "2026-10-14",
+            "checked" : "2026-10-16",
+            "evidence" : "make recipe-check: its check turn through a stand-in Vercel AI Gateway (doz try with --gateway vercel-ai-gateway; models@1)",
             "gateway" : "vercel-ai-gateway",
-            "level" : "unknown",
-            "reason" : "not checked against OpenHands"
+            "level" : "verified"
           }
         ]
       },
       "type" : "com.dozersandbox/gateways@1"
+    },
+    {
+      "config" : {
+        "default" : "xai",
+        "models" : {
+          "xai" : "grok-build-0.1"
+        },
+        "shapes" : [
+          {
+            "env" : {
+              "LLM_BASE_URL" : "${{ dozer.base_url }}",
+              "LLM_MODEL" : "openai/${{ dozer.model }}"
+            },
+            "key_env" : [
+              "LLM_API_KEY"
+            ],
+            "shape" : "openai-chat",
+            "source" : "https://docs.openhands.dev/openhands/usage/cli/headless"
+          },
+          {
+            "env" : {
+              "LLM_BASE_URL" : "${{ dozer.base_url }}",
+              "LLM_MODEL" : "anthropic/${{ dozer.model }}"
+            },
+            "key_env" : [
+              "LLM_API_KEY"
+            ],
+            "shape" : "anthropic-messages",
+            "source" : "https://docs.openhands.dev/openhands/usage/cli/headless"
+          }
+        ]
+      },
+      "type" : "com.dozersandbox/models@1"
     },
     {
       "config" : {
@@ -242,7 +339,7 @@
             "tag" : "headless"
           }
         ],
-        "terms" : "Your xAI API key — a key from console.x.ai."
+        "terms" : "Your API key of the provider or gateway you choose (xAI by default)."
       },
       "type" : "com.dozersandbox/directory@1"
     },
@@ -271,7 +368,7 @@
       "type" : "com.dozersandbox/guide@1"
     }
   ],
-  "description" : "OpenHands' coding agent for the terminal, here on an xAI API key (its LLM settings from the environment).",
+  "description" : "OpenHands' coding agent for the terminal, on the key of the provider or gateway you choose (xAI by default; its LLM settings from the environment).",
   "displayName" : "OpenHands CLI",
   "id" : "openhands/openhands",
   "kind" : "workload",
