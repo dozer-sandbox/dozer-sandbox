@@ -495,7 +495,7 @@ public enum GuestCommand {
     """
 
     /// Root shell: install the shim, its aliases and the profile drop-in when missing or older
-    /// (idempotent, never fails the caller).
+    /// (idempotent, never fails the caller). 617: and the clipboard shim.
     public static var openShimInstall: String {
         let quoted = "'" + openShim.replacingOccurrences(of: "'", with: "'\\''") + "\n'"
         let profile = "'" + openShimProfile.replacingOccurrences(of: "'", with: "'\\''") + "\n'"
@@ -504,6 +504,92 @@ public enum GuestCommand {
             + " && printf '%s' \(quoted) > '\(openShimPath).tmp' && chmod 0755 '\(openShimPath).tmp'"
             + " && mv -f '\(openShimPath).tmp' '\(openShimPath)' && \(links)"
             + "; mkdir -p /etc/profile.d && printf '%s' \(profile) > '\(openShimProfilePath)'; }; } || true"
+            + "; " + copyShimInstall
+    }
+
+    // MARK: 617 — the clipboard bridge's guest half for programs that copy with a Linux clipboard tool
+
+    public static let copyShimPath = openShimDirectory + "/doz-copy"
+    /// The tools a Linux program runs to copy (clipboardy — Gemini CLI —, Grok Build's command-line route, scripts).
+    public static let copyShimAliases = ["xclip", "xsel", "wl-copy", "wl-paste"]
+    static let copyShimStamp = "doz:clipboard-shim:v1"
+
+    /// A sandbox has no X11 or Wayland display, so `xclip`/`xsel`/`wl-copy` have nothing to reach: a copy made with one
+    /// becomes OSC 52 on the session's terminal — the same sequence a TUI's own copy sends — and the host's clipboard bridge
+    /// decides (the setting `sandbox.clipboard`, its limits, its notice). Reading is refused: a sandbox never reads the
+    /// Mac's clipboard. With a real display (DISPLAY/WAYLAND_DISPLAY set) the real tool further down PATH runs instead.
+    /// Like the open shim it writes nothing a person sees (only the sequence, which every viewer takes out).
+    public static let copyShim = #"""
+    #!/bin/sh
+    # doz:clipboard-shim:v1
+    # Dozer Sandbox's clipboard bridge for programs that copy with xclip, xsel or wl-copy. This sandbox has no
+    # display, so the text goes to the session's terminal as OSC 52 and doz puts it on the Mac's clipboard (unless
+    # the clipboard bridge is off for this sandbox: doz config show --sandbox). A sandbox never reads the Mac's
+    # clipboard. Written at every boot and wake.
+    me=${0##*/}
+    if [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]; then
+        here=${0%/*}
+        rest=$(printf '%s' "$PATH" | tr ':' '\n' | grep -v -x -F "$here" | tr '\n' ':')
+        real=$(PATH="$rest" command -v "$me" 2>/dev/null)
+        [ -n "$real" ] && exec "$real" "$@"
+    fi
+    read=""
+    primary=""
+    files=""
+    tmp=""
+    for a in "$@"; do
+        case "$me:$a" in
+            *:-version|*:--version|*:-V) echo "$me (Dozer Sandbox's clipboard bridge: copies reach your Mac as OSC 52)"; exit 0 ;;
+            *:-h|*:-help|*:--help) echo "usage: ... | $me    (copies to your Mac's clipboard through the Dozer session; reading is refused)"; exit 0 ;;
+            wl-paste:*|xclip:-o|xclip:-out|xsel:-o|xsel:--output) read=1 ;;
+            xsel:-p|xsel:--primary|wl-copy:-p|wl-copy:--primary) primary=1 ;;
+            xsel:-c|xsel:--clear|wl-copy:-c|wl-copy:--clear) exit 0 ;;
+        esac
+    done
+    [ "$me" = wl-paste ] && read=1
+    if [ -n "$read" ]; then echo "$me: a sandbox cannot read your Mac's clipboard" >&2; exit 1; fi
+    # xclip's default selection is PRIMARY (the middle-click one): only an explicit clipboard copy goes to the Mac.
+    # Files named on its command line are what it copies (xclip FILE…).
+    if [ "$me" = xclip ]; then
+        primary=1
+        skip=""
+        for a in "$@"; do
+            if [ -n "$skip" ]; then
+                if [ "$skip" = sel ]; then case "$a" in c*|b*) primary="" ;; esac; fi
+                skip=""
+                continue
+            fi
+            case "$a" in
+                -selection|-sel) skip=sel ;;
+                -t|-target|-l|-loops|-d|-display) skip=1 ;;
+                -*) ;;
+                *) [ -n "$tmp" ] || tmp=$(mktemp 2>/dev/null || echo "/tmp/doz-copy.$$"); cat -- "$a" >> "$tmp" || exit 1; files=1 ;;
+            esac
+        done
+    fi
+    if [ -n "$primary" ]; then [ -n "$files" ] || cat >/dev/null 2>&1; [ -z "$tmp" ] || rm -f "$tmp"; exit 0; fi
+    if [ -n "$files" ]; then data=$(base64 < "$tmp" | tr -d '\n'); rm -f "$tmp"
+    elif [ "$me" = wl-copy ] && [ $# -gt 0 ] && [ "${1#-}" = "$1" ]; then data=$(printf '%s' "$*" | base64 | tr -d '\n')
+    else data=$(base64 | tr -d '\n'); fi
+    send() {
+        if [ -n "${TMUX:-}" ] && [ -n "${DOZ_TTY:-}" ] && [ -w "$DOZ_TTY" ] \
+            && printf '\033]52;c;%s\007' "$1" 2>/dev/null > "$DOZ_TTY"; then return 0; fi
+        if [ -w /dev/tty ] 2>/dev/null && printf '\033]52;c;%s\007' "$1" 2>/dev/null > /dev/tty; then return 0; fi
+        if [ -n "${DOZ_TTY:-}" ] && [ -w "$DOZ_TTY" ] && printf '\033]52;c;%s\007' "$1" 2>/dev/null > "$DOZ_TTY"; then return 0; fi
+        if [ -t 1 ]; then printf '\033]52;c;%s\007' "$1"; return 0; fi
+        echo "$me: no terminal of a Dozer session to reach your Mac through (run it in a session: doz attach, or the dashboard)" >&2
+        return 1
+    }
+    send "$data"
+    """#
+
+    /// Root shell: install the clipboard shim and its names when missing or older (idempotent, never fails the caller).
+    public static var copyShimInstall: String {
+        let quoted = "'" + copyShim.replacingOccurrences(of: "'", with: "'\\''") + "\n'"
+        let links = copyShimAliases.map { "ln -sf doz-copy '\(openShimDirectory)/\($0)'" }.joined(separator: "; ")
+        return "{ grep -q '\(copyShimStamp)' '\(copyShimPath)' 2>/dev/null || { mkdir -p '\(openShimDirectory)'"
+            + " && printf '%s' \(quoted) > '\(copyShimPath).tmp' && chmod 0755 '\(copyShimPath).tmp'"
+            + " && mv -f '\(copyShimPath).tmp' '\(copyShimPath)' && \(links); }; } || true"
     }
 
     // MARK: 599 (594.B3) — tmux inside a session

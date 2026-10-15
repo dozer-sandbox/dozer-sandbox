@@ -1,0 +1,178 @@
+# yaml-language-server: $schema=../../../../../schema/dozer-recipe-2.schema.json
+# Docker Agent — Dozer's recipe (schema 2). The format: docs/recipes/RECIPE-FORMAT.md.
+# Edit this file, then run make recipes (it writes Recipes/compiled/docker-agent.json, which Dozer embeds).
+schema: 2
+kind: workload
+id: docker/docker-agent
+displayName: Docker Agent
+description: Docker's YAML-defined agent runner (formerly cagent), its built-in coding agent on an xAI API key.
+author: Docker
+sourceUrl: https://github.com/docker/docker-agent
+licenses:
+- Apache-2.0
+args:
+  version:
+    description: The Docker Agent release Dozer installs (its pin).
+    default: 1.150.0
+    pattern: '[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?'
+    buildArg: DOCKER_AGENT_VERSION
+provides:
+- com.dozersandbox/docker-agent@${{ kit.args.version }}
+capabilities:
+- type: com.docker.sandbox/network-policy@1
+  config:
+    runtime:
+      allow:
+      - api.x.ai:443
+      deny:
+      - models.dev:443
+    dozer:
+      model:
+        id: model:docker-agent
+        title: Talk to xAI
+        summary: Docker Agent's model here (the xAI API, with your key) — needed for it to answer.
+        phrase: talk to your AI model (xAI)
+        hosts:
+        - host: api.x.ai
+          paths:
+          - /v1/chat/completions
+      update: []
+      excluded: []
+      quiet:
+      - host: models.dev
+        reason: Docker Agent reads the public models.dev catalogue at each run (no setting turns it off); with its model named it does without it when refused
+- type: com.docker.sandbox/credential@1
+  description: xAI API access
+  config:
+    service: xai
+    phase: runtime
+    apiKey:
+      name: XAI_API_KEY
+      proxyManaged: true
+      inject:
+      - domain: api.x.ai
+        header: authorization
+        format: Bearer %s
+    dozer:
+      accounts:
+      - key
+- type: com.docker.sandbox/volume@1
+  config:
+    path: /home/agent/.cagent
+- type: com.docker.sandbox/volume@1
+  config:
+    path: /home/agent/.config/cagent
+- type: com.dozersandbox/install@1
+  config:
+    kind: release-binary
+    url: https://github.com/docker/docker-agent/releases/download/v${{ kit.args.version }}/docker-agent-linux-arm64
+    binary: docker-agent
+    bake_hosts:
+    - github.com
+    - release-assets.githubusercontent.com
+    integrity: sha512-KklBky8+usd4CK6S48S940vZJpxg1wn1cKqmGgJmsfBw3YAkRWusE/nlnDqT4TM0l4Lh/SVPgAvC/d8XQdAVmA==
+- type: com.dozersandbox/launch@1
+  config:
+    command:
+    - docker-agent
+    - run
+    - coder
+    - --model
+    - xai/grok-build-0.1
+    no_prompts_args:
+    - --yolo
+    passthrough:
+    - --help
+    - -h
+    - help
+    - version
+    - run
+    - models
+    - doctor
+    - setup
+    - sessions
+    - new
+    - eval
+    - alias
+    - toolsets
+    - getting-started
+    env:
+      TELEMETRY_ENABLED: 'false'
+      DOCKER_AGENT_AUTO_UPDATE: 'false'
+      DOCKER_AGENT_NO_TOUR: '1'
+      DOCKER_AGENT_NO_SETUP: '1'
+      DOCKER_AGENT_HIDE_TELEMETRY_BANNER: '1'
+    state_env: {}
+    status: osc7501
+    verify:
+    - argv:
+      - docker-agent
+      - version
+      expect: ${{ kit.args.version }}
+    check:
+      argv:
+      - docker-agent
+      - run
+      - coder
+      - --model
+      - xai/grok-build-0.1
+      - --exec
+      - say ok
+      expect: DOZ_FAKE_OK
+- type: com.dozersandbox/auth@1
+  config:
+    methods:
+    - kind: api-key
+      provider: xai
+      accounts:
+      - key
+      keys_page: https://console.x.ai/
+      note: Docker Agent's xai provider reads XAI_API_KEY; Dozer runs its built-in coder agent with --model xai/grok-build-0.1. Your own agent YAML files work the same way (docker-agent run ./agent.yaml).
+      checked: '2026-10-14'
+- type: com.dozersandbox/gateways@1
+  config:
+    entries:
+    - gateway: openrouter
+      level: unknown
+      reason: Docker Agent takes OpenAI-compatible endpoints in its YAML; OpenRouter was not checked
+      checked: '2026-10-14'
+    - gateway: vercel-ai-gateway
+      level: unknown
+      reason: not checked against Docker Agent
+      checked: '2026-10-14'
+- type: com.dozersandbox/currency@1
+  config:
+    checked: '2026-10-14'
+- type: com.dozersandbox/directory@1
+  config:
+    kind: coding-agent
+    categories:
+    - coding-agent
+    aliases:
+    - cagent
+    icon: docker-agent
+    default_base: debian
+    platforms:
+      glibc: true
+      musl: true
+    tags:
+    - tag: headless
+      level: verified
+      notes:
+      - docker-agent run coder --model xai/grok-build-0.1 --exec "…"
+      evidence: 'make recipe-check: docker-agent run coder --exec "say ok" printed the stand-in''s answer and exited in a fresh try'
+      checked: '2026-10-14'
+    terms: Your xAI API key — a key from console.x.ai. It runs as a program in the sandbox; Docker Desktop is not used.
+- type: com.dozersandbox/guide@1
+  config:
+    intro: "Docker Agent is a coding agent with its own screen: the session on the left. Ask it to read, change and run the code in your folder."
+    steps:
+    - text: "Check it answers, without its screen."
+      command: "docker-agent run coder --model xai/grok-build-0.1 --exec \"say ok\""
+    - text: "Ask it something in its own screen — the session on the left."
+    - text: "One task without its screen."
+      command: "docker-agent run coder --model xai/grok-build-0.1 --exec \"list the files in this folder\""
+    tips:
+    - "Files it makes are in /workspace — your folder on the Mac."
+    - "Restart its session from the session's ⋯ menu; End stops it."
+    docs: https://github.com/docker/docker-agent

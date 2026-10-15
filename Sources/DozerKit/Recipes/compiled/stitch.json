@@ -1,0 +1,267 @@
+{
+  "args" : {
+    "version" : {
+      "buildArg" : "STITCH_VERSION",
+      "default" : "0.11.1",
+      "description" : "The Google Stitch CLI release Dozer installs (its pin).",
+      "pattern" : "[0-9]+\\.[0-9]+\\.[0-9]+([-+][0-9A-Za-z.-]+)?"
+    }
+  },
+  "author" : "Google Labs",
+  "capabilities" : [
+    {
+      "config" : {
+        "dozer" : {
+          "excluded" : [
+
+          ],
+          "model" : {
+            "hosts" : [
+              {
+                "host" : "stitch.googleapis.com",
+                "paths" : [
+                  "/mcp",
+                  "/v2alpha/"
+                ]
+              }
+            ],
+            "id" : "model:stitch",
+            "phrase" : "talk to Google Stitch",
+            "summary" : "The Stitch CLI's service (Google's hosted Stitch, with your Stitch API key) — every command is a call to it.",
+            "title" : "Talk to Google Stitch"
+          },
+          "update" : [
+
+          ]
+        },
+        "runtime" : {
+          "allow" : [
+            "stitch.googleapis.com:443"
+          ]
+        }
+      },
+      "type" : "com.docker.sandbox/network-policy@1"
+    },
+    {
+      "config" : {
+        "apiKey" : {
+          "inject" : [
+            {
+              "domain" : "stitch.googleapis.com",
+              "format" : "%s",
+              "header" : "x-goog-api-key"
+            }
+          ],
+          "name" : "STITCH_API_KEY",
+          "proxyManaged" : true
+        },
+        "dozer" : {
+          "accounts" : [
+            "key"
+          ]
+        },
+        "phase" : "runtime",
+        "service" : "google-stitch"
+      },
+      "description" : "Google Stitch API access",
+      "type" : "com.docker.sandbox/credential@1"
+    },
+    {
+      "config" : {
+        "path" : "/home/agent/.stitch"
+      },
+      "type" : "com.docker.sandbox/volume@1"
+    },
+    {
+      "config" : {
+        "binary" : "stitch",
+        "integrity" : "sha512-MzzAvOMU8AuvmIDJpAONSs5oJuHLofMleWsTNChw0HmzrPIWdI9d597BTtQXOypzXqwwy+8E3dU0vzGtj0ucDg==",
+        "kind" : "npm",
+        "needs_node" : "22",
+        "npm_args" : [
+          "--ignore-scripts"
+        ],
+        "package" : "@google/stitch"
+      },
+      "type" : "com.dozersandbox/install@1"
+    },
+    {
+      "config" : {
+        "check" : {
+          "argv" : [
+            "stitch",
+            "find",
+            "projects",
+            "--limit",
+            "1",
+            "--json"
+          ],
+          "expect" : "DOZ_FAKE_OK",
+          "timeout" : 120
+        },
+        "command" : [
+          "stitch"
+        ],
+        "env" : {
+          "STITCH_NO_BROWSER" : "1",
+          "STITCH_NO_TELEMETRY" : "1"
+        },
+        "no_prompts_args" : [
+
+        ],
+        "passthrough" : [
+          "--version",
+          "--help",
+          "-h"
+        ],
+        "session" : "shell",
+        "state_env" : {
+
+        },
+        "status" : "none",
+        "verify" : [
+          {
+            "argv" : [
+              "stitch",
+              "--version"
+            ],
+            "expect" : "${{ kit.args.version }}"
+          }
+        ]
+      },
+      "type" : "com.dozersandbox/launch@1"
+    },
+    {
+      "config" : {
+        "methods" : [
+          {
+            "accounts" : [
+              "key"
+            ],
+            "checked" : "2026-10-14",
+            "keys_page" : "https://stitch.withgoogle.com/",
+            "kind" : "api-key",
+            "note" : "A Stitch API key (it starts AQ.), made in Stitch's settings — not a Gemini or Google Cloud key (AIza…), which Stitch refuses. The CLI reads STITCH_API_KEY each run and sends it as x-goog-api-key.",
+            "provider" : "google-stitch"
+          },
+          {
+            "account" : "a Google account (stitch login)",
+            "checked" : "2026-10-14",
+            "in_sandbox" : false,
+            "kind" : "vendor-sign-in",
+            "note" : "Stitch's Google sign-in keeps OAuth tokens in the sandbox; Dozer does not offer it. A Stitch API key covers projects, screens and design systems."
+          }
+        ]
+      },
+      "type" : "com.dozersandbox/auth@1"
+    },
+    {
+      "config" : {
+        "entries" : [
+          {
+            "checked" : "2026-10-14",
+            "gateway" : "openrouter",
+            "level" : "no",
+            "reason" : "Stitch is Google's own service; its models are not chosen by the client"
+          },
+          {
+            "checked" : "2026-10-14",
+            "gateway" : "vercel-ai-gateway",
+            "level" : "no",
+            "reason" : "Stitch is Google's own service; its models are not chosen by the client"
+          }
+        ]
+      },
+      "type" : "com.dozersandbox/gateways@1"
+    },
+    {
+      "config" : {
+        "checked" : "2026-10-14"
+      },
+      "type" : "com.dozersandbox/currency@1"
+    },
+    {
+      "config" : {
+        "aliases" : [
+          "google-stitch",
+          "stitch-cli"
+        ],
+        "categories" : [
+          "terminal-tool",
+          "mcp"
+        ],
+        "default_base" : "debian",
+        "icon" : "stitch",
+        "kind" : "ai-tool",
+        "limits" : [
+          {
+            "musl" : true,
+            "reason" : "not checked on Alpine"
+          }
+        ],
+        "platforms" : {
+          "glibc" : true,
+          "musl" : false
+        },
+        "tags" : [
+          {
+            "checked" : "2026-10-14",
+            "evidence" : "make recipe-check: stitch find projects reached a stand-in Stitch MCP endpoint with the swapped key and printed its project",
+            "level" : "verified",
+            "notes" : [
+              "stitch find projects --json",
+              "stitch generate screen --new-project \"…\" --prompt \"…\" --device MOBILE --json"
+            ],
+            "tag" : "headless"
+          }
+        ],
+        "terms" : "Your Stitch API key — made in Stitch's settings (stitch.withgoogle.com). Generation uses your Stitch account's quota. Google Labs says the CLI is not an officially supported Google product."
+      },
+      "type" : "com.dozersandbox/directory@1"
+    },
+    {
+      "config" : {
+        "docs" : "https://github.com/google-labs-code/stitch-sdk",
+        "intro" : "The Stitch CLI is Google Labs' command line for Stitch, its UI design service: it generates and edits app screens from a prompt on Google's side and prints their ids and links. It runs in your shell and exits.",
+        "steps" : [
+          {
+            "command" : "stitch find projects --limit 1 --json",
+            "text" : "Check it reaches Stitch with your key: list a project."
+          },
+          {
+            "command" : "stitch generate screen --schema",
+            "text" : "See what a screen request takes."
+          },
+          {
+            "command" : "stitch generate screen --new-project \"My app\" --prompt \"A sign-up screen with email and password\" --device MOBILE",
+            "edit" : true,
+            "text" : "Generate a screen in a new project — change the prompt first:"
+          },
+          {
+            "command" : "stitch --help",
+            "text" : "See its commands."
+          }
+        ],
+        "tips" : [
+          "Every command takes `--json` for output a script or an agent can read, and `--dry-run` to preview a change without calling Stitch.",
+          "`stitch serve -p PROJECT --port 3000` previews a project's screens; `doz ports add NAME 3000` opens it on your Mac.",
+          "`stitch mcp install` registers its MCP server with a coding agent in the same sandbox.",
+          "Its Google sign-in (`stitch login`) is not offered: your Stitch API key stays on the Mac."
+        ]
+      },
+      "type" : "com.dozersandbox/guide@1"
+    }
+  ],
+  "description" : "Google Labs' command line for Stitch, its UI design service — generate and edit app screens from a prompt, on a Stitch API key.",
+  "displayName" : "Google Stitch CLI",
+  "id" : "google/stitch",
+  "kind" : "workload",
+  "licenses" : [
+    "Apache-2.0"
+  ],
+  "provides" : [
+    "com.dozersandbox/stitch@${{ kit.args.version }}"
+  ],
+  "schema" : 2,
+  "sourceUrl" : "https://github.com/google-labs-code/stitch-sdk"
+}

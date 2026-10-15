@@ -1,0 +1,523 @@
+kind claude-code Claude Code
+kind pi pi
+kind none none
+kind codex Codex
+kind antigravity Antigravity CLI
+kind gemini Gemini CLI
+kind grok Grok Build
+kind fabric Fabric
+kind openclaw OpenClaw
+kind nanobot nanobot
+kind gptme gptme
+kind llm llm
+kind shell-gpt ShellGPT
+kind zeroclaw ZeroClaw
+kind aichat AIChat
+kind tgpt tgpt
+kind opencode OpenCode
+kind smolagents smolagents
+kind adk Agent Development Kit
+kind promptfoo promptfoo
+kind clai clai (Pydantic AI)
+kind copilot GitHub Copilot CLI
+kind qwen-code Qwen Code
+kind goose Goose
+kind kilo Kilo Code CLI
+kind mistral-vibe Mistral Vibe
+kind droid Factory Droid
+kind dirac Dirac
+kind kimi-code Kimi Code
+kind cline Cline CLI
+kind openhands OpenHands CLI
+kind letta-code Letta Code
+kind docker-agent Docker Agent
+kind nanocoder Nanocoder
+kind mini-swe-agent mini-swe-agent
+kind open-interpreter Open Interpreter
+kind crush Crush
+kind mimo-code MiMo Code
+kind codewhale CodeWhale
+kind maki Maki
+kind omp oh-my-pi
+kind tau Tau
+kind stitch Google Stitch CLI
+parse lab → alpine none lab Alpine · none base-name lab-sandbox
+parse claude-code → node claude-code claude-code Node.js · Claude Code base-name claude-sandbox
+parse pi → node pi pi Node.js · pi base-name pi-sandbox
+parse codex → node codex codex Node.js · Codex base-name codex-sandbox
+parse node → node none node Node.js · none base-name node-sandbox
+parse node-antigravity → node antigravity node-antigravity Node.js · Antigravity CLI base-name node-agy-sandbox
+parse gemini → node gemini gemini Node.js · Gemini CLI base-name gemini-sandbox
+parse node-grok → node grok node-grok Node.js · Grok Build base-name node-grok-sandbox
+parse node-fabric → node fabric node-fabric Node.js · Fabric base-name node-fabric-sandbox
+parse node-openclaw → node openclaw node-openclaw Node.js · OpenClaw base-name node-openclaw-sandbox
+parse node-nanobot → node nanobot node-nanobot Node.js · nanobot base-name node-nanobot-sandbox
+parse node-gptme → node gptme node-gptme Node.js · gptme base-name node-gptme-sandbox
+parse node-llm → node llm node-llm Node.js · llm base-name node-llm-sandbox
+parse node-shell-gpt → node shell-gpt node-shell-gpt Node.js · ShellGPT base-name node-sgpt-sandbox
+parse node-zeroclaw → node zeroclaw node-zeroclaw Node.js · ZeroClaw base-name node-zeroclaw-sandbox
+parse node-aichat → node aichat node-aichat Node.js · AIChat base-name node-aichat-sandbox
+parse node-tgpt → node tgpt node-tgpt Node.js · tgpt base-name node-tgpt-sandbox
+parse node-opencode → node opencode node-opencode Node.js · OpenCode base-name node-opencode-sandbox
+parse node-smolagents → node smolagents node-smolagents Node.js · smolagents base-name node-smolagent-sandbox
+parse node-adk → node adk node-adk Node.js · Agent Development Kit base-name node-adk-sandbox
+parse node-promptfoo → node promptfoo node-promptfoo Node.js · promptfoo base-name node-promptfoo-sandbox
+parse node-clai → node clai node-clai Node.js · clai (Pydantic AI) base-name node-clai-sandbox
+parse node-copilot → node copilot node-copilot Node.js · GitHub Copilot CLI base-name node-copilot-sandbox
+parse qwen-code → node qwen-code qwen-code Node.js · Qwen Code base-name qwen-sandbox
+parse node-goose → node goose node-goose Node.js · Goose base-name node-goose-sandbox
+parse node-kilo → node kilo node-kilo Node.js · Kilo Code CLI base-name node-kilo-sandbox
+parse node-mistral-vibe → node mistral-vibe node-mistral-vibe Node.js · Mistral Vibe base-name node-vibe-sandbox
+parse node-droid → node droid node-droid Node.js · Factory Droid base-name node-droid-sandbox
+parse dirac → node dirac dirac Node.js · Dirac base-name dirac-sandbox
+parse kimi-code → node kimi-code kimi-code Node.js · Kimi Code base-name kimi-sandbox
+parse node-cline → node cline node-cline Node.js · Cline CLI base-name node-cline-sandbox
+parse node-openhands → node openhands node-openhands Node.js · OpenHands CLI base-name node-openhands-sandbox
+parse letta-code → node letta-code letta-code Node.js · Letta Code base-name letta-sandbox
+parse node-docker-agent → node docker-agent node-docker-agent Node.js · Docker Agent base-name node-docker-agent-sandbox
+parse nanocoder → node nanocoder nanocoder Node.js · Nanocoder base-name nanocoder-sandbox
+parse node-mini-swe-agent → node mini-swe-agent node-mini-swe-agent Node.js · mini-swe-agent base-name node-mini-sandbox
+parse node-open-interpreter → node open-interpreter node-open-interpreter Node.js · Open Interpreter base-name node-interpreter-sandbox
+parse node-crush → node crush node-crush Node.js · Crush base-name node-crush-sandbox
+parse node-mimo-code → node mimo-code node-mimo-code Node.js · MiMo Code base-name node-mimo-sandbox
+parse node-codewhale → node codewhale node-codewhale Node.js · CodeWhale base-name node-codewhale-sandbox
+parse node-maki → node maki node-maki Node.js · Maki base-name node-maki-sandbox
+parse node-omp → node omp node-omp Node.js · oh-my-pi base-name node-omp-sandbox
+parse node-tau → node tau node-tau Node.js · Tau base-name node-tau-sandbox
+parse node-stitch → node stitch node-stitch Node.js · Google Stitch CLI base-name node-stitch-sandbox
+parse python-claude-code → python claude-code python-claude-code Python · Claude Code base-name python-claude-sandbox
+parse python-pi → python pi python-pi Python · pi base-name python-pi-sandbox
+parse python → python none python Python · none base-name python-sandbox
+parse python-codex → python codex python-codex Python · Codex base-name python-codex-sandbox
+parse python-antigravity → python antigravity python-antigravity Python · Antigravity CLI base-name python-agy-sandbox
+parse python-gemini → python gemini python-gemini Python · Gemini CLI base-name python-gemini-sandbox
+parse python-grok → python grok python-grok Python · Grok Build base-name python-grok-sandbox
+parse python-fabric → python fabric python-fabric Python · Fabric base-name python-fabric-sandbox
+parse python-openclaw → python openclaw python-openclaw Python · OpenClaw base-name python-openclaw-sandbox
+parse python-nanobot → python nanobot python-nanobot Python · nanobot base-name python-nanobot-sandbox
+parse python-gptme → python gptme python-gptme Python · gptme base-name python-gptme-sandbox
+parse python-llm → python llm python-llm Python · llm base-name python-llm-sandbox
+parse python-shell-gpt → python shell-gpt python-shell-gpt Python · ShellGPT base-name python-sgpt-sandbox
+parse python-zeroclaw → python zeroclaw python-zeroclaw Python · ZeroClaw base-name python-zeroclaw-sandbox
+parse python-aichat → python aichat python-aichat Python · AIChat base-name python-aichat-sandbox
+parse python-tgpt → python tgpt python-tgpt Python · tgpt base-name python-tgpt-sandbox
+parse python-opencode → python opencode python-opencode Python · OpenCode base-name python-opencode-sandbox
+parse python-smolagents → python smolagents python-smolagents Python · smolagents base-name python-smolagent-sandbox
+parse python-adk → python adk python-adk Python · Agent Development Kit base-name python-adk-sandbox
+parse python-promptfoo → python promptfoo python-promptfoo Python · promptfoo base-name python-promptfoo-sandbox
+parse python-clai → python clai python-clai Python · clai (Pydantic AI) base-name python-clai-sandbox
+parse python-copilot → python copilot python-copilot Python · GitHub Copilot CLI base-name python-copilot-sandbox
+parse python-qwen-code → python qwen-code python-qwen-code Python · Qwen Code base-name python-qwen-sandbox
+parse python-goose → python goose python-goose Python · Goose base-name python-goose-sandbox
+parse python-kilo → python kilo python-kilo Python · Kilo Code CLI base-name python-kilo-sandbox
+parse python-mistral-vibe → python mistral-vibe python-mistral-vibe Python · Mistral Vibe base-name python-vibe-sandbox
+parse python-droid → python droid python-droid Python · Factory Droid base-name python-droid-sandbox
+parse python-dirac → python dirac python-dirac Python · Dirac base-name python-dirac-sandbox
+parse python-kimi-code → python kimi-code python-kimi-code Python · Kimi Code base-name python-kimi-sandbox
+parse python-cline → python cline python-cline Python · Cline CLI base-name python-cline-sandbox
+parse python-openhands → python openhands python-openhands Python · OpenHands CLI base-name python-openhands-sandbox
+parse python-letta-code → python letta-code python-letta-code Python · Letta Code base-name python-letta-sandbox
+parse python-docker-agent → python docker-agent python-docker-agent Python · Docker Agent base-name python-docker-agent-sandbox
+parse python-nanocoder → python nanocoder python-nanocoder Python · Nanocoder base-name python-nanocoder-sandbox
+parse python-mini-swe-agent → python mini-swe-agent python-mini-swe-agent Python · mini-swe-agent base-name python-mini-sandbox
+parse python-open-interpreter → python open-interpreter python-open-interpreter Python · Open Interpreter base-name python-interpreter-sandbox
+parse python-crush → python crush python-crush Python · Crush base-name python-crush-sandbox
+parse python-mimo-code → python mimo-code python-mimo-code Python · MiMo Code base-name python-mimo-sandbox
+parse python-codewhale → python codewhale python-codewhale Python · CodeWhale base-name python-codewhale-sandbox
+parse python-maki → python maki python-maki Python · Maki base-name python-maki-sandbox
+parse python-omp → python omp python-omp Python · oh-my-pi base-name python-omp-sandbox
+parse python-tau → python tau python-tau Python · Tau base-name python-tau-sandbox
+parse python-stitch → python stitch python-stitch Python · Google Stitch CLI base-name python-stitch-sandbox
+parse go-claude-code → go claude-code go-claude-code Go · Claude Code base-name go-claude-sandbox
+parse go-pi → go pi go-pi Go · pi base-name go-pi-sandbox
+parse go → go none go Go · none base-name go-sandbox
+parse go-codex → go codex go-codex Go · Codex base-name go-codex-sandbox
+parse go-antigravity → go antigravity go-antigravity Go · Antigravity CLI base-name go-agy-sandbox
+parse go-gemini → go gemini go-gemini Go · Gemini CLI base-name go-gemini-sandbox
+parse go-grok → go grok go-grok Go · Grok Build base-name go-grok-sandbox
+parse go-fabric → go fabric go-fabric Go · Fabric base-name go-fabric-sandbox
+parse go-openclaw → go openclaw go-openclaw Go · OpenClaw base-name go-openclaw-sandbox
+parse go-nanobot → go nanobot go-nanobot Go · nanobot base-name go-nanobot-sandbox
+parse go-gptme → go gptme go-gptme Go · gptme base-name go-gptme-sandbox
+parse go-llm → go llm go-llm Go · llm base-name go-llm-sandbox
+parse go-shell-gpt → go shell-gpt go-shell-gpt Go · ShellGPT base-name go-sgpt-sandbox
+parse go-zeroclaw → go zeroclaw go-zeroclaw Go · ZeroClaw base-name go-zeroclaw-sandbox
+parse go-aichat → go aichat go-aichat Go · AIChat base-name go-aichat-sandbox
+parse go-tgpt → go tgpt go-tgpt Go · tgpt base-name go-tgpt-sandbox
+parse go-opencode → go opencode go-opencode Go · OpenCode base-name go-opencode-sandbox
+parse go-smolagents → go smolagents go-smolagents Go · smolagents base-name go-smolagent-sandbox
+parse go-adk → go adk go-adk Go · Agent Development Kit base-name go-adk-sandbox
+parse go-promptfoo → go promptfoo go-promptfoo Go · promptfoo base-name go-promptfoo-sandbox
+parse go-clai → go clai go-clai Go · clai (Pydantic AI) base-name go-clai-sandbox
+parse go-copilot → go copilot go-copilot Go · GitHub Copilot CLI base-name go-copilot-sandbox
+parse go-qwen-code → go qwen-code go-qwen-code Go · Qwen Code base-name go-qwen-sandbox
+parse go-goose → go goose go-goose Go · Goose base-name go-goose-sandbox
+parse go-kilo → go kilo go-kilo Go · Kilo Code CLI base-name go-kilo-sandbox
+parse go-mistral-vibe → go mistral-vibe go-mistral-vibe Go · Mistral Vibe base-name go-vibe-sandbox
+parse go-droid → go droid go-droid Go · Factory Droid base-name go-droid-sandbox
+parse go-dirac → go dirac go-dirac Go · Dirac base-name go-dirac-sandbox
+parse go-kimi-code → go kimi-code go-kimi-code Go · Kimi Code base-name go-kimi-sandbox
+parse go-cline → go cline go-cline Go · Cline CLI base-name go-cline-sandbox
+parse go-openhands → go openhands go-openhands Go · OpenHands CLI base-name go-openhands-sandbox
+parse go-letta-code → go letta-code go-letta-code Go · Letta Code base-name go-letta-sandbox
+parse go-docker-agent → go docker-agent go-docker-agent Go · Docker Agent base-name go-docker-agent-sandbox
+parse go-nanocoder → go nanocoder go-nanocoder Go · Nanocoder base-name go-nanocoder-sandbox
+parse go-mini-swe-agent → go mini-swe-agent go-mini-swe-agent Go · mini-swe-agent base-name go-mini-sandbox
+parse go-open-interpreter → go open-interpreter go-open-interpreter Go · Open Interpreter base-name go-interpreter-sandbox
+parse go-crush → go crush go-crush Go · Crush base-name go-crush-sandbox
+parse go-mimo-code → go mimo-code go-mimo-code Go · MiMo Code base-name go-mimo-sandbox
+parse go-codewhale → go codewhale go-codewhale Go · CodeWhale base-name go-codewhale-sandbox
+parse go-maki → go maki go-maki Go · Maki base-name go-maki-sandbox
+parse go-omp → go omp go-omp Go · oh-my-pi base-name go-omp-sandbox
+parse go-tau → go tau go-tau Go · Tau base-name go-tau-sandbox
+parse go-stitch → go stitch go-stitch Go · Google Stitch CLI base-name go-stitch-sandbox
+parse rust-claude-code → rust claude-code rust-claude-code Rust · Claude Code base-name rust-claude-sandbox
+parse rust-pi → rust pi rust-pi Rust · pi base-name rust-pi-sandbox
+parse rust → rust none rust Rust · none base-name rust-sandbox
+parse rust-codex → rust codex rust-codex Rust · Codex base-name rust-codex-sandbox
+parse rust-antigravity → rust antigravity rust-antigravity Rust · Antigravity CLI base-name rust-agy-sandbox
+parse rust-gemini → rust gemini rust-gemini Rust · Gemini CLI base-name rust-gemini-sandbox
+parse rust-grok → rust grok rust-grok Rust · Grok Build base-name rust-grok-sandbox
+parse rust-fabric → rust fabric rust-fabric Rust · Fabric base-name rust-fabric-sandbox
+parse rust-openclaw → rust openclaw rust-openclaw Rust · OpenClaw base-name rust-openclaw-sandbox
+parse rust-nanobot → rust nanobot rust-nanobot Rust · nanobot base-name rust-nanobot-sandbox
+parse rust-gptme → rust gptme rust-gptme Rust · gptme base-name rust-gptme-sandbox
+parse rust-llm → rust llm rust-llm Rust · llm base-name rust-llm-sandbox
+parse rust-shell-gpt → rust shell-gpt rust-shell-gpt Rust · ShellGPT base-name rust-sgpt-sandbox
+parse rust-zeroclaw → rust zeroclaw rust-zeroclaw Rust · ZeroClaw base-name rust-zeroclaw-sandbox
+parse rust-aichat → rust aichat rust-aichat Rust · AIChat base-name rust-aichat-sandbox
+parse rust-tgpt → rust tgpt rust-tgpt Rust · tgpt base-name rust-tgpt-sandbox
+parse rust-opencode → rust opencode rust-opencode Rust · OpenCode base-name rust-opencode-sandbox
+parse rust-smolagents → rust smolagents rust-smolagents Rust · smolagents base-name rust-smolagent-sandbox
+parse rust-adk → rust adk rust-adk Rust · Agent Development Kit base-name rust-adk-sandbox
+parse rust-promptfoo → rust promptfoo rust-promptfoo Rust · promptfoo base-name rust-promptfoo-sandbox
+parse rust-clai → rust clai rust-clai Rust · clai (Pydantic AI) base-name rust-clai-sandbox
+parse rust-copilot → rust copilot rust-copilot Rust · GitHub Copilot CLI base-name rust-copilot-sandbox
+parse rust-qwen-code → rust qwen-code rust-qwen-code Rust · Qwen Code base-name rust-qwen-sandbox
+parse rust-goose → rust goose rust-goose Rust · Goose base-name rust-goose-sandbox
+parse rust-kilo → rust kilo rust-kilo Rust · Kilo Code CLI base-name rust-kilo-sandbox
+parse rust-mistral-vibe → rust mistral-vibe rust-mistral-vibe Rust · Mistral Vibe base-name rust-vibe-sandbox
+parse rust-droid → rust droid rust-droid Rust · Factory Droid base-name rust-droid-sandbox
+parse rust-dirac → rust dirac rust-dirac Rust · Dirac base-name rust-dirac-sandbox
+parse rust-kimi-code → rust kimi-code rust-kimi-code Rust · Kimi Code base-name rust-kimi-sandbox
+parse rust-cline → rust cline rust-cline Rust · Cline CLI base-name rust-cline-sandbox
+parse rust-openhands → rust openhands rust-openhands Rust · OpenHands CLI base-name rust-openhands-sandbox
+parse rust-letta-code → rust letta-code rust-letta-code Rust · Letta Code base-name rust-letta-sandbox
+parse rust-docker-agent → rust docker-agent rust-docker-agent Rust · Docker Agent base-name rust-docker-agent-sandbox
+parse rust-nanocoder → rust nanocoder rust-nanocoder Rust · Nanocoder base-name rust-nanocoder-sandbox
+parse rust-mini-swe-agent → rust mini-swe-agent rust-mini-swe-agent Rust · mini-swe-agent base-name rust-mini-sandbox
+parse rust-open-interpreter → rust open-interpreter rust-open-interpreter Rust · Open Interpreter base-name rust-interpreter-sandbox
+parse rust-crush → rust crush rust-crush Rust · Crush base-name rust-crush-sandbox
+parse rust-mimo-code → rust mimo-code rust-mimo-code Rust · MiMo Code base-name rust-mimo-sandbox
+parse rust-codewhale → rust codewhale rust-codewhale Rust · CodeWhale base-name rust-codewhale-sandbox
+parse rust-maki → rust maki rust-maki Rust · Maki base-name rust-maki-sandbox
+parse rust-omp → rust omp rust-omp Rust · oh-my-pi base-name rust-omp-sandbox
+parse rust-tau → rust tau rust-tau Rust · Tau base-name rust-tau-sandbox
+parse rust-stitch → rust stitch rust-stitch Rust · Google Stitch CLI base-name rust-stitch-sandbox
+parse java-claude-code → java claude-code java-claude-code Java · Claude Code base-name java-claude-sandbox
+parse java-pi → java pi java-pi Java · pi base-name java-pi-sandbox
+parse java → java none java Java · none base-name java-sandbox
+parse java-codex → java codex java-codex Java · Codex base-name java-codex-sandbox
+parse java-antigravity → java antigravity java-antigravity Java · Antigravity CLI base-name java-agy-sandbox
+parse java-gemini → java gemini java-gemini Java · Gemini CLI base-name java-gemini-sandbox
+parse java-grok → java grok java-grok Java · Grok Build base-name java-grok-sandbox
+parse java-fabric → java fabric java-fabric Java · Fabric base-name java-fabric-sandbox
+parse java-openclaw → java openclaw java-openclaw Java · OpenClaw base-name java-openclaw-sandbox
+parse java-nanobot → java nanobot java-nanobot Java · nanobot base-name java-nanobot-sandbox
+parse java-gptme → java gptme java-gptme Java · gptme base-name java-gptme-sandbox
+parse java-llm → java llm java-llm Java · llm base-name java-llm-sandbox
+parse java-shell-gpt → java shell-gpt java-shell-gpt Java · ShellGPT base-name java-sgpt-sandbox
+parse java-zeroclaw → java zeroclaw java-zeroclaw Java · ZeroClaw base-name java-zeroclaw-sandbox
+parse java-aichat → java aichat java-aichat Java · AIChat base-name java-aichat-sandbox
+parse java-tgpt → java tgpt java-tgpt Java · tgpt base-name java-tgpt-sandbox
+parse java-opencode → java opencode java-opencode Java · OpenCode base-name java-opencode-sandbox
+parse java-smolagents → java smolagents java-smolagents Java · smolagents base-name java-smolagent-sandbox
+parse java-adk → java adk java-adk Java · Agent Development Kit base-name java-adk-sandbox
+parse java-promptfoo → java promptfoo java-promptfoo Java · promptfoo base-name java-promptfoo-sandbox
+parse java-clai → java clai java-clai Java · clai (Pydantic AI) base-name java-clai-sandbox
+parse java-copilot → java copilot java-copilot Java · GitHub Copilot CLI base-name java-copilot-sandbox
+parse java-qwen-code → java qwen-code java-qwen-code Java · Qwen Code base-name java-qwen-sandbox
+parse java-goose → java goose java-goose Java · Goose base-name java-goose-sandbox
+parse java-kilo → java kilo java-kilo Java · Kilo Code CLI base-name java-kilo-sandbox
+parse java-mistral-vibe → java mistral-vibe java-mistral-vibe Java · Mistral Vibe base-name java-vibe-sandbox
+parse java-droid → java droid java-droid Java · Factory Droid base-name java-droid-sandbox
+parse java-dirac → java dirac java-dirac Java · Dirac base-name java-dirac-sandbox
+parse java-kimi-code → java kimi-code java-kimi-code Java · Kimi Code base-name java-kimi-sandbox
+parse java-cline → java cline java-cline Java · Cline CLI base-name java-cline-sandbox
+parse java-openhands → java openhands java-openhands Java · OpenHands CLI base-name java-openhands-sandbox
+parse java-letta-code → java letta-code java-letta-code Java · Letta Code base-name java-letta-sandbox
+parse java-docker-agent → java docker-agent java-docker-agent Java · Docker Agent base-name java-docker-agent-sandbox
+parse java-nanocoder → java nanocoder java-nanocoder Java · Nanocoder base-name java-nanocoder-sandbox
+parse java-mini-swe-agent → java mini-swe-agent java-mini-swe-agent Java · mini-swe-agent base-name java-mini-sandbox
+parse java-open-interpreter → java open-interpreter java-open-interpreter Java · Open Interpreter base-name java-interpreter-sandbox
+parse java-crush → java crush java-crush Java · Crush base-name java-crush-sandbox
+parse java-mimo-code → java mimo-code java-mimo-code Java · MiMo Code base-name java-mimo-sandbox
+parse java-codewhale → java codewhale java-codewhale Java · CodeWhale base-name java-codewhale-sandbox
+parse java-maki → java maki java-maki Java · Maki base-name java-maki-sandbox
+parse java-omp → java omp java-omp Java · oh-my-pi base-name java-omp-sandbox
+parse java-tau → java tau java-tau Java · Tau base-name java-tau-sandbox
+parse java-stitch → java stitch java-stitch Java · Google Stitch CLI base-name java-stitch-sandbox
+parse ruby-claude-code → ruby claude-code ruby-claude-code Ruby · Claude Code base-name ruby-claude-sandbox
+parse ruby-pi → ruby pi ruby-pi Ruby · pi base-name ruby-pi-sandbox
+parse ruby → ruby none ruby Ruby · none base-name ruby-sandbox
+parse ruby-codex → ruby codex ruby-codex Ruby · Codex base-name ruby-codex-sandbox
+parse ruby-antigravity → ruby antigravity ruby-antigravity Ruby · Antigravity CLI base-name ruby-agy-sandbox
+parse ruby-gemini → ruby gemini ruby-gemini Ruby · Gemini CLI base-name ruby-gemini-sandbox
+parse ruby-grok → ruby grok ruby-grok Ruby · Grok Build base-name ruby-grok-sandbox
+parse ruby-fabric → ruby fabric ruby-fabric Ruby · Fabric base-name ruby-fabric-sandbox
+parse ruby-openclaw → ruby openclaw ruby-openclaw Ruby · OpenClaw base-name ruby-openclaw-sandbox
+parse ruby-nanobot → ruby nanobot ruby-nanobot Ruby · nanobot base-name ruby-nanobot-sandbox
+parse ruby-gptme → ruby gptme ruby-gptme Ruby · gptme base-name ruby-gptme-sandbox
+parse ruby-llm → ruby llm ruby-llm Ruby · llm base-name ruby-llm-sandbox
+parse ruby-shell-gpt → ruby shell-gpt ruby-shell-gpt Ruby · ShellGPT base-name ruby-sgpt-sandbox
+parse ruby-zeroclaw → ruby zeroclaw ruby-zeroclaw Ruby · ZeroClaw base-name ruby-zeroclaw-sandbox
+parse ruby-aichat → ruby aichat ruby-aichat Ruby · AIChat base-name ruby-aichat-sandbox
+parse ruby-tgpt → ruby tgpt ruby-tgpt Ruby · tgpt base-name ruby-tgpt-sandbox
+parse ruby-opencode → ruby opencode ruby-opencode Ruby · OpenCode base-name ruby-opencode-sandbox
+parse ruby-smolagents → ruby smolagents ruby-smolagents Ruby · smolagents base-name ruby-smolagent-sandbox
+parse ruby-adk → ruby adk ruby-adk Ruby · Agent Development Kit base-name ruby-adk-sandbox
+parse ruby-promptfoo → ruby promptfoo ruby-promptfoo Ruby · promptfoo base-name ruby-promptfoo-sandbox
+parse ruby-clai → ruby clai ruby-clai Ruby · clai (Pydantic AI) base-name ruby-clai-sandbox
+parse ruby-copilot → ruby copilot ruby-copilot Ruby · GitHub Copilot CLI base-name ruby-copilot-sandbox
+parse ruby-qwen-code → ruby qwen-code ruby-qwen-code Ruby · Qwen Code base-name ruby-qwen-sandbox
+parse ruby-goose → ruby goose ruby-goose Ruby · Goose base-name ruby-goose-sandbox
+parse ruby-kilo → ruby kilo ruby-kilo Ruby · Kilo Code CLI base-name ruby-kilo-sandbox
+parse ruby-mistral-vibe → ruby mistral-vibe ruby-mistral-vibe Ruby · Mistral Vibe base-name ruby-vibe-sandbox
+parse ruby-droid → ruby droid ruby-droid Ruby · Factory Droid base-name ruby-droid-sandbox
+parse ruby-dirac → ruby dirac ruby-dirac Ruby · Dirac base-name ruby-dirac-sandbox
+parse ruby-kimi-code → ruby kimi-code ruby-kimi-code Ruby · Kimi Code base-name ruby-kimi-sandbox
+parse ruby-cline → ruby cline ruby-cline Ruby · Cline CLI base-name ruby-cline-sandbox
+parse ruby-openhands → ruby openhands ruby-openhands Ruby · OpenHands CLI base-name ruby-openhands-sandbox
+parse ruby-letta-code → ruby letta-code ruby-letta-code Ruby · Letta Code base-name ruby-letta-sandbox
+parse ruby-docker-agent → ruby docker-agent ruby-docker-agent Ruby · Docker Agent base-name ruby-docker-agent-sandbox
+parse ruby-nanocoder → ruby nanocoder ruby-nanocoder Ruby · Nanocoder base-name ruby-nanocoder-sandbox
+parse ruby-mini-swe-agent → ruby mini-swe-agent ruby-mini-swe-agent Ruby · mini-swe-agent base-name ruby-mini-sandbox
+parse ruby-open-interpreter → ruby open-interpreter ruby-open-interpreter Ruby · Open Interpreter base-name ruby-interpreter-sandbox
+parse ruby-crush → ruby crush ruby-crush Ruby · Crush base-name ruby-crush-sandbox
+parse ruby-mimo-code → ruby mimo-code ruby-mimo-code Ruby · MiMo Code base-name ruby-mimo-sandbox
+parse ruby-codewhale → ruby codewhale ruby-codewhale Ruby · CodeWhale base-name ruby-codewhale-sandbox
+parse ruby-maki → ruby maki ruby-maki Ruby · Maki base-name ruby-maki-sandbox
+parse ruby-omp → ruby omp ruby-omp Ruby · oh-my-pi base-name ruby-omp-sandbox
+parse ruby-tau → ruby tau ruby-tau Ruby · Tau base-name ruby-tau-sandbox
+parse ruby-stitch → ruby stitch ruby-stitch Ruby · Google Stitch CLI base-name ruby-stitch-sandbox
+parse dotnet-claude-code → dotnet claude-code dotnet-claude-code .NET · Claude Code base-name dotnet-claude-sandbox
+parse dotnet-pi → dotnet pi dotnet-pi .NET · pi base-name dotnet-pi-sandbox
+parse dotnet → dotnet none dotnet .NET · none base-name dotnet-sandbox
+parse dotnet-codex → dotnet codex dotnet-codex .NET · Codex base-name dotnet-codex-sandbox
+parse dotnet-antigravity → dotnet antigravity dotnet-antigravity .NET · Antigravity CLI base-name dotnet-agy-sandbox
+parse dotnet-gemini → dotnet gemini dotnet-gemini .NET · Gemini CLI base-name dotnet-gemini-sandbox
+parse dotnet-grok → dotnet grok dotnet-grok .NET · Grok Build base-name dotnet-grok-sandbox
+parse dotnet-fabric → dotnet fabric dotnet-fabric .NET · Fabric base-name dotnet-fabric-sandbox
+parse dotnet-openclaw → dotnet openclaw dotnet-openclaw .NET · OpenClaw base-name dotnet-openclaw-sandbox
+parse dotnet-nanobot → dotnet nanobot dotnet-nanobot .NET · nanobot base-name dotnet-nanobot-sandbox
+parse dotnet-gptme → dotnet gptme dotnet-gptme .NET · gptme base-name dotnet-gptme-sandbox
+parse dotnet-llm → dotnet llm dotnet-llm .NET · llm base-name dotnet-llm-sandbox
+parse dotnet-shell-gpt → dotnet shell-gpt dotnet-shell-gpt .NET · ShellGPT base-name dotnet-sgpt-sandbox
+parse dotnet-zeroclaw → dotnet zeroclaw dotnet-zeroclaw .NET · ZeroClaw base-name dotnet-zeroclaw-sandbox
+parse dotnet-aichat → dotnet aichat dotnet-aichat .NET · AIChat base-name dotnet-aichat-sandbox
+parse dotnet-tgpt → dotnet tgpt dotnet-tgpt .NET · tgpt base-name dotnet-tgpt-sandbox
+parse dotnet-opencode → dotnet opencode dotnet-opencode .NET · OpenCode base-name dotnet-opencode-sandbox
+parse dotnet-smolagents → dotnet smolagents dotnet-smolagents .NET · smolagents base-name dotnet-smolagent-sandbox
+parse dotnet-adk → dotnet adk dotnet-adk .NET · Agent Development Kit base-name dotnet-adk-sandbox
+parse dotnet-promptfoo → dotnet promptfoo dotnet-promptfoo .NET · promptfoo base-name dotnet-promptfoo-sandbox
+parse dotnet-clai → dotnet clai dotnet-clai .NET · clai (Pydantic AI) base-name dotnet-clai-sandbox
+parse dotnet-copilot → dotnet copilot dotnet-copilot .NET · GitHub Copilot CLI base-name dotnet-copilot-sandbox
+parse dotnet-qwen-code → dotnet qwen-code dotnet-qwen-code .NET · Qwen Code base-name dotnet-qwen-sandbox
+parse dotnet-goose → dotnet goose dotnet-goose .NET · Goose base-name dotnet-goose-sandbox
+parse dotnet-kilo → dotnet kilo dotnet-kilo .NET · Kilo Code CLI base-name dotnet-kilo-sandbox
+parse dotnet-mistral-vibe → dotnet mistral-vibe dotnet-mistral-vibe .NET · Mistral Vibe base-name dotnet-vibe-sandbox
+parse dotnet-droid → dotnet droid dotnet-droid .NET · Factory Droid base-name dotnet-droid-sandbox
+parse dotnet-dirac → dotnet dirac dotnet-dirac .NET · Dirac base-name dotnet-dirac-sandbox
+parse dotnet-kimi-code → dotnet kimi-code dotnet-kimi-code .NET · Kimi Code base-name dotnet-kimi-sandbox
+parse dotnet-cline → dotnet cline dotnet-cline .NET · Cline CLI base-name dotnet-cline-sandbox
+parse dotnet-openhands → dotnet openhands dotnet-openhands .NET · OpenHands CLI base-name dotnet-openhands-sandbox
+parse dotnet-letta-code → dotnet letta-code dotnet-letta-code .NET · Letta Code base-name dotnet-letta-sandbox
+parse dotnet-docker-agent → dotnet docker-agent dotnet-docker-agent .NET · Docker Agent base-name dotnet-docker-agent-sandbox
+parse dotnet-nanocoder → dotnet nanocoder dotnet-nanocoder .NET · Nanocoder base-name dotnet-nanocoder-sandbox
+parse dotnet-mini-swe-agent → dotnet mini-swe-agent dotnet-mini-swe-agent .NET · mini-swe-agent base-name dotnet-mini-sandbox
+parse dotnet-open-interpreter → dotnet open-interpreter dotnet-open-interpreter .NET · Open Interpreter base-name dotnet-interpreter-sandbox
+parse dotnet-crush → dotnet crush dotnet-crush .NET · Crush base-name dotnet-crush-sandbox
+parse dotnet-mimo-code → dotnet mimo-code dotnet-mimo-code .NET · MiMo Code base-name dotnet-mimo-sandbox
+parse dotnet-codewhale → dotnet codewhale dotnet-codewhale .NET · CodeWhale base-name dotnet-codewhale-sandbox
+parse dotnet-maki → dotnet maki dotnet-maki .NET · Maki base-name dotnet-maki-sandbox
+parse dotnet-omp → dotnet omp dotnet-omp .NET · oh-my-pi base-name dotnet-omp-sandbox
+parse dotnet-tau → dotnet tau dotnet-tau .NET · Tau base-name dotnet-tau-sandbox
+parse dotnet-stitch → dotnet stitch dotnet-stitch .NET · Google Stitch CLI base-name dotnet-stitch-sandbox
+parse debian-claude-code → debian claude-code debian-claude-code Debian · Claude Code base-name debian-claude-sandbox
+parse debian-pi → debian pi debian-pi Debian · pi base-name debian-pi-sandbox
+parse debian → debian none debian Debian · none base-name debian-sandbox
+parse debian-codex → debian codex debian-codex Debian · Codex base-name debian-codex-sandbox
+parse antigravity → debian antigravity antigravity Debian · Antigravity CLI base-name agy-sandbox
+parse debian-gemini → debian gemini debian-gemini Debian · Gemini CLI base-name debian-gemini-sandbox
+parse grok → debian grok grok Debian · Grok Build base-name grok-sandbox
+parse fabric → debian fabric fabric Debian · Fabric base-name fabric-sandbox
+parse openclaw → debian openclaw openclaw Debian · OpenClaw base-name openclaw-sandbox
+parse nanobot → debian nanobot nanobot Debian · nanobot base-name nanobot-sandbox
+parse gptme → debian gptme gptme Debian · gptme base-name gptme-sandbox
+parse llm → debian llm llm Debian · llm base-name llm-sandbox
+parse shell-gpt → debian shell-gpt shell-gpt Debian · ShellGPT base-name sgpt-sandbox
+parse zeroclaw → debian zeroclaw zeroclaw Debian · ZeroClaw base-name zeroclaw-sandbox
+parse aichat → debian aichat aichat Debian · AIChat base-name aichat-sandbox
+parse tgpt → debian tgpt tgpt Debian · tgpt base-name tgpt-sandbox
+parse opencode → debian opencode opencode Debian · OpenCode base-name opencode-sandbox
+parse smolagents → debian smolagents smolagents Debian · smolagents base-name smolagent-sandbox
+parse adk → debian adk adk Debian · Agent Development Kit base-name adk-sandbox
+parse promptfoo → debian promptfoo promptfoo Debian · promptfoo base-name promptfoo-sandbox
+parse clai → debian clai clai Debian · clai (Pydantic AI) base-name clai-sandbox
+parse copilot → debian copilot copilot Debian · GitHub Copilot CLI base-name copilot-sandbox
+parse debian-qwen-code → debian qwen-code debian-qwen-code Debian · Qwen Code base-name debian-qwen-sandbox
+parse goose → debian goose goose Debian · Goose base-name goose-sandbox
+parse kilo → debian kilo kilo Debian · Kilo Code CLI base-name kilo-sandbox
+parse mistral-vibe → debian mistral-vibe mistral-vibe Debian · Mistral Vibe base-name vibe-sandbox
+parse droid → debian droid droid Debian · Factory Droid base-name droid-sandbox
+parse debian-dirac → debian dirac debian-dirac Debian · Dirac base-name debian-dirac-sandbox
+parse debian-kimi-code → debian kimi-code debian-kimi-code Debian · Kimi Code base-name debian-kimi-sandbox
+parse cline → debian cline cline Debian · Cline CLI base-name cline-sandbox
+parse openhands → debian openhands openhands Debian · OpenHands CLI base-name openhands-sandbox
+parse debian-letta-code → debian letta-code debian-letta-code Debian · Letta Code base-name debian-letta-sandbox
+parse docker-agent → debian docker-agent docker-agent Debian · Docker Agent base-name docker-agent-sandbox
+parse debian-nanocoder → debian nanocoder debian-nanocoder Debian · Nanocoder base-name debian-nanocoder-sandbox
+parse mini-swe-agent → debian mini-swe-agent mini-swe-agent Debian · mini-swe-agent base-name mini-sandbox
+parse open-interpreter → debian open-interpreter open-interpreter Debian · Open Interpreter base-name interpreter-sandbox
+parse crush → debian crush crush Debian · Crush base-name crush-sandbox
+parse mimo-code → debian mimo-code mimo-code Debian · MiMo Code base-name mimo-sandbox
+parse codewhale → debian codewhale codewhale Debian · CodeWhale base-name codewhale-sandbox
+parse maki → debian maki maki Debian · Maki base-name maki-sandbox
+parse omp → debian omp omp Debian · oh-my-pi base-name omp-sandbox
+parse tau → debian tau tau Debian · Tau base-name tau-sandbox
+parse stitch → debian stitch stitch Debian · Google Stitch CLI base-name stitch-sandbox
+parse ubuntu-claude-code → ubuntu claude-code ubuntu-claude-code Ubuntu · Claude Code base-name ubuntu-claude-sandbox
+parse ubuntu-pi → ubuntu pi ubuntu-pi Ubuntu · pi base-name ubuntu-pi-sandbox
+parse ubuntu → ubuntu none ubuntu Ubuntu · none base-name ubuntu-sandbox
+parse ubuntu-codex → ubuntu codex ubuntu-codex Ubuntu · Codex base-name ubuntu-codex-sandbox
+parse ubuntu-antigravity → ubuntu antigravity ubuntu-antigravity Ubuntu · Antigravity CLI base-name ubuntu-agy-sandbox
+parse ubuntu-gemini → ubuntu gemini ubuntu-gemini Ubuntu · Gemini CLI base-name ubuntu-gemini-sandbox
+parse ubuntu-grok → ubuntu grok ubuntu-grok Ubuntu · Grok Build base-name ubuntu-grok-sandbox
+parse ubuntu-fabric → ubuntu fabric ubuntu-fabric Ubuntu · Fabric base-name ubuntu-fabric-sandbox
+parse ubuntu-openclaw → ubuntu openclaw ubuntu-openclaw Ubuntu · OpenClaw base-name ubuntu-openclaw-sandbox
+parse ubuntu-nanobot → ubuntu nanobot ubuntu-nanobot Ubuntu · nanobot base-name ubuntu-nanobot-sandbox
+parse ubuntu-gptme → ubuntu gptme ubuntu-gptme Ubuntu · gptme base-name ubuntu-gptme-sandbox
+parse ubuntu-llm → ubuntu llm ubuntu-llm Ubuntu · llm base-name ubuntu-llm-sandbox
+parse ubuntu-shell-gpt → ubuntu shell-gpt ubuntu-shell-gpt Ubuntu · ShellGPT base-name ubuntu-sgpt-sandbox
+parse ubuntu-zeroclaw → ubuntu zeroclaw ubuntu-zeroclaw Ubuntu · ZeroClaw base-name ubuntu-zeroclaw-sandbox
+parse ubuntu-aichat → ubuntu aichat ubuntu-aichat Ubuntu · AIChat base-name ubuntu-aichat-sandbox
+parse ubuntu-tgpt → ubuntu tgpt ubuntu-tgpt Ubuntu · tgpt base-name ubuntu-tgpt-sandbox
+parse ubuntu-opencode → ubuntu opencode ubuntu-opencode Ubuntu · OpenCode base-name ubuntu-opencode-sandbox
+parse ubuntu-smolagents → ubuntu smolagents ubuntu-smolagents Ubuntu · smolagents base-name ubuntu-smolagent-sandbox
+parse ubuntu-adk → ubuntu adk ubuntu-adk Ubuntu · Agent Development Kit base-name ubuntu-adk-sandbox
+parse ubuntu-promptfoo → ubuntu promptfoo ubuntu-promptfoo Ubuntu · promptfoo base-name ubuntu-promptfoo-sandbox
+parse ubuntu-clai → ubuntu clai ubuntu-clai Ubuntu · clai (Pydantic AI) base-name ubuntu-clai-sandbox
+parse ubuntu-copilot → ubuntu copilot ubuntu-copilot Ubuntu · GitHub Copilot CLI base-name ubuntu-copilot-sandbox
+parse ubuntu-qwen-code → ubuntu qwen-code ubuntu-qwen-code Ubuntu · Qwen Code base-name ubuntu-qwen-sandbox
+parse ubuntu-goose → ubuntu goose ubuntu-goose Ubuntu · Goose base-name ubuntu-goose-sandbox
+parse ubuntu-kilo → ubuntu kilo ubuntu-kilo Ubuntu · Kilo Code CLI base-name ubuntu-kilo-sandbox
+parse ubuntu-mistral-vibe → ubuntu mistral-vibe ubuntu-mistral-vibe Ubuntu · Mistral Vibe base-name ubuntu-vibe-sandbox
+parse ubuntu-droid → ubuntu droid ubuntu-droid Ubuntu · Factory Droid base-name ubuntu-droid-sandbox
+parse ubuntu-dirac → ubuntu dirac ubuntu-dirac Ubuntu · Dirac base-name ubuntu-dirac-sandbox
+parse ubuntu-kimi-code → ubuntu kimi-code ubuntu-kimi-code Ubuntu · Kimi Code base-name ubuntu-kimi-sandbox
+parse ubuntu-cline → ubuntu cline ubuntu-cline Ubuntu · Cline CLI base-name ubuntu-cline-sandbox
+parse ubuntu-openhands → ubuntu openhands ubuntu-openhands Ubuntu · OpenHands CLI base-name ubuntu-openhands-sandbox
+parse ubuntu-letta-code → ubuntu letta-code ubuntu-letta-code Ubuntu · Letta Code base-name ubuntu-letta-sandbox
+parse ubuntu-docker-agent → ubuntu docker-agent ubuntu-docker-agent Ubuntu · Docker Agent base-name ubuntu-docker-agent-sandbox
+parse ubuntu-nanocoder → ubuntu nanocoder ubuntu-nanocoder Ubuntu · Nanocoder base-name ubuntu-nanocoder-sandbox
+parse ubuntu-mini-swe-agent → ubuntu mini-swe-agent ubuntu-mini-swe-agent Ubuntu · mini-swe-agent base-name ubuntu-mini-sandbox
+parse ubuntu-open-interpreter → ubuntu open-interpreter ubuntu-open-interpreter Ubuntu · Open Interpreter base-name ubuntu-interpreter-sandbox
+parse ubuntu-crush → ubuntu crush ubuntu-crush Ubuntu · Crush base-name ubuntu-crush-sandbox
+parse ubuntu-mimo-code → ubuntu mimo-code ubuntu-mimo-code Ubuntu · MiMo Code base-name ubuntu-mimo-sandbox
+parse ubuntu-codewhale → ubuntu codewhale ubuntu-codewhale Ubuntu · CodeWhale base-name ubuntu-codewhale-sandbox
+parse ubuntu-maki → ubuntu maki ubuntu-maki Ubuntu · Maki base-name ubuntu-maki-sandbox
+parse ubuntu-omp → ubuntu omp ubuntu-omp Ubuntu · oh-my-pi base-name ubuntu-omp-sandbox
+parse ubuntu-tau → ubuntu tau ubuntu-tau Ubuntu · Tau base-name ubuntu-tau-sandbox
+parse ubuntu-stitch → ubuntu stitch ubuntu-stitch Ubuntu · Google Stitch CLI base-name ubuntu-stitch-sandbox
+parse alpine-claude-code → alpine claude-code alpine-claude-code Alpine · Claude Code base-name alpine-claude-sandbox
+parse alpine-pi → alpine pi alpine-pi Alpine · pi base-name alpine-pi-sandbox
+parse alpine-codex → alpine codex alpine-codex Alpine · Codex base-name alpine-codex-sandbox
+parse alpine-antigravity → alpine antigravity alpine-antigravity Alpine · Antigravity CLI base-name alpine-agy-sandbox
+parse alpine-gemini → alpine gemini alpine-gemini Alpine · Gemini CLI base-name alpine-gemini-sandbox
+parse alpine-grok → alpine grok alpine-grok Alpine · Grok Build base-name alpine-grok-sandbox
+parse alpine-fabric → alpine fabric alpine-fabric Alpine · Fabric base-name alpine-fabric-sandbox
+parse alpine-openclaw → alpine openclaw alpine-openclaw Alpine · OpenClaw base-name alpine-openclaw-sandbox
+parse alpine-nanobot → alpine nanobot alpine-nanobot Alpine · nanobot base-name alpine-nanobot-sandbox
+parse alpine-gptme → alpine gptme alpine-gptme Alpine · gptme base-name alpine-gptme-sandbox
+parse alpine-llm → alpine llm alpine-llm Alpine · llm base-name alpine-llm-sandbox
+parse alpine-shell-gpt → alpine shell-gpt alpine-shell-gpt Alpine · ShellGPT base-name alpine-sgpt-sandbox
+parse alpine-zeroclaw → alpine zeroclaw alpine-zeroclaw Alpine · ZeroClaw base-name alpine-zeroclaw-sandbox
+parse alpine-aichat → alpine aichat alpine-aichat Alpine · AIChat base-name alpine-aichat-sandbox
+parse alpine-tgpt → alpine tgpt alpine-tgpt Alpine · tgpt base-name alpine-tgpt-sandbox
+parse alpine-opencode → alpine opencode alpine-opencode Alpine · OpenCode base-name alpine-opencode-sandbox
+parse alpine-smolagents → alpine smolagents alpine-smolagents Alpine · smolagents base-name alpine-smolagent-sandbox
+parse alpine-adk → alpine adk alpine-adk Alpine · Agent Development Kit base-name alpine-adk-sandbox
+parse alpine-promptfoo → alpine promptfoo alpine-promptfoo Alpine · promptfoo base-name alpine-promptfoo-sandbox
+parse alpine-clai → alpine clai alpine-clai Alpine · clai (Pydantic AI) base-name alpine-clai-sandbox
+parse alpine-copilot → alpine copilot alpine-copilot Alpine · GitHub Copilot CLI base-name alpine-copilot-sandbox
+parse alpine-qwen-code → alpine qwen-code alpine-qwen-code Alpine · Qwen Code base-name alpine-qwen-sandbox
+parse alpine-goose → alpine goose alpine-goose Alpine · Goose base-name alpine-goose-sandbox
+parse alpine-kilo → alpine kilo alpine-kilo Alpine · Kilo Code CLI base-name alpine-kilo-sandbox
+parse alpine-mistral-vibe → alpine mistral-vibe alpine-mistral-vibe Alpine · Mistral Vibe base-name alpine-vibe-sandbox
+parse alpine-droid → alpine droid alpine-droid Alpine · Factory Droid base-name alpine-droid-sandbox
+parse alpine-dirac → alpine dirac alpine-dirac Alpine · Dirac base-name alpine-dirac-sandbox
+parse alpine-kimi-code → alpine kimi-code alpine-kimi-code Alpine · Kimi Code base-name alpine-kimi-sandbox
+parse alpine-cline → alpine cline alpine-cline Alpine · Cline CLI base-name alpine-cline-sandbox
+parse alpine-openhands → alpine openhands alpine-openhands Alpine · OpenHands CLI base-name alpine-openhands-sandbox
+parse alpine-letta-code → alpine letta-code alpine-letta-code Alpine · Letta Code base-name alpine-letta-sandbox
+parse alpine-docker-agent → alpine docker-agent alpine-docker-agent Alpine · Docker Agent base-name alpine-docker-agent-sandbox
+parse alpine-nanocoder → alpine nanocoder alpine-nanocoder Alpine · Nanocoder base-name alpine-nanocoder-sandbox
+parse alpine-mini-swe-agent → alpine mini-swe-agent alpine-mini-swe-agent Alpine · mini-swe-agent base-name alpine-mini-sandbox
+parse alpine-open-interpreter → alpine open-interpreter alpine-open-interpreter Alpine · Open Interpreter base-name alpine-interpreter-sandbox
+parse alpine-crush → alpine crush alpine-crush Alpine · Crush base-name alpine-crush-sandbox
+parse alpine-mimo-code → alpine mimo-code alpine-mimo-code Alpine · MiMo Code base-name alpine-mimo-sandbox
+parse alpine-codewhale → alpine codewhale alpine-codewhale Alpine · CodeWhale base-name alpine-codewhale-sandbox
+parse alpine-maki → alpine maki alpine-maki Alpine · Maki base-name alpine-maki-sandbox
+parse alpine-omp → alpine omp alpine-omp Alpine · oh-my-pi base-name alpine-omp-sandbox
+parse alpine-tau → alpine tau alpine-tau Alpine · Tau base-name alpine-tau-sandbox
+parse alpine-stitch → alpine stitch alpine-stitch Alpine · Google Stitch CLI base-name alpine-stitch-sandbox
+parse df-0123456789ab-claude-code → df-0123456789ab claude-code df-0123456789ab-claude-code Dockerfile · Claude Code base-name dockerfile-claude-sandbox
+parse df-0123456789ab-pi → df-0123456789ab pi df-0123456789ab-pi Dockerfile · pi base-name dockerfile-pi-sandbox
+parse df-0123456789ab → df-0123456789ab none df-0123456789ab Dockerfile · none base-name dockerfile-sandbox
+parse df-0123456789ab-codex → df-0123456789ab codex df-0123456789ab-codex Dockerfile · Codex base-name dockerfile-codex-sandbox
+parse df-0123456789ab-antigravity → df-0123456789ab antigravity df-0123456789ab-antigravity Dockerfile · Antigravity CLI base-name dockerfile-agy-sandbox
+parse df-0123456789ab-gemini → df-0123456789ab gemini df-0123456789ab-gemini Dockerfile · Gemini CLI base-name dockerfile-gemini-sandbox
+parse df-0123456789ab-grok → df-0123456789ab grok df-0123456789ab-grok Dockerfile · Grok Build base-name dockerfile-grok-sandbox
+parse df-0123456789ab-fabric → df-0123456789ab fabric df-0123456789ab-fabric Dockerfile · Fabric base-name dockerfile-fabric-sandbox
+parse df-0123456789ab-openclaw → df-0123456789ab openclaw df-0123456789ab-openclaw Dockerfile · OpenClaw base-name dockerfile-openclaw-sandbox
+parse df-0123456789ab-nanobot → df-0123456789ab nanobot df-0123456789ab-nanobot Dockerfile · nanobot base-name dockerfile-nanobot-sandbox
+parse df-0123456789ab-gptme → df-0123456789ab gptme df-0123456789ab-gptme Dockerfile · gptme base-name dockerfile-gptme-sandbox
+parse df-0123456789ab-llm → df-0123456789ab llm df-0123456789ab-llm Dockerfile · llm base-name dockerfile-llm-sandbox
+parse df-0123456789ab-shell-gpt → df-0123456789ab shell-gpt df-0123456789ab-shell-gpt Dockerfile · ShellGPT base-name dockerfile-sgpt-sandbox
+parse df-0123456789ab-zeroclaw → df-0123456789ab zeroclaw df-0123456789ab-zeroclaw Dockerfile · ZeroClaw base-name dockerfile-zeroclaw-sandbox
+parse df-0123456789ab-aichat → df-0123456789ab aichat df-0123456789ab-aichat Dockerfile · AIChat base-name dockerfile-aichat-sandbox
+parse df-0123456789ab-tgpt → df-0123456789ab tgpt df-0123456789ab-tgpt Dockerfile · tgpt base-name dockerfile-tgpt-sandbox
+parse df-0123456789ab-opencode → df-0123456789ab opencode df-0123456789ab-opencode Dockerfile · OpenCode base-name dockerfile-opencode-sandbox
+parse df-0123456789ab-smolagents → df-0123456789ab smolagents df-0123456789ab-smolagents Dockerfile · smolagents base-name dockerfile-smolagent-sandbox
+parse df-0123456789ab-adk → df-0123456789ab adk df-0123456789ab-adk Dockerfile · Agent Development Kit base-name dockerfile-adk-sandbox
+parse df-0123456789ab-promptfoo → df-0123456789ab promptfoo df-0123456789ab-promptfoo Dockerfile · promptfoo base-name dockerfile-promptfoo-sandbox
+parse df-0123456789ab-clai → df-0123456789ab clai df-0123456789ab-clai Dockerfile · clai (Pydantic AI) base-name dockerfile-clai-sandbox
+parse df-0123456789ab-copilot → df-0123456789ab copilot df-0123456789ab-copilot Dockerfile · GitHub Copilot CLI base-name dockerfile-copilot-sandbox
+parse df-0123456789ab-qwen-code → df-0123456789ab qwen-code df-0123456789ab-qwen-code Dockerfile · Qwen Code base-name dockerfile-qwen-sandbox
+parse df-0123456789ab-goose → df-0123456789ab goose df-0123456789ab-goose Dockerfile · Goose base-name dockerfile-goose-sandbox
+parse df-0123456789ab-kilo → df-0123456789ab kilo df-0123456789ab-kilo Dockerfile · Kilo Code CLI base-name dockerfile-kilo-sandbox
+parse df-0123456789ab-mistral-vibe → df-0123456789ab mistral-vibe df-0123456789ab-mistral-vibe Dockerfile · Mistral Vibe base-name dockerfile-vibe-sandbox
+parse df-0123456789ab-droid → df-0123456789ab droid df-0123456789ab-droid Dockerfile · Factory Droid base-name dockerfile-droid-sandbox
+parse df-0123456789ab-dirac → df-0123456789ab dirac df-0123456789ab-dirac Dockerfile · Dirac base-name dockerfile-dirac-sandbox
+parse df-0123456789ab-kimi-code → df-0123456789ab kimi-code df-0123456789ab-kimi-code Dockerfile · Kimi Code base-name dockerfile-kimi-sandbox
+parse df-0123456789ab-cline → df-0123456789ab cline df-0123456789ab-cline Dockerfile · Cline CLI base-name dockerfile-cline-sandbox
+parse df-0123456789ab-openhands → df-0123456789ab openhands df-0123456789ab-openhands Dockerfile · OpenHands CLI base-name dockerfile-openhands-sandbox
+parse df-0123456789ab-letta-code → df-0123456789ab letta-code df-0123456789ab-letta-code Dockerfile · Letta Code base-name dockerfile-letta-sandbox
+parse df-0123456789ab-docker-agent → df-0123456789ab docker-agent df-0123456789ab-docker-agent Dockerfile · Docker Agent base-name dockerfile-docker-agent-sandbox
+parse df-0123456789ab-nanocoder → df-0123456789ab nanocoder df-0123456789ab-nanocoder Dockerfile · Nanocoder base-name dockerfile-nanocoder-sandbox
+parse df-0123456789ab-mini-swe-agent → df-0123456789ab mini-swe-agent df-0123456789ab-mini-swe-agent Dockerfile · mini-swe-agent base-name dockerfile-mini-sandbox
+parse df-0123456789ab-open-interpreter → df-0123456789ab open-interpreter df-0123456789ab-open-interpreter Dockerfile · Open Interpreter base-name dockerfile-interpreter-sandbox
+parse df-0123456789ab-crush → df-0123456789ab crush df-0123456789ab-crush Dockerfile · Crush base-name dockerfile-crush-sandbox
+parse df-0123456789ab-mimo-code → df-0123456789ab mimo-code df-0123456789ab-mimo-code Dockerfile · MiMo Code base-name dockerfile-mimo-sandbox
+parse df-0123456789ab-codewhale → df-0123456789ab codewhale df-0123456789ab-codewhale Dockerfile · CodeWhale base-name dockerfile-codewhale-sandbox
+parse df-0123456789ab-maki → df-0123456789ab maki df-0123456789ab-maki Dockerfile · Maki base-name dockerfile-maki-sandbox
+parse df-0123456789ab-omp → df-0123456789ab omp df-0123456789ab-omp Dockerfile · oh-my-pi base-name dockerfile-omp-sandbox
+parse df-0123456789ab-tau → df-0123456789ab tau df-0123456789ab-tau Dockerfile · Tau base-name dockerfile-tau-sandbox
+parse df-0123456789ab-stitch → df-0123456789ab stitch df-0123456789ab-stitch Dockerfile · Google Stitch CLI base-name dockerfile-stitch-sandbox
+parse node-claude-code → node claude-code claude-code Node.js · Claude Code base-name node-claude-code-sandbox
+parse node-pi → node pi pi Node.js · pi base-name node-pi-sandbox
+parse node-codex → node codex codex Node.js · Codex base-name node-codex-sandbox
+parse alpine → alpine none lab Alpine · none base-name alpine-sandbox
+parse cobol-pi → nil base-name cobol-pi-sandbox
+parse custom:mine → nil base-name mine-sandbox
+parse python-claude → nil base-name python-claude-sandbox

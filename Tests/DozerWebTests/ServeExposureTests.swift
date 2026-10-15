@@ -13,9 +13,9 @@ final class ServeExposureTests: XCTestCase {
             .overview, .sandbox("s"), .sandboxSessions("s"), .sandboxNetwork("s"), .sandboxTools("s"), .images, .imageTree, .accounts,
             .metrics(WebMetricsQuery.parse(nil)!), .metricsCSV(WebMetricsQuery.parse(nil)!), .events, .doctor, .stream, .actions, .operations,
             .policyPreview("s"), .terminal("s"), .terminalTicket("s"), .terminalSocket("s"), .settings, .settingsChange, .sessionScreen("s", "shell"),
-            .terminalLayout("s"), .terminalLayoutSet("s"), .bootLogs("s"), .bootLog("s", 1), .onboarding, .onboardingConfig, .preparations,
+            .terminalLayout("s"), .terminalLayoutSet("s"), .bootLogs("s"), .bootLog("s", 1), .buildLog("s"), .onboarding, .onboardingConfig, .preparations,
             .accountAdd, .sandboxKey("s"), .workspaceCheck, .workspaceChoose, .quickAdd, .projectsDirChoose, .projectOpen, .projectPreview,
-            .projectWrite, .resources, .resourcesPreview, .bases, .dockerfileChoose, .access, .accessCheck, .accessGithubKey, .signup,
+            .projectWrite, .resources, .resourcesPreview, .bases, .tryCatalog, .tryList, .plan, .dockerfileChoose, .access, .accessCheck, .accessGithubKey, .signup,
             .serveStatus, .serveDevices, .serveShare, .serveRevoke("abc123"), .serveRename("abc123"), .serveProbe,
         ]
         for r in all { _ = covered(r) }
@@ -27,9 +27,9 @@ final class ServeExposureTests: XCTestCase {
         case .index, .asset, .terminalFrame, .offline, .serviceWorker, .sessionBootstrap, .sessionInfo, .sessionRenew, .sessionEnd, .overview,
              .sandbox, .sandboxSessions, .sandboxNetwork, .sandboxTools, .images, .imageTree, .accounts, .metrics, .metricsCSV, .events, .doctor,
              .stream, .actions, .operations, .policyPreview, .terminal, .terminalTicket, .terminalSocket, .settings, .settingsChange,
-             .sessionScreen, .terminalLayout, .terminalLayoutSet, .bootLogs, .bootLog, .onboarding, .onboardingConfig, .preparations,
+             .sessionScreen, .terminalLayout, .terminalLayoutSet, .bootLogs, .bootLog, .buildLog, .onboarding, .onboardingConfig, .preparations,
              .accountAdd, .sandboxKey, .workspaceCheck, .workspaceChoose, .quickAdd, .projectsDirChoose, .projectOpen, .projectPreview,
-             .projectWrite, .resources, .resourcesPreview, .bases, .dockerfileChoose, .access, .accessCheck, .accessGithubKey, .signup,
+             .projectWrite, .resources, .resourcesPreview, .bases, .tryCatalog, .tryList, .plan, .dockerfileChoose, .access, .accessCheck, .accessGithubKey, .signup,
              .serveStatus, .serveDevices, .serveShare, .serveRevoke, .serveRename, .serveProbe:
             return true
         }

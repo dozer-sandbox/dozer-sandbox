@@ -175,6 +175,12 @@ final class WebOperations: @unchecked Sendable {
         let finished = Self.finishedLine(e)
         if let o = update(id, { o in
             guard o.state == "running" else { return }
+            // 617: the steps, the one under way and a short tail — the page's progress panel. A build's raw output goes
+            // to the tail only: the header's one line keeps the step in plain words (owner: no apt lines up there).
+            var p = o.progress ?? WebOpProgress()
+            p.apply(e)
+            o.progress = p
+            if e.kind == .output { return }
             o.text = text
             // 594 W22: Restart host keeps each sandbox's line (they hibernate in parallel).
             if o.action == "host-restart", let finished { o.lines = (o.lines ?? []) + [finished] }
@@ -247,6 +253,9 @@ final class WebOperations: @unchecked Sendable {
             return "keep-alive \(on ? "on" : "off")"
         case .accountVerify(let acc):
             return (try? v.decode([AccountRow].self))?.first { $0.name == acc }.map { "\(acc): \($0.verification ?? $0.state)" } ?? "\(acc) checked"
+        case .accountRefresh(let acc):
+            let ok = (try? v.decode([AccountRow].self))?.first { $0.name == acc }?.sourceState == "ok"
+            return ok ? "\(acc): its key was read again" : "\(acc): its key could not be read — the Accounts page says why"
         case .accountRemove(let acc):
             return "removed account \(acc)"
         case .onboard(let images):

@@ -75,6 +75,35 @@ final class WebTerminalUnitTests: XCTestCase {
         }
     }
 
+    /// 617: tab zero (the console, read-only, never a session) and the agent's quiet terminal (no boot view in it).
+    func testTheConsoleAndTheQuietTerminalAreDecodedStrictly() throws {
+        func d(_ s: String) throws -> WebTerminalTicketRequest { try WebTerminalTicketRequest.decode(Data(s.utf8)) }
+        let console = try d(#"{"mode":"console","cols":120,"rows":40}"#)
+        XCTAssertEqual(console.mode, .console)
+        XCTAssertNil(console.size, "the console never sizes anything")
+        XCTAssertNil(console.session)
+        XCTAssertFalse(console.quiet)
+        let quiet = try d(#"{"mode":"interactive","quiet":true,"cols":100,"rows":30}"#)
+        XCTAssertTrue(quiet.quiet)
+        XCTAssertEqual(quiet.size, TermSize(cols: 100, rows: 30))
+        XCTAssertFalse(try d(#"{"mode":"interactive","quiet":false}"#).quiet)
+        XCTAssertFalse(try d(#"{"mode":"interactive"}"#).quiet, "loud by default (the boot view as before, for doz ui's other starts)")
+        for bad in [#"{"mode":"console","session":"shell"}"#, #"{"mode":"console","quiet":true}"#, #"{"mode":"watch","quiet":true}"#,
+                    #"{"mode":"interactive","quiet":1}"#, #"{"mode":"interactive","quiet":"yes"}"#] {
+            XCTAssertThrowsError(try d(bad), bad)
+        }
+    }
+
+    func testAMintedGrantCarriesQuiet() async throws {
+        let store = WebTerminalTicketStore()
+        let t = try await store.mint(cookie: "a", sandbox: "demo", session: nil, mode: .interactive, size: nil, quiet: true)
+        let g = try await store.consume(t, cookie: "a", sandbox: "demo")
+        XCTAssertTrue(g.quiet)
+        let c = try await store.mint(cookie: "a", sandbox: "demo", session: nil, mode: .console, size: nil)
+        let cg = try await store.consume(c, cookie: "a", sandbox: "demo")
+        XCTAssertEqual(cg.mode, WebTerminalMode.console)
+    }
+
     // MARK: the upgrade checks
 
     func md(host: String? = "127.0.0.1:50123", origin: String? = "http://127.0.0.1:50123", site: String? = nil,

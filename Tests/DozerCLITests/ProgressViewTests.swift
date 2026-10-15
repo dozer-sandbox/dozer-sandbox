@@ -49,7 +49,7 @@ final class ProgressViewTests: XCTestCase {
         _ = b.apply(ev(.progress, "pulling node@1a2b3c4d5e6f", done: 0, total: 142_000_000, items: 0, totalItems: 5), now: t0)
         _ = b.apply(ev(.progress, "pulling node@1a2b3c4d5e6f", done: 87_000_000, total: 142_000_000, items: 3, totalItems: 5), now: t0 + 10)
         guard case .transfer(let line)? = b.live(now: t0 + 10).dropFirst().first else { return XCTFail("no transfer line") }
-        XCTAssertEqual(line, "pulling node@1a2b3c4d5e6f  ████████████░░░░░░░░  87 / 142 MB  8.7 MB/s  ~6.3 s  (3/5 layers)")
+        XCTAssertEqual(line, "Downloading node@1a2b3c4d5e6f  ████████████░░░░░░░░  87 / 142 MB  8.7 MB/s  ~6.3 s  (3/5 layers)")
         let done = b.apply(ev(.progress, "pulling node@1a2b3c4d5e6f", done: 142_000_000, total: 142_000_000, items: 5, totalItems: 5), now: t0 + 16)
         XCTAssertEqual(done, [.transferDone("pulling node@1a2b3c4d5e6f", bytes: 142_000_000, seconds: 16)])
         XCTAssertEqual(b.apply(ev(.failed, "pulled the base image node", ms: 16_000, error: "registry said 503"), now: t0 + 16),
@@ -61,19 +61,19 @@ final class ProgressViewTests: XCTestCase {
     func testAnimatedBytesKeepTheLiveBlockOutOfTheScrollback() {
         let v = ProgressTerminal(mode: .animated, color: false)
         let a = v.apply(ev(.started, "step: npm install"), now: t0)
-        XCTAssertEqual(a, "⠋ step: npm install  0 ms", "the block: no newline after it")
+        XCTAssertEqual(a, "⠋ Preparing the image: npm install…  0 ms", "the block: no newline after it")
         let b = v.apply(ev(.output, "added 3 packages"), now: t0 + 1)
-        XCTAssertEqual(b, "\r\u{1B}[J" + "⠋ step: npm install  1.0 s\r\n  │ added 3 packages", "erased, redrawn")
+        XCTAssertEqual(b, "\r\u{1B}[J" + "⠋ Preparing the image: npm install…  1.0 s\r\n  │ added 3 packages", "erased, redrawn")
         let tick = v.tick(now: t0 + 1.2)
-        XCTAssertEqual(tick, "\r\u{1B}[1A\u{1B}[J" + "⠙ step: npm install  1.2 s\r\n  │ added 3 packages", "a tick: the next frame, in place")
+        XCTAssertEqual(tick, "\r\u{1B}[1A\u{1B}[J" + "⠙ Preparing the image: npm install…  1.2 s\r\n  │ added 3 packages", "a tick: the next frame, in place")
         let c = v.apply(ev(.step, "step: npm install", ms: 2500), now: t0 + 2.5)
-        XCTAssertEqual(c, "\r\u{1B}[1A\u{1B}[J" + "✓ step: npm install — 2.5 s\r\n", "the finished line — and no block left")
+        XCTAssertEqual(c, "\r\u{1B}[1A\u{1B}[J" + "✓ Prepared the image: npm install — 2.5 s\r\n", "the finished line — and no block left")
         XCTAssertFalse(v.hasBlock)
         XCTAssertEqual(v.tick(now: t0 + 3), "", "nothing live: no bytes")
         // A console line from outside goes above the block.
         _ = v.apply(ev(.started, "VM created and booted"), now: t0)
         let console = v.write([.raw("[    0.1] Linux version")], now: t0)
-        XCTAssertTrue(console.hasPrefix("\r\u{1B}[J[    0.1] Linux version\r\n") && console.hasSuffix(" VM created and booted  0 ms"), console)
+        XCTAssertTrue(console.hasPrefix("\r\u{1B}[J[    0.1] Linux version\r\n") && console.hasSuffix(" VM created and booted…  0 ms"), console)
         XCTAssertEqual(v.finish(now: t0), "\r\u{1B}[J", "the end erases the block")
     }
 
@@ -99,15 +99,15 @@ final class ProgressViewTests: XCTestCase {
         XCTAssertEqual(v.apply(ev(.started, "booted the bake VM"), now: t0), "", "no line for a start")
         XCTAssertEqual(v.apply(ev(.output, "\u{1B}]52;c;x\u{07}added"), now: t0), "", "no output tail")
         XCTAssertEqual(v.tick(now: t0 + 1), "", "no ticks")
-        XCTAssertEqual(v.apply(ev(.step, "booted the bake VM", ms: 812), now: t0), "  · booted the bake VM — 812 ms\r\n")
+        XCTAssertEqual(v.apply(ev(.step, "booted the bake VM", ms: 812), now: t0), "  · Started a VM to prepare the image — 812 ms\r\n")
         _ = v.apply(ev(.progress, "pulling node@1a2b3c4d5e6f", done: 0, total: 142_000_000), now: t0)
-        XCTAssertEqual(v.apply(ev(.progress, "pulling node@1a2b3c4d5e6f", done: 142_000_000, total: 142_000_000), now: t0 + 23), "  · pulled node@1a2b3c4d5e6f: 142 MB in 23.0 s\r\n")
+        XCTAssertEqual(v.apply(ev(.progress, "pulling node@1a2b3c4d5e6f", done: 142_000_000, total: 142_000_000), now: t0 + 23), "  · Downloaded node@1a2b3c4d5e6f: 142 MB in 23.0 s\r\n")
         for s in [v.apply(ev(.step, "x", ms: 1)), v.finish()] {
             XCTAssertFalse(s.contains("\u{1B}"), "plain without colour: no escape at all")
             XCTAssertFalse(s.contains("⠋"))
         }
         let web = ProgressTerminal(mode: .plain, color: true, plainPrefix: "[doz] ", plainStyle: "2")
-        XCTAssertEqual(web.apply(ev(.step, "kernel ready", ms: 11)), "\u{1B}[2m[doz] kernel ready — 11 ms\u{1B}[0m\r\n", "the web's plain lines, dim")
+        XCTAssertEqual(web.apply(ev(.step, "kernel ready", ms: 11)), "\u{1B}[2m[doz] Linux kernel ready — 11 ms\u{1B}[0m\r\n", "the web's plain lines, dim")
     }
 
     func testGuestOutputCannotEscape() {
@@ -136,7 +136,7 @@ final class ProgressViewTests: XCTestCase {
         let v = ProgressTerminal(mode: .animated, color: false)
         _ = v.apply(ev(.started, "verify: claude --version"), now: t0)
         let out = v.apply(ev(.step, "verify: claude --version → 2.1.285 (Claude Code)", ms: 169), now: t0)
-        XCTAssertTrue(out.contains("✓ verify: claude --version → 2.1.285 (Claude Code) — 169 ms"), out)
+        XCTAssertTrue(out.contains("✓ Checked the image (claude): 2.1.285 (Claude Code) — 169 ms"), out)
         XCTAssertFalse(v.board.isLive, "the started line ended — no spinner left")
         XCTAssertEqual(PreparationRecord.key("verify: claude --version → 2.1.285"), PreparationRecord.key("verify: claude --version"),
                        "the same step across versions (estimates)")

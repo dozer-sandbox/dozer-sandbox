@@ -1,0 +1,268 @@
+{
+  "args" : {
+    "version" : {
+      "buildArg" : "CODEWHALE_VERSION",
+      "default" : "0.10.1",
+      "description" : "The CodeWhale release Dozer installs (its pin).",
+      "pattern" : "[0-9]+\\.[0-9]+\\.[0-9]+([-+][0-9A-Za-z.-]+)?"
+    }
+  },
+  "author" : "Hunter Bown and contributors",
+  "capabilities" : [
+    {
+      "config" : {
+        "dozer" : {
+          "excluded" : [
+
+          ],
+          "model" : {
+            "hosts" : [
+              {
+                "host" : "api.x.ai",
+                "paths" : [
+                  "/v1/chat/completions"
+                ]
+              }
+            ],
+            "id" : "model:codewhale",
+            "phrase" : "talk to your AI model (xAI)",
+            "summary" : "CodeWhale's model here (the xAI API, with your key) — needed for it to answer.",
+            "title" : "Talk to xAI"
+          },
+          "quiet" : [
+            {
+              "host" : "models.dev",
+              "reason" : "CodeWhale's TUI refreshes the public models.dev catalogue when it starts; it has the catalogue bundled and does without the refresh when refused"
+            }
+          ],
+          "update" : [
+
+          ]
+        },
+        "runtime" : {
+          "allow" : [
+            "api.x.ai:443"
+          ],
+          "deny" : [
+            "models.dev:443"
+          ]
+        }
+      },
+      "type" : "com.docker.sandbox/network-policy@1"
+    },
+    {
+      "config" : {
+        "apiKey" : {
+          "inject" : [
+            {
+              "domain" : "api.x.ai",
+              "format" : "Bearer %s",
+              "header" : "authorization"
+            }
+          ],
+          "name" : "XAI_API_KEY",
+          "proxyManaged" : true
+        },
+        "dozer" : {
+          "accounts" : [
+            "key"
+          ]
+        },
+        "phase" : "runtime",
+        "service" : "xai"
+      },
+      "description" : "xAI API access",
+      "type" : "com.docker.sandbox/credential@1"
+    },
+    {
+      "config" : {
+        "path" : "/home/agent/.codewhale"
+      },
+      "type" : "com.docker.sandbox/volume@1"
+    },
+    {
+      "config" : {
+        "bake_hosts" : [
+          "github.com",
+          "release-assets.githubusercontent.com"
+        ],
+        "binary" : "codewhale",
+        "integrity" : "sha512-F/gS+8C4eANXPF15cRvzss7lowLk96a1tlOPZWxdNHveKURQdU9cRQ+RlW4Di0lg4TgXsfRCebR/AS1i0qhpzw==",
+        "kind" : "release-binary",
+        "url" : "https://github.com/Hmbown/CodeWhale/releases/download/v${{ kit.args.version }}/codewhale-linux-arm64"
+      },
+      "type" : "com.dozersandbox/install@1"
+    },
+    {
+      "config" : {
+        "check" : {
+          "argv" : [
+            "codewhale",
+            "exec",
+            "say ok"
+          ],
+          "expect" : "DOZ_FAKE_OK"
+        },
+        "command" : [
+          "codewhale",
+          "--skip-onboarding"
+        ],
+        "env" : {
+          "CODEWHALE_MODEL" : "grok-build-0.1",
+          "CODEWHALE_NO_UPDATE_CHECK" : "1",
+          "CODEWHALE_PROVIDER" : "xai",
+          "CODEWHALE_TELEMETRY" : "0"
+        },
+        "no_prompts_args" : [
+          "--approval-policy",
+          "never"
+        ],
+        "passthrough" : [
+          "--version",
+          "-V",
+          "--help",
+          "-h",
+          "help",
+          "exec",
+          "auth",
+          "models",
+          "doctor",
+          "update",
+          "config"
+        ],
+        "resume" : [
+          "--continue"
+        ],
+        "state_env" : {
+
+        },
+        "status" : "none",
+        "verify" : [
+          {
+            "argv" : [
+              "codewhale",
+              "--version"
+            ],
+            "expect" : "${{ kit.args.version }}"
+          }
+        ]
+      },
+      "type" : "com.dozersandbox/launch@1"
+    },
+    {
+      "config" : {
+        "methods" : [
+          {
+            "accounts" : [
+              "key"
+            ],
+            "checked" : "2026-10-14",
+            "keys_page" : "https://console.x.ai/",
+            "kind" : "api-key",
+            "note" : "CodeWhale's built-in xai provider (CODEWHALE_PROVIDER=xai) reads XAI_API_KEY each run; model grok-build-0.1. Its own account (hosted keys) is not used.",
+            "provider" : "xai"
+          },
+          {
+            "account" : "a CodeWhale account (codewhale login)",
+            "checked" : "2026-10-14",
+            "in_sandbox" : false,
+            "kind" : "vendor-sign-in",
+            "note" : "CodeWhale's account keeps provider keys on its servers; Dozer does not offer it."
+          }
+        ]
+      },
+      "type" : "com.dozersandbox/auth@1"
+    },
+    {
+      "config" : {
+        "entries" : [
+          {
+            "checked" : "2026-10-14",
+            "gateway" : "openrouter",
+            "level" : "unknown",
+            "reason" : "CodeWhale has an OpenRouter route; not checked"
+          },
+          {
+            "checked" : "2026-10-14",
+            "gateway" : "vercel-ai-gateway",
+            "level" : "unknown",
+            "reason" : "not checked against CodeWhale"
+          }
+        ]
+      },
+      "type" : "com.dozersandbox/gateways@1"
+    },
+    {
+      "config" : {
+        "checked" : "2026-10-14"
+      },
+      "type" : "com.dozersandbox/currency@1"
+    },
+    {
+      "config" : {
+        "aliases" : [
+          "deepseek-tui"
+        ],
+        "categories" : [
+          "coding-agent"
+        ],
+        "default_base" : "debian",
+        "icon" : "codewhale",
+        "kind" : "coding-agent",
+        "platforms" : {
+          "glibc" : true,
+          "musl" : true
+        },
+        "tags" : [
+          {
+            "checked" : "2026-10-14",
+            "evidence" : "make recipe-check: codewhale exec \"say ok\" printed the stand-in's answer and exited in a fresh try",
+            "level" : "verified",
+            "notes" : [
+              "codewhale exec \"…\" (--auto for tools)"
+            ],
+            "tag" : "headless"
+          }
+        ],
+        "terms" : "Your xAI API key — a key from console.x.ai."
+      },
+      "type" : "com.dozersandbox/directory@1"
+    },
+    {
+      "config" : {
+        "docs" : "https://github.com/Hmbown/CodeWhale",
+        "intro" : "CodeWhale is a coding agent with its own screen: the session on the left. Ask it to read, change and run the code in your folder.",
+        "steps" : [
+          {
+            "command" : "codewhale exec \"say ok\"",
+            "text" : "Check it answers, without its screen."
+          },
+          {
+            "text" : "Ask it something in its own screen — the session on the left."
+          },
+          {
+            "command" : "codewhale exec \"list the files in this folder\"",
+            "text" : "One task without its screen."
+          }
+        ],
+        "tips" : [
+          "Files it makes are in /workspace — your folder on the Mac.",
+          "Restart its session from the session's ⋯ menu; End stops it."
+        ]
+      },
+      "type" : "com.dozersandbox/guide@1"
+    }
+  ],
+  "description" : "A provider-neutral coding agent for the terminal (formerly DeepSeek TUI), here on an xAI API key.",
+  "displayName" : "CodeWhale",
+  "id" : "hmbown/codewhale",
+  "kind" : "workload",
+  "licenses" : [
+    "MIT"
+  ],
+  "provides" : [
+    "com.dozersandbox/codewhale@${{ kit.args.version }}"
+  ],
+  "schema" : 2,
+  "sourceUrl" : "https://github.com/Hmbown/CodeWhale"
+}

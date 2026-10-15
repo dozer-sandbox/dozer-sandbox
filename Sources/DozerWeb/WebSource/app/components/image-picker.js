@@ -1,7 +1,7 @@
 // components/image-picker — The image of a new sandbox — Agent × Base (596).
 import { h } from '../dom/h.js';
 import { icon, withIcon } from '../dom/icons.js';
-import { AGENT_NAMES, AGENTS, imageNameOf, parseImageName } from '../core/agents.js';
+import { AGENT_NAMES, AGENTS, CATALOG, imageNameOf, parseImageName, registerCatalog } from '../core/agents.js';
 import { api } from '../core/api.js';
 import { bytes } from '../core/format.js';
 import { actOrThrow, waitOps } from '../core/operations.js';
@@ -12,6 +12,11 @@ import { callout } from './callout.js';
 export function imagePicker({ images = [], bases = null, value = 'claude-code', dockerfile = '', onChange = () => {}, onDockerfile = () => {} }) {
   const catalogue = bases ? bases.bases : [];
   const ids = catalogue.map((b) => b.id);
+  // 617 (owner: "split them"): every agent and tool, in two sections — coding agents and AI tools — and no agent.
+  registerCatalog(bases && bases.catalog);
+  const kinds = (bases && bases.kinds) || [{ id: 'coding-agent', title: 'Coding agents' }, { id: 'ai-tool', title: 'AI tools' }];
+  const agentList = CATALOG.length ? CATALOG : AGENTS.filter(([a]) => a !== 'none').map(([id, title]) => ({ id, title, kind: 'coding-agent', defaultBase: 'node', musl: true }));
+  const titleOf = (a) => a === 'none' ? 'none' : (agentList.find((x) => x.id === a) || {}).title || AGENT_NAMES[a] || a;
   const templates = images.filter((i) => i.kind === 'custom');
   const parsed = parseImageName(value, ids);
   let agent = parsed ? parsed.agent : 'claude-code', base = parsed ? parsed.base : 'node';
@@ -20,11 +25,30 @@ export function imagePicker({ images = [], bases = null, value = 'claude-code', 
   let builder = bases ? bases.builder : { state: 'missing', note: '', startNote: '', installNote: '' };
   let notNow = false;
   const changed = () => { paint(); onChange(); };
-  // Agent.
+  // Agent: the section (coding agents, AI tools, none), then that section's agents.
+  const sectionOf = (a) => a === 'none' ? 'none' : (agentList.find((x) => x.id === a) || { kind: 'coding-agent' }).kind;
+  let section = sectionOf(agent);
+  const choose = (a) => {
+    agent = a;
+    // Its own base when the one chosen cannot run it (Alpine for a glibc-only one) or it is not one of the recommended.
+    const c = agentList.find((x) => x.id === a), b = catalogue.find((x) => x.id === base);
+    if (c && (!b || (b.musl && !c.musl))) base = c.defaultBase;
+    changed();
+  };
+  const sectionSegs = {};
+  const sectionCtl = h('div', { class: 'segmented', role: 'group', 'aria-label': 'Coding agent, AI tool or none', 'data-agent-section': '' },
+    [...kinds.map((k) => [k.id, k.title, k.id === 'ai-tool' ? 'layers' : 'rocket']), ['none', 'No agent', 'terminal']].map(([id, label, ic]) =>
+      (sectionSegs[id] = h('button', { type: 'button', class: 'seg', 'data-agent-section': id, on: { click: () => {
+        if (section === id) return;
+        section = id;
+        if (id === 'none') { choose('none'); return; }
+        const first = agentList.find((x) => x.kind === id);
+        if (first && sectionOf(agent) !== id) choose(first.id); else changed();
+      } } }, withIcon(ic, label)))));
   const agentSegs = {};
-  const agentCtl = h('div', { class: 'segmented', role: 'group', 'aria-label': 'Agent', 'data-agent-choice': '' },
-    AGENTS.map(([a, label]) => (agentSegs[a] = h('button', { type: 'button', class: 'seg', 'data-agent': a, on: { click: () => { agent = a; changed(); } } },
-      withIcon(a === 'none' ? 'terminal' : 'rocket', label)))));
+  const agentCtl = h('div', { class: 'segmented agent-chips', role: 'group', 'aria-label': 'Agent', 'data-agent-choice': '' },
+    [...agentList.map((x) => [x.id, x.title]), ['none', 'none']].map(([a, label]) => (agentSegs[a] = h('button', { type: 'button', class: 'seg', 'data-agent': a,
+      on: { click: () => { section = sectionOf(a); choose(a); } } }, label))));
   // Base kind.
   const kindSegs = {};
   const kindSeg = (k, label, ic, extra = {}) => (kindSegs[k] = h('button', { type: 'button', class: 'seg', 'data-base-kind': k, ...extra,
@@ -100,15 +124,27 @@ export function imagePicker({ images = [], bases = null, value = 'claude-code', 
   const tplPanel = h('div', { class: 'tpl-panel' }, tplSelect, h('small', { class: 'muted' }, 'A template is a saved root disk: its base and agent are the ones it was saved from.'));
   const summary = h('small', { class: 'muted image-summary', 'data-image-summary': '' });
   // The image by its name, too (hidden): what a script or an older page names — setting it moves the choices.
-  const names = [...new Set(['claude-code', 'pi', 'lab', ...catalogue.flatMap((b) => AGENTS.map(([a]) => imageNameOf(b.id, a))), ...templates.map((t) => t.name)])];
+  const names = [...new Set(['claude-code', 'pi', 'lab', ...catalogue.flatMap((b) => [...agentList.map((x) => x.id), 'none'].map((a) => imageNameOf(b.id, a))),
+    ...agentList.map((x) => imageNameOf(x.defaultBase, x.id)), ...templates.map((t) => t.name)])];
   const byName = h('select', { name: 'image', hidden: true, 'aria-hidden': 'true', tabindex: '-1' }, names.map((n) => h('option', { value: n }, n)));
   byName.addEventListener('change', () => {
     const p = parseImageName(byName.value, ids.length ? ids : ['node', 'alpine']);
-    if (p) { agent = p.agent; base = p.base; kind = 'recommended'; } else if (templates.some((t) => t.name === byName.value)) { kind = 'template'; template = byName.value; tplSelect.value = template; }
+    if (p) { agent = p.agent; base = p.base; kind = 'recommended'; section = sectionOf(agent); } else if (templates.some((t) => t.name === byName.value)) { kind = 'template'; template = byName.value; tplSelect.value = template; }
     changed();
   });
   function paint() {
-    for (const [a, b] of Object.entries(agentSegs)) { b.classList.toggle('active', a === agent); b.setAttribute('aria-pressed', a === agent ? 'true' : 'false'); b.disabled = kind === 'template'; }
+    for (const [id, b] of Object.entries(sectionSegs)) { b.classList.toggle('active', id === section); b.setAttribute('aria-pressed', id === section ? 'true' : 'false'); b.disabled = kind === 'template'; }
+    for (const [a, b] of Object.entries(agentSegs)) {
+      b.classList.toggle('active', a === agent); b.setAttribute('aria-pressed', a === agent ? 'true' : 'false'); b.disabled = kind === 'template';
+      b.hidden = section === 'none' || sectionOf(a) !== section;          // only the section's agents (none: no list)
+    }
+    agentCtl.hidden = section === 'none';
+    // A recipe agent that cannot run on Alpine: that base's card says so (never chosen for it).
+    const c = agentList.find((x) => x.id === agent);
+    for (const [id, card] of Object.entries(cards)) {
+      const bb = catalogue.find((x) => x.id === id);
+      card.disabled = !!(c && bb && bb.musl && !c.musl);
+    }
     for (const [k, b] of Object.entries(kindSegs)) { b.classList.toggle('active', k === kind); b.setAttribute('aria-pressed', k === kind ? 'true' : 'false'); }
     for (const [id, c] of Object.entries(cards)) {
       c.classList.toggle('active', id === base);
@@ -124,12 +160,12 @@ export function imagePicker({ images = [], bases = null, value = 'claude-code', 
     const now = kind === 'template' ? template : kind === 'dockerfile' ? null : imageNameOf(base, agent);
     if (now && [...byName.options].some((o) => o.value === now)) byName.value = now;
     summary.textContent = kind === 'template' ? 'Template ' + template
-      : kind === 'dockerfile' ? 'Your Dockerfile · ' + (AGENTS.find((x) => x[0] === agent) || [0, agent])[1]
-      : (b ? b.title : base) + ' · ' + (AGENTS.find((x) => x[0] === agent) || [0, agent])[1] + ' — image ' + imageNameOf(base, agent);
+      : kind === 'dockerfile' ? 'Your Dockerfile · ' + titleOf(agent)
+      : (b ? b.title : base) + ' · ' + titleOf(agent) + ' — image ' + imageNameOf(base, agent);
   }
   paint();
   const el = h('div', { class: 'field image-picker' },
-    h('span', null, 'Agent'), agentCtl,
+    h('span', null, 'Agent'), sectionCtl, agentCtl,
     h('span', null, 'Base'), kindCtl, grid, dfPanel, tplPanel, summary, byName);
   return {
     el,

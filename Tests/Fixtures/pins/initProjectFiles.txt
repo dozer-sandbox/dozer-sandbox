@@ -1,0 +1,57 @@
+init --yes --name p --image codex:
+  | version: 1
+  | name: p
+  | image: codex                  # when made
+init --yes --name p --image claude-code --permissions +web:
+  | version: 1
+  | name: p
+  | image: claude-code                  # when made
+  | permissions: "+web"
+init --yes --name p --image claude-code --permissions -error-reports,+web:
+  | version: 1
+  | name: p
+  | image: claude-code                  # when made
+  | permissions: "-error-reports,+web"
+init --yes --name p --image claude-code --permissions locked:
+  | version: 1
+  | name: p
+  | image: claude-code                  # when made
+  | permissions: locked
+init --yes --name p --image python-pi --network locked --account none --cpus 4 --memory 4G --github read --ssh-agent on --clipboard off --browser-bridge off --open-files off --tmux --ignore-mode hide --no-agent-sudo:
+  | version: 1
+  | name: p
+  | image: python-pi                  # when made
+  | cpus: 4                     # when made
+  | memory: 4G                 # when made
+  | network: locked
+  | account: none
+  | agent_sudo: false
+  | github: read
+  | clipboard: off
+  | browser_bridge: off
+  | open_files: off
+  | ssh_agent: on
+  | tmux: true
+  | ignore_mode: hide
+init --yes --name p --image lab --network nat:
+  | version: 1
+  | name: p
+  | image: lab                  # when made
+  | network: nat
+init --yes --name p --image lab --network nat --permissions +web:
+  refused
+init --yes --name p --image go-codex --account work:
+  | version: 1
+  | name: p
+  | image: go-codex                  # when made
+  | account: work
+init --yes --name p:
+  | version: 1
+  | name: p
+  | image: lab                  # when made
+init --yes --name Bad_Name:
+  refused
+init --yes --name p --network wide:
+  refused
+init --yes --name p --github write:
+  refused

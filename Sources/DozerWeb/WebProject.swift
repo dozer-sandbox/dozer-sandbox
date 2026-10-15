@@ -180,6 +180,9 @@ public struct WebProjectPreview: Codable, Equatable, Sendable {
     public var diff: [String]?
     public var replace: String?
     public var written: Bool?
+    /// 617: the plan of what `doz up` there makes — the command, what it can reach (the host's own planner, so the
+    /// review never disagrees with the CLI's `--dry-run`).
+    public var plan: WebPlan?
 }
 
 /// The bodies, decoded strictly.
@@ -265,6 +268,12 @@ enum WebProject {
     }
 
     /// The file the form makes, checked as `doz init` checks it, and what is there now.
+    /// 617: what the planner is asked for the review — `up` in the folder, with the file as it was read back.
+    static func planRequest(_ back: DozerProject, folder: String, path: String, settings: DozerSettings) -> PlanRequest {
+        PlanRequest(purpose: "up", name: back.name,
+                    create: back.createOptions(folder: URL(fileURLWithPath: folder), file: URL(fileURLWithPath: path), settings: settings))
+    }
+
     static func preview(_ q: WebProjectRequest, settings: DozerSettings, store: String, taken: Set<String>) throws -> (WebProjectPreview, DozerProject) {
         guard let form = q.form else { throw WebAction.Invalid("form: required") }
         let folder = try q.normalizedFolder()

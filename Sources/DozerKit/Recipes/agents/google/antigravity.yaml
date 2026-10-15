@@ -1,0 +1,218 @@
+# yaml-language-server: $schema=../../../../../schema/dozer-recipe-2.schema.json
+# Antigravity CLI — Dozer's recipe (schema 2). The format: docs/recipes/RECIPE-FORMAT.md.
+# Edit this file, then run make recipes (it writes Recipes/compiled/antigravity.json, which Dozer embeds).
+schema: 2
+kind: workload
+id: google/antigravity
+displayName: Antigravity CLI
+description: Google's lead coding agent, on a Gemini API key.
+author: Google
+sourceUrl: https://antigravity.google
+licenses:
+- LicenseRef-Google-Antigravity-Terms
+args:
+  version:
+    description: The Antigravity CLI release Dozer installs (its pin).
+    default: 1.3.4+5524158944247808
+    pattern: '[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?'
+    buildArg: ANTIGRAVITY_VERSION
+provides:
+- com.dozersandbox/antigravity@${{ kit.args.version }}
+capabilities:
+- type: com.docker.sandbox/network-policy@1
+  config:
+    runtime:
+      allow:
+      - generativelanguage.googleapis.com:443
+      - antigravity-unleash.goog:443
+      - play.googleapis.com:443
+      deny:
+      - accounts.google.com:443
+      - oauth2.googleapis.com:443
+      - cloudcode-pa.googleapis.com:443
+    dozer:
+      model:
+        id: model:antigravity
+        title: Talk to Google AI
+        summary: Antigravity CLI's model (the Gemini API, with an API key) — needed for Antigravity CLI to work.
+        phrase: talk to your AI model (Google AI)
+        hosts:
+        - host: generativelanguage.googleapis.com
+      update:
+      - host: antigravity-cli-auto-updater-974169037036.us-central1.run.app
+      - host: storage.googleapis.com
+        paths:
+        - /antigravity-public/antigravity-cli/
+      excluded:
+      - accounts.google.com
+      - oauth2.googleapis.com
+      - cloudcode-pa.googleapis.com
+      vendor:
+      - host: antigravity-unleash.goog
+        reason: Antigravity CLI reads Google's feature switches for it (antigravity-unleash.goog) when it starts
+      - host: play.googleapis.com
+        reason: 'Antigravity CLI sends its usage log to Google, every few seconds (its enableTelemetry setting does not stop it; the owner: do not block it)'
+- type: com.docker.sandbox/credential@1
+  description: Google AI (Gemini API) API access
+  config:
+    service: google
+    phase: runtime
+    apiKey:
+      name: GEMINI_API_KEY
+      proxyManaged: true
+      inject:
+      - domain: generativelanguage.googleapis.com
+        header: x-goog-api-key
+        format: '%s'
+    dozer:
+      accounts:
+      - key
+- type: com.docker.sandbox/volume@1
+  config:
+    path: /home/agent/.gemini
+- type: com.docker.sandbox/volume@1
+  config:
+    path: /home/agent/.antigravity
+- type: com.docker.sandbox/volume@1
+  config:
+    path: /home/agent/.agents
+- type: com.docker.sandbox/agent-context@1
+  config:
+    directory: /home/agent/.agents/skills/dozer
+    filename: SKILL.md
+    dozer:
+      kind: skill
+- type: com.dozersandbox/install@1
+  config:
+    kind: manifest-binary
+    manifest: https://antigravity-cli-auto-updater-974169037036.us-central1.run.app/manifests/linux_arm64.json
+    payload: antigravity
+    binary: agy
+    url: https://storage.googleapis.com/antigravity-public/antigravity-cli/${{ dozer.build }}/linux-arm/cli_linux_arm64.tar.gz
+    bake_hosts:
+    - storage.googleapis.com
+    integrity: sha512-JKHUYzGXAfSUOy1JMsuGyjTWDS6f7c2QGMoxgJdz1xnyclEgaJEWMtsXXXIzCIVRAzvOzAoqVrG8+gQSaWh+rw==
+- type: com.dozersandbox/launch@1
+  config:
+    command:
+    - agy
+    no_prompts_args:
+    - --dangerously-skip-permissions
+    passthrough:
+    - --version
+    - -v
+    - --help
+    - -h
+    - help
+    - agent
+    - agents
+    - changelog
+    - install
+    - mcp
+    - models
+    - plugin
+    - plugins
+    - update
+    - remote-control
+    - mic-serve
+    env:
+      AGY_CLI_DISABLE_AUTO_UPDATE: '1'
+    state_env: {}
+    first_run:
+    - file: ~/.gemini/antigravity-cli/settings.json
+      set:
+        enableTelemetry: false
+        modelProvider: gemini
+        showFeedbackSurvey: false
+        # /workspace is trusted at the first start, as Claude Code's and Codex's are (the VM is the boundary). Its
+        # Terms of Service & Data Use are NOT accepted for the person: that screen is theirs (owner, 2026-10-15).
+        trustedWorkspaces:
+        - /workspace
+    status: none
+    resume:
+    - --continue
+    verify:
+    - argv:
+      - agy
+      - --version
+      expect: ${{ kit.args.version }}
+    check:
+      argv:
+      - agy
+      - -p
+      - say ok
+      expect: DOZ_FAKE_OK
+      screen:
+        # Its first start: a colour scheme (no setting skips it alone — it is the first page of the onboarding that ends
+        # with the terms; Enter keeps the default, "terminal"), then Google's Terms of Service & Data Use, which are the
+        # person's to accept (owner, 2026-10-15). The check reaches that screen and accepts it — and only it.
+        keys:
+        - enter
+        expect:
+        - Terms of Service & Data Use
+        allow:
+        - Terms of Service
+        - Privacy Policy
+- type: com.dozersandbox/auth@1
+  config:
+    methods:
+    - kind: api-key
+      provider: google
+      accounts:
+      - key
+      keys_page: https://aistudio.google.com/apikey
+      note: 'A Gemini API key (modelProvider gemini, GEMINI_API_KEY): Dozer never offers the Google sign-in, which keeps its token in a keyring on the machine.'
+      checked: '2026-10-12'
+- type: com.dozersandbox/gateways@1
+  config:
+    entries:
+    - gateway: openrouter
+      level: unknown
+      reason: Antigravity CLI speaks the Gemini API with a key (GOOGLE_GEMINI_BASE_URL); its program also names undocumented AGY_LLM_GATEWAY_* settings, not checked
+      checked: '2026-10-12'
+    - gateway: vercel-ai-gateway
+      level: unknown
+      reason: Antigravity CLI speaks the Gemini API with a key (GOOGLE_GEMINI_BASE_URL); its program also names undocumented AGY_LLM_GATEWAY_* settings, not checked
+      checked: '2026-10-12'
+- type: com.dozersandbox/currency@1
+  config:
+    checked: '2026-10-12'
+- type: com.dozersandbox/directory@1
+  config:
+    kind: coding-agent
+    categories:
+    - coding-agent
+    limits:
+    - reason: Dozer installs Antigravity CLI's glibc build only for now (Google publishes a musl build too; it is not checked yet)
+      musl: true
+    aliases:
+    - agy
+    icon: antigravity
+    default_base: debian
+    platforms:
+      glibc: true
+      musl: false
+    tags:
+    - tag: headless
+      level: documented
+      notes:
+      - agy -p / --print, --output-format json|stream-json
+      source: https://antigravity.google/docs/cli/headless/
+      checked: '2026-10-12'
+    terms: Closed source, installed from Google's own release (checksum-verified); a Gemini API key only.
+    licence: Proprietary (Google Antigravity terms)
+- type: com.dozersandbox/guide@1
+  config:
+    intro: "Antigravity CLI is a coding agent with its own screen: the session on the left. Ask it to read, change and run the code in your folder."
+    notice: "at its first start it asks you to accept Google's Terms of Service & Data Use (data sharing is ticked by default; you can untick it)"
+    steps:
+    - text: "Antigravity asks you to accept Google's Terms of Service & Data Use; data sharing is ticked by default and you can untick it."
+    - text: "Check it answers, without its screen."
+      command: "agy -p \"say ok\""
+    - text: "Ask it something in its own screen — the session on the left."
+    - text: "One task without its screen."
+      command: "agy -p \"list the files in this folder\""
+    tips:
+    - "Files it makes are in /workspace — your folder on the Mac."
+    - "Restart its session from the session's ⋯ menu; End stops it."
+    docs: https://antigravity.google

@@ -48,7 +48,7 @@ final class ProgressHoldTests: XCTestCase {
         e.totalItems = 1
         p.handle(e)
         usleep(250_000)
-        XCTAssertTrue(sink.value.contains("pulling alpine:3.20"), "the transfer is drawn while it runs (got \(sink.value.suffix(300).debugDescription))")
+        XCTAssertTrue(sink.value.contains("Downloading alpine:3.20"), "the transfer is drawn while it runs (got \(sink.value.suffix(300).debugDescription))")
         p.finish()
     }
 

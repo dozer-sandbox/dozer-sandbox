@@ -69,7 +69,8 @@ AP=$(grep -rlE --include='*.swift' '^[[:space:]]*import[[:space:]]+ArgumentParse
       | grep -vE "/Sources/(DozerCLI|doz)/" || true)
 [[ -z "$AP" ]] || fail "ArgumentParser is imported outside Sources/DozerCLI and Sources/doz:
 $AP"
-# 594: Yams reads the project file — the CLI's commands only (never the library, the host or the web UI).
+# 594: Yams reads the project file — the CLI's commands only (never the library, the host or the web UI). 617: and the
+# YAML recipe sources (Sources/DozerCLI/RecipeSource.swift), compiled to JSON that DozerKit embeds.
 YA=$(grep -rlE --include='*.swift' '^[[:space:]]*import[[:space:]]+Yams([[:space:]]|$)' "$PACKAGE/Sources" \
       | grep -vE "/Sources/DozerCLI/" || true)
 [[ -z "$YA" ]] || fail "Yams is imported outside Sources/DozerCLI:
@@ -212,7 +213,7 @@ $STRAY"
 
 printf 'ok audit: DozerKit imports only its allowlist (Foundation/Security/Virtualization/Containerization/NIO/X509),\n'
 printf '          depends only on apple/containerization (exact) + the apple/* packages it already resolves\n'
-printf '          (TLS; ArgumentParser for the CLI targets only) and Yams (exact; the CLI'"'"'s project file only),\n'
+printf '          (TLS; ArgumentParser for the CLI targets only) and Yams (exact; the CLI'"'"'s project file and recipe sources only),\n'
 printf '          carries no host brand, deckhold + doznet + dozview match their provenance (no libfuse),\n'
 printf '          the web UI (NIOHTTP1, confined) ships exactly the assets its sources build,\n'
 printf '          doz ui stays loopback-only and only doz serve binds the LAN (dnssd confined to its announcer),\n'

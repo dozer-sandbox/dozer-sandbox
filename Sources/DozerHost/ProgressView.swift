@@ -126,7 +126,10 @@ public final class ProgressBoard: @unchecked Sendable {
                 let started = removeStep(e.startedAs.map { ProgressFormat.trimDigests(ProgressFormat.inert($0, limit: 400)) } ?? text)
                 var out: [ProgressFinal] = []
                 if let t = transfer, t.label.isEmpty == false, started != nil || steps.isEmpty {
-                    out.append(.transferDone(t.label, bytes: t.done, seconds: now.timeIntervalSince(t.started)))
+                    // 617: an unpack's transfer is the step's own progress — its step's line says it, once.
+                    if !t.label.hasPrefix("unpacking ") {
+                        out.append(.transferDone(t.label, bytes: t.done, seconds: now.timeIntervalSince(t.started)))
+                    }
                     transfer = nil
                 }
                 tail = []
@@ -152,10 +155,12 @@ public final class ProgressBoard: @unchecked Sendable {
                     transfer = Transfer(label: text, done: done, total: e.totalBytes, items: e.completedItems, totalItems: e.totalItems,
                                         started: now, updated: now, firstDone: done)
                 }
-                // A transfer that reached its total is done.
+                // A transfer that reached its total is done (an unpack's is said by its step).
                 if let t = transfer, let total = t.total, total > 0, t.done >= total, t.totalItems.map({ (t.items ?? 0) >= $0 }) ?? true {
                     transfer = nil
-                    out.append(.transferDone(t.label, bytes: t.done, seconds: now.timeIntervalSince(t.started)))
+                    if !t.label.hasPrefix("unpacking ") {
+                        out.append(.transferDone(t.label, bytes: t.done, seconds: now.timeIntervalSince(t.started)))
+                    }
                 }
                 return out
             case .output:
@@ -215,7 +220,7 @@ public final class ProgressBoard: @unchecked Sendable {
 
     /// `pulling node@1a2b3c4d5e6f  ██████░░░░  87 / 142 MB  6.1 MB/s  ~9 s  (3/5 layers)`.
     public static func transferLine(_ t: Transfer, now: Date) -> String {
-        var parts = [t.label]
+        var parts = [StepWording.transfer(t.label)]
         let elapsed = now.timeIntervalSince(t.started)
         let rate = elapsed > 0.5 ? Double(t.done - t.firstDone) / elapsed : 0
         if let total = t.total, total > 0 {
@@ -230,7 +235,7 @@ public final class ProgressBoard: @unchecked Sendable {
                 if left < 3600 { parts.append("~" + ProgressFormat.duration(left).replacingOccurrences(of: ".0 s", with: " s")) }
             }
         }
-        if let ti = t.totalItems { parts.append("(\(t.items ?? 0)/\(ti) layers)") }
+        if let ti = t.totalItems { parts.append("(\(t.items ?? 0)/\(ti) \(t.label.hasPrefix("unpacking ") ? "files" : "layers"))") }
         return parts.joined(separator: "  ")
     }
 }
@@ -248,6 +253,19 @@ public final class ProgressTerminal {
     private var blockHeight = 0
     private var frame = 0
     public let board: ProgressBoard
+    /// 617: false — the animated view shows only the steps a person cares about (`StepWords.major`), failures and
+    /// warnings; the rest needs -v. Plain mode always shows every step (logs, scripts).
+    public var verbose = true
+
+    /// Whether a finished line is shown (animated, not verbose: the major steps, failures, transfers, real notes).
+    public func shows(_ f: ProgressFinal) -> Bool {
+        guard mode == .animated, !verbose else { return true }
+        switch f {
+        case .stepDone(let l, _): return StepWording.of(l).major
+        case .note(let t): return !StepWording.noteIsDetail(t)
+        default: return true
+        }
+    }
 
     public init(mode: ProgressMode, color: Bool = true, plainPrefix: String = "", plainStyle: String? = nil, board: ProgressBoard = ProgressBoard()) {
         self.mode = mode
@@ -269,12 +287,14 @@ public final class ProgressTerminal {
 
     private func unstyledFormat(_ f: ProgressFinal) -> String {
         switch (mode, f) {
-        case (.animated, .stepDone(let l, let s)): return style("32", "✓") + " " + l + style("2", " — " + ProgressFormat.duration(s))
-        case (.animated, .stepFailed(let l, let s, let why)): return style("31", "✗ " + l + " — " + (why ?? "failed")) + style("2", " (" + ProgressFormat.duration(s) + ")")
+        case (.animated, .stepDone(let l, let s)): return style("32", "✓") + " " + StepWording.of(l).done + style("2", " — " + ProgressFormat.duration(s))
+        case (.animated, .stepFailed(let l, let s, let why)):
+            return style("31", "✗ " + StepWording.of(l).running + " — " + (why ?? "failed")) + style("2", " (" + ProgressFormat.duration(s) + ")")
         case (.animated, .note(let t)): return style("2", "  " + t)
         case (.animated, .transferDone(let l, let b, let s)): return style("32", "✓") + " " + Self.pulled(l, b, s)
-        case (.plain, .stepDone(let l, let s)): return plainPrefix + l + String(format: " — %.0f ms", s * 1000)
-        case (.plain, .stepFailed(let l, let s, let why)): return plainPrefix + "FAILED: " + l + (why.map { " — \($0)" } ?? "") + String(format: " (%.0f ms)", s * 1000)
+        case (.plain, .stepDone(let l, let s)): return plainPrefix + StepWording.of(l).done + String(format: " — %.0f ms", s * 1000)
+        case (.plain, .stepFailed(let l, let s, let why)):
+            return plainPrefix + "FAILED: " + StepWording.of(l).running + (why.map { " — \($0)" } ?? "") + String(format: " (%.0f ms)", s * 1000)
         case (.plain, .note(let t)): return plainPrefix + t
         case (.plain, .transferDone(let l, let b, let s)): return plainPrefix + Self.pulled(l, b, s)
         case (_, .raw(let t)): return t
@@ -283,7 +303,7 @@ public final class ProgressTerminal {
 
     /// "pulled node@1a2b3c4d5e6f: 142 MB in 23.0 s" (a download's label reads "pulling …").
     static func pulled(_ label: String, _ bytes: Int64, _ seconds: Double) -> String {
-        let what = label.hasPrefix("pulling ") ? "pulled " + label.dropFirst(8) : label.hasPrefix("downloading ") ? "downloaded " + label.dropFirst(12) : label
+        let what = label.hasPrefix("pulling ") ? "Downloaded " + label.dropFirst(8) : label.hasPrefix("downloading ") ? "Downloaded " + label.dropFirst(12) : label
         return "\(what): \(ProgressFormat.bytes(bytes)) in \(ProgressFormat.duration(seconds))"
     }
 
@@ -301,7 +321,8 @@ public final class ProgressTerminal {
         switch l {
         case .step(let label, let s):
             let d = "  " + ProgressFormat.duration(s)
-            return style("36", ProgressFormat.spinnerFrames[frame % ProgressFormat.spinnerFrames.count]) + " " + fit(label, cols - 2 - d.count) + style("2", d)
+            let running = StepWording.of(label).running + "…"
+            return style("36", ProgressFormat.spinnerFrames[frame % ProgressFormat.spinnerFrames.count]) + " " + fit(running, cols - 2 - d.count) + style("2", d)
         case .transfer(let t): return "  " + fit(t, cols - 2)
         case .output(let o): return style("2", "  │ " + fit(o, cols - 4))
         }
@@ -325,7 +346,7 @@ public final class ProgressTerminal {
     /// block is erased first and redrawn after them.
     public func write(_ finals: [ProgressFinal], now: Date = Date()) -> String {
         if mode == .plain { return finals.map { format($0) + "\r\n" }.joined() }
-        let body = finals.map { format($0) + "\r\n" }.joined()
+        let body = finals.filter(shows).map { format($0) + "\r\n" }.joined()
         return eraseBlock() + body + drawBlock(now: now)
     }
 
@@ -347,7 +368,7 @@ public final class ProgressTerminal {
     public func finish(now: Date = Date()) -> String {
         let finals = board.finishAll(now: now)
         if mode == .plain { return write(finals, now: now) }
-        return eraseBlock() + finals.map { format($0) + "\r\n" }.joined()
+        return eraseBlock() + finals.filter(shows).map { format($0) + "\r\n" }.joined()
     }
 
     public var hasBlock: Bool { blockHeight > 0 }

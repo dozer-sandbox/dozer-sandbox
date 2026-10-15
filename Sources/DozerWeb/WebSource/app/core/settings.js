@@ -29,8 +29,8 @@ export async function loadSettings() {
 }
 export async function saveSetting(key, value) { adoptSettings(await api('settings', { method: 'POST', json: { key, value } })); }
 export async function resetSetting(key) { adoptSettings(await api('settings', { method: 'POST', json: { key, reset: true } })); }
-/// The settings' ui.boot_view_on_start (and a boot view needs browser terminals).
-export function bootViewOnStart() { return setting('ui.boot_view_on_start', true) && setting('ui.terminals', true); }
+/// The settings' ui.boot_view_on_start — 617: after Start, stay on tab zero (Console) rather than switch to the agent's tab.
+export function bootViewOnStart() { return setting('ui.boot_view_on_start', false) && setting('ui.terminals', true); }
 
 // ── adding an account from a key or a token (594, owner ruling) ──────────────
 // While ui.allow_secret_entry (default on), the wizard's account step and this page take an API key or

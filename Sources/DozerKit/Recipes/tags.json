@@ -1,0 +1,34 @@
+{
+  "schema": 1,
+  "tags": [
+    { "id": "multi-vendor-models", "title": "Other vendors' models", "meaning": "It can use models of other makers than its own (here: through a model gateway).", "derived": true },
+    { "id": "gateway:openrouter", "title": "Works through OpenRouter", "meaning": "One OpenRouter key reaches its models.", "derived": true },
+    { "id": "gateway:vercel-ai-gateway", "title": "Works through Vercel AI Gateway", "meaning": "One Vercel AI Gateway key reaches its models.", "derived": true },
+    { "id": "api-key", "title": "API key", "meaning": "It works with an API key of its model's provider.", "derived": true },
+    { "id": "vendor-sign-in", "title": "Its maker's sign-in", "meaning": "It can sign in with its maker's own account (a subscription, a ChatGPT plan, an x.ai account).", "derived": true },
+    { "id": "no-account", "title": "No account needed", "meaning": "It works with no key and no sign-in.", "derived": true },
+    { "id": "free-tier", "title": "Free tier", "meaning": "Its model has a free tier (cited, with the date it was checked).", "derived": true },
+    { "id": "status", "title": "Says what it is doing", "meaning": "It reports its state to Dozer (OSC 7501): working, waiting for you, done.", "derived": true },
+    { "id": "resume", "title": "Resumes after a restart", "meaning": "Its default session continues the last conversation when it is restarted.", "derived": true },
+    { "id": "musl", "title": "Runs on Alpine", "meaning": "It runs on a musl base (Alpine).", "derived": true },
+    { "id": "open-source", "title": "Open source", "meaning": "Its source is published under an open-source licence.", "derived": true },
+    { "id": "headless", "title": "Runs without a terminal", "meaning": "It has a non-interactive mode: one prompt in, the answer out (claude -p, codex exec).", "derived": false }
+  ],
+  "kinds": [
+    {"id": "coding-agent", "title": "Coding agents", "meaning": "An agent that works on code in its folder: reads, edits and runs it, in a session you watch."},
+    {"id": "ai-tool", "title": "AI tools", "meaning": "Everything else with a model behind it: chat and shell helpers, personal agents, frameworks, evaluation, workflows."}
+  ],
+  "categories": [
+    {"id": "coding-agent", "title": "Coding agent", "meaning": "It edits and runs code in its folder, turn by turn (Claude Code, Codex, Aider).", "kind": "coding-agent"},
+    {"id": "personal-agent", "title": "Personal agent", "meaning": "A general assistant that acts for you with shell, file and web tools (OpenClaw, nanobot, gptme)."},
+    {"id": "terminal-tool", "title": "Terminal tool", "meaning": "A command-line helper: a chat REPL, an answer to a prompt, a shell command from a request (llm, AIChat, ShellGPT).", "kind": "ai-tool"},
+    {"id": "framework", "title": "Framework", "meaning": "A library or kit for building agents and LLM apps, with a command line (smolagents, ADK, CrewAI).", "kind": "ai-tool"},
+    {"id": "browser-agent", "title": "Browser agent", "meaning": "It drives a web browser for you or for another agent (browser-use, Skyvern).", "kind": "ai-tool"},
+    {"id": "mcp", "title": "MCP", "meaning": "Model Context Protocol servers, gateways and inspectors.", "kind": "ai-tool"},
+    {"id": "research", "title": "Research", "meaning": "It searches, reads and reports: deep research, notebooks over your sources.", "kind": "ai-tool"},
+    {"id": "evaluation", "title": "Evaluation", "meaning": "It tests and red-teams prompts, models and LLM apps (promptfoo, garak).", "kind": "ai-tool"},
+    {"id": "workflow", "title": "Workflow", "meaning": "A builder for automations and LLM pipelines, usually with a web UI (n8n, Langflow, Dify).", "kind": "ai-tool"},
+    {"id": "local-models", "title": "Local models", "meaning": "It runs models inside the sandbox, with no API key (Ollama, llama.cpp).", "kind": "ai-tool"},
+    {"id": "chat-app", "title": "Chat app", "meaning": "A chat web app for your models (Open WebUI, LibreChat).", "kind": "ai-tool"}
+  ]
+}

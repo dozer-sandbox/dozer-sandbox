@@ -16,6 +16,7 @@
 //   · 605: the page outlives its server. doz ui restarting is a calm pause (terminals reattach, operations
 //     resolve, a newer build offers a reload); a sign-in again happens INSIDE the page, over what it shows.
 
+import { paintStartProgress } from './app/components/start-progress.js';
 import { expose, provide } from './app/core/hooks.js';
 import { $ } from './app/dom/h.js';
 import { icon, setButton } from './app/dom/icons.js';
@@ -68,10 +69,11 @@ import { renderWizard, viewOnboarding, wizardStopPolling, wizGo } from './app/vi
 import { acknowledgeOps, renderOperations, renderOps, viewOperations } from './app/views/operations.js';
 import { viewOverview } from './app/views/overview.js';
 import { viewResources } from './app/views/resources.js';
+import { backToTrySetup, renderTryPrep, viewTry } from './app/views/try.js';
 import './app/views/sandbox-dialogs.js';
 import { openSavedTerminal, persistLayout } from './app/views/sandbox-layout.js';
 import './app/views/sandbox-network.js';
-import { newShellTerminal, paintSplitButton, paintTabs, paintTermEmpty, renderTerminals, splitWith } from './app/views/sandbox-terminals.js';
+import { newShellTerminal, paintSplitButton, paintTabs, paintTermEmpty, renderTerminals, splitWith, syncBuildLogTab, syncConsoleTab } from './app/views/sandbox-terminals.js';
 import { refreshSandbox, showSandbox } from './app/views/sandbox.js';
 import { gridEnter, gridLeave, gridRefresh, gridSchedule } from './app/views/sessions.js';
 import { viewSettings } from './app/views/settings.js';
@@ -80,6 +82,9 @@ import './app/views/shortcuts.js';
 // 599c: Quick add in the sidebar, beside Sandboxes.
 $('nav-quick-add').replaceChildren(icon('plus'));
 $('nav-quick-add').addEventListener('click', (ev) => { ev.preventDefault(); quickAdd(ev.currentTarget); });
+// 617 (owner): TRY is a section of its own — its + opens the Quick try, as its one item does.
+$('nav-try-add').replaceChildren(icon('plus'));
+$('nav-try-add').addEventListener('click', (ev) => { ev.preventDefault(); location.hash = '#/try'; });
 $('sign-out').addEventListener('click', async () => {
   try { await api('session', { method: 'DELETE' }); } catch (_) { /* already gone */ }
   signedOut('This browser is signed out of Dozer.', 'signed-out');
@@ -88,7 +93,7 @@ $('sign-out').addEventListener('click', async () => {
 // ── start ───────────────────────────────────────────────────────────────────
 // The static page's own controls get their icons here (index.html holds no SVG).
 const NAV_ICONS = { devices: 'user-round', overview: 'box', sessions: 'layout-grid', images: 'layers', resources: 'cylinder', operations: 'list-checks', accounts: 'key-round',
-                    metrics: 'chart-line', activity: 'activity', onboarding: 'rocket', doctor: 'stethoscope', settings: 'settings' };
+                    metrics: 'chart-line', activity: 'activity', onboarding: 'rocket', doctor: 'stethoscope', settings: 'settings', try: 'play' };
 for (const a of document.querySelectorAll('#nav > a[data-view]')) {
   if (NAV_ICONS[a.dataset.view]) a.prepend(icon(NAV_ICONS[a.dataset.view]));
   a.title = a.querySelector('.lbl').textContent;       // the rail's tooltip (the label stays readable to assistive tech)
@@ -131,13 +136,13 @@ async function startApp() {
 // The calls that go UP the layers (core/hooks.js): every upcall('name') a lower module makes is provided here, once,
 // before anything runs.
 provide({
-  acknowledgeOps, banner, btn, callout, closeWizardModal, connect, dropBanner, failureFor, gridEnter, gridLeave,
+  acknowledgeOps, backToTrySetup, banner, btn, callout, closeWizardModal, connect, dropBanner, failureFor, gridEnter, gridLeave,
   gridRefresh, hostChanged, lifecycle, modalInert, opFailed, openSavedTerminal, openWizardModal, pageFailure,
   paintCover, paintNav, paintResTotal, paintRowOps, paintSplitButton, paintTabs, paintTermEmpty, paintTransition,
   persistLayout, reattachTerminals, refresh, refreshNav, refreshSandbox, renderActivity, renderHostFoot, renderOps,
-  renderTerminals, renderWizard, showSandbox, signedOut, startApp, toast, viewAccounts, viewActivity, viewDevices, viewDoctor,
+  renderTerminals, renderTryPrep, renderWizard, showSandbox, signedOut, startApp, syncConsoleTab, syncBuildLogTab, paintStartProgress, toast, viewAccounts, viewActivity, viewDevices, viewDoctor,
   viewImages, viewMetrics, viewNew, viewOnboarding, viewOperations, viewOverview, viewResources, viewSettings,
-  wizardStopPolling,
+  viewTry, wizardStopPolling,
 });
 // The browser probes' names. The one script's top-level names were globals, and the workspace's browser probes
 // (probes/*, over CDP Runtime.evaluate) read and call some of them; module names are not globals, so these stay

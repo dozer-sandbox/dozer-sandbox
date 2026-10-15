@@ -1,0 +1,66 @@
+{
+  "schema": 1,
+  "agent": "antigravity",
+  "version": "1.3.4",
+  "profiled": "2026-10-14",
+  "how": "a fresh try with the Open network, every HTTPS request decrypted and logged; its first start, then a scripted task (read a file, edit it, run a command) run non-interactively with FAKE keys — xAI and Google through a fake provider that answers text only, Anthropic and OpenAI refused by the real API (401). A real-key run would see more: the model's turns and what its tool calls fetch.",
+  "taskEnded": "DOZ_FAKE_OK",
+  "endpoints": [
+    {
+      "host": "antigravity-unleash.goog",
+      "method": "GET",
+      "path": "/api/client/features",
+      "when": "start+task",
+      "count": 2,
+      "credential": [
+        "none"
+      ],
+      "refusedWhenProfiled": false,
+      "determination": "allow",
+      "reason": "Antigravity CLI reads Google's feature switches for it when it starts",
+      "seen": true
+    },
+    {
+      "host": "antigravity-unleash.goog",
+      "method": "POST",
+      "path": "/api/client/register",
+      "when": "start+task",
+      "count": 2,
+      "credential": [
+        "none"
+      ],
+      "refusedWhenProfiled": false,
+      "determination": "allow",
+      "reason": "Antigravity CLI reads Google's feature switches for it when it starts",
+      "seen": true
+    },
+    {
+      "host": "generativelanguage.googleapis.com",
+      "method": "POST",
+      "path": "/v1beta/models/{model}:streamGenerateContent",
+      "when": "task",
+      "count": 2,
+      "credential": [
+        "placeholder swapped for key:google"
+      ],
+      "refusedWhenProfiled": false,
+      "determination": "allow",
+      "reason": "the Gemini API — the model (the key is swapped in by Dozer's proxy)",
+      "seen": true
+    },
+    {
+      "host": "play.googleapis.com",
+      "method": "POST",
+      "path": "/log",
+      "when": "start+task",
+      "count": 4,
+      "credential": [
+        "none"
+      ],
+      "refusedWhenProfiled": false,
+      "determination": "allow",
+      "reason": "its usage log to Google (enableTelemetry does not stop it) — allowed: the owner, do not block it",
+      "seen": true
+    }
+  ]
+}

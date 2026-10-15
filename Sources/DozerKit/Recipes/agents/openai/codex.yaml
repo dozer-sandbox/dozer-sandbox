@@ -1,0 +1,217 @@
+# yaml-language-server: $schema=../../../../../schema/dozer-recipe-2.schema.json
+# Codex — Dozer's recipe (schema 2). The format: docs/recipes/RECIPE-FORMAT.md.
+# Edit this file, then run make recipes (it writes Recipes/compiled/codex.json, which Dozer embeds).
+schema: 2
+kind: workload
+id: openai/codex
+displayName: Codex
+description: OpenAI's open-source coding agent.
+author: OpenAI
+sourceUrl: https://github.com/openai/codex
+licenses:
+- Apache-2.0
+args:
+  version:
+    description: The Codex release Dozer installs (its pin).
+    default: 0.160.1
+    pattern: '[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?'
+    buildArg: CODEX_VERSION
+provides:
+- com.dozersandbox/codex@${{ kit.args.version }}
+capabilities:
+- type: com.docker.sandbox/network-policy@1
+  config:
+    runtime:
+      allow:
+      - chatgpt.com:443
+      - api.openai.com:443
+      - ab.chatgpt.com:443
+      - raw.githubusercontent.com:443
+      - github.com:443
+      - files.openai.com:443
+    dozer:
+      model:
+        id: model:openai
+        title: Talk to OpenAI
+        hosts:
+        - host: chatgpt.com
+        - host: api.openai.com
+        - host: ab.chatgpt.com
+      update: []
+      excluded: []
+      vendor:
+      - host: raw.githubusercontent.com
+        exact_paths:
+        - /openai/codex/main/announcement_tip.toml
+        reason: Codex reads OpenAI's start-up tips (announcement_tip.toml on GitHub) when it starts
+      - host: github.com
+        exact_paths:
+        - /openai/plugins.git/info/refs
+        - /openai/plugins.git/git-upload-pack
+        reason: Codex fetches OpenAI's curated plugins (openai/plugins.git, read only) when it starts
+      - host: files.openai.com
+        reason: OpenAI's own site — called at start-up (not identified)
+- type: com.docker.sandbox/credential@1
+  description: OpenAI API access
+  config:
+    service: openai
+    phase: runtime
+    apiKey:
+      name: OPENAI_API_KEY
+      proxyManaged: true
+      inject:
+      - domain: api.openai.com
+        header: authorization
+        format: Bearer %s
+    dozer:
+      accounts:
+      - codex-mac
+      - chatgpt
+      - openai-key
+- type: com.docker.sandbox/volume@1
+  config:
+    path: /home/agent/.codex
+- type: com.docker.sandbox/agent-context@1
+  config:
+    directory: /home/agent/.agents/skills/dozer
+    filename: SKILL.md
+    dozer:
+      kind: skill
+- type: com.dozersandbox/install@1
+  config:
+    kind: builtin
+    builtin: true
+    package: '@openai/codex'
+    binary: codex
+    integrity: sha512-JLyjBlmjPvwTaicHemw+y5xQSz3Uja2r7F/xkvS8gFufTA2g132Ak+0fo35xnJ/k2uc9fTtjm0LrsEGI78L6Ng==
+- type: com.dozersandbox/launch@1
+  config:
+    command:
+    - codex
+    no_prompts_args:
+    - --dangerously-bypass-approvals-and-sandbox
+    passthrough:
+    - login
+    - logout
+    - mcp
+    - --version
+    - -V
+    - --help
+    - -h
+    env: {}
+    state_env:
+      CODEX_HOME: /home/agent/.codex
+    status: none
+    resume:
+    - resume
+    - --last
+    verify:
+    - argv:
+      - codex
+      - --version
+      expect: codex-cli ${{ kit.args.version }}
+    check:
+      argv:
+      - codex
+      - exec
+      - --skip-git-repo-check
+      - say ok
+      expect: DOZ_FAKE_OK
+    settings:
+      version: images.codex_version
+      permissions: codex.permissions
+- type: com.dozersandbox/auth@1
+  config:
+    methods:
+    - kind: vendor-sign-in
+      account: a ChatGPT plan
+      accounts:
+      - codex-mac
+      - chatgpt
+      note: This Mac's own Codex login (the account mac, read-only), or Dozer's own ChatGPT sign-in on this Mac (doz account add NAME --chatgpt). The sign-in stays on the Mac — the sandbox's auth.json holds placeholders.
+      checked: '2026-10-12'
+    - kind: api-key
+      provider: openai
+      accounts:
+      - openai-key
+      keys_page: https://platform.openai.com/api-keys
+      checked: '2026-10-12'
+- type: com.dozersandbox/gateways@1
+  config:
+    entries:
+    - gateway: openrouter
+      level: documented
+      shape: openai-responses
+      endpoint: v1
+      how:
+        config:
+        - file: ~/.codex/config.toml
+          set:
+            model_provider: openrouter
+            model_providers.openrouter.base_url: ${{ dozer.gateway.endpoint.v1 }}
+            model_providers.openrouter.env_key: OPENROUTER_API_KEY
+            model_providers.openrouter.name: openrouter
+            model_providers.openrouter.wire_api: responses
+        env:
+          OPENROUTER_API_KEY: ${{ dozer.placeholder }}
+        model_args:
+        - --model
+        - ${{ dozer.model }}
+      limits:
+      - 'with env_key Codex does not fetch OpenRouter''s model catalogue: other makers'' models show an "Unknown model" warning (OpenRouter recommends an auth command instead)'
+      notes:
+      - 'wire_api = responses is added here: OpenRouter''s page omits it, and Codex speaks only the Responses API (Vercel''s page)'
+      source: https://openrouter.ai/docs/cookbook/coding-agents/codex-cli.md
+      checked: '2026-10-12'
+    - gateway: vercel-ai-gateway
+      level: documented
+      shape: openai-responses
+      endpoint: codex
+      how:
+        config:
+        - file: ~/.codex/config.toml
+          set:
+            model_provider: vercel
+            model_providers.vercel.base_url: ${{ dozer.gateway.endpoint.codex }}
+            model_providers.vercel.env_key: AI_GATEWAY_API_KEY
+            model_providers.vercel.name: Vercel AI Gateway
+            model_providers.vercel.wire_api: responses
+        env:
+          AI_GATEWAY_API_KEY: ${{ dozer.placeholder }}
+        model_args:
+        - --model
+        - ${{ dozer.model }}
+      notes:
+      - /codex/v1 is Codex's own compatibility endpoint; /model lists the gateway's catalogue
+      source: https://vercel.com/docs/ai-gateway/coding-agents
+      checked: '2026-10-12'
+- type: com.dozersandbox/directory@1
+  config:
+    kind: coding-agent
+    categories:
+    - coding-agent
+    icon: codex
+    default_base: node
+    platforms:
+      glibc: true
+      musl: true
+    tags:
+    - tag: headless
+      level: documented
+      notes:
+      - codex exec
+      source: https://learn.chatgpt.com/codex/non-interactive-mode
+      checked: '2026-10-12'
+- type: com.dozersandbox/guide@1
+  config:
+    intro: "Codex is a coding agent with its own screen: the session on the left. Ask it to read, change and run the code in your folder."
+    steps:
+    - text: "Check it answers, without its screen."
+      command: "codex exec --skip-git-repo-check \"say ok\""
+    - text: "Ask it something in its own screen — the session on the left."
+    - text: "One task without its screen."
+      command: "codex exec --skip-git-repo-check \"list the files in this folder\""
+    tips:
+    - "Files it makes are in /workspace — your folder on the Mac."
+    - "Restart its session from the session's ⋯ menu; End stops it."
+    docs: https://github.com/openai/codex

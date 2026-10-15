@@ -3,13 +3,14 @@ import { upcall } from './hooks.js';
 import { api } from './api.js';
 import { adoptOperations, loadPreparations, trackOp } from './operations.js';
 import { buildUiOverlay, checkBuild, movedAway, uiBack, uiLost } from './reconnect.js';
-import { refresh } from './router.js';
+import { refresh, route } from './router.js';
 import { setLive, signedOut } from './session.js';
 import { state } from './state.js';
 // Calls up the layers (provided by app.js — core/hooks.js):
 const hostChanged = upcall('hostChanged'), reattachTerminals = upcall('reattachTerminals'),
   refreshNav = upcall('refreshNav'), renderActivity = upcall('renderActivity'), renderOps = upcall('renderOps'),
-  renderWizard = upcall('renderWizard'), toast = upcall('toast');
+  renderTryPrep = upcall('renderTryPrep'), renderWizard = upcall('renderWizard'), toast = upcall('toast'),
+  paintStartProgress = upcall('paintStartProgress'), syncBuildLogTab = upcall('syncBuildLogTab');
 
 /// What a live change re-renders: not Settings (a half-typed value), Operations (its own events) or the
 /// onboarding wizard (its own), nor a page whose masked key field is being filled in.
@@ -51,6 +52,26 @@ export function connect() {
     try { state.preps = JSON.parse(ev.data); } catch (_) { return; }
     renderOps();
     if (state.modal === 'onboarding') renderWizard();
+    if (state.modal === 'try') renderTryPrep();
+    paintStartProgress();                              // 617: the build bar follows the preparation
+    if (state.view === 'sandbox' && state.param) syncBuildLogTab(state.param);   // 617: its log's tab after the build
+  });
+  // 617: `doz try --ui AGENT` with this page open — show the Quick try (only that page, only its own hash).
+  es.addEventListener('show', (ev) => {
+    let d; try { d = JSON.parse(ev.data); } catch (_) { return; }
+    if (!d || typeof d.hash !== 'string' || !/^#\/try(\/[a-z0-9][a-z0-9-]{0,39})?$/.test(d.hash)) return;
+    if (state.modal && state.modal !== 'try') return;            // never over a wizard the person is in
+    state.tr = null;
+    // Already there (the Quick try open on that agent): no hashchange follows, so route now — the page's state was just
+    // reset, and a view left on screen would hold a Create that no longer does anything.
+    if (location.hash === d.hash) route(); else location.hash = d.hash;
+    window.focus();
+    // The CLI brings the browser forward; this tab cannot raise itself, so its title says where to look for a while.
+    const was = document.title;
+    if (!was.startsWith('▶ ')) {
+      document.title = '▶ Quick try — ' + was;
+      setTimeout(() => { if (document.title.startsWith('▶ Quick try')) document.title = was; }, 10000);
+    }
   });
   es.addEventListener('op', (ev) => { try { trackOp(JSON.parse(ev.data)); } catch (_) { /* */ } });
   es.addEventListener('activity', (ev) => {

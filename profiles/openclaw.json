@@ -1,0 +1,24 @@
+{
+  "schema": 1,
+  "agent": "openclaw",
+  "version": "OpenClaw 2026.10.3 (59cb447)",
+  "profiled": "2026-10-14",
+  "how": "a fresh try with the Open network, every HTTPS request decrypted and logged; its first start, then a scripted task (read a file, edit it, run a command) run non-interactively with FAKE keys — xAI and Google through a fake provider that answers text only, Anthropic and OpenAI refused by the real API (401). A real-key run would see more: the model's turns and what its tool calls fetch.",
+  "taskEnded": "\u001b[33m[state/agent-db]\u001b[39m \u001b[36magent database clean-close receipt: active-leases\u001b[39m / \u001b[34m[session-sqlite]\u001b[39m \u001b[33mSQLite reclamation Worker failed pid=124 threadId=0 isMainThread=true reclamationKind=maintenance-plan elapsedMs=53 outcome=rejected error=\"Session mutation and executor cleanup f",
+  "endpoints": [
+    {
+      "host": "generativelanguage.googleapis.com",
+      "method": "POST",
+      "path": "/v1beta/models/{model}:streamGenerateContent",
+      "when": "task",
+      "count": 1,
+      "credential": [
+        "placeholder swapped for key:google"
+      ],
+      "refusedWhenProfiled": false,
+      "determination": "allow",
+      "reason": "the Gemini API — the model (the key is swapped in by Dozer's proxy)",
+      "seen": true
+    }
+  ]
+}

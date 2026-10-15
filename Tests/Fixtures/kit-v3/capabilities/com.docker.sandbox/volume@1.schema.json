@@ -1,0 +1,59 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "com.docker.sandbox/volume@1",
+  "description": "Config schema for one volume need: a persistent (or tmpfs) path and its characteristics. Instance-shaped, keyed by cleaned path. Matching configurations across Kits merge; differing configurations conflict. Storage belongs to the sandbox instance. The @1 names the capability contract, including this config schema and observable reconciliation and storage-lifetime behavior. RELEASES.md defines when versions move and the maintainer-approved draft-stage exception.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "path"
+  ],
+  "properties": {
+    "path": {
+      "description": "Instance-local destination, compared after path cleaning.",
+      "type": "string",
+      "anyOf": [
+        {
+          "pattern": "^/"
+        },
+        {
+          "$ref": "../../definitions/kit-arg.schema.json#/definitions/bearing"
+        }
+      ]
+    },
+    "size": {
+      "description": "Capacity request; suffixes use powers of 1024. Equivalent byte values match; omission or an empty string is unspecified and differs from an explicit value.",
+      "type": "string",
+      "anyOf": [
+        {
+          "pattern": "^([0-9]+(\\.[0-9]+)?\\s*([kKmMgGtT]i?[bB]?)?)?$"
+        },
+        {
+          "$ref": "../../definitions/kit-arg.schema.json#/definitions/bearing"
+        }
+      ]
+    },
+    "tmpfs": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "$ref": "../../definitions/kit-arg.schema.json#/definitions/whole"
+        }
+      ],
+      "description": "Private scratch storage, empty after stop or recreation. Omission is equivalent to false."
+    },
+    "mode": {
+      "description": "Initial permissions, compared by octal value. Reattachment preserves existing permissions; omission or an empty string is unspecified.",
+      "type": "string",
+      "anyOf": [
+        {
+          "pattern": "^([0-7]{3,4})?$"
+        },
+        {
+          "$ref": "../../definitions/kit-arg.schema.json#/definitions/bearing"
+        }
+      ]
+    }
+  }
+}

@@ -89,7 +89,7 @@ extension DozerProject {
                 image = s
             case "agent":
                 let s = try scalarString(v, key)
-                guard ["claude-code", "pi", "codex", "none"].contains(s) else { throw bad(v, "agent: claude-code, pi, codex or none") }
+                guard AgentKind(rawValue: s) != nil else { throw bad(v, "agent: \(DozerProject.agentWords)") }
                 p.agent = s
             case "base":
                 let s = try scalarString(v, key)
@@ -176,6 +176,19 @@ extension DozerProject {
                 let s = v.bool == false ? "off" : try scalarString(v, key)
                 guard ["off", "read", "push"].contains(s) else { throw bad(v, "github: off, read or push") }
                 p.github = s
+            case "keys":
+                // 617: custom key accounts — a list of names (or one name).
+                let names: [String]
+                switch v {
+                case .scalar(let s): names = [s.string]
+                case .sequence(let seq): names = try seq.map { try scalarString($0, "a key's name") }
+                default: throw bad(v, "keys: a list of custom key account names")
+                }
+                guard (1...8).contains(names.count), Set(names).count == names.count,
+                      names.allSatisfy({ $0.range(of: "^[a-z0-9][a-z0-9-]{0,39}$", options: .regularExpression) != nil }) else {
+                    throw bad(v, "keys: 1–8 different account names (doz account ls)")
+                }
+                p.keys = names
             default:
                 // 599: a per-sandbox setting, checked against the setting's own type.
                 if let sk = settingKeys.first(where: { $0.key == key }), let d = DozerSettings.definition(sk.setting) {

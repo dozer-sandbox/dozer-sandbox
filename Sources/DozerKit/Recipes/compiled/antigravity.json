@@ -1,0 +1,335 @@
+{
+  "args" : {
+    "version" : {
+      "buildArg" : "ANTIGRAVITY_VERSION",
+      "default" : "1.3.4+5524158944247808",
+      "description" : "The Antigravity CLI release Dozer installs (its pin).",
+      "pattern" : "[0-9]+\\.[0-9]+\\.[0-9]+([-+][0-9A-Za-z.-]+)?"
+    }
+  },
+  "author" : "Google",
+  "capabilities" : [
+    {
+      "config" : {
+        "dozer" : {
+          "excluded" : [
+            "accounts.google.com",
+            "oauth2.googleapis.com",
+            "cloudcode-pa.googleapis.com"
+          ],
+          "model" : {
+            "hosts" : [
+              {
+                "host" : "generativelanguage.googleapis.com"
+              }
+            ],
+            "id" : "model:antigravity",
+            "phrase" : "talk to your AI model (Google AI)",
+            "summary" : "Antigravity CLI's model (the Gemini API, with an API key) — needed for Antigravity CLI to work.",
+            "title" : "Talk to Google AI"
+          },
+          "update" : [
+            {
+              "host" : "antigravity-cli-auto-updater-974169037036.us-central1.run.app"
+            },
+            {
+              "host" : "storage.googleapis.com",
+              "paths" : [
+                "/antigravity-public/antigravity-cli/"
+              ]
+            }
+          ],
+          "vendor" : [
+            {
+              "host" : "antigravity-unleash.goog",
+              "reason" : "Antigravity CLI reads Google's feature switches for it (antigravity-unleash.goog) when it starts"
+            },
+            {
+              "host" : "play.googleapis.com",
+              "reason" : "Antigravity CLI sends its usage log to Google, every few seconds (its enableTelemetry setting does not stop it; the owner: do not block it)"
+            }
+          ]
+        },
+        "runtime" : {
+          "allow" : [
+            "generativelanguage.googleapis.com:443",
+            "antigravity-unleash.goog:443",
+            "play.googleapis.com:443"
+          ],
+          "deny" : [
+            "accounts.google.com:443",
+            "oauth2.googleapis.com:443",
+            "cloudcode-pa.googleapis.com:443"
+          ]
+        }
+      },
+      "type" : "com.docker.sandbox/network-policy@1"
+    },
+    {
+      "config" : {
+        "apiKey" : {
+          "inject" : [
+            {
+              "domain" : "generativelanguage.googleapis.com",
+              "format" : "%s",
+              "header" : "x-goog-api-key"
+            }
+          ],
+          "name" : "GEMINI_API_KEY",
+          "proxyManaged" : true
+        },
+        "dozer" : {
+          "accounts" : [
+            "key"
+          ]
+        },
+        "phase" : "runtime",
+        "service" : "google"
+      },
+      "description" : "Google AI (Gemini API) API access",
+      "type" : "com.docker.sandbox/credential@1"
+    },
+    {
+      "config" : {
+        "path" : "/home/agent/.gemini"
+      },
+      "type" : "com.docker.sandbox/volume@1"
+    },
+    {
+      "config" : {
+        "path" : "/home/agent/.antigravity"
+      },
+      "type" : "com.docker.sandbox/volume@1"
+    },
+    {
+      "config" : {
+        "path" : "/home/agent/.agents"
+      },
+      "type" : "com.docker.sandbox/volume@1"
+    },
+    {
+      "config" : {
+        "directory" : "/home/agent/.agents/skills/dozer",
+        "dozer" : {
+          "kind" : "skill"
+        },
+        "filename" : "SKILL.md"
+      },
+      "type" : "com.docker.sandbox/agent-context@1"
+    },
+    {
+      "config" : {
+        "bake_hosts" : [
+          "storage.googleapis.com"
+        ],
+        "binary" : "agy",
+        "integrity" : "sha512-JKHUYzGXAfSUOy1JMsuGyjTWDS6f7c2QGMoxgJdz1xnyclEgaJEWMtsXXXIzCIVRAzvOzAoqVrG8+gQSaWh+rw==",
+        "kind" : "manifest-binary",
+        "manifest" : "https://antigravity-cli-auto-updater-974169037036.us-central1.run.app/manifests/linux_arm64.json",
+        "payload" : "antigravity",
+        "url" : "https://storage.googleapis.com/antigravity-public/antigravity-cli/${{ dozer.build }}/linux-arm/cli_linux_arm64.tar.gz"
+      },
+      "type" : "com.dozersandbox/install@1"
+    },
+    {
+      "config" : {
+        "check" : {
+          "argv" : [
+            "agy",
+            "-p",
+            "say ok"
+          ],
+          "expect" : "DOZ_FAKE_OK",
+          "screen" : {
+            "allow" : [
+              "Terms of Service",
+              "Privacy Policy"
+            ],
+            "expect" : [
+              "Terms of Service & Data Use"
+            ],
+            "keys" : [
+              "enter"
+            ]
+          }
+        },
+        "command" : [
+          "agy"
+        ],
+        "env" : {
+          "AGY_CLI_DISABLE_AUTO_UPDATE" : "1"
+        },
+        "first_run" : [
+          {
+            "file" : "~/.gemini/antigravity-cli/settings.json",
+            "set" : {
+              "enableTelemetry" : false,
+              "modelProvider" : "gemini",
+              "showFeedbackSurvey" : false,
+              "trustedWorkspaces" : [
+                "/workspace"
+              ]
+            }
+          }
+        ],
+        "no_prompts_args" : [
+          "--dangerously-skip-permissions"
+        ],
+        "passthrough" : [
+          "--version",
+          "-v",
+          "--help",
+          "-h",
+          "help",
+          "agent",
+          "agents",
+          "changelog",
+          "install",
+          "mcp",
+          "models",
+          "plugin",
+          "plugins",
+          "update",
+          "remote-control",
+          "mic-serve"
+        ],
+        "resume" : [
+          "--continue"
+        ],
+        "state_env" : {
+
+        },
+        "status" : "none",
+        "verify" : [
+          {
+            "argv" : [
+              "agy",
+              "--version"
+            ],
+            "expect" : "${{ kit.args.version }}"
+          }
+        ]
+      },
+      "type" : "com.dozersandbox/launch@1"
+    },
+    {
+      "config" : {
+        "methods" : [
+          {
+            "accounts" : [
+              "key"
+            ],
+            "checked" : "2026-10-12",
+            "keys_page" : "https://aistudio.google.com/apikey",
+            "kind" : "api-key",
+            "note" : "A Gemini API key (modelProvider gemini, GEMINI_API_KEY): Dozer never offers the Google sign-in, which keeps its token in a keyring on the machine.",
+            "provider" : "google"
+          }
+        ]
+      },
+      "type" : "com.dozersandbox/auth@1"
+    },
+    {
+      "config" : {
+        "entries" : [
+          {
+            "checked" : "2026-10-12",
+            "gateway" : "openrouter",
+            "level" : "unknown",
+            "reason" : "Antigravity CLI speaks the Gemini API with a key (GOOGLE_GEMINI_BASE_URL); its program also names undocumented AGY_LLM_GATEWAY_* settings, not checked"
+          },
+          {
+            "checked" : "2026-10-12",
+            "gateway" : "vercel-ai-gateway",
+            "level" : "unknown",
+            "reason" : "Antigravity CLI speaks the Gemini API with a key (GOOGLE_GEMINI_BASE_URL); its program also names undocumented AGY_LLM_GATEWAY_* settings, not checked"
+          }
+        ]
+      },
+      "type" : "com.dozersandbox/gateways@1"
+    },
+    {
+      "config" : {
+        "checked" : "2026-10-12"
+      },
+      "type" : "com.dozersandbox/currency@1"
+    },
+    {
+      "config" : {
+        "aliases" : [
+          "agy"
+        ],
+        "categories" : [
+          "coding-agent"
+        ],
+        "default_base" : "debian",
+        "icon" : "antigravity",
+        "kind" : "coding-agent",
+        "licence" : "Proprietary (Google Antigravity terms)",
+        "limits" : [
+          {
+            "musl" : true,
+            "reason" : "Dozer installs Antigravity CLI's glibc build only for now (Google publishes a musl build too; it is not checked yet)"
+          }
+        ],
+        "platforms" : {
+          "glibc" : true,
+          "musl" : false
+        },
+        "tags" : [
+          {
+            "checked" : "2026-10-12",
+            "level" : "documented",
+            "notes" : [
+              "agy -p / --print, --output-format json|stream-json"
+            ],
+            "source" : "https://antigravity.google/docs/cli/headless/",
+            "tag" : "headless"
+          }
+        ],
+        "terms" : "Closed source, installed from Google's own release (checksum-verified); a Gemini API key only."
+      },
+      "type" : "com.dozersandbox/directory@1"
+    },
+    {
+      "config" : {
+        "docs" : "https://antigravity.google",
+        "intro" : "Antigravity CLI is a coding agent with its own screen: the session on the left. Ask it to read, change and run the code in your folder.",
+        "notice" : "at its first start it asks you to accept Google's Terms of Service & Data Use (data sharing is ticked by default; you can untick it)",
+        "steps" : [
+          {
+            "text" : "Antigravity asks you to accept Google's Terms of Service & Data Use; data sharing is ticked by default and you can untick it."
+          },
+          {
+            "command" : "agy -p \"say ok\"",
+            "text" : "Check it answers, without its screen."
+          },
+          {
+            "text" : "Ask it something in its own screen — the session on the left."
+          },
+          {
+            "command" : "agy -p \"list the files in this folder\"",
+            "text" : "One task without its screen."
+          }
+        ],
+        "tips" : [
+          "Files it makes are in /workspace — your folder on the Mac.",
+          "Restart its session from the session's ⋯ menu; End stops it."
+        ]
+      },
+      "type" : "com.dozersandbox/guide@1"
+    }
+  ],
+  "description" : "Google's lead coding agent, on a Gemini API key.",
+  "displayName" : "Antigravity CLI",
+  "id" : "google/antigravity",
+  "kind" : "workload",
+  "licenses" : [
+    "LicenseRef-Google-Antigravity-Terms"
+  ],
+  "provides" : [
+    "com.dozersandbox/antigravity@${{ kit.args.version }}"
+  ],
+  "schema" : 2,
+  "sourceUrl" : "https://antigravity.google"
+}

@@ -1,0 +1,24 @@
+{
+  "schema": 1,
+  "agent": "llm",
+  "version": "llm, version 0.36",
+  "profiled": "2026-10-14",
+  "how": "a fresh try with the Open network, every HTTPS request decrypted and logged; its first start, then a scripted task (read a file, edit it, run a command) run non-interactively with FAKE keys — xAI and Google through a fake provider that answers text only, Anthropic and OpenAI refused by the real API (401). A real-key run would see more: the model's turns and what its tool calls fetch.",
+  "taskEnded": "DOZ_FAKE_OK",
+  "endpoints": [
+    {
+      "host": "api.x.ai",
+      "method": "POST",
+      "path": "/v1/chat/completions",
+      "when": "task",
+      "count": 1,
+      "credential": [
+        "placeholder swapped for key:xai"
+      ],
+      "refusedWhenProfiled": false,
+      "determination": "allow",
+      "reason": "the xAI API — the model (the key is swapped in by Dozer's proxy)",
+      "seen": true
+    }
+  ]
+}

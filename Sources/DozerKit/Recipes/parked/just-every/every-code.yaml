@@ -1,0 +1,176 @@
+# yaml-language-server: $schema=../../../../../schema/dozer-recipe-2.schema.json
+# PARKED (owner, 2026-10-15): "coming" in Recipes/known.json — it shows a ChatGPT sign-in whenever ~/.code has no
+# login file, whatever provider is set. Kept here, not compiled, so it can come back when that changes: move it back
+# to Recipes/agents/, run make recipes, add the embed line, drop the known entry.
+# Every Code — Dozer's recipe (schema 2). The format: docs/recipes/RECIPE-FORMAT.md.
+# Edit this file, then run make recipes (it writes Recipes/compiled/every-code.json, which Dozer embeds).
+schema: 2
+kind: workload
+id: just-every/every-code
+displayName: Every Code
+description: A Codex CLI fork with multi-agent orchestration (just-every/code), here on an xAI API key.
+author: just-every
+sourceUrl: https://github.com/just-every/code
+licenses:
+- Apache-2.0
+args:
+  version:
+    description: The Every Code release Dozer installs (its pin).
+    default: 0.6.196
+    pattern: '[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?'
+    buildArg: EVERY_CODE_VERSION
+provides:
+- com.dozersandbox/every-code@${{ kit.args.version }}
+capabilities:
+- type: com.docker.sandbox/network-policy@1
+  config:
+    runtime:
+      allow:
+      - api.x.ai:443
+      - api.github.com:443
+    dozer:
+      model:
+        id: model:every-code
+        title: Talk to xAI
+        summary: Every Code's model here (the xAI API, with your key) — needed for it to answer.
+        phrase: talk to your AI model (xAI)
+        hosts:
+        - host: api.x.ai
+          paths:
+          - /v1/chat/completions
+      update: []
+      excluded: []
+      vendor:
+      - host: api.github.com
+        paths:
+        - /repos/just-every/code/releases/latest
+        reason: Every Code asks GitHub for its latest release when its TUI starts (read-only; no setting turns it off) and only shows a notice
+- type: com.docker.sandbox/credential@1
+  description: xAI API access
+  config:
+    service: xai
+    phase: runtime
+    apiKey:
+      name: XAI_API_KEY
+      proxyManaged: true
+      inject:
+      - domain: api.x.ai
+        header: authorization
+        format: Bearer %s
+    dozer:
+      accounts:
+      - key
+- type: com.docker.sandbox/volume@1
+  config:
+    path: /home/agent/.code
+- type: com.dozersandbox/install@1
+  config:
+    kind: npm-platform-binary
+    package: '@just-every/code'
+    platform_package: '@just-every/code-linux-arm64-musl'
+    payload: bin/code-aarch64-unknown-linux-musl
+    binary: coder
+    integrity: sha512-3Ss/lvzTxV1Z7C/y/0DHk3M7oCkV42FRCxp6t8twr2AtRIok43erm3BxTlmhmrOt/CjZGAMKOoaMgawzIOFvXg==
+- type: com.dozersandbox/launch@1
+  config:
+    command:
+    - coder
+    no_prompts_args:
+    - --dangerously-bypass-approvals-and-sandbox
+    passthrough:
+    - --version
+    - -V
+    - --help
+    - -h
+    - help
+    - login
+    - logout
+    - exec
+    - auto
+    - mcp
+    - completion
+    env: {}
+    state_env: {}
+    first_run:
+    - file: ~/.code/config.toml
+      set:
+        model: grok-build-0.1
+        model_provider: xai
+        model_providers.xai.name: xAI
+        model_providers.xai.base_url: https://api.x.ai/v1
+        model_providers.xai.env_key: XAI_API_KEY
+        model_providers.xai.wire_api: chat
+    status: none
+    resume:
+    - resume
+    - --last
+    verify:
+    - argv:
+      - coder
+      - --version
+      expect: ${{ kit.args.version }}
+    check:
+      argv:
+      - coder
+      - exec
+      - --skip-git-repo-check
+      - say ok
+      expect: DOZ_FAKE_OK
+- type: com.dozersandbox/auth@1
+  config:
+    methods:
+    - kind: api-key
+      provider: xai
+      accounts:
+      - key
+      keys_page: https://console.x.ai/
+      note: Every Code's Codex-style model_providers table names xAI's API (env_key XAI_API_KEY, wire_api chat), model grok-build-0.1; its ChatGPT sign-in is not offered here.
+      checked: '2026-10-14'
+- type: com.dozersandbox/gateways@1
+  config:
+    entries:
+    - gateway: openrouter
+      level: unknown
+      reason: Every Code takes any model_providers entry, as Codex does; OpenRouter was not checked
+      checked: '2026-10-14'
+    - gateway: vercel-ai-gateway
+      level: unknown
+      reason: not checked against Every Code
+      checked: '2026-10-14'
+- type: com.dozersandbox/currency@1
+  config:
+    checked: '2026-10-14'
+- type: com.dozersandbox/directory@1
+  config:
+    kind: coding-agent
+    categories:
+    - coding-agent
+    aliases:
+    - just-every-code
+    - coder
+    icon: every-code
+    default_base: debian
+    platforms:
+      glibc: true
+      musl: true
+    tags:
+    - tag: headless
+      level: verified
+      notes:
+      - coder exec --skip-git-repo-check "…"
+      evidence: 'make recipe-check: coder exec printed the stand-in''s answer and exited in a fresh try'
+      checked: '2026-10-14'
+    terms: Your xAI API key — a key from console.x.ai.
+- type: com.dozersandbox/guide@1
+  config:
+    intro: "Every Code is a coding agent with its own screen: the session on the left. Ask it to read, change and run the code in your folder."
+    steps:
+    - text: "Check it answers, without its screen."
+      command: "coder exec --skip-git-repo-check \"say ok\""
+    - text: "Ask it something in its own screen — the session on the left."
+    - text: "One task without its screen."
+      command: "coder exec --skip-git-repo-check \"list the files in this folder\""
+    tips:
+    - "Files it makes are in /workspace — your folder on the Mac."
+    - "Restart its session from the session's ⋯ menu; End stops it."
+    docs: https://github.com/just-every/code

@@ -443,6 +443,51 @@ final class AccountTests: XCTestCase {
         XCTAssertTrue(m3.error!.message.contains("isn't a Claude setup token"))
     }
 
+    /// A key its provider refused at its last check is `rejected` — never `ok` (it showed green on the dashboard and `ok`
+    /// in `doz account ls`, with "rejected: HTTP 400" beside it). Not checked and can't-read stay what they were.
+    func testAKeyItsProviderRefusedIsRejectedNotOK() async throws {
+        XCTAssertEqual(AccountRow.keyState("ok", verification: "rejected: HTTP 400 from generativelanguage.googleapis.com"), "rejected")
+        XCTAssertEqual(AccountRow.keyState("expires-soon", verification: "rejected: invalid bearer token"), "rejected")
+        XCTAssertEqual(AccountRow.keyState("unchecked", verification: "rejected: HTTP 401"), "rejected")
+        XCTAssertEqual(AccountRow.keyState("ok", verification: "verified"), "ok")
+        XCTAssertEqual(AccountRow.keyState("ok", verification: "unverified: --no-verify"), "ok", "never checked: as before")
+        XCTAssertEqual(AccountRow.keyState("ok", verification: nil), "ok")
+        XCTAssertEqual(AccountRow.keyState("unchecked", verification: "unverified: --no-verify"), "unchecked")
+        // What says the key cannot be used at all comes first: that is what to fix.
+        for s in ["unavailable", "missing", "locked", "expired"] {
+            XCTAssertEqual(AccountRow.keyState(s, verification: "rejected: HTTP 400"), s)
+        }
+
+        // Through the host: stored without its check (offline), then the provider refuses it.
+        var r = HostRequest(.accountAdd)
+        r.account = "gold"
+        r.accountKind = "key"
+        r.provider = "google"
+        r.secret = "AIzaFAKE-REFUSED-" + String(repeating: "B", count: 24)
+        let offline = await core(services(verifier: .unavailable("offline")))
+        let added = await offline.handle(r)
+        XCTAssertNil(added.error)
+        let listed = await offline.handle(HostRequest(.accountList))
+        var ls = try XCTUnwrap(try XCTUnwrap(listed.result).decode([AccountRow].self).first { $0.name == "gold" })
+        XCTAssertEqual(ls.state, "ok", "not checked yet: its keychain item is there")
+        let refusing = await core(services(verifier: .rejected("HTTP 400 from generativelanguage.googleapis.com")))
+        var v = HostRequest(.accountVerify)
+        v.account = "gold"
+        let m = await refusing.handle(v)
+        XCTAssertNil(m.error)
+        ls = try XCTUnwrap(try XCTUnwrap(m.result).decode([AccountRow].self).first { $0.name == "gold" })
+        XCTAssertEqual(ls.state, "rejected")
+        XCTAssertTrue(ls.verification?.hasPrefix("rejected: HTTP 400") == true, ls.verification ?? "")
+        // `doz account ls` says it in its STATE column.
+        let line = try XCTUnwrap(renderAccounts([ls]).split(separator: "\n").first { $0.hasPrefix("gold") })
+        XCTAssertTrue(line.contains(" rejected "), String(line))
+        XCTAssertFalse(line.contains(" ok "), String(line))
+        // Checked again and accepted: ok again.
+        let accepting = await core(services(verifier: .verified))
+        let again = await accepting.handle(v)
+        XCTAssertEqual(try XCTUnwrap(again.result).decode([AccountRow].self).first { $0.name == "gold" }?.state, "ok")
+    }
+
     func testDefaultAccountAndNamesAndPolicy() async throws {
         keychain.put(svc, claudeItem("sk-ant-oat01-MAC", expires: Date().addingTimeInterval(7200)))
         let c = await core()

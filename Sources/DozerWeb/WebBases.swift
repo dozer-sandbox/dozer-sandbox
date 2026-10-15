@@ -28,11 +28,14 @@ public struct WebBase: Codable, Equatable, Sendable {
     public var registries: [String]
     public var prepared: [String]
     public var updateAvailable: Bool?
+    /// 617: a musl base (Alpine) — an agent built for glibc only cannot run on it.
+    public var musl = false
 
     public init(_ r: BaseRow) {
         id = r.id; title = r.title; useCase = r.useCase; reference = r.reference; digest = r.digest; pinned = r.pinned
         downloadBytes = r.downloadBytes; prepareSeconds = r.prepareSeconds; packageManager = r.packageManager
         registries = r.registries; prepared = r.prepared; updateAvailable = r.updateAvailable
+        musl = BaseCatalogue.base(r.id)?.musl == true
     }
 }
 
@@ -79,6 +82,27 @@ public struct WebBases: Codable, Equatable, Sendable {
     }
 
     public static let agentChoices: [[String]] = [["claude-code", "Claude Code"], ["pi", "pi"], ["none", "none — a shell only"]]
+
+    /// 617 (owner: "split them"): every agent and tool New Sandbox can make, with its section (`coding-agent` |
+    /// `ai-tool`), its categories, its own base and whether it runs on Alpine (musl) — the picker's two sections.
+    public struct CatalogAgent: Codable, Equatable, Sendable {
+        public var id: String
+        public var title: String
+        public var kind: String
+        public var categories: [String]
+        public var defaultBase: String
+        public var musl: Bool
+    }
+    public var catalog: [CatalogAgent] = WebBases.catalogAgents
+    public var kinds: [WebTryCatalog.Word] = Categories.kinds.map { WebTryCatalog.Word(id: $0.id, title: $0.title, meaning: $0.meaning) }
+
+    public static var catalogAgents: [CatalogAgent] {
+        AgentKind.allCases.compactMap { k in
+            guard let r = k.recipe else { return nil }
+            return CatalogAgent(id: r.id, title: r.title, kind: r.catalogKind ?? "coding-agent", categories: r.categories ?? [],
+                                defaultBase: r.defaultBase, musl: r.platforms.musl)
+        }
+    }
 }
 
 extension HostWebData {

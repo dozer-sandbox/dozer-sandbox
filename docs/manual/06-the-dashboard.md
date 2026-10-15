@@ -112,7 +112,7 @@ top shows the whole sidebar over the page.
 
 ### Safety catches
 
-**Reset**, **Remove**, **Revert** and every delete ask you to type the name first. **Shut down**
+**Reset**, **Remove**, **Revert** and every delete ask you to tick a box first ("Yes, remove …"). **Shut down**
 asks with a plain confirmation. Clicking an action again while it runs does nothing more.
 
 ### When something fails
@@ -201,7 +201,7 @@ dashboard can switch this off but never on.
 | `ui.terminal_title` | `{sandbox} · {session} · {time}` | A terminal tab's title (and your terminal's, in `doz attach`). |
 | `ui.split_default` | `shell` | What **Split** opens: `shell`, `watch`, `attach` or `dialog`. |
 | `ui.details_open` | `true` | A sandbox's page shows its details (the tabs beside its terminals). |
-| `ui.boot_view_on_start` | `true` | **Start** opens a terminal on the boot. |
+| `ui.boot_view_on_start` | `false` | After **Start**, stay on tab zero (**Console**) rather than switch to the agent's tab. |
 | `ui.confirm_shutdown` | `true` | **Shut down** asks first. |
 | `ui.grid_live_tiles` | `8` | All sessions: at most this many tiles live at once (1–12). |
 | `ui.grid_tile_size` | `medium` | All sessions: `small`, `medium`, `large`. |

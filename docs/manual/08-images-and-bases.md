@@ -66,9 +66,11 @@ doz create tpl-copy --image my-template                                 # a temp
 
 ## Choose an image — in the dashboard
 
-**New sandbox** shows two rows: **Agent** (Claude Code · pi · none) and **Base** — **Recommended**
-(a card per base, with its download and time), **Dockerfile** (**Choose Dockerfile…** opens the Mac's
-file picker) or **Template**. The line under them names the image the pair makes.
+**New sandbox** shows two rows: **Agent** and **Base**. The agent is chosen in two steps: **Coding agents**,
+**AI tools** or **No agent**, then one of that section's (Claude Code, pi, Codex, Grok Build … · Fabric, llm,
+promptfoo …). Choosing one that cannot run on the base chosen (Alpine, for a tool built for glibc only) moves the base
+to its own. **Base**: **Recommended** (a card per base, with its download and time), **Dockerfile** (**Choose
+Dockerfile…** opens the Mac's file picker) or **Template**. The line under them names the image the pair makes.
 
 ![Choosing agent and base](images/new-sandbox-base.png)
 

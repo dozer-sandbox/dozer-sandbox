@@ -168,7 +168,7 @@ final class WebTerminalBridge: @unchecked Sendable {
 
     func run(_ inbound: NIOAsyncChannelInboundStream<WebSocketFrame>) async {
         await withTaskGroup(of: Void.self) { g in
-            g.addTask { await self.hostLoop() }
+            g.addTask { if self.grant.mode == .console { await self.consoleLoop() } else { await self.hostLoop() } }
             g.addTask { await self.inboundLoop(inbound) }
             g.addTask { await self.watchdog() }
             await g.next()
@@ -201,7 +201,7 @@ final class WebTerminalBridge: @unchecked Sendable {
     private func hostLoop() async {
         var first = true
         while !isEnded {
-            let watch = grant.mode == .watch
+            let watch = grant.mode != .interactive
             let want: (String?, TermSize) = lock.withLock { (session, watch ? TermSize(cols: 0, rows: 0) : size) }
             // 594 W18: a REattach (the host hibernated everything and went: `doz host stop`, SIGTERM,
             // idle) waits for a host — started by a wake, a CLI command or Start host — rather than
@@ -335,6 +335,35 @@ final class WebTerminalBridge: @unchecked Sendable {
         }
     }
 
+    // MARK: the console (617: the sandbox page's tab zero)
+
+    /// The system console as `doz console NAME --follow` shows it (the newest part of the log first, then each line as
+    /// it is written), inert text, read-only. It ends when the socket does; the page closes it when the VM powers off.
+    private func consoleLoop() async {
+        lock.withLock {
+            awaitingScreen = false
+            everAttached = true
+        }
+        await pushState()
+        while !isEnded {
+            guard let stream = data.bootConsole(grant.sandbox) else {
+                // No host yet (it is starting): try again shortly.
+                try? await Task.sleep(for: .seconds(1))
+                continue
+            }
+            for await line in stream {
+                if isEnded { return }
+                let text = WebTerminalWire.bootText(line)
+                await sendBinary(Array((text + "\r\n").utf8)[...])
+            }
+            // The host's stream ended (a restart): follow again. A fresh follow replays the log's newest part, so the
+            // screen is reset first — nothing is drawn twice.
+            if isEnded { return }
+            await sendBinary(Array("\u{1B}c".utf8)[...])
+            try? await Task.sleep(for: .seconds(1))
+        }
+    }
+
     // MARK: the boot view (591)
 
     private var bootEvents: Task<Void, Never>?
@@ -358,7 +387,8 @@ final class WebTerminalBridge: @unchecked Sendable {
         while !isEnded {
             startBootEvents()
             let ph = lock.withLock { phase }
-            if ph == Phase.booting.rawValue || hub.runningAction(name) == "start" { await enterBootView() }
+            // 617: a quiet terminal (the agent's tab, added once it is ready) shows nothing of the boot — the Console tab does.
+            if !grant.quiet, ph == Phase.booting.rawValue || hub.runningAction(name) == "start" { await enterBootView() }
             if ph == Phase.running.rawValue { break }
             try? await Task.sleep(for: .milliseconds(200))
         }
@@ -415,7 +445,7 @@ final class WebTerminalBridge: @unchecked Sendable {
                             self.setPhaseLocked(ph)
                             return before != self.phase
                         }
-                        if ph == Phase.booting.rawValue { await self.enterBootView() }
+                        if ph == Phase.booting.rawValue, !self.grant.quiet { await self.enterBootView() }
                         if changed { await self.pushState() }
                     }
                 case .step, .note, .started, .failed, .progress, .output:
@@ -543,9 +573,11 @@ final class WebTerminalBridge: @unchecked Sendable {
         return lock.withLock {
             if action == "wake" || action == "resume", wakeStart == nil { wakeStart = Date() }
             if bootView { return (WebTerminalCover.boot, phase) }
+            // 617: the console has no cover — it is the console.
+            if grant.mode == .console { return (WebTerminalCover(kind: .none, headline: "", detail: nil, action: nil, spinner: false, since: nil, elapsedVerb: nil), phase) }
             let screenBack = !awaitingScreen || (screenDeadline.map { Date() >= $0 } ?? false)
             let c = WebTerminalCover.derive(phase: phase, since: phaseSince, action: action, screenBack: screenBack,
-                                            everAttached: everAttached, watch: grant.mode == .watch)
+                                            everAttached: everAttached, watch: grant.mode != .interactive)
             return (c, phase)
         }
     }

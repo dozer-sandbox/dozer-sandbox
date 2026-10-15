@@ -1,0 +1,180 @@
+# yaml-language-server: $schema=../../../../../schema/dozer-recipe-2.schema.json
+# Tau — Dozer's recipe (schema 2). The format: docs/recipes/RECIPE-FORMAT.md.
+# Edit this file, then run make recipes (it writes Recipes/compiled/tau.json, which Dozer embeds).
+schema: 2
+kind: workload
+id: huggingface/tau
+displayName: Tau
+description: Hugging Face's Python port of the pi coding agent, here on an xAI API key.
+author: Hugging Face
+sourceUrl: https://github.com/huggingface/tau
+licenses:
+- MIT
+args:
+  version:
+    description: The Tau release Dozer installs (its pin).
+    default: 0.4.7
+    pattern: '[0-9]+\.[0-9]+(\.[0-9]+)?([-+][0-9A-Za-z.-]+)?'
+    buildArg: TAU_VERSION
+provides:
+- com.dozersandbox/tau@${{ kit.args.version }}
+capabilities:
+- type: com.docker.sandbox/network-policy@1
+  config:
+    runtime:
+      allow:
+      - api.x.ai:443
+    dozer:
+      model:
+        id: model:tau
+        title: Talk to xAI
+        summary: Tau's model here (the xAI API, with your key) — needed for it to answer.
+        phrase: talk to your AI model (xAI)
+        hosts:
+        - host: api.x.ai
+          paths:
+          - /v1/chat/completions
+      update: []
+      excluded: []
+- type: com.docker.sandbox/credential@1
+  description: xAI API access
+  config:
+    service: xai
+    phase: runtime
+    apiKey:
+      name: XAI_API_KEY
+      proxyManaged: true
+      inject:
+      - domain: api.x.ai
+        header: authorization
+        format: Bearer %s
+    dozer:
+      accounts:
+      - key
+- type: com.docker.sandbox/volume@1
+  config:
+    path: /home/agent/.tau
+- type: com.dozersandbox/install@1
+  config:
+    kind: pypi
+    package: tau-ai
+    binary: tau
+    integrity: sha512-d4WAekaGnc6sVNtqtN57wIGdKTbGa/EsnvCPa2rKShDZ5u/UmycxtREaYLqCW7QRkW7WygD2slaHwb5SbNBe9Q==
+    requirements:
+    - annotated-doc==0.0.5 --hash=sha256:117bac03a25ede5df5440e855b32d556049ca169ead221505badf432fed4b101
+    - annotated-types==0.8.0 --hash=sha256:f072f4d804ea359e4eaf198b1af7a8b0943881a87f31bb764f8bf219bb9419e0
+    - anyio==4.15.1 --hash=sha256:6152fdbbf9a77fdec97731721bebf7c4c44f7c29b424b0065826173efc7ed101
+    - certifi==2026.7.22 --hash=sha256:62f22742b58a1a33014a2b6b706588a8d7e2a88ae7bd1a6ebe8c992928483775
+    - h11==0.16.0 --hash=sha256:63cf8bbe7522de3bf65932fda1d9c2772064ffb3dae62d55932da54b31cb6c86
+    - httpcore==1.0.9 --hash=sha256:2d400746a40668fc9dec9810239072b40b4484b640a8c38fd654a024c7a1bf55
+    - httpx==0.28.1 --hash=sha256:d909fcccc110f8c7faf814ca82a9a4d816bc5a6dbfea25d6591d6985b8ba59ad
+    - idna==3.20 --hash=sha256:ab7ae7122974553370f0bdb919e1a960b2cd1bc1ef0276416d896db81c14582c
+    - linkify-it-py==2.2.0 --hash=sha256:3adc40eb5af300b2605fcfdb968c24e1d780a90f1f2221af7c15e5111e94d443
+    - markdown-it-py==4.2.0 --hash=sha256:9f7ebbcd14fe59494226453aed97c1070d83f8d24b6fc3a3bcf9a38092641c4a
+    - mdit-py-plugins==0.6.1 --hash=sha256:214c82fb2ac524472ab6a5bcab1de80f73b50443e187f401bfd77efbc7c6481d
+    - mdurl==0.1.2 --hash=sha256:84008a41e51615a49fc9966191ff91509e3c40b939176e643fd50a5c2196b8f8
+    - packaging==26.3 --hash=sha256:d7193f7c8e4e93f444fde0262bf90af30e16fa0ad0ad44cb553c87339b23cd1c
+    - pillow==12.3.0 --hash=sha256:f7401aebd7f581d7f83a439d87d474999317ee099218e5ad25d125290990ba65
+    - platformdirs==4.13.0 --hash=sha256:3dbcf4cd708f21cf876c4eaa90e58412bc4f033d87143f41b1493ff77c25b7e1
+    - pydantic==2.14.1 --hash=sha256:9195d967ec791692a04438115466764fb8b9a27b31f14a760437694f40d6b454
+    - pydantic_core==2.50.1 --hash=sha256:409e0ea40ec30d9158f33574fd758e689f6045a0f2596701828c27816ca9687d
+    - pygments==2.21.0 --hash=sha256:2363c69b61c4a97c838da3b130dcd6468f4848992b21a82f2a63ec34377137d9
+    - rich==15.0.0 --hash=sha256:33bd4ef74232fb73fe9279a257718407f169c09b78a87ad3d296f548e27de0bb
+    - shellingham==1.5.4 --hash=sha256:7ecfff8f2fd72616f7481040475a65b2bf8af90a56c89140852d1120324e8686
+    - socksio==1.0.0 --hash=sha256:95dc1f15f9b34e8d7b16f06d74b8ccf48f609af32ab33c608d08761c5dcbb1f3
+    - tau-ai==0.4.7 --hash=sha256:4899ca3cc1c965e27c175fefad8754a68b441d9af49838f6624cc0e1adb59ce9
+    - textual==8.2.8 --hash=sha256:267375fd402dc8d981457212efa71f0e3365fd17bba144ba9bb3ed7563cb374a
+    - typer==0.27.3 --hash=sha256:e50022f28b82a86313e54501317a1db64bf8f8d036ff8cfe5ca7e47675454aff
+    - typing-inspection==0.4.4 --hash=sha256:65b8397ba37ccbce054456aaccddfc91e6e3083c92824df348d96ca832f3f147
+    - typing_extensions==4.16.0 --hash=sha256:481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8
+- type: com.dozersandbox/launch@1
+  config:
+    command:
+    - tau
+    - --provider
+    - xai
+    - -m
+    - grok-build-0.1
+    no_prompts_args: []
+    passthrough:
+    - --version
+    - --help
+    - -p
+    - --print
+    - setup
+    - upgrade
+    env:
+      TAU_NO_UPDATE_CHECK: '1'
+      TAU_OFFLINE: '1'
+    state_env: {}
+    status: none
+    verify:
+    - argv:
+      - tau
+      - --version
+      expect: ${{ kit.args.version }}
+    check:
+      argv:
+      - tau
+      - -p
+      - --provider
+      - xai
+      - -m
+      - grok-build-0.1
+      - say ok
+      expect: DOZ_FAKE_OK
+- type: com.dozersandbox/auth@1
+  config:
+    methods:
+    - kind: api-key
+      provider: xai
+      accounts:
+      - key
+      keys_page: https://console.x.ai/
+      note: Tau's built-in xai provider reads XAI_API_KEY (api_key_env in its catalogue) each run; --provider xai -m grok-build-0.1 in the command. Its /login is not needed.
+      checked: '2026-10-14'
+- type: com.dozersandbox/gateways@1
+  config:
+    entries:
+    - gateway: openrouter
+      level: unknown
+      reason: Tau has an OpenRouter provider; not checked
+      checked: '2026-10-14'
+    - gateway: vercel-ai-gateway
+      level: unknown
+      reason: not checked against Tau
+      checked: '2026-10-14'
+- type: com.dozersandbox/currency@1
+  config:
+    checked: '2026-10-14'
+- type: com.dozersandbox/directory@1
+  config:
+    kind: coding-agent
+    categories:
+    - coding-agent
+    icon: tau
+    default_base: debian
+    platforms:
+      glibc: true
+      musl: false
+    tags:
+    - tag: headless
+      level: verified
+      notes:
+      - tau -p --provider xai -m grok-build-0.1 "…"
+      evidence: 'make recipe-check: tau -p "say ok" printed the stand-in''s answer and exited in a fresh try'
+      checked: '2026-10-14'
+    terms: Your xAI API key — a key from console.x.ai.
+- type: com.dozersandbox/guide@1
+  config:
+    intro: "Tau is a coding agent with its own screen: the session on the left. Ask it to read, change and run the code in your folder."
+    steps:
+    - text: "Check it answers, without its screen."
+      command: "tau -p --provider xai -m grok-build-0.1 \"say ok\""
+    - text: "Ask it something in its own screen — the session on the left."
+    - text: "One task without its screen."
+      command: "tau -p --provider xai -m grok-build-0.1 \"list the files in this folder\""
+    tips:
+    - "Files it makes are in /workspace — your folder on the Mac."
+    - "Restart its session from the session's ⋯ menu; End stops it."
+    docs: https://github.com/huggingface/tau

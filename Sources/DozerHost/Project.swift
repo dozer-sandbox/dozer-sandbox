@@ -54,6 +54,8 @@ public struct DozerProject: Equatable, Sendable {
     /// `open`, or changes on Standard like `+web`, `-error-reports`), for a proxied network with
     /// permissions. nil: the setting decides. When the sandbox is made.
     public var permissions: [String]?
+    /// 617 (D6): custom key accounts attached beside the account (`--key NAME`), when the sandbox is made.
+    public var keys: [String]?
 
     public init(name: String, image: String, cpus: Int? = nil, memoryMiB: UInt64? = nil, network: String? = nil, account: String? = nil) {
         self.name = name
@@ -101,6 +103,7 @@ public struct DozerProject: Equatable, Sendable {
         ("agent_prompt_mode", "append (to the template, the default) or replace"),
         ("agent_sudo", "true or false: the agent's passwordless sudo in the sandbox (default: the setting sandbox.agent_sudo, true)"),
         ("github", "off, read or push: git and gh signed in as you on GitHub — the permissions \"Use GitHub as you\" / \"Push to GitHub\" (default off; when the sandbox is made — later: doz net allow NAME github:as-you)"),
+        ("keys", "custom keys attached beside the account (doz account add NAME --custom …), each of its hosts allowed — when the sandbox is made"),
     ] + settingKeys.map { k in
         (k.key, "\(DozerSettings.definition(k.setting)?.type.name ?? "a value"): this sandbox's \(k.setting) (default: the setting)")
     }
@@ -141,7 +144,7 @@ public struct DozerProject: Equatable, Sendable {
     public func problem(effectiveNetwork: String? = nil) -> String? {
         if !WebNameCheck.isSandboxName(name) { return "name: 1–40 of a-z 0-9 - (not starting with -)" }
         if base != nil, dockerfile != nil { return "base or dockerfile — not both" }
-        if let a = agent, !["claude-code", "pi", "codex", "none"].contains(a) { return "agent: claude-code, pi, codex or none" }
+        if let a = agent, AgentKind(rawValue: a) == nil { return "agent: \(Self.agentWords)" }
         if let b = base, BaseCatalogue.base(b) == nil { return "base: \(BaseCatalogue.ids.joined(separator: ", ")) (doz base ls)" }
         if let c = cpus, !(1...64).contains(c) { return "cpus: a whole number 1–64" }
         if let m = memoryMiB, !(256...262_144).contains(m) { return "memory: 256 MiB – 256 GiB" }
@@ -161,11 +164,17 @@ public struct DozerProject: Equatable, Sendable {
         return nil
     }
 
-    /// 596: the image agent + base name (a Dockerfile's: the agent's, the host swaps in its base).
+    /// 617: "claude-code, pi, codex, antigravity, gemini, grok or none" — every agent this build has a recipe for.
+    public static var agentWords: String {
+        AgentKind.allCases.filter { $0 != .none }.map(\.rawValue).joined(separator: ", ") + " or none"
+    }
+
+    /// 596: the image agent + base name (a Dockerfile's: the agent's, the host swaps in its base). 617: with no
+    /// base, the agent's recipe's default base (Node for the three that existed — as before; Debian for Grok Build).
     public var chosenImage: String {
-        let a: AgentKind = switch agent ?? "claude-code" { case "pi": .pi; case "codex": .codex; case "none": .none; default: .claudeCode }
+        let a = AgentKind(rawValue: agent ?? "claude-code") ?? .claudeCode
         if dockerfile != nil { return ImageChoice(base: a == .none ? "alpine" : "node", agent: a).name }
-        return ImageChoice(base: base ?? "node", agent: a).name
+        return ImageChoice(base: base ?? a.recipe?.defaultBase ?? "node", agent: a).name
     }
 
     /// The file `doz init` and the wizard write: every key listed; the ones not set are commented (their defaults).
@@ -191,7 +200,7 @@ public struct DozerProject: Equatable, Sendable {
         """
         // 596 (B10): the image as agent + base/dockerfile when the file said so, else by name.
         if agent != nil || base != nil || dockerfile != nil {
-            out += "agent: \(agent ?? "claude-code")               # claude-code, pi, codex or none — when made\n"
+            out += "agent: \(agent ?? "claude-code")               # \(Self.agentWords) — when made\n"
             out += base.map { "base: \($0)                   # doz base ls — when made\n" } ?? "# base: node                 # doz base ls — or dockerfile — when made\n"
             out += dockerfile.map { "dockerfile: \(quoted($0))     # built with Apple's container build, OUTSIDE Dozer's network policy — when made\n" } ?? ""
         } else {
@@ -247,6 +256,7 @@ public struct DozerProject: Equatable, Sendable {
             ?? "# agent_sudo: true           # the agent's passwordless sudo (apt-get install …); false: none. From the next session\n"
         out += github.map { "github: \($0)\n" }
             ?? "# github: off                # read: git and gh signed in as you on GitHub (read-only); push: also push. When the sandbox is made\n"
+        if let k = keys, !k.isEmpty { out += "keys: [\(k.map(quoted).joined(separator: ", "))]   # custom keys — when made\n" }
         for k in Self.settingKeys {
             out += settings[k.setting].map { "\(k.key): \($0.plain)\n" } ?? k.comment + "\n"
         }
@@ -273,6 +283,7 @@ public struct DozerProject: Equatable, Sendable {
         }
         words += Self.gitHubWords(gh) ?? []
         if !words.isEmpty { o.allow = words }
+        if let k = keys, !k.isEmpty { o.keys = k }
         o.project = file.path
         // 596 (B6): a Dockerfile relative to this folder (its folder is the build context).
         if let d = dockerfile {

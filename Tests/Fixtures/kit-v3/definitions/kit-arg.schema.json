@@ -1,0 +1,17 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Kit reference shapes",
+  "description": "Editor-schema companions to Kit references. String capability configuration fields accept kit.args and kit.env references before create-time expansion; numeric and boolean fields accept whole kit.args references. Effective configurations validate against the literal grammar.",
+  "definitions": {
+    "whole": {
+      "type": "string",
+      "pattern": "^\\$\\{\\{\\s*kit\\.args\\.[A-Za-z_][A-Za-z0-9_]*\\s*\\}\\}$",
+      "description": "A string that is exactly one ${{ kit.args.<name> }} reference. Whole-value references adopt the arg's type at create (SPEC-v3 \u00a76)."
+    },
+    "bearing": {
+      "type": "string",
+      "pattern": "\\$\\{\\{\\s*kit\\.(args|env)\\.[A-Za-z_][A-Za-z0-9_]*\\s*\\}\\}",
+      "description": "A string containing a kit.args or kit.env reference. Environment values remain strings and use the final container environment."
+    }
+  }
+}

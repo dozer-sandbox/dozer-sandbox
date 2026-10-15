@@ -282,6 +282,8 @@ public final class DozerWebServer: @unchecked Sendable {
 
     /// 594 W19: a line every open page shows as a toast ("doz ui restarted — 0.12.0-rc.4").
     public func tellPages(_ text: String) { hub.broadcast("notice", ["text": text]) }
+    /// 617: the open pages go to `hash` (only the Quick try's — `WebControl.showPage` checked it; the page checks again).
+    public func showPages(_ hash: String) { hub.broadcast("show", ["hash": hash]) }
 
     /// 594 W19: `doz ui link --rotate` / `doz ui --new-link` on a running UI — every session ends (each
     /// open page is told to use the new link), then a fresh one-use link.
@@ -673,6 +675,7 @@ public final class DozerWebServer: @unchecked Sendable {
 
     func sessionInfo(_ s: WebSession, _ ctx: WebRequestContext, _ device: WebDeviceView?) -> WebSessionInfo {
         var info = WebSessionInfo(csrf: s.csrfToken, expiresAt: s.expiresAt, serverRun: serverRun, store: data.storePath, version: version)
+        info.homes = DisplayPath.homes()
         info.chatgptSignIn = BuildFlavor.current.chatgptSignIn          // 611
         info.update = updateNotice
         info.signup = Usage.isOfficial
@@ -827,7 +830,7 @@ public final class DozerWebServer: @unchecked Sendable {
             try Self.requireJSONBody(md)
             guard settings.terminalsEnabled else { throw WebRejection.terminalsOff }
             let r = try WebTerminalTicketRequest.decode(body)
-            let t = try await tickets.mint(cookie: cookie, sandbox: name, session: r.session, mode: r.mode, size: r.size, reattach: r.reattach)
+            let t = try await tickets.mint(cookie: cookie, sandbox: name, session: r.session, mode: r.mode, size: r.size, reattach: r.reattach, quiet: r.quiet)
             return json(WebTerminalTicketInfo(ticket: t, expiresInSeconds: Int(tickets.lifetime), session: r.session, mode: r.mode))
         case .terminalSocket:
             throw WebRejection.upgradeRequired            // answered in respond(); never dispatched
@@ -844,6 +847,8 @@ public final class DozerWebServer: @unchecked Sendable {
             return json(try await data.bootLogs(name))
         case .bootLog(let name, let n):
             return json(try await data.bootLog(name, number: n))
+        case .buildLog(let name):
+            return json(try await data.buildLog(name))
         case .terminalLayoutSet(let name):
             try Self.requireJSONBody(md)
             return json(try await data.setTerminalLayout(name, try WebTerminalLayout.decode(body)))
@@ -950,7 +955,11 @@ public final class DozerWebServer: @unchecked Sendable {
             let q = try WebProjectRequest.decode(body, allowed: writing ? ["folder", "form", "explicit", "replace"] : ["folder", "form", "explicit"])
             let taken = Set(((try? await data.overview())?.sandboxes ?? []).map(\.name))
             if writing { return json(try WebProject.write(q, settings: settings.current, store: data.storePath, taken: taken)) }
-            return json(try WebProject.preview(q, settings: settings.current, store: data.storePath, taken: taken).0)
+            var (out, back) = try WebProject.preview(q, settings: settings.current, store: data.storePath, taken: taken)
+            // 617: the review shows the plan (best effort — the file is the review's subject; a plan that cannot be made
+            // leaves it out rather than failing the preview).
+            out.plan = try? await data.plan(WebProject.planRequest(back, folder: out.folder, path: out.path, settings: settings.current))
+            return json(out)
         case .projectsDirChoose:
             // 599c: the Mac's picker; what the person chose there is written here — never a path from the page.
             try Self.requireJSONBody(md)
@@ -964,6 +973,24 @@ public final class DozerWebServer: @unchecked Sendable {
             return json(WebProjectsDirChoice(path: (try? Workspace.normalize(path)) ?? path, cancelled: false, report: report))
         case .bases:
             return json(try await data.bases())
+        case .tryCatalog:
+            // 617: read-only — each agent's try plan from the host's read-only op (in-process with no host).
+            // Every agent planned on ONE reading of the store (the host's `plans`) — it was one `plan` each, ~0.6 s apiece.
+            let d = data
+            let store = DozerStore(root: URL(fileURLWithPath: d.storePath)), current = settings.current
+            return json(await WebTryCatalog.build(plans: { await d.plans($0) }, secretEntry: settings.secretEntryAllowed,
+                                                  currency: AgentCurrency.all(store: store),
+                                                  accounts: (try? await d.accounts().accounts) ?? [],
+                                                  installs: { WebTryCatalog.installs(store: store, settings: current, images: $0) }))
+        case .tryList:
+            // 617: the list alone, from the recipes (no host, no plan) — the page draws its cards from it at once.
+            let store = DozerStore(root: URL(fileURLWithPath: data.storePath))
+            return json(WebTryCatalog.list(secretEntry: settings.secretEntryAllowed, currency: AgentCurrency.all(store: store),
+                                           installs: WebTryCatalog.installs(store: store, settings: settings.current)))
+        case .plan:
+            // 617: changes nothing; POST (CSRF, above) like the quick-add question.
+            try Self.requireJSONBody(md)
+            return json(try await data.plan(try WebPlanQuery.decode(body).request))
         case .dockerfileChoose:
             // The MAC's file picker (CSRF above); opened at the field's folder, else the projects folder.
             try Self.requireJSONBody(md)

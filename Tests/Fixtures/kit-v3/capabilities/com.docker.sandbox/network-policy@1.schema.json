@@ -1,0 +1,36 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "com.docker.sandbox/network-policy@1",
+  "description": "Config schema for the phase-scoped egress policy need: install is open while the install hooks run and closed before the agent starts; runtime is what the agent gets. Singleton. The @1 names the capability contract, including this config schema and observable behavior. RELEASES.md defines when versions move and the maintainer-approved draft-stage exception.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "install": {
+      "$ref": "#/definitions/networkRules"
+    },
+    "runtime": {
+      "$ref": "#/definitions/networkRules"
+    }
+  },
+  "definitions": {
+    "networkRules": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Allow/deny domain patterns (policykit glob semantics: * within a label, ** across labels, bare * matches any host). Deny wins.",
+      "properties": {
+        "allow": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "deny": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

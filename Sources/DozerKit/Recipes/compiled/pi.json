@@ -1,0 +1,290 @@
+{
+  "args" : {
+    "version" : {
+      "buildArg" : "PI_VERSION",
+      "default" : "0.84.1",
+      "description" : "The pi release Dozer installs (its pin).",
+      "pattern" : "[0-9]+\\.[0-9]+\\.[0-9]+([-+][0-9A-Za-z.-]+)?"
+    }
+  },
+  "author" : "Mario Zechner",
+  "capabilities" : [
+    {
+      "config" : {
+        "dozer" : {
+          "excluded" : [
+
+          ],
+          "model" : {
+            "id" : "model",
+            "shared" : true
+          },
+          "update" : [
+            {
+              "host" : "pi.dev"
+            },
+            {
+              "host" : "registry.npmjs.org",
+              "paths" : [
+                "/@earendil-works/pi-coding-agent",
+                "/@earendil-works%2fpi-coding-agent",
+                "/@earendil-works%2Fpi-coding-agent"
+              ]
+            }
+          ],
+          "vendor" : [
+            {
+              "host" : "pi.dev",
+              "reason" : "pi's own site — called at start-up (not identified)"
+            }
+          ]
+        },
+        "runtime" : {
+          "allow" : [
+            "api.anthropic.com:443",
+            "pi.dev:443"
+          ]
+        }
+      },
+      "type" : "com.docker.sandbox/network-policy@1"
+    },
+    {
+      "config" : {
+        "apiKey" : {
+          "inject" : [
+            {
+              "domain" : "api.anthropic.com",
+              "format" : "%s",
+              "header" : "x-api-key"
+            }
+          ],
+          "name" : "ANTHROPIC_API_KEY",
+          "proxyManaged" : true
+        },
+        "dozer" : {
+          "accounts" : [
+            "api-key"
+          ]
+        },
+        "phase" : "runtime",
+        "service" : "anthropic"
+      },
+      "description" : "Anthropic API access",
+      "type" : "com.docker.sandbox/credential@1"
+    },
+    {
+      "config" : {
+        "path" : "/home/agent/.pi/agent"
+      },
+      "type" : "com.docker.sandbox/volume@1"
+    },
+    {
+      "config" : {
+        "directory" : "/home/agent/.pi/agent/skills/dozer",
+        "dozer" : {
+          "kind" : "skill",
+          "launcher_arg" : [
+            "--append-system-prompt"
+          ]
+        },
+        "filename" : "SKILL.md"
+      },
+      "type" : "com.docker.sandbox/agent-context@1"
+    },
+    {
+      "config" : {
+        "binary" : "pi",
+        "builtin" : true,
+        "integrity" : "sha512-ncAqFrG+iybuPGOhMiZoEHkEzTpJgz3guYD32pD+M7ucc0WeHmauP6wa7qwP8V/KWvsZDVNa5XGsdZ7fkC7w7A==",
+        "kind" : "builtin",
+        "needs_node" : "22",
+        "npm_args" : [
+          "--ignore-scripts"
+        ],
+        "package" : "@earendil-works/pi-coding-agent"
+      },
+      "type" : "com.dozersandbox/install@1"
+    },
+    {
+      "config" : {
+        "check" : {
+          "argv" : [
+            "pi",
+            "-p",
+            "say ok"
+          ],
+          "expect" : "DOZ_FAKE_OK"
+        },
+        "command" : [
+          "pi"
+        ],
+        "env" : {
+
+        },
+        "no_prompts_args" : [
+
+        ],
+        "passthrough" : [
+
+        ],
+        "resume" : [
+          "--continue"
+        ],
+        "session_env" : {
+          "PI_SKIP_VERSION_CHECK" : "1"
+        },
+        "settings" : {
+          "version" : "images.pi_version"
+        },
+        "state_env" : {
+          "PI_CODING_AGENT_DIR" : "/home/agent/.pi/agent"
+        },
+        "status" : "osc7501",
+        "verify" : [
+          {
+            "argv" : [
+              "pi",
+              "--version"
+            ],
+            "expect" : "${{ kit.args.version }}"
+          }
+        ]
+      },
+      "type" : "com.dozersandbox/launch@1"
+    },
+    {
+      "config" : {
+        "methods" : [
+          {
+            "accounts" : [
+              "api-key"
+            ],
+            "checked" : "2026-10-12",
+            "keys_page" : "https://platform.claude.com/settings/keys",
+            "kind" : "api-key",
+            "note" : "pi reads ANTHROPIC_API_KEY; a Claude subscription is never given to it.",
+            "provider" : "anthropic"
+          },
+          {
+            "checked" : "2026-10-12",
+            "gateways" : [
+              "openrouter"
+            ],
+            "kind" : "gateway",
+            "note" : "pi reads OPENROUTER_API_KEY (its docs/providers.md). Dozer offers gateways in a later version."
+          }
+        ]
+      },
+      "type" : "com.dozersandbox/auth@1"
+    },
+    {
+      "config" : {
+        "entries" : [
+          {
+            "checked" : "2026-10-12",
+            "endpoint" : "v1",
+            "gateway" : "openrouter",
+            "how" : {
+              "env" : {
+                "OPENROUTER_API_KEY" : "${{ dozer.placeholder }}"
+              },
+              "model_args" : [
+                "--model",
+                "openrouter/${{ dozer.model }}"
+              ]
+            },
+            "level" : "documented",
+            "notes" : [
+              "pi's own openrouter provider knows the base URL (https://openrouter.ai/api/v1) and also speaks Anthropic Messages there for Anthropic models (packages/ai/src/providers/openrouter.ts)",
+              "--model is PROVIDER/MODEL in pi's docs (azure/gpt-5.4)"
+            ],
+            "shape" : "openai-chat",
+            "source" : "https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/providers.md"
+          },
+          {
+            "checked" : "2026-10-12",
+            "gateway" : "vercel-ai-gateway",
+            "how" : {
+              "env" : {
+                "AI_GATEWAY_API_KEY" : "${{ dozer.placeholder }}"
+              },
+              "model_args" : [
+                "--model",
+                "${{ dozer.model }}"
+              ]
+            },
+            "level" : "documented",
+            "notes" : [
+              "pi's own vercel-ai-gateway provider knows the base URL; AI_GATEWAY_API_KEY is in pi's providers.md, and Vercel's setup writes the key to ~/.pi/agent/auth.json instead",
+              "which API shape pi's Vercel provider speaks is not stated by either side (left out)"
+            ],
+            "source" : "https://vercel.com/docs/ai-gateway/coding-agents/pi"
+          }
+        ]
+      },
+      "type" : "com.dozersandbox/gateways@1"
+    },
+    {
+      "config" : {
+        "categories" : [
+          "coding-agent"
+        ],
+        "default_base" : "node",
+        "icon" : "pi",
+        "kind" : "coding-agent",
+        "platforms" : {
+          "glibc" : true,
+          "musl" : true
+        },
+        "tags" : [
+          {
+            "checked" : "2026-10-12",
+            "level" : "documented",
+            "notes" : [
+              "pi -p / --print, --mode json"
+            ],
+            "source" : "https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/cli.md",
+            "tag" : "headless"
+          }
+        ]
+      },
+      "type" : "com.dozersandbox/directory@1"
+    },
+    {
+      "config" : {
+        "docs" : "https://github.com/earendil-works/pi",
+        "intro" : "pi is a coding agent with its own screen: the session on the left. Ask it to read, change and run the code in your folder.",
+        "steps" : [
+          {
+            "command" : "pi -p \"say ok\"",
+            "text" : "Check it answers, without its screen."
+          },
+          {
+            "text" : "Ask it something in its own screen — the session on the left."
+          },
+          {
+            "command" : "pi -p \"list the files in this folder\"",
+            "text" : "One task without its screen."
+          }
+        ],
+        "tips" : [
+          "Files it makes are in /workspace — your folder on the Mac.",
+          "Restart its session from the session's ⋯ menu; End stops it."
+        ]
+      },
+      "type" : "com.dozersandbox/guide@1"
+    }
+  ],
+  "description" : "A small, open-source coding agent that works with many model providers.",
+  "displayName" : "pi",
+  "id" : "earendil-works/pi",
+  "kind" : "workload",
+  "licenses" : [
+    "MIT"
+  ],
+  "provides" : [
+    "com.dozersandbox/pi@${{ kit.args.version }}"
+  ],
+  "schema" : 2,
+  "sourceUrl" : "https://github.com/earendil-works/pi"
+}

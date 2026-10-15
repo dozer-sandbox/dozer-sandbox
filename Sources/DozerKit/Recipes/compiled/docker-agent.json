@@ -1,0 +1,274 @@
+{
+  "args" : {
+    "version" : {
+      "buildArg" : "DOCKER_AGENT_VERSION",
+      "default" : "1.150.0",
+      "description" : "The Docker Agent release Dozer installs (its pin).",
+      "pattern" : "[0-9]+\\.[0-9]+\\.[0-9]+([-+][0-9A-Za-z.-]+)?"
+    }
+  },
+  "author" : "Docker",
+  "capabilities" : [
+    {
+      "config" : {
+        "dozer" : {
+          "excluded" : [
+
+          ],
+          "model" : {
+            "hosts" : [
+              {
+                "host" : "api.x.ai",
+                "paths" : [
+                  "/v1/chat/completions"
+                ]
+              }
+            ],
+            "id" : "model:docker-agent",
+            "phrase" : "talk to your AI model (xAI)",
+            "summary" : "Docker Agent's model here (the xAI API, with your key) — needed for it to answer.",
+            "title" : "Talk to xAI"
+          },
+          "quiet" : [
+            {
+              "host" : "models.dev",
+              "reason" : "Docker Agent reads the public models.dev catalogue at each run (no setting turns it off); with its model named it does without it when refused"
+            }
+          ],
+          "update" : [
+
+          ]
+        },
+        "runtime" : {
+          "allow" : [
+            "api.x.ai:443"
+          ],
+          "deny" : [
+            "models.dev:443"
+          ]
+        }
+      },
+      "type" : "com.docker.sandbox/network-policy@1"
+    },
+    {
+      "config" : {
+        "apiKey" : {
+          "inject" : [
+            {
+              "domain" : "api.x.ai",
+              "format" : "Bearer %s",
+              "header" : "authorization"
+            }
+          ],
+          "name" : "XAI_API_KEY",
+          "proxyManaged" : true
+        },
+        "dozer" : {
+          "accounts" : [
+            "key"
+          ]
+        },
+        "phase" : "runtime",
+        "service" : "xai"
+      },
+      "description" : "xAI API access",
+      "type" : "com.docker.sandbox/credential@1"
+    },
+    {
+      "config" : {
+        "path" : "/home/agent/.cagent"
+      },
+      "type" : "com.docker.sandbox/volume@1"
+    },
+    {
+      "config" : {
+        "path" : "/home/agent/.config/cagent"
+      },
+      "type" : "com.docker.sandbox/volume@1"
+    },
+    {
+      "config" : {
+        "bake_hosts" : [
+          "github.com",
+          "release-assets.githubusercontent.com"
+        ],
+        "binary" : "docker-agent",
+        "integrity" : "sha512-KklBky8+usd4CK6S48S940vZJpxg1wn1cKqmGgJmsfBw3YAkRWusE/nlnDqT4TM0l4Lh/SVPgAvC/d8XQdAVmA==",
+        "kind" : "release-binary",
+        "url" : "https://github.com/docker/docker-agent/releases/download/v${{ kit.args.version }}/docker-agent-linux-arm64"
+      },
+      "type" : "com.dozersandbox/install@1"
+    },
+    {
+      "config" : {
+        "check" : {
+          "argv" : [
+            "docker-agent",
+            "run",
+            "coder",
+            "--model",
+            "xai/grok-build-0.1",
+            "--exec",
+            "say ok"
+          ],
+          "expect" : "DOZ_FAKE_OK"
+        },
+        "command" : [
+          "docker-agent",
+          "run",
+          "coder",
+          "--model",
+          "xai/grok-build-0.1"
+        ],
+        "env" : {
+          "DOCKER_AGENT_AUTO_UPDATE" : "false",
+          "DOCKER_AGENT_HIDE_TELEMETRY_BANNER" : "1",
+          "DOCKER_AGENT_NO_SETUP" : "1",
+          "DOCKER_AGENT_NO_TOUR" : "1",
+          "TELEMETRY_ENABLED" : "false"
+        },
+        "no_prompts_args" : [
+          "--yolo"
+        ],
+        "passthrough" : [
+          "--help",
+          "-h",
+          "help",
+          "version",
+          "run",
+          "models",
+          "doctor",
+          "setup",
+          "sessions",
+          "new",
+          "eval",
+          "alias",
+          "toolsets",
+          "getting-started"
+        ],
+        "state_env" : {
+
+        },
+        "status" : "osc7501",
+        "verify" : [
+          {
+            "argv" : [
+              "docker-agent",
+              "version"
+            ],
+            "expect" : "${{ kit.args.version }}"
+          }
+        ]
+      },
+      "type" : "com.dozersandbox/launch@1"
+    },
+    {
+      "config" : {
+        "methods" : [
+          {
+            "accounts" : [
+              "key"
+            ],
+            "checked" : "2026-10-14",
+            "keys_page" : "https://console.x.ai/",
+            "kind" : "api-key",
+            "note" : "Docker Agent's xai provider reads XAI_API_KEY; Dozer runs its built-in coder agent with --model xai/grok-build-0.1. Your own agent YAML files work the same way (docker-agent run ./agent.yaml).",
+            "provider" : "xai"
+          }
+        ]
+      },
+      "type" : "com.dozersandbox/auth@1"
+    },
+    {
+      "config" : {
+        "entries" : [
+          {
+            "checked" : "2026-10-14",
+            "gateway" : "openrouter",
+            "level" : "unknown",
+            "reason" : "Docker Agent takes OpenAI-compatible endpoints in its YAML; OpenRouter was not checked"
+          },
+          {
+            "checked" : "2026-10-14",
+            "gateway" : "vercel-ai-gateway",
+            "level" : "unknown",
+            "reason" : "not checked against Docker Agent"
+          }
+        ]
+      },
+      "type" : "com.dozersandbox/gateways@1"
+    },
+    {
+      "config" : {
+        "checked" : "2026-10-14"
+      },
+      "type" : "com.dozersandbox/currency@1"
+    },
+    {
+      "config" : {
+        "aliases" : [
+          "cagent"
+        ],
+        "categories" : [
+          "coding-agent"
+        ],
+        "default_base" : "debian",
+        "icon" : "docker-agent",
+        "kind" : "coding-agent",
+        "platforms" : {
+          "glibc" : true,
+          "musl" : true
+        },
+        "tags" : [
+          {
+            "checked" : "2026-10-14",
+            "evidence" : "make recipe-check: docker-agent run coder --exec \"say ok\" printed the stand-in's answer and exited in a fresh try",
+            "level" : "verified",
+            "notes" : [
+              "docker-agent run coder --model xai/grok-build-0.1 --exec \"…\""
+            ],
+            "tag" : "headless"
+          }
+        ],
+        "terms" : "Your xAI API key — a key from console.x.ai. It runs as a program in the sandbox; Docker Desktop is not used."
+      },
+      "type" : "com.dozersandbox/directory@1"
+    },
+    {
+      "config" : {
+        "docs" : "https://github.com/docker/docker-agent",
+        "intro" : "Docker Agent is a coding agent with its own screen: the session on the left. Ask it to read, change and run the code in your folder.",
+        "steps" : [
+          {
+            "command" : "docker-agent run coder --model xai/grok-build-0.1 --exec \"say ok\"",
+            "text" : "Check it answers, without its screen."
+          },
+          {
+            "text" : "Ask it something in its own screen — the session on the left."
+          },
+          {
+            "command" : "docker-agent run coder --model xai/grok-build-0.1 --exec \"list the files in this folder\"",
+            "text" : "One task without its screen."
+          }
+        ],
+        "tips" : [
+          "Files it makes are in /workspace — your folder on the Mac.",
+          "Restart its session from the session's ⋯ menu; End stops it."
+        ]
+      },
+      "type" : "com.dozersandbox/guide@1"
+    }
+  ],
+  "description" : "Docker's YAML-defined agent runner (formerly cagent), its built-in coding agent on an xAI API key.",
+  "displayName" : "Docker Agent",
+  "id" : "docker/docker-agent",
+  "kind" : "workload",
+  "licenses" : [
+    "Apache-2.0"
+  ],
+  "provides" : [
+    "com.dozersandbox/docker-agent@${{ kit.args.version }}"
+  ],
+  "schema" : 2,
+  "sourceUrl" : "https://github.com/docker/docker-agent"
+}

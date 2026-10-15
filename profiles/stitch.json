@@ -1,0 +1,38 @@
+{
+  "schema": 1,
+  "agent": "stitch",
+  "version": "0.11.1",
+  "profiled": "2026-10-14",
+  "how": "a fresh try with the Open network, every HTTPS request decrypted and logged; its first start, then a scripted task (read a file, edit it, run a command) run non-interactively with FAKE keys — xAI and Google through a fake provider that answers text only, Anthropic and OpenAI refused by the real API (401). A real-key run would see more: the model's turns and what its tool calls fetch.",
+  "taskEnded": "\"isTruncated\": false / } / }",
+  "endpoints": [
+    {
+      "host": "stitch.googleapis.com",
+      "method": "GET",
+      "path": "/mcp",
+      "when": "task",
+      "count": 1,
+      "credential": [
+        "placeholder swapped for key:google-stitch"
+      ],
+      "refusedWhenProfiled": false,
+      "determination": "allow-path",
+      "reason": "Google Stitch's MCP endpoint — the client opens its event stream first (the same path)",
+      "seen": true
+    },
+    {
+      "host": "stitch.googleapis.com",
+      "method": "POST",
+      "path": "/mcp",
+      "when": "task",
+      "count": 3,
+      "credential": [
+        "placeholder swapped for key:google-stitch"
+      ],
+      "refusedWhenProfiled": false,
+      "determination": "allow-path",
+      "reason": "Google Stitch's MCP endpoint — every command is a call to it (the key is swapped in by Dozer's proxy)",
+      "seen": true
+    }
+  ]
+}

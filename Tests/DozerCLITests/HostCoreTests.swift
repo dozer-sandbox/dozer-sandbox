@@ -69,7 +69,7 @@ final class HostCoreTests: XCTestCase {
                                             environment: ["DOZ_KERNEL_CACHE": "/k"])
         XCTAssertEqual(cc.imageSpec?.name, "claude-code")
         // 597 (P5): Standard is stored as its permissions (by name), the hosts coming from this build.
-        XCTAssertEqual(cc.network, .proxied(.permissions(AgentPermissions.preset("agent", base: "node")!, preset: "agent")))
+        XCTAssertEqual(cc.network, .proxied(.permissions(AgentPermissions.preset("agent", base: "node")! + ["vendor:claude-code"], preset: "agent")))
         XCTAssertEqual(AgentPermissions.preset("agent", base: "node"), ["model", "update", "install:system", "install:node", "github", "error-reports"])
         XCTAssertEqual(cc.memoryMiB, 4096)
         XCTAssertEqual(cc.kernelCacheDirectory?.path, "/k")

@@ -41,6 +41,8 @@ public enum HostOp: String, Codable, Sendable, CaseIterable {
     /// 588: named Anthropic credentials (the Mac login, setup tokens, API keys).
     case accountList = "account-ls", accountAdd = "account-add", accountRemove = "account-rm"
     case accountDefault = "account-default", accountUse = "account-use", accountVerify = "account-verify"
+    /// 617: read an account's key from its source again now (the cached value is dropped).
+    case accountRefresh = "account-refresh"
     case accountKeepalive = "account-keepalive"
     case events
     case hostStop = "host-stop"
@@ -82,6 +84,9 @@ public enum HostOp: String, Codable, Sendable, CaseIterable {
     /// latest): its events and kernel console. Read-only; from the sandbox's directory (plus, from the
     /// host, a boot under way).
     case bootLog = "boot-log"
+    /// 617: the build log of a sandbox's image (`BuildLogs`: its last preparation in this store — steps and every
+    /// step's whole output). Read-only; from the store.
+    case buildLog = "build-log"
     /// 595: everything Dozer uses (`ResourceReport`: every byte of the store attributed, memory, CPUs,
     /// traffic, kernels). Read-only; answered in-process when no host runs.
     case resources
@@ -128,12 +133,26 @@ public enum HostOp: String, Codable, Sendable, CaseIterable {
     /// (`sessions.json`); an agent's default session continues its conversation unless `fresh`
     /// (`SessionRestarted`). Serialised with open-session.
     case sessionRestart = "session-restart"
+    /// 617 (616.03 §6 2b): what a create would make (`plan`: a `PlanRequest`) — `CreatePlan`: the command, the project
+    /// file, what it can reach, the image's readiness, the problems. Read-only; answered in-process when no host runs.
+    case plan
+    /// 617 (owner: "fold doz cp into 617", then "doz put and doz get"): copy files and folders out of or into a running
+    /// sandbox (`fileCopy`: a `CopyRequest`). Answered with `CopyReady`; then the connection carries `CopyFrame`s — a tar
+    /// stream over the guest stream (no new guest→host channel) — and ends with `CopyDone`.
+    case copy
+    /// 617 (RP-1): a sandbox's web-port forwards — listed, or one added (`portAdd`) or removed (`portRemove`); answered
+    /// with `PortsAnswer`. Listeners live in the host, so this always needs it.
+    case ports
+    /// 617 (owner: "try now … a blank modal with a considerable delay"): `plan` for many requests at once
+    /// (`planRequests`, ≤ 128) — the store's facts read ONCE (the image list alone costs ~0.6 s), answered with
+    /// `[CreatePlan]` in the same order. The Quick try's readiness. Read-only.
+    case plans
 
     /// Operations that only read — answered from the store in-process when no host is running.
     public var isReadOnly: Bool {
         switch self {
-        case .ping, .ls, .inspect, .pointList, .imageList, .keyList, .accountList, .imageTree, .prepareStatus, .sessionScreen, .terminalLayout, .bootLog, .resources,
-             .bases, .builderStatus, .netPermissions, .workspaceRules: true
+        case .ping, .ls, .inspect, .pointList, .imageList, .keyList, .accountList, .imageTree, .prepareStatus, .sessionScreen, .terminalLayout, .bootLog, .buildLog, .resources,
+             .bases, .builderStatus, .netPermissions, .workspaceRules, .plan, .plans: true
         case .netPolicy: false        // decided per request (a change needs the host)
         default: false
         }
@@ -180,6 +199,14 @@ public struct CreateOptions: Codable, Equatable, Sendable {
     public var prepare: Bool?
     /// EXPERIMENTAL (604): an audio sandbox — the Mac's microphone and speakers (`SandboxSpec.audio`).
     public var audio: Bool?
+    /// 617 (D6): custom key accounts to attach (`--key NAME`, repeatable); each host must be allowed.
+    public var keys: [String]?
+    /// 617 (D14): made by `doz try` — marked as a try (`doz ls` says so).
+    public var trial: Bool?
+    /// 617 (models@1): the model source a recipe agent uses (`--provider`/`--gateway`: anthropic, openai, xai, google,
+    /// openrouter, vercel-ai-gateway) — its account is then a key of that source — and the model (`--model`).
+    public var modelSource: String?
+    public var model: String?
 
     public init(image: String, cpus: Int? = nil, memoryMiB: UInt64? = nil, workspace: String? = nil,
                 network: String? = nil, subnet: String? = nil, account: String? = nil) {
@@ -265,7 +292,28 @@ public struct HostRequest: Codable, Equatable, Sendable {
     /// Claude config dir, adopted keychain service; the policy; verify (default true); force; on/off.
     public var account: String?
     public var accountKind: String?
+    /// 617: a `key` account's provider (`xai`, `google`); `account-default` by provider.
+    public var provider: String?
+    /// 617 (§7): account-add — where the key is read from (a reference, never a value), its tool variables, its TTL.
+    public var secretSource: SecretSource?
+    public var sourceEnv: [String: String]?
+    public var ttlSeconds: Int?
+    /// 617 (D6): account-add — a custom key's binding; account-use — attach (`extra`) or detach (`removeExtra`) it.
+    public var custom: CustomKey?
+    public var extra: Bool?
+    public var removeExtra: Bool?
+    /// 617: `plan` — what was chosen.
+    public var planRequest: PlanRequest?
+    /// 617: `plans` — several at once.
+    public var planRequests: [PlanRequest]?
+    /// 617: `copy`'s what and where.
+    public var fileCopy: CopyRequest?
+    /// 617: `attach` with no session named — open the image's own session when it is not running (`doz attach`).
+    public var openDefault: Bool?
     public var plan: String?
+    /// 617 (RP-1) `ports`: a forward to add (kept in the sandbox's record) or a guest port to stop forwarding.
+    public var portAdd: PortForwardEntry?
+    public var portRemove: Int?
     public var configDir: String?
     public var keychainService: String?
     public var policy: String?
@@ -443,7 +491,8 @@ public struct HostEvent: Codable, Equatable, Sendable {
             self.init(kind: .failed, sandbox: sandbox, text: s, milliseconds: ms)
             error = why
         case .output(let s): self.init(kind: .output, sandbox: sandbox, text: s)
-        case .status: return nil
+        // 617: a step's whole output is the preparation's build log, never a client's event (runPreparation takes it).
+        case .status, .stepOutput, .bakePlan: return nil
         }
     }
 
@@ -486,6 +535,18 @@ public enum PhaseName {
 // MARK: results
 
 /// One row of `ls` (and the head of `inspect`).
+/// 617 (RP-1): `ports`' answer — the sandbox's forwards and its phase (listeners exist only while it runs), and a
+/// sentence for what a change did (`added`, a moved port).
+public struct PortsAnswer: Codable, Equatable, Sendable {
+    public var sandbox: String
+    public var phase: String
+    public var ports: [PortForwardRow]
+    public var note: String?
+    public init(sandbox: String, phase: String, ports: [PortForwardRow], note: String? = nil) {
+        self.sandbox = sandbox; self.phase = phase; self.ports = ports; self.note = note
+    }
+}
+
 public struct SandboxInfo: Codable, Equatable, Sendable {
     public var name: String
     /// `lab`, `claude-code`, `pi`, or `custom:<name>`.
@@ -555,6 +616,14 @@ public struct SandboxInfo: Codable, Equatable, Sendable {
     public var sessionStatuses: [SessionStatus]? = nil
     public var agentStatus: SessionStatus? = nil
     public var agentWorking: Bool? = nil
+    /// 617 (D14): made by `doz try`.
+    public var trial: Bool? = nil
+    /// 617: the folder Dozer made for this try (nil: none, or one the person chose).
+    public var trialFolder: String? = nil
+    /// 617 (D6): the custom keys attached beside the account.
+    public var extraKeys: [String]? = nil
+    /// 617 (RP-1): its web-port forwards (nil: none) — the dashboard's Open buttons.
+    public var ports: [PortForwardRow]? = nil
 
     /// 594 W28: the notice for `olderImage` (`doz ls`, the sandbox's page, create).
     public var olderImageLine: String? {
@@ -576,6 +645,8 @@ public struct SandboxInfo: Codable, Equatable, Sendable {
         case workspaceView                                // 608
         case imagePreparation                             // create --prepare
         case sessionStatuses, agentStatus, agentWorking   // 612
+        case trial, extraKeys, trialFolder                // 617
+        case ports                                        // 617 (RP-1)
     }
 
     public init(from decoder: Decoder) throws {
@@ -614,6 +685,10 @@ public struct SandboxInfo: Codable, Equatable, Sendable {
         sessionStatuses = try c.decodeIfPresent([SessionStatus].self, forKey: .sessionStatuses)
         agentStatus = try c.decodeIfPresent(SessionStatus.self, forKey: .agentStatus)
         agentWorking = try c.decodeIfPresent(Bool.self, forKey: .agentWorking)
+        trial = try c.decodeIfPresent(Bool.self, forKey: .trial)
+        extraKeys = try c.decodeIfPresent([String].self, forKey: .extraKeys)
+        trialFolder = try c.decodeIfPresent(String.self, forKey: .trialFolder)
+        ports = try c.decodeIfPresent([PortForwardRow].self, forKey: .ports)
     }
 
     /// `workspace` is written even when null (with `isolated: true`), so a reader never has to guess.
@@ -652,6 +727,10 @@ public struct SandboxInfo: Codable, Equatable, Sendable {
         try c.encodeIfPresent(olderImageLine, forKey: .olderImageLine)
         try c.encodeIfPresent(imageNotice, forKey: .imageNotice)
         try c.encodeIfPresent(imagePreparation, forKey: .imagePreparation)
+        try c.encodeIfPresent(trial, forKey: .trial)
+        try c.encodeIfPresent(extraKeys, forKey: .extraKeys)
+        try c.encodeIfPresent(trialFolder, forKey: .trialFolder)
+        try c.encodeIfPresent(ports, forKey: .ports)
         try c.encodeIfPresent(sessionStatuses, forKey: .sessionStatuses)
         try c.encodeIfPresent(agentStatus, forKey: .agentStatus)
         try c.encodeIfPresent(agentWorking, forKey: .agentWorking)
@@ -702,6 +781,8 @@ public struct SandboxDetail: Codable, Equatable, Sendable {
     public var agentPrompt: AgentPromptReport?
     /// 594: the project file it was made from (`doz_project.yaml`), when it was.
     public var project: String?
+    /// 617.11: a recipe agent's guide — the recipe's steps and Dozer's facts of this sandbox (nil: none).
+    public var guide: SandboxGuide? = nil
 }
 
 /// One guest session (`deckhold ls`).

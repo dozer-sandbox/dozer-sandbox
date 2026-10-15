@@ -91,6 +91,9 @@ public enum SettingType: Sendable, Equatable {
         switch self {
         case .bool: "boolean"
         case .int(let r): "integer \(r.lowerBound)–\(r.upperBound)"
+        // 617: a long list (defaults.image: every agent and tool) is not spelled out, so the file does not grow with
+        // the recipes; the setting is still checked against all of them.
+        case .choice(let c) where c.count > 8: c.prefix(4).joined(separator: " | ") + ", or an agent or tool's id (doz try lists them)"
         case .choice(let c): c.joined(separator: " | ")
         case .path: "path (\"\" = automatic)"
         case .subnet: "IPv4 subnet, a.b.c.d/nn (\"\" = a free one)"
@@ -165,11 +168,14 @@ public struct SettingDefinition: Sendable {
     public let applies: SettingApplies
     /// False: the web UI shows it read-only (host paths — the UI never names one).
     public let editableInUI: Bool
+    /// A recipe agent's own setting (its id): generated from its recipe, and written into doz.toml only once that
+    /// agent has a value set there (`render`). nil: one of Dozer's own, always listed.
+    public let agent: String?
 
     public var key: String { "\(section).\(name)" }
 
     init(_ section: String, _ name: String, _ type: SettingType, _ defaultValue: TOMLValue, _ summary: String,
-         env: String? = nil, flag: String? = nil, applies: SettingApplies, ui: Bool = true) {
+         env: String? = nil, flag: String? = nil, applies: SettingApplies, ui: Bool = true, agent: String? = nil) {
         self.section = section
         self.name = name
         self.type = type
@@ -179,6 +185,7 @@ public struct SettingDefinition: Sendable {
         self.flag = flag
         self.applies = applies
         editableInUI = ui
+        self.agent = agent
     }
 
     /// Check a typed value (from the file, the UI or the CLI). Throws a message that never echoes
@@ -204,7 +211,9 @@ public struct SettingDefinition: Sendable {
             guard s.isEmpty || Self.isSubnet(s) else { throw SettingsError("\(key) is an IPv4 subnet like 192.168.64.0/24, or \"\"") }
             return v
         case (.version, .string(let s)):
-            guard s == "latest" || SettingType.isExactVersion(s) else { throw SettingsError("\(key) is latest, or an exact version like 2.1.227") }
+            // 617: a pinned-only recipe (pypi, release-binary) takes its own pin too, which may have two parts (llm 0.36).
+            let pin = AgentRecipes.all.first { !$0.isBuiltin && $0.versionSettingKey == key && AgentRecipe.pinnedOnlyKinds.contains($0.install.kind) }?.install.pinned.version
+            guard s == "latest" || SettingType.isExactVersion(s) || s == pin else { throw SettingsError("\(key) is latest, or an exact version like 2.1.227") }
             return v
         case (.timeZone, .string(let s)):
             guard s == "mac" || SettingType.isTimeZoneName(s) else { throw SettingsError("\(key) is mac, or a time zone like Australia/Sydney") }
@@ -407,7 +416,12 @@ public enum SettingKey {
     /// rc.3: run the Mac's own codex near its login's expiry while a sandbox uses it (`mac` for Codex).
     public static let codexKeepAlive = "codex.keep_alive"
     public static func agentVersion(_ image: String) -> String? {
-        switch image { case "claude-code": claudeCodeVersion; case "pi": piVersion; case "codex": codexVersion; default: nil }
+        switch image {
+        case "claude-code": claudeCodeVersion
+        case "pi": piVersion
+        case "codex": codexVersion
+        default: AgentRecipes.recipe(image).flatMap { $0.isBuiltin ? nil : $0.versionSettingKey }       // 617: images.gemini_version
+        }
     }
 }
 
@@ -419,14 +433,32 @@ public struct DozerSettings: Sendable {
 
     static let networks = ["agent", "bake", "locked", "open", "nat", "none"]
 
-    /// Every setting, in file order. CLOSED: a key not here is unknown everywhere (file, CLI, UI).
-    public static let schema: [SettingDefinition] = {
+    /// Every setting, in file order. CLOSED: a key not here is unknown everywhere (file, CLI, UI). 617: still a fixed
+    /// list per build — the keys of the recipe agents (`images.<id>_version`, `<id>.permissions`, `images.<id>.*`) are
+    /// generated from the compiled-in recipes (and, in tests, a registered one).
+    public static var schema: [SettingDefinition] {
+        let g = AgentRecipes.generation
+        schemaLock.lock(); defer { schemaLock.unlock() }
+        if let c = schemaCache, c.generation == g { return c.schema }
+        let s = buildSchema()
+        schemaCache = (g, s)
+        return s
+    }
+    nonisolated(unsafe) private static var schemaCache: (generation: Int, schema: [SettingDefinition])?
+    private static let schemaLock = NSLock()
+
+    /// The recipe agents (not the built-in three): their settings are generated.
+    static var recipeAgents: [AgentRecipe] { AgentRecipes.all.filter { !$0.isBuiltin } }
+
+    static func buildSchema() -> [SettingDefinition] {
         var s: [SettingDefinition] = [
-            .init("ui", "boot_view_on_start", .bool, .bool(true),
-                  "Start opens a terminal on the boot sequence (the kernel console) until the sandbox is up; false: Start just starts it.",
+            // 617 (owner, the start sequence): the boot console is tab zero on every start; this only decides whether the
+            // page stays on it. Off by default — the agent's tab is what a start is for.
+            .init("ui", "boot_view_on_start", .bool, .bool(false),
+                  "After Start the page stays on tab zero, Console (the kernel and vminitd), and marks the agent's tab when it is ready; false (the default): it switches to the agent's tab as soon as that has drawn its screen.",
                   applies: .now),
             .init("ui", "confirm_shutdown", .bool, .bool(true),
-                  "Shut Down asks first (its dialog's \"don't ask again\" sets this to false). Reset and Remove always ask for the name.",
+                  "Shut Down asks first (its dialog's \"don't ask again\" sets this to false). Reset and Remove always ask with a box to tick.",
                   applies: .now),
             .init("ui", "split_default", .choice(["shell", "watch", "attach", "dialog"]), .string("shell"),
                   "What a terminal's Split opens: shell (a new shell session), watch (a read-only view of the left terminal's session), attach (a second, shared view of it), dialog (choose each time).",
@@ -510,7 +542,7 @@ public struct DozerSettings: Sendable {
             .init("defaults", "nat_subnet", .subnet, .string(""),
                   "The vmnet subnet of a new --network nat sandbox.",
                   env: "DOZ_SUBNET", flag: "doz create --subnet", applies: .nextCreate),
-            .init("defaults", "image", .choice(["lab", "claude-code", "pi", "codex"]), .string("lab"),
+            .init("defaults", "image", .choice(["lab", "claude-code", "pi", "codex"] + recipeAgents.map(\.id)), .string("lab"),
                   "The image of a new sandbox when none is named (doz up NAME, doz init, the UI's New sandbox). doz onboard writes the one you chose.",
                   flag: "doz create --image", applies: .nextCreate),
             .init("defaults", "projects_dir", .path, .string("~/dozer-sandbox-workspaces"),
@@ -586,13 +618,33 @@ public struct DozerSettings: Sendable {
         s.append(.init("images", "codex_version", .version, .string("latest"),
                        "The OpenAI Codex CLI the codex image (and every base's Codex image) is prepared with: latest or an exact version like 0.160.1, as images.claude_code_version.",
                        applies: .nextCreate))
-        for (image, memory, network) in [("lab", 1024, "bake"), ("claude-code", 2048, "agent"), ("pi", 2048, "agent"), ("codex", 2048, "agent")] {
+        // 617: each recipe agent's version, and whether its own approval prompts are skipped (the VM is the boundary).
+        for r in recipeAgents {
+            let v = r.versionSettingKey.split(separator: ".", maxSplits: 1).map(String.init)
+            s.append(.init(v[0], v[1], .version, .string("latest"),
+                           "The \(r.title) the \(r.id) image (and every base's \(r.title) image) is prepared with: latest or an exact version like \(r.install.pinned.version), as images.claude_code_version.",
+                           applies: .nextCreate, agent: r.id))
+        }
+        if let at = s.firstIndex(where: { $0.key == SettingKey.codexKeepAlive }) {
+            let perms: [SettingDefinition] = recipeAgents.compactMap { r in
+                guard let k = r.permissionsSettingKey else { return nil }
+                let p = k.split(separator: ".", maxSplits: 1).map(String.init)
+                return .init(p[0], p[1], .choice(["skip", "ask"]), .string("skip"),
+                             "\(r.title) in \("aeiou".contains(r.id.prefix(1)) ? "an" : "a") \(r.id) sandbox: skip its approval prompts (the sandbox is the boundary), or ask as on a Mac.",
+                             flag: "-e \(r.permissionsVariable)=… on run/exec", applies: .nextSession, agent: r.id)
+            }
+            s.insert(contentsOf: perms, at: at + 1)
+        }
+        let builtinImages: Set<String> = ["lab", "claude-code", "pi", "codex"]
+        for (image, memory, network) in [("lab", 1024, "bake"), ("claude-code", 2048, "agent"), ("pi", 2048, "agent"), ("codex", 2048, "agent")]
+            + recipeAgents.map({ ($0.id, 2048, "agent") }) {
+            let agent = builtinImages.contains(image) ? nil : image
             s.append(.init("images.\(image)", "memory_mib", .int(256...262_144), .int(memory),
                            "Memory (MiB) of a new \(image) sandbox (a custom image follows the image it was saved from).",
-                           flag: "doz create --memory", applies: .nextCreate))
+                           flag: "doz create --memory", applies: .nextCreate, agent: agent))
             s.append(.init("images.\(image)", "network", .choice(networks), .string(network),
                            "The network of a new \(image) sandbox: agent, bake, locked, open (proxied presets), nat or none.",
-                           flag: "doz create --network", applies: .nextCreate))
+                           flag: "doz create --network", applies: .nextCreate, agent: agent))
         }
         s.append(.init("kernel", "path", .path, .string(""),
                        "An explicit Linux kernel for new sandboxes (\"\": the pinned kernel, fetched into the cache).",
@@ -601,7 +653,7 @@ public struct DozerSettings: Sendable {
                        "Where the pinned kernel is cached (\"\": the store's own); share one between stores.",
                        env: "DOZ_KERNEL_CACHE", applies: .nextCreate, ui: false))
         return s
-    }()
+    }
 
     public static func definition(_ key: String) -> SettingDefinition? { schema.first { $0.key == key } }
 
@@ -657,7 +709,7 @@ public struct DozerSettings: Sendable {
             return DozerSettings(text: nil, url: url, environment: environment, readError: "\(url.path) is not a file")
         }
         guard st.st_size <= off_t(TOML.maximumBytes), let data = FileManager.default.contents(atPath: url.path) else {
-            return DozerSettings(text: nil, url: url, environment: environment, readError: "\(url.path) could not be read (or is over 64 KiB)")
+            return DozerSettings(text: nil, url: url, environment: environment, readError: "\(url.path) could not be read (or is over \(TOML.maximumBytes / 1024) KiB)")
         }
         guard let text = String(data: data, encoding: .utf8) else {
             return DozerSettings(text: nil, url: url, environment: environment, readError: "\(url.path) is not UTF-8")
@@ -763,7 +815,14 @@ public struct DozerSettings: Sendable {
         case "claude-code": "claude-code"
         case "pi": "pi"
         case "codex": "codex"
-        case let n?: ImageChoice.parse(n)?.agent == .pi ? "pi" : ImageChoice.parse(n)?.agent == .codex ? "codex" : "claude-code"
+        case let n?:
+            switch ImageChoice.parse(n)?.agent {
+            case .pi?: "pi"
+            case .codex?: "codex"
+            // 617: a recipe agent's own section (images.gemini, images.grok).
+            case let a? where !a.isBuiltin: a.rawValue
+            default: "claude-code"
+            }
         }
     }
 
@@ -835,14 +894,21 @@ public struct DozerSettings: Sendable {
         return Self.load(environment: environment)
     }
 
+    /// The comment that stands for every recipe agent's settings not written out (`render`).
+    static let agentSettingsNote = "Each agent or tool's own settings (images.ID_version, ID.permissions, [images.ID]) are written here only once one of them is set: `doz config show --agent ID` lists them, `doz config set KEY VALUE` writes them."
+
     /// The file's text: a header, then every section and setting of the schema, each with its
-    /// description and its default commented out, unless `values` sets it.
+    /// description and its default commented out, unless `values` sets it. 617 (owner: the file grew ~1.5 KiB per
+    /// recipe): a recipe agent's own settings are written only when that agent has a value set — its whole block then,
+    /// defaults commented as usual; otherwise nothing, and one comment says where they are listed. Reading is unchanged:
+    /// any agent's key set by hand parses and applies.
     public static func render(values: [String: TOMLValue], unknown: [TOMLEntry] = []) -> String {
         var out = """
         # Dozer Sandbox settings (doz.toml)
         #
         # Every setting is listed with its default, commented out: `# key = default`. Uncomment a line
-        # to set it. `doz config set KEY VALUE` and the UI's Settings page write this file for you;
+        # to set it. An agent or tool's own settings appear once one of them is set (see [images]).
+        # `doz config set KEY VALUE` and the UI's Settings page write this file for you;
         # they regenerate it from the settings list, so comments you add are not kept.
         #
         # Precedence: a command-line flag, then the environment variable named, then this file, then
@@ -852,11 +918,19 @@ public struct DozerSettings: Sendable {
 
         """
         for n in notSettable { out += "#   - \(n)\n" }
+        let all = schema
+        let active = Set(all.compactMap { d in d.agent.flatMap { values[d.key] != nil ? $0 : nil } })
+        let shown = all.filter { d in d.agent.map(active.contains) ?? true }
         var sections: [String] = []
-        for d in schema where !sections.contains(d.section) { sections.append(d.section) }
+        for d in all where !sections.contains(d.section) { sections.append(d.section) }
         for section in sections {
+            let defs = shown.filter { $0.section == section }
+            let extra = unknown.filter { $0.section == section }
+            let notesAgents = section == "images"
+            guard !defs.isEmpty || !extra.isEmpty || notesAgents else { continue }
             out += "\n[\(section)]\n"
-            for d in schema where d.section == section {
+            if notesAgents { out += "\n" + wrapComment(agentSettingsNote) }
+            for d in defs {
                 out += "\n" + wrapComment(d.summary)
                 var facts: [String] = [d.type.name]
                 if let e = d.environment { facts.append("env \(e)") }
@@ -869,7 +943,6 @@ public struct DozerSettings: Sendable {
                     out += "# \(d.name) = \(TOML.render(d.defaultValue))\n"
                 }
             }
-            let extra = unknown.filter { $0.section == section }
             if !extra.isEmpty {
                 out += "\n# not known to this version (kept as they were):\n"
                 for e in extra { out += "\(e.key) = \(TOML.render(e.value))\n" }

@@ -1,0 +1,40 @@
+{
+  "schema": 1,
+  "id": "echo-agent",
+  "title": "Echo Agent",
+  "publisher": "Dozer tests",
+  "licence": "MIT",
+  "homepage": "https://example.invalid/echo-agent",
+  "default_base": "debian",
+  "platforms": { "glibc": true, "musl": true },
+  "install": {
+    "kind": "npm",
+    "package": "doz-echo-agent",
+    "binary": "echo-agent",
+    "needs_node": "20",
+    "pinned": { "version": "1.0.0", "integrity": "sha512-ZWNobw==" }
+  },
+  "launch": {
+    "command": ["echo-agent"],
+    "no_prompts_args": ["--yes"],
+    "passthrough": ["--version"],
+    "env": {}
+  },
+  "state": { "persist": ["~/.echo-agent"], "env": {} },
+  "credentials": [{ "provider": "xai", "accounts": ["key"] }],
+  "network": {
+    "model": { "id": "model:echo", "title": "Talk to the echo model", "hosts": [{ "host": "api.x.ai", "paths": ["/v1/echo"] }] },
+    "update": [],
+    "excluded": ["echo.example.invalid"]
+  },
+  "status": "none",
+  "verify": [{ "argv": ["echo-agent", "--version"], "expect": "{version}" }],
+  "tags": [{ "tag": "headless", "level": "unknown" }],
+  "catalog_kind": "ai-tool",
+  "categories": ["terminal-tool"],
+  "gateways": [
+    { "gateway": "openrouter", "level": "unknown" },
+    { "gateway": "vercel-ai-gateway", "level": "unknown" }
+  ],
+  "auth": { "methods": [{ "kind": "api-key", "provider": "xai", "keys_page": "https://console.x.ai/" }] }
+}

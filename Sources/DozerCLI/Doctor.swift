@@ -239,7 +239,8 @@ struct Doctor: AsyncParsableCommand {
             }
         }
         let rows = accounts.accounts.map { a -> String in
-            var s = a.name + (accounts.defaultAccount == a.name || accounts.openaiDefault == a.name ? " (default)" : "")
+            var s = a.name + (accounts.defaultAccount == a.name || accounts.openaiDefault == a.name
+                              || accounts.providerDefaults?.values.contains(a.name) == true ? " (default)" : "")
             switch a.kind {
             case .mac: s += a.configDir.map { " (Mac login, \($0))" } ?? ""
             case .setupToken: s += " (setup-token" + (a.expiresAt.map { ", expires \($0.formatted(date: .abbreviated, time: .omitted))" } ?? "") + ")"
@@ -247,8 +248,26 @@ struct Doctor: AsyncParsableCommand {
             case .openaiKey: s += " (openai-key)"
             case .chatgpt: s += " (chatgpt" + (a.plan.map { ", \($0)" } ?? "") + ")"
             case .codexMac: s += " (codex-mac)"
+            case .key: s += a.custom != nil ? " (custom key)" : " (key, \(a.provider ?? "?"))"          // 617
             }
+            if a.readsOnUse, let src = a.source { s += " ← \(src.label)" }
             return s
+        }
+        // 617 (§7): a key read on use whose tool is missing.
+        var said = Set<String>()
+        for a in accounts.accounts where a.readsOnUse {
+            if let src = a.source, let why = SecretSources.missingTool(src) {
+                out.append(DoctorCheck(check: "key source", status: .warn, detail: "account \(a.name): \(why)"))
+                said.insert(a.name)
+            }
+        }
+        // 617: and the running host's last read that FAILED — the same words the proxy answered with.
+        if accounts.accounts.contains(where: \.readsOnUse), store.hostIsRunning(),
+           let m = try? HostClient.request(HostRequest(.accountList), store: store, autostart: false),
+           let rows = try? m.result?.decode([AccountRow].self) {
+            for r in rows where r.sourceState == "failed" && !said.contains(r.name) {
+                out.append(DoctorCheck(check: "key source", status: .warn, detail: r.sourceProblem ?? "account \(r.name): its last read failed"))
+            }
         }
         let expiring = accounts.accounts.filter { a in a.kind != .mac && (a.expiresAt.map { $0.timeIntervalSince(now) < 30 * 86_400 } ?? false) }
         out.append(DoctorCheck(check: "accounts", status: expiring.isEmpty ? .ok : .warn,

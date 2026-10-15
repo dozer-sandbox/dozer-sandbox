@@ -7,16 +7,18 @@ import { loadSettings } from './settings.js';
 import { state } from './state.js';
 import { terminals } from './terminals.js';
 import { quietly } from './util.js';
+import { setHomes, tildePath } from './paths.js';
 // Calls up the layers (provided by app.js — core/hooks.js):
 const banner = upcall('banner'), connect = upcall('connect'), dropBanner = upcall('dropBanner'), modalInert = upcall('modalInert'),
   paintCover = upcall('paintCover'), startApp = upcall('startApp');
 
 // ── session ─────────────────────────────────────────────────────────────────
 export async function bootstrap() {
-  const m = /^#cap=([A-Za-z0-9_-]{16,256})$/.exec(location.hash);
+  // 617: `doz try --ui` opens a link that also names its page (`&to=try/AGENT` — the Quick try only).
+  const m = /^#cap=([A-Za-z0-9_-]{16,256})(?:&to=(try(?:\/[a-z0-9][a-z0-9-]{0,39})?))?$/.exec(location.hash);
   if (m) {
     // The capability leaves the address bar and the history entry before anything else happens.
-    history.replaceState(null, '', location.pathname + '#/overview');
+    history.replaceState(null, '', location.pathname + (m[2] ? '#/' + m[2] : '#/overview'));
     try {
       adopt(await api('session', { method: 'POST', bearer: m[1] }));
       return true;
@@ -53,9 +55,10 @@ export function adopt(info) {
   state.signupPage = typeof info.signupPage === 'string' && /^https:\/\//.test(info.signupPage) ? info.signupPage : '';
   state.chatgptSignIn = info.chatgptSignIn !== false;   // a public build has no ChatGPT sign-in of its own
   const mac = state.serve ? (state.serve.mac || 'the Mac') : null;
+  setHomes(info.homes);
   const sp = $('store-path');
-  sp.textContent = mac ? 'on ' + mac + ' · ' + info.store : info.store;
-  sp.title = info.store;
+  sp.textContent = mac ? 'on ' + mac + ' · ' + tildePath(info.store) : tildePath(info.store);
+  sp.title = tildePath(info.store);
   $('version').textContent = 'doz ' + info.version;
   document.title = (mac ? 'Dozer on ' + mac : 'Dozer') + ' — ' + info.store.split('/').pop();
   const k = document.querySelector('#live .foot-k');

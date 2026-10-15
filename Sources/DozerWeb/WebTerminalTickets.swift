@@ -7,9 +7,10 @@ import DozerKit
 // mode; the upgrade presents it (in `Sec-WebSocket-Protocol`) and consumes it.
 
 /// Interactive (keys reach the session) or watch-only (nothing the browser sends reaches the host,
-/// and the attach never resizes the session: HELLO 0×0).
+/// and the attach never resizes the session: HELLO 0×0). 617: `console` — the sandbox's system console (the stream
+/// `doz console NAME --follow` shows: the kernel and vminitd), read-only, never an attach: the sandbox page's tab zero.
 public enum WebTerminalMode: String, Codable, Equatable, Sendable {
-    case interactive, watch
+    case interactive, watch, console
 }
 
 /// The body of `POST /api/v1/sandboxes/{name}/terminal-ticket`, decoded STRICTLY.
@@ -21,6 +22,10 @@ public struct WebTerminalTicketRequest: Equatable, Sendable {
     /// 605: the page reattaches a terminal it had (after `doz ui` restarted, or a sign-in again): the first
     /// SNAPSHOT then keeps the terminal's scrollback, as after a boot view.
     public var reattach: Bool = false
+    /// 617 (owner: the agent's tab appears once, ready): an interactive terminal on a sandbox that is not running yet
+    /// waits WITHOUT the boot view (nothing of the boot written into it — the Console tab shows that), then opens the
+    /// image's session and attaches.
+    public var quiet: Bool = false
 
     public static let colsRange: ClosedRange<Int> = 2...1000
     public static let rowsRange: ClosedRange<Int> = 1...500
@@ -29,9 +34,10 @@ public struct WebTerminalTicketRequest: Equatable, Sendable {
         guard let obj = try? JSONSerialization.jsonObject(with: body), let d = obj as? [String: Any] else {
             throw WebAction.Invalid("the body must be a JSON object")
         }
-        let extra = Set(d.keys).subtracting(["session", "mode", "cols", "rows", "reattach"])
+        let extra = Set(d.keys).subtracting(["session", "mode", "cols", "rows", "reattach", "quiet"])
         guard extra.isEmpty else { throw WebAction.Invalid("unexpected field(s): \(extra.sorted().joined(separator: ", "))") }
-        guard let m = d["mode"] as? String, let mode = WebTerminalMode(rawValue: m) else { throw WebAction.Invalid("mode: interactive or watch") }
+        guard let m = d["mode"] as? String, let mode = WebTerminalMode(rawValue: m) else { throw WebAction.Invalid("mode: interactive, watch or console") }
+        if mode == .console, d["session"] != nil { throw WebAction.Invalid("a console terminal names no session") }
         var session: String?
         if let v = d["session"] {
             guard let s = v as? String, s.utf8.count <= 64 else { throw WebAction.Invalid("session: 1–64 of letters, digits . _ - (not starting with .)") }
@@ -54,7 +60,13 @@ public struct WebTerminalTicketRequest: Equatable, Sendable {
             guard let n = v as? NSNumber, CFGetTypeID(n) == CFBooleanGetTypeID() else { throw WebAction.Invalid("reattach: true or false") }
             reattach = n.boolValue
         }
-        return WebTerminalTicketRequest(session: session, mode: mode, size: mode == .watch ? nil : size, reattach: reattach)
+        var quiet = false
+        if let v = d["quiet"] {
+            guard let n = v as? NSNumber, CFGetTypeID(n) == CFBooleanGetTypeID() else { throw WebAction.Invalid("quiet: true or false") }
+            quiet = n.boolValue
+        }
+        if quiet, mode != .interactive { throw WebAction.Invalid("quiet: an interactive terminal only") }
+        return WebTerminalTicketRequest(session: session, mode: mode, size: mode == .interactive ? size : nil, reattach: reattach, quiet: quiet)
     }
 }
 
@@ -68,6 +80,8 @@ public struct WebTerminalGrant: Equatable, Sendable {
     public let size: TermSize?
     /// 605: see `WebTerminalTicketRequest.reattach`.
     public var reattach: Bool = false
+    /// 617: see `WebTerminalTicketRequest.quiet`.
+    public var quiet: Bool = false
 }
 
 /// The ticket answer. `ticket` is a one-use capability for 30 s — it goes to the page (which keeps
@@ -107,13 +121,13 @@ public actor WebTerminalTicketStore {
     }
 
     /// A new one-use ticket for `cookie`'s browser session.
-    public func mint(cookie: String, sandbox: String, session: String?, mode: WebTerminalMode, size: TermSize?, reattach: Bool = false) throws -> String {
+    public func mint(cookie: String, sandbox: String, session: String?, mode: WebTerminalMode, size: TermSize?, reattach: Bool = false, quiet: Bool = false) throws -> String {
         prune()
         let t = now()
         let live = pending.values.filter { $0.grant.cookie == cookie && t.timeIntervalSince($0.issuedAt) < lifetime }.count
         guard live < maximumPendingPerSession else { throw WebRejection.tooManyTickets }
         let token = WebRandom.token()
-        pending[token] = Pending(grant: WebTerminalGrant(cookie: cookie, sandbox: sandbox, session: session, mode: mode, size: size, reattach: reattach), issuedAt: t)
+        pending[token] = Pending(grant: WebTerminalGrant(cookie: cookie, sandbox: sandbox, session: session, mode: mode, size: size, reattach: reattach, quiet: quiet), issuedAt: t)
         return token
     }
 

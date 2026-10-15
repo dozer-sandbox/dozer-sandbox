@@ -91,7 +91,7 @@ final class WebSettingsHTTPTests: XCTestCase {
         XCTAssertFalse(rep.exists)
         XCTAssertEqual(rep.settings.map(\.key), DozerSettings.schema.map(\.key))
         XCTAssertTrue(rep.settings.allSatisfy { $0.source == .default && $0.value == $0.defaultValue })
-        XCTAssertEqual(try row(rep, "ui.boot_view_on_start").value, .bool(true))
+        XCTAssertEqual(try row(rep, "ui.boot_view_on_start").value, .bool(false))
         XCTAssertFalse(try row(rep, "store.path").editable, "a host path is read-only in the UI")
         XCTAssertTrue(try row(rep, "ui.boot_view_on_start").editable)
         XCTAssertFalse(rep.notSettable.isEmpty)
@@ -99,20 +99,20 @@ final class WebSettingsHTTPTests: XCTestCase {
 
     func testAChangeIsWrittenAndReadBackAndReset() throws {
         let (cookie, csrf) = try signIn()
-        var r = try change(#"{"key":"ui.boot_view_on_start","value":false}"#, cookie, csrf)
+        var r = try change(#"{"key":"ui.boot_view_on_start","value":true}"#, cookie, csrf)
         XCTAssertEqual(r.status, 200, r.text)
         var rep = try report(r)
-        XCTAssertEqual(try row(rep, "ui.boot_view_on_start").value, .bool(false))
+        XCTAssertEqual(try row(rep, "ui.boot_view_on_start").value, .bool(true))
         XCTAssertEqual(try row(rep, "ui.boot_view_on_start").source, .file)
         let text = try String(contentsOf: file, encoding: .utf8)
-        XCTAssertTrue(text.contains("\nboot_view_on_start = false\n"), "the file shows the uncommented value")
+        XCTAssertTrue(text.contains("\nboot_view_on_start = true\n"), "the file shows the uncommented value")
         XCTAssertTrue(text.contains("\n# confirm_shutdown = true\n"), "the rest stays commented at its default")
         var st = stat()
         XCTAssertEqual(stat(file.path, &st), 0)
         XCTAssertEqual(st.st_mode & 0o777, 0o600)
         // The page re-reads it.
         rep = try report(try request("/api/v1/settings", ["Cookie": cookie]))
-        XCTAssertEqual(try row(rep, "ui.boot_view_on_start").value, .bool(false))
+        XCTAssertEqual(try row(rep, "ui.boot_view_on_start").value, .bool(true))
         // Other types.
         for body in [#"{"key":"ui.terminal_font_size","value":16}"#, #"{"key":"ui.split_default","value":"watch"}"#,
                      #"{"key":"images.pi.memory_mib","value":4096}"#, #"{"key":"defaults.nat_subnet","value":"192.168.70.0/24"}"#] {
@@ -124,7 +124,7 @@ final class WebSettingsHTTPTests: XCTestCase {
         r = try change(#"{"key":"ui.boot_view_on_start","reset":true}"#, cookie, csrf)
         XCTAssertEqual(r.status, 200, r.text)
         XCTAssertEqual(try row(try report(r), "ui.boot_view_on_start").source, .default)
-        XCTAssertTrue(try String(contentsOf: file, encoding: .utf8).contains("\n# boot_view_on_start = true\n"))
+        XCTAssertTrue(try String(contentsOf: file, encoding: .utf8).contains("\n# boot_view_on_start = false\n"))
     }
 
     func testTheRouteRefusesNoCSRFAnotherOriginAndNonJSON() throws {

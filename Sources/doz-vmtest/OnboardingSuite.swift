@@ -421,10 +421,10 @@ func cliFirstExecProgressChecks(binary: String) {
     while p.isRunning && Date() < deadline {
         let t = c.text, now = Date().timeIntervalSince(t0)
         if firstNote == nil, t.contains("is not prepared in this store yet") { firstNote = now }
-        if initBar == nil, t.contains("pulling the guest init image") { initBar = now }
-        if initDone == nil, t.contains("pulled the guest init image") { initDone = now }
-        if alpineBar == nil, t.contains("pulling alpine") { alpineBar = now }
-        if alpineDone == nil, t.contains("pulled alpine") { alpineDone = now }
+        if initBar == nil, t.contains(StepWording.transfer("pulling the guest init image")) { initBar = now }
+        if initDone == nil, t.contains("Downloaded the guest init image") { initDone = now }
+        if alpineBar == nil, t.contains(StepWording.transfer("pulling alpine")) { alpineBar = now }
+        if alpineDone == nil, t.contains("Downloaded alpine") { alpineDone = now }
         usleep(50_000)
     }
     if p.isRunning { p.terminate() }

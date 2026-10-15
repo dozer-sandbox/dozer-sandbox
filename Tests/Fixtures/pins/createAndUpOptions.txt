@@ -1,0 +1,66 @@
+create b --image codex → {"image":"codex"}
+up b --image codex [default claude-code] → {"image":"codex"}
+create b --image lab → {"image":"lab"}
+up b --image lab [default claude-code] → {"image":"lab"}
+create b --image python-claude-code → {"image":"python-claude-code"}
+up b --image python-claude-code [default claude-code] → {"image":"python-claude-code"}
+create b --agent codex --base python → {"image":"python-codex"}
+up b --agent codex --base python [default claude-code] → {"image":"python-codex"}
+create b --agent claude → {"image":"claude-code"}
+up b --agent claude [default claude-code] → {"image":"claude-code"}
+create b --agent claude-code → {"image":"claude-code"}
+up b --agent claude-code [default claude-code] → {"image":"claude-code"}
+create b --agent pi --base alpine → {"image":"alpine-pi"}
+up b --agent pi --base alpine [default claude-code] → {"image":"alpine-pi"}
+create b --agent none --base debian → {"image":"debian"}
+up b --agent none --base debian [default claude-code] → {"image":"debian"}
+create b --agent shell → {"image":"node"}
+up b --agent shell [default claude-code] → {"image":"node"}
+create b --base go → {"image":"go-claude-code"}
+up b --base go [default claude-code] → {"image":"go-claude-code"}
+create b --image lab --allow web,-error-reports → {"allow":["web","-error-reports"],"image":"lab"}
+up b --image lab --allow web,-error-reports [default claude-code] → {"allow":["web","-error-reports"],"image":"lab"}
+create b --image claude-code --allow locked --allow site:api.example.com → {"allow":["locked","site:api.example.com"],"image":"claude-code"}
+up b --image claude-code --allow locked --allow site:api.example.com [default claude-code] → {"allow":["locked","site:api.example.com"],"image":"claude-code"}
+create b --image claude-code --allow standard,+web → {"allow":["standard","+web"],"image":"claude-code"}
+up b --image claude-code --allow standard,+web [default claude-code] → {"allow":["standard","+web"],"image":"claude-code"}
+create b --image pi --github push → {"allow":["+github:as-you","+github:push"],"image":"pi"}
+up b --image pi --github push [default claude-code] → {"allow":["+github:as-you","+github:push"],"image":"pi"}
+create b --image pi --github off → {"allow":["-github:as-you","-github:push"],"image":"pi"}
+up b --image pi --github off [default claude-code] → {"allow":["-github:as-you","-github:push"],"image":"pi"}
+create b --image codex --network locked --account none --cpus 4 --memory 4G --workspace /tmp/617-pin-w → {"account":"none","cpus":4,"image":"codex","memoryMiB":4096,"network":"locked","workspace":"\/tmp\/617-pin-w"}
+up b --image codex --network locked --account none --cpus 4 --memory 4G --workspace /tmp/617-pin-w [default claude-code] → {"account":"none","cpus":4,"image":"codex","memoryMiB":4096,"network":"locked","workspace":"\/tmp\/617-pin-w"}
+create b --image claude-code --isolated --no-agent-sudo --tmux --clipboard off --browser-bridge off --open-files off --ssh-agent on --ignore-mode hide --workspace-view off → {"agentSudo":false,"image":"claude-code","isolated":true,"settings":{"sandbox.browser_bridge":"off","sandbox.clipboard":"off","sandbox.open_files":"off","sandbox.ssh_agent":"on","sessions.tmux":true,"workspace.ignore_mode":"hide","workspace.view":"off"}}
+up b --image claude-code --isolated --no-agent-sudo --tmux --clipboard off --browser-bridge off --open-files off --ssh-agent on --ignore-mode hide --workspace-view off [default claude-code] → {"agentSudo":false,"image":"claude-code","isolated":true,"settings":{"sandbox.browser_bridge":"off","sandbox.clipboard":"off","sandbox.open_files":"off","sandbox.ssh_agent":"on","sessions.tmux":true,"workspace.ignore_mode":"hide","workspace.view":"off"}}
+create b --image claude-code --rebuild → {"image":"claude-code"}
+up b --image claude-code --rebuild [default claude-code] → {"image":"claude-code"}
+create b --image claude-code --use-current → {"image":"claude-code"}
+up b --image claude-code --use-current [default claude-code] → {"image":"claude-code"}
+create b --image go-codex --network nat --subnet 10.9.0.0/24 → {"image":"go-codex","network":"nat","subnet":"10.9.0.0\/24"}
+up b --image go-codex --network nat --subnet 10.9.0.0/24 [default claude-code] → {"image":"go-codex","network":"nat","subnet":"10.9.0.0\/24"}
+create b --image claude-code --memory 512M --account work → {"account":"work","image":"claude-code","memoryMiB":512}
+up b --image claude-code --memory 512M --account work [default claude-code] → {"account":"work","image":"claude-code","memoryMiB":512}
+create b  → refused
+up b  [default claude-code] → {"image":"claude-code"}
+create b --image lab --agent pi → refused
+up b --image lab --agent pi [default claude-code] → refused
+create b --agent nosuch → refused
+up b --agent nosuch [default claude-code] → refused
+create b --base cobol → refused
+up b --base cobol [default claude-code] → refused
+create b --isolated --workspace /tmp/w → refused
+up b --isolated --workspace /tmp/w [default claude-code] → refused
+create b --image lab --memory lots → refused
+up b --image lab --memory lots [default claude-code] → refused
+create b --image lab --cpus 0 → refused
+up b --image lab --cpus 0 [default claude-code] → refused
+create b --image lab --github write → refused
+up b --image lab --github write [default claude-code] → refused
+create b --image lab --rebuild --use-current → refused
+up b --image lab --rebuild --use-current [default claude-code] → refused
+create b --image lab --clipboard maybe → refused
+up b --image lab --clipboard maybe [default claude-code] → refused
+create --dockerfile F --agent codex → image codex dockerfile=F:true workspace=dir:true
+create --dockerfile F --isolated → image claude-code workspace=nil isolated=true
+create --agent-prompt F --agent-prompt-mode replace → prompt="Be brief.\n" mode=replace
+create --workspace rel → absolute under cwd: true

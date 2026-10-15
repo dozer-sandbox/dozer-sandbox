@@ -65,6 +65,7 @@ struct ConfigShow: AsyncParsableCommand {
     static let configuration = CommandConfiguration(commandName: "show", abstract: "Every setting: its effective value and its source (the default).")
     @OptionGroup var g: GlobalOptions
     @Option(name: .long, help: "A sandbox: its per-sandbox settings and whose value each is.") var sandbox: String?
+    @Option(name: .long, help: "One agent or tool (a recipe's id, e.g. grok): only its own settings — the ones doz.toml lists only once one is set.") var agent: String?
 
     func run() async throws {
         if let sandbox {
@@ -73,7 +74,14 @@ struct ConfigShow: AsyncParsableCommand {
             return
         }
         let s = DozerSettings.load()
-        let report = s.report(flags: configFlags(g))
+        var report = s.report(flags: configFlags(g))
+        if let agent {
+            guard let id = AgentRecipes.recipe(agent.lowercased()).map(\.id), DozerSettings.schema.contains(where: { $0.agent == id }) else {
+                throw ValidationError("--agent: an agent or tool with its own settings (\(DozerSettings.schema.compactMap(\.agent).reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }.joined(separator: ", "))) — not \(agent)")
+            }
+            let keys = Set(DozerSettings.schema.filter { $0.agent == id }.map(\.key))
+            report.settings = report.settings.filter { keys.contains($0.key) }
+        }
         if g.json { Out.json(report); return }
         settingsWarnings(s, g)
         var t = [["SETTING", "VALUE", "SOURCE", "DEFAULT"]]
@@ -166,7 +174,7 @@ struct ConfigUnset: AsyncParsableCommand {
 
 struct ConfigInit: AsyncParsableCommand {
     static let configuration = CommandConfiguration(commandName: "init",
-        abstract: "Write the settings file: every setting with its default commented out (an existing file keeps its values and gains any new settings).")
+        abstract: "Write the settings file: every setting with its default commented out — an agent's own once one of them is set (an existing file keeps its values and gains any new settings).")
     @OptionGroup var g: GlobalOptions
 
     func run() async throws {

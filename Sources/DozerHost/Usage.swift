@@ -286,7 +286,9 @@ public enum UsageSchema {
     ]
 
     public static let chips = ["m1", "m2", "m3", "m4", "m5", "other"]
-    public static let agents = ["claude-code", "codex", "pi", "none"]
+    /// A CLOSED list, the same as the receiving Worker's `AGENTS` (617: gemini and grok, deployed there first).
+    /// `UsageTests` checks every agent id is in it — a new recipe that is not breaks the daily message.
+    public static let agents = ["claude-code", "codex", "pi", "none", "gemini", "grok", "antigravity", "fabric", "openclaw", "nanobot", "gptme", "llm", "shell-gpt", "zeroclaw", "aichat", "tgpt", "opencode", "smolagents", "adk", "promptfoo", "clai", "copilot", "qwen-code", "goose", "kilo", "mistral-vibe", "droid", "dirac", "kimi-code", "every-code", "cline", "openhands", "codebuddy", "letta-code", "docker-agent", "nanocoder", "mini-swe-agent", "open-interpreter", "crush", "mimo-code", "codewhale", "maki", "omp", "tau", "stitch"]
     public static let accounts = ["mac", "api-key", "setup-token", "none"]
     public static let networks = ["standard", "locked", "open", "custom", "nat", "none"]
     public static let onboardingVia = ["cli", "web"]

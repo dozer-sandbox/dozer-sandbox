@@ -1,0 +1,140 @@
+# Recipes — every agent recipe run for real on a self-hosted Mac (`make recipe-check`, Scripts/recipe-check.py; the steps are in
+# docs/recipes/RECIPE-FORMAT.md, "Checking a recipe"): its image built at the pin, its verify checks, a fresh try with FAKE
+# keys against a stand-in provider (Scripts/fake-provider.py), its check turn, the key swapped in and never in the guest,
+# the leak guard, and for an agent that reports its status (OSC 7501) idle/working/done seen.
+#
+#   pull_request / push to main   the recipes a change touches (all of them when the harness or shared data changed)
+#   schedule (nightly, 17:00 UTC) all of them, then `make agent-currency` and `make profile-agents DIFF=1` (a new network
+#                                 endpoint fails the run; the difference is in the job summary)
+#   workflow_dispatch             recipes: changed (default) | all | a list ("grok gemini")
+#
+# Runs only on a Mac labelled doz-recipes (it boots VMs). The store is a PERSISTENT cache on that Mac
+# ($HOME/Library/Caches/DozerKit-ci/recipes-store): prepared images are kept between runs, sandboxes never are; images
+# baked more than 14 days ago are pruned at the end. The kernel cache is ci.yml's.
+#
+# PUBLIC-REPO SAFETY (as ci.yml): a fork's pull request never reaches the self-hosted Mac (the guard on the job), no
+# pull_request_target anywhere, read-only token. `make audit` checks both.
+name: Recipes
+
+on:
+  pull_request:
+    paths:
+      - 'Sources/DozerKit/Recipes/**'
+      - 'profiles/**'
+      - 'schema/dozer-recipe-2.schema.json'
+      - 'Scripts/fake-provider.py'
+      - 'Scripts/fake-provider-up.sh'
+      - 'Scripts/recipe-check.py'
+      - '.github/workflows/recipes.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'Sources/DozerKit/Recipes/**'
+      - 'profiles/**'
+      - 'schema/dozer-recipe-2.schema.json'
+      - 'Scripts/fake-provider.py'
+      - 'Scripts/fake-provider-up.sh'
+      - 'Scripts/recipe-check.py'
+      - '.github/workflows/recipes.yml'
+  schedule:
+    - cron: '0 17 * * *'
+  workflow_dispatch:
+    inputs:
+      recipes:
+        description: 'changed (the recipes this branch touches since main), all, or a list ("grok gemini")'
+        type: string
+        default: changed
+
+permissions:
+  contents: read
+
+# A newer push to a pull request cancels that PR's older run (both lanes push often, and a PR touching shared recipe
+# files runs every recipe); nightly, dispatch and main runs are never cancelled.
+concurrency:
+  group: recipes-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  recipes:
+    name: Recipe check
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, doz-recipes]
+    timeout-minutes: ${{ (github.event_name == 'schedule' || inputs.recipes == 'all') && 180 || 90 }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          set-safe-directory: false    # the runner's ~/.gitconfig is a relative symlink (as ci.yml)
+
+      - name: Which recipes
+        id: which
+        shell: bash
+        env:
+          EVENT: ${{ github.event_name }}
+          INPUT: ${{ inputs.recipes }}
+          BASE_REF: ${{ github.base_ref }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          case "$EVENT" in
+            schedule) R=all ;;
+            workflow_dispatch) R="${INPUT:-changed}" ;;
+            *) R=changed ;;
+          esac
+          if [ "$R" = changed ]; then
+            case "$EVENT" in
+              pull_request) git fetch -q origin "$BASE_REF"; BASE="origin/$BASE_REF" ;;
+              push) BASE="$BEFORE"; git cat-file -e "$BASE^{commit}" 2>/dev/null || BASE=HEAD~1 ;;
+              *) git fetch -q origin main; BASE=origin/main ;;
+            esac
+            R=$(/usr/bin/python3 Scripts/recipe-check.py --changed "$BASE")
+          fi
+          echo "recipes: ${R:-none}"
+          echo "recipes=$R" >> "$GITHUB_OUTPUT"
+          [ -n "$R" ] || echo "No recipe changed — nothing to check." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: make recipe-check (serialised with the other builds on this Mac)
+        if: steps.which.outputs.recipes != ''
+        shell: bash
+        env:
+          RECIPES: ${{ steps.which.outputs.recipes }}
+        run: |
+          set -euo pipefail
+          STORE="$HOME/Library/Caches/DozerKit-ci/recipes-store"
+          KERNELS="$HOME/Library/Caches/DozerKit-ci/kernels"
+          mkdir -p "$STORE"
+          RUN="make recipe-check RECIPES=\"$RECIPES\" RECIPE_STORE=\"$STORE\" KERNEL_CACHE=\"$KERNELS\" RECIPE_REPORT=\"$RUNNER_TEMP/recipe-report.json\" RECIPE_SUMMARY=\"$GITHUB_STEP_SUMMARY\""
+          LOCK="$HOME/Developer/bin/ci-build-lock"
+          if [ -x "$LOCK" ]; then "$LOCK" --name "$GITHUB_REPOSITORY#recipes" -- bash -c "$RUN"; else echo "! $LOCK missing — unserialised"; bash -c "$RUN"; fi
+
+      - name: Nightly — is every agent current, and has its network changed
+        if: github.event_name == 'schedule' || inputs.recipes == 'all'
+        shell: bash
+        run: |
+          set -uo pipefail
+          rc=0
+          { echo "### Agent currency"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          make agent-currency 2>&1 | tee -a "$GITHUB_STEP_SUMMARY" || rc=1
+          { echo '```'; echo "### Network profiles (new endpoints fail)"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          AGENTS=""
+          for f in Sources/DozerKit/Recipes/compiled/*.json; do b=${f##*/}; AGENTS="$AGENTS ${b%.json}"; done
+          export PROFILE_WORK="$HOME/Library/Caches/DozerKit-ci/profile-store" DOZ_KERNEL_CACHE="$HOME/Library/Caches/DozerKit-ci/kernels"
+          RUN="make profile-agents DIFF=1 AGENTS=\"$AGENTS\" KERNEL_CACHE=\"$DOZ_KERNEL_CACHE\""
+          LOCK="$HOME/Developer/bin/ci-build-lock"
+          if [ -x "$LOCK" ]; then "$LOCK" --name "$GITHUB_REPOSITORY#profiles" -- bash -c "$RUN" 2>&1 | tee -a "$GITHUB_STEP_SUMMARY" || rc=1
+          else bash -c "$RUN" 2>&1 | tee -a "$GITHUB_STEP_SUMMARY" || rc=1; fi
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          exit $rc
+
+      - name: The report
+        if: always() && steps.which.outputs.recipes != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: recipe-report
+          path: ${{ runner.temp }}/recipe-report.json
+          if-no-files-found: warn
+
+      - name: Prune images older than 14 days from the cache
+        if: always()
+        shell: bash
+        run: /usr/bin/python3 Scripts/recipe-check.py --store "$HOME/Library/Caches/DozerKit-ci/recipes-store" --prune-days 14

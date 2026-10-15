@@ -1,0 +1,286 @@
+{
+  "args" : {
+    "version" : {
+      "buildArg" : "LETTA_CODE_VERSION",
+      "default" : "0.34.13",
+      "description" : "The Letta Code release Dozer installs (its pin).",
+      "pattern" : "[0-9]+\\.[0-9]+\\.[0-9]+([-+][0-9A-Za-z.-]+)?"
+    }
+  },
+  "author" : "Letta",
+  "capabilities" : [
+    {
+      "config" : {
+        "dozer" : {
+          "excluded" : [
+
+          ],
+          "model" : {
+            "hosts" : [
+              {
+                "host" : "api.x.ai",
+                "paths" : [
+                  "/v1/responses"
+                ]
+              }
+            ],
+            "id" : "model:letta-code",
+            "phrase" : "talk to your AI model (xAI)",
+            "summary" : "Letta Code's model here (the xAI API, with your key) — needed for it to answer.",
+            "title" : "Talk to xAI"
+          },
+          "quiet" : [
+            {
+              "host" : "api.letta.com",
+              "reason" : "Letta Code asks Letta Cloud for its health and the account's balance when its TUI starts, even on the local backend with no account; it does without them when refused"
+            }
+          ],
+          "update" : [
+
+          ]
+        },
+        "runtime" : {
+          "allow" : [
+            "api.x.ai:443"
+          ],
+          "deny" : [
+            "api.letta.com:443"
+          ]
+        }
+      },
+      "type" : "com.docker.sandbox/network-policy@1"
+    },
+    {
+      "config" : {
+        "apiKey" : {
+          "inject" : [
+            {
+              "domain" : "api.x.ai",
+              "format" : "Bearer %s",
+              "header" : "authorization"
+            }
+          ],
+          "name" : "XAI_API_KEY",
+          "proxyManaged" : true
+        },
+        "dozer" : {
+          "accounts" : [
+            "key"
+          ]
+        },
+        "phase" : "runtime",
+        "service" : "xai"
+      },
+      "description" : "xAI API access",
+      "type" : "com.docker.sandbox/credential@1"
+    },
+    {
+      "config" : {
+        "path" : "/home/agent/.letta"
+      },
+      "type" : "com.docker.sandbox/volume@1"
+    },
+    {
+      "config" : {
+        "binary" : "letta",
+        "integrity" : "sha512-aEu3M1aYGA2HzpDjRd4rMJKRe4owLpPvdUnQZ0Nzf9/I7wo5Bl0yu7oM8hxBvelCZpPVug+pI/K06fBhbq4ckw==",
+        "kind" : "npm",
+        "needs_node" : "22",
+        "npm_args" : [
+          "--ignore-scripts"
+        ],
+        "package" : "@letta-ai/letta-code"
+      },
+      "type" : "com.dozersandbox/install@1"
+    },
+    {
+      "config" : {
+        "check" : {
+          "argv" : [
+            "letta",
+            "--backend",
+            "local",
+            "-m",
+            "xai/grok-4.3",
+            "--new-agent",
+            "-p",
+            "say ok"
+          ],
+          "expect" : "DOZ_FAKE_OK",
+          "screen" : {
+            "allow" : [
+              "/login +sign in with Letta"
+            ]
+          }
+        },
+        "command" : [
+          "letta",
+          "--backend",
+          "local",
+          "-m",
+          "xai/grok-4.3"
+        ],
+        "env" : {
+          "DISABLE_AUTOUPDATER" : "1",
+          "LETTA_CODE_TELEM" : "0"
+        },
+        "no_prompts_args" : [
+
+        ],
+        "passthrough" : [
+          "--version",
+          "-v",
+          "--help",
+          "-h",
+          "memory",
+          "agents",
+          "model",
+          "messages",
+          "mcp",
+          "mods",
+          "skills",
+          "backend",
+          "connect",
+          "setup",
+          "update",
+          "upgrade"
+        ],
+        "state_env" : {
+
+        },
+        "status" : "none",
+        "verify" : [
+          {
+            "argv" : [
+              "letta",
+              "--version"
+            ],
+            "expect" : "${{ kit.args.version }}"
+          }
+        ]
+      },
+      "type" : "com.dozersandbox/launch@1"
+    },
+    {
+      "config" : {
+        "methods" : [
+          {
+            "accounts" : [
+              "key"
+            ],
+            "checked" : "2026-10-14",
+            "keys_page" : "https://console.x.ai/",
+            "kind" : "api-key",
+            "note" : "Letta Code's local backend (--backend local, no Letta account) with its xAI provider, which reads XAI_API_KEY each run; model xai/grok-4.3 (grok-build-0.1 is not in its catalogue).",
+            "provider" : "xai"
+          },
+          {
+            "account" : "a Letta Cloud account",
+            "checked" : "2026-10-14",
+            "in_sandbox" : false,
+            "kind" : "vendor-sign-in",
+            "note" : "Letta Cloud's agents and memory sync need its sign-in; Dozer does not offer it yet."
+          }
+        ]
+      },
+      "type" : "com.dozersandbox/auth@1"
+    },
+    {
+      "config" : {
+        "entries" : [
+          {
+            "checked" : "2026-10-14",
+            "gateway" : "openrouter",
+            "level" : "unknown",
+            "reason" : "Letta Code has an OpenRouter provider; not checked"
+          },
+          {
+            "checked" : "2026-10-14",
+            "gateway" : "vercel-ai-gateway",
+            "level" : "unknown",
+            "reason" : "not checked against Letta Code"
+          }
+        ]
+      },
+      "type" : "com.dozersandbox/gateways@1"
+    },
+    {
+      "config" : {
+        "checked" : "2026-10-14"
+      },
+      "type" : "com.dozersandbox/currency@1"
+    },
+    {
+      "config" : {
+        "aliases" : [
+          "letta"
+        ],
+        "categories" : [
+          "coding-agent"
+        ],
+        "default_base" : "node",
+        "icon" : "letta-code",
+        "kind" : "coding-agent",
+        "limits" : [
+          {
+            "musl" : true,
+            "reason" : "Letta Code needs Node 22.19 or later; Alpine's Node is older"
+          }
+        ],
+        "platforms" : {
+          "glibc" : true,
+          "musl" : false
+        },
+        "tags" : [
+          {
+            "checked" : "2026-10-14",
+            "evidence" : "make recipe-check: letta -p \"say ok\" (local backend) printed the stand-in's answer and exited in a fresh try",
+            "level" : "verified",
+            "notes" : [
+              "letta --backend local -m xai/grok-4.3 --new-agent -p \"…\""
+            ],
+            "tag" : "headless"
+          }
+        ],
+        "terms" : "Your xAI API key — a key from console.x.ai. Letta Cloud is not used."
+      },
+      "type" : "com.dozersandbox/directory@1"
+    },
+    {
+      "config" : {
+        "docs" : "https://github.com/letta-ai/letta-code",
+        "intro" : "Letta Code is a coding agent with its own screen: the session on the left. Ask it to read, change and run the code in your folder.",
+        "steps" : [
+          {
+            "command" : "letta --backend local -m xai/grok-4.3 --new-agent -p \"say ok\"",
+            "text" : "Check it answers, without its screen."
+          },
+          {
+            "text" : "Ask it something in its own screen — the session on the left."
+          },
+          {
+            "command" : "letta --backend local -m xai/grok-4.3 --new-agent -p \"list the files in this folder\"",
+            "text" : "One task without its screen."
+          }
+        ],
+        "tips" : [
+          "Files it makes are in /workspace — your folder on the Mac.",
+          "Restart its session from the session's ⋯ menu; End stops it."
+        ]
+      },
+      "type" : "com.dozersandbox/guide@1"
+    }
+  ],
+  "description" : "Letta's memory-first coding agent, with its local backend (no Letta account), here on an xAI API key.",
+  "displayName" : "Letta Code",
+  "id" : "letta-ai/letta-code",
+  "kind" : "workload",
+  "licenses" : [
+    "Apache-2.0"
+  ],
+  "provides" : [
+    "com.dozersandbox/letta-code@${{ kit.args.version }}"
+  ],
+  "schema" : 2,
+  "sourceUrl" : "https://github.com/letta-ai/letta-code"
+}

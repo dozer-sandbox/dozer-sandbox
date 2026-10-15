@@ -6,7 +6,7 @@
 Each sandbox is a small Linux virtual machine with your
 project folder inside it. It starts in about a third of a second, pauses in a millisecond, and hibernates to
 disk to give its memory back — then wakes with every program still running where it was. Run a coding agent
-(Claude Code, Codex, pi) with its permission prompts off: the VM is the boundary, the network goes through a
+(Claude Code, Codex, pi, Antigravity CLI, Grok Build, Gemini CLI) with its permission prompts off: the VM is the boundary, the network goes through a
 policy you can read, and your keys never enter the sandbox.
 
 ```sh
@@ -27,6 +27,13 @@ Prefer the terminal? The same setup, without the dashboard:
 doz onboard                 # once: checks this Mac, your agent's account, and prepares an image
 cd ~/code/my-project
 doz up                      # a sandbox for this folder (at /workspace), its agent running, your terminal attached
+```
+
+Just want to see an agent work? One command, from nothing — it asks for the key it needs, makes a Locked sandbox with
+a new empty folder, and starts the agent:
+
+```sh
+doz try grok                # or: doz try antigravity · doz try (the list) · doz search (what this Dozer runs)
 ```
 
 ## Requirements
@@ -96,6 +103,9 @@ sign-up code is not open source (what may be sent, and every switch, is: `Source
   from a sandbox, and what they do not.
 - [DozerKit](docs/DOZERKIT.md) — the Swift engine underneath, for developers: the lifecycle, lineage,
   memory, the proxied network, the host process, and how to depend on it.
+- [The dashboard style guide](docs/style-guide/index.html) — a living specimen of the dashboard's look, drawn by its
+  real stylesheet, icons and marks (serve the repository root, e.g. `python3 -m http.server`, and open
+  `/docs/style-guide/`).
 
 ## Building from source
 

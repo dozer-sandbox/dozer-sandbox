@@ -1,0 +1,251 @@
+# yaml-language-server: $schema=../../../../../schema/dozer-recipe-2.schema.json
+# smolagents — Dozer's recipe (schema 2). The format: docs/recipes/RECIPE-FORMAT.md.
+# Edit this file, then run make recipes (it writes Recipes/compiled/smolagents.json, which Dozer embeds).
+schema: 2
+kind: workload
+id: huggingface/smolagents
+displayName: smolagents
+description: Hugging Face's library and CLI for agents that write and run Python code (smolagent), on an xAI, OpenAI, Google AI, OpenRouter or Vercel AI Gateway key.
+author: Hugging Face
+sourceUrl: https://github.com/huggingface/smolagents
+licenses:
+- Apache-2.0
+args:
+  version:
+    description: The smolagents release Dozer installs (its pin).
+    default: '1.26.0'
+    pattern: '[0-9]+\.[0-9]+(\.[0-9]+)?([-+][0-9A-Za-z.-]+)?'
+    buildArg: SMOLAGENTS_VERSION
+provides:
+- com.dozersandbox/smolagents@${{ kit.args.version }}
+capabilities:
+- type: com.docker.sandbox/network-policy@1
+  config:
+    runtime:
+      allow:
+      - api.openai.com:443
+      - api.x.ai:443
+      - generativelanguage.googleapis.com:443
+      - openrouter.ai:443
+      - ai-gateway.vercel.sh:443
+    dozer:
+      model:
+        id: model:smolagents
+        title: Talk to its model provider
+        summary: smolagents's model — the provider or gateway its key is for (OpenAI, xAI, Google AI, OpenRouter or Vercel AI Gateway), with an API key. Needed for smolagents to answer.
+        phrase: talk to your AI model
+        hosts:
+        - host: api.openai.com
+          reason: OpenAI — when the sandbox's key is OpenAI's
+        - host: api.x.ai
+          reason: xAI — when the sandbox's key is xAI's
+        - host: generativelanguage.googleapis.com
+          reason: Google AI — when the sandbox's key is Google AI's
+        - host: openrouter.ai
+          reason: OpenRouter — when the sandbox's key is OpenRouter's
+        - host: ai-gateway.vercel.sh
+          reason: Vercel AI Gateway — when the sandbox's key is Vercel AI Gateway's
+      update: []
+      excluded: []
+- type: com.docker.sandbox/credential@1
+  description: xAI API access
+  config:
+    service: xai
+    phase: runtime
+    apiKey:
+      name: XAI_API_KEY
+      proxyManaged: true
+      inject:
+      - domain: api.x.ai
+        header: authorization
+        format: Bearer %s
+    dozer:
+      accounts:
+      - key
+- type: com.docker.sandbox/volume@1
+  config:
+    path: /home/agent/.cache/huggingface
+- type: com.dozersandbox/install@1
+  config:
+    kind: pypi
+    package: smolagents
+    binary: smolagent
+    integrity: sha512-pILyUgYQX7m3SyYmADBbYmx9ab/aRsJ4vOHdhbSw0DlwOQIDMToq8acWqLfkIK0sv0NlttXNjJqwaQQspljiPg==
+    requirements:
+    - annotated-types==0.8.0 --hash=sha256:f072f4d804ea359e4eaf198b1af7a8b0943881a87f31bb764f8bf219bb9419e0
+    - anyio==4.15.1 --hash=sha256:6152fdbbf9a77fdec97731721bebf7c4c44f7c29b424b0065826173efc7ed101
+    - beautifulsoup4==4.15.0 --hash=sha256:d6f88de62e1d4e38ecb1077eb9724cd0eff29d2a08ca16a401e9b9e93f117cf9
+    - certifi==2026.7.22 --hash=sha256:62f22742b58a1a33014a2b6b706588a8d7e2a88ae7bd1a6ebe8c992928483775
+    - charset-normalizer==3.5.2 --hash=sha256:849df64e889b2e17230d58410a03dba311a65b163508fd33679b2b737d4b7858
+    - click==8.5.0 --hash=sha256:255bc9599cf7748b4b1a446ccc735421bd08a2ae529a8b88597d3de5664ee360
+    - ddgs==9.16.0 --hash=sha256:175d9198c958a263f51a06a54368ba0b41294942c0cd29f4aa71be03dbcd5f4a
+    - filelock==4.1.1 --hash=sha256:3f4a557945a7b0f95efeb1f432267affe5d45ac8ddde2aed1b97ebb62382c089
+    - fsspec==2026.9.0 --hash=sha256:8dd6e646e99ea382bd85f97a45e6b526a442d79423a7dc673f1e2756d05fcb5f
+    - h11==0.16.0 --hash=sha256:63cf8bbe7522de3bf65932fda1d9c2772064ffb3dae62d55932da54b31cb6c86
+    - hf-xet==1.7.0 --hash=sha256:fcfd6c22418e57dd5b3aea649e813b2e2cfb2aebf317b210d90f1fe4b3018b52
+    - httpcore2==2.13.1 --hash=sha256:e1e05d4f25f7d7d496bfb96748f6f4b67657b03da069b3a68c36069f3db73d0a
+    - httpx2==2.13.1 --hash=sha256:6dff50fabc270ee5fd25d845d0b078ed20564579744d6d962850975996d2f9a4
+    - huggingface_hub==2.2.0 --hash=sha256:1667f145dc56dc210d60966069397df9ecfca9607a5d43db88b308c89dae56b3
+    - idna==3.20 --hash=sha256:ab7ae7122974553370f0bdb919e1a960b2cd1bc1ef0276416d896db81c14582c
+    - jinja2==3.1.6 --hash=sha256:85ece4451f492d0c13c5dd7c13a64681a86afae63a5f347908daf103ce6d2f67
+    - jiter==0.17.0 --hash=sha256:4e3f052c671d5f425cca5ea5901cf11a831369fba4a55a3862cab93c323b4c3b
+    - lxml==6.1.3 --hash=sha256:5cffe18571ccc51d742cd08cbb3f8b756de9311d18c7ea98f5d92f37b8fb60c2
+    - markdown-it-py==4.2.0 --hash=sha256:9f7ebbcd14fe59494226453aed97c1070d83f8d24b6fc3a3bcf9a38092641c4a
+    - markdownify==1.2.3 --hash=sha256:a189a0bedfd14009030fde5f85bb6f77c56897cb839b5c25315dd7d4e3e290ba
+    - markupsafe==3.0.4 --hash=sha256:7018d4af1cd272e847aa5917983ab5e83e4f6579f9dbfecd4a79c0ca80b144c2
+    - mdurl==0.1.2 --hash=sha256:84008a41e51615a49fc9966191ff91509e3c40b939176e643fd50a5c2196b8f8
+    - openai==3.29.0 --hash=sha256:860d3bad424c5d38cd9ba0a0a2050d558b58ce027596a39f9ccbc0f51a2090b7
+    - packaging==26.3 --hash=sha256:d7193f7c8e4e93f444fde0262bf90af30e16fa0ad0ad44cb553c87339b23cd1c
+    - pillow==12.3.0 --hash=sha256:f7401aebd7f581d7f83a439d87d474999317ee099218e5ad25d125290990ba65
+    - primp==2.0.1 --hash=sha256:aa85a55b1c53ef8c2d14f1c61f0b7ab0ff300b349b2768a52d6c2f3f3f9ca80c
+    - pydantic==2.14.1 --hash=sha256:9195d967ec791692a04438115466764fb8b9a27b31f14a760437694f40d6b454
+    - pydantic_core==2.50.1 --hash=sha256:409e0ea40ec30d9158f33574fd758e689f6045a0f2596701828c27816ca9687d
+    - pygments==2.21.0 --hash=sha256:2363c69b61c4a97c838da3b130dcd6468f4848992b21a82f2a63ec34377137d9
+    - python-dotenv==1.2.4 --hash=sha256:42269a8a5b3fd54ffa6f3d84b18abed50064717576b4ecf03dc4a55d8aa04fdc
+    - pyyaml==6.0.3 --hash=sha256:ee2922902c45ae8ccada2c5b501ab86c36525b883eff4255313a253a3160861c
+    - requests==2.34.2 --hash=sha256:2a0d60c172f83ac6ab31e4554906c0f3b3588d37b5cb939b1c061f4907e278e0
+    - rich==15.0.0 --hash=sha256:33bd4ef74232fb73fe9279a257718407f169c09b78a87ad3d296f548e27de0bb
+    - six==1.17.0 --hash=sha256:4721f391ed90541fddacab5acf947aa0d3dc7d27b2e1e8eda2be8970586c3274
+    - smolagents==1.26.0 --hash=sha256:70e1cfb1576f782da93190ee31d9bb2659e5ca4bd84fda0c412e1f20498f28b6
+    - sniffio==1.3.1 --hash=sha256:2f6da418d1f1e0fddd844478f41680e794e6051915791a034ff65e5f100525a2
+    - soupsieve==3.0.3 --hash=sha256:fa30e3ba4809cb81ce1f3209f2fbe3e779fc445f0439bc147a0d7c4601743f21
+    - tqdm==4.70.1 --hash=sha256:c293e525e6fef9c20e8728fd4612df02a0aa31bb5fe91ecd93e123b1b7bffa73
+    - truststore==0.10.5 --hash=sha256:9aaaedaefaf06d8b206278cf8b5012bc897f485a874503501e12d776df78951c
+    - typing-inspection==0.4.4 --hash=sha256:65b8397ba37ccbce054456aaccddfc91e6e3083c92824df348d96ca832f3f147
+    - typing_extensions==4.16.0 --hash=sha256:481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8
+    - urllib3==2.8.0 --hash=sha256:0cf3cae568d36aa9576b28dfb35f11328f1cb974ca7647d9475ebb86c75ac6e3
+- type: com.dozersandbox/launch@1
+  config:
+    command:
+    - smolagent
+    no_prompts_args: []
+    passthrough:
+    - '--help'
+    - '-h'
+    env:
+      HF_HUB_DISABLE_TELEMETRY: '1'
+    state_env: {}
+    session: shell
+    status: none
+    verify:
+    - argv:
+      - /opt/smolagents/venv/bin/pip
+      - show
+      - smolagents
+      expect: 'Version: ${{ kit.args.version }}'
+    check:
+      argv:
+      - smolagent
+      - say ok
+      - '--model-type'
+      - OpenAIModel
+      - '--model-id'
+      - '${{ dozer.model }}'
+      - '--api-base'
+      - '${{ dozer.base_url }}'
+      expect: DOZ_FAKE_OK
+      timeout: 300
+- type: com.dozersandbox/auth@1
+  config:
+    methods:
+    - kind: api-key
+      provider: xai
+      accounts:
+      - key
+      keys_page: https://console.x.ai/
+      note: 'smolagent speaks to the chosen source through its OpenAI-compatible model: --model-type OpenAIModel --model-id "$DOZ_MODEL" --api-base "$OPENAI_BASE_URL" (the key under OPENAI_API_KEY). Its Hugging Face inference default is not offered.'
+      checked: '2026-10-14'
+    - kind: api-key
+      provider: openai
+      accounts:
+      - openai-key
+      keys_page: https://platform.openai.com/api-keys
+      note: 'smolagents through OpenAI: doz try smolagents --provider openai (or choose it in the try setup); the model with --model.'
+      checked: '2026-10-14'
+    - kind: api-key
+      provider: google
+      accounts:
+      - key
+      keys_page: https://aistudio.google.com/apikey
+      note: 'smolagents through Google AI: doz try smolagents --provider google (or choose it in the try setup); the model with --model.'
+      checked: '2026-10-14'
+    - kind: api-key
+      provider: openrouter
+      accounts:
+      - key
+      keys_page: https://openrouter.ai/keys
+      note: 'smolagents through OpenRouter: doz try smolagents --gateway openrouter (or choose it in the try setup); the model with --model.'
+      checked: '2026-10-14'
+    - kind: api-key
+      provider: vercel-ai-gateway
+      accounts:
+      - key
+      keys_page: https://vercel.com/docs/ai-gateway/authentication-and-byok
+      note: 'smolagents through Vercel AI Gateway: doz try smolagents --gateway vercel-ai-gateway (or choose it in the try setup); the model with --model.'
+      checked: '2026-10-14'
+- type: com.dozersandbox/gateways@1
+  config:
+    entries:
+    - gateway: openrouter
+      level: verified
+      shape: openai-chat
+      endpoint: v1
+      how:
+        env:
+          OPENAI_BASE_URL: '${{ dozer.gateway.endpoint.v1 }}'
+          DOZ_MODEL: '${{ dozer.model }}'
+      evidence: 'make recipe-check: its check turn through a stand-in OpenRouter (doz try with --gateway openrouter; models@1)'
+      checked: '2026-10-14'
+    - gateway: vercel-ai-gateway
+      level: verified
+      shape: openai-chat
+      endpoint: v1
+      how:
+        env:
+          OPENAI_BASE_URL: '${{ dozer.gateway.endpoint.v1 }}'
+          DOZ_MODEL: '${{ dozer.model }}'
+      evidence: 'make recipe-check: its check turn through a stand-in Vercel AI Gateway (doz try with --gateway vercel-ai-gateway; models@1)'
+      checked: '2026-10-14'
+- type: com.dozersandbox/models@1
+  config:
+    default: xai
+    shapes:
+    - shape: openai-chat
+      env:
+        OPENAI_BASE_URL: '${{ dozer.base_url }}'
+        DOZ_MODEL: '${{ dozer.model }}'
+      key_env:
+      - OPENAI_API_KEY
+- type: com.dozersandbox/currency@1
+  config:
+    checked: '2026-10-14'
+- type: com.dozersandbox/directory@1
+  config:
+    kind: ai-tool
+    categories:
+    - framework
+    icon: smolagents
+    default_base: debian
+    platforms:
+      glibc: true
+      musl: false
+    tags:
+    - tag: headless
+      level: verified
+      notes:
+      - smolagent PROMPT --model-type OpenAIModel --model-id MODEL --api-base URL
+      evidence: 'A2 VM proof: its check turn answered DOZ_FAKE_OK through the fake provider (make recipe-check; probes/617-*/recipes/smolagents)'
+      checked: '2026-10-14'
+    terms: Your API key of the provider or gateway you choose (xAI by default). Its web agent (webagent) needs a browser in the image, which Dozer does not offer yet.
+- type: com.dozersandbox/guide@1
+  config:
+    intro: "smolagents is Hugging Face's library for agents that write and run Python; `smolagent` runs one task from your shell."
+    steps:
+    - text: "Check it answers."
+      command: "smolagent \"say ok\" --model-type OpenAIModel --model-id \"$DOZ_MODEL\" --api-base \"$OPENAI_BASE_URL\""
+    - text: "Give it a task it solves with code."
+      command: "smolagent \"what is 17 times 23?\" --model-type OpenAIModel --model-id \"$DOZ_MODEL\" --api-base \"$OPENAI_BASE_URL\""
+    tips:
+    - "`DOZ_MODEL` and `OPENAI_BASE_URL` are set for the key you chose."
+    - "Its web-search tools reach the open web only when you allow it."
+    docs: https://huggingface.co/docs/smolagents

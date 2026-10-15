@@ -1,0 +1,290 @@
+{
+  "args" : {
+    "version" : {
+      "buildArg" : "NANOCODER_VERSION",
+      "default" : "1.31.0",
+      "description" : "The Nanocoder release Dozer installs (its pin).",
+      "pattern" : "[0-9]+\\.[0-9]+\\.[0-9]+([-+][0-9A-Za-z.-]+)?"
+    }
+  },
+  "author" : "Nano Collective",
+  "capabilities" : [
+    {
+      "config" : {
+        "dozer" : {
+          "excluded" : [
+
+          ],
+          "model" : {
+            "hosts" : [
+              {
+                "host" : "api.x.ai",
+                "paths" : [
+                  "/v1/chat/completions"
+                ]
+              }
+            ],
+            "id" : "model:nanocoder",
+            "phrase" : "talk to your AI model (xAI)",
+            "summary" : "Nanocoder's model here (the xAI API, with your key) — needed for it to answer.",
+            "title" : "Talk to xAI"
+          },
+          "quiet" : [
+            {
+              "host" : "models.dev",
+              "reason" : "Nanocoder reads the public models.dev catalogue for a model's context size and prices (no setting turns it off); it does without it when refused"
+            }
+          ],
+          "update" : [
+
+          ]
+        },
+        "runtime" : {
+          "allow" : [
+            "api.x.ai:443"
+          ],
+          "deny" : [
+            "models.dev:443"
+          ]
+        }
+      },
+      "type" : "com.docker.sandbox/network-policy@1"
+    },
+    {
+      "config" : {
+        "apiKey" : {
+          "inject" : [
+            {
+              "domain" : "api.x.ai",
+              "format" : "Bearer %s",
+              "header" : "authorization"
+            }
+          ],
+          "name" : "XAI_API_KEY",
+          "proxyManaged" : true
+        },
+        "dozer" : {
+          "accounts" : [
+            "key"
+          ]
+        },
+        "phase" : "runtime",
+        "service" : "xai"
+      },
+      "description" : "xAI API access",
+      "type" : "com.docker.sandbox/credential@1"
+    },
+    {
+      "config" : {
+        "path" : "/home/agent/.config/nanocoder"
+      },
+      "type" : "com.docker.sandbox/volume@1"
+    },
+    {
+      "config" : {
+        "path" : "/home/agent/.local/share/nanocoder"
+      },
+      "type" : "com.docker.sandbox/volume@1"
+    },
+    {
+      "config" : {
+        "binary" : "nanocoder",
+        "integrity" : "sha512-EyJn8aO7YFKDA+IYyUmSN9/XHCqgBfrYKHE61iKMf6B4ASY9GDd8VHG0J09w0bd/V5kQdUQzHszk0fiCv8fRHQ==",
+        "kind" : "npm",
+        "needs_node" : "22",
+        "npm_args" : [
+          "--ignore-scripts"
+        ],
+        "package" : "@nanocollective/nanocoder"
+      },
+      "type" : "com.dozersandbox/install@1"
+    },
+    {
+      "config" : {
+        "check" : {
+          "argv" : [
+            "nanocoder",
+            "run",
+            "say ok",
+            "--trust-directory",
+            "--plain"
+          ],
+          "expect" : "DOZ_FAKE_OK"
+        },
+        "command" : [
+          "nanocoder"
+        ],
+        "env" : {
+          "NANOCODER_CONTEXT_LIMIT" : "256000"
+        },
+        "first_run" : [
+          {
+            "file" : "~/.config/nanocoder/agents.config.json",
+            "set" : {
+              "nanocoder.providers" : [
+                {
+                  "apiKey" : "${XAI_API_KEY}",
+                  "baseUrl" : "https://api.x.ai/v1",
+                  "models" : [
+                    "grok-build-0.1"
+                  ],
+                  "name" : "xAI",
+                  "sdkProvider" : "openai-compatible"
+                }
+              ]
+            }
+          },
+          {
+            "file" : "~/.config/nanocoder/nanocoder-preferences.json",
+            "set" : {
+              "trustedDirectories" : [
+                "/workspace"
+              ]
+            }
+          }
+        ],
+        "no_prompts_args" : [
+          "--mode",
+          "yolo"
+        ],
+        "passthrough" : [
+          "--version",
+          "-v",
+          "--help",
+          "-h",
+          "run",
+          "init",
+          "review",
+          "config",
+          "skills",
+          "completion"
+        ],
+        "state_env" : {
+
+        },
+        "status" : "none",
+        "verify" : [
+          {
+            "argv" : [
+              "nanocoder",
+              "--version"
+            ],
+            "expect" : "${{ kit.args.version }}"
+          }
+        ]
+      },
+      "type" : "com.dozersandbox/launch@1"
+    },
+    {
+      "config" : {
+        "methods" : [
+          {
+            "accounts" : [
+              "key"
+            ],
+            "checked" : "2026-10-14",
+            "keys_page" : "https://console.x.ai/",
+            "kind" : "api-key",
+            "note" : "An OpenAI-compatible provider in ~/.config/nanocoder/agents.config.json on xAI's API; its apiKey is the reference ${XAI_API_KEY}, which Nanocoder expands from the environment each run, so the key is never written there. Model grok-build-0.1.",
+            "provider" : "xai"
+          }
+        ]
+      },
+      "type" : "com.dozersandbox/auth@1"
+    },
+    {
+      "config" : {
+        "entries" : [
+          {
+            "checked" : "2026-10-14",
+            "gateway" : "openrouter",
+            "level" : "unknown",
+            "reason" : "Nanocoder takes any OpenAI-compatible provider; OpenRouter was not checked"
+          },
+          {
+            "checked" : "2026-10-14",
+            "gateway" : "vercel-ai-gateway",
+            "level" : "unknown",
+            "reason" : "not checked against Nanocoder"
+          }
+        ]
+      },
+      "type" : "com.dozersandbox/gateways@1"
+    },
+    {
+      "config" : {
+        "checked" : "2026-10-14"
+      },
+      "type" : "com.dozersandbox/currency@1"
+    },
+    {
+      "config" : {
+        "categories" : [
+          "coding-agent"
+        ],
+        "default_base" : "node",
+        "icon" : "nanocoder",
+        "kind" : "coding-agent",
+        "limits" : [
+          {
+            "musl" : true,
+            "reason" : "not checked on Alpine"
+          }
+        ],
+        "platforms" : {
+          "glibc" : true,
+          "musl" : false
+        },
+        "tags" : [
+          {
+            "checked" : "2026-10-14",
+            "evidence" : "make recipe-check: nanocoder run \"say ok\" printed the stand-in's answer and exited in a fresh try",
+            "level" : "verified",
+            "notes" : [
+              "nanocoder run \"…\" --trust-directory --plain"
+            ],
+            "tag" : "headless"
+          }
+        ],
+        "terms" : "Your xAI API key — a key from console.x.ai."
+      },
+      "type" : "com.dozersandbox/directory@1"
+    },
+    {
+      "config" : {
+        "docs" : "https://github.com/Nano-Collective/nanocoder",
+        "intro" : "Nanocoder is a coding agent with its own screen: the session on the left. Ask it to read, change and run the code in your folder.",
+        "steps" : [
+          {
+            "command" : "nanocoder run \"say ok\" --trust-directory --plain",
+            "text" : "Check it answers, without its screen."
+          },
+          {
+            "text" : "Ask it something in its own screen — the session on the left."
+          },
+          {
+            "command" : "nanocoder run \"list the files in this folder\" --trust-directory --plain",
+            "text" : "One task without its screen."
+          }
+        ],
+        "tips" : [
+          "Files it makes are in /workspace — your folder on the Mac.",
+          "Restart its session from the session's ⋯ menu; End stops it."
+        ]
+      },
+      "type" : "com.dozersandbox/guide@1"
+    }
+  ],
+  "description" : "The Nano Collective's local-first coding agent for the terminal, here on an xAI API key.",
+  "displayName" : "Nanocoder",
+  "id" : "nano-collective/nanocoder",
+  "kind" : "workload",
+  "licenses" : [
+    "MIT"
+  ],
+  "provides" : [
+    "com.dozersandbox/nanocoder@${{ kit.args.version }}"
+  ],
+  "schema" : 2,
+  "sourceUrl" : "https://github.com/Nano-Collective/nanocoder"
+}

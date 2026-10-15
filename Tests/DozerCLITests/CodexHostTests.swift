@@ -207,7 +207,7 @@ final class CodexHostTests: XCTestCase {
         preset.preset = "locked"
         do { let m = await c.handle(preset); XCTAssertNil(m.error, m.error?.message ?? "") }
         let locked = try await XCTUnwrapAsync(await c.effectiveNetworkPolicy(of: "cx"))
-        XCTAssertEqual(locked.permissions, ["model", "model:openai"], "a preset keeps Codex's model")
+        XCTAssertEqual(locked.permissions, ["model", "model:openai", "vendor:codex"], "a preset keeps Codex's model and its own sites")
         // An API-key account instead: the sign-in's binding is gone, the key's auth.json.
         _ = await add(c, "okey", .openaiKey, "sk-proj-FAKEFAKEFAKEFAKEFAKE")
         var use = HostRequest(.accountUse, name: "cx")

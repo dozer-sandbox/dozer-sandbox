@@ -1,0 +1,144 @@
+# yaml-language-server: $schema=../../../../../schema/dozer-recipe-2.schema.json
+# tgpt — Dozer's recipe (schema 2). The format: docs/recipes/RECIPE-FORMAT.md.
+# Edit this file, then run make recipes (it writes Recipes/compiled/tgpt.json, which Dozer embeds).
+schema: 2
+kind: workload
+id: aandrew-me/tgpt
+displayName: tgpt
+description: A small terminal chat client for many AI providers, set up on a Gemini API key.
+author: aandrew-me
+sourceUrl: https://github.com/aandrew-me/tgpt
+licenses:
+- GPL-3.0-only
+args:
+  version:
+    description: The tgpt release Dozer installs (its pin).
+    default: '2.15.0'
+    pattern: '[0-9]+\.[0-9]+(\.[0-9]+)?([-+][0-9A-Za-z.-]+)?'
+    buildArg: TGPT_VERSION
+provides:
+- com.dozersandbox/tgpt@${{ kit.args.version }}
+capabilities:
+- type: com.docker.sandbox/network-policy@1
+  config:
+    runtime:
+      allow:
+      - generativelanguage.googleapis.com:443
+    dozer:
+      model:
+        id: model:tgpt
+        title: Talk to Google AI
+        summary: tgpt's model (the Gemini API, with an API key) — needed for tgpt to answer.
+        phrase: talk to your AI model (Google AI)
+        hosts:
+        - host: generativelanguage.googleapis.com
+      update: []
+      excluded: []
+- type: com.docker.sandbox/credential@1
+  description: Google AI (Gemini API) API access
+  config:
+    service: google
+    phase: runtime
+    apiKey:
+      name: GEMINI_API_KEY
+      proxyManaged: true
+      inject:
+      - domain: generativelanguage.googleapis.com
+        header: x-goog-api-key
+        format: '%s'
+    dozer:
+      accounts:
+      - key
+- type: com.docker.sandbox/volume@1
+  config:
+    path: /home/agent/.config/tgpt
+- type: com.dozersandbox/install@1
+  config:
+    kind: release-binary
+    url: https://github.com/aandrew-me/tgpt/releases/download/v${{ kit.args.version }}/tgpt-linux-arm64
+    binary: tgpt
+    bake_hosts:
+    - github.com
+    - release-assets.githubusercontent.com
+    integrity: sha512-EcCxUb8C5DTvpeY7PpRxbOQFOBL6875cweRzAokS4aY0/m3pHKvS2+g6niA4SlqzT8G1Wp7SGGxxUezmH8rv4w==
+- type: com.dozersandbox/launch@1
+  config:
+    command:
+    - tgpt
+    - '-i'
+    no_prompts_args: []
+    passthrough:
+    - '--version'
+    - '-v'
+    - '--help'
+    - '-h'
+    env:
+      AI_PROVIDER: gemini
+      GEMINI_MODEL: gemini-2.5-flash
+    state_env: {}
+    status: none
+    verify:
+    - argv:
+      - tgpt
+      - '--version'
+      expect: '${{ kit.args.version }}'
+    check:
+      argv:
+      - tgpt
+      - '-q'
+      - say ok
+      expect: DOZ_FAKE_OK
+- type: com.dozersandbox/auth@1
+  config:
+    methods:
+    - kind: api-key
+      provider: google
+      accounts:
+      - key
+      keys_page: https://aistudio.google.com/apikey
+      note: tgpt is set to its Gemini provider (AI_PROVIDER=gemini, GEMINI_MODEL=gemini-2.5-flash), which reads GEMINI_API_KEY and calls the Gemini API's OpenAI-compatible endpoint with a Bearer header; Dozer's proxy sends the key there as x-goog-api-key (checked against a stand-in, not yet against Google). Its key-less free providers reach third-party services Dozer does not allow by default.
+      checked: '2026-10-14'
+- type: com.dozersandbox/gateways@1
+  config:
+    entries:
+    - gateway: openrouter
+      level: unknown
+      reason: not checked against tgpt
+      checked: '2026-10-14'
+    - gateway: vercel-ai-gateway
+      level: unknown
+      reason: not checked against tgpt
+      checked: '2026-10-14'
+- type: com.dozersandbox/currency@1
+  config:
+    checked: '2026-10-14'
+- type: com.dozersandbox/directory@1
+  config:
+    kind: ai-tool
+    categories:
+    - terminal-tool
+    icon: tgpt
+    default_base: debian
+    platforms:
+      glibc: true
+      musl: true
+    tags:
+    - tag: headless
+      level: verified
+      notes:
+      - tgpt -q PROMPT
+      evidence: 'A2 VM proof: its check turn answered DOZ_FAKE_OK through the fake provider (make recipe-check; probes/617-*/recipes/tgpt)'
+      checked: '2026-10-14'
+    terms: Your Gemini API key — a key from aistudio.google.com.
+- type: com.dozersandbox/guide@1
+  config:
+    intro: "tgpt is a small terminal chat: its session on the left is its interactive mode, and `tgpt -q` answers one question."
+    steps:
+    - text: "Check it answers."
+      command: "tgpt -q \"say ok\""
+    - text: "Chat in its session on the left."
+    - text: "One question, quietly."
+      command: "tgpt -q \"what is a sandbox, in one line?\""
+    tips:
+    - "Its key-less free providers are other companies' services, which Dozer does not allow by default."
+    docs: https://github.com/aandrew-me/tgpt

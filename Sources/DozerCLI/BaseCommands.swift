@@ -9,8 +9,7 @@ import DozerHost
 
 /// `~/…` for a path under the home folder.
 func tildePath(_ p: String) -> String {
-    let home = FileManager.default.homeDirectoryForCurrentUser.path
-    return p.hasPrefix(home + "/") ? "~" + p.dropFirst(home.count) : p
+    DisplayPath.tilde(p)
 }
 
 struct BaseCommand: AsyncParsableCommand {

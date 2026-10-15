@@ -41,14 +41,17 @@ export const TRANSITION_LABEL = { start: 'Booting…', wake: 'Waking…', resume
                            hibernate: 'Hibernating…', shutdown: 'Shutting down…', reset: 'Resetting…', rm: 'Removing…' };
 state.transitions = new Map();
 state.trGen = 0;
-export function beginTransition(name, action) {
+export function beginTransition(name, action, verbs) {
   if (!name || !TRANSITION_LABEL[action]) return;
   const have = state.transitions.get(name);
   if (have && have.action === action) return;
   state.trGen++;
-  state.transitions.set(name, { action, verbs: verbsFor(sandboxPhase(name)) });
+  // `verbs`: the buttons to keep showing when the page knows no phase yet (617: a try's page before its create returns).
+  state.transitions.set(name, { action, verbs: verbs || verbsFor(sandboxPhase(name)) });
   paintTransition(name);
 }
+/// 617: a transition this page began for an operation that never came (a try whose create failed) — ended, repainted.
+export function cancelTransition(name, action) { endTransition(name, action, true); }
 /// `repaint`: the action failed or was refused — show what is true again at once. After a success the
 /// refresh that follows repaints from the NEW state (repainting now would show the phase it just left).
 function endTransition(name, action, repaint = true) {
@@ -76,6 +79,8 @@ export function trackOp(op) {
   if (before && before.state !== 'running' && op.state === 'running') return;
   state.ops.set(op.id, op);
   if (state.ops.size > 60) state.ops.delete(state.ops.keys().next().value);
+  // 617: whoever waits for this operation's end hears it NOW (an event, not a poll — see waitOp).
+  if (op.state !== 'running') settleOpWaiters(op);
   renderOps();
   paintRowOps();
   // A new operation: re-render, so its sandbox's buttons are disabled while it runs.
@@ -136,22 +141,34 @@ export function adoptOperations(list) {
   renderOps();
   paintRowOps();
 }
+/// 617 (owner: a 68 s pause between a try's create and its start): waiting for an operation's end is driven by the
+/// operation's own event (`trackOp`), never by polling. A polling loop of short timers is what a browser slows to
+/// ONE WAKE A MINUTE in a tab it has hidden for a while (Chrome's intensive throttling) — the page then sat on a
+/// finished create for a minute before it started the sandbox. The timer below is only the give-up.
+const opWaiters = new Map();
+function settleOpWaiters(op) {
+  const ws = opWaiters.get(op.id);
+  if (!ws) return;
+  opWaiters.delete(op.id);
+  for (const w of ws) w(op);
+}
+function untilOpEnds(id, max) {
+  const o = state.ops.get(id);
+  if (o && o.state !== 'running') return Promise.resolve(o);
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (v) => { if (!done) { done = true; resolve(v); } };
+    const list = opWaiters.get(id) || [];
+    list.push(finish);
+    opWaiters.set(id, list);
+    setTimeout(() => finish(null), max);
+  });
+}
 /// Until the operation `id` this page started ends (its SSE end, or the answer) — or `max` ms.
 export async function waitOp(id, max = 120000) {
-  const t0 = Date.now();
-  while (Date.now() - t0 < max) {
-    const o = state.ops.get(id);
-    if (o && o.state !== 'running') return o;
-    await new Promise((r) => setTimeout(r, 150));
-  }
-  return state.ops.get(id) || null;
+  const o = await untilOpEnds(id, max);
+  return o || state.ops.get(id) || null;
 }
 export async function waitForOp(op, seconds = 300) {
-  const end = Date.now() + seconds * 1000;
-  while (Date.now() < end) {
-    const o = state.ops.get(op.id);
-    if (o && o.state !== 'running') return o;
-    await new Promise((r) => setTimeout(r, 250));
-  }
-  return null;
+  return await untilOpEnds(op.id, seconds * 1000);
 }

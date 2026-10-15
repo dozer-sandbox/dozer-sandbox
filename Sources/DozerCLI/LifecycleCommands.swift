@@ -3,12 +3,16 @@ import Foundation
 import DozerKit
 import DozerHost
 
-/// What `create` and `up` take to make a sandbox.
-struct CreateArguments: ParsableArguments {
+/// 617 (D13): the ONE set of choice options `new`, `create`, `up` and `try` take — named after `doz_project.yaml`'s keys
+/// (`--agent`, `--base`, `--dockerfile`, `--permissions`, `--account`, `--github`, `--key`, …), with the old spellings
+/// kept as aliases (`--image` = agent + base, `--allow` = `--permissions`).
+typealias CreateArguments = ChoiceOptions
+
+struct ChoiceOptions: ParsableArguments {
     @Option(name: .long, help: "lab (Alpine + bash), claude-code, pi, codex, a base × agent image (python-claude-code, go-codex, go, …), or a template (doz image ls). Shorthand for --agent/--base.")
     var image: String?
 
-    @Option(name: .long, help: "The agent — claude-code, pi, codex (OpenAI Codex) or none (a shell only). Default claude-code.")
+    @Option(name: .long, help: "The agent — claude-code, pi, codex (OpenAI Codex), gemini (Gemini CLI), grok (Grok Build) or none (a shell only). Default claude-code.")
     var agent: String?
 
     @Option(name: .long, help: "A recommended base (doz base ls): node, python, go, rust, java, ruby, dotnet, debian, ubuntu, alpine. Default node.")
@@ -73,12 +77,36 @@ struct CreateArguments: ParsableArguments {
     @Flag(name: .long, help: "When the image is out of date (an older doz's recipe, or a newer agent release): rebuild it first (~2 min, needs network; existing sandboxes are not affected).")
     var rebuild = false
 
-    // `--allow -error-reports`: the value may start with a dash.
-    @Option(name: .long, parsing: .unconditionalSingleValue, help: "What the agent may do, on top of the default (defaults.permissions): permissions (doz net permissions), -PERMISSION to remove, site:HOST, or standard/locked/open. Comma-separated or repeated.")
+    // `--permissions -error-reports`: the value may start with a dash. `--allow` is the same option (its earlier name).
+    @Option(name: [.customLong("permissions"), .customLong("allow")], parsing: .unconditionalSingleValue,
+            help: "What the agent may do, on top of the default (defaults.permissions): permissions (doz net permissions), -PERMISSION to remove, site:HOST, or standard/locked/open. Comma-separated or repeated. --allow is the same.")
     var allow: [String] = []
 
     @Flag(name: .long, help: "When the image is out of date: use it as it is (the default off a terminal; said as a warning).")
     var useCurrent = false
+
+    @Option(name: .long, help: "A custom key to attach beside the account (doz account add NAME --custom …); repeatable. Each of its hosts must be allowed (--allow site:HOST).")
+    var key: [String] = []
+
+    @Option(name: .long, help: "The model provider a tool or recipe agent uses — anthropic, openai, xai, google (doz try AGENT --dry-run lists what it can use). Its account is then a key of that provider: --account, else that provider's default.")
+    var provider: String?
+
+    @Option(name: .long, help: "The model gateway a tool or recipe agent goes through — openrouter or vercel-ai-gateway (one key, many models). Its account is then a key of that gateway.")
+    var gateway: String?
+
+    @Option(name: .long, help: "The model it uses (a gateway's are creator/name: anthropic/claude-sonnet-4.6). Default: the provider's or gateway's default model.")
+    var model: String?
+
+    /// 617 (models@1): `--provider`/`--gateway` (one of them) and `--model` onto the create.
+    func applyModelSource(to o: inout CreateOptions) throws {
+        if provider != nil && gateway != nil { throw ValidationError("--provider or --gateway, not both") }
+        if let g = gateway, !ModelSources.isGateway(g) {
+            throw ValidationError("\(g) is not a gateway — " + ModelSources.ids.filter(ModelSources.isGateway).joined(separator: ", "))
+        }
+        if let p = provider, ModelSources.isGateway(p) { throw ValidationError("\(p) is a gateway: --gateway \(p)") }
+        if let s = provider ?? gateway { o.modelSource = s }
+        if let m = model { o.model = m }
+    }
 
     // EXPERIMENTAL (604): an audio sandbox.
     @Flag(name: .long, help: ArgumentHelp("EXPERIMENTAL: give the sandbox the Mac's microphone and speakers (a sound device and its own kernel; doz-sound inside to record and play). macOS asks about the microphone for the app that started doz.",
@@ -92,18 +120,21 @@ struct CreateArguments: ParsableArguments {
         guard image == nil else { throw ValidationError("--image, or --agent/--base/--dockerfile — not both") }
         let a: AgentKind
         switch agent ?? "claude-code" {
-        case "claude-code", "claude": a = .claudeCode
-        case "pi": a = .pi
-        case "codex": a = .codex
         case "none", "shell": a = .none
-        case let x: throw ValidationError("--agent: claude-code, pi, codex or none — not \(x)")
+        // 617: any agent this build has a recipe for, by id or alias (`claude`).
+        case let x:
+            guard let r = AgentRecipes.matching(x), let k = AgentKind(rawValue: r.id) else {
+                throw ValidationError("--agent: \(DozerProject.agentWords) — not \(x)")
+            }
+            a = k
         }
         if dockerfile != nil {
             guard base == nil else { throw ValidationError("--base or --dockerfile — not both") }
             // The host names the image by the Dockerfile's own base id; this carries the agent.
             return ImageChoice(base: a == .none ? "alpine" : "node", agent: a).name
         }
-        let b = base ?? "node"
+        // 617: no --base — the agent's own default base (Node for Claude Code, pi and Codex, as before).
+        let b = base ?? a.recipe?.defaultBase ?? "node"
         guard BaseCatalogue.base(b) != nil else {
             throw ValidationError("--base: \(BaseCatalogue.ids.joined(separator: ", ")) (doz base ls) — or --dockerfile PATH — not \(b)")
         }
@@ -122,6 +153,16 @@ struct CreateArguments: ParsableArguments {
         guard let img = try chosenImage() ?? image ?? defaultImage else {
             throw ValidationError("--image (or --agent/--base/--dockerfile) is required: lab, claude-code, pi, codex, a base × agent image or a template")
         }
+        return try choices(image: img)
+    }
+
+    /// 617: the choices as `CreateOptions` for the planner — `image` empty when none was chosen (the defaults decide).
+    func planChoices() throws -> CreateOptions { try choices(image: try chosenImage() ?? image ?? "") }
+
+    /// 617: `ChoiceOptions` itself, from argv (a plan's, a probe's) — the round trip's other half.
+    static func from(_ argv: [String]) throws -> ChoiceOptions { try parse(argv) }
+
+    private func choices(image img: String) throws -> CreateOptions {
         var mem: UInt64?
         if let m = memory {
             guard let v = DozerImages.parseMemory(m) else { throw ValidationError("--memory: \(m) is not a size (2G, 512M, 2048)") }
@@ -140,6 +181,8 @@ struct CreateArguments: ParsableArguments {
         // 599d: --github read|push|off is the same as allowing (or not) its two permissions.
         words += try Self.githubWords(github, flag: "--github")
         if !words.isEmpty { o.allow = words }
+        if !key.isEmpty { o.keys = key }          // 617 (D6)
+        try applyModelSource(to: &o)              // 617 (models@1)
         if let df = absoluteDockerfile {
             guard FileManager.default.fileExists(atPath: df) else { throw ValidationError("--dockerfile: no file at \(df)") }
             o.dockerfile = df
@@ -237,8 +280,7 @@ func chooseImage(_ o: inout CreateOptions, rebuild: Bool, useCurrent: Bool, _ g:
 func noteWorkspace(_ info: SandboxInfo, isolatedAsked: Bool, _ g: GlobalOptions) {
     guard !g.json, !g.quiet else { return }
     if info.workspaceCreated == true, let w = info.workspace {
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        Out.stderr("[doz] created \(w.hasPrefix(home + "/") ? "~" + w.dropFirst(home.count) : Substring(w))\n")
+        Out.stderr("[doz] created \(DisplayPath.tilde(w))\n")
     }
     if info.workspace == nil, !isolatedAsked {
         Out.stderr("[doz] \(Workspace.isolatedNote) — --workspace DIR shares a folder (--isolated says it on purpose)\n")
@@ -254,10 +296,13 @@ struct Create: AsyncParsableCommand {
     @Flag(name: .long, help: "Start it too.") var start = false
     @Flag(name: .long, help: "Prepare its image now (download and bake it once, with progress), so its first start does not wait; the sandbox stays off. Ctrl-C stops watching: the preparation goes on.")
     var prepare = false
+    @Flag(name: .long, help: "Make nothing: print the plan — the command, its doz_project.yaml, what it can reach (--json: the plan as data).")
+    var dryRun = false
 
     func run() async throws {
         var r = HostRequest(.create, name: name)
         var o = try create.options()
+        if dryRun { printPlan(try await requestPlan(PlanRequest(purpose: "create", name: name, create: o), g), g); return }
         if prepare { o.prepare = true }
         try preflightAgentAccount(&o, g)          // 594: pi needs an API-key account — before anything is made
         // 596 (B7, B9): a Dockerfile base — where it is built, and Apple's tool ready before a start builds it.
@@ -301,32 +346,42 @@ struct New: AsyncParsableCommand {
         """)
 
     @OptionGroup var g: GlobalOptions
-    @Option(name: .long, help: "The image (default: the setting defaults.image).") var image: String?
-    @Option(name: .long, help: "The name (default: the image's — claude-sandbox, claude-sandbox-2, …).") var name: String?
-    @Flag(name: .long, help: "Share no folder: /workspace is private to the sandbox.") var isolated = false
+    @Argument(help: "The name (default: the image's — claude-sandbox, claude-sandbox-2, …).") var positionalName: String?
+    @Option(name: .customLong("name"), help: ArgumentHelp("The name (the same as NAME).", visibility: .hidden)) var nameOption: String?
+    @OptionGroup var choices: ChoiceOptions
     @Flag(name: [.short, .customLong("detach")], help: "Create and start it, but do not attach.") var detach = false
+    @Flag(name: .long, help: "Make nothing: print the plan — the command, its doz_project.yaml, what it can reach (--json: the plan as data).")
+    var dryRun = false
+
+    /// The name given (NAME, or --name).
+    var name: String? { positionalName ?? nameOption }
+    var image: String? { choices.image }
+    var isolated: Bool { choices.isolated }
+
+    func validate() throws {
+        if positionalName != nil, nameOption != nil { throw ValidationError("NAME or --name, not both") }
+    }
 
     func run() async throws {
-        let rows = try decode(try await query(HostRequest(.ls), g), [SandboxInfo].self, g)
-        let plan: QuickAddPlan
-        do {
-            plan = try QuickAdd.plan(image: image, name: name, isolated: isolated, taken: Set(rows.map(\.name)), settings: .load())
-        } catch let e as HostError {
-            throw fail(e, g)
+        let planned = try await requestPlan(PlanRequest(purpose: "new", name: name, create: try choices.planChoices()), g)
+        if dryRun { printPlan(planned, g); return }
+        if let p = planned.problems.first(where: { $0.code != "key" && $0.code != "image" }) {
+            throw fail(HostError(p.code == "name" && p.text.contains("exists") ? .exists : .invalid, p.text + (p.fix.map { " — \($0)" } ?? "")), g)
         }
+        let plan = QuickAddPlan(name: planned.name, image: planned.image, workspace: planned.workspace, projectsDir: "")
         if !g.json { Out.stdout(plan.line() + "\n") }
-        var o = CreateOptions(image: plan.image, workspace: plan.workspace)
-        o.isolated = isolated ? true : nil
+        var o = planned.create
         do {
             try preflightAgentAccount(&o, g)      // pi needs an API-key account: offered on a terminal, else the next step
         } catch {
             if !g.json {
                 Out.stderr("[doz] doz new uses the store's default account: doz account default NAME makes one the default "
-                           + "— or doz create NAME --image \(plan.image) --account NAME --start\n")
+                           + "— or doz new --account NAME\n")
             }
             throw error
         }
-        let notice = try await chooseImage(&o, rebuild: false, useCurrent: false, g)
+        let notice = try await chooseImage(&o, rebuild: choices.rebuild, useCurrent: choices.useCurrent, g)
+        if o.dockerfile != nil { try await builderPreflight(g, required: true) }
         var r = HostRequest(.create, name: plan.name)
         r.create = o
         let info = try decode(try call(r, g), SandboxInfo.self, g)
@@ -420,6 +475,37 @@ struct Hibernate: AsyncParsableCommand {
     func run() async throws { _ = try lifecycle(.hibernate, name, g) }
 }
 
+/// 617 (owner: "yes queue doz down"): the opposite of `up` — put a sandbox away. Hibernate by default (RAM returned,
+/// sessions come back on `up`, `attach` or `wake`); `--shutdown` a cold stop (asked, as `shutdown` does); `--sleep`
+/// keeps the RAM. Only a choice among the existing verbs — the same host requests, the same output.
+struct Down: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(abstract: "Put a sandbox away: hibernate it (the default — RAM returned, sessions come back on up), or --sleep, or --shutdown.",
+        discussion: """
+        doz down my-app hibernates it: everything is kept on disk, it holds no memory, and doz up (or attach, or wake) \
+        brings it back with its sessions where they were. --sleep keeps its RAM for an even quicker wake. --shutdown is \
+        a cold stop that keeps the disk; running programs end (asked unless -y). Works on a try.
+        """)
+    @OptionGroup var g: GlobalOptions
+    @Argument var name: String
+    @Flag(name: .long, help: "A cold stop that keeps the disk; running programs end (asked unless -y).") var shutdown = false
+    @Flag(name: .long, help: "Sleep instead: the RAM is kept (a quicker wake; it costs the memory).") var sleep = false
+    @Flag(name: [.short, .long], help: "Do not ask (with --shutdown).") var yes = false
+
+    func validate() throws {
+        if shutdown && sleep { throw ValidationError("--shutdown or --sleep, not both") }
+    }
+
+    var op: HostOp { shutdown ? .shutdown : sleep ? .sleep : .hibernate }
+
+    func run() async throws {
+        if shutdown {
+            try await requireSandbox(name, g)
+            try confirm("Shut down \(name)? Its running programs end (the disk is kept).", yes: yes, g)
+        }
+        _ = try lifecycle(op, name, g)
+    }
+}
+
 struct Wake: AsyncParsableCommand {
     static let configuration = CommandConfiguration(abstract: "Wake from sleep or hibernation (~0.3 s), sessions and pids where they were.")
     @OptionGroup var g: GlobalOptions
@@ -458,9 +544,47 @@ struct Remove: AsyncParsableCommand {
     @Flag(name: [.short, .long], help: "Do not ask.") var yes = false
     func run() async throws {
         try await requireSandbox(name, g)
+        let folder = await tryFolder(name, g)
         try confirm("Remove \(name) and everything it has on disk (disks, restore points, state)?", yes: yes, g)
         _ = try lifecycle(.rm, name, g)
+        cleanUpTryFolder(folder, g)
     }
+}
+
+/// 617: the folder Dozer made for a try (nil: not a try, or a folder the person chose).
+struct TryFolder { var path: String; var wasEmpty: Bool }
+func tryFolder(_ name: String, _ g: GlobalOptions) async -> TryFolder? {
+    var r = HostRequest(.ls)
+    r.withSessions = false
+    let rows = (try? decode(try await query(r, g), [SandboxInfo].self, g)) ?? []
+    guard let p = rows.first(where: { $0.name == name && $0.trial == true })?.trialFolder,
+          FileManager.default.fileExists(atPath: p) else { return nil }
+    return TryFolder(path: p, wasEmpty: Workspace.isEmptyOrMissing(p))
+}
+
+/// 617 (owner): a removed try's own folder — gone when empty (the host removes it with the sandbox; this says so);
+/// asked about when it holds files (default: keep, saying where); kept off a terminal, said.
+func cleanUpTryFolder(_ folder: TryFolder?, _ g: GlobalOptions) {
+    guard let folder else { return }
+    let p = folder.path
+    let shown = DisplayPath.tilde(p)
+    if !FileManager.default.fileExists(atPath: p) || Workspace.isEmptyOrMissing(p) {
+        try? FileManager.default.removeItem(atPath: p)
+        if folder.wasEmpty, !g.json, !g.quiet { Out.stdout("removed its empty folder \(shown)\n") }
+        return
+    }
+    let count = ((try? FileManager.default.subpathsOfDirectory(atPath: p)) ?? []).filter { !$0.hasSuffix(".DS_Store") }.count
+    let asker = Asker(yes: false, json: g.json)
+    if asker.interactive, asker.yesNo("Its folder \(shown) holds \(count) item\(count == 1 ? "" : "s") the agent made. Delete it too?", default: false) {
+        do {
+            try FileManager.default.removeItem(atPath: p)
+            Out.stdout("removed its folder \(shown)\n")
+        } catch {
+            Out.stderr("[doz] could not remove \(shown): \(error.localizedDescription)\n")
+        }
+        return
+    }
+    if !g.json && !g.quiet { Out.stdout("kept its folder \(shown) (\(count) item\(count == 1 ? "" : "s"))\n") }
 }
 
 struct Up: AsyncParsableCommand {
@@ -478,6 +602,8 @@ struct Up: AsyncParsableCommand {
     @Option(name: .long, help: "The session to attach to (default: the image's own).") var session: String?
     @Flag(name: [.short, .customLong("detach")], help: "Do not attach.") var detach = false
     @Option(name: .long, help: "The key that detaches: ctrl-] (default), ctrl-<letter>, or none.") var detachKey = "ctrl-]"
+    @Flag(name: .long, help: "Make nothing: print the plan of the sandbox it would create — the command, its doz_project.yaml, what it can reach (--json: as data).")
+    var dryRun = false
     @Argument(parsing: .postTerminator, help: "A program for a NEW session instead of the default one.") var command: [String] = []
 
     func run() async throws {
@@ -525,6 +651,9 @@ struct Up: AsyncParsableCommand {
                 if !allowWords.isEmpty { o.allow = (o.allow ?? []) + allowWords }       // 597 (the file's github: first, the flags after)
                 if let s = try create.sandboxSettings() { o.settings = (o.settings ?? [:]).merging(s) { _, flag in flag } }
                 try create.applyPrompt(to: &o)
+                if !create.key.isEmpty { o.keys = create.key }          // 617: custom keys given here win over the file's
+                try create.applyModelSource(to: &o)                       // 617 (models@1)
+                if dryRun { printPlan(try await requestPlan(PlanRequest(purpose: "up", name: name, create: o), g), g); return }
                 // 594: doz_project.yaml's image and account are checked like any create.
                 try preflightAgentAccount(&o, g)
                 if create.rebuild && create.useCurrent { throw ValidationError("--rebuild or --use-current, not both") }
@@ -532,6 +661,7 @@ struct Up: AsyncParsableCommand {
                 r.create = o
             } else {
                 var o = try create.options(defaultImage: DozerSettings.load().string(SettingKey.defaultImage) ?? "lab")
+                if dryRun { printPlan(try await requestPlan(PlanRequest(purpose: "up", name: name, create: o), g), g); return }
                 try preflightAgentAccount(&o, g)
                 _ = try await chooseImage(&o, rebuild: create.rebuild, useCurrent: create.useCurrent, g)
                 r.create = o
@@ -544,6 +674,11 @@ struct Up: AsyncParsableCommand {
             }
             noteWorkspace(info, isolatedAsked: create.isolated, g)
         } else {
+            if dryRun {
+                if g.json { Out.json(["name": .string(name), "exists": .bool(true)] as [String: JSONValue]) }
+                else { Out.stdout("\(name) exists — doz up starts or wakes it and attaches; nothing would be made\n") }
+                return
+            }
             if create.givenAny && !g.quiet {
                 Out.stderr("[doz] \(name) exists — its image and settings are kept (the options apply only to a new sandbox)\n")
             }

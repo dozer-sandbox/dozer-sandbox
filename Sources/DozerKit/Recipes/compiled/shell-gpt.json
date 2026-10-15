@@ -1,0 +1,356 @@
+{
+  "args" : {
+    "version" : {
+      "buildArg" : "SHELL_GPT_VERSION",
+      "default" : "1.5.1",
+      "description" : "The ShellGPT release Dozer installs (its pin).",
+      "pattern" : "[0-9]+\\.[0-9]+(\\.[0-9]+)?([-+][0-9A-Za-z.-]+)?"
+    }
+  },
+  "author" : "TheR1D",
+  "capabilities" : [
+    {
+      "config" : {
+        "dozer" : {
+          "excluded" : [
+
+          ],
+          "model" : {
+            "hosts" : [
+              {
+                "host" : "api.openai.com",
+                "reason" : "OpenAI — when the sandbox's key is OpenAI's"
+              },
+              {
+                "host" : "api.x.ai",
+                "reason" : "xAI — when the sandbox's key is xAI's"
+              },
+              {
+                "host" : "generativelanguage.googleapis.com",
+                "reason" : "Google AI — when the sandbox's key is Google AI's"
+              },
+              {
+                "host" : "openrouter.ai",
+                "reason" : "OpenRouter — when the sandbox's key is OpenRouter's"
+              },
+              {
+                "host" : "ai-gateway.vercel.sh",
+                "reason" : "Vercel AI Gateway — when the sandbox's key is Vercel AI Gateway's"
+              }
+            ],
+            "id" : "model:shell-gpt",
+            "phrase" : "talk to your AI model",
+            "summary" : "ShellGPT's model — the provider or gateway its key is for (OpenAI, xAI, Google AI, OpenRouter or Vercel AI Gateway), with an API key. Needed for ShellGPT to answer.",
+            "title" : "Talk to its model provider"
+          },
+          "update" : [
+
+          ]
+        },
+        "runtime" : {
+          "allow" : [
+            "api.openai.com:443",
+            "api.x.ai:443",
+            "generativelanguage.googleapis.com:443",
+            "openrouter.ai:443",
+            "ai-gateway.vercel.sh:443"
+          ]
+        }
+      },
+      "type" : "com.docker.sandbox/network-policy@1"
+    },
+    {
+      "config" : {
+        "apiKey" : {
+          "inject" : [
+            {
+              "domain" : "api.x.ai",
+              "format" : "Bearer %s",
+              "header" : "authorization"
+            }
+          ],
+          "name" : "XAI_API_KEY",
+          "proxyManaged" : true
+        },
+        "dozer" : {
+          "accounts" : [
+            "key"
+          ]
+        },
+        "phase" : "runtime",
+        "service" : "xai"
+      },
+      "description" : "xAI API access",
+      "type" : "com.docker.sandbox/credential@1"
+    },
+    {
+      "config" : {
+        "path" : "/home/agent/.config/shell_gpt"
+      },
+      "type" : "com.docker.sandbox/volume@1"
+    },
+    {
+      "config" : {
+        "binary" : "sgpt",
+        "integrity" : "sha512-wtiD9Hjrac0l5s1jfrEzncC0o7Wl61cJM/22qeBHKya9eYsJ7cxBk0wxRRXilNbON/2lrJaM1onMNWApQcVBNg==",
+        "kind" : "pypi",
+        "package" : "shell-gpt",
+        "requirements" : [
+          "annotated-doc==0.0.5 --hash=sha256:117bac03a25ede5df5440e855b32d556049ca169ead221505badf432fed4b101",
+          "annotated-types==0.8.0 --hash=sha256:f072f4d804ea359e4eaf198b1af7a8b0943881a87f31bb764f8bf219bb9419e0",
+          "anyio==4.15.1 --hash=sha256:6152fdbbf9a77fdec97731721bebf7c4c44f7c29b424b0065826173efc7ed101",
+          "certifi==2026.7.22 --hash=sha256:62f22742b58a1a33014a2b6b706588a8d7e2a88ae7bd1a6ebe8c992928483775",
+          "click==8.5.0 --hash=sha256:255bc9599cf7748b4b1a446ccc735421bd08a2ae529a8b88597d3de5664ee360",
+          "distro==1.9.0 --hash=sha256:7bffd925d65168f85027d8da9af6bddab658135b840670a223589bc0c8ef02b2",
+          "h11==0.16.0 --hash=sha256:63cf8bbe7522de3bf65932fda1d9c2772064ffb3dae62d55932da54b31cb6c86",
+          "httpcore==1.0.9 --hash=sha256:2d400746a40668fc9dec9810239072b40b4484b640a8c38fd654a024c7a1bf55",
+          "httpx==0.28.1 --hash=sha256:d909fcccc110f8c7faf814ca82a9a4d816bc5a6dbfea25d6591d6985b8ba59ad",
+          "idna==3.20 --hash=sha256:ab7ae7122974553370f0bdb919e1a960b2cd1bc1ef0276416d896db81c14582c",
+          "jiter==0.17.0 --hash=sha256:4e3f052c671d5f425cca5ea5901cf11a831369fba4a55a3862cab93c323b4c3b",
+          "markdown-it-py==4.2.0 --hash=sha256:9f7ebbcd14fe59494226453aed97c1070d83f8d24b6fc3a3bcf9a38092641c4a",
+          "mdurl==0.1.2 --hash=sha256:84008a41e51615a49fc9966191ff91509e3c40b939176e643fd50a5c2196b8f8",
+          "openai==2.54.0 --hash=sha256:89089789197ccdb87f173a03145ed1598d00795220c93e96cf712b1cbf5e5f2b",
+          "prompt_toolkit==3.0.53 --hash=sha256:01c0891d7f9237d5e339f7d3e42cdae80b7534abb1c7c0e3352efba6231492f2",
+          "pydantic==2.14.1 --hash=sha256:9195d967ec791692a04438115466764fb8b9a27b31f14a760437694f40d6b454",
+          "pydantic_core==2.50.1 --hash=sha256:409e0ea40ec30d9158f33574fd758e689f6045a0f2596701828c27816ca9687d",
+          "pygments==2.21.0 --hash=sha256:2363c69b61c4a97c838da3b130dcd6468f4848992b21a82f2a63ec34377137d9",
+          "rich==13.9.4 --hash=sha256:6049d5e6ec054bf2779ab3358186963bac2ea89175919d699e378b99738c2a90",
+          "shell_gpt==1.5.1 --hash=sha256:f7bf429e289d878e8094adf9826dec1d28f3c69438a0d85446bc043e4f052b83",
+          "shellingham==1.5.4 --hash=sha256:7ecfff8f2fd72616f7481040475a65b2bf8af90a56c89140852d1120324e8686",
+          "sniffio==1.3.1 --hash=sha256:2f6da418d1f1e0fddd844478f41680e794e6051915791a034ff65e5f100525a2",
+          "tqdm==4.70.1 --hash=sha256:c293e525e6fef9c20e8728fd4612df02a0aa31bb5fe91ecd93e123b1b7bffa73",
+          "typer==0.27.3 --hash=sha256:e50022f28b82a86313e54501317a1db64bf8f8d036ff8cfe5ca7e47675454aff",
+          "typing-inspection==0.4.4 --hash=sha256:65b8397ba37ccbce054456aaccddfc91e6e3083c92824df348d96ca832f3f147",
+          "typing_extensions==4.16.0 --hash=sha256:481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8",
+          "wcwidth==0.9.2 --hash=sha256:674b518af28d38ee645ff97b74f5760abee5fad4bac74413bfc4b881ef2ce724"
+        ]
+      },
+      "type" : "com.dozersandbox/install@1"
+    },
+    {
+      "config" : {
+        "check" : {
+          "argv" : [
+            "sgpt",
+            "say ok"
+          ],
+          "expect" : "DOZ_FAKE_OK"
+        },
+        "command" : [
+          "sgpt"
+        ],
+        "env" : {
+
+        },
+        "no_prompts_args" : [
+
+        ],
+        "passthrough" : [
+          "--version",
+          "--help"
+        ],
+        "session" : "shell",
+        "state_env" : {
+
+        },
+        "status" : "none",
+        "verify" : [
+          {
+            "argv" : [
+              "/opt/shell-gpt/venv/bin/pip",
+              "show",
+              "shell-gpt"
+            ],
+            "expect" : "Version: ${{ kit.args.version }}"
+          }
+        ]
+      },
+      "type" : "com.dozersandbox/launch@1"
+    },
+    {
+      "config" : {
+        "methods" : [
+          {
+            "accounts" : [
+              "key"
+            ],
+            "checked" : "2026-10-14",
+            "keys_page" : "https://console.x.ai/",
+            "kind" : "api-key",
+            "note" : "ShellGPT speaks OpenAI's API; Dozer points it at the chosen provider's or gateway's (API_BASE_URL) and puts the key's placeholder under OPENAI_API_KEY too. On xAI (the default) the model is grok-4-1-fast (DEFAULT_MODEL; doz try --model, or sgpt --model).",
+            "provider" : "xai"
+          },
+          {
+            "accounts" : [
+              "openai-key"
+            ],
+            "checked" : "2026-10-14",
+            "keys_page" : "https://platform.openai.com/api-keys",
+            "kind" : "api-key",
+            "note" : "ShellGPT through OpenAI: doz try shell-gpt --provider openai (or choose it in the try setup); the model with --model.",
+            "provider" : "openai"
+          },
+          {
+            "accounts" : [
+              "key"
+            ],
+            "checked" : "2026-10-14",
+            "keys_page" : "https://aistudio.google.com/apikey",
+            "kind" : "api-key",
+            "note" : "ShellGPT through Google AI: doz try shell-gpt --provider google (or choose it in the try setup); the model with --model.",
+            "provider" : "google"
+          },
+          {
+            "accounts" : [
+              "key"
+            ],
+            "checked" : "2026-10-14",
+            "keys_page" : "https://openrouter.ai/keys",
+            "kind" : "api-key",
+            "note" : "ShellGPT through OpenRouter: doz try shell-gpt --gateway openrouter (or choose it in the try setup); the model with --model.",
+            "provider" : "openrouter"
+          },
+          {
+            "accounts" : [
+              "key"
+            ],
+            "checked" : "2026-10-14",
+            "keys_page" : "https://vercel.com/docs/ai-gateway/authentication-and-byok",
+            "kind" : "api-key",
+            "note" : "ShellGPT through Vercel AI Gateway: doz try shell-gpt --gateway vercel-ai-gateway (or choose it in the try setup); the model with --model.",
+            "provider" : "vercel-ai-gateway"
+          }
+        ]
+      },
+      "type" : "com.dozersandbox/auth@1"
+    },
+    {
+      "config" : {
+        "entries" : [
+          {
+            "checked" : "2026-10-14",
+            "endpoint" : "v1",
+            "evidence" : "make recipe-check: its check turn through a stand-in OpenRouter (doz try with --gateway openrouter; models@1)",
+            "gateway" : "openrouter",
+            "how" : {
+              "env" : {
+                "API_BASE_URL" : "${{ dozer.gateway.endpoint.v1 }}",
+                "DEFAULT_MODEL" : "${{ dozer.model }}"
+              }
+            },
+            "level" : "verified",
+            "shape" : "openai-chat"
+          },
+          {
+            "checked" : "2026-10-14",
+            "endpoint" : "v1",
+            "evidence" : "make recipe-check: its check turn through a stand-in Vercel AI Gateway (doz try with --gateway vercel-ai-gateway; models@1)",
+            "gateway" : "vercel-ai-gateway",
+            "how" : {
+              "env" : {
+                "API_BASE_URL" : "${{ dozer.gateway.endpoint.v1 }}",
+                "DEFAULT_MODEL" : "${{ dozer.model }}"
+              }
+            },
+            "level" : "verified",
+            "shape" : "openai-chat"
+          }
+        ]
+      },
+      "type" : "com.dozersandbox/gateways@1"
+    },
+    {
+      "config" : {
+        "default" : "xai",
+        "shapes" : [
+          {
+            "env" : {
+              "API_BASE_URL" : "${{ dozer.base_url }}",
+              "DEFAULT_MODEL" : "${{ dozer.model }}"
+            },
+            "key_env" : [
+              "OPENAI_API_KEY"
+            ],
+            "shape" : "openai-chat"
+          }
+        ]
+      },
+      "type" : "com.dozersandbox/models@1"
+    },
+    {
+      "config" : {
+        "checked" : "2026-10-14"
+      },
+      "type" : "com.dozersandbox/currency@1"
+    },
+    {
+      "config" : {
+        "categories" : [
+          "terminal-tool"
+        ],
+        "default_base" : "debian",
+        "icon" : "shell-gpt",
+        "kind" : "ai-tool",
+        "platforms" : {
+          "glibc" : true,
+          "musl" : false
+        },
+        "tags" : [
+          {
+            "checked" : "2026-10-14",
+            "evidence" : "A2 VM proof: its check turn answered DOZ_FAKE_OK through the fake provider (make recipe-check; probes/617-*/recipes/shell-gpt)",
+            "level" : "verified",
+            "notes" : [
+              "sgpt PROMPT"
+            ],
+            "tag" : "headless"
+          }
+        ],
+        "terms" : "Your API key of the provider or gateway you choose (xAI by default)."
+      },
+      "type" : "com.dozersandbox/directory@1"
+    },
+    {
+      "config" : {
+        "docs" : "https://github.com/TheR1D/shell_gpt",
+        "intro" : "ShellGPT (`sgpt`) answers questions and turns a request into a shell command. It answers in your shell and exits.",
+        "steps" : [
+          {
+            "command" : "sgpt \"say ok\"",
+            "text" : "Check it answers."
+          },
+          {
+            "command" : "sgpt --code \"a python function that adds two numbers\"",
+            "text" : "Ask for code only."
+          },
+          {
+            "command" : "sgpt --chat demo \"my name is Ada\"",
+            "text" : "A conversation that remembers — say something, then ask about it."
+          },
+          {
+            "command" : "sgpt --chat demo \"what is my name?\"",
+            "text" : "Ask about it."
+          }
+        ],
+        "tips" : [
+          "`sgpt --shell \"find the five largest files here\"` suggests a command and asks before it runs it.",
+          "`sgpt --repl temp` opens a chat in the terminal.",
+          "The model is `DEFAULT_MODEL`, set for the key you chose."
+        ]
+      },
+      "type" : "com.dozersandbox/guide@1"
+    }
+  ],
+  "description" : "A command-line assistant that answers questions and turns requests into shell commands (sgpt), on an xAI, OpenAI, Google AI, OpenRouter or Vercel AI Gateway key.",
+  "displayName" : "ShellGPT",
+  "id" : "ther1d/shell-gpt",
+  "kind" : "workload",
+  "licenses" : [
+    "MIT"
+  ],
+  "provides" : [
+    "com.dozersandbox/shell-gpt@${{ kit.args.version }}"
+  ],
+  "schema" : 2,
+  "sourceUrl" : "https://github.com/TheR1D/shell_gpt"
+}

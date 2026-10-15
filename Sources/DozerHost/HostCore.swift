@@ -45,6 +45,8 @@ public actor HostCore {
     var watchers: [String: LoginWatcher] = [:]
     /// 599i: one session per ChatGPT account (its sandboxes share it).
     var chatgptSessions: [String: ChatGPTSession] = [:]
+    /// 617 (§7): each account's reads from its source — generation and last outcome (never a value).
+    nonisolated let secretSourceState = SecretSourceState()
     /// 611: what this build leaves out (a public build: no ChatGPT sign-in of its own). Tests set it.
     var buildFlavor: BuildFlavor = .current
     public func setBuildFlavor(_ f: BuildFlavor) { buildFlavor = f; chatgptSessions = [:] }
@@ -84,6 +86,10 @@ public actor HostCore {
     nonisolated let coldStarts = ColdStarts()
     /// 599: the session bridges' limits and recent actions (`HostCore+Bridges`).
     nonisolated let bridgeState = BridgeState()
+    /// 617 (RP-1): the standing web-port forwards (`HostCore+Ports`).
+    nonisolated let portTable = PortForwardTable()
+    /// 617 (RP-1): the ports a program in each running sandbox listens on, and when that was read (`refreshServing`).
+    var portServing: [String: (checked: Date, ports: Set<Int>)] = [:]
     /// 609: which viewer set each session's size last (the attach relay re-applies the typist's).
     nonisolated let sizeOwners = SessionSizeOwners()
     /// 612: the programs' status per sandbox and session, the status watchers (keyed sandbox NUL session), the
@@ -261,6 +267,9 @@ public actor HostCore {
         if case .phase(let p) = e {
             if p == .running { Task { await self.refreshStatusWatches(name) } }
             if p == .off { clearStatuses(name) }
+            // 617 (RP-1): forwards listen while the sandbox runs, and only then.
+            if p == .running { Task { await self.bindPorts(name, settle: true) } }
+            if [.off, .asleep, .hibernated, .failed].contains(p) { unbindPorts(name, why: PhaseName.label(p)) }
         }
         if let he = HostEvent(e, sandbox: name) {
             managed[name]?.boot?.record(he)
@@ -370,7 +379,7 @@ public actor HostCore {
         let (def, kinds) = accountKinds()
         switch kinds[account == "default" ? def : account] {
         case .mac?, .codexMac?: return "mac"
-        case .apiKey?, .openaiKey?: return "api-key"
+        case .apiKey?, .openaiKey?, .key?: return "api-key"
         case .setupToken?: return "setup-token"
         case nil: return account == "default" && (def.isEmpty || def == "none") ? "none" : nil
         default: return nil
@@ -434,6 +443,17 @@ public actor HostCore {
                            foreignCredentials: egress.map { $0.vault.foreignSightings.count }.flatMap { $0 == 0 ? nil : $0 })
         i.agent = m.sandbox.spec.imageSpec?.name
         i.credentialProblem = credentialProblem(m)
+        i.trial = m.config.trial
+        i.trialFolder = m.config.trialFolder
+        i.extraKeys = m.config.extraKeys
+        // 617 (RP-1): whether something serves each port — read in the background, never on this call's path.
+        if phase == .running, !readOnly, !wantedPorts(m).isEmpty,
+           portServing[m.name].map({ Date().timeIntervalSince($0.checked) > 15 }) ?? true {
+            let name = m.name
+            Task { await self.refreshServing(name, maxAge: 15) }
+        }
+        let ports = portRows(m, running: phase == .running)                // 617 (RP-1)
+        i.ports = ports.isEmpty ? nil : ports
         statusFields(m.name, into: &i)                                 // 612: from memory, never the guest
         i.workspaceRules = workspaceRulesInfo(m, phase: phase)       // 599g: two stats when there are no rules
         i.workspaceView = Self.workspaceViewState(running: phase == .running, workspace: m.config.workspace != nil,
@@ -644,6 +664,19 @@ public actor HostCore {
             return try JSONValue(encoding: SessionScreen(name: m.name, saved))
         case .bootLog:
             return try bootLog(r)
+        case .buildLog:
+            // 617: the log of the build that made an image (`image`), or a sandbox's image (`name`) — or its last attempt.
+            let image: String
+            if let i = r.image {
+                guard BuildLogs.isValidImage(i) else { throw HostError(.invalid, "not an image name: \(i)") }
+                image = i
+            } else {
+                image = try get(r.name).config.image
+            }
+            guard let log = BuildLogs.read(image, store: store) else {
+                throw HostError(.notFound, "no build log of \(image) is kept — one is kept each time this store prepares an image (doz image bake \(image))")
+            }
+            return try JSONValue(encoding: log)
         case .resources:
             return try JSONValue(encoding: await resourceReport())
         case .resourcesRemove, .resourcesClean:
@@ -682,6 +715,18 @@ public actor HostCore {
             return try await point(r, emit: emit)
         case .imageList:
             return try JSONValue(encoding: images())
+        case .copy:
+            throw HostError(.invalid, "copy streams on its own connection (doz get / doz put)")
+        case .ports:
+            return try JSONValue(encoding: try await ports(r))             // 617 (RP-1)
+        case .plan:
+            guard let p = r.planRequest, PlanRequest.purposes.contains(p.purpose) else { throw HostError(.invalid, "plan: what to plan (purpose new, create, up, init or try)") }
+            return try JSONValue(encoding: plan(p))
+        case .plans:
+            guard let ps = r.planRequests, ps.count <= 128, ps.allSatisfy({ PlanRequest.purposes.contains($0.purpose) }) else {
+                throw HostError(.invalid, "plans: at most 128 plans, each with a purpose (new, create, up, init or try)")
+            }
+            return try JSONValue(encoding: plans(ps))
         case .bases:
             let s = store
             let check = preparedCheck
@@ -741,9 +786,13 @@ public actor HostCore {
         case .accountUse:
             let m = try get(r.name)
             guard let a = r.account, !a.isEmpty else { throw HostError(.invalid, "which account? (a name, default or none)") }
+            // 617 (D6): a custom key attached beside the account, or taken off.
+            if r.extra == true || r.removeExtra == true { return try JSONValue(encoding: try useExtraKey(m, a, attach: r.extra == true)) }
             return try JSONValue(encoding: try await useAccount(m, a))
         case .accountVerify:
             return try JSONValue(encoding: try await verifyAccount(r))
+        case .accountRefresh:
+            return try JSONValue(encoding: try await refreshAccount(r))
         case .accountKeepalive:
             return try JSONValue(encoding: try setKeepalive(r))
         case .console:
@@ -847,11 +896,22 @@ public actor HostCore {
             guard !buildFlavor.isPublic else { throw HostError(.invalid, BuildFlavor.audioMissing) }   // 611
             try MacAudio.installSoundKernel(into: spec.kernelCacheDirectory ?? StoreLayout(spec: spec).kernels)
         }
+        // 617 (models@1): a model source chosen (`--provider`/`--gateway`; `--model` alone: the default source) — the
+        // account becomes a key of that source: the one given, else its default.
+        let modelSource = o.modelSource ?? (o.model != nil ? AgentCredentials.sources(spec.imageSpec?.name)?.first : nil)
+        if let source = modelSource {
+            guard spec.network.policy != nil else { throw HostError(.invalid, "a model provider needs a proxied network: its key lives in the host's proxy") }
+            let r = AgentCredentials.account(forSource: source, model: o.model, image: spec.imageSpec?.name, account: o.account, file: accountStore.load())
+            if let p = r.problem { throw HostError(.invalid, p.text + " — " + p.fix) }
+            if let n = r.name { o.account = n }
+        }
         // 594: the agent's credential prerequisite, before anything is made (pi: an API-key account).
         if spec.network.policy != nil {
             let (def, kinds) = accountKinds()
+            let (providers, providerDefaults) = accountProviders()
             if let p = AgentCredentials.createProblem(image: spec.imageSpec?.name, account: o.account, defaultAccount: def, kinds: kinds,
-                                                      openaiDefault: openaiDefault(for: spec.imageSpec?.name), codexMac: AgentCredentials.provider(spec.imageSpec?.name) == "openai" && codexMacSignedIn()) {
+                                                      openaiDefault: openaiDefault(for: spec.imageSpec?.name), codexMac: AgentCredentials.codexFlow(spec.imageSpec?.name) && codexMacSignedIn(),
+                                                      providers: providers, providerDefaults: providerDefaults) {
                 throw HostError(.invalid, p)
             }
         }
@@ -885,6 +945,29 @@ public actor HostCore {
             ?? cfg.imageChoice.flatMap { $0.isDockerfile ? Dockerfiles.record($0.base, store)?.dockerfile : nil }
         // 599: its own values of the per-sandbox settings (the clipboard and browser bridges, tmux).
         if let s = o.settings, !s.isEmpty { cfg.settings = try Self.checkedSandboxSettings(s) }
+        // 617 (D6): custom keys beside the account — each a custom key account, each of its hosts allowed on purpose.
+        if let keys = o.keys, !keys.isEmpty {
+            guard let policy = spec.network.policy else { throw HostError(.invalid, "--key needs a proxied network: a custom key lives in the host's proxy") }
+            let file = accountStore.load()
+            for k in keys {
+                guard let c = file.accounts.first(where: { $0.name == k })?.custom else {
+                    throw HostError(.notFound, "no custom key \(k) (doz account add \(k) --custom --host H --env-var V)")
+                }
+                let refused = c.hosts.filter { policy.evaluateConnection(host: $0, port: 443).kind == .deny }
+                if !refused.isEmpty {
+                    throw HostError(.invalid, "the custom key \(k) goes to \(refused.joined(separator: ", ")), which \(name) may not reach — add "
+                                    + refused.map { "--allow site:\($0)" }.joined(separator: " "))
+                }
+            }
+            var seen = Set<String>()
+            cfg.extraKeys = keys.filter { seen.insert($0).inserted }
+        }
+        if let model = o.model, let source = modelSource { cfg.models = [source: model] }     // 617 (models@1)
+        if o.trial == true {                           // 617 (D14)
+            cfg.trial = true
+            // The try's own folder — made now by Dozer, so its delete may offer to remove it (never one of yours).
+            if let p = prepared, p.created { cfg.trialFolder = p.path }
+        }
         try cfg.write(store.configFile(name))
         let m = try adopt(cfg)
         var createDetail = ["network": cfg.networkName]
@@ -1071,7 +1154,15 @@ public actor HostCore {
         case .reset:
             action = ("reset to image", { try await sb.resetToImage() })
         case .rm:
-            action = ("delete sandbox", { try await sb.delete() })
+            // 617: a try's own folder (Dozer made it) goes with it while it is EMPTY — the dashboard's Delete and `doz rm`
+            // alike; one that holds the agent's files is the person's to keep or delete (the CLI asks; the page says where).
+            let folder = m.config.trial == true ? m.config.trialFolder : nil
+            action = ("delete sandbox", {
+                try await sb.delete()
+                if let f = folder, FileManager.default.fileExists(atPath: f), Workspace.isEmptyOrMissing(f) {
+                    try? FileManager.default.removeItem(atPath: f)
+                }
+            })
         default:
             throw HostError(.invalid, "not a lifecycle operation: \(op.rawValue)")
         }
@@ -1387,17 +1478,70 @@ public actor HostCore {
     /// (`skip`), and never over the caller's own `-e DOZ_CLAUDE_PERMISSIONS=…`.
     static func withClaudePermissions(_ env: [String: String], imageSpec: String?,
                                       settings: @autoclosure () -> DozerSettings = .load()) -> [String: String] {
-        // 599i: Codex's launcher reads DOZ_CODEX_PERMISSIONS (the setting codex.permissions) the same way.
-        if imageSpec.flatMap({ ImageChoice.parse($0) })?.agent == .codex {
-            guard env["DOZ_CODEX_PERMISSIONS"] == nil, let mode = settings().string(SettingKey.codexPermissions), mode != "skip" else { return env }
-            var e = env
-            e["DOZ_CODEX_PERMISSIONS"] = mode
-            return e
-        }
-        guard imageSpec.flatMap({ ImageChoice.parse($0) })?.agent == .claudeCode, env["DOZ_CLAUDE_PERMISSIONS"] == nil else { return env }
-        guard let mode = settings().string(SettingKey.claudePermissions), mode != "skip" else { return env }
+        // 599i: Codex's launcher reads DOZ_CODEX_PERMISSIONS (the setting codex.permissions) the same way. 617: every
+        // agent whose recipe has a permissions setting — its launcher's DOZ_<SHORT>_PERMISSIONS (gemini.permissions →
+        // DOZ_GEMINI_PERMISSIONS); pi has none.
+        guard let r = imageSpec.flatMap({ ImageChoice.parse($0) })?.agent.recipe, let key = r.permissionsSettingKey,
+              env[r.permissionsVariable] == nil, let mode = settings().string(key), mode != "skip" else { return env }
         var e = env
-        e["DOZ_CLAUDE_PERMISSIONS"] = mode
+        e[r.permissionsVariable] = mode
+        return e
+    }
+
+    /// 617 (owner: "I couldn't use its clipboard" in a Grok try): a session's terminal IS an OSC 52 sink while the
+    /// clipboard bridge is on (the attach relay takes the copy to the Mac). Grok Build decides its copy route from its
+    /// surroundings: a Dozer VM has no DISPLAY, no SSH and no container marker, so it took its desktop routes (X11, then
+    /// xclip/xsel/wl-copy), which have nothing to reach, and never sent OSC 52 — no copy and no read reached the host.
+    /// `grok wrap` tells the Grok it runs that its OSC 52 is intercepted with `GROK_OSC52_SINK=1` (its pty_wrap; read in
+    /// its clipboard code), which is exactly what the relay does. Never over the caller's own value.
+    public static let clipboardSinkVariables = ["GROK_OSC52_SINK"]
+
+    /// 617 (owner: Gemini CLI warned "True color (24-bit) support not detected"): every session's terminal is 24-bit —
+    /// Dozer needs macOS 26, whose Terminal.app, Ghostty, iTerm2 and the dashboard's ghostty-web all draw it, and
+    /// deckhold's emulator keeps it. Set at session open (never baked: no bake key changes); never over the caller's.
+    static func withTrueColour(_ env: [String: String]) -> [String: String] {
+        var e = env
+        if e["COLORTERM"] == nil { e["COLORTERM"] = "truecolor" }
+        return e
+    }
+
+    /// 617 (owner: a fresh try shows no refusal): the agent's recipe's `launch.session_env` (its own switch for its
+    /// self-update check — pi's `PI_SKIP_VERSION_CHECK`), and each `network.off_without` whose permission the sandbox's
+    /// policy does not have (Claude Code's error reports and usage data without "Send error reports"). A policy of
+    /// rules (before permissions) or no proxy: the off switches are not added (as before). Never over the caller's value.
+    static func withRecipeEnvironment(_ env: [String: String], imageSpec: String?, permissions: [String]?) -> [String: String] {
+        guard let r = imageSpec.flatMap({ ImageChoice.parse($0) })?.agent.recipe else { return env }
+        var e = env
+        for (k, v) in r.launch.sessionEnv ?? [:] where e[k] == nil { e[k] = v }
+        if let permissions {
+            for o in r.network.offWithout ?? [] where !permissions.contains(o.permission) {
+                for (k, v) in o.env where e[k] == nil { e[k] = v }
+            }
+        }
+        return e
+    }
+    func recipeEnvironment(_ env: [String: String], _ m: Managed) -> [String: String] {
+        var e = Self.withRecipeEnvironment(env, imageSpec: m.config.spec.imageSpec?.name, permissions: m.sandbox.egress?.policy.permissions)
+        // 617 (models@1): the chosen model source's settings (base URL, model), never over the caller's own value.
+        for (k, v) in modelSelection(m)?.env ?? [:] where e[k] == nil { e[k] = v }
+        return e
+    }
+
+    /// 617 (models@1): what this sandbox's recipe agent is set to use — the source of its account (its default source
+    /// when it has none it can use) and the model chosen for that source, else the source's default. nil: not a
+    /// models@1 recipe.
+    func modelSelection(_ m: Managed) -> ModelSelection? {
+        let image = m.sandbox.spec.imageSpec?.name
+        guard let r = image.flatMap({ ImageChoice.parse($0) })?.agent.recipe, r.models != nil,
+              var source = AgentCredentials.sources(image)?.first else { return nil }
+        if case .record(let a) = resolvedAccount(m, accountStore.load()), AgentCredentials.accepts(image, a),
+           let s = AgentCredentials.source(of: a) { source = s }
+        return r.selection(source: source, model: m.config.models?[source])
+    }
+    static func withClipboardSink(_ env: [String: String], on: Bool) -> [String: String] {
+        guard on else { return env }
+        var e = env
+        for v in clipboardSinkVariables where e[v] == nil { e[v] = "1" }
         return e
     }
 
@@ -1501,9 +1645,17 @@ public actor HostCore {
                 argv += ["--append-system-prompt", AgentPrompt.guestPromptPath]
             }
         }
+        if argv == m.config.defaultSession.argv { await deliverGuideNote(m) }    // 617.11: a shell tool's first steps, once
         argv += extraArguments
         // 599i: Codex's credentials for this session — its auth.json with placeholders only (or none).
         await deliverCodexAuth(m)
+        // 617 (§7): a key read on use (1Password, AWS, a command) is read now, beside the session's start, so the agent's
+        // first call does not wait for it (a fresh cached read makes this nothing).
+        if let vault = m.sandbox.egress?.vault {
+            // Keys only (GitHub's and ChatGPT's providers keep their own timing).
+            let ids = vault.allBindings.map(\.id).filter { $0 != CredentialBinding.github.id && $0 != CredentialBinding.chatgpt.id }
+            Task.detached { for id in ids { vault.prefetch(id) } }
+        }
         let size = TermSize(cols: r.cols ?? 120, rows: r.rows ?? 36)
         let workdir: String? = m.config.spec.imageSpec == nil && m.config.workspace != nil ? DozerImages.workspaceGuestPath : nil
         // A command the caller named (doz run NAME -- CMD, the dashboard's "run a command"): a program the
@@ -1517,8 +1669,10 @@ public actor HostCore {
         let t0 = ContinuousClock.now
         let started = Date()
         do {
+            let sink = Self.sandboxValue(m.config, SettingKey.clipboard).plain != "off"
             try await m.sandbox.openSession(session, argv: argv,
-                                            environment: Self.withClaudePermissions(r.environment ?? [:], imageSpec: m.config.spec.imageSpec?.name),
+                                            environment: Self.withTrueColour(recipeEnvironment(Self.withClipboardSink(Self.withClaudePermissions(r.environment ?? [:], imageSpec: m.config.spec.imageSpec?.name),
+                                                                                on: sink), m)),
                                             workingDirectory: r.workdir ?? workdir,
                                             user: r.user, size: size)
         } catch {
@@ -1558,7 +1712,7 @@ public actor HostCore {
         let first = try await ensureRunning(m, wake: r.wake ?? true, start: r.start ?? false, emit: emit)
         // 599i: `doz exec NAME -- codex exec …` works before any session has run (its auth.json, placeholders only).
         if m.config.imageChoice?.agent == .codex, (argv.first as NSString?)?.lastPathComponent == "codex" { await deliverCodexAuth(m) }
-        let ctx = Self.execContext(config: m.config, environment: Self.withClaudePermissions(r.environment ?? [:], imageSpec: m.config.spec.imageSpec?.name),
+        let ctx = Self.execContext(config: m.config, environment: recipeEnvironment(Self.withClaudePermissions(r.environment ?? [:], imageSpec: m.config.spec.imageSpec?.name), m),
                                    workdir: r.workdir, user: r.user)
         let t0 = ContinuousClock.now
         let res: ExecResult
@@ -1615,6 +1769,7 @@ public actor HostCore {
     // MARK: inspect
 
     private func detail(_ m: Managed) async throws -> SandboxDetail {
+        await refreshServing(m.name, maxAge: 4)       // 617 (RP-1): a look reads whether its web ports are served
         let i = await info(m, sessions: false)
         var sessions: [SessionRow]?
         var live: [SessionInfo]?
@@ -1631,7 +1786,7 @@ public actor HostCore {
                              directory: m.sandbox.layout.sandboxDirectory.path, bootLog: m.sandbox.bootLogURL.path,
                              snapshotBytes: Int64(status.snapshotBytes > 0 ? status.snapshotBytes : fileSize(m.sandbox.layout.snapshot)),
                              hasRootDisk: m.sandbox.hasRootDisk, defaultSession: m.config.defaultSession.name,
-                             agentPrompt: agentPromptReport(m), project: m.config.project)
+                             agentPrompt: agentPromptReport(m), project: m.config.project, guide: guide(m))
     }
 
     func credentials(_ m: Managed) -> [CredentialRow] {
@@ -1641,13 +1796,13 @@ public actor HostCore {
         let policy = effectivePolicy(m, file).rawValue
         let sightings = vault.foreignSightings
         let inUse: String? = {
-            if case .record(let a) = account { return a.kind.binding.id }
+            if case .record(let a) = account { return a.binding.id }
             return vault.allBindings.first { vault.hasSecret($0.id) }?.id
         }()
         return vault.allBindings.enumerated().map { i, b in
             var row = CredentialRow(binding: b.id, hosts: b.hosts, set: vault.hasSecret(b.id), source: m.config.credentialSources[b.id])
             row.policy = policy
-            if case .record(let a) = account, a.kind.binding.id == b.id {
+            if case .record(let a) = account, a.binding.id == b.id {
                 row.source = "account:\(a.name)"
                 row.account = a.name
             } else if case .missing(let n) = account, b.id == CredentialBinding.claudeOAuth.id {
@@ -1841,6 +1996,9 @@ public actor HostCore {
         cfg.credentialSources = [:]
         cfg.diedWithHostAt = nil
         cfg.placeholderHashes = nil
+        cfg.trial = nil                 // 617: a duplicate is kept on purpose — never a try; its custom keys (extraKeys) come along
+        cfg.trialFolder = nil
+        if spec.network.policy == nil { cfg.extraKeys = nil }
         if spec.network.policy != nil {
             switch o.account {
             case nil: if cfg.account == nil, m.config.spec.network.policy == nil { cfg.account = "default" }
@@ -1852,8 +2010,10 @@ public actor HostCore {
             }
             // 594: the agent's credential prerequisite (a duplicate keeps the source's account unless told).
             let (def, kinds) = accountKinds()
+            let (providers, providerDefaults) = accountProviders()
             if let p = AgentCredentials.createProblem(image: spec.imageSpec?.name, account: o.account ?? cfg.account ?? "none", defaultAccount: def, kinds: kinds,
-                                                      openaiDefault: openaiDefault(for: spec.imageSpec?.name), codexMac: AgentCredentials.provider(spec.imageSpec?.name) == "openai" && codexMacSignedIn()) {
+                                                      openaiDefault: openaiDefault(for: spec.imageSpec?.name), codexMac: AgentCredentials.codexFlow(spec.imageSpec?.name) && codexMacSignedIn(),
+                                                      providers: providers, providerDefaults: providerDefaults) {
                 throw HostError(.invalid, p)
             }
         } else {
@@ -2057,6 +2217,8 @@ public actor HostCore {
         try m.config.write(store.configFile(m.name))
         // 599d: "Use GitHub as you" / "Push to GitHub" take effect at once (turning it off revokes every placeholder).
         if AgentPermissions.gitHubMode(p.permissions) != egress.github?.mode { applyGitHub(m) }
+        // 617 (D6): a custom key goes only to hosts the policy allows — judged again now.
+        if m.config.extraKeys?.isEmpty == false { applyExtraKeys(m, accountStore.load()) }
         metrics?.record(run: metricsRun, action: "network policy", sandbox: m.name, image: m.config.image, startedAt: Date(), durationMs: 0,
                         detail: ["preset": p.preset ?? "custom", "rules": String(p.rules.count)])
         note(m.name, "network policy: \(p.preset ?? "custom") (\(p.rules.count) rules)")

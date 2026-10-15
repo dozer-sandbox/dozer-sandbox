@@ -1,0 +1,438 @@
+{
+  "$schema": "../../../../schema/dozer-icons-1.schema.json",
+  "schema": 1,
+  "icons": [
+    {
+      "id": "anthropic", "kind": "vendor", "name": "Anthropic",
+      "variants": { "mono": "anthropic.svg" },
+      "source": "Dozer's lettermark (DozerKit Lettermark)",
+      "terms": "https://www.anthropic.com/legal/trademark-guidelines",
+      "allowed": "lettermark", "checked": "2026-10-13",
+      "notes": "Anthropic's marks may be used only as it permits, in materials it approves beforehand, and never altered (colour included) — so not its mark, a neutral lettermark.",
+      "lettermark": { "text": "A", "frame": "square" }
+    },
+    {
+      "id": "openai", "kind": "vendor", "name": "OpenAI",
+      "variants": { "mono": "openai.svg" },
+      "source": "Dozer's lettermark (DozerKit Lettermark)",
+      "terms": "https://openai.com/brand/",
+      "allowed": "lettermark", "checked": "2026-10-13",
+      "notes": "OpenAI's brand guidelines license its marks only on their terms and send logo use to its partner communications team for permission — so a neutral lettermark. (The page refused a direct fetch; read from its indexed text.)",
+      "lettermark": { "text": "OA", "frame": "circle" }
+    },
+    {
+      "id": "google", "kind": "vendor", "name": "Google",
+      "variants": { "mono": "google.svg" },
+      "source": "Dozer's lettermark (DozerKit Lettermark)",
+      "terms": "https://partnermarketinghub.withgoogle.com/brands/google/trademarks-and-terms/trademark-guidelines-for-proper-usage/",
+      "allowed": "lettermark", "checked": "2026-10-13",
+      "notes": "Google's brand features need its approval and Google-approved artwork, never altered — so a neutral lettermark.",
+      "lettermark": { "text": "G", "frame": "hex" }
+    },
+    {
+      "id": "xai", "kind": "vendor", "name": "xAI",
+      "variants": { "mono": "xai.svg" },
+      "source": "Dozer's lettermark (DozerKit Lettermark)",
+      "terms": "https://x.ai/legal/brand-guidelines",
+      "allowed": "lettermark", "checked": "2026-10-13",
+      "notes": "xAI's guidelines allow its marks only to refer to it accurately and publish no licence for its logos in another maker's app — so, conservatively, a neutral lettermark. (The page refused a direct fetch; read from its indexed text.)",
+      "lettermark": { "text": "X", "frame": "diamond" }
+    },
+    {
+      "id": "claude-code", "kind": "product", "name": "Claude Code", "vendor": "anthropic",
+      "variants": { "mono": "claude-code.svg" },
+      "source": "Dozer's lettermark (DozerKit Lettermark)",
+      "terms": "https://www.anthropic.com/legal/trademark-guidelines",
+      "allowed": "lettermark", "checked": "2026-10-13",
+      "notes": "Anthropic's terms, as for its own mark.",
+      "lettermark": { "text": "CC", "frame": "square" }
+    },
+    {
+      "id": "codex", "kind": "product", "name": "Codex", "vendor": "openai",
+      "variants": { "mono": "codex.svg" },
+      "source": "Dozer's lettermark (DozerKit Lettermark)",
+      "terms": "https://openai.com/brand/",
+      "allowed": "lettermark", "checked": "2026-10-13",
+      "notes": "OpenAI's terms, as for its own mark.",
+      "lettermark": { "text": "Cx", "frame": "circle" }
+    },
+    {
+      "id": "antigravity", "kind": "product", "name": "Antigravity CLI", "vendor": "google",
+      "variants": { "mono": "antigravity.svg" },
+      "source": "Dozer's lettermark (DozerKit Lettermark)",
+      "terms": "https://partnermarketinghub.withgoogle.com/brands/google/trademarks-and-terms/trademark-guidelines-for-proper-usage/",
+      "allowed": "lettermark", "checked": "2026-10-13",
+      "notes": "Google's terms, as for its own mark.",
+      "lettermark": { "text": "A", "frame": "hex" }
+    },
+    {
+      "id": "gemini-cli", "kind": "product", "name": "Gemini CLI", "vendor": "google",
+      "variants": { "mono": "gemini-cli.svg" },
+      "source": "Dozer's lettermark (DozerKit Lettermark)",
+      "terms": "https://partnermarketinghub.withgoogle.com/brands/google/trademarks-and-terms/trademark-guidelines-for-proper-usage/",
+      "allowed": "lettermark", "checked": "2026-10-13",
+      "notes": "Google's terms, as for its own mark (the CLI's code is Apache-2.0; that licence grants no trademark rights).",
+      "lettermark": { "text": "Gm", "frame": "hex" }
+    },
+    {
+      "id": "grok-build", "kind": "product", "name": "Grok Build", "vendor": "xai",
+      "variants": { "mono": "grok-build.svg" },
+      "source": "Dozer's lettermark (DozerKit Lettermark)",
+      "terms": "https://x.ai/legal/brand-guidelines",
+      "allowed": "lettermark", "checked": "2026-10-13",
+      "notes": "xAI's terms, as for its own mark.",
+      "lettermark": { "text": "G", "frame": "diamond" }
+    },
+    {
+      "id": "pi", "kind": "product", "name": "pi",
+      "variants": { "mono": "pi.svg" },
+      "source": "Dozer's lettermark (DozerKit Lettermark)",
+      "terms": "https://github.com/earendil-works/pi",
+      "allowed": "lettermark", "checked": "2026-10-13",
+      "notes": "Open source (MIT); the licence covers the code, not a mark, and the project publishes no logo terms — so a neutral lettermark.",
+      "lettermark": { "text": "π", "frame": "octagon" }
+    },
+    {
+      "id": "fabric", "kind": "product", "name": "Fabric",
+      "variants": { "mono": "fabric.svg" },
+      "source": "Dozer's lettermark (DozerKit Lettermark)",
+      "terms": "https://github.com/danielmiessler/Fabric",
+      "allowed": "lettermark", "checked": "2026-10-14",
+      "notes": "Open source (MIT); the licence covers the code, not a mark, and the project publishes no logo terms — so a neutral lettermark.",
+      "lettermark": { "text": "F", "frame": "circle" }
+    },
+    {
+      "id": "openclaw", "kind": "product", "name": "OpenClaw",
+      "variants": { "mono": "openclaw.svg" },
+      "source": "Dozer's lettermark (DozerKit Lettermark)",
+      "terms": "https://github.com/openclaw/openclaw",
+      "allowed": "lettermark", "checked": "2026-10-14",
+      "notes": "Open source (MIT); the licence covers the code, not a mark, and no logo terms were found — so a neutral lettermark.",
+      "lettermark": { "text": "OC", "frame": "octagon" }
+    },
+    {
+      "id": "nanobot", "kind": "product", "name": "nanobot",
+      "variants": { "mono": "nanobot.svg" },
+      "source": "Dozer's lettermark (DozerKit Lettermark)",
+      "terms": "https://github.com/HKUDS/nanobot",
+      "allowed": "lettermark", "checked": "2026-10-14",
+      "notes": "Open source (MIT); the licence covers the code, not a mark, and no logo terms were found — so a neutral lettermark.",
+      "lettermark": { "text": "NB", "frame": "hex" }
+    },
+    {
+      "id": "gptme", "kind": "product", "name": "gptme",
+      "variants": { "mono": "gptme.svg" },
+      "source": "Dozer's lettermark (DozerKit Lettermark)",
+      "terms": "https://github.com/gptme/gptme",
+      "allowed": "lettermark", "checked": "2026-10-14",
+      "notes": "Open source (MIT); the licence covers the code, not a mark, and no logo terms were found — so a neutral lettermark.",
+      "lettermark": { "text": "GM", "frame": "square" }
+    },
+    {
+      "id": "llm", "kind": "product", "name": "llm",
+      "variants": { "mono": "llm.svg" },
+      "source": "Dozer's lettermark (DozerKit Lettermark)",
+      "terms": "https://github.com/simonw/llm",
+      "allowed": "lettermark", "checked": "2026-10-14",
+      "notes": "Open source (Apache-2.0); the licence grants no trademark rights and the project publishes no logo terms — so a neutral lettermark.",
+      "lettermark": { "text": "L", "frame": "circle" }
+    },
+    {
+      "id": "shell-gpt", "kind": "product", "name": "ShellGPT",
+      "variants": { "mono": "shell-gpt.svg" },
+      "source": "Dozer's lettermark (DozerKit Lettermark)",
+      "terms": "https://github.com/TheR1D/shell_gpt",
+      "allowed": "lettermark", "checked": "2026-10-14",
+      "notes": "Open source (MIT); the licence covers the code, not a mark, and no logo terms were found — so a neutral lettermark.",
+      "lettermark": { "text": "SG", "frame": "diamond" }
+    },
+    {
+      "id": "zeroclaw", "kind": "product", "name": "ZeroClaw",
+      "variants": { "mono": "zeroclaw.svg" },
+      "source": "Dozer's lettermark (DozerKit Lettermark)",
+      "terms": "https://github.com/zeroclaw-labs/zeroclaw",
+      "allowed": "lettermark", "checked": "2026-10-14",
+      "notes": "Open source (Apache-2.0); the licence grants no trademark rights and no logo terms were found — so a neutral lettermark.",
+      "lettermark": { "text": "ZC", "frame": "hex" }
+    },
+    {
+      "id": "aichat", "kind": "product", "name": "AIChat",
+      "variants": { "mono": "aichat.svg" },
+      "source": "Dozer's lettermark (DozerKit Lettermark)",
+      "terms": "https://github.com/sigoden/aichat",
+      "allowed": "lettermark", "checked": "2026-10-14",
+      "notes": "Open source (Apache-2.0 or MIT); the licences grant no trademark rights and no logo terms were found — so a neutral lettermark.",
+      "lettermark": { "text": "AC", "frame": "square" }
+    },
+    {
+      "id": "tgpt", "kind": "product", "name": "tgpt",
+      "variants": { "mono": "tgpt.svg" },
+      "source": "Dozer's lettermark (DozerKit Lettermark)",
+      "terms": "https://github.com/aandrew-me/tgpt",
+      "allowed": "lettermark", "checked": "2026-10-14",
+      "notes": "Open source (GPL-3.0); the licence covers the code, not a mark, and no logo terms were found — so a neutral lettermark.",
+      "lettermark": { "text": "T", "frame": "diamond" }
+    },
+    {
+      "id": "opencode", "kind": "product", "name": "OpenCode",
+      "variants": { "mono": "opencode.svg" },
+      "source": "Dozer's lettermark (DozerKit Lettermark)",
+      "terms": "https://github.com/anomalyco/opencode",
+      "allowed": "lettermark", "checked": "2026-10-14",
+      "notes": "Open source (MIT); the licence covers the code, not a mark, and the project publishes no logo terms — so a neutral lettermark.",
+      "lettermark": { "text": "O", "frame": "square" }
+    },
+    {
+      "id": "smolagents", "kind": "product", "name": "smolagents",
+      "variants": { "mono": "smolagents.svg" },
+      "source": "Dozer's lettermark (DozerKit Lettermark)",
+      "terms": "https://github.com/huggingface/smolagents",
+      "allowed": "lettermark", "checked": "2026-10-14",
+      "notes": "Open source (Apache-2.0); the licence grants no trademark rights, and Hugging Face's brand needs its permission — so a neutral lettermark.",
+      "lettermark": { "text": "SA", "frame": "hex" }
+    },
+    {
+      "id": "adk", "kind": "product", "name": "Agent Development Kit",
+      "variants": { "mono": "adk.svg" },
+      "source": "Dozer's lettermark (DozerKit Lettermark)",
+      "terms": "https://partnermarketinghub.withgoogle.com/brands/google/trademarks-and-terms/trademark-guidelines-for-proper-usage/",
+      "allowed": "lettermark", "checked": "2026-10-14",
+      "notes": "Google's terms, as for its own mark (the code is Apache-2.0; that licence grants no trademark rights).",
+      "lettermark": { "text": "AD", "frame": "hex" }
+    },
+    {
+      "id": "promptfoo", "kind": "product", "name": "promptfoo",
+      "variants": { "mono": "promptfoo.svg" },
+      "source": "Dozer's lettermark (DozerKit Lettermark)",
+      "terms": "https://github.com/promptfoo/promptfoo",
+      "allowed": "lettermark", "checked": "2026-10-14",
+      "notes": "Open source (MIT); the licence covers the code, not a mark, and no logo terms were found — so a neutral lettermark.",
+      "lettermark": { "text": "PF", "frame": "circle" }
+    },
+    {
+      "id": "clai", "kind": "product", "name": "clai (Pydantic AI)",
+      "variants": { "mono": "clai.svg" },
+      "source": "Dozer's lettermark (DozerKit Lettermark)",
+      "terms": "https://github.com/pydantic/pydantic-ai",
+      "allowed": "lettermark", "checked": "2026-10-14",
+      "notes": "Open source (MIT); the licence covers the code, not a mark, and Pydantic publishes no logo terms for others — so a neutral lettermark.",
+      "lettermark": { "text": "PY", "frame": "square" }
+    },
+    {
+      "id": "copilot", "kind": "product", "name": "GitHub Copilot CLI",
+      "variants": { "mono": "copilot.svg" },
+      "source": "Dozer's lettermark (DozerKit Lettermark)",
+      "terms": "https://github.com/logos",
+      "allowed": "lettermark", "checked": "2026-10-14",
+      "notes": "GitHub's logo terms allow its marks only to refer to GitHub and its products, unaltered, and its licence grants no use of its trademarks or logos — so a neutral lettermark.",
+      "lettermark": { "text": "CP", "frame": "circle" }
+    },
+    {
+      "id": "qwen-code", "kind": "product", "name": "Qwen Code",
+      "variants": { "mono": "qwen-code.svg" },
+      "source": "Dozer's lettermark (DozerKit Lettermark)",
+      "terms": "https://github.com/QwenLM/qwen-code",
+      "allowed": "lettermark", "checked": "2026-10-14",
+      "notes": "Open source (Apache-2.0); the licence covers the code, not a mark, and no logo terms were found — so a neutral lettermark.",
+      "lettermark": { "text": "Q", "frame": "circle" }
+    },
+    {
+      "id": "goose", "kind": "product", "name": "Goose",
+      "variants": { "mono": "goose.svg" },
+      "source": "Dozer's lettermark (DozerKit Lettermark)",
+      "terms": "https://github.com/aaif-goose/goose",
+      "allowed": "lettermark", "checked": "2026-10-14",
+      "notes": "Open source (Apache-2.0); the licence covers the code, not a mark, and no logo terms were found — so a neutral lettermark.",
+      "lettermark": { "text": "G", "frame": "hex" }
+    },
+    {
+      "id": "kilo", "kind": "product", "name": "Kilo Code CLI",
+      "variants": { "mono": "kilo.svg" },
+      "source": "Dozer's lettermark (DozerKit Lettermark)",
+      "terms": "https://github.com/Kilo-Org/kilocode",
+      "allowed": "lettermark", "checked": "2026-10-14",
+      "notes": "Open source (MIT); the licence covers the code, not a mark, and no logo terms were found — so a neutral lettermark.",
+      "lettermark": { "text": "K", "frame": "square" }
+    },
+    {
+      "id": "mistral-vibe", "kind": "product", "name": "Mistral Vibe",
+      "variants": { "mono": "mistral-vibe.svg" },
+      "source": "Dozer's lettermark (DozerKit Lettermark)",
+      "terms": "https://github.com/mistralai/mistral-vibe",
+      "allowed": "lettermark", "checked": "2026-10-14",
+      "notes": "Open source (Apache-2.0); Mistral's logo is its trademark and is not used — a neutral lettermark.",
+      "lettermark": { "text": "MV", "frame": "octagon" }
+    },
+    {
+      "id": "droid", "kind": "product", "name": "Factory Droid",
+      "variants": { "mono": "droid.svg" },
+      "source": "Dozer's lettermark (DozerKit Lettermark)",
+      "terms": "https://factory.ai",
+      "allowed": "lettermark", "checked": "2026-10-14",
+      "notes": "Proprietary; Factory's logo is its trademark and is not used — a neutral lettermark.",
+      "lettermark": { "text": "FD", "frame": "diamond" }
+    },
+    {
+      "id": "dirac", "kind": "product", "name": "Dirac",
+      "variants": { "mono": "dirac.svg" },
+      "source": "Dozer's lettermark (DozerKit Lettermark)",
+      "terms": "https://github.com/dirac-run/dirac",
+      "allowed": "lettermark", "checked": "2026-10-14",
+      "notes": "Open source (Apache-2.0); no logo terms were found — a neutral lettermark.",
+      "lettermark": { "text": "D", "frame": "circle" }
+    },
+    {
+      "id": "kimi-code", "kind": "product", "name": "Kimi Code",
+      "variants": { "mono": "kimi-code.svg" },
+      "source": "Dozer's lettermark (DozerKit Lettermark)",
+      "terms": "https://github.com/MoonshotAI/kimi-code",
+      "allowed": "lettermark", "checked": "2026-10-14",
+      "notes": "Open source (MIT); Moonshot's Kimi logo is its trademark and is not used — a neutral lettermark.",
+      "lettermark": { "text": "KC", "frame": "hex" }
+    },
+    {
+      "id": "every-code", "kind": "product", "name": "Every Code",
+      "variants": { "mono": "every-code.svg" },
+      "source": "Dozer's lettermark (DozerKit Lettermark)",
+      "terms": "https://github.com/just-every/code",
+      "allowed": "lettermark", "checked": "2026-10-14",
+      "notes": "Open source (Apache-2.0); no logo terms were found — a neutral lettermark.",
+      "lettermark": { "text": "EC", "frame": "square" }
+    },
+    {
+      "id": "cline", "kind": "product", "name": "Cline CLI",
+      "variants": { "mono": "cline.svg" },
+      "source": "Dozer's lettermark (DozerKit Lettermark)",
+      "terms": "https://github.com/cline/cline",
+      "allowed": "lettermark", "checked": "2026-10-14",
+      "notes": "Open source (Apache-2.0); Cline's logo is its trademark and is not used — a neutral lettermark.",
+      "lettermark": { "text": "CL", "frame": "octagon" }
+    },
+    {
+      "id": "openhands", "kind": "product", "name": "OpenHands CLI",
+      "variants": { "mono": "openhands.svg" },
+      "source": "Dozer's lettermark (DozerKit Lettermark)",
+      "terms": "https://github.com/OpenHands/OpenHands-CLI",
+      "allowed": "lettermark", "checked": "2026-10-14",
+      "notes": "Open source (MIT); OpenHands' logo is its mark and is not used — a neutral lettermark.",
+      "lettermark": { "text": "OH", "frame": "circle" }
+    },
+    {
+      "id": "codebuddy", "kind": "product", "name": "CodeBuddy Code",
+      "variants": { "mono": "codebuddy.svg" },
+      "source": "Dozer's lettermark (DozerKit Lettermark)",
+      "terms": "https://www.codebuddy.ai",
+      "allowed": "lettermark", "checked": "2026-10-14",
+      "notes": "MIT licence for the code; Tencent's CodeBuddy logo is its trademark and is not used — a neutral lettermark.",
+      "lettermark": { "text": "CB", "frame": "hex" }
+    },
+    {
+      "id": "letta-code", "kind": "product", "name": "Letta Code",
+      "variants": { "mono": "letta-code.svg" },
+      "source": "Dozer's lettermark (DozerKit Lettermark)",
+      "terms": "https://github.com/letta-ai/letta-code",
+      "allowed": "lettermark", "checked": "2026-10-14",
+      "notes": "Open source (Apache-2.0); Letta's logo is its trademark and is not used — a neutral lettermark.",
+      "lettermark": { "text": "LC", "frame": "circle" }
+    },
+    {
+      "id": "docker-agent", "kind": "product", "name": "Docker Agent",
+      "variants": { "mono": "docker-agent.svg" },
+      "source": "Dozer's lettermark (DozerKit Lettermark)",
+      "terms": "https://github.com/docker/docker-agent",
+      "allowed": "lettermark", "checked": "2026-10-14",
+      "notes": "Open source (Apache-2.0); Docker's logo and marks are its trademarks and are not used — a neutral lettermark.",
+      "lettermark": { "text": "DA", "frame": "square" }
+    },
+    {
+      "id": "nanocoder", "kind": "product", "name": "Nanocoder",
+      "variants": { "mono": "nanocoder.svg" },
+      "source": "Dozer's lettermark (DozerKit Lettermark)",
+      "terms": "https://github.com/Nano-Collective/nanocoder",
+      "allowed": "lettermark", "checked": "2026-10-14",
+      "notes": "Open source (MIT); no logo terms were found — a neutral lettermark.",
+      "lettermark": { "text": "NC", "frame": "diamond" }
+    },
+    {
+      "id": "mini-swe-agent", "kind": "product", "name": "mini-swe-agent",
+      "variants": { "mono": "mini-swe-agent.svg" },
+      "source": "Dozer's lettermark (DozerKit Lettermark)",
+      "terms": "https://github.com/SWE-agent/mini-swe-agent",
+      "allowed": "lettermark", "checked": "2026-10-14",
+      "notes": "Open source (MIT); SWE-agent's logo is not used — a neutral lettermark.",
+      "lettermark": { "text": "MS", "frame": "square" }
+    },
+    {
+      "id": "open-interpreter", "kind": "product", "name": "Open Interpreter",
+      "variants": { "mono": "open-interpreter.svg" },
+      "source": "Dozer's lettermark (DozerKit Lettermark)",
+      "terms": "https://github.com/openinterpreter/openinterpreter",
+      "allowed": "lettermark", "checked": "2026-10-14",
+      "notes": "Open source (Apache-2.0); Open Interpreter's logo is not used — a neutral lettermark.",
+      "lettermark": { "text": "OI", "frame": "octagon" }
+    },
+    {
+      "id": "crush", "kind": "product", "name": "Crush",
+      "variants": { "mono": "crush.svg" },
+      "source": "Dozer's lettermark (DozerKit Lettermark)",
+      "terms": "https://github.com/charmbracelet/crush",
+      "allowed": "lettermark", "checked": "2026-10-14",
+      "notes": "FSL-1.1-MIT code; Charmbracelet's logo and marks are not used — a neutral lettermark.",
+      "lettermark": { "text": "CR", "frame": "circle" }
+    },
+    {
+      "id": "mimo-code", "kind": "product", "name": "MiMo Code",
+      "variants": { "mono": "mimo-code.svg" },
+      "source": "Dozer's lettermark (DozerKit Lettermark)",
+      "terms": "https://mimo.xiaomi.com",
+      "allowed": "lettermark", "checked": "2026-10-14",
+      "notes": "MIT code; Xiaomi's MiMo logo is its trademark and is not used — a neutral lettermark.",
+      "lettermark": { "text": "MI", "frame": "hex" }
+    },
+    {
+      "id": "codewhale", "kind": "product", "name": "CodeWhale",
+      "variants": { "mono": "codewhale.svg" },
+      "source": "Dozer's lettermark (DozerKit Lettermark)",
+      "terms": "https://github.com/Hmbown/CodeWhale",
+      "allowed": "lettermark", "checked": "2026-10-14",
+      "notes": "Open source (MIT); no logo terms were found — a neutral lettermark.",
+      "lettermark": { "text": "CW", "frame": "diamond" }
+    },
+    {
+      "id": "maki", "kind": "product", "name": "Maki",
+      "variants": { "mono": "maki.svg" },
+      "source": "Dozer's lettermark (DozerKit Lettermark)",
+      "terms": "https://github.com/tontinton/maki",
+      "allowed": "lettermark", "checked": "2026-10-14",
+      "notes": "Open source (MIT); no logo terms were found — a neutral lettermark.",
+      "lettermark": { "text": "MK", "frame": "square" }
+    },
+    {
+      "id": "omp", "kind": "product", "name": "oh-my-pi",
+      "variants": { "mono": "omp.svg" },
+      "source": "Dozer's lettermark (DozerKit Lettermark)",
+      "terms": "https://github.com/can1357/oh-my-pi",
+      "allowed": "lettermark", "checked": "2026-10-14",
+      "notes": "Open source (MIT); no logo terms were found — a neutral lettermark.",
+      "lettermark": { "text": "OM", "frame": "octagon" }
+    },
+    {
+      "id": "tau", "kind": "product", "name": "Tau",
+      "variants": { "mono": "tau.svg" },
+      "source": "Dozer's lettermark (DozerKit Lettermark)",
+      "terms": "https://github.com/huggingface/tau",
+      "allowed": "lettermark", "checked": "2026-10-14",
+      "notes": "Open source (MIT); Hugging Face's logo is its trademark and is not used — a neutral lettermark.",
+      "lettermark": { "text": "T", "frame": "circle" }
+    },
+    {
+      "id": "stitch", "kind": "product", "name": "Google Stitch CLI",
+      "variants": { "mono": "stitch.svg" },
+      "source": "Dozer's lettermark (DozerKit Lettermark)",
+      "terms": "https://github.com/google-labs-code/stitch-sdk",
+      "allowed": "lettermark", "checked": "2026-10-14",
+      "notes": "Open source (Apache-2.0); Google's and Stitch's logos are Google's trademarks and are not used — a neutral lettermark.",
+      "lettermark": { "text": "S", "frame": "circle" }
+    }
+  ]
+}

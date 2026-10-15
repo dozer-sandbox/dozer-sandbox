@@ -1,0 +1,55 @@
+/* The style guide's own layout: the specimen grid, the light and dark panels, and the theme switch. Built from the
+   dashboard's tokens only (app.css :root); nothing here styles a dashboard component, so every sample is drawn by the
+   real stylesheet. In the views layer, after the dashboard's own rules. */
+@layer views {
+  body { background: var(--bg); }
+  .sg { max-width: 1240px; margin: 0 auto; padding: 32px 24px 96px; }
+  .sg > header h1 { font-size: 26px; margin: 0 0 6px; }
+  .sg > header p { max-width: 86ch; color: var(--ink-2); font-size: var(--fs-lg); line-height: var(--lh-prose); margin: 0 0 8px; }
+  .sg-label { font: var(--fw-medium) var(--fs-xs)/1 var(--font); letter-spacing: .06em; text-transform: uppercase; color: var(--ink-2); margin: 0 0 10px; }
+  .sg > section { margin-top: 40px; }
+  .sg > section > h2 { font-size: var(--fs-xl); margin: 0 0 4px; }
+  .sg > section > p { color: var(--ink-2); max-width: 92ch; margin: 0 0 12px; }
+  .pair { display: grid; grid-template-columns: 1fr 1fr; border: var(--bw) solid var(--line); border-radius: var(--r-lg); overflow: hidden; }
+  .pair.wide { grid-template-columns: 1fr; }
+  .scheme { background: var(--bg); color: var(--ink); padding: 26px 16px 16px; display: flex; flex-direction: column; gap: 12px; min-width: 0; position: relative; }
+  .scheme[data-s="dark"] { color-scheme: dark; border-left: var(--bw) solid var(--line); }
+  .pair.wide .scheme[data-s="dark"] { border-left: 0; border-top: var(--bw) solid var(--line); }
+  .scheme[data-s="light"] { color-scheme: light; }
+  .scheme::before { content: attr(data-s); position: absolute; top: 6px; right: 10px; font: var(--fw-medium) var(--fs-xs)/1 var(--font); color: var(--ink-2); }
+  .sg-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .sg-sw { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+  .sg-sw div { border: var(--bw) solid var(--line); border-radius: var(--r-md); overflow: hidden; background: var(--surface); font-size: var(--fs-xs); }
+  .sg-sw i { display: block; height: 34px; }
+  .sg-sw span { display: block; padding: 4px 6px; font-family: var(--mono); }
+  .rules { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 24px; padding-left: 18px; margin: 0; font-size: var(--fs-md); line-height: var(--lh-prose); }
+  .type-row { display: grid; grid-template-columns: 110px 1fr; gap: 12px; align-items: baseline; }
+  .type-row code { color: var(--ink-2); }
+  .space i { display: inline-block; height: 12px; background: var(--accent); border-radius: 2px; vertical-align: middle; margin-right: 8px; }
+  .radii div { width: 64px; height: 44px; background: var(--surface); border: var(--bw) solid var(--line-strong); display: grid; place-items: center; font-size: var(--fs-xs); }
+  .elev div { width: 120px; height: 56px; background: var(--surface); border-radius: var(--r-lg); display: grid; place-items: center; font-size: var(--fs-xs); }
+  .icons { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 4px; }
+  .icons div { display: flex; gap: 8px; align-items: center; padding: 6px 8px; background: var(--surface); border: var(--bw) solid var(--line); border-radius: var(--r-sm); font: var(--fs-xs) var(--mono); color: var(--ink-2); min-width: 0; }
+  .icons .icon { color: var(--ink); }
+  .marks { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+  .marks div { display: grid; gap: 4px; justify-items: center; padding: 10px 8px; background: var(--surface); border: var(--bw) solid var(--line); border-radius: var(--r-md); font-size: var(--fs-xs); color: var(--ink-2); text-align: center; }
+  .marks .mark { width: 44px; height: 44px; }
+  .marks b { color: var(--ink); font-weight: var(--fw-strong); }
+  /* The specimen's own containment: the modal, the menu and the panels are fixed or absolute in the app; here they sit in the flow. */
+  .scheme .wiz-modal { position: relative; inset: auto; z-index: auto; padding: 16px; height: 470px; }
+  .scheme .wm-box { height: 100%; }
+  .scheme .menu { position: static; display: block; width: 280px; }
+  .scheme dialog.dlg { position: static; margin: 0; width: auto; max-width: 100%; }
+  .scheme .qt { height: 560px; flex: none; }
+  .scheme .terms.sg-terms { flex: none; height: 300px; display: block; border: var(--bw) solid var(--line); border-radius: var(--r-lg); overflow: hidden; }
+  .src { font-size: var(--fs-sm); color: var(--ink-2); }
+  .sg-bar { position: fixed; right: 12px; bottom: 12px; z-index: var(--z-toast); display: flex; gap: 4px; align-items: center; padding: 4px 6px;
+    background: var(--surface); border: var(--bw) solid var(--line-strong); border-radius: var(--r-md); box-shadow: var(--shadow-2); font-size: var(--fs-sm); }
+  .sg-bar button { font: inherit; border: 0; background: transparent; color: var(--ink-2); padding: 3px 8px; border-radius: var(--r-sm); cursor: pointer; }
+  .sg-bar button[aria-pressed="true"] { background: var(--surface-3); color: var(--ink); }
+  @media (max-width: 900px) {
+    .pair { grid-template-columns: 1fr; }
+    .scheme[data-s="dark"] { border-left: 0; border-top: var(--bw) solid var(--line); }
+    .rules { grid-template-columns: 1fr; }
+  }
+}

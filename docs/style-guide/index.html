@@ -1,0 +1,555 @@
+<!doctype html>
+<html lang="en-AU">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dashboard Style Guide</title>
+<!-- The dashboard's style guide: a LIVING specimen of the doz ui dashboard's look. It loads the dashboard's REAL stylesheet
+     (Sources/DozerWeb/WebSource/app.css — not a copy), its vendored Lucide icons (listed by
+     Sources/DozerWeb/WebSource/vendor/lucide-static/VENDOR.json) and the icon registry (Sources/DozerKit/Recipes/icons/),
+     so it shows what ships. The markup is what the components in Sources/DozerWeb/WebSource/app/ produce.
+
+     To view it, serve the repository root over HTTP (a file:// page cannot read the icon files):
+
+         python3 -m http.server 8000        (from the repository root)
+         open http://localhost:8000/docs/style-guide/
+
+     Rule: a change to the dashboard's UI updates this page in the same commit (CLAUDE.md). -->
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="../../Sources/DozerWeb/WebSource/app.css">
+<link rel="stylesheet" href="style-guide.css">
+</head>
+<body>
+<div class="sg">
+<header>
+  <p class="sg-label">Dozer Sandbox · the dashboard (doz ui)</p>
+  <h1>Style guide — a living specimen</h1>
+  <p>Every sample on this page is drawn by the dashboard’s <b>real</b> stylesheet, <code>Sources/DozerWeb/WebSource/app.css</code>,
+    loaded in place, with the icons the dashboard vendors and the marks of its icon registry. The markup is what the components in
+    <code>Sources/DozerWeb/WebSource/app/</code> produce. Light and dark sit side by side — <code>color-scheme</code> is the theme, exactly as in the app.</p>
+  <p class="src">A change to the dashboard’s look updates this page in the same commit. A sample here that no longer matches the app is a bug in this page.</p>
+</header>
+
+<section>
+  <h2>Rules every piece of the dashboard keeps</h2>
+  <ol class="rules">
+    <li><b>Tokens only.</b> Every colour, size, radius, shadow and layer is a <code>var(--…)</code> from app.css <code>:root</code>, with <code>light-dark()</code>; no literal colour anywhere else.</li>
+    <li><b>13 px is the UI size</b> (<code>--fs-md</code>); 14 for prose in wizards and section titles; 16 for a step’s title; 20 for a page or modal title.</li>
+    <li><b>One button family</b> — default, <code>.primary</code>, <code>.quiet</code>, <code>.danger</code>, <code>.sm</code>/<code>.lg</code>, <code>.icon-only</code> (with aria-label). <b>One primary per view</b>: the verb that moves forward (Next, Create, Start).</li>
+    <li><b>One notice surface</b>: the callout (info · ok · warn · bad). A failure is said where the action started and stays; a toast is only for success.</li>
+    <li><b>Never colour alone</b>: a pill is glyph + word; a dimmed option says <i>why</i> in readable text (<code>--ink-2</code>, never <code>--ink-3</code>).</li>
+    <li><b>Wizards are the modal</b> (<code>.wiz-modal › .wm-box</code>): <code>wizHead</code> (title, ✕, the step strip), a scrolling <code>.w-body</code>, a footer that never leaves the screen. Quick try is the same modal made full-page (<code>.wiz-modal.full</code>) with a labelled Close.</li>
+    <li><b>Choices are cards</b> (<code>.wiz-choice</code>, <code>.base-card</code>, Quick try’s <code>.qt-item</code>): chosen = a ring; a segmented control for 2–4 short modes.</li>
+    <li><b>Icons are the vendored Lucide set only</b> (listed at the end). A new icon is a vendoring change (VENDOR.json). <b>Marks</b> (agents, vendors) come from the icon registry, monochrome, in <code>currentColor</code>.</li>
+    <li><b>Commands and files are shown exactly</b>, monospace, copyable, never holding a secret; a long file folds away behind a disclosure.</li>
+    <li><b>Light and dark</b> both work, and the theme is the app’s switch (<code>data-theme</code> on <code>&lt;html&gt;</code>; auto follows macOS). Text is set with <code>textContent</code>, never markup.</li>
+  </ol>
+</section>
+
+<section>
+  <h2>Tokens — colour</h2>
+  <p>Each swatch is drawn with the token itself; the values under the panels are read live from app.css.</p>
+  <div class="pair"><div class="scheme">
+    <div class="sg-sw">
+      <div><i style="background:var(--bg)"></i><span>--bg</span></div>
+      <div><i style="background:var(--surface)"></i><span>--surface</span></div>
+      <div><i style="background:var(--surface-2)"></i><span>--surface-2</span></div>
+      <div><i style="background:var(--surface-3)"></i><span>--surface-3</span></div>
+      <div><i style="background:var(--ink)"></i><span>--ink</span></div>
+      <div><i style="background:var(--ink-2)"></i><span>--ink-2</span></div>
+      <div><i style="background:var(--ink-3)"></i><span>--ink-3 (decoration)</span></div>
+      <div><i style="background:var(--line)"></i><span>--line</span></div>
+      <div><i style="background:var(--line-strong)"></i><span>--line-strong</span></div>
+      <div><i style="background:var(--control)"></i><span>--control</span></div>
+      <div><i style="background:var(--accent)"></i><span>--accent</span></div>
+      <div><i style="background:var(--accent-tint)"></i><span>--accent-tint</span></div>
+      <div><i style="background:var(--focus)"></i><span>--focus</span></div>
+      <div><i style="background:var(--ok)"></i><span>--ok (running)</span></div>
+      <div><i style="background:var(--warn)"></i><span>--warn (paused)</span></div>
+      <div><i style="background:var(--bad)"></i><span>--bad (failed)</span></div>
+      <div><i style="background:var(--ph-asleep)"></i><span>--ph-asleep</span></div>
+      <div><i style="background:var(--ph-hibernated)"></i><span>--ph-hibernated</span></div>
+      <div><i style="background:var(--data-shared)"></i><span>--data-shared</span></div>
+    </div>
+  </div></div>
+  <p class="src" style="margin-top:8px">Source, e.g. <code>--accent</code> = <code data-token="--accent"></code> · <code>--bg</code> = <code data-token="--bg"></code> · <code>--ok</code> = <code data-token="--ok"></code></p>
+</section>
+
+<section>
+  <h2>Type, space, shape, elevation</h2>
+  <div class="pair"><div class="scheme">
+    <div class="type-row"><code>--fs-2xl 20</code><span style="font-size:var(--fs-2xl);font-weight:var(--fw-strong)">New sandbox</span></div>
+    <div class="type-row"><code>--fs-xl 16</code><span style="font-size:var(--fs-xl);font-weight:var(--fw-strong)">Agent — a step title</span></div>
+    <div class="type-row"><code>--fs-lg 14</code><span style="font-size:var(--fs-lg)">Wizard prose and section titles.</span></div>
+    <div class="type-row"><code>--fs-md 13</code><span>THE UI size: body, tables, controls.</span></div>
+    <div class="type-row"><code>--fs-sm 12</code><span style="font-size:var(--fs-sm);color:var(--ink-2)">Meta, help text, pills, small buttons.</span></div>
+    <div class="type-row"><code>--fs-xs 11</code><span style="font-size:var(--fs-xs);color:var(--ink-2)">Tags, counts, micro-labels.</span></div>
+    <div class="type-row"><code>--mono 12</code><code>doz new todo-app --agent grok</code></div>
+    <div class="space"><code>--sp-1…8</code>&nbsp; <i style="width:4px"></i><i style="width:6px"></i><i style="width:8px"></i><i style="width:12px"></i><i style="width:16px"></i><i style="width:20px"></i><i style="width:24px"></i><i style="width:32px"></i></div>
+    <div class="sg-row radii"><div style="border-radius:var(--r-xs)">r-xs 3</div><div style="border-radius:var(--r-sm)">r-sm 5</div><div style="border-radius:var(--r-md)">r-md 7</div><div style="border-radius:var(--r-lg)">r-lg 10</div><div style="border-radius:var(--r-xl)">r-xl 14</div></div>
+    <div class="sg-row elev"><div style="box-shadow:var(--shadow-1)">shadow-1</div><div style="box-shadow:var(--shadow-2)">shadow-2 menus</div><div style="box-shadow:var(--shadow-3)">shadow-3 modal</div></div>
+  </div></div>
+</section>
+
+<section>
+  <h2>Buttons and segmented controls</h2>
+  <p><code>btn(label, fn, {primary, quiet, danger, small, lg, iconOnly, icon})</code> — the icon comes from the label (<code>iconFor</code>).</p>
+  <div class="pair"><div class="scheme">
+    <div class="sg-row">
+      <button class="btn lg primary" type="button"><span class="btn-label">Next</span><i data-i="arrow-right"></i></button>
+      <button class="btn" type="button"><i data-i="arrow-left"></i>Back</button>
+      <button class="btn quiet" type="button"><i data-i="skip-forward"></i>Skip to review</button>
+      <button class="btn danger" type="button"><i data-i="trash-2"></i>Remove…</button>
+      <button class="btn" type="button" disabled><i data-i="plus"></i>Create</button>
+    </div>
+    <div class="sg-row">
+      <button class="btn sm" type="button"><i data-i="folder"></i>Choose…</button>
+      <button class="btn sm quiet" type="button"><i data-i="copy"></i>Copy</button>
+      <button class="btn sm primary" type="button"><i data-i="play"></i>Start</button>
+      <button class="btn quiet icon-only" type="button" aria-label="Close" title="Close"><i data-i="x"></i></button>
+      <button class="btn icon-only" type="button" aria-label="More" title="More"><i data-i="ellipsis"></i></button>
+      <button class="btn lg primary" type="button"><i data-i="rocket"></i>Start</button>
+    </div>
+    <div class="sg-row">
+      <div class="segmented" role="group" aria-label="Agent"><button type="button" class="seg active" aria-pressed="true"><i data-i="rocket"></i>Claude Code</button><button type="button" class="seg"><i data-i="rocket"></i>pi</button><button type="button" class="seg"><i data-i="rocket"></i>Codex</button><button type="button" class="seg"><i data-i="terminal"></i>none</button></div>
+      <div class="segmented" role="group" aria-label="Base"><button type="button" class="seg active"><i data-i="star"></i>Recommended</button><button type="button" class="seg"><i data-i="box"></i>Dockerfile</button><button type="button" class="seg" disabled><i data-i="layout-template"></i>Template</button></div>
+    </div>
+  </div></div>
+</section>
+
+<section>
+  <h2>Pills, tags, agent chips</h2>
+  <p>A pill is a <i>state</i> (tinted, glyph + word); a tag is an <i>attribute</i> (square-ish, quiet); a chip is what the agent is doing.</p>
+  <div class="pair"><div class="scheme">
+    <div class="sg-row">
+      <span class="pill ph-running"><span class="dot ph-running"></span>running</span>
+      <span class="pill ph-booting"><span class="mini-spin"></span>starting …</span>
+      <span class="pill ph-paused"><i data-i="pause"></i>paused</span>
+      <span class="pill ph-asleep"><i data-i="moon+cpu"></i>asleep</span>
+      <span class="pill ph-hibernated"><i data-i="moon+cylinder"></i>hibernated</span>
+      <span class="pill ph-off"><i data-i="power"></i>off</span>
+      <span class="pill ph-failed"><i data-i="x"></i>failed</span>
+    </div>
+    <div class="sg-row">
+      <span class="tag">plain</span><span class="tag info">info</span><span class="tag ok">current</span><span class="tag warn">superseded</span><span class="tag bad">refused</span><span class="tag outline">headless</span>
+    </div>
+    <div class="sg-row">
+      <span class="ag-chip ag-working"><span class="ag-mark"></span>working</span>
+      <span class="ag-chip ag-blocked"><span class="ag-mark"></span>needs you</span>
+      <span class="ag-chip ag-done"><span class="ag-mark"></span>done</span>
+      <span class="ag-chip ag-error"><span class="ag-mark"></span>error</span>
+    </div>
+  </div></div>
+</section>
+
+<section>
+  <h2>Callouts — the one notice surface</h2>
+  <div class="pair"><div class="scheme">
+    <div class="callout info" role="status"><i data-i="info"></i><div class="c-body">Writing the file, then making the sandbox as <code>doz up</code> would there.</div></div>
+    <div class="callout ok" role="status"><i data-i="circle-check"></i><div class="c-body"><div class="c-title">Key read from 1Password</div>work-xai · op://Dev/xai/credential · 2 min ago</div></div>
+    <div class="callout warn" role="status"><i data-i="triangle-alert"></i><div class="c-body"><div class="c-title">Superseded by Antigravity CLI</div>Google retired Gemini CLI for personal accounts. <button type="button" class="linkish">Try Antigravity CLI instead</button></div></div>
+    <div class="callout bad" role="alert"><i data-i="circle-x"></i><div class="c-body"><div class="c-title">op is not signed in</div>Run <code>op signin</code> on this Mac, then Refresh.</div><div class="c-acts"><button class="btn sm" type="button"><i data-i="refresh-cw"></i>Refresh</button><button class="btn sm quiet icon-only" type="button" aria-label="Dismiss"><i data-i="x"></i></button></div></div>
+    <div class="callout info compact" role="status"><i data-i="info"></i><div class="c-body">A compact callout, for a line under a field.</div></div>
+  </div></div>
+</section>
+
+<section>
+  <h2>Forms and choices</h2>
+  <div class="pair"><div class="scheme">
+    <label class="field"><span>Sandbox name</span><input type="text" value="todo-app"><small>Its name in doz ls and the dashboard.</small></label>
+    <label class="field"><span>Network</span><select><option>agent — proxied: what the agent may do is its permissions</option></select></label>
+    <div class="sg-row"><label class="field check"><input type="checkbox" checked><span>A checkbox</span></label><label class="field check"><input type="checkbox" role="switch" checked><span>A switch (on)</span></label><label class="field check"><input type="checkbox" role="switch"><span>off</span></label></div>
+    <div class="wiz-choices">
+      <label class="wiz-choice chosen"><input type="radio" name="g1" checked><span>A new folder in your projects folder</span></label>
+      <label class="wiz-choice"><input type="radio" name="g1"><span>A folder you have (your project)</span></label>
+    </div>
+    <div class="field image-picker"><span>Agent</span>
+      <div class="segmented" role="group" aria-label="Coding agent, AI tool or none"><button type="button" class="seg" aria-pressed="false"><i data-i="rocket"></i>Coding agents</button><button type="button" class="seg active" aria-pressed="true"><i data-i="layers"></i>AI tools</button><button type="button" class="seg" aria-pressed="false"><i data-i="terminal"></i>No agent</button></div>
+      <div class="segmented agent-chips" role="group" aria-label="Agent"><button type="button" class="seg">Fabric</button><button type="button" class="seg">OpenClaw</button><button type="button" class="seg">nanobot</button><button type="button" class="seg">gptme</button><button type="button" class="seg active" aria-pressed="true">llm</button><button type="button" class="seg">ShellGPT</button><button type="button" class="seg">ZeroClaw</button><button type="button" class="seg">AIChat</button><button type="button" class="seg">tgpt</button><button type="button" class="seg">smolagents</button><button type="button" class="seg">Agent Development Kit</button><button type="button" class="seg">promptfoo</button><button type="button" class="seg">clai (Pydantic AI)</button></div>
+      <small class="muted">New Sandbox's agent: the section (a segmented control), then the section's agents (<code>.segmented.agent-chips</code>, wrapping); a base the agent cannot run on (Alpine for a glibc-only tool) is disabled.</small></div>
+    <div class="base-grid">
+      <button type="button" class="base-card active"><span class="base-title">Debian</span><span class="base-use">General purpose — Debian 12</span><code class="base-ref">debian:bookworm</code><span class="base-meta">↓ 46 MiB · first prepare ~1 min</span></button>
+      <button type="button" class="base-card"><span class="base-title">Python</span><span class="base-use">Python 3.13 with pip</span><code class="base-ref">python:3.13-bookworm</code><span class="base-meta">↓ 356 MiB · ~3 min</span><span class="base-prepared">prepared</span></button>
+    </div>
+    <dl class="facts"><dt>Folder</dt><dd><code>~/code/todo-app</code></dd><dt>Network</dt><dd>agent · standard</dd></dl>
+    <details class="disclosure" open><summary><i data-i="chevron-down"></i>The file, exactly as written (12 lines)</summary><pre class="nw-yaml">version: 1
+name: todo-app</pre></details>
+  </div></div>
+</section>
+
+<section>
+  <h2>Menus</h2>
+  <div class="pair"><div class="scheme">
+    <div class="menu" role="menu">
+      <button class="menu-item" type="button" data-desc="A copy of this sandbox, its disk shared until it writes"><i data-i="copy"></i><span class="mi-label">Duplicate</span></button>
+      <button class="menu-item" type="button"><i data-i="layout-template"></i><span class="mi-label">Save as template…</span></button>
+      <div class="menu-sep"></div>
+      <button class="menu-item danger" type="button"><i data-i="trash-2"></i><span class="mi-label">Remove…</span></button>
+    </div>
+  </div></div>
+</section>
+
+<section>
+  <h2>The wizard modal and its step strip</h2>
+  <p><code>wizHead(title, sub, actions, steps)</code> + a <code>form.wiz-card</code> (<code>.w-body</code> scrolls, <code>.w-foot</code> stays). Steps: done (a check), current (the accent circle), later (its number); below 720 px the circles only, with “Step N of M”.</p>
+  <div class="pair"><div class="scheme">
+    <div class="wiz-modal"><div class="wm-scrim"></div><div class="wm-box" role="dialog" aria-label="New sandbox">
+      <div class="wizard nw">
+        <header class="wm-head">
+          <div class="wm-title-row"><h1>New sandbox</h1><span class="wm-gap"></span><button class="btn quiet icon-only" type="button" aria-label="Close"><i data-i="x"></i></button></div>
+          <nav class="wm-steps" aria-label="Steps"><ol class="stepper wiz-steps">
+            <li class="done"><span class="n"><i data-i="check"></i></span><span class="s-label">Agent</span></li>
+            <li class="done"><span class="n"><i data-i="check"></i></span><span class="s-label">Model &amp; key</span></li>
+            <li class="current"><span class="n">3</span><span class="s-label">Base</span></li>
+            <li><span class="n">4</span><span class="s-label">Network</span></li>
+            <li><span class="n">5</span><span class="s-label">Review</span></li>
+          </ol></nav>
+        </header>
+        <form class="wiz-card"><div class="w-body"><h2>Base</h2><p class="muted">The step’s content scrolls here; the header and footer stay put.</p></div>
+          <div class="w-foot wiz-buttons"><button class="btn" type="button"><i data-i="arrow-left"></i>Back</button><span class="wiz-gap"></span><button class="btn quiet" type="button"><i data-i="skip-forward"></i>Skip to review</button><button class="btn lg primary" type="button"><span class="btn-label">Next</span><i data-i="arrow-right"></i></button></div>
+        </form>
+      </div>
+    </div></div>
+  </div></div>
+</section>
+
+<section>
+  <h2>Quick try — search, pills, cards or a list, marks</h2>
+  <p>The wizards' modal over the app, like onboarding (the app stays visible behind the scrim; opened from the nav's TRY section — its one item, or the + on its heading); its header has the title, a line and a labelled <b>Close</b> with its Esc hint.
+    Inside, <code>.qt</code>: the two sections (<code>.qt-kinds</code> — <b>Coding agents</b> and <b>AI tools</b>, a segmented control the pane's width, each with its count),
+    the search box (<code>.qt-box</code>, <code>/</code> focuses it), the filter pills (<code>.qt-pill</code>, <code>aria-pressed</code>: <b>Ready</b>, then the section's declared
+    categories — any of those pressed),
+    the count and the cards/list toggle (<code>.qt-seg</code>), the results (<code>.qt-item</code> — a mark, the title and maker, version and age, a ready check;
+    superseded and coming ones quieter), and the chosen agent on the right — INFORMATION ONLY (what a published recipe page shows) with a <b>Try</b> button.
+    Below 760 px the panes stack, with a back control.</p>
+  <div class="pair wide"><div class="scheme">
+    <header class="qt-mhead"><div><h1>Quick try</h1><p class="sub">Pick an agent and try it in a fresh sandbox: its own folder, the network locked to its model, your key never inside. Nothing is prepared until you press Start.</p></div>
+      <button class="btn qt-close" type="button" title="Close (Esc)"><i data-i="x"></i>Close<span class="qt-kbd" aria-hidden="true">Esc</span></button></header>
+    <div class="qt">
+      <section class="qt-left" aria-label="Agents">
+        <div class="qt-search">
+          <div class="qt-kinds" role="group" aria-label="Coding agents or AI tools"><button type="button" aria-pressed="false">Coding agents<span class="n">26</span></button><button type="button" aria-pressed="true">AI tools<span class="n">13</span></button></div>
+          <label class="qt-box"><i data-i="search"></i><input type="search" value="" placeholder="Search agents — name, maker, tag:headless" aria-label="Search agents"><span class="qt-kbd" aria-hidden="true">/</span></label>
+          <div class="qt-pills" role="group" aria-label="Filters">
+            <button type="button" class="qt-pill" aria-pressed="false"><i data-i="key-round"></i>Ready</button>
+            <button type="button" class="qt-pill" aria-pressed="false">Personal agent</button>
+            <button type="button" class="qt-pill" aria-pressed="true">Terminal tool</button>
+            <button type="button" class="qt-pill" aria-pressed="false">Framework</button>
+            <button type="button" class="qt-pill" aria-pressed="false">Evaluation</button>
+          </div>
+          <div class="qt-bar"><span>7 of 13 tools · 3 coming</span><span class="qt-gap"></span>
+            <span class="qt-seg" role="group" aria-label="View"><button type="button" aria-label="Cards" aria-pressed="true"><i data-i="layout-grid"></i></button><button type="button" aria-label="List" aria-pressed="false"><i data-i="list"></i></button></span></div>
+        </div>
+        <div class="qt-results cards" role="listbox" aria-label="Agents">
+          <button type="button" role="option" class="qt-item" aria-selected="true"><span data-mark="codex"></span><span class="tp"><span class="t">Codex</span><span class="p">OpenAI</span></span><span class="v">0.160.1 · 3 days ago</span><span class="ready"><i data-i="circle-check"></i></span></button>
+          <button type="button" role="option" class="qt-item" aria-selected="false"><span data-mark="pi"></span><span class="tp"><span class="t">pi</span><span class="p">Mario Zechner</span></span><span class="v">0.84.1 · 4 days ago</span><span class="ready"><i data-i="circle-check"></i></span></button>
+          <button type="button" role="option" class="qt-item" aria-selected="false"><span data-mark="grok-build"></span><span class="tp"><span class="t">Grok Build</span><span class="p">xAI</span></span><span class="v">1.0.50 · today</span><span class="ready-gap"></span></button>
+          <button type="button" role="option" class="qt-item superseded" aria-selected="false"><span data-mark="gemini-cli"></span><span class="tp"><span class="t">Gemini CLI</span><span class="p">Google</span></span><span class="v">0.63.0 · 6 days ago · superseded</span><span class="ready"><i data-i="circle-check"></i></span></button>
+        </div>
+      </section>
+      <section class="qt-right" aria-label="The chosen agent">
+        <div class="qt-head"><span data-mark="codex" class="mark lg"></span><div><h2>Codex</h2><div class="p">OpenAI · open source</div></div></div>
+        <div class="qt-facts"><span class="tag ok">current</span><span class="tag outline">headless</span><span class="tag outline">through a gateway</span><span class="tag outline">resumes a conversation</span></div>
+        <p class="qt-desc">OpenAI's open-source coding agent.</p>
+        <div class="qt-sect"><h3>Versions</h3><dl class="qt-plan"><dt>Dozer installs</dt><dd>0.160.1 · released 3 days ago</dd><dt>Base</dt><dd>Node.js</dd></dl></div>
+        <div class="qt-sect"><h3>What it can reach</h3><ul class="reach-list"><li class="reach-model">Talk to OpenAI (chatgpt.com, api.openai.com)</li><li class="reach-folder">A new empty folder, at /workspace</li></ul></div>
+        <div class="qt-foot"><span class="qt-gap"></span><span class="qt-note">Enter</span><button class="btn lg primary" type="button"><i data-i="rocket"></i>Try Codex…</button></div>
+      </section>
+    </div>
+  </div></div>
+  <p class="src" style="margin-top:8px">The list view (<code>.qt-results.list</code>), and the empty state (<code>.qt-empty</code>, with Clear search and filters):</p>
+  <div class="pair"><div class="scheme">
+    <div class="qt-results list" role="listbox" aria-label="Agents" style="padding:0">
+      <button type="button" role="option" class="qt-item" aria-selected="false"><span data-mark="claude-code"></span><span class="tp"><span class="t">Claude Code</span><span class="p">Anthropic</span></span><span class="v">2.1.227 · 3 days ago</span><span class="ready"><i data-i="circle-check"></i></span></button>
+      <button type="button" role="option" class="qt-item" aria-selected="true"><span data-mark="antigravity"></span><span class="tp"><span class="t">Antigravity CLI</span><span class="p">Google</span></span><span class="v">1.3.3 · 2 days ago</span><span class="ready"><i data-i="circle-check"></i></span></button>
+      <button type="button" role="option" class="qt-item coming" aria-selected="false"><span data-mark="openai"></span><span class="tp"><span class="t">An agent to come</span><span class="p">its maker</span></span><span class="v">coming</span><span class="ready-gap"></span></button>
+    </div>
+    <div class="qt-empty"><i data-i="search"></i><p>No agent matches “qwertyagent”.</p><button class="btn sm" type="button"><i data-i="x"></i>Clear search and filters</button><p class="muted">Missing an agent? <code>doz search NAME</code> says whether it is coming.</p></div>
+  </div></div>
+  <p class="src" style="margin-top:8px">While the list is read (the modal is drawn at once): placeholder cards (<code>.qt-item.skeleton</code>, <code>.sk</code>) — never the empty state;
+    a failed read is said in the list (<code>.qt-error</code>, a compact bad callout with Retry):</p>
+  <div class="pair"><div class="scheme">
+    <div class="qt-results cards" aria-hidden="true" style="padding:0">
+      <div class="qt-item skeleton"><span class="sk sk-mark"></span><span class="tp"><span class="sk sk-line"></span><span class="sk sk-line short"></span></span></div>
+      <div class="qt-item skeleton"><span class="sk sk-mark"></span><span class="tp"><span class="sk sk-line"></span><span class="sk sk-line short"></span></span></div>
+      <div class="qt-item skeleton"><span class="sk sk-mark"></span><span class="tp"><span class="sk sk-line"></span><span class="sk sk-line short"></span></span></div>
+    </div>
+    <div class="qt-results cards" style="padding:0">
+      <div class="callout bad compact qt-error" role="alert"><i data-i="circle-x"></i><div class="c-body"><div class="c-title">The agents could not be read</div>HTTP 503</div><div class="c-acts"><button class="btn sm" type="button"><i data-i="refresh-cw"></i>Retry</button></div></div>
+    </div>
+  </div></div>
+</section>
+
+<section>
+  <h2>Try’s setup, and every destructive confirmation: a box to tick</h2>
+  <p><b>Try</b> opens a smaller modal over the Quick try (<code>dialog.dlg.try-setup</code>): every prerequisite — the key (the one it uses, a choice when it can use
+    several, or the card: paste, a source kept outside, what is not offered), the image, the plan — and the final <b>Start</b>; Cancel or Esc leaves nothing behind.
+    A tool that speaks several APIs gets a <b>Model</b> section first (<code>.try-model</code>): the provider or gateway (providers, then gateways, each with its default model) and the model
+    (empty: that default); the key part then follows that source — its accounts, or a paste saved as its key.
+    <b>Every destructive confirmation is ONE component</b> (<code>confirmAction</code> / <code>confirmWithCheck</code> in <code>components/dialog.js</code>): a box to tick whose
+    sentence says what happens (“Yes, reset demo”), the button disabled until it is ticked and named by the verb, its icon by the verb (trash for Remove and Delete,
+    <code>rotate-ccw</code> for Reset, <code>history</code> for Revert) — never a name to type. Removing or resetting a sandbox, deleting or reverting to a restore point,
+    removing an account, an image or a template, deleting a try.</p>
+  <div class="pair"><div class="scheme">
+    <dialog class="dlg try-setup" open><form method="dialog">
+      <div class="dlg-head"><span data-mark="pi" class="mark"></span><h2 class="h-title">Try pi</h2><button class="btn sm quiet icon-only" type="button" aria-label="Cancel"><i data-i="x"></i></button></div>
+      <div class="dlg-body"><p class="sub">A fresh sandbox, try-pi: a new empty folder of its own, the network locked to its model, your key never inside.</p>
+        <div class="qt-sect"><h3>Key</h3><p class="try-key"><i data-i="circle-check"></i> <strong>anthropic</strong> — keychain — the sandbox only ever sees a placeholder.</p></div>
+        <div class="qt-sect"><h3>Image</h3><div class="try-prep">Node.js · pi — ready.</div></div>
+        <div class="qt-sect"><h3>The plan</h3><dl class="qt-plan"><dt>Name</dt><dd>try-pi</dd><dt>Network</dt><dd>Locked — only its model</dd><dt>Folder</dt><dd>A new empty folder (not one of yours)</dd></dl></div></div>
+      <div class="dlg-foot dlg-buttons"><span class="why"></span><button class="btn quiet" type="button"><i data-i="x"></i>Cancel</button><button class="btn primary" type="button"><i data-i="rocket"></i>Start</button></div>
+    </form></dialog>
+    <dialog class="dlg try-setup" open><form method="dialog">
+      <div class="dlg-head"><span data-mark="shell-gpt" class="mark"></span><h2 class="h-title">Try ShellGPT</h2><button class="btn sm quiet icon-only" type="button" aria-label="Cancel"><i data-i="x"></i></button></div>
+      <div class="dlg-body"><p class="sub">A fresh sandbox, try-sgpt: a new empty folder of its own, the network locked to its model, your key never inside.</p>
+        <div class="qt-sect"><h3>Model</h3><div class="try-model">
+          <label class="field"><span>Provider or gateway</span><select><optgroup label="Providers"><option>xAI — grok-4-1-fast</option><option>OpenAI — gpt-5.4-mini</option></optgroup><optgroup label="Gateways — one key, many models"><option selected>OpenRouter — openai/gpt-5.4-mini</option></optgroup></select></label>
+          <label class="field"><span>Model</span><input type="text" placeholder="openai/gpt-5.4-mini" value="anthropic/claude-sonnet-4.6"></label></div>
+          <p class="muted">A gateway names a model creator/name (anthropic/claude-sonnet-4.6). Empty: openai/gpt-5.4-mini. Its key only ever goes to OpenRouter; the sandbox sees a placeholder.</p></div>
+        <div class="qt-sect"><h3>Key</h3><div class="try-need"><h4>An OpenRouter key</h4>
+          <div class="try-option"><div><strong>Paste an OpenRouter key</strong><div class="muted">Kept in this Mac’s keychain as an account; the sandbox only ever sees a placeholder.</div></div>
+            <div class="try-paste"><input type="password" placeholder="paste the key (sk-or-…)"><button class="btn sm" type="button"><i data-i="key-round"></i>Save the key</button></div></div></div></div>
+        <div class="qt-sect"><h3>The plan</h3><dl class="qt-plan"><dt>Name</dt><dd>try-sgpt</dd><dt>Model</dt><dd>anthropic/claude-sonnet-4.6 through OpenRouter</dd><dt>Network</dt><dd>Locked — only its model providers</dd></dl></div></div>
+      <div class="dlg-foot dlg-buttons"><span class="why">Add a key first</span><button class="btn quiet" type="button"><i data-i="x"></i>Cancel</button><button class="btn primary" type="button" disabled><i data-i="rocket"></i>Start</button></div>
+    </form></dialog>
+    <dialog class="dlg" open><form method="dialog">
+      <div class="dlg-head"><h2 class="h-title">Delete try-pi?</h2><button class="btn sm quiet icon-only" type="button" aria-label="Close"><i data-i="x"></i></button></div>
+      <div class="dlg-body"><p class="sub">The sandbox, its disks, snapshot and restore points are deleted.</p>
+        <label class="field check confirm-check"><input type="checkbox"><span>Yes, delete try-pi and everything it has on disk</span></label></div>
+      <div class="dlg-foot dlg-buttons"><span class="why"></span><button class="btn quiet" type="button"><i data-i="x"></i>Cancel</button><button class="btn primary danger" type="button" disabled><i data-i="trash-2"></i>Delete</button></div>
+    </form></dialog>
+    <dialog class="dlg" open><form method="dialog">
+      <div class="dlg-head"><h2 class="h-title">Reset demo</h2><button class="btn sm quiet icon-only" type="button" aria-label="Close"><i data-i="x"></i></button></div>
+      <div class="dlg-body"><p class="sub">Its root disk goes back to the image: everything installed or changed outside the workspace is lost.</p>
+        <label class="field check confirm-check"><input type="checkbox" checked><span>Yes, reset demo</span></label></div>
+      <div class="dlg-foot dlg-buttons"><span class="why"></span><button class="btn quiet" type="button"><i data-i="x"></i>Cancel</button><button class="btn primary danger" type="button"><i data-i="rotate-ccw"></i>Reset</button></div>
+    </form></dialog>
+  </div></div>
+</section>
+
+<section>
+  <h2>The Guide tab</h2>
+  <p>A recipe agent's sandbox has a <b>Guide</b> tab in the inspector (<code>components/try-guide.js</code>): first and chosen on a try (the details open on its first visit), last elsewhere.
+    Dozer's preamble and facts (<code>.guide-facts</code>; Network links to its tab), the recipe's steps (<code>.guide-steps</code> — each command in <code>.guide-cmd</code> with
+    <b>Copy</b> and <b>Run</b>, or <b>Type</b> for one to change first; a ran step says <code>✓ ran</code>), tips and the footer. Text only: <code>code</code> comes from backquotes, never markup.
+    Run is disabled, with why, until a live session it can type into is open.</p>
+  <div class="pair"><div class="scheme">
+    <div class="sbx-details-inner" style="max-width:420px">
+      <div class="itabs" role="tablist"><button type="button" role="tab" class="itab" aria-selected="true"><i data-i="list-checks"></i><span class="itab-l">Guide</span></button><button type="button" role="tab" class="itab" aria-selected="false"><i data-i="info"></i><span class="itab-l">Overview</span></button></div>
+      <section class="ipanel"><div class="head"><h2>Guide</h2></div>
+        <div class="guide">
+          <div class="guide-head"><div class="guide-title"><strong>Fabric</strong><span class="muted"> · by Daniel Miessler · MIT · a command-line tool</span></div>
+            <p>Fabric applies ready-made prompts — patterns — to text you pipe into it. It is not a chat: it answers in your shell and exits.</p>
+            <p class="muted">It answers in your shell and exits: type its commands in the terminal, or press Run below.</p></div>
+          <div class="guide-sect"><h3>This try</h3><dl class="facts guide-facts"><dt>Version</dt><dd>Fabric 1.4.518 (Dozer's pin)</dd><dt>Model</dt><dd>Google AI (Gemini API) · gemini-2.5-flash — your key google stays on the Mac; the sandbox holds a placeholder</dd><dt>Reaches</dt><dd>its model only (Locked)<button type="button" class="linkish"> · Network</button></dd></dl></div>
+          <div class="guide-sect"><h3>Start here</h3><ol class="guide-steps">
+            <li><p>Check it answers.<span class="guide-ran"> ✓ ran</span></p><div class="guide-cmd"><code>echo hello | fabric "say ok"</code><button class="btn sm quiet" type="button"><i data-i="copy"></i>Copy</button><button class="btn sm" type="button"><i data-i="play"></i>Run</button></div></li>
+            <li><p>Use a file from your folder — put it there first, then change the name:</p><div class="guide-cmd"><code>fabric -p extract_wisdom &lt; notes.md</code><button class="btn sm quiet" type="button"><i data-i="copy"></i>Copy</button><button class="btn sm" type="button"><i data-i="square-terminal"></i>Type</button></div></li>
+          </ol></div>
+          <div class="guide-sect"><h3>Good to know</h3><ul class="guide-tips"><li><code>fabric -s</code> streams the answer as it comes.</li></ul></div>
+          <p class="muted guide-foot"><span>Docs: <code>https://github.com/danielmiessler/Fabric</code></span><span> · Recipe checked 2026-10-14</span></p>
+        </div></section>
+    </div>
+  </div></div>
+</section>
+
+<section>
+  <h2>The terminal strip</h2>
+  <p>The active tab sits on the terminal’s own dark chrome in both themes; its close, move and session buttons take the terminal’s ink (<code>--term-ink</code>).
+    Tab zero, <strong>Console</strong> (<code>.tab-console</code>), is the system console: first, its own icon (<code>cpu</code>), no number, no close box, there exactly while the VM is powered on.
+    A tab that is ready but not shown carries a dot (<code>.tab-activity</code>): the agent’s, when <code>ui.boot_view_on_start</code> keeps the page on Console.
+    Left of Console, the <strong>build log</strong>’s small tab (<code>.tab-buildlog</code>): an icon only (<code>list-checks</code>), its name in the tooltip, read-only, no close box —
+    the image’s last build (its steps with their times, then each step’s whole output), there whenever one is kept, through shutdown and sleep; never chosen by itself.</p>
+  <div class="pair"><div class="scheme">
+    <div class="sg-row" style="gap:0">
+      <div class="tab-wrap"><button type="button" class="tab tab-buildlog" title="Build log" aria-label="Build log"><i data-i="list-checks"></i></button></div>
+      <div class="tab-wrap"><button type="button" class="tab tab-console"><i data-i="cpu"></i>Console</button></div>
+      <div class="tab-wrap"><button type="button" class="tab active"><span class="tab-dot ph-running"></span><i data-i="terminal"></i>1 · try-pi · pi</button><button type="button" class="tab-x" aria-label="More"><i data-i="ellipsis"></i></button><button type="button" class="tab-x" aria-label="Close"><i data-i="x"></i></button></div>
+      <div class="tab-wrap"><button type="button" class="tab"><span class="tab-dot ph-running"></span><i data-i="terminal"></i>2 · shell-1<span class="tab-activity" aria-label="ready"></span></button><button type="button" class="tab-x" aria-label="Close"><i data-i="x"></i></button></div>
+    </div>
+  </div></div>
+</section>
+
+<section>
+  <h2>A start, in the terminal area</h2>
+  <p>After Start the page is there at once and nothing moves. While it starts the area IS the start — no card, at its final width from the first frame: the bar spans the terminal area up to
+    <code>--build-max</code> (1100 px; wider is hard to read). The action bar’s status slot says nothing while the panel shows (a failure and the result still do). The terminal area shows, in the same place: the build, while the image is prepared
+    (<code>.start-progress</code>, <code>components/start-progress.js</code>) — a bar for the whole build that never moves back (steps weighted by this Mac’s last build of the recipe,
+    else by kind; a download fills its share by bytes), “Step N of M · step · elapsed”, the finished steps, and the raw output under “Show details”; then tab zero, Console, when the VM powers on;
+    then the agent’s tab once it has drawn its screen (switched to, or a dot). A cached image shows no bar. A failure keeps the area, with the error, the log, Start again and Dismiss.
+    The header’s pill says Preparing…, then Booting…. When the build ends its log stays, as the small build-log tab left of Console. What the agent was refused is the header’s “N denied” menu, never a banner.
+    A try’s Start moves at once: the button says Starting… with a spinner in the click’s own frame, both modals close, and the try’s page draws its header and an
+    indeterminate “Preparing NAME” panel from the plan while the sandbox is made behind it. A create that fails says so there — “NAME was not made”, the reason, Back to setup
+    (the setup again, with the error) — never only a toast.</p>
+  <div class="pair"><div class="scheme">
+    <div class="sg-row"><button class="btn primary" type="button" disabled aria-busy="true"><span class="mini-spin" aria-hidden="true"></span><span>Starting…</span></button></div>
+    <section class="terms sg-terms">
+      <div class="start-progress building" role="status" data-start-pending><div class="sp-box">
+        <h3>Preparing try-grok</h3>
+        <div class="sp-barbox"><progress class="sp-bar" max="1"></progress>
+          <div class="sp-stepline">Preparing · <span>0:00</span></div></div>
+        <ol class="sp-steps"></ol>
+      </div></div>
+    </section>
+    <section class="terms sg-terms">
+      <div class="start-progress" role="alert" data-start-failure><div class="sp-box">
+        <h3>try-grok was not made</h3>
+        <div class="sp-failed"><p>sandbox try-grok already exists</p>
+          <div class="sp-acts"><button class="btn primary sm" type="button"><i data-i="arrow-left"></i>Back to setup</button></div></div>
+      </div></div>
+    </section>
+  </div></div>
+  <div class="pair"><div class="scheme">
+    <section class="terms sg-terms">
+      <div class="start-progress building" role="status"><div class="sp-box">
+        <h3>Preparing gemini for try-gemini</h3>
+        <div class="sp-barbox"><progress class="sp-bar" max="1" value="0.42"></progress>
+          <div class="sp-stepline">Step 3 of 5 · Installing Gemini CLI · <span>0:42</span></div></div>
+        <ol class="sp-steps">
+          <li class="sp-step"><i data-i="check"></i><span>The Node.js base image was already downloaded</span></li>
+          <li class="sp-step"><i data-i="check"></i><span>Started a VM to prepare the image</span><span class="muted">0.5 s</span></li>
+          <li class="sp-step current"><span class="mini-spin" aria-hidden="true"></span><span>Installing Gemini CLI…</span><span class="muted">0:12</span></li>
+        </ol>
+        <details class="disclosure sp-details"><summary><i data-i="chevron-down"></i>Show details</summary><pre class="sp-tail">added 412 packages in 9s</pre></details>
+      </div></div>
+    </section>
+  </div></div>
+  <div class="pair"><div class="scheme">
+    <section class="terms sg-terms">
+      <div class="start-progress building" role="status"><div class="sp-box">
+        <h3>Starting try-gemini failed</h3>
+        <div class="sp-barbox"><progress class="sp-bar failed" max="1" value="0.6"></progress>
+          <div class="sp-stepline">Step 3 of 5 · <span>1:05</span></div></div>
+        <div class="sp-failed" role="alert"><p><strong>try-gemini did not start: </strong>npm install failed (exit 1)</p>
+          <div class="sp-acts"><button class="btn primary sm" type="button"><i data-i="play"></i>Start again</button><button class="btn quiet sm" type="button">Dismiss</button></div></div>
+      </div></div>
+    </section>
+  </div></div>
+  <div class="pair"><div class="scheme">
+    <div class="sg-row"><span class="pill ph-busy"><span class="mini-spin" aria-hidden="true"></span> Preparing…</span></div>
+    <div class="sbx-actions toolbar" data-sg-bar-plain><button class="btn" type="button"><i data-i="play"></i>Start</button><span class="spacer"></span>
+      <div class="op-banner op-running"><span class="mini-spin" aria-hidden="true"></span><span class="op-text">start · 3 s — VM created and booted</span></div></div>
+    <div class="sbx-actions toolbar" data-sg-bar-failed><button class="btn" type="button"><i data-i="play"></i>Start</button><span class="spacer"></span>
+      <div class="op-banner op-failed"><div class="callout bad compact" role="alert"><i data-i="circle-x"></i><div class="c-body">try-gemini did not start: the image could not be prepared</div>
+        <div class="c-acts"><button type="button" class="btn sm quiet icon-only b-x" aria-label="Dismiss"><i data-i="x"></i></button></div></div></div></div>
+    <div class="sbx-title" data-sg-chips-plain><span class="chips sbx-meta"><span class="chip-kv"><span class="k">Image</span>Node.js · Gemini CLI</span><button type="button" class="chip-kv"><span class="k">Network</span>locked</button></span></div>
+    <div class="sbx-title" data-sg-chips-denied><span class="chips sbx-meta"><span class="chip-kv"><span class="k">Image</span>Node.js · Gemini CLI</span><button type="button" class="chip-kv"><span class="k">Network</span>locked</button><span class="menu-wrap"><button type="button" class="tag warn denied-chip">4 denied</button></span></span></div>
+    <div class="sbx-title" data-sg-chips-ports><span class="chips sbx-meta"><span class="chip-kv"><span class="k">Image</span>Debian · AIChat</span><a class="btn small" href="#" title="AIChat web — the sandbox’s port 8000 at http://127.0.0.1:8000/"><i data-i="link"></i>Open AIChat web</a></span></div>
+    <div class="sbx-title" data-sg-chips-ports-idle><span class="chips sbx-meta"><span class="chip-kv"><span class="k">Image</span>Debian · Fabric</span><button type="button" class="btn small" disabled title="Not serving yet — start it in a session (fabric --serve)"><i data-i="link"></i>Open Fabric REST API</button></span></div>
+  </div></div>
+  <p>A forwarded web port (<code>doz ports</code>) is an <strong>Open</strong> link among the header’s chips while the sandbox runs: “Open TITLE”, a small button
+    with the link glyph, its tooltip the sandbox’s port and the Mac URL (and “was taken” when the Mac port moved). It opens a new tab on this Mac’s
+    <code>127.0.0.1</code>. From another device (<code>doz serve</code>) it is a plain outline tag “TITLE (on the Mac)” instead — that device’s 127.0.0.1 is not the Mac.
+    The Overview tab lists every forward with its state (listening, stopped, failed and why). While nothing in the sandbox listens on the port the
+    button is there but DISABLED, its tooltip how to start it — the recipe’s own command when it has one (“Not serving yet — start it in a session
+    (fabric --serve)”); the details’ list says the same.</p>
+  <p>Accounts &amp; keys (<code>views/accounts.js</code>): one card per provider (<code>.ak-prov</code>) — its tools named in the header and an Add a key —
+    each key a row (<code>.ak-row</code>): a <b>Default</b> radio (Anthropic also has “No default”), the key’s name and where it lives in plain words
+    (Keychain · 1Password · a command · This Mac’s Claude login; the keychain item and fingerprint go in Details), ONE status pill — glyph and word —
+    who uses it, then the one verb that helps now (Check · Read again · Fix), Details (chevron) and ⋯ (Remove…). The statuses:
+    <span class="st-ok">Works</span>, <span class="st-off">Not checked</span>, <span class="st-fail">Refused</span> (its provider said no),
+    <span class="st-fail">Can’t read</span> (its source did not answer, or its keychain item is gone), <span class="st-off">No check for this provider</span>,
+    and for a login <span class="st-ok">Signed in</span> / <span class="st-warn">Signed out</span>. The same key stored twice wears a
+    <code>.tag.warn</code> “same key as …”. Failing keys come first, as bad callouts saying what the provider or source answered, the fix and
+    the sandboxes affected. The cards, callouts and table stop at 960px; under 640px a row stacks (radio, then the key, status and verbs).</p>
+  <div class="pair wide"><div class="scheme">
+    <div class="ak-attn">
+      <div class="callout bad" role="alert"><i data-i="circle-x"></i><div class="c-body"><div class="c-title">Refused: google-old (Google AI (Gemini API))</div>
+        <p>Google AI (Gemini API) refused it (HTTP 400 from generativelanguage.googleapis.com): the key is wrong, revoked or out of credit. Add a new key, then remove this one.</p>
+        <p>Used by box-gemini — their next session gets no Google AI (Gemini API) key.</p></div>
+        <div class="c-acts"><button type="button" class="btn sm"><i data-i="key-round"></i>Add a new key…</button><button type="button" class="btn sm quiet"><i data-i="badge-check"></i>Check again</button></div></div>
+    </div>
+    <section class="ak-prov">
+      <div class="ak-prov-h"><div class="ak-av" aria-hidden="true">x</div><h3>xAI</h3><div class="muted">For Grok Build, Fabric, OpenClaw and 4 more</div>
+        <div class="ak-add"><button type="button" class="btn sm"><i data-i="plus"></i>Add a key</button></div></div>
+      <div class="ak-rows">
+        <div class="ak-row ak-colhead" aria-hidden="true"><span>Default</span><span>Key</span><span class="h-state">Status</span><span class="h-used">Used by</span><span></span></div>
+        <div class="ak-row"><label class="ak-def"><input type="radio" name="sg-ak" checked>Default</label>
+          <div class="ak-keycell"><div class="ak-name">xai <span class="tag warn">same key as xai-copy</span></div><div class="ak-where"><i data-i="key-round"></i><span>Keychain</span></div></div>
+          <div class="ak-state"><span class="pill st-ok"><i data-i="circle-check"></i>Works</span><span class="muted">checked 2 min ago</span></div>
+          <div class="ak-used"><span class="ak-chip">box-grok</span></div>
+          <div class="ak-acts"><button type="button" class="btn sm quiet icon-only" aria-label="Details"><i data-i="chevron-down"></i></button><button type="button" class="btn sm quiet icon-only" aria-label="More"><i data-i="ellipsis"></i></button></div></div>
+        <div class="ak-row"><label class="ak-def"><input type="radio" name="sg-ak"></label>
+          <div class="ak-keycell"><div class="ak-name">xai-1p</div><div class="ak-where"><i data-i="shield"></i><span>1Password</span><code>op://Dev/xai/credential</code></div></div>
+          <div class="ak-state"><span class="pill st-fail"><i data-i="circle-x"></i>Can’t read</span><span class="muted">its source did not answer</span></div>
+          <div class="ak-used"><span>no sandbox</span></div>
+          <div class="ak-acts"><button type="button" class="btn sm"><i data-i="refresh-cw"></i>Read again</button><button type="button" class="btn sm quiet icon-only" aria-label="Details"><i data-i="chevron-down"></i></button><button type="button" class="btn sm quiet icon-only" aria-label="More"><i data-i="ellipsis"></i></button></div>
+          <dl class="ak-details"><dt>Source</dt><dd>1Password: op://Dev/xai/credential</dd><dt>Fingerprint</dt><dd>3f9a01c2 (a sha256 prefix — never the key)</dd><dt>Remove</dt><dd>only Dozer’s record — the source is not touched</dd></dl></div>
+        <div class="ak-row"><label class="ak-def"><input type="radio" name="sg-ak"></label>
+          <div class="ak-keycell"><div class="ak-name">xai-old</div><div class="ak-where"><i data-i="key-round"></i><span>Keychain</span></div></div>
+          <div class="ak-state"><span class="pill st-off"><i data-i="info"></i>Not checked</span><span class="muted">added without its check</span></div>
+          <div class="ak-used"><span>no sandbox</span></div>
+          <div class="ak-acts"><button type="button" class="btn sm quiet"><i data-i="badge-check"></i>Check</button><button type="button" class="btn sm quiet icon-only" aria-label="Details"><i data-i="chevron-down"></i></button><button type="button" class="btn sm quiet icon-only" aria-label="More"><i data-i="ellipsis"></i></button></div></div>
+      </div>
+    </section>
+    <div class="ak-tablewrap"><table class="ak-table"><thead><tr><th>Sandbox</th><th>Tool</th><th>Key</th><th>How</th><th>Status</th><th></th></tr></thead>
+      <tbody><tr><td><b>box-grok</b></td><td>Grok Build</td><td>xai <span class="muted">(xAI)</span></td><td>follows the xAI default</td><td><span class="pill st-ok"><i data-i="circle-check"></i>Works</span></td>
+        <td class="ak-tdacts"><button type="button" class="btn sm quiet"><i data-i="key-round"></i>Change…</button></td></tr></tbody></table></div>
+  </div></div>
+  <p>By sandbox (<code>.ak-table</code> in <code>.ak-tablewrap</code>, which scrolls inside its box on a phone): each sandbox, the key it uses now and how it
+    got it; Change… picks another from its next session. Add a key is a three-step dialog (<code>dialog.dlg.ak-flow</code>): the provider (searchable by a
+    tool’s name, <code>.ak-pick</code> tiles; a non-match is <code>.dim</code>), the key (a masked field while <code>ui.allow_secret_entry</code> is on; for
+    1Password, AWS, a command, a custom key or a ChatGPT sign-in, the exact <code>doz account add</code> line in <code>.ak-cmd</code> with Copy), then the check’s
+    result. With no keys at all the page is <code>.ak-empty</code>: three <code>.ak-card</code>s — this Mac’s Claude login, paste a key, keep it in 1Password or AWS.</p>
+  <div class="pair"><div class="scheme">
+    <div class="ak-steps"><span class="done">✓ Provider</span><span class="on">2 The key</span><span>3 Check</span></div>
+    <div class="ak-pgrid"><button type="button" class="ak-pick"><span class="ak-av" aria-hidden="true">x</span><b>xAI</b><small>Grok Build uses it</small></button>
+      <button type="button" class="ak-pick dim"><span class="ak-av" aria-hidden="true">A</span><b>Anthropic</b><small>2 keys · for Claude Code, pi…</small></button></div>
+    <pre class="ak-cmd">doz account add xai-2 --provider xai --from op://Dev/xai/credential</pre>
+    <div class="ak-result" role="status"><span class="pill st-ok"><i data-i="circle-check"></i>Works</span><div><b>xai-2 is ready.</b><div class="muted">xAI accepted it. It is in your login keychain.</div></div></div>
+  </div></div>
+</section>
+
+<section>
+  <h2>The build log</h2>
+  <p>The build log’s tab draws a document, not a terminal (<code>components/build-log.js</code>, from the host’s <code>BuildLogDocument</code> — the same record
+    <code>doz image log IMAGE</code> prints): how the image was made. The inputs (the base with its digest, kernel, guest init, the recipe and its version, the bake’s
+    network policy folded, the early steps and which were cached); then each step under a plain heading, with its command or script exactly as it ran in a
+    monospace block (<code>.bl-code</code>), every file it writes (path and contents, folded when long), and its output; then each check — the command, what it
+    expects, what it got. Text only; nothing secret-shaped is ever kept in it.</p>
+  <div class="pair"><div class="scheme">
+    <section class="terms sg-terms" style="height:420px">
+      <div class="buildlog-doc">
+        <header class="bl-head"><h2>How debian-gemini was built</h2><p class="bl-sub">Built in 1:12 · 13 Oct 2026, 19:34</p></header>
+        <section class="bl-inputs"><h3>Inputs</h3>
+          <dl class="bl-facts"><dt>Base image</dt><dd>docker.io/library/debian@sha256:6f1e2d…</dd><dt>Kernel</dt><dd>vmlinux-6.18.15-186 (sha256 2fe4a58d2885d623…)</dd>
+            <dt>Recipe</dt><dd>gemini — @google/gemini-cli 0.63.0 (integrity sha512-…)</dd><dt>Bake network</dt><dd>no interface — only through the Mac’s proxy, policy bake (anything else: deny)</dd></dl>
+          <details class="disclosure bl-fold"><summary><i data-i="chevron-down"></i>Bake network policy (6 rules)</summary><pre class="bl-code">allow deb.debian.org:443</pre></details>
+          <ul class="bl-early"><li><span class="bl-mark ok">✓</span>kernel ready (vmlinux-6.18.15-186, cached) <span class="muted">0.0 s</span><span class="tag">cached</span></li></ul>
+        </section>
+        <section class="bl-step"><h3><span class="bl-mark ok">✓</span>2. Install the developer baseline</h3>
+          <p class="bl-sub">step: install the developer baseline (procps git …) · as root · ran in 15.2 s</p>
+          <div class="bl-cmd"><div class="bl-label">Command: bash -euo pipefail -c — the script, verbatim</div>
+            <pre class="bl-code bl-script">export DEBIAN_FRONTEND=noninteractive
+apt-get update
+apt-get install -y --no-install-recommends apt-utils
+apt-get install -y --no-install-recommends procps git less jq …</pre></div>
+          <details class="disclosure bl-fold"><summary><i data-i="chevron-down"></i>Writes /home/agent/.local/bin/gemini (14 lines)</summary><pre class="bl-code bl-file">#!/bin/sh
+exec /usr/local/bin/gemini "$@"</pre></details>
+          <div class="bl-out"><div class="bl-label">Output (113 lines)</div><pre class="bl-code bl-output">Get:1 http://deb.debian.org/debian bookworm InRelease [151 kB]</pre></div>
+        </section>
+        <section class="bl-checks"><h3>Checks</h3><ul class="bl-check-list"><li class="bl-check">
+          <div class="bl-check-head"><span class="bl-mark ok">✓</span><strong>Check: apt’s package lists are kept</strong><span class="muted">0.6 s</span></div>
+          <dl class="bl-facts"><dt>Command</dt><dd><code>sh -c 'apt-cache policy cowsay | grep -q Candidate: …'</code></dd><dt>Expects</dt><dd>exit 0, and the output contains “apt-lists-ok”</dd>
+            <dt>Got</dt><dd><pre class="bl-code">apt-lists-ok</pre></dd></dl></li></ul></section>
+      </div>
+    </section>
+  </div></div>
+</section>
+
+<section>
+  <h2>Marks — the icon registry</h2>
+  <p>Vendor and product marks from <code>Sources/DozerKit/Recipes/icons/</code>: one <code>currentColor</code> path each, so they follow the text colour in light and dark.
+    Each says whether it is the maker’s own mark (<i>official</i>, as its brand terms allow) or Dozer’s neutral <i>lettermark</i>. Colour variants come later.</p>
+  <div class="pair"><div class="scheme"><div class="marks"></div></div></div>
+</section>
+
+<section>
+  <h2>Icons — the vendored set</h2>
+  <p><span data-icon-count>…</span>. Only these ship; another is a vendoring change.</p>
+  <div class="icons" id="icons"></div>
+</section>
+</div>
+<script src="style-guide.js"></script>
+</body>
+</html>

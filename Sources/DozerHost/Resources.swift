@@ -323,6 +323,7 @@ public enum Resources {
         case "content", "state.json": return "cache:downloads"
         case "tools": return "cache:tools"                       // 599h: the tools layer's downloads (gh)
         case "serve": return "store"                             // 606: doz serve's devices, audit log, port
+        case "build-logs": return "store"                        // 617: each image's last build log
         case "initfs.ext4": return "initfs"
         case "kernels": return c.count >= 2 ? "kernel:\(kernelVersion(c[1]))" : "store"
         case "containers": return c.count >= 2 ? "leftover:\(c[1])" : "store"

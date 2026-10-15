@@ -1,0 +1,150 @@
+{
+  "schema": 1,
+  "agent": "omp",
+  "version": "omp/18.10.4",
+  "profiled": "2026-10-14",
+  "how": "a fresh try with the Open network, every HTTPS request decrypted and logged; its first start, then a scripted task (read a file, edit it, run a command) run non-interactively with FAKE keys — xAI and Google through a fake provider that answers text only, Anthropic and OpenAI refused by the real API (401). A real-key run would see more: the model's turns and what its tool calls fetch.",
+  "taskEnded": "DOZ_FAKE_OK / Working...",
+  "endpoints": [
+    {
+      "host": "api.commandcode.ai",
+      "method": "CONNECT",
+      "path": null,
+      "when": "start",
+      "count": 1,
+      "credential": [
+        "none"
+      ],
+      "refusedWhenProfiled": true,
+      "determination": "refuse",
+      "reason": "a model gateway's public model list, asked at start (no setting turns it off); it does without — refused quietly (network.quiet)",
+      "seen": true
+    },
+    {
+      "host": "api.kilo.ai",
+      "method": "CONNECT",
+      "path": null,
+      "when": "start",
+      "count": 1,
+      "credential": [
+        "none"
+      ],
+      "refusedWhenProfiled": true,
+      "determination": "refuse",
+      "reason": "a model gateway's public model list, asked at start (no setting turns it off); it does without — refused quietly (network.quiet)",
+      "seen": true
+    },
+    {
+      "host": "api.venice.ai",
+      "method": "CONNECT",
+      "path": null,
+      "when": "start",
+      "count": 1,
+      "credential": [
+        "none"
+      ],
+      "refusedWhenProfiled": true,
+      "determination": "refuse",
+      "reason": "a model gateway's public model list, asked at start (no setting turns it off); it does without — refused quietly (network.quiet)",
+      "seen": true
+    },
+    {
+      "host": "api.x.ai",
+      "method": "GET",
+      "path": "/v1/models",
+      "when": "start",
+      "count": 2,
+      "credential": [
+        "placeholder swapped for key:xai"
+      ],
+      "refusedWhenProfiled": false,
+      "determination": "allow-path",
+      "reason": "xAI's API — the model and its model list (the key is swapped in by Dozer's proxy)",
+      "seen": true
+    },
+    {
+      "host": "api.x.ai",
+      "method": "POST",
+      "path": "/v1/responses",
+      "when": "task",
+      "count": 1,
+      "credential": [
+        "placeholder swapped for key:xai"
+      ],
+      "refusedWhenProfiled": false,
+      "determination": "allow-path",
+      "reason": "xAI's API — the model and its model list (the key is swapped in by Dozer's proxy)",
+      "seen": true
+    },
+    {
+      "host": "build.stencil.so",
+      "method": "GET",
+      "path": "/api/products/omp/latest/linux-arm64",
+      "when": "start",
+      "count": 1,
+      "credential": [
+        "none"
+      ],
+      "refusedWhenProfiled": false,
+      "determination": "refuse",
+      "reason": "oh-my-pi's release check at start (no setting turns it off); Dozer installs the pinned release — refused quietly (network.quiet)",
+      "seen": true
+    },
+    {
+      "host": "catalog.stencil.so",
+      "method": "CONNECT",
+      "path": null,
+      "when": "start",
+      "count": 1,
+      "credential": [
+        "none"
+      ],
+      "refusedWhenProfiled": true,
+      "determination": "refuse",
+      "reason": "a model gateway's public model list, asked at start (no setting turns it off); it does without — refused quietly (network.quiet)",
+      "seen": true
+    },
+    {
+      "host": "coding-intl.dashscope.aliyuncs.com",
+      "method": "GET",
+      "path": "/v1/models",
+      "when": "start",
+      "count": 1,
+      "credential": [
+        "none"
+      ],
+      "refusedWhenProfiled": false,
+      "determination": "refuse",
+      "reason": "a model gateway's public model list, asked at start (no setting turns it off); it does without — refused quietly (network.quiet)",
+      "seen": true
+    },
+    {
+      "host": "hyper.charm.land",
+      "method": "CONNECT",
+      "path": null,
+      "when": "start+task",
+      "count": 2,
+      "credential": [
+        "none"
+      ],
+      "refusedWhenProfiled": true,
+      "determination": "refuse",
+      "reason": "a model gateway's public model list, asked at start (no setting turns it off); it does without — refused quietly (network.quiet)",
+      "seen": true
+    },
+    {
+      "host": "zenmux.ai",
+      "method": "CONNECT",
+      "path": null,
+      "when": "start",
+      "count": 1,
+      "credential": [
+        "none"
+      ],
+      "refusedWhenProfiled": true,
+      "determination": "refuse",
+      "reason": "a model gateway's public model list, asked at start (no setting turns it off); it does without — refused quietly (network.quiet)",
+      "seen": true
+    }
+  ]
+}

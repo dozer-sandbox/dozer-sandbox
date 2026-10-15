@@ -61,10 +61,16 @@ asleep or hibernated sandbox and resumes a paused one, so it's the one command t
 | `doz sleep NAME` · `doz wake NAME` | paused **and** saved to disk — survives a crash of the host | ~0.3 s | kept | carry on |
 | `doz hibernate NAME` · `doz wake NAME` | saved to disk, then the VM stops | ~0.35 s / ~0.3 s | **given back** | carry on: same processes, same screens |
 | `doz shutdown NAME` | a cold stop; the disks are kept | | given back | end |
+| `doz down NAME` | the opposite of `up`: hibernate (`--sleep`: sleep; `--shutdown`: shut down) | as those | as those | as those |
 | `doz reset NAME` | shut down and go back to a fresh copy of the image (the state disk and restore points stay) | | | end |
 | `doz rm NAME` | remove the sandbox and everything it has on disk | | | end |
 
 `start` has an alias, `cold-boot`; `pause` has `suspend`.
+
+`doz down NAME` puts a sandbox away when you are done for now: it hibernates it — nothing kept in memory, its
+sessions come back where they were with `doz up` (in its project folder), `doz attach` or `doz wake`.
+`--sleep` keeps its memory for an even quicker wake; `--shutdown` is a cold stop, asked first as `shutdown` is
+(`-y` skips the question). It works on a try too.
 
 `shutdown`, `reset` and `rm` ask first. `--yes` skips the question; without a terminal and without
 `--yes` they refuse, so a script can't destroy something by accident. The question names what you
@@ -156,9 +162,10 @@ does all that without attaching. On an existing sandbox, create options are igno
    makes the sandbox from it, starts it and opens it with the boot in a terminal. See
    [Projects](04-projects.md#in-the-dashboard).
 3. Or **One-page form** (in the wizard, top right): everything on one page, a **Shared folder** or
-   **Isolated**, and no project file. **Create** makes it off; **Start** boots it. With the setting
-   `ui.boot_view_on_start` on (the default), Start opens a terminal that shows the boot as it happens,
-   then becomes the sandbox's own session.
+   **Isolated**, and no project file. **Create** makes it off; **Start** boots it: the terminal area shows
+   the image's build while there is one, then tab zero, **Console** (the boot as it happens), then the
+   agent's own tab once it has drawn its screen. With the setting `ui.boot_view_on_start` on, the page
+   stays on Console and marks the agent's tab instead of switching to it.
 
 ![New sandbox](images/new-sandbox.png)
 
@@ -166,8 +173,8 @@ Each sandbox has an entry under **Sandboxes** in the sidebar, with a dot in its 
 while it holds memory, a ring when it holds none, a square when it failed). Its page has the lifecycle
 buttons across the top — **Start**, **Pause**, **Resume**, **Sleep**, **Hibernate**, **Wake**, **Shut
 down** — showing only those that make sense in its state, the one that brings it back first;
-**Reset…** and **Remove…** are under **⋯**. **Reset** and **Remove** ask you to type the sandbox's
-name; **Shut down** asks with a plain confirmation ("Don't ask again" sets `ui.confirm_shutdown` to
+**Reset…** and **Remove…** are under **⋯**. **Reset** and **Remove** ask you to tick a box
+first; **Shut down** asks with a plain confirmation ("Don't ask again" sets `ui.confirm_shutdown` to
 `false`).
 
 ## See what you have
@@ -255,7 +262,7 @@ newer doz fixes, without a restart.
 | `host.idle_timeout_minutes` | `5` | Minutes with nothing running before the host exits; `0` = never (`$DOZ_HOST_IDLE`). |
 | `host.screen_capture_minutes` | `5` | How often a running sandbox's changed screens are saved; `0` = only at pause, sleep and hibernate. |
 | `host.boot_logs_kept` | `5` | Boots kept per sandbox (1–50). |
-| `ui.boot_view_on_start` | `true` | The dashboard's Start opens a terminal on the boot. |
+| `ui.boot_view_on_start` | `false` | After the dashboard's Start, stay on tab zero (Console) rather than switch to the agent's tab. |
 | `ui.confirm_shutdown` | `true` | The dashboard's Shut down asks first. |
 
 ## Limits

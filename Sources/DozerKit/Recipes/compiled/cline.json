@@ -1,0 +1,290 @@
+{
+  "args" : {
+    "version" : {
+      "buildArg" : "CLINE_VERSION",
+      "default" : "3.0.71",
+      "description" : "The Cline CLI release Dozer installs (its pin).",
+      "pattern" : "[0-9]+\\.[0-9]+\\.[0-9]+([-+][0-9A-Za-z.-]+)?"
+    }
+  },
+  "author" : "Cline",
+  "capabilities" : [
+    {
+      "config" : {
+        "dozer" : {
+          "excluded" : [
+
+          ],
+          "model" : {
+            "hosts" : [
+              {
+                "host" : "api.x.ai",
+                "paths" : [
+                  "/v1/chat/completions"
+                ]
+              }
+            ],
+            "id" : "model:cline",
+            "phrase" : "talk to your AI model (xAI)",
+            "summary" : "Cline's model here (the xAI API, with your key) — needed for it to answer.",
+            "title" : "Talk to xAI"
+          },
+          "quiet" : [
+            {
+              "host" : "api.cline.bot",
+              "reason" : "Cline asks for its recommended models (its account's models) when its TUI starts; it does without them when refused"
+            },
+            {
+              "host" : "data.cline.bot",
+              "reason" : "Cline asks its PostHog host for feature flags at each start even with telemetryOptOut; it does without them when refused"
+            },
+            {
+              "host" : "models.dev",
+              "reason" : "Cline reads the public models.dev catalogue when its TUI starts; with its model set it does without it when refused"
+            }
+          ],
+          "update" : [
+
+          ]
+        },
+        "runtime" : {
+          "allow" : [
+            "api.x.ai:443"
+          ],
+          "deny" : [
+            "api.cline.bot:443",
+            "data.cline.bot:443",
+            "models.dev:443"
+          ]
+        }
+      },
+      "type" : "com.docker.sandbox/network-policy@1"
+    },
+    {
+      "config" : {
+        "apiKey" : {
+          "inject" : [
+            {
+              "domain" : "api.x.ai",
+              "format" : "Bearer %s",
+              "header" : "authorization"
+            }
+          ],
+          "name" : "XAI_API_KEY",
+          "proxyManaged" : true
+        },
+        "dozer" : {
+          "accounts" : [
+            "key"
+          ]
+        },
+        "phase" : "runtime",
+        "service" : "xai"
+      },
+      "description" : "xAI API access",
+      "type" : "com.docker.sandbox/credential@1"
+    },
+    {
+      "config" : {
+        "path" : "/home/agent/.cline"
+      },
+      "type" : "com.docker.sandbox/volume@1"
+    },
+    {
+      "config" : {
+        "binary" : "cline",
+        "integrity" : "sha512-d0z0d//cOfuMaPWmU++0eg6L4jmE9E0t8DZPIWlqoBLdax4o3u7E2MqkKenrtX6mTG7LiA4wrRk3KIF/zXMdOA==",
+        "kind" : "npm-platform-binary",
+        "package" : "cline",
+        "payload" : "bin/cline",
+        "platform_package" : "@cline/cli-linux-arm64"
+      },
+      "type" : "com.dozersandbox/install@1"
+    },
+    {
+      "config" : {
+        "check" : {
+          "argv" : [
+            "cline",
+            "-P",
+            "xai",
+            "-m",
+            "grok-build-0.1",
+            "say ok"
+          ],
+          "expect" : "DOZ_FAKE_OK"
+        },
+        "command" : [
+          "cline",
+          "-P",
+          "xai",
+          "-m",
+          "grok-build-0.1"
+        ],
+        "env" : {
+          "CLINE_DISABLE_CLINE_PASS_NOTICE" : "1",
+          "CLINE_NO_AUTO_UPDATE" : "1"
+        },
+        "first_run" : [
+          {
+            "file" : "~/.cline/data/settings/global-settings.json",
+            "set" : {
+              "autoUpdateEnabled" : false,
+              "telemetryOptOut" : true
+            }
+          }
+        ],
+        "no_prompts_args" : [
+
+        ],
+        "passthrough" : [
+          "--version",
+          "-V",
+          "--help",
+          "-h",
+          "help",
+          "auth",
+          "config",
+          "plugin",
+          "skill",
+          "mcp"
+        ],
+        "state_env" : {
+
+        },
+        "status" : "none",
+        "verify" : [
+          {
+            "argv" : [
+              "cline",
+              "--version"
+            ],
+            "expect" : "${{ kit.args.version }}"
+          }
+        ]
+      },
+      "type" : "com.dozersandbox/launch@1"
+    },
+    {
+      "config" : {
+        "methods" : [
+          {
+            "accounts" : [
+              "key"
+            ],
+            "checked" : "2026-10-14",
+            "keys_page" : "https://console.x.ai/",
+            "kind" : "api-key",
+            "note" : "Cline reads XAI_API_KEY with -P xai (its key is not saved; providers.json keeps only the provider and model). Its default Cline account provider is not offered here.",
+            "provider" : "xai"
+          },
+          {
+            "account" : "a Cline account (ClinePass)",
+            "checked" : "2026-10-14",
+            "in_sandbox" : false,
+            "kind" : "vendor-sign-in",
+            "note" : "Cline's own account and its models need its servers; Dozer does not offer them yet."
+          }
+        ]
+      },
+      "type" : "com.dozersandbox/auth@1"
+    },
+    {
+      "config" : {
+        "entries" : [
+          {
+            "checked" : "2026-10-14",
+            "gateway" : "openrouter",
+            "level" : "unknown",
+            "reason" : "Cline has an OpenRouter provider; not checked"
+          },
+          {
+            "checked" : "2026-10-14",
+            "gateway" : "vercel-ai-gateway",
+            "level" : "unknown",
+            "reason" : "not checked against Cline"
+          }
+        ]
+      },
+      "type" : "com.dozersandbox/gateways@1"
+    },
+    {
+      "config" : {
+        "checked" : "2026-10-14"
+      },
+      "type" : "com.dozersandbox/currency@1"
+    },
+    {
+      "config" : {
+        "aliases" : [
+          "cline-cli"
+        ],
+        "categories" : [
+          "coding-agent"
+        ],
+        "default_base" : "debian",
+        "icon" : "cline",
+        "kind" : "coding-agent",
+        "limits" : [
+          {
+            "musl" : true,
+            "reason" : "Dozer installs Cline's glibc linux-arm64 build"
+          }
+        ],
+        "platforms" : {
+          "glibc" : true,
+          "musl" : false
+        },
+        "tags" : [
+          {
+            "checked" : "2026-10-14",
+            "evidence" : "make recipe-check: cline -P xai -m grok-build-0.1 \"say ok\" printed the stand-in's answer and exited in a fresh try",
+            "level" : "verified",
+            "notes" : [
+              "cline -P xai -m grok-build-0.1 \"…\""
+            ],
+            "tag" : "headless"
+          }
+        ],
+        "terms" : "Your xAI API key — a key from console.x.ai."
+      },
+      "type" : "com.dozersandbox/directory@1"
+    },
+    {
+      "config" : {
+        "docs" : "https://github.com/cline/cline",
+        "intro" : "Cline CLI is a coding agent with its own screen: the session on the left. Ask it to read, change and run the code in your folder.",
+        "steps" : [
+          {
+            "command" : "cline -P xai -m grok-build-0.1 \"say ok\"",
+            "text" : "Check it answers, without its screen."
+          },
+          {
+            "text" : "Ask it something in its own screen — the session on the left."
+          },
+          {
+            "command" : "cline -P xai -m grok-build-0.1 \"list the files in this folder\"",
+            "text" : "One task without its screen."
+          }
+        ],
+        "tips" : [
+          "Files it makes are in /workspace — your folder on the Mac.",
+          "Restart its session from the session's ⋯ menu; End stops it."
+        ]
+      },
+      "type" : "com.dozersandbox/guide@1"
+    }
+  ],
+  "description" : "Cline's coding agent for the terminal, here on an xAI API key (no Cline account).",
+  "displayName" : "Cline CLI",
+  "id" : "cline/cline",
+  "kind" : "workload",
+  "licenses" : [
+    "Apache-2.0"
+  ],
+  "provides" : [
+    "com.dozersandbox/cline@${{ kit.args.version }}"
+  ],
+  "schema" : 2,
+  "sourceUrl" : "https://github.com/cline/cline"
+}

@@ -1,0 +1,38 @@
+{
+  "schema": 1,
+  "agent": "gptme",
+  "version": "0.34.0",
+  "profiled": "2026-10-14",
+  "how": "a fresh try with the Open network, every HTTPS request decrypted and logged; its first start, then a scripted task (read a file, edit it, run a command) run non-interactively with FAKE keys — xAI and Google through a fake provider that answers text only, Anthropic and OpenAI refused by the real API (401). A real-key run would see more: the model's turns and what its tool calls fetch.",
+  "taskEnded": "confirmation... / · WARNING  Autonomous mode: No tools used after 2 confirmations. Exiting. / · Hook 'complete.auto_reply' signaled session completion",
+  "endpoints": [
+    {
+      "host": "api.x.ai",
+      "method": "POST",
+      "path": "/v1/chat/completions",
+      "when": "task",
+      "count": 4,
+      "credential": [
+        "placeholder swapped for key:xai"
+      ],
+      "refusedWhenProfiled": false,
+      "determination": "allow",
+      "reason": "the xAI API — the model (the key is swapped in by Dozer's proxy)",
+      "seen": true
+    },
+    {
+      "host": "openaipublic.blob.core.windows.net",
+      "method": "GET",
+      "path": "/encodings/cl100k_base.tiktoken",
+      "when": "task",
+      "count": 1,
+      "credential": [
+        "none"
+      ],
+      "refusedWhenProfiled": false,
+      "determination": "allow-path",
+      "reason": "tiktoken's tokenizer file, downloaded at the first turn (allowed by its path /encodings/)",
+      "seen": true
+    }
+  ]
+}

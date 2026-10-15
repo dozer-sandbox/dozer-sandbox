@@ -81,6 +81,11 @@ public final class SandboxCA: @unchecked Sendable {
         let leafKey = P256.Signing.PrivateKey()
         let san: GeneralName = IPv4CIDR.parseAddress(h) != nil
             ? .ipAddress(ASN1OctetStringShim.bytes(h)) : .dnsName(h)
+        // 617: the leaf names its issuer's key (Authority Key Identifier). Python 3.13+ verifies with VERIFY_X509_STRICT
+        // by default and refuses a leaf without it ("Missing Authority Key Identifier") — every Python tool's HTTPS
+        // through the proxy (httpx, requests) failed. The CA's own Subject Key Identifier (every Dozer CA has one).
+        let caKeyID = (try? certificate.extensions.subjectKeyIdentifier)??.keyIdentifier
+            ?? SubjectKeyIdentifier(hash: certificate.publicKey).keyIdentifier
         let cert = try Certificate(
             version: .v3, serialNumber: Certificate.SerialNumber(),
             publicKey: Certificate.PublicKey(leafKey.publicKey),
@@ -92,6 +97,7 @@ public final class SandboxCA: @unchecked Sendable {
                 Critical(KeyUsage(digitalSignature: true))
                 try ExtendedKeyUsage([.serverAuth])
                 SubjectAlternativeNames([san])
+                AuthorityKeyIdentifier(keyIdentifier: caKeyID)
             },
             issuerPrivateKey: Certificate.PrivateKey(key))
         let pem = try cert.serializeAsPEM().pemString

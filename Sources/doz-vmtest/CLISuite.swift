@@ -590,10 +590,10 @@ func cliBootLogChecks(_ h: CLIHarness) {
     let table = h.run(["console", "clibt", "--list"])
     check(table.code == 0 && table.out.contains("KIND") && table.out.contains("cold boot") && table.out.contains("✓"), "console --list prints a table")
     var r = h.run(["console", "clibt", "--boot", "2", "--steps"])
-    check(r.code == 0 && r.out.contains("── wake of clibt") && r.out.contains("restored VM state from disk") && r.out.contains("── kernel console"),
+    check(r.code == 0 && r.out.contains("── wake of clibt") && r.out.contains(StepWording.of("restored VM state from disk").done) && r.out.contains("── kernel console"),
           "--boot 2 --steps: the previous boot (a wake from hibernation): its steps, then its console")
     r = h.run(["console", "clibt", "--boot", "4", "--steps"])
-    check(r.code == 0 && r.out.contains("── cold boot of clibt") && r.out.contains("VM created and booted") && r.out.range(of: #"\[ *\d+\.\d+\]"#, options: .regularExpression) != nil,
+    check(r.code == 0 && r.out.contains("── cold boot of clibt") && r.out.contains(StepWording.of("VM created and booted (VZ start + Linux kernel + vminitd)").done) && r.out.range(of: #"\[ *\d+\.\d+\]"#, options: .regularExpression) != nil,
           "--boot 4 --steps: an older cold boot's steps and its kernel console")
     check(!r.out.contains("\u{1B}"), "…as plain text off a terminal (no escape)")
     let rec = h.json(["console", "clibt", "--boot", "1"], BootLogRecord.self)
@@ -796,12 +796,12 @@ func cliConfigChecks(_ h: CLIHarness) {
           "config init: doz.toml lists all \(DozerSettings.schema.count) settings, each commented at its default")
     var st = stat()
     check(stat(file.path, &st) == 0 && st.st_mode & 0o777 == 0o600, "the file is 0600")
-    r = h.run(["config", "set", "ui.boot_view_on_start", "false"])
+    r = h.run(["config", "set", "ui.boot_view_on_start", "true"])
     let text = (try? String(contentsOf: file, encoding: .utf8)) ?? ""
-    check(r.code == 0 && text.contains("\nboot_view_on_start = false\n") && text.contains("\n# confirm_shutdown = true\n"),
-          "config set ui.boot_view_on_start false: that line uncommented, the rest still at their defaults")
+    check(r.code == 0 && text.contains("\nboot_view_on_start = true\n") && text.contains("\n# confirm_shutdown = true\n"),
+          "config set ui.boot_view_on_start true: that line uncommented, the rest still at their defaults")
     r = h.run(["config", "get", "ui.boot_view_on_start"])
-    check(r.code == 0 && r.out == "false\n", "config get: false")
+    check(r.code == 0 && r.out == "true\n", "config get: true")
     let report = h.run(["config", "show", "--json"])
     let rep = try? JSONDecoder().decode(SettingsReport.self, from: report.outData)
     check(rep?.settings.first { $0.key == "ui.boot_view_on_start" }?.source == .file, "config show --json: source file")
@@ -814,7 +814,7 @@ func cliConfigChecks(_ h: CLIHarness) {
     r = h.run(["config", "set", "ui.nope", "1"])
     check(r.code == 64 && r.err.contains("unknown setting"), "config set: unknown key → usage error")
     r = h.run(["config", "unset", "ui.boot_view_on_start"])
-    check(r.code == 0 && h.run(["config", "get", "ui.boot_view_on_start"]).out == "true\n", "config unset: back to the default")
+    check(r.code == 0 && h.run(["config", "get", "ui.boot_view_on_start"]).out == "false\n", "config unset: back to the default")
     // An unknown key in the file is a warning, never a failure.
     try? ((try? String(contentsOf: file, encoding: .utf8)) ?? "").appending("\n[later]\nthing = 1\n").write(to: file, atomically: true, encoding: .utf8)
     r = h.run(["config", "show"])

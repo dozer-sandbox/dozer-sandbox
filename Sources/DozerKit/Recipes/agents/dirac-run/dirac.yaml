@@ -1,0 +1,159 @@
+# yaml-language-server: $schema=../../../../../schema/dozer-recipe-2.schema.json
+# Dirac — Dozer's recipe (schema 2). The format: docs/recipes/RECIPE-FORMAT.md.
+# Edit this file, then run make recipes (it writes Recipes/compiled/dirac.json, which Dozer embeds).
+schema: 2
+kind: workload
+id: dirac-run/dirac
+displayName: Dirac
+description: A Cline-derived coding agent for the terminal, aimed at lower API cost, here on an xAI API key.
+author: dirac-run
+sourceUrl: https://github.com/dirac-run/dirac
+licenses:
+- Apache-2.0
+args:
+  version:
+    description: The Dirac release Dozer installs (its pin).
+    default: 0.5.20
+    pattern: '[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?'
+    buildArg: DIRAC_VERSION
+provides:
+- com.dozersandbox/dirac@${{ kit.args.version }}
+capabilities:
+- type: com.docker.sandbox/network-policy@1
+  config:
+    runtime:
+      allow:
+      - api.x.ai:443
+    dozer:
+      model:
+        id: model:dirac
+        title: Talk to xAI
+        summary: Dirac's model here (the xAI API, with your key) — needed for it to answer.
+        phrase: talk to your AI model (xAI)
+        hosts:
+        - host: api.x.ai
+          paths:
+          - /v1/chat/completions
+      update: []
+      excluded: []
+- type: com.docker.sandbox/credential@1
+  description: xAI API access
+  config:
+    service: xai
+    phase: runtime
+    apiKey:
+      name: XAI_API_KEY
+      proxyManaged: true
+      inject:
+      - domain: api.x.ai
+        header: authorization
+        format: Bearer %s
+    dozer:
+      accounts:
+      - key
+- type: com.docker.sandbox/volume@1
+  config:
+    path: /home/agent/.dirac
+- type: com.dozersandbox/install@1
+  config:
+    kind: npm
+    package: dirac-cli
+    binary: dirac
+    needs_node: '22'
+    npm_args:
+    - --ignore-scripts
+    integrity: sha512-t2sUPPI9APCTHq+Lwr1IOq1OkubRSIrzB3lHJMMaAT+OLVjAGjWhxVIS/3xFCouBvQHB2xQF/jyVb57bbOjJvw==
+- type: com.dozersandbox/launch@1
+  config:
+    command:
+    - dirac
+    no_prompts_args:
+    - --auto-approve-all
+    passthrough:
+    - --version
+    - -V
+    - --help
+    - -h
+    - help
+    env:
+      DIRAC_PROVIDER: xai
+      DIRAC_NO_AUTO_UPDATE: '1'
+    state_env: {}
+    first_run:
+    - file: ~/.dirac/data/globalState.json
+      set:
+        telemetrySetting: disabled
+        actModeApiProvider: xai
+        planModeApiProvider: xai
+    status: none
+    verify:
+    - argv:
+      - dirac
+      - --version
+      expect: ${{ kit.args.version }}
+    check:
+      argv:
+      - dirac
+      - --yolo
+      - say ok
+      expect: DOZ_FAKE_OK
+- type: com.dozersandbox/auth@1
+  config:
+    methods:
+    - kind: api-key
+      provider: xai
+      accounts:
+      - key
+      keys_page: https://console.x.ai/
+      note: Dirac reads XAI_API_KEY with xAI as its provider (actModeApiProvider/planModeApiProvider in its global state for the TUI, DIRAC_PROVIDER for a one-shot run) and picks its own xAI model; its other providers are not offered here yet.
+      checked: '2026-10-14'
+- type: com.dozersandbox/gateways@1
+  config:
+    entries:
+    - gateway: openrouter
+      level: unknown
+      reason: Dirac reads OPENROUTER_API_KEY; not checked
+      checked: '2026-10-14'
+    - gateway: vercel-ai-gateway
+      level: unknown
+      reason: not checked against Dirac
+      checked: '2026-10-14'
+- type: com.dozersandbox/currency@1
+  config:
+    checked: '2026-10-14'
+- type: com.dozersandbox/directory@1
+  config:
+    kind: coding-agent
+    categories:
+    - coding-agent
+    aliases:
+    - dirac-cli
+    icon: dirac
+    default_base: node
+    platforms:
+      glibc: true
+      musl: false
+    limits:
+    - musl: true
+      reason: Dirac needs Node 22.13 to 24; Alpine's Node is older
+    tags:
+    - tag: headless
+      level: verified
+      notes:
+      - dirac --yolo "…"
+      evidence: 'make recipe-check: dirac --yolo "say ok" ended its task with the stand-in''s answer in a fresh try'
+      checked: '2026-10-14'
+    terms: Your xAI API key — a key from console.x.ai.
+- type: com.dozersandbox/guide@1
+  config:
+    intro: "Dirac is a coding agent with its own screen: the session on the left. Ask it to read, change and run the code in your folder."
+    steps:
+    - text: "Check it answers, without its screen."
+      command: "dirac --yolo \"say ok\""
+    - text: "Ask it something in its own screen — the session on the left."
+    - text: "One task without its screen."
+      command: "dirac --yolo \"list the files in this folder\""
+    tips:
+    - "Files it makes are in /workspace — your folder on the Mac."
+    - "Restart its session from the session's ⋯ menu; End stops it."
+    docs: https://github.com/dirac-run/dirac

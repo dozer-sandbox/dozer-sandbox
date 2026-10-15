@@ -24,7 +24,7 @@ func cliHostStopSuite(binary: String) async {
     var r = t.run(["host", "stop"], timeout: 180)
     check(r.code == 0, "host stop (exit \(r.code))")
     check(r.err.contains("  · hibernated hs1 (snapshot ") && r.err.contains("  · hibernated hs2 (snapshot "), "plain: a line per sandbox — \(r.err.split(separator: "\n").filter { $0.contains("hibernated") })")
-    check(r.err.contains("  · saving the host's state — "), "plain: the host's own last step")
+    check(r.err.contains("  · \(StepWording.of("saving the host's state").done) — "), "plain: the host's own last step")
     check(!r.err.contains("\u{1B}["), "plain: no escape sequences off a terminal")
     check(r.out.range(of: #"^host stopped — 2 sandboxes hibernated \(hs1, hs2\) in [0-9.]+ (ms|s); the next command starts a new host\n$"#, options: .regularExpression) != nil,
           "the summary: \(r.out.trimmingCharacters(in: .whitespacesAndNewlines))")

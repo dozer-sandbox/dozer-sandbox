@@ -1,0 +1,92 @@
+create b --image lab → ok
+create b --agent codex → ok
+create b --base python → ok
+create b --dockerfile /tmp/Dockerfile → ok
+create b --cpus 3 → ok
+create b --memory 4G → ok
+create b --workspace /tmp/w → ok
+create b --isolated → ok
+create b --network locked → ok
+create b --subnet 10.1.2.0/24 → ok
+create b --account work → ok
+create b --agent-prompt /tmp/p.md → ok
+create b --agent-prompt-mode replace → ok
+create b --agent-sudo → ok
+create b --no-agent-sudo → ok
+create b --clipboard off → ok
+create b --browser-bridge off → ok
+create b --open-files off → ok
+create b --github read → ok
+create b --ssh-agent on → ok
+create b --tmux → ok
+create b --no-tmux → ok
+create b --ignore-mode hide → ok
+create b --workspace-view off → ok
+create b --rebuild → ok
+create b --allow web → ok
+create b --allow -error-reports → ok
+create b --use-current → ok
+create b --audio → ok
+create b --start → ok
+create b --prepare → ok
+up b --image lab → ok
+up b --agent codex → ok
+up b --base python → ok
+up b --dockerfile /tmp/Dockerfile → ok
+up b --cpus 3 → ok
+up b --memory 4G → ok
+up b --workspace /tmp/w → ok
+up b --isolated → ok
+up b --network locked → ok
+up b --subnet 10.1.2.0/24 → ok
+up b --account work → ok
+up b --agent-prompt /tmp/p.md → ok
+up b --agent-prompt-mode replace → ok
+up b --agent-sudo → ok
+up b --no-agent-sudo → ok
+up b --clipboard off → ok
+up b --browser-bridge off → ok
+up b --open-files off → ok
+up b --github read → ok
+up b --ssh-agent on → ok
+up b --tmux → ok
+up b --no-tmux → ok
+up b --ignore-mode hide → ok
+up b --workspace-view off → ok
+up b --rebuild → ok
+up b --allow web → ok
+up b --allow -error-reports → ok
+up b --use-current → ok
+up b --audio → ok
+up b --session s → ok
+up b -d → ok
+up b --detach → ok
+up b --detach-key ctrl-a → ok
+up b -- bash -l → ok
+new --image codex → ok
+new --name n → ok
+new --isolated → ok
+new -d → ok
+new --detach → ok
+init /tmp/dir → ok
+init --name n → ok
+init --image codex → ok
+init --cpus 3 → ok
+init --memory 4G → ok
+init --network locked → ok
+init --permissions +web → ok
+init --permissions -error-reports → ok
+init --account work → ok
+init --github read → ok
+init --ssh-agent on → ok
+init --clipboard off → ok
+init --browser-bridge off → ok
+init --open-files off → ok
+init --tmux → ok
+init --no-tmux → ok
+init --ignore-mode hide → ok
+init --agent-sudo → ok
+init --no-agent-sudo → ok
+init --yes → ok
+init -y → ok
+init --force → ok

@@ -63,8 +63,8 @@ func basesCLIPart(_ binary: String) async {
     check(r.code != 0 && r.err.contains("--base: node, python"), "an unknown base is refused, the bases named")
     r = h.run(["create", "x1", "--image", "lab", "--agent", "pi"])
     check(r.code != 0 && r.err.contains("not both"), "--image with --agent: refused")
-    r = h.run(["create", "x1", "--agent", "gemini"])      // codex is an agent since 599i
-    check(r.code != 0 && r.err.contains("--agent: claude-code, pi, codex or none"), "an unknown agent is refused")
+    r = h.run(["create", "x1", "--agent", "cobol-agent"])      // codex is an agent since 599i, gemini since 617
+    check(r.code != 0 && r.err.contains("--agent: \(DozerProject.agentWords)"), "an unknown agent is refused, every agent named")
     r = h.run(["create", "g1", "--base", "go", "--agent", "none", "--isolated", "--json"])
     let g1 = try? HostWire.decoder.decode(SandboxInfo.self, from: r.outData)
     check(r.code == 0 && g1?.image == "go" && g1?.imageTitle == "Go · none" && g1?.base == "go", "create --base go --agent none: image go, Go · none")
@@ -436,6 +436,12 @@ func basesMatrixPart(_ binary: String) async {
             check(v.contains("codex-cli "), "\(name): codex --version → \(v.trimmingCharacters(in: .whitespacesAndNewlines))")
         case .none:
             check(h.run(["exec", name, "--", "sh", "-c", "command -v claude || command -v pi || command -v codex || echo no-agent"]).out == "no-agent\n", "\(name): no agent")
+        default:
+            // 617: a recipe agent — its own verify argv answers (the agents suite checks the rest).
+            if let r = a.recipe, let check0 = r.verify.first {
+                let v = h.run(["exec", name, "--"] + check0.argv).out
+                check(h.run(["exec", name, "--"] + check0.argv).code == 0, "\(name): \(check0.argv.joined(separator: " ")) → \(v.trimmingCharacters(in: .whitespacesAndNewlines))")
+            }
         }
         if b == "go" {
             check(h.run(["net", "policy", name]).out.contains("proxy.golang.org"), "\(name): Go's module proxy is allowed")

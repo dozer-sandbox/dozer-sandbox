@@ -1,0 +1,67 @@
+{
+  "schema": 1,
+  "agent": "letta-code",
+  "version": "0.34.13 (Letta Code)",
+  "profiled": "2026-10-14",
+  "how": "a fresh try with the Open network, every HTTPS request decrypted and logged; its first start, then a scripted task (read a file, edit it, run a command) run non-interactively with FAKE keys — xAI and Google through a fake provider that answers text only, Anthropic and OpenAI refused by the real API (401). A real-key run would see more: the model's turns and what its tool calls fetch.",
+  "taskEnded": "DOZ_FAKE_OK",
+  "endpoints": [
+    {
+      "host": "api.letta.com",
+      "method": "GET",
+      "path": "/v1/health",
+      "when": "start+task",
+      "count": 2,
+      "credential": [
+        "none"
+      ],
+      "refusedWhenProfiled": false,
+      "determination": "refuse",
+      "reason": "Letta Cloud's health check, asked for when its TUI starts even on the local backend with no account; it does without it — refused quietly (network.quiet)",
+      "seen": false
+    },
+    {
+      "host": "api.letta.com",
+      "method": "GET",
+      "path": "/v1/metadata/balance",
+      "when": "start",
+      "count": 2,
+      "credential": [
+        "none"
+      ],
+      "refusedWhenProfiled": false,
+      "determination": "refuse",
+      "reason": "Letta Cloud's account balance, asked for when its TUI starts even on the local backend with no account; it does without it — refused quietly (network.quiet)",
+      "seen": false
+    },
+    {
+      "host": "api.letta.com",
+      "method": "POST",
+      "path": "/v1/metadata/telemetry",
+      "when": "task",
+      "count": 1,
+      "credential": [
+        "none"
+      ],
+      "refusedWhenProfiled": false,
+      "determination": "off-by-setting",
+      "reason": "Letta Code's usage telemetry to Letta Cloud — turned off by LETTA_CODE_TELEM=0 (DO_NOT_TRACK=1 also does)",
+      "seen": false,
+      "setting": "LETTA_CODE_TELEM"
+    },
+    {
+      "host": "api.x.ai",
+      "method": "POST",
+      "path": "/v1/responses",
+      "when": "task",
+      "count": 1,
+      "credential": [
+        "placeholder swapped for key:xai"
+      ],
+      "refusedWhenProfiled": false,
+      "determination": "allow-path",
+      "reason": "xAI's API — the model (the key is swapped in by Dozer's proxy)",
+      "seen": true
+    }
+  ]
+}

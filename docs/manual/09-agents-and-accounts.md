@@ -54,6 +54,7 @@ Inside a sandbox Claude Code never updates itself; the image decides its version
 
 ```sh
 doz account ls                                    # accounts, state, expiry, which sandboxes use them — never a secret
+                                                  # (state rejected: its provider refused the key at its last check)
 doz account add work --setup-token --plan max     # paste the token (no echo), or pipe it in
 doz account add ci --api-key                      # an API key (prompt or stdin), or --keychain SERVICE
 doz account default work                          # every sandbox that follows the default moves to work
@@ -67,13 +68,49 @@ doz create my-app --image claude-code --account work
 A new sandbox follows the store's default account — `mac` out of the box. Sign in to Claude Code on
 your Mac once, and every sandbox can use your subscription with nothing to paste.
 
+Keys of the other providers and of the model gateways are accounts too, each with its provider:
+
+```sh
+doz account add xai --provider xai                # xAI (Grok Build, and the tools that speak xAI)
+doz account add google --provider google          # the Gemini API (Gemini CLI, Antigravity CLI, Fabric …)
+doz account add or --provider openrouter          # OpenRouter: one key, many models (creator/name)
+doz account add vg --provider vercel-ai-gateway   # Vercel AI Gateway: the same idea
+```
+
+Each provider has its own default (`doz account default or` makes `or` OpenRouter's). An agent or tool that can use
+several (the AI tools — see [Other AI tools](28-ai-tools.md)) talks to the provider or gateway of the account it is
+given: `doz try TOOL --gateway openrouter` picks OpenRouter's default key, `--account NAME` a given one. The key goes
+only to that provider's or gateway's own API — a placeholder sent anywhere else is refused.
+
 ## Accounts — in the dashboard
 
-**Accounts & keys** lists your accounts with their state and expiry: **Add account** (a masked field
-for a key or token, with the plan for a token), **Verify** (or **Make default**) on each row with the
-rest — **Remove…** too — under its **⋯**, and keep-alive on or off. A sandbox's page shows its account,
-with **Account…** (the details' **Keys** tab) to change it; New sandbox
-offers only the accounts its agent can use.
+**Accounts & keys** shows one card per provider (Anthropic, OpenAI, then each provider and gateway),
+naming the tools its key serves. Each key is a row:
+
+- a **Default** radio: the key a sandbox that follows its provider's default uses. Anthropic also
+  offers **No default**.
+- the key's name, and where it lives in plain words: Keychain, 1Password, AWS, a command, or this
+  Mac's Claude login. **Details** shows the keychain item, the fingerprint, the source and the last check.
+- one status: **Works**, **Not checked**, **Refused** (its provider said no), **Can't read** (its source
+  did not answer, or its keychain item is gone) or **No check for this provider**.
+- the sandboxes that use it, then the one action that helps now: **Check**, **Read again** or **Fix**.
+  **Remove…** sits under **⋯**.
+
+A key that fails comes first, at the top of the page, with what the provider or source answered, the
+fix, and the sandboxes it affects. The same key stored twice is flagged ("same key as …"). The Claude
+Code keep-alive switch sits under the Mac login's row.
+
+**By sandbox** lists every sandbox with the key its tool uses now and how it got it (the provider's
+default, or chosen for it). **Change…** picks another; it applies from the sandbox's next session.
+
+**Add a key** asks for the provider first; type a tool's name (grok, codex, gemini) to find the
+providers it can use. Paste the key into the masked field: Dozer checks it with one small request
+and keeps it in your login keychain. The field is there only while the setting
+`ui.allow_secret_entry` is on. For a key kept in 1Password or AWS, read by a command, a custom key or a
+ChatGPT sign-in, the page gives the exact `doz account add` line to copy and run in Terminal.
+
+A sandbox's page shows its account, with **Account…** (the details' **Keys** tab) to change it; New
+sandbox offers only the accounts its agent can use.
 
 ## How the Mac login stays fresh
 
@@ -122,6 +159,73 @@ doz key rm my-app --anthropic
 
 A key typed or piped in lasts while the host runs; after the host stops, set it again (or use
 `--keychain`, which is read again by each new host).
+
+## Keys from 1Password, AWS or a command
+
+An API-key account (`--api-key`, `--openai-key`, `--provider xai|google|google-stitch|openrouter|vercel-ai-gateway`, `--custom`) can keep its key
+where you already keep it. Dozer stores only **where** it is — never the key, not even in the keychain —
+and the host reads it on your Mac when a sandbox needs it:
+
+```sh
+doz account add grok --provider xai --from op://Dev/xAI/credential               # 1Password (op)
+doz account add grok --provider xai --from op://Dev/xAI/credential --env OP_ACCOUNT=my.1password.com
+doz account add work --api-key --from aws:arn:aws:secretsmanager:eu-west-1:123456789012:secret:dev/anthropic#api_key
+doz account add work --api-key --from aws:arn:… --env AWS_PROFILE=dev --env AWS_REGION=eu-west-1
+doz account add ci --openai-key --from-command '~/bin/print-key openai'                 # any program; its output is the key
+doz account add work --api-key --from op://Dev/Anthropic/credential --force       # switch an existing account
+doz account show grok                                                             # where it comes from, the last read — never the key
+doz account refresh grok                                                          # read it again now
+```
+
+- **When it is read:** once when you add it (with the provider's own key check — `--no-verify` skips
+  both), then on use: kept in the host's memory for `--ttl` (55 minutes by default; `2h`, `90m`), read
+  again right away after `doz account refresh` or a change to the account, and once more when the
+  provider answers 401 (a rotated key). A sandbox's session start reads it in the background, so the
+  agent's first request does not wait for 1Password.
+- **`--from-command`** runs a program with arguments — never a shell: no `;`, `|`, `&`, `$(…)`, backticks
+  or redirections (put a pipeline in a script and give its path). The program is found once, at add
+  time, as an absolute path; `doz` shows the exact command and asks before saving it (`--yes` off a
+  terminal). Its output is the key: one line, at most 8 KiB.
+- **Where it runs:** on your Mac, as the host, with the standard `PATH`, your home, the tools' own
+  sign-in variables (`OP_SERVICE_ACCOUNT_TOKEN`, `AWS_*`) and the `--env` variables the account names —
+  only `OP_ACCOUNT`, `AWS_PROFILE`, `AWS_REGION`, `AWS_CONFIG_FILE` and `AWS_SHARED_CREDENTIALS_FILE`
+  (never a secret). Nothing is typed into it. 1Password gets 20 seconds (a Touch ID prompt), the others 10.
+- **When it fails** the agent's request gets a 401 saying why, in the tool's own words (the first line it
+  wrote to its errors, cleaned and shortened — never its output, never a line holding the key), the reason
+  in plain words where it is known, and what to do — never another key. For example:
+
+  ```
+  the key of account demo comes from command: /usr/bin/security find-generic-password -w -s demo, but
+  /usr/bin/security says: The specified item could not be found in the keychain. (the keychain has no such
+  item) — run that command in Terminal to check it, then doz account refresh demo
+  ```
+
+  Known: `security`'s exits 44 (no such item), 51 (it would have to ask you) and 36 (the keychain is locked);
+  `op` signed out; `aws` AccessDenied and expired credentials; `gh` not signed in. `doz account show`, the
+  sandbox's page and `doz doctor` say the same; `account show` gives the last verification as history ("last
+  verified 12 Oct 16:21").
+- **In the dashboard** an account like this shows where its key comes from and its last read, with
+  **Refresh**. Adding or changing where a key comes from is done with `doz` only.
+
+## Custom keys for other services
+
+A key for an API Dozer has no account kind for — your own service, a search API — goes to exactly the
+hosts you name, in the header you name, and only replaces its placeholder (the sandbox never has the
+key):
+
+```sh
+doz account add search --custom --host api.search.example --env-var SEARCH_API_KEY --bearer      # Authorization: Bearer KEY
+doz account add maps --custom --host maps.example.com --env-var MAPS_KEY --header x-api-key      # x-api-key: KEY
+doz account add search --custom --host api.search.example --env-var SEARCH_API_KEY --bearer --from op://Dev/search/key
+doz create my-app --image claude-code --allow site:api.search.example --key search             # attach it (repeatable)
+doz account use my-app search --extra                                                           # attach to an existing sandbox
+doz account use my-app search --remove-extra
+```
+
+Each host must be one the sandbox may reach on purpose (`--allow site:HOST`, or `doz net allow`) —
+Dozer refuses to attach it otherwise, and withholds it (saying how to allow it) if the policy later
+denies the host. A custom key never goes to a host Dozer already holds keys for (Anthropic, OpenAI,
+GitHub, xAI, Google). Sessions opened after attaching get its variable.
 
 ## Agent versions
 
@@ -207,4 +311,6 @@ touched.
 | pi can't be created: no account it can use | `doz account add NAME --api-key`, then `--account NAME`. |
 | "the agent prompt does not render" | `doz inspect NAME --prompt` names the unknown `{{variable}}` and the file. |
 | The agent doesn't know where it runs | `doz inspect NAME --prompt`. An image prepared by a much older Dozer may need `doz reset NAME` after a rebuild. |
+| "the key of account X comes from 1Password …, but op is not signed in" | `op signin` on the Mac (or give the host `OP_SERVICE_ACCOUNT_TOKEN`), then `doz account refresh X`. |
+| A custom key is not used | `doz account show NAME` (its hosts); the sandbox must allow each one: `doz net allow SANDBOX site:HOST`. |
 | `/login` inside the sandbox never finishes | The key policy is `strict` (it blocks the sign-in pages). That's usually what you want; to allow it: `doz key policy NAME allow`. |

@@ -21,6 +21,8 @@ import { confirmWeb, isAgentModel, permissionSwitches } from '../components/perm
 import { rulesStep } from '../components/rules-step.js';
 import { stepperNode } from '../components/stepper.js';
 import { openDefaultTerminal } from '../components/terminal.js';
+import { planBlock } from '../components/plan-view.js';
+import { tildePath } from '../core/paths.js';
 
 // ── 599f: the New Sandbox wizard (owner: "a new wizard process for creating a purposeful sandbox that steps
 // the user through all the choices, capturing the config in a doz_project.yml in the project / working dir").
@@ -99,9 +101,8 @@ function nwPayload() {
 function nwAnswer(id) {
   const nw = state.nw, f = nw.form;
   if (!f) return null;
-  const home = (p) => String(p || '').replace(/^\/Users\/[^/]+/, '~');
   switch (id) {
-    case 'folder': return nw.open ? home(nw.open.folder) : null;
+    case 'folder': return nw.open ? tildePath(nw.open.folder) : null;
     case 'image': return f.name + ' · ' + (f.dockerfile ? 'Dockerfile' : f.image);
     case 'account': { const a = nwAgent(f); return a ? (f.account && f.account !== 'default' ? f.account : 'the store default') : 'none needed'; }
     case 'access': { const g = f.github || setting('defaults.github', 'off'), ssh = f.sshAgent || setting('sandbox.ssh_agent', 'off');
@@ -266,8 +267,8 @@ function nwFolder() {
   };
   const name = h('input', { type: 'text', name: 'nw-new-name', 'data-nw-new-name': '', autocomplete: 'off', spellcheck: 'false', placeholder: 'a-z 0-9 -' });
   name.value = nw.newName;
-  const where = h('div', { class: 'muted mono', 'data-nw-new-path': '' }, nw.projectsDir + '/' + nw.newName);
-  name.addEventListener('input', () => { nw.newName = name.value.trim(); where.textContent = nw.projectsDir + '/' + nw.newName; nw.open = null; nw.form = null; });
+  const where = h('div', { class: 'muted mono', 'data-nw-new-path': '' }, tildePath(nw.projectsDir + '/' + nw.newName));
+  name.addEventListener('input', () => { nw.newName = name.value.trim(); where.textContent = tildePath(nw.projectsDir + '/' + nw.newName); nw.open = null; nw.form = null; });
   const path = h('input', { type: 'text', name: 'nw-path', 'data-nw-path': '', autocomplete: 'off', spellcheck: 'false', placeholder: '~/code/my-app' });
   path.value = nw.path;
   path.addEventListener('input', () => { nw.path = path.value.trim(); nw.open = null; nw.form = null; });
@@ -309,9 +310,22 @@ function nwImage() {
   const nw = state.nw, f = nw.form;
   const name = h('input', { type: 'text', name: 'nw-name', 'data-nw-name': '', autocomplete: 'off', spellcheck: 'false', placeholder: 'a-z 0-9 -' });
   name.value = f.name;
-  name.addEventListener('input', () => { f.name = name.value.trim(); nw.preview = null; });
-  const picker = imagePicker({ images: nw.images, bases: nw.bases, value: f.dockerfile ? (f.agent === 'pi' ? 'pi' : f.agent === 'none' ? 'lab' : 'claude-code') : f.image,
-                               dockerfile: f.dockerfile || '', onChange: () => {} });
+  // 617 (616.06 friction 2): the default name follows the agent and base — "grok-sandbox" after Grok — until the
+  // person edits it (any edit stops the following). The folder keeps the name it was given.
+  if (nw.autoName === undefined) nw.autoName = f.name;
+  name.addEventListener('input', () => { f.name = name.value.trim(); nw.preview = null; nw.nameEdited = f.name !== nw.autoName; });
+  let asked = 0, picker = null;
+  const follow = () => {
+    if (!picker || nw.nameEdited || picker.dockerfile()) return;
+    const image = picker.image(), mine = ++asked;
+    if (!image) return;
+    api('quick-add', { method: 'POST', json: { image } }).then((qa) => {
+      if (mine !== asked || nw.nameEdited || state.nw !== nw || !qa || !qa.name) return;
+      nw.autoName = qa.name; f.name = qa.name; name.value = qa.name; nw.preview = null;
+    }).catch(() => { /* the name stays as it is */ });
+  };
+  picker = imagePicker({ images: nw.images, bases: nw.bases, value: f.dockerfile ? (f.agent === 'pi' ? 'pi' : f.agent === 'none' ? 'lab' : 'claude-code') : f.image,
+                               dockerfile: f.dockerfile || '', onChange: () => follow() });
   const el = h('div', { class: 'nw-fields' }, h('label', { class: 'field' }, h('span', null, 'Sandbox name'), name, h('small', { class: 'muted' }, 'Its name in doz ls and the dashboard.')), picker.el);
   return {
     el,
@@ -514,6 +528,8 @@ function nwReview() {
   const pre = h('pre', { class: 'nw-yaml', 'data-nw-yaml': '' }, nw.preview ? nw.preview.text : 'Reading…');
   const where = h('div', { class: 'muted mono', 'data-nw-file': '' }, nw.preview ? nw.preview.path : '');
   const diffBox = h('div', { 'data-nw-diff-box': '' });
+  // 617: the plan — the command that makes the same in a terminal, and what it can reach — from the host's planner.
+  const planBox = h('div', { 'data-nw-plan-box': '' });
   const go = btn(nw.open && nw.open.file ? 'Replace the file and create' : 'Write and create', () => nwCreate(go), { primary: true, lg: true, icon: 'rocket' });
   go.dataset.nwCreate = '';
   go.disabled = !nw.preview;
@@ -523,6 +539,7 @@ function nwReview() {
     diffBox.replaceChildren(nw.preview.existing === undefined || nw.preview.existing === null ? h('small', { class: 'muted' }, 'A new file.')
       : nw.preview.existing === nw.preview.text ? h('small', { class: 'muted', 'data-nw-same': '' }, 'The same as the file there now — nothing to write.')
       : h('small', { class: 'muted' }, 'It replaces the file there now — you see what changes before it is written.'));
+    planBox.replaceChildren(...(nw.preview.plan ? [planBlock(nw.preview.plan)] : []));
     go.disabled = false;
   };
   if (nw.preview) setTimeout(paint, 0);
@@ -553,7 +570,7 @@ function nwReview() {
         fact('Session', nwAnswer('session') + ' · sudo ' + ((f.agentSudo ?? setting('sandbox.agent_sudo', true)) ? 'yes' : 'no'))),
       callout('info', { compact: true, attrs: { 'data-nw-what': '' }, body: ['Writing the file, then making the sandbox as ', h('code', null, 'doz up'),
         ' would there, starting it and setting up its tools; then it opens.', willPrepare ? ' The first start prepares the ' + f.image + ' image (minutes, needs network).' : ''] }),
-      diffBox, disclosure),
+      planBox, diffBox, disclosure),
     extra: go,
   };
 }

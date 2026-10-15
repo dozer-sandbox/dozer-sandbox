@@ -1,0 +1,38 @@
+{
+  "schema": 1,
+  "agent": "open-interpreter",
+  "version": "interpreter 0.0.56",
+  "profiled": "2026-10-14",
+  "how": "a fresh try with the Open network, every HTTPS request decrypted and logged; its first start, then a scripted task (read a file, edit it, run a command) run non-interactively with FAKE keys — xAI and Google through a fake provider that answers text only, Anthropic and OpenAI refused by the real API (401). A real-key run would see more: the model's turns and what its tool calls fetch.",
+  "taskEnded": "DOZ_FAKE_OK / tokens used / 2",
+  "endpoints": [
+    {
+      "host": "api.x.ai",
+      "method": "POST",
+      "path": "/v1/chat/completions",
+      "when": "task",
+      "count": 1,
+      "credential": [
+        "placeholder swapped for key:xai"
+      ],
+      "refusedWhenProfiled": false,
+      "determination": "allow-path",
+      "reason": "xAI's API — the model (the key is swapped in by Dozer's proxy)",
+      "seen": true
+    },
+    {
+      "host": "raw.githubusercontent.com",
+      "method": "GET",
+      "path": "/openai/codex/main/announcement_tip.toml",
+      "when": "start",
+      "count": 1,
+      "credential": [
+        "none"
+      ],
+      "refusedWhenProfiled": false,
+      "determination": "allow-path",
+      "reason": "the announcement tips file its TUI (Codex's) reads when it starts — read-only, that one path",
+      "seen": true
+    }
+  ]
+}

@@ -1,0 +1,66 @@
+{
+  "schema": 1,
+  "agent": "openhands",
+  "version": "OpenHands CLI 1.16.0",
+  "profiled": "2026-10-14",
+  "how": "a fresh try with the Open network, every HTTPS request decrypted and logged; its first start, then a scripted task (read a file, edit it, run a command) run non-interactively with FAKE keys — xAI and Google through a fake provider that answers text only, Anthropic and OpenAI refused by the real API (401). A real-key run would see more: the model's turns and what its tool calls fetch.",
+  "taskEnded": "Conversation ID: 49b6360ffd104fdc8024394a38eb3cbb / Hint: run openhands --resume 49b6360f-fd10-4fdc-8024-394a38eb3cbb to resume this / conversation.",
+  "endpoints": [
+    {
+      "host": "api.x.ai",
+      "method": "POST",
+      "path": "/v1/chat/completions",
+      "when": "task",
+      "count": 1,
+      "credential": [
+        "placeholder swapped for key:xai"
+      ],
+      "refusedWhenProfiled": false,
+      "determination": "allow-path",
+      "reason": "xAI's API — the model (the key is swapped in by Dozer's proxy)",
+      "seen": true
+    },
+    {
+      "host": "github.com",
+      "method": "POST",
+      "path": "/OpenHands/extensions/git-upload-pack",
+      "when": "start+task",
+      "count": 8,
+      "credential": [
+        "none"
+      ],
+      "refusedWhenProfiled": false,
+      "determination": "allow-path",
+      "reason": "OpenHands' public skills: a git clone of github.com/OpenHands/extensions at each start (no setting turns it off)",
+      "seen": true
+    },
+    {
+      "host": "github.com",
+      "method": "GET",
+      "path": "/OpenHands/extensions/info/refs",
+      "when": "start+task",
+      "count": 7,
+      "credential": [
+        "none"
+      ],
+      "refusedWhenProfiled": false,
+      "determination": "allow-path",
+      "reason": "OpenHands' public skills: a git clone of github.com/OpenHands/extensions at each start (no setting turns it off)",
+      "seen": true
+    },
+    {
+      "host": "pypi.org",
+      "method": "GET",
+      "path": "/pypi/openhands/json",
+      "when": "start+task",
+      "count": 2,
+      "credential": [
+        "none"
+      ],
+      "refusedWhenProfiled": false,
+      "determination": "allow-path",
+      "reason": "OpenHands' release check on PyPI when it starts (read-only, a notice only; Dozer installs the pinned release)",
+      "seen": true
+    }
+  ]
+}

@@ -274,8 +274,26 @@ public final class CredentialVault: @unchecked Sendable {
     /// Read the providers of `host`'s bindings whose secret is missing or older than their ttl — OUTSIDE
     /// the lock (a source may be a process).
     func refreshProviders(host: String, now: Date = Date()) {
+        refreshProviders(now: now) { id in self.bindings[id]?.covers(host) == true }
+    }
+
+    /// 617: read binding `id`'s source now when its cached read is missing, stale or of another version — e.g. at a
+    /// session's start, so the agent's first call does not wait for a 1Password or AWS read.
+    public func prefetch(_ id: String, now: Date = Date()) {
+        refreshProviders(now: now) { $0 == id }
+    }
+
+    /// 617: binding `id` holds a secret given to it again (no longer read on use); its placeholders stay valid.
+    public func clearProvider(_ id: String) {
+        lock.lock(); defer { lock.unlock() }
+        providers[id] = nil
+        fetchedAt[id] = nil
+        fetchedVersion[id] = nil
+    }
+
+    private func refreshProviders(now: Date, which: (String) -> Bool) {
         lock.lock()
-        let mine = providers.filter { id, _ in bindings[id]?.covers(host) == true }
+        let mine = providers.filter { id, _ in which(id) }
         let fetched = fetchedAt, versions = fetchedVersion
         lock.unlock()
         for (id, p) in mine {

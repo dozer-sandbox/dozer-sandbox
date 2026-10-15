@@ -1,0 +1,215 @@
+# yaml-language-server: $schema=../../../../../schema/dozer-recipe-2.schema.json
+# Claude Code — Dozer's recipe (schema 2). The format: docs/recipes/RECIPE-FORMAT.md.
+# Edit this file, then run make recipes (it writes Recipes/compiled/claude-code.json, which Dozer embeds).
+schema: 2
+kind: workload
+id: anthropic/claude-code
+displayName: Claude Code
+description: Anthropic's coding agent in your terminal.
+author: Anthropic
+sourceUrl: https://code.claude.com
+licenses:
+- LicenseRef-proprietary
+args:
+  version:
+    description: The Claude Code release Dozer installs (its pin).
+    default: 2.1.227
+    pattern: '[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?'
+    buildArg: CLAUDE_CODE_VERSION
+provides:
+- com.dozersandbox/claude-code@${{ kit.args.version }}
+capabilities:
+- type: com.docker.sandbox/network-policy@1
+  config:
+    runtime:
+      allow:
+      - api.anthropic.com:443
+      - downloads.claude.ai:443
+      - raw.githubusercontent.com:443
+    dozer:
+      model:
+        id: model
+        shared: true
+      update:
+      - host: downloads.claude.ai
+      - host: registry.npmjs.org
+        paths:
+        - /@anthropic-ai/claude-code
+        - /@anthropic-ai%2fclaude-code
+        - /@anthropic-ai%2Fclaude-code
+      excluded: []
+      vendor:
+      - host: downloads.claude.ai
+        paths:
+        - /model-catalog/
+        reason: Claude Code reads Anthropic's list of models when it starts
+      - host: downloads.claude.ai
+        paths:
+        - /claude-code-releases/plugins/
+        reason: Claude Code reads Anthropic's official plugin list (and fetches those plugins) when it starts
+      - host: raw.githubusercontent.com
+        exact_paths:
+        - /anthropics/claude-code/refs/heads/main/CHANGELOG.md
+        reason: Claude Code reads its release notes (Anthropic's CHANGELOG.md on GitHub) when it starts
+      off_without:
+      - permission: error-reports
+        env:
+          DISABLE_ERROR_REPORTING: '1'
+          DISABLE_TELEMETRY: '1'
+        says: Claude Code's error reports and usage data are turned off (Send error reports is off)
+- type: com.docker.sandbox/credential@1
+  description: Anthropic API access
+  config:
+    service: anthropic
+    phase: runtime
+    apiKey:
+      name: ANTHROPIC_API_KEY
+      proxyManaged: true
+      inject:
+      - domain: api.anthropic.com
+        header: x-api-key
+        format: '%s'
+    dozer:
+      accounts:
+      - mac
+      - setup-token
+      - api-key
+- type: com.docker.sandbox/volume@1
+  config:
+    path: /home/agent/.claude
+- type: com.docker.sandbox/agent-context@1
+  config:
+    directory: /home/agent/.claude/skills/dozer
+    filename: SKILL.md
+    dozer:
+      kind: skill
+      launcher_arg:
+      - --append-system-prompt
+- type: com.dozersandbox/install@1
+  config:
+    kind: builtin
+    builtin: true
+    package: '@anthropic-ai/claude-code'
+    binary: claude
+    integrity: sha512-D0YP8GFwPaP/9eObEuP5LRO5+9QSD9CLa6K26whNzXxpxz3pFqPS3nn7l1/MLmSWy32wBP2IKQzkRB3mumUKUQ==
+- type: com.dozersandbox/launch@1
+  config:
+    command:
+    - claude
+    no_prompts_args:
+    - --dangerously-skip-permissions
+    passthrough: []
+    env: {}
+    state_env:
+      CLAUDE_CONFIG_DIR: /home/agent/.claude
+      DISABLE_AUTOUPDATER: '1'
+      DISABLE_UPDATES: '1'
+    status: osc7501
+    resume:
+    - --continue
+    resume_check: d="$HOME/.claude/projects/$(pwd -P | sed 's/[^A-Za-z0-9]/-/g')"; ls "$d"/*.jsonl >/dev/null 2>&1 && echo resumable || echo none
+    verify:
+    - argv:
+      - claude
+      - --version
+      expect: ${{ kit.args.version }}
+    check:
+      argv:
+      - claude
+      - -p
+      - say ok
+      expect: DOZ_FAKE_OK
+    settings:
+      version: images.claude_code_version
+      permissions: claude.permissions
+- type: com.dozersandbox/auth@1
+  config:
+    methods:
+    - kind: vendor-sign-in
+      account: a Claude subscription (Pro, Max, Team or Enterprise)
+      accounts:
+      - mac
+      - setup-token
+      note: This Mac's own Claude Code login (the account mac, read on the Mac and renewed by the Mac's Claude Code), or a token from claude setup-token. The sign-in stays on the Mac — the sandbox gets a placeholder.
+      checked: '2026-10-12'
+    - kind: api-key
+      provider: anthropic
+      accounts:
+      - api-key
+      keys_page: https://platform.claude.com/settings/keys
+      checked: '2026-10-12'
+- type: com.dozersandbox/gateways@1
+  config:
+    entries:
+    - gateway: openrouter
+      level: documented
+      shape: anthropic-messages
+      endpoint: anthropic
+      how:
+        env:
+          ANTHROPIC_API_KEY: ''
+          ANTHROPIC_AUTH_TOKEN: ${{ dozer.placeholder }}
+          ANTHROPIC_BASE_URL: ${{ dozer.gateway.endpoint.anthropic }}
+          CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY: '1'
+        model_args:
+        - --model
+        - ${{ dozer.model }}
+      limits:
+      - only guaranteed with Anthropic's own models, Anthropic first in the provider order
+      - 'never with a Claude subscription (mac / setup-token): the gateway key replaces it'
+      notes:
+      - ~creator/…-latest aliases also work; a [1m] suffix marks a 1M context and OpenRouter strips it
+      source: https://openrouter.ai/docs/guides/guides/claude-code-integration
+      checked: '2026-10-12'
+    - gateway: vercel-ai-gateway
+      level: documented
+      shape: anthropic-messages
+      endpoint: claude-code
+      how:
+        env:
+          ANTHROPIC_API_KEY: ''
+          ANTHROPIC_AUTH_TOKEN: ${{ dozer.placeholder }}
+          ANTHROPIC_BASE_URL: ${{ dozer.gateway.endpoint.claude-code }}
+          CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY: '1'
+        model_args:
+        - --model
+        - ${{ dozer.model }}
+      limits:
+      - 'never with a Claude subscription (mac / setup-token): the gateway key replaces it'
+      notes:
+      - /claude-code is Claude Code's own compatibility endpoint; discovery puts every gateway model in /model
+      source: https://vercel.com/docs/ai-gateway/coding-agents
+      checked: '2026-10-12'
+- type: com.dozersandbox/directory@1
+  config:
+    kind: coding-agent
+    categories:
+    - coding-agent
+    aliases:
+    - claude
+    icon: claude-code
+    default_base: node
+    platforms:
+      glibc: true
+      musl: true
+    tags:
+    - tag: headless
+      level: documented
+      notes:
+      - claude -p
+      source: https://code.claude.com/docs/en/headless
+      checked: '2026-10-12'
+    licence: proprietary
+- type: com.dozersandbox/guide@1
+  config:
+    intro: "Claude Code is a coding agent with its own screen: the session on the left. Ask it to read, change and run the code in your folder."
+    steps:
+    - text: "Check it answers, without its screen."
+      command: "claude -p \"say ok\""
+    - text: "Ask it something in its own screen — the session on the left."
+    - text: "One task without its screen."
+      command: "claude -p \"list the files in this folder\""
+    tips:
+    - "Files it makes are in /workspace — your folder on the Mac."
+    - "Restart its session from the session's ⋯ menu; End stops it."
+    docs: https://code.claude.com

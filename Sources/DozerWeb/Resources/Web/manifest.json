@@ -6,7 +6,7 @@
       "mimeType" : "text/html; charset=utf-8",
       "publicPath" : "/",
       "resourcePath" : "index.html",
-      "sha256" : "2944ca4fb4845b8f3cc6da0a7286f08a7a488df2dd5972f864eb9799f1d8647d"
+      "sha256" : "d70983f5a55dbb4e5c7dafd174fd55b7f72d83f8cc133266ae1f59f31086b1df"
     },
     {
       "cachePolicy" : "public, max-age=31536000, immutable",
@@ -20,41 +20,41 @@
       "cachePolicy" : "public, max-age=31536000, immutable",
       "class" : "page",
       "mimeType" : "application/javascript; charset=utf-8",
-      "publicPath" : "/assets/app-b2341f7a4b660eb2.js",
-      "resourcePath" : "assets/app-b2341f7a4b660eb2.js",
-      "sha256" : "b2341f7a4b660eb284334014c8d81aeae4a80c462e5b2e51025315bdaa2dbcfc"
+      "publicPath" : "/assets/app-b5f0cfd6b7b7f8e4.js",
+      "resourcePath" : "assets/app-b5f0cfd6b7b7f8e4.js",
+      "sha256" : "b5f0cfd6b7b7f8e42898d3d5e5652dace79bef25e33c5a37c1ff30d1aa0c5057"
     },
     {
       "cachePolicy" : "public, max-age=31536000, immutable",
       "class" : "page",
       "mimeType" : "text/css; charset=utf-8",
-      "publicPath" : "/assets/app-cff1be987d955d87.css",
-      "resourcePath" : "assets/app-cff1be987d955d87.css",
-      "sha256" : "cff1be987d955d8741fb2acd54d5cecf8e287ee337a01a08e4665b87f0b44c03"
+      "publicPath" : "/assets/app-fb63d1f783d3e9f7.css",
+      "resourcePath" : "assets/app-fb63d1f783d3e9f7.css",
+      "sha256" : "fb63d1f783d3e9f76d6dca8234395855923196e6d786e43dd1cb07776add4830"
     },
     {
       "cachePolicy" : "public, max-age=31536000, immutable",
       "class" : "page",
       "mimeType" : "application/javascript; charset=utf-8",
-      "publicPath" : "/assets/app/components/access-step-a99f9fd587f2ab54.js",
-      "resourcePath" : "assets/app/components/access-step-a99f9fd587f2ab54.js",
-      "sha256" : "a99f9fd587f2ab54003d93e74ac575d96df58683b9958c2aea6a38fe0c5a569d"
+      "publicPath" : "/assets/app/components/access-step-1e14712d5c702111.js",
+      "resourcePath" : "assets/app/components/access-step-1e14712d5c702111.js",
+      "sha256" : "1e14712d5c702111c8a2cc81bb93fb6ecf6eb70b8854807a53370af8c879713e"
     },
     {
       "cachePolicy" : "public, max-age=31536000, immutable",
       "class" : "page",
       "mimeType" : "application/javascript; charset=utf-8",
-      "publicPath" : "/assets/app/components/accounts-4085d9653ec62a45.js",
-      "resourcePath" : "assets/app/components/accounts-4085d9653ec62a45.js",
-      "sha256" : "4085d9653ec62a452ef2be071740af069006ed03c6abf113df48170e08ad0e01"
+      "publicPath" : "/assets/app/components/accounts-5fdcb84f475c8132.js",
+      "resourcePath" : "assets/app/components/accounts-5fdcb84f475c8132.js",
+      "sha256" : "5fdcb84f475c8132545d7d0c6fcc3a1c3a57aa49e26bb842198b6b268f51476c"
     },
     {
       "cachePolicy" : "public, max-age=31536000, immutable",
       "class" : "page",
       "mimeType" : "application/javascript; charset=utf-8",
-      "publicPath" : "/assets/app/components/agent-status-b9a650ed9bacab15.js",
-      "resourcePath" : "assets/app/components/agent-status-b9a650ed9bacab15.js",
-      "sha256" : "b9a650ed9bacab15ee463fe1c8ad26bd057a87870bbda33bef1a14ce3f75de56"
+      "publicPath" : "/assets/app/components/agent-status-450c9d571aac92bf.js",
+      "resourcePath" : "assets/app/components/agent-status-450c9d571aac92bf.js",
+      "sha256" : "450c9d571aac92bf518e869948b7815a3e19e85fa166792502329528c25e4820"
     },
     {
       "cachePolicy" : "public, max-age=31536000, immutable",
@@ -68,49 +68,57 @@
       "cachePolicy" : "public, max-age=31536000, immutable",
       "class" : "page",
       "mimeType" : "application/javascript; charset=utf-8",
-      "publicPath" : "/assets/app/components/button-72d87e1085f00b4e.js",
-      "resourcePath" : "assets/app/components/button-72d87e1085f00b4e.js",
-      "sha256" : "72d87e1085f00b4ea19a993680c1d5d875868e792a934ceb571494a128f968db"
+      "publicPath" : "/assets/app/components/build-log-2d282dfd99ccf2f1.js",
+      "resourcePath" : "assets/app/components/build-log-2d282dfd99ccf2f1.js",
+      "sha256" : "2d282dfd99ccf2f17ed60045858f0f65405d7c3c387db1bd92b66f21e71a3062"
     },
     {
       "cachePolicy" : "public, max-age=31536000, immutable",
       "class" : "page",
       "mimeType" : "application/javascript; charset=utf-8",
-      "publicPath" : "/assets/app/components/callout-48fdacc012091bbe.js",
-      "resourcePath" : "assets/app/components/callout-48fdacc012091bbe.js",
-      "sha256" : "48fdacc012091bbe58b705f7f98964368c3288b65b3ddafd9a630595e86e5a6c"
+      "publicPath" : "/assets/app/components/button-cbb8a60e3220f977.js",
+      "resourcePath" : "assets/app/components/button-cbb8a60e3220f977.js",
+      "sha256" : "cbb8a60e3220f977556470a036ea4d626037ca046bde418240394a33186fc724"
     },
     {
       "cachePolicy" : "public, max-age=31536000, immutable",
       "class" : "page",
       "mimeType" : "application/javascript; charset=utf-8",
-      "publicPath" : "/assets/app/components/create-dialog-1851d831bbddcc37.js",
-      "resourcePath" : "assets/app/components/create-dialog-1851d831bbddcc37.js",
-      "sha256" : "1851d831bbddcc37a45acc4d235929178052fa11b29ee75d3b3a25dbc0e788c7"
+      "publicPath" : "/assets/app/components/callout-e7d97c36b36fe970.js",
+      "resourcePath" : "assets/app/components/callout-e7d97c36b36fe970.js",
+      "sha256" : "e7d97c36b36fe9708b585c8592e672dbb3b4b4fa98f24b33a76a838e87ae90ee"
     },
     {
       "cachePolicy" : "public, max-age=31536000, immutable",
       "class" : "page",
       "mimeType" : "application/javascript; charset=utf-8",
-      "publicPath" : "/assets/app/components/dialog-39f26d1bf619d148.js",
-      "resourcePath" : "assets/app/components/dialog-39f26d1bf619d148.js",
-      "sha256" : "39f26d1bf619d14819fad80636106241903a76f56a2078b217b13b158568c160"
+      "publicPath" : "/assets/app/components/create-dialog-55dcbdc75bb8dcd7.js",
+      "resourcePath" : "assets/app/components/create-dialog-55dcbdc75bb8dcd7.js",
+      "sha256" : "55dcbdc75bb8dcd712ec3f89b58763d43b1c8e6618e9a6b205e0a0c2478f16db"
     },
     {
       "cachePolicy" : "public, max-age=31536000, immutable",
       "class" : "page",
       "mimeType" : "application/javascript; charset=utf-8",
-      "publicPath" : "/assets/app/components/host-0b7239f42398c1b5.js",
-      "resourcePath" : "assets/app/components/host-0b7239f42398c1b5.js",
-      "sha256" : "0b7239f42398c1b5a95eccc53f51a9a7e1cb55383ece1bf3d6dbd11289e0a5a2"
+      "publicPath" : "/assets/app/components/dialog-6e2b5c41ab058a33.js",
+      "resourcePath" : "assets/app/components/dialog-6e2b5c41ab058a33.js",
+      "sha256" : "6e2b5c41ab058a3315d325d2c3b390e581f02b1d11d61db223f6f48f632df2bb"
     },
     {
       "cachePolicy" : "public, max-age=31536000, immutable",
       "class" : "page",
       "mimeType" : "application/javascript; charset=utf-8",
-      "publicPath" : "/assets/app/components/image-picker-0179b7fe957b1953.js",
-      "resourcePath" : "assets/app/components/image-picker-0179b7fe957b1953.js",
-      "sha256" : "0179b7fe957b195385c0783f7feb28d995e51e7e48e032cf2f722e1d34f47505"
+      "publicPath" : "/assets/app/components/host-a15fbe62828b663c.js",
+      "resourcePath" : "assets/app/components/host-a15fbe62828b663c.js",
+      "sha256" : "a15fbe62828b663c5410d8212ba4f91f287af5453c3ae54d06c782b5f66436ea"
+    },
+    {
+      "cachePolicy" : "public, max-age=31536000, immutable",
+      "class" : "page",
+      "mimeType" : "application/javascript; charset=utf-8",
+      "publicPath" : "/assets/app/components/image-picker-576337e5376588c0.js",
+      "resourcePath" : "assets/app/components/image-picker-576337e5376588c0.js",
+      "sha256" : "576337e5376588c0b1e54001e43c740e1942f6d5928e246b62d68b9c9c977f76"
     },
     {
       "cachePolicy" : "public, max-age=31536000, immutable",
@@ -124,153 +132,185 @@
       "cachePolicy" : "public, max-age=31536000, immutable",
       "class" : "page",
       "mimeType" : "application/javascript; charset=utf-8",
-      "publicPath" : "/assets/app/components/lifecycle-859f7b9c19bde1f3.js",
-      "resourcePath" : "assets/app/components/lifecycle-859f7b9c19bde1f3.js",
-      "sha256" : "859f7b9c19bde1f3edebccca427294b137761047c88da3090347dbcce5a72cd9"
+      "publicPath" : "/assets/app/components/lifecycle-924851199c461d50.js",
+      "resourcePath" : "assets/app/components/lifecycle-924851199c461d50.js",
+      "sha256" : "924851199c461d50105ef01e9043537f9e455f544c7ea93d0c6a0737fa3bb667"
     },
     {
       "cachePolicy" : "public, max-age=31536000, immutable",
       "class" : "page",
       "mimeType" : "application/javascript; charset=utf-8",
-      "publicPath" : "/assets/app/components/menus-08caea0a1297bf90.js",
-      "resourcePath" : "assets/app/components/menus-08caea0a1297bf90.js",
-      "sha256" : "08caea0a1297bf90c97358a4b88f0a96f5dde0a434b3c02629e11e384ac07def"
+      "publicPath" : "/assets/app/components/menus-b1e7a64fdf6f51f5.js",
+      "resourcePath" : "assets/app/components/menus-b1e7a64fdf6f51f5.js",
+      "sha256" : "b1e7a64fdf6f51f55c7d81d7c53f3ace170c221c8bfc6eab968b30307a443416"
     },
     {
       "cachePolicy" : "public, max-age=31536000, immutable",
       "class" : "page",
       "mimeType" : "application/javascript; charset=utf-8",
-      "publicPath" : "/assets/app/components/modal-e04005196044f9ec.js",
-      "resourcePath" : "assets/app/components/modal-e04005196044f9ec.js",
-      "sha256" : "e04005196044f9ecd8bf28b6bcceecf9be1a62e9e5187d7d95e313fdc3e7b8f8"
+      "publicPath" : "/assets/app/components/modal-8b94d803d636ec5e.js",
+      "resourcePath" : "assets/app/components/modal-8b94d803d636ec5e.js",
+      "sha256" : "8b94d803d636ec5ea49e5de82331fc705bba00b15a54aaec26b17a425cd47a5e"
     },
     {
       "cachePolicy" : "public, max-age=31536000, immutable",
       "class" : "page",
       "mimeType" : "application/javascript; charset=utf-8",
-      "publicPath" : "/assets/app/components/nav-278258bf224378a9.js",
-      "resourcePath" : "assets/app/components/nav-278258bf224378a9.js",
-      "sha256" : "278258bf224378a93919182f227fc6ca7d53355cbca9cefb92dd8e0b89c50c0f"
+      "publicPath" : "/assets/app/components/nav-6f650ce2ca4e8409.js",
+      "resourcePath" : "assets/app/components/nav-6f650ce2ca4e8409.js",
+      "sha256" : "6f650ce2ca4e8409b201d7771b469bd6cc04e2545abd9890440d4acc6e281042"
     },
     {
       "cachePolicy" : "public, max-age=31536000, immutable",
       "class" : "page",
       "mimeType" : "application/javascript; charset=utf-8",
-      "publicPath" : "/assets/app/components/notices-77c4597c42011d6e.js",
-      "resourcePath" : "assets/app/components/notices-77c4597c42011d6e.js",
-      "sha256" : "77c4597c42011d6ed6b477a33f94d0a97484203329ef14fe291ba551441154ad"
+      "publicPath" : "/assets/app/components/notices-0eac624a71d00e4f.js",
+      "resourcePath" : "assets/app/components/notices-0eac624a71d00e4f.js",
+      "sha256" : "0eac624a71d00e4f291bb5fd81c09f518902b924b02cc0c894f066f96d9ebde4"
     },
     {
       "cachePolicy" : "public, max-age=31536000, immutable",
       "class" : "page",
       "mimeType" : "application/javascript; charset=utf-8",
-      "publicPath" : "/assets/app/components/permissions-02eca9cf8719959d.js",
-      "resourcePath" : "assets/app/components/permissions-02eca9cf8719959d.js",
-      "sha256" : "02eca9cf8719959dbcf3093b6837655831f056f1b924d430929e814b2aea1ae0"
+      "publicPath" : "/assets/app/components/permissions-b76d7ef3f66e7dd5.js",
+      "resourcePath" : "assets/app/components/permissions-b76d7ef3f66e7dd5.js",
+      "sha256" : "b76d7ef3f66e7dd5849d368fa0af2fd94466040654e5ebe012042e9eb66fceed"
     },
     {
       "cachePolicy" : "public, max-age=31536000, immutable",
       "class" : "page",
       "mimeType" : "application/javascript; charset=utf-8",
-      "publicPath" : "/assets/app/components/pills-4768bb74cc2cf525.js",
-      "resourcePath" : "assets/app/components/pills-4768bb74cc2cf525.js",
-      "sha256" : "4768bb74cc2cf52574b6bbed19cf461a073d97090f0bd7823166fe5cab9be421"
+      "publicPath" : "/assets/app/components/pills-4037a7464bd2c4fa.js",
+      "resourcePath" : "assets/app/components/pills-4037a7464bd2c4fa.js",
+      "sha256" : "4037a7464bd2c4fa8e6e1223749c8533a18f59d4e53e410217f487b3fea0759a"
     },
     {
       "cachePolicy" : "public, max-age=31536000, immutable",
       "class" : "page",
       "mimeType" : "application/javascript; charset=utf-8",
-      "publicPath" : "/assets/app/components/prep-card-90fc2a630a3d1dbc.js",
-      "resourcePath" : "assets/app/components/prep-card-90fc2a630a3d1dbc.js",
-      "sha256" : "90fc2a630a3d1dbc99cbdfdb72730d3c0840a1fe843810a265cb67eefd19d540"
+      "publicPath" : "/assets/app/components/plan-view-d5bc01e363272562.js",
+      "resourcePath" : "assets/app/components/plan-view-d5bc01e363272562.js",
+      "sha256" : "d5bc01e363272562fa6cece293fe428d2c29e8d49566318c2192dd53a8ad398f"
     },
     {
       "cachePolicy" : "public, max-age=31536000, immutable",
       "class" : "page",
       "mimeType" : "application/javascript; charset=utf-8",
-      "publicPath" : "/assets/app/components/qr-70eb03c3c4d654f1.js",
-      "resourcePath" : "assets/app/components/qr-70eb03c3c4d654f1.js",
-      "sha256" : "70eb03c3c4d654f10083a837a232a6681bad5ea3a688e3de132fe2e7806a14ec"
+      "publicPath" : "/assets/app/components/prep-card-f04587dbc4728b29.js",
+      "resourcePath" : "assets/app/components/prep-card-f04587dbc4728b29.js",
+      "sha256" : "f04587dbc4728b29c14148bde1d77320556e64a6776f6ce318566510b8f743f7"
     },
     {
       "cachePolicy" : "public, max-age=31536000, immutable",
       "class" : "page",
       "mimeType" : "application/javascript; charset=utf-8",
-      "publicPath" : "/assets/app/components/quick-add-0660b92555f385b1.js",
-      "resourcePath" : "assets/app/components/quick-add-0660b92555f385b1.js",
-      "sha256" : "0660b92555f385b11fbc1441e0d7d6c6f36f0d7a6dc3651a159b461e28df2b6b"
+      "publicPath" : "/assets/app/components/qr-85b617ddc96675f5.js",
+      "resourcePath" : "assets/app/components/qr-85b617ddc96675f5.js",
+      "sha256" : "85b617ddc96675f59d7c0fb98ff1fedac3cef5557e7d797d950f053254d0db50"
     },
     {
       "cachePolicy" : "public, max-age=31536000, immutable",
       "class" : "page",
       "mimeType" : "application/javascript; charset=utf-8",
-      "publicPath" : "/assets/app/components/rules-step-124b3dfb793c8146.js",
-      "resourcePath" : "assets/app/components/rules-step-124b3dfb793c8146.js",
-      "sha256" : "124b3dfb793c8146a8346b5cd82a1fe5227b5db7f257dc38eaf105f875a1115b"
+      "publicPath" : "/assets/app/components/quick-add-a4e28afc3cdbb771.js",
+      "resourcePath" : "assets/app/components/quick-add-a4e28afc3cdbb771.js",
+      "sha256" : "a4e28afc3cdbb771cc53d75210e7a24d18ab40c5b116682121b294f6cdb0e8de"
     },
     {
       "cachePolicy" : "public, max-age=31536000, immutable",
       "class" : "page",
       "mimeType" : "application/javascript; charset=utf-8",
-      "publicPath" : "/assets/app/components/session-actions-dfcc83b7dcdf8795.js",
-      "resourcePath" : "assets/app/components/session-actions-dfcc83b7dcdf8795.js",
-      "sha256" : "dfcc83b7dcdf879505de8f8bc941d6dcab7db76b7f3886313bc3f7b402b1715c"
+      "publicPath" : "/assets/app/components/rules-step-5de53662175cc5bd.js",
+      "resourcePath" : "assets/app/components/rules-step-5de53662175cc5bd.js",
+      "sha256" : "5de53662175cc5bd0b7d1e32bf10a1885e83e1ca74ca0dfa3d517e957f73f636"
     },
     {
       "cachePolicy" : "public, max-age=31536000, immutable",
       "class" : "page",
       "mimeType" : "application/javascript; charset=utf-8",
-      "publicPath" : "/assets/app/components/share-9deed7d0b88433b0.js",
-      "resourcePath" : "assets/app/components/share-9deed7d0b88433b0.js",
-      "sha256" : "9deed7d0b88433b0475c892283892a924e4d745fd5157428cb165fd34829592d"
+      "publicPath" : "/assets/app/components/session-actions-917bc5b6028fec9d.js",
+      "resourcePath" : "assets/app/components/session-actions-917bc5b6028fec9d.js",
+      "sha256" : "917bc5b6028fec9d43dbb27a9472d629a440770f0f4d51d5b20ce6ece327d865"
     },
     {
       "cachePolicy" : "public, max-age=31536000, immutable",
       "class" : "page",
       "mimeType" : "application/javascript; charset=utf-8",
-      "publicPath" : "/assets/app/components/stepper-eb70a810bda2f73e.js",
-      "resourcePath" : "assets/app/components/stepper-eb70a810bda2f73e.js",
-      "sha256" : "eb70a810bda2f73e37cc4dd6efb01d93c3705dcf6fa1d7babce966d752ccf776"
+      "publicPath" : "/assets/app/components/share-9dd68ad990c497a1.js",
+      "resourcePath" : "assets/app/components/share-9dd68ad990c497a1.js",
+      "sha256" : "9dd68ad990c497a15ccb510c8336fd827c1e1bee9ca6c2ddcc6b1563b1a0fca9"
     },
     {
       "cachePolicy" : "public, max-age=31536000, immutable",
       "class" : "page",
       "mimeType" : "application/javascript; charset=utf-8",
-      "publicPath" : "/assets/app/components/terminal-547d4aaa0d8a60f6.js",
-      "resourcePath" : "assets/app/components/terminal-547d4aaa0d8a60f6.js",
-      "sha256" : "547d4aaa0d8a60f6a38ff8336b8e56fbd0204cc2cbd2d238c1bd1052c1ca98c5"
+      "publicPath" : "/assets/app/components/start-progress-b16374ebc7173de4.js",
+      "resourcePath" : "assets/app/components/start-progress-b16374ebc7173de4.js",
+      "sha256" : "b16374ebc7173de40108a37305bfb94123328966c86c0a5917bb9c5f8f6091bf"
     },
     {
       "cachePolicy" : "public, max-age=31536000, immutable",
       "class" : "page",
       "mimeType" : "application/javascript; charset=utf-8",
-      "publicPath" : "/assets/app/components/workspace-chooser-fc12b399ad37dee0.js",
-      "resourcePath" : "assets/app/components/workspace-chooser-fc12b399ad37dee0.js",
-      "sha256" : "fc12b399ad37dee0ef5e1cb6d6be77e24e737a57ff68ea6714e2a5fc67153089"
+      "publicPath" : "/assets/app/components/stepper-61e5dacc702ce715.js",
+      "resourcePath" : "assets/app/components/stepper-61e5dacc702ce715.js",
+      "sha256" : "61e5dacc702ce7158c13af4ca4702fc36147dc4b104a1bc870fcbd99aa9ed594"
     },
     {
       "cachePolicy" : "public, max-age=31536000, immutable",
       "class" : "page",
       "mimeType" : "application/javascript; charset=utf-8",
-      "publicPath" : "/assets/app/core/agents-66154a04b9c4696c.js",
-      "resourcePath" : "assets/app/core/agents-66154a04b9c4696c.js",
-      "sha256" : "66154a04b9c4696cf0e0f41d1ebfaff6ca1a346ef1d2f5aaafca3b6cddb89a8d"
+      "publicPath" : "/assets/app/components/terminal-626bae4b7cf1f181.js",
+      "resourcePath" : "assets/app/components/terminal-626bae4b7cf1f181.js",
+      "sha256" : "626bae4b7cf1f1815d79dd3c9591027169150b40e3437668a3fffcf48135fa54"
     },
     {
       "cachePolicy" : "public, max-age=31536000, immutable",
       "class" : "page",
       "mimeType" : "application/javascript; charset=utf-8",
-      "publicPath" : "/assets/app/core/api-2c3b9826610441d3.js",
-      "resourcePath" : "assets/app/core/api-2c3b9826610441d3.js",
-      "sha256" : "2c3b9826610441d377656a2ab69e9c491004f3f0f82827ff346218f2b5b47be1"
+      "publicPath" : "/assets/app/components/try-guide-27a82b1f1d1ca379.js",
+      "resourcePath" : "assets/app/components/try-guide-27a82b1f1d1ca379.js",
+      "sha256" : "27a82b1f1d1ca37938f122d2302cc64a1b85172af679b2a95d7dbc3d50918ad5"
     },
     {
       "cachePolicy" : "public, max-age=31536000, immutable",
       "class" : "page",
       "mimeType" : "application/javascript; charset=utf-8",
-      "publicPath" : "/assets/app/core/events-85d5787dd7102ad1.js",
-      "resourcePath" : "assets/app/core/events-85d5787dd7102ad1.js",
-      "sha256" : "85d5787dd7102ad1c4d783d2c02f574af6807898c83f67215ddf87af85aa39eb"
+      "publicPath" : "/assets/app/components/workspace-chooser-9e92b5edc7706aba.js",
+      "resourcePath" : "assets/app/components/workspace-chooser-9e92b5edc7706aba.js",
+      "sha256" : "9e92b5edc7706aba096ac1a5fd6224d9f6934cf95a9c4aef8572d3522792891b"
+    },
+    {
+      "cachePolicy" : "public, max-age=31536000, immutable",
+      "class" : "page",
+      "mimeType" : "application/javascript; charset=utf-8",
+      "publicPath" : "/assets/app/core/agent-search-a05f165f3681cc81.js",
+      "resourcePath" : "assets/app/core/agent-search-a05f165f3681cc81.js",
+      "sha256" : "a05f165f3681cc818ede803be492dff8ce3909440f30c26b45616bf25a049c7f"
+    },
+    {
+      "cachePolicy" : "public, max-age=31536000, immutable",
+      "class" : "page",
+      "mimeType" : "application/javascript; charset=utf-8",
+      "publicPath" : "/assets/app/core/agents-b0c34d5ef450e352.js",
+      "resourcePath" : "assets/app/core/agents-b0c34d5ef450e352.js",
+      "sha256" : "b0c34d5ef450e35206105143d99238921c248d23eab238dd4d848b795cca21a0"
+    },
+    {
+      "cachePolicy" : "public, max-age=31536000, immutable",
+      "class" : "page",
+      "mimeType" : "application/javascript; charset=utf-8",
+      "publicPath" : "/assets/app/core/api-2814f617dbd35bcd.js",
+      "resourcePath" : "assets/app/core/api-2814f617dbd35bcd.js",
+      "sha256" : "2814f617dbd35bcd5e32d67f82146c532eda78d069aa977f532c0710879c1273"
+    },
+    {
+      "cachePolicy" : "public, max-age=31536000, immutable",
+      "class" : "page",
+      "mimeType" : "application/javascript; charset=utf-8",
+      "publicPath" : "/assets/app/core/events-1e29d92cadea2a11.js",
+      "resourcePath" : "assets/app/core/events-1e29d92cadea2a11.js",
+      "sha256" : "1e29d92cadea2a11dabb9d186b70cc0abd00dd7b2f7faa7fedcb705635bef8f6"
     },
     {
       "cachePolicy" : "public, max-age=31536000, immutable",
@@ -292,73 +332,81 @@
       "cachePolicy" : "public, max-age=31536000, immutable",
       "class" : "page",
       "mimeType" : "application/javascript; charset=utf-8",
-      "publicPath" : "/assets/app/core/measure-9286c622e396fbda.js",
-      "resourcePath" : "assets/app/core/measure-9286c622e396fbda.js",
-      "sha256" : "9286c622e396fbda425f1adad900dc5fe56c6fd1aba547575a16e144a8ed46fe"
+      "publicPath" : "/assets/app/core/measure-350c7ba1594878ed.js",
+      "resourcePath" : "assets/app/core/measure-350c7ba1594878ed.js",
+      "sha256" : "350c7ba1594878ede2043346ed387c6a22e3a00b897a553feb5f4201ecbf3022"
     },
     {
       "cachePolicy" : "public, max-age=31536000, immutable",
       "class" : "page",
       "mimeType" : "application/javascript; charset=utf-8",
-      "publicPath" : "/assets/app/core/operations-430d70a292bbd389.js",
-      "resourcePath" : "assets/app/core/operations-430d70a292bbd389.js",
-      "sha256" : "430d70a292bbd38991054f11f5fd87c1d69c568034235889327e377c6e8085c3"
+      "publicPath" : "/assets/app/core/operations-56949f5379c9806f.js",
+      "resourcePath" : "assets/app/core/operations-56949f5379c9806f.js",
+      "sha256" : "56949f5379c9806fd0e72e4e96fa2c52937b063db5191f1370aa2f62c5a8ff40"
     },
     {
       "cachePolicy" : "public, max-age=31536000, immutable",
       "class" : "page",
       "mimeType" : "application/javascript; charset=utf-8",
-      "publicPath" : "/assets/app/core/reconnect-8ffea41971e59768.js",
-      "resourcePath" : "assets/app/core/reconnect-8ffea41971e59768.js",
-      "sha256" : "8ffea41971e597682d3d9acdcceb8e7e9aad18e9b64a19546278c3c692ec8798"
+      "publicPath" : "/assets/app/core/paths-074fefdb8b1d48aa.js",
+      "resourcePath" : "assets/app/core/paths-074fefdb8b1d48aa.js",
+      "sha256" : "074fefdb8b1d48aabac6d4157937f8bbc3d1b23ef500be3bc0ac2c426e31557b"
     },
     {
       "cachePolicy" : "public, max-age=31536000, immutable",
       "class" : "page",
       "mimeType" : "application/javascript; charset=utf-8",
-      "publicPath" : "/assets/app/core/router-7644c1ee7ecf2350.js",
-      "resourcePath" : "assets/app/core/router-7644c1ee7ecf2350.js",
-      "sha256" : "7644c1ee7ecf2350d0d52803ea1319204df34af0fcc3f6e916538db4657ccd27"
+      "publicPath" : "/assets/app/core/reconnect-e7328801b87631ff.js",
+      "resourcePath" : "assets/app/core/reconnect-e7328801b87631ff.js",
+      "sha256" : "e7328801b87631ff5858882a6c9ec2beeba1cf9e1e472f7aade37f114adc4257"
     },
     {
       "cachePolicy" : "public, max-age=31536000, immutable",
       "class" : "page",
       "mimeType" : "application/javascript; charset=utf-8",
-      "publicPath" : "/assets/app/core/sandboxes-21105e5d17330dbc.js",
-      "resourcePath" : "assets/app/core/sandboxes-21105e5d17330dbc.js",
-      "sha256" : "21105e5d17330dbca28ce4b79d2c4f32d9aa321a68ac2b54e5364b2635dd322f"
+      "publicPath" : "/assets/app/core/router-94400845dc4e72f8.js",
+      "resourcePath" : "assets/app/core/router-94400845dc4e72f8.js",
+      "sha256" : "94400845dc4e72f822c43df5e43f32ac6368a362051df3cca5449d54eaf2aa58"
     },
     {
       "cachePolicy" : "public, max-age=31536000, immutable",
       "class" : "page",
       "mimeType" : "application/javascript; charset=utf-8",
-      "publicPath" : "/assets/app/core/session-b9f1ef59241a2198.js",
-      "resourcePath" : "assets/app/core/session-b9f1ef59241a2198.js",
-      "sha256" : "b9f1ef59241a21987061aed9a09ddad58cf42484788fe9876ae3e4bf3e9def47"
+      "publicPath" : "/assets/app/core/sandboxes-e50f57c55febd40a.js",
+      "resourcePath" : "assets/app/core/sandboxes-e50f57c55febd40a.js",
+      "sha256" : "e50f57c55febd40a076ff7c123a71d9ffebd207a03d5f60a30339567a9a4fb22"
     },
     {
       "cachePolicy" : "public, max-age=31536000, immutable",
       "class" : "page",
       "mimeType" : "application/javascript; charset=utf-8",
-      "publicPath" : "/assets/app/core/settings-2df0efadfc2dcdae.js",
-      "resourcePath" : "assets/app/core/settings-2df0efadfc2dcdae.js",
-      "sha256" : "2df0efadfc2dcdaeef75ffff4957b399c7914df1191f75fb588c8e12ba5cacfc"
+      "publicPath" : "/assets/app/core/session-a11b36fbe5b8e637.js",
+      "resourcePath" : "assets/app/core/session-a11b36fbe5b8e637.js",
+      "sha256" : "a11b36fbe5b8e63760ed4589093cdf780d21005f41586677f73eb34316375d75"
     },
     {
       "cachePolicy" : "public, max-age=31536000, immutable",
       "class" : "page",
       "mimeType" : "application/javascript; charset=utf-8",
-      "publicPath" : "/assets/app/core/state-d453713f2a04f6d3.js",
-      "resourcePath" : "assets/app/core/state-d453713f2a04f6d3.js",
-      "sha256" : "d453713f2a04f6d3adec936b7a8a10a5f7ae9ea44fcd52f0f16533d3478abc06"
+      "publicPath" : "/assets/app/core/settings-e508eb68e0b62892.js",
+      "resourcePath" : "assets/app/core/settings-e508eb68e0b62892.js",
+      "sha256" : "e508eb68e0b628923ad631b365bc24f57e3ddcd2b7a4bc692aab706bb5bed20d"
     },
     {
       "cachePolicy" : "public, max-age=31536000, immutable",
       "class" : "page",
       "mimeType" : "application/javascript; charset=utf-8",
-      "publicPath" : "/assets/app/core/terminals-fa5cf7fc28fdb48f.js",
-      "resourcePath" : "assets/app/core/terminals-fa5cf7fc28fdb48f.js",
-      "sha256" : "fa5cf7fc28fdb48f94283a9aa563b9fa43f2cc881bd047c6302acf183b2cd8e6"
+      "publicPath" : "/assets/app/core/state-450cb6573a620304.js",
+      "resourcePath" : "assets/app/core/state-450cb6573a620304.js",
+      "sha256" : "450cb6573a620304a273125002981a2adb1bf128b8ed4be070ec7fc686ef2d56"
+    },
+    {
+      "cachePolicy" : "public, max-age=31536000, immutable",
+      "class" : "page",
+      "mimeType" : "application/javascript; charset=utf-8",
+      "publicPath" : "/assets/app/core/terminals-933851e9be49078e.js",
+      "resourcePath" : "assets/app/core/terminals-933851e9be49078e.js",
+      "sha256" : "933851e9be49078ed469f180008a4c58614aabceab958377d5f260df0cae1b4a"
     },
     {
       "cachePolicy" : "public, max-age=31536000, immutable",
@@ -388,161 +436,169 @@
       "cachePolicy" : "public, max-age=31536000, immutable",
       "class" : "page",
       "mimeType" : "application/javascript; charset=utf-8",
-      "publicPath" : "/assets/app/dom/icons-75c107270d336b51.js",
-      "resourcePath" : "assets/app/dom/icons-75c107270d336b51.js",
-      "sha256" : "75c107270d336b51b3bf1395fb2622d6c8b827d7767c4457103614c2178bd833"
+      "publicPath" : "/assets/app/dom/icons-2b30ba761d2d921b.js",
+      "resourcePath" : "assets/app/dom/icons-2b30ba761d2d921b.js",
+      "sha256" : "2b30ba761d2d921bee4783f21b4c3bee1b0c262943ff8f4c5bfd3967193f1620"
     },
     {
       "cachePolicy" : "public, max-age=31536000, immutable",
       "class" : "page",
       "mimeType" : "application/javascript; charset=utf-8",
-      "publicPath" : "/assets/app/views/accounts-7b4ac97f01a48414.js",
-      "resourcePath" : "assets/app/views/accounts-7b4ac97f01a48414.js",
-      "sha256" : "7b4ac97f01a484149e14906009cf06b789547b100da02bf922577d88bb21c46c"
+      "publicPath" : "/assets/app/views/accounts-bc0bfccd5e5d5fea.js",
+      "resourcePath" : "assets/app/views/accounts-bc0bfccd5e5d5fea.js",
+      "sha256" : "bc0bfccd5e5d5fead75cebade58900da480bd6f7c2cb7267bfbed0fcb0ba74ed"
     },
     {
       "cachePolicy" : "public, max-age=31536000, immutable",
       "class" : "page",
       "mimeType" : "application/javascript; charset=utf-8",
-      "publicPath" : "/assets/app/views/activity-ad20c42c93678edd.js",
-      "resourcePath" : "assets/app/views/activity-ad20c42c93678edd.js",
-      "sha256" : "ad20c42c93678edd912ca7fafb72842a752ba0f113dfd886746fb82fecdadc9c"
+      "publicPath" : "/assets/app/views/activity-41611c62fcbf0f61.js",
+      "resourcePath" : "assets/app/views/activity-41611c62fcbf0f61.js",
+      "sha256" : "41611c62fcbf0f610bec1e7c9726cd9f1588e91abd45f6686459898e9cf4bf11"
     },
     {
       "cachePolicy" : "public, max-age=31536000, immutable",
       "class" : "page",
       "mimeType" : "application/javascript; charset=utf-8",
-      "publicPath" : "/assets/app/views/devices-251a976cc21adb2d.js",
-      "resourcePath" : "assets/app/views/devices-251a976cc21adb2d.js",
-      "sha256" : "251a976cc21adb2d8266e2ecb597279abe898013c82f729321bed59594adb025"
+      "publicPath" : "/assets/app/views/devices-a655bafda058ccc3.js",
+      "resourcePath" : "assets/app/views/devices-a655bafda058ccc3.js",
+      "sha256" : "a655bafda058ccc3194264f2d7283cd9e05d0b19774b71f393b6bba27dcf7c6d"
     },
     {
       "cachePolicy" : "public, max-age=31536000, immutable",
       "class" : "page",
       "mimeType" : "application/javascript; charset=utf-8",
-      "publicPath" : "/assets/app/views/doctor-ba4faefb0af02619.js",
-      "resourcePath" : "assets/app/views/doctor-ba4faefb0af02619.js",
-      "sha256" : "ba4faefb0af02619e73ea78a4dbe24e950c42bae053e8ae1ead7eb35b0cbdd1a"
+      "publicPath" : "/assets/app/views/doctor-c2212776a856b88d.js",
+      "resourcePath" : "assets/app/views/doctor-c2212776a856b88d.js",
+      "sha256" : "c2212776a856b88dd874694a89269dae31060f724875dc2254a07c8da07de037"
     },
     {
       "cachePolicy" : "public, max-age=31536000, immutable",
       "class" : "page",
       "mimeType" : "application/javascript; charset=utf-8",
-      "publicPath" : "/assets/app/views/images-30c65acbc9140c32.js",
-      "resourcePath" : "assets/app/views/images-30c65acbc9140c32.js",
-      "sha256" : "30c65acbc9140c32f23e8f36bf2d424fd51823a6954c8aa3e55ba3cd896a4fd4"
+      "publicPath" : "/assets/app/views/images-b8726c348f49db85.js",
+      "resourcePath" : "assets/app/views/images-b8726c348f49db85.js",
+      "sha256" : "b8726c348f49db85445da48d17005f1851e1c274b06cf379c095cc0239d9063b"
     },
     {
       "cachePolicy" : "public, max-age=31536000, immutable",
       "class" : "page",
       "mimeType" : "application/javascript; charset=utf-8",
-      "publicPath" : "/assets/app/views/metrics-13adb58a0b12484f.js",
-      "resourcePath" : "assets/app/views/metrics-13adb58a0b12484f.js",
-      "sha256" : "13adb58a0b12484fcc28e501a800e1c868bc12456d5f42b10a90215abec8781d"
+      "publicPath" : "/assets/app/views/metrics-08d59fc5ac8aef9a.js",
+      "resourcePath" : "assets/app/views/metrics-08d59fc5ac8aef9a.js",
+      "sha256" : "08d59fc5ac8aef9acce08cc4d4b9e191bc7a03079f7a8c1a68b383af1fbd26b9"
     },
     {
       "cachePolicy" : "public, max-age=31536000, immutable",
       "class" : "page",
       "mimeType" : "application/javascript; charset=utf-8",
-      "publicPath" : "/assets/app/views/new-sandbox-1788096b67bad7bf.js",
-      "resourcePath" : "assets/app/views/new-sandbox-1788096b67bad7bf.js",
-      "sha256" : "1788096b67bad7bf2bd4b9dc5fb05fda4c00e26efeb6a8b5eb2533f4585ac9b8"
+      "publicPath" : "/assets/app/views/new-sandbox-cd0df751c86b77ff.js",
+      "resourcePath" : "assets/app/views/new-sandbox-cd0df751c86b77ff.js",
+      "sha256" : "cd0df751c86b77ffc955f25661c6456aeb9a9c085ab2dfbf0f0cd713ebd600d5"
     },
     {
       "cachePolicy" : "public, max-age=31536000, immutable",
       "class" : "page",
       "mimeType" : "application/javascript; charset=utf-8",
-      "publicPath" : "/assets/app/views/onboarding-e32313f46ecf2f18.js",
-      "resourcePath" : "assets/app/views/onboarding-e32313f46ecf2f18.js",
-      "sha256" : "e32313f46ecf2f189f50ece096209457240e2682b36d0287c2c2814043c2c62f"
+      "publicPath" : "/assets/app/views/onboarding-da4e905a4a4d1da7.js",
+      "resourcePath" : "assets/app/views/onboarding-da4e905a4a4d1da7.js",
+      "sha256" : "da4e905a4a4d1da742d8e247489fcb1e2200eb2c9703268fb096a9e7122d0bd1"
     },
     {
       "cachePolicy" : "public, max-age=31536000, immutable",
       "class" : "page",
       "mimeType" : "application/javascript; charset=utf-8",
-      "publicPath" : "/assets/app/views/operations-392ba2828ae3e98f.js",
-      "resourcePath" : "assets/app/views/operations-392ba2828ae3e98f.js",
-      "sha256" : "392ba2828ae3e98f47d6e839c43686f6195e79721fbd1c10e666aca84789550e"
+      "publicPath" : "/assets/app/views/operations-124c5923d2f07e79.js",
+      "resourcePath" : "assets/app/views/operations-124c5923d2f07e79.js",
+      "sha256" : "124c5923d2f07e793dc2028e8a1d14c82cdb4951bd668154514d3a96b6df3abe"
     },
     {
       "cachePolicy" : "public, max-age=31536000, immutable",
       "class" : "page",
       "mimeType" : "application/javascript; charset=utf-8",
-      "publicPath" : "/assets/app/views/overview-501c30337603594e.js",
-      "resourcePath" : "assets/app/views/overview-501c30337603594e.js",
-      "sha256" : "501c30337603594eed9b8dfc96038df185410277f02cef0fab028ce81656db76"
+      "publicPath" : "/assets/app/views/overview-c24a33d667e75502.js",
+      "resourcePath" : "assets/app/views/overview-c24a33d667e75502.js",
+      "sha256" : "c24a33d667e755028810d2afff9fb0f454fc8b88f6ef5ecd7a81cf6ca949ed46"
     },
     {
       "cachePolicy" : "public, max-age=31536000, immutable",
       "class" : "page",
       "mimeType" : "application/javascript; charset=utf-8",
-      "publicPath" : "/assets/app/views/resources-7df3416b6ee371a5.js",
-      "resourcePath" : "assets/app/views/resources-7df3416b6ee371a5.js",
-      "sha256" : "7df3416b6ee371a5992ac543fbd43f3eaf77c54a482f8f6cc660bbefeb057e05"
+      "publicPath" : "/assets/app/views/resources-2467e67c63006675.js",
+      "resourcePath" : "assets/app/views/resources-2467e67c63006675.js",
+      "sha256" : "2467e67c630066753b38356b14940872deb515fd2ed65b2585e5c1ff1faa480c"
     },
     {
       "cachePolicy" : "public, max-age=31536000, immutable",
       "class" : "page",
       "mimeType" : "application/javascript; charset=utf-8",
-      "publicPath" : "/assets/app/views/sandbox-a6c2fe1b0cd56275.js",
-      "resourcePath" : "assets/app/views/sandbox-a6c2fe1b0cd56275.js",
-      "sha256" : "a6c2fe1b0cd56275baac0afcb58c668601040fc38c6e0d41cfcfa3303d87e353"
+      "publicPath" : "/assets/app/views/sandbox-dialogs-b1c4174c4c963a00.js",
+      "resourcePath" : "assets/app/views/sandbox-dialogs-b1c4174c4c963a00.js",
+      "sha256" : "b1c4174c4c963a005ae5b5905906d0280a79ce8f5edd9cf086f38d020680dee0"
     },
     {
       "cachePolicy" : "public, max-age=31536000, immutable",
       "class" : "page",
       "mimeType" : "application/javascript; charset=utf-8",
-      "publicPath" : "/assets/app/views/sandbox-dialogs-59d737fcd15e7fc2.js",
-      "resourcePath" : "assets/app/views/sandbox-dialogs-59d737fcd15e7fc2.js",
-      "sha256" : "59d737fcd15e7fc270ccbefd07f687a3313ec5d21d26ce1583b07508181b8f8f"
+      "publicPath" : "/assets/app/views/sandbox-f272187004699aa3.js",
+      "resourcePath" : "assets/app/views/sandbox-f272187004699aa3.js",
+      "sha256" : "f272187004699aa3bc78d42d857ff0489dde4d9f8de73cc4612869b9a1a7b9bb"
     },
     {
       "cachePolicy" : "public, max-age=31536000, immutable",
       "class" : "page",
       "mimeType" : "application/javascript; charset=utf-8",
-      "publicPath" : "/assets/app/views/sandbox-layout-979e885e39bc1958.js",
-      "resourcePath" : "assets/app/views/sandbox-layout-979e885e39bc1958.js",
-      "sha256" : "979e885e39bc19589bd8ec4809d30000ccc550d62657a6c397f0958087bca5a6"
+      "publicPath" : "/assets/app/views/sandbox-layout-f6d82e815d480fd1.js",
+      "resourcePath" : "assets/app/views/sandbox-layout-f6d82e815d480fd1.js",
+      "sha256" : "f6d82e815d480fd163e57db7cba93150206f57758205b7c8a3e651d201306290"
     },
     {
       "cachePolicy" : "public, max-age=31536000, immutable",
       "class" : "page",
       "mimeType" : "application/javascript; charset=utf-8",
-      "publicPath" : "/assets/app/views/sandbox-network-0f64d493a119501c.js",
-      "resourcePath" : "assets/app/views/sandbox-network-0f64d493a119501c.js",
-      "sha256" : "0f64d493a119501c8e93929063647307160fbb22e0d954b3991507c248d87b36"
+      "publicPath" : "/assets/app/views/sandbox-network-3978287463940fd0.js",
+      "resourcePath" : "assets/app/views/sandbox-network-3978287463940fd0.js",
+      "sha256" : "3978287463940fd08c7eb3bad72f809bc1a07bee4d39e4383a3496dc52387aff"
     },
     {
       "cachePolicy" : "public, max-age=31536000, immutable",
       "class" : "page",
       "mimeType" : "application/javascript; charset=utf-8",
-      "publicPath" : "/assets/app/views/sandbox-terminals-9dfd61fd1ba44989.js",
-      "resourcePath" : "assets/app/views/sandbox-terminals-9dfd61fd1ba44989.js",
-      "sha256" : "9dfd61fd1ba44989f37d8820d3ca218860a55980f6c4c1fe1151dfe71cba48b1"
+      "publicPath" : "/assets/app/views/sandbox-terminals-d87f3c69db15b839.js",
+      "resourcePath" : "assets/app/views/sandbox-terminals-d87f3c69db15b839.js",
+      "sha256" : "d87f3c69db15b8392e81a40beb45ef93f85a4ef56bc4af9103e09fd4adee0746"
     },
     {
       "cachePolicy" : "public, max-age=31536000, immutable",
       "class" : "page",
       "mimeType" : "application/javascript; charset=utf-8",
-      "publicPath" : "/assets/app/views/sessions-ad2c93bada8a29be.js",
-      "resourcePath" : "assets/app/views/sessions-ad2c93bada8a29be.js",
-      "sha256" : "ad2c93bada8a29be50ca667c70f6d2db4a3b7e8e164c0f77df7f32cd56a4754d"
+      "publicPath" : "/assets/app/views/sessions-fcc65ceb14450a61.js",
+      "resourcePath" : "assets/app/views/sessions-fcc65ceb14450a61.js",
+      "sha256" : "fcc65ceb14450a6199d831da44cc9ec4a3a912d7cf52e98e555ab112bd0bdf96"
     },
     {
       "cachePolicy" : "public, max-age=31536000, immutable",
       "class" : "page",
       "mimeType" : "application/javascript; charset=utf-8",
-      "publicPath" : "/assets/app/views/settings-f613b129a5cb52af.js",
-      "resourcePath" : "assets/app/views/settings-f613b129a5cb52af.js",
-      "sha256" : "f613b129a5cb52afe5e5b3d7c2248a0b215dc9b17028b04574655c52ef03870c"
+      "publicPath" : "/assets/app/views/settings-c1dac84114a21cdb.js",
+      "resourcePath" : "assets/app/views/settings-c1dac84114a21cdb.js",
+      "sha256" : "c1dac84114a21cdbbb9a4f8a49d6ce55ec625df17a1f7a10dec61e12c38010ac"
     },
     {
       "cachePolicy" : "public, max-age=31536000, immutable",
       "class" : "page",
       "mimeType" : "application/javascript; charset=utf-8",
-      "publicPath" : "/assets/app/views/shortcuts-eab3cd8ea0914d97.js",
-      "resourcePath" : "assets/app/views/shortcuts-eab3cd8ea0914d97.js",
-      "sha256" : "eab3cd8ea0914d9784be70e4da40d643ce0a742aa0b470505aa4bc5d52a9cd7a"
+      "publicPath" : "/assets/app/views/shortcuts-0cb7e44ef957c3fe.js",
+      "resourcePath" : "assets/app/views/shortcuts-0cb7e44ef957c3fe.js",
+      "sha256" : "0cb7e44ef957c3fea7ed21c2a8b405bbb9cc15a065878e1061308078eda90059"
+    },
+    {
+      "cachePolicy" : "public, max-age=31536000, immutable",
+      "class" : "page",
+      "mimeType" : "application/javascript; charset=utf-8",
+      "publicPath" : "/assets/app/views/try-1367c501430629b0.js",
+      "resourcePath" : "assets/app/views/try-1367c501430629b0.js",
+      "sha256" : "1367c501430629b00f341d41712b1bcf7693a4e2995a61af44f2171b91b14676"
     },
     {
       "cachePolicy" : "public, max-age=31536000, immutable",
@@ -636,9 +692,9 @@
       "cachePolicy" : "public, max-age=31536000, immutable",
       "class" : "vendor",
       "mimeType" : "image/svg+xml",
-      "publicPath" : "/assets/vendor-lucide-icons-d98f46e1d07aa6c2.svg",
-      "resourcePath" : "assets/vendor-lucide-icons-d98f46e1d07aa6c2.svg",
-      "sha256" : "d98f46e1d07aa6c244985d18274ea9ce3e15fac2f932d3da0300e3160f0b1d1c"
+      "publicPath" : "/assets/vendor-lucide-icons-fa3cb9c6056d9110.svg",
+      "resourcePath" : "assets/vendor-lucide-icons-fa3cb9c6056d9110.svg",
+      "sha256" : "fa3cb9c6056d91109c123d7103378c8c2f6c15557a2711524709a2e12db1f94b"
     },
     {
       "cachePolicy" : "no-store",

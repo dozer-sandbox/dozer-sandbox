@@ -65,7 +65,7 @@ DOCC_OUT         ?= .docc-build
 DOCC_BASE_PATH   ?= /DozerKit/
 DOCC_PREVIEW_PORT ?= 8000
 
-.PHONY: help build test test-safety test-updates doz-update-keys publish promote audit audit-resolved web-assets web-assets-check test-cli-onboarding test-cli-terminal test-cli-hoststop test-cli-agentsudo test-cli-points test-cli-timezone test-cli-sessions test-cli-images test-cli-bases test-cli-permissions test-cli-clipboard test-cli-browser test-cli-openfiles test-cli-github test-cli-codex test-cli-access test-cli-tools tools-fixture test-cli-quickadd test-cli-projectwizard test-cli-tmux pullbench test-vm test-vm-agents test-vm-network test-vm-hardening test-vm-lineage prev-cli test-vm-upgrade vmtest-host kernel deckhold deckhold-snapshot-check deckhold-status-check deckhold-verify doznet doznet-verify dozview dozview-verify test-vm-ignore test-vm-agentwrite test-vm-cwd test-vm-status cli install-cli test-cli test-vm-claude test-vm-templates docs docs-preview docs-drift-check release bump bump-minor
+.PHONY: help build test recipes test-safety test-updates doz-update-keys publish promote audit audit-resolved web-assets web-assets-check test-cli-onboarding test-cli-terminal test-cli-hoststop test-cli-agentsudo test-cli-points test-cli-timezone test-cli-sessions test-cli-images test-cli-bases test-cli-permissions test-cli-clipboard test-cli-browser test-cli-ports test-cli-openfiles test-cli-github test-cli-codex test-cli-try test-cli-agents profile-agents recipe-check agent-currency test-cli-access test-cli-tools tools-fixture test-cli-quickadd test-cli-projectwizard test-cli-tmux pullbench test-vm test-vm-agents test-vm-network test-vm-hardening test-vm-lineage prev-cli test-vm-upgrade vmtest-host kernel deckhold deckhold-snapshot-check deckhold-status-check deckhold-verify doznet doznet-verify dozview dozview-verify test-vm-ignore test-vm-agentwrite test-vm-cwd test-vm-status cli install-cli test-cli test-vm-claude test-vm-templates docs docs-preview docs-drift-check release bump bump-minor
 
 help: ## Show this help
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) | sed 's/:.*## /\t/' | expand -t 22
@@ -84,7 +84,7 @@ build: ## Build every product (and the VM test host)
 # `make test-vm-claude DOZ_TEST_REAL_MAC=1` (e.g. to add this Mac's own Claude login, read-only).
 TEST_SCRATCH ?= $(or $(TMPDIR),/tmp/)doz-test
 TEST_XDG     ?= $(TEST_SCRATCH)-xdg
-TEST_TARGETS := test test-vm test-vm-% test-cli test-cli-% test-updates kernel pullbench prev-cli
+TEST_TARGETS := test test-vm test-vm-% test-cli test-cli-% test-updates kernel pullbench prev-cli recipes
 ifneq ($(DOZ_TEST_REAL_MAC),1)
 $(TEST_TARGETS): export DOZ_TEST_GUARD := 1
 $(TEST_TARGETS): export DOZ_TEST_NO_MAC_LOGIN := 1
@@ -103,6 +103,12 @@ test-safety:
 
 test: test-safety web-assets-check ## Unit tests — no VM, no entitlement (never --parallel); first, the web assets' drift check
 	swift test $(SWIFT_BUILD_SYSTEM) -j $(JOBS)
+
+# 617: the agent recipes. Sources/DozerKit/Recipes/agents/VENDOR/PRODUCT.yaml is what people edit (schema 2 —
+# docs/recipes/RECIPE-FORMAT.md); Recipes/compiled/PRODUCT.json is each one as JSON (DozerKit embeds it and never
+# parses YAML) and is COMMITTED. `make test` fails when they differ (RecipeSourceTests).
+recipes: test-safety ## Compile the YAML recipes to Recipes/compiled/ (commit the result)
+	DOZ_WRITE_RECIPES=1 swift test $(SWIFT_BUILD_SYSTEM) -j $(JOBS) --filter 'RecipeSourceTests|RecipeSchemaTests'
 
 # 590: `doz ui`'s front end. WebSource/ is what people edit; Resources/Web is generated from it
 # (content-hashed, digest manifest) and COMMITTED. The check fails when they differ — run by `make
@@ -298,6 +304,9 @@ test-cli-permissions: cli vmtest-host ## 597: agent permissions — doz net perm
 test-cli-clipboard: cli vmtest-host ## 599 (594.B1): OSC 52 → the Mac clipboard (a file, DOZ_TEST_PASTEBOARD) with a notice each time; a read never answered; 1 MiB + rate limits; sandbox.clipboard off (per sandbox, for all)
 	perl -e 'alarm shift; exec @ARGV' 900 $(VMTEST_BIN) cli-clipboard --doz $(CLI_BIN)
 
+test-cli-ports: cli vmtest-host ## 617 (RP-1): web ports in a real VM — doz ports add/ls/rm, doz open (the opener seam), the Mac's 127.0.0.1 only, a taken Mac port moved and kept, closed on sleep/hibernate/host stop/shutdown and back on wake/start
+	perl -e 'alarm shift; exec @ARGV' 900 $(VMTEST_BIN) cli-ports --doz $(CLI_BIN)
+
 test-cli-browser: cli vmtest-host ## 599 (594.B2): xdg-open/$BROWSER → the Mac's browser (a file, DOZ_TEST_OPEN_URL), a fake OAuth sign-in's localhost callback forwarded into the sandbox; refusals, rate, sandbox.browser_bridge off
 	perl -e 'alarm shift; exec @ARGV' 900 $(VMTEST_BIN) cli-browser --doz $(CLI_BIN)
 
@@ -306,6 +315,26 @@ test-cli-openfiles: cli vmtest-host ## 599b: xdg-open/open/doz-open FILE in a sh
 
 test-cli-github: cli vmtest-host ## 599d: GitHub as the user through SEAMS only — a fake GitHub (git http-backend over TLS, its own CA; the proxy's upstream seam), a fake gh, a throwaway ssh-agent: clone, the swap (Basic + token), read-only refusals (push, API, GraphQL mutation), no token in the guest, push, identity, key source, off revokes, SSH agent on/off (prepares claude-code)
 	perl -e 'alarm shift; exec @ARGV' 2400 $(VMTEST_BIN) cli-github --doz $(CLI_BIN)
+
+AGENTS ?= claude-code pi codex gemini grok
+profile-agents: cli ## 617: the network profile of each agent (AGENTS="grok gemini"): a fresh try with the Open network in a scratch store (PROFILE_WORK, default /tmp/doz-profile), every HTTPS request decrypted and logged, its first start + a short scripted task (fake keys; xAI/Google through a fake provider) → profiles/AGENT.json, keeping every determination already made. DIFF=1: report new / missing endpoints only (exit 1 on a new one) — never writes, never allows
+	Scripts/profile-agents.sh $(if $(DIFF),--diff,) $(AGENTS)
+
+test-cli-agents: cli vmtest-host ## 617: the recipe agents (Grok Build, Gemini CLI, Antigravity CLI) in real VMs through SEAMS only — a fake provider over TLS (Scripts/fake-provider.py), fake keys in memory, a fake op: the pin, the launcher, the swap, no key in the guest, the leak guard, a fresh try with no counted refusal, op as a key source (AGENTS_PARTS=grok,gemini,antigravity; AGENTS_KEEP=1 keeps the store; network: the registries + Google's release)
+	perl -e 'alarm shift; exec @ARGV' 5400 $(VMTEST_BIN) cli-agents --doz $(CLI_BIN)
+
+# 617: every recipe run for real — build, verify, a fresh try with fake keys against a stand-in provider, its `check`
+# turn, no key in the guest, the leak guard, and its OSC 7501 states (Scripts/recipe-check.py; docs/recipes/RECIPE-FORMAT.md).
+RECIPE_STORE ?= /tmp/doz-recipe-check
+recipe-check: cli ## 617: run each recipe for real (RECIPES="grok gemini" or all) in a scratch store (RECIPE_STORE, default /tmp/doz-recipe-check; images kept, sandboxes never): build at the pin, verify, a fresh try with FAKE keys against Scripts/fake-provider.py, the recipe's check turn, the key swapped in and never in the guest, the leak guard, and for status osc7501 idle/working/done seen; a JSON report (RECIPE_REPORT, default $(RECIPE_STORE)/report.json; RECIPE_SUMMARY appends a markdown table; RECIPE_VERSIONS=latest; a recipe that can use several providers/gateways is checked with each, RECIPE_SELECTIONS=default for its default only); every agent whose default session is the agent: its first screen, nothing typed — no setup wizard, sign-in, consent or trust question (RECIPE_ONLY=screen: that check alone). Exits non-zero on any failure
+	@test -n "$(RECIPES)" || { echo 'name the recipes: make recipe-check RECIPES="grok gemini" (or RECIPES=all)' >&2; exit 64; }
+	/usr/bin/python3 Scripts/recipe-check.py --store "$(RECIPE_STORE)" $(if $(RECIPE_REPORT),--report "$(RECIPE_REPORT)",) $(if $(RECIPE_SUMMARY),--summary "$(RECIPE_SUMMARY)",) $(if $(RECIPE_VERSIONS),--versions $(RECIPE_VERSIONS),) $(if $(RECIPE_SELECTIONS),--selections "$(RECIPE_SELECTIONS)",) $(if $(RECIPE_ONLY),--only $(RECIPE_ONLY),) $(RECIPES)
+
+agent-currency: ## 617: every agent's latest release, its date and age, freshness, deprecation, its GitHub repository archived or not, and its recorded lifecycle → profiles/currency.json; TODO lines for a new release (re-profile its network) or a deprecation/archive (review its lifecycle). Read-only requests to npm, the vendor manifest and GitHub
+	Scripts/agent-currency.py
+
+test-cli-try: cli vmtest-host ## 617: doz try on a terminal (script(1)) through seams only — the key card with a FAKE key typed hidden (never in accounts.json), the try made and attached, Ctrl-] twice and "Keep this try?": Enter sleeps it, an unknown answer is asked again, d deletes it and its empty folder, k keeps it; --rm and --keep ask nothing; the slept try wakes (prepares grok at its pin)
+	perl -e 'alarm shift; exec @ARGV' 2400 $(VMTEST_BIN) cli-try --doz $(CLI_BIN)
 
 test-cli-codex: cli vmtest-host ## 599i: Codex through SEAMS only — a fake OpenAI over TLS (its own CA; the proxy's, the sign-in's and the refresh's upstream), the browser seam: Dozer's own ChatGPT sign-in, the real Codex in a VM answered via chatgpt.com with the placeholder swapped, a renewal on the Mac, the guest's renewal answered by the proxy, no token in the guest, no silent fallback, an API key, Alpine (prepares codex + alpine-codex; network: Docker Hub + npm; CODEX_KEEP=1 keeps the store)
 	perl -e 'alarm shift; exec @ARGV' 5400 $(VMTEST_BIN) cli-codex --doz $(CLI_BIN)

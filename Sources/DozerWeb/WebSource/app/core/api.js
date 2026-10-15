@@ -13,6 +13,7 @@ export async function api(path, opts = {}) {
   if (init.method !== 'GET') init.headers['X-Doz-CSRF'] = state.csrf || '';
   if (opts.bearer) init.headers['Authorization'] = 'Bearer ' + opts.bearer;
   if (opts.display) init.headers['X-Doz-Display'] = opts.display;
+  if (opts.signal) init.signal = opts.signal;             // an AbortController's: the caller may cancel the read
   if (opts.json !== undefined) {
     init.headers['Content-Type'] = 'application/json';
     init.body = JSON.stringify(opts.json);

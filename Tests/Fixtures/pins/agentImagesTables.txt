@@ -1,0 +1,473 @@
+lab credentials=nil agentName=nil package=nil pinned=nil
+claude-code credentials=anthropic:mac,setup-token,api-key agentName=Claude Code package=@anthropic-ai/claude-code pinned=2.1.227 sha512-D0YP8GFwPaP/9eObEuP5LRO5+9QSD9CLa6K26whNzXxpxz3pFqPS3nn7l1/MLmSWy32wBP2IKQzkRB3mumUKUQ==
+pi credentials=anthropic:api-key agentName=pi package=@earendil-works/pi-coding-agent pinned=0.84.1 sha512-ncAqFrG+iybuPGOhMiZoEHkEzTpJgz3guYD32pD+M7ucc0WeHmauP6wa7qwP8V/KWvsZDVNa5XGsdZ7fkC7w7A==
+codex credentials=openai:codex-mac,chatgpt,openai-key agentName=Codex package=@openai/codex pinned=0.160.1 sha512-JLyjBlmjPvwTaicHemw+y5xQSz3Uja2r7F/xkvS8gFufTA2g132Ak+0fo35xnJ/k2uc9fTtjm0LrsEGI78L6Ng==
+node credentials=nil agentName=nil package=nil pinned=nil
+node-antigravity credentials=google:key agentName=Antigravity CLI package=nil pinned=nil
+gemini credentials=google:key agentName=Gemini CLI package=@google/gemini-cli pinned=0.63.0 sha512-mmhqMmAdsoplCzrLQQC4yJBqr4uSKXghnrLspgUU6N9drmsaq7pi7oF09skRYzEq2dYK6eMT4UpFQP6rG2o/ew==
+node-grok credentials=xai:key agentName=Grok Build package=nil pinned=nil
+node-fabric credentials=google:key agentName=Fabric package=nil pinned=nil
+node-openclaw credentials=google:key agentName=OpenClaw package=nil pinned=nil
+node-nanobot credentials=xai:key agentName=nanobot package=nil pinned=nil
+node-gptme credentials=xai:key agentName=gptme package=nil pinned=nil
+node-llm credentials=xai:key agentName=llm package=nil pinned=nil
+node-shell-gpt credentials=xai:key agentName=ShellGPT package=nil pinned=nil
+node-zeroclaw credentials=xai:key agentName=ZeroClaw package=nil pinned=nil
+node-aichat credentials=xai:key agentName=AIChat package=nil pinned=nil
+node-tgpt credentials=google:key agentName=tgpt package=nil pinned=nil
+node-opencode credentials=xai:key agentName=OpenCode package=nil pinned=nil
+node-smolagents credentials=xai:key agentName=smolagents package=nil pinned=nil
+node-adk credentials=google:key agentName=Agent Development Kit package=nil pinned=nil
+node-promptfoo credentials=xai:key agentName=promptfoo package=nil pinned=nil
+node-clai credentials=xai:key agentName=clai (Pydantic AI) package=nil pinned=nil
+node-copilot credentials=xai:key agentName=GitHub Copilot CLI package=nil pinned=nil
+qwen-code credentials=xai:key agentName=Qwen Code package=@qwen-code/qwen-code pinned=0.25.1 sha512-6cEbtfx4Ugl1d3FdFLa8fcsG6knHuUUHqvDseLxGY06Xan8p7Fcd7+g5KlX694zX4mo/+Vh56AHxT/4R15zpYA==
+node-goose credentials=xai:key agentName=Goose package=nil pinned=nil
+node-kilo credentials=xai:key agentName=Kilo Code CLI package=nil pinned=nil
+node-mistral-vibe credentials=xai:key agentName=Mistral Vibe package=nil pinned=nil
+node-droid credentials=xai:key agentName=Factory Droid package=nil pinned=nil
+dirac credentials=xai:key agentName=Dirac package=dirac-cli pinned=0.5.20 sha512-t2sUPPI9APCTHq+Lwr1IOq1OkubRSIrzB3lHJMMaAT+OLVjAGjWhxVIS/3xFCouBvQHB2xQF/jyVb57bbOjJvw==
+kimi-code credentials=xai:key agentName=Kimi Code package=@moonshot-ai/kimi-code pinned=2.1.1 sha512-xClqcnTQUKgKDbeOGPU78qcwxGzL8wA2rqWuOX3CLpyQ1/NhSX7jAh6hZo/JFwThSX8obkgef3uw/li5JaJNyw==
+node-cline credentials=xai:key agentName=Cline CLI package=nil pinned=nil
+node-openhands credentials=xai:key agentName=OpenHands CLI package=nil pinned=nil
+letta-code credentials=xai:key agentName=Letta Code package=@letta-ai/letta-code pinned=0.34.13 sha512-aEu3M1aYGA2HzpDjRd4rMJKRe4owLpPvdUnQZ0Nzf9/I7wo5Bl0yu7oM8hxBvelCZpPVug+pI/K06fBhbq4ckw==
+node-docker-agent credentials=xai:key agentName=Docker Agent package=nil pinned=nil
+nanocoder credentials=xai:key agentName=Nanocoder package=@nanocollective/nanocoder pinned=1.31.0 sha512-EyJn8aO7YFKDA+IYyUmSN9/XHCqgBfrYKHE61iKMf6B4ASY9GDd8VHG0J09w0bd/V5kQdUQzHszk0fiCv8fRHQ==
+node-mini-swe-agent credentials=xai:key agentName=mini-swe-agent package=nil pinned=nil
+node-open-interpreter credentials=xai:key agentName=Open Interpreter package=nil pinned=nil
+node-crush credentials=xai:key agentName=Crush package=nil pinned=nil
+node-mimo-code credentials=xai:key agentName=MiMo Code package=nil pinned=nil
+node-codewhale credentials=xai:key agentName=CodeWhale package=nil pinned=nil
+node-maki credentials=xai:key agentName=Maki package=nil pinned=nil
+node-omp credentials=xai:key agentName=oh-my-pi package=nil pinned=nil
+node-tau credentials=xai:key agentName=Tau package=nil pinned=nil
+node-stitch credentials=google-stitch:key agentName=Google Stitch CLI package=nil pinned=nil
+python-claude-code credentials=anthropic:mac,setup-token,api-key agentName=Claude Code package=nil pinned=nil
+python-pi credentials=anthropic:api-key agentName=pi package=nil pinned=nil
+python credentials=nil agentName=nil package=nil pinned=nil
+python-codex credentials=openai:codex-mac,chatgpt,openai-key agentName=Codex package=nil pinned=nil
+python-antigravity credentials=google:key agentName=Antigravity CLI package=nil pinned=nil
+python-gemini credentials=google:key agentName=Gemini CLI package=nil pinned=nil
+python-grok credentials=xai:key agentName=Grok Build package=nil pinned=nil
+python-fabric credentials=google:key agentName=Fabric package=nil pinned=nil
+python-openclaw credentials=google:key agentName=OpenClaw package=nil pinned=nil
+python-nanobot credentials=xai:key agentName=nanobot package=nil pinned=nil
+python-gptme credentials=xai:key agentName=gptme package=nil pinned=nil
+python-llm credentials=xai:key agentName=llm package=nil pinned=nil
+python-shell-gpt credentials=xai:key agentName=ShellGPT package=nil pinned=nil
+python-zeroclaw credentials=xai:key agentName=ZeroClaw package=nil pinned=nil
+python-aichat credentials=xai:key agentName=AIChat package=nil pinned=nil
+python-tgpt credentials=google:key agentName=tgpt package=nil pinned=nil
+python-opencode credentials=xai:key agentName=OpenCode package=nil pinned=nil
+python-smolagents credentials=xai:key agentName=smolagents package=nil pinned=nil
+python-adk credentials=google:key agentName=Agent Development Kit package=nil pinned=nil
+python-promptfoo credentials=xai:key agentName=promptfoo package=nil pinned=nil
+python-clai credentials=xai:key agentName=clai (Pydantic AI) package=nil pinned=nil
+python-copilot credentials=xai:key agentName=GitHub Copilot CLI package=nil pinned=nil
+python-qwen-code credentials=xai:key agentName=Qwen Code package=nil pinned=nil
+python-goose credentials=xai:key agentName=Goose package=nil pinned=nil
+python-kilo credentials=xai:key agentName=Kilo Code CLI package=nil pinned=nil
+python-mistral-vibe credentials=xai:key agentName=Mistral Vibe package=nil pinned=nil
+python-droid credentials=xai:key agentName=Factory Droid package=nil pinned=nil
+python-dirac credentials=xai:key agentName=Dirac package=nil pinned=nil
+python-kimi-code credentials=xai:key agentName=Kimi Code package=nil pinned=nil
+python-cline credentials=xai:key agentName=Cline CLI package=nil pinned=nil
+python-openhands credentials=xai:key agentName=OpenHands CLI package=nil pinned=nil
+python-letta-code credentials=xai:key agentName=Letta Code package=nil pinned=nil
+python-docker-agent credentials=xai:key agentName=Docker Agent package=nil pinned=nil
+python-nanocoder credentials=xai:key agentName=Nanocoder package=nil pinned=nil
+python-mini-swe-agent credentials=xai:key agentName=mini-swe-agent package=nil pinned=nil
+python-open-interpreter credentials=xai:key agentName=Open Interpreter package=nil pinned=nil
+python-crush credentials=xai:key agentName=Crush package=nil pinned=nil
+python-mimo-code credentials=xai:key agentName=MiMo Code package=nil pinned=nil
+python-codewhale credentials=xai:key agentName=CodeWhale package=nil pinned=nil
+python-maki credentials=xai:key agentName=Maki package=nil pinned=nil
+python-omp credentials=xai:key agentName=oh-my-pi package=nil pinned=nil
+python-tau credentials=xai:key agentName=Tau package=nil pinned=nil
+python-stitch credentials=google-stitch:key agentName=Google Stitch CLI package=nil pinned=nil
+go-claude-code credentials=anthropic:mac,setup-token,api-key agentName=Claude Code package=nil pinned=nil
+go-pi credentials=anthropic:api-key agentName=pi package=nil pinned=nil
+go credentials=nil agentName=nil package=nil pinned=nil
+go-codex credentials=openai:codex-mac,chatgpt,openai-key agentName=Codex package=nil pinned=nil
+go-antigravity credentials=google:key agentName=Antigravity CLI package=nil pinned=nil
+go-gemini credentials=google:key agentName=Gemini CLI package=nil pinned=nil
+go-grok credentials=xai:key agentName=Grok Build package=nil pinned=nil
+go-fabric credentials=google:key agentName=Fabric package=nil pinned=nil
+go-openclaw credentials=google:key agentName=OpenClaw package=nil pinned=nil
+go-nanobot credentials=xai:key agentName=nanobot package=nil pinned=nil
+go-gptme credentials=xai:key agentName=gptme package=nil pinned=nil
+go-llm credentials=xai:key agentName=llm package=nil pinned=nil
+go-shell-gpt credentials=xai:key agentName=ShellGPT package=nil pinned=nil
+go-zeroclaw credentials=xai:key agentName=ZeroClaw package=nil pinned=nil
+go-aichat credentials=xai:key agentName=AIChat package=nil pinned=nil
+go-tgpt credentials=google:key agentName=tgpt package=nil pinned=nil
+go-opencode credentials=xai:key agentName=OpenCode package=nil pinned=nil
+go-smolagents credentials=xai:key agentName=smolagents package=nil pinned=nil
+go-adk credentials=google:key agentName=Agent Development Kit package=nil pinned=nil
+go-promptfoo credentials=xai:key agentName=promptfoo package=nil pinned=nil
+go-clai credentials=xai:key agentName=clai (Pydantic AI) package=nil pinned=nil
+go-copilot credentials=xai:key agentName=GitHub Copilot CLI package=nil pinned=nil
+go-qwen-code credentials=xai:key agentName=Qwen Code package=nil pinned=nil
+go-goose credentials=xai:key agentName=Goose package=nil pinned=nil
+go-kilo credentials=xai:key agentName=Kilo Code CLI package=nil pinned=nil
+go-mistral-vibe credentials=xai:key agentName=Mistral Vibe package=nil pinned=nil
+go-droid credentials=xai:key agentName=Factory Droid package=nil pinned=nil
+go-dirac credentials=xai:key agentName=Dirac package=nil pinned=nil
+go-kimi-code credentials=xai:key agentName=Kimi Code package=nil pinned=nil
+go-cline credentials=xai:key agentName=Cline CLI package=nil pinned=nil
+go-openhands credentials=xai:key agentName=OpenHands CLI package=nil pinned=nil
+go-letta-code credentials=xai:key agentName=Letta Code package=nil pinned=nil
+go-docker-agent credentials=xai:key agentName=Docker Agent package=nil pinned=nil
+go-nanocoder credentials=xai:key agentName=Nanocoder package=nil pinned=nil
+go-mini-swe-agent credentials=xai:key agentName=mini-swe-agent package=nil pinned=nil
+go-open-interpreter credentials=xai:key agentName=Open Interpreter package=nil pinned=nil
+go-crush credentials=xai:key agentName=Crush package=nil pinned=nil
+go-mimo-code credentials=xai:key agentName=MiMo Code package=nil pinned=nil
+go-codewhale credentials=xai:key agentName=CodeWhale package=nil pinned=nil
+go-maki credentials=xai:key agentName=Maki package=nil pinned=nil
+go-omp credentials=xai:key agentName=oh-my-pi package=nil pinned=nil
+go-tau credentials=xai:key agentName=Tau package=nil pinned=nil
+go-stitch credentials=google-stitch:key agentName=Google Stitch CLI package=nil pinned=nil
+rust-claude-code credentials=anthropic:mac,setup-token,api-key agentName=Claude Code package=nil pinned=nil
+rust-pi credentials=anthropic:api-key agentName=pi package=nil pinned=nil
+rust credentials=nil agentName=nil package=nil pinned=nil
+rust-codex credentials=openai:codex-mac,chatgpt,openai-key agentName=Codex package=nil pinned=nil
+rust-antigravity credentials=google:key agentName=Antigravity CLI package=nil pinned=nil
+rust-gemini credentials=google:key agentName=Gemini CLI package=nil pinned=nil
+rust-grok credentials=xai:key agentName=Grok Build package=nil pinned=nil
+rust-fabric credentials=google:key agentName=Fabric package=nil pinned=nil
+rust-openclaw credentials=google:key agentName=OpenClaw package=nil pinned=nil
+rust-nanobot credentials=xai:key agentName=nanobot package=nil pinned=nil
+rust-gptme credentials=xai:key agentName=gptme package=nil pinned=nil
+rust-llm credentials=xai:key agentName=llm package=nil pinned=nil
+rust-shell-gpt credentials=xai:key agentName=ShellGPT package=nil pinned=nil
+rust-zeroclaw credentials=xai:key agentName=ZeroClaw package=nil pinned=nil
+rust-aichat credentials=xai:key agentName=AIChat package=nil pinned=nil
+rust-tgpt credentials=google:key agentName=tgpt package=nil pinned=nil
+rust-opencode credentials=xai:key agentName=OpenCode package=nil pinned=nil
+rust-smolagents credentials=xai:key agentName=smolagents package=nil pinned=nil
+rust-adk credentials=google:key agentName=Agent Development Kit package=nil pinned=nil
+rust-promptfoo credentials=xai:key agentName=promptfoo package=nil pinned=nil
+rust-clai credentials=xai:key agentName=clai (Pydantic AI) package=nil pinned=nil
+rust-copilot credentials=xai:key agentName=GitHub Copilot CLI package=nil pinned=nil
+rust-qwen-code credentials=xai:key agentName=Qwen Code package=nil pinned=nil
+rust-goose credentials=xai:key agentName=Goose package=nil pinned=nil
+rust-kilo credentials=xai:key agentName=Kilo Code CLI package=nil pinned=nil
+rust-mistral-vibe credentials=xai:key agentName=Mistral Vibe package=nil pinned=nil
+rust-droid credentials=xai:key agentName=Factory Droid package=nil pinned=nil
+rust-dirac credentials=xai:key agentName=Dirac package=nil pinned=nil
+rust-kimi-code credentials=xai:key agentName=Kimi Code package=nil pinned=nil
+rust-cline credentials=xai:key agentName=Cline CLI package=nil pinned=nil
+rust-openhands credentials=xai:key agentName=OpenHands CLI package=nil pinned=nil
+rust-letta-code credentials=xai:key agentName=Letta Code package=nil pinned=nil
+rust-docker-agent credentials=xai:key agentName=Docker Agent package=nil pinned=nil
+rust-nanocoder credentials=xai:key agentName=Nanocoder package=nil pinned=nil
+rust-mini-swe-agent credentials=xai:key agentName=mini-swe-agent package=nil pinned=nil
+rust-open-interpreter credentials=xai:key agentName=Open Interpreter package=nil pinned=nil
+rust-crush credentials=xai:key agentName=Crush package=nil pinned=nil
+rust-mimo-code credentials=xai:key agentName=MiMo Code package=nil pinned=nil
+rust-codewhale credentials=xai:key agentName=CodeWhale package=nil pinned=nil
+rust-maki credentials=xai:key agentName=Maki package=nil pinned=nil
+rust-omp credentials=xai:key agentName=oh-my-pi package=nil pinned=nil
+rust-tau credentials=xai:key agentName=Tau package=nil pinned=nil
+rust-stitch credentials=google-stitch:key agentName=Google Stitch CLI package=nil pinned=nil
+java-claude-code credentials=anthropic:mac,setup-token,api-key agentName=Claude Code package=nil pinned=nil
+java-pi credentials=anthropic:api-key agentName=pi package=nil pinned=nil
+java credentials=nil agentName=nil package=nil pinned=nil
+java-codex credentials=openai:codex-mac,chatgpt,openai-key agentName=Codex package=nil pinned=nil
+java-antigravity credentials=google:key agentName=Antigravity CLI package=nil pinned=nil
+java-gemini credentials=google:key agentName=Gemini CLI package=nil pinned=nil
+java-grok credentials=xai:key agentName=Grok Build package=nil pinned=nil
+java-fabric credentials=google:key agentName=Fabric package=nil pinned=nil
+java-openclaw credentials=google:key agentName=OpenClaw package=nil pinned=nil
+java-nanobot credentials=xai:key agentName=nanobot package=nil pinned=nil
+java-gptme credentials=xai:key agentName=gptme package=nil pinned=nil
+java-llm credentials=xai:key agentName=llm package=nil pinned=nil
+java-shell-gpt credentials=xai:key agentName=ShellGPT package=nil pinned=nil
+java-zeroclaw credentials=xai:key agentName=ZeroClaw package=nil pinned=nil
+java-aichat credentials=xai:key agentName=AIChat package=nil pinned=nil
+java-tgpt credentials=google:key agentName=tgpt package=nil pinned=nil
+java-opencode credentials=xai:key agentName=OpenCode package=nil pinned=nil
+java-smolagents credentials=xai:key agentName=smolagents package=nil pinned=nil
+java-adk credentials=google:key agentName=Agent Development Kit package=nil pinned=nil
+java-promptfoo credentials=xai:key agentName=promptfoo package=nil pinned=nil
+java-clai credentials=xai:key agentName=clai (Pydantic AI) package=nil pinned=nil
+java-copilot credentials=xai:key agentName=GitHub Copilot CLI package=nil pinned=nil
+java-qwen-code credentials=xai:key agentName=Qwen Code package=nil pinned=nil
+java-goose credentials=xai:key agentName=Goose package=nil pinned=nil
+java-kilo credentials=xai:key agentName=Kilo Code CLI package=nil pinned=nil
+java-mistral-vibe credentials=xai:key agentName=Mistral Vibe package=nil pinned=nil
+java-droid credentials=xai:key agentName=Factory Droid package=nil pinned=nil
+java-dirac credentials=xai:key agentName=Dirac package=nil pinned=nil
+java-kimi-code credentials=xai:key agentName=Kimi Code package=nil pinned=nil
+java-cline credentials=xai:key agentName=Cline CLI package=nil pinned=nil
+java-openhands credentials=xai:key agentName=OpenHands CLI package=nil pinned=nil
+java-letta-code credentials=xai:key agentName=Letta Code package=nil pinned=nil
+java-docker-agent credentials=xai:key agentName=Docker Agent package=nil pinned=nil
+java-nanocoder credentials=xai:key agentName=Nanocoder package=nil pinned=nil
+java-mini-swe-agent credentials=xai:key agentName=mini-swe-agent package=nil pinned=nil
+java-open-interpreter credentials=xai:key agentName=Open Interpreter package=nil pinned=nil
+java-crush credentials=xai:key agentName=Crush package=nil pinned=nil
+java-mimo-code credentials=xai:key agentName=MiMo Code package=nil pinned=nil
+java-codewhale credentials=xai:key agentName=CodeWhale package=nil pinned=nil
+java-maki credentials=xai:key agentName=Maki package=nil pinned=nil
+java-omp credentials=xai:key agentName=oh-my-pi package=nil pinned=nil
+java-tau credentials=xai:key agentName=Tau package=nil pinned=nil
+java-stitch credentials=google-stitch:key agentName=Google Stitch CLI package=nil pinned=nil
+ruby-claude-code credentials=anthropic:mac,setup-token,api-key agentName=Claude Code package=nil pinned=nil
+ruby-pi credentials=anthropic:api-key agentName=pi package=nil pinned=nil
+ruby credentials=nil agentName=nil package=nil pinned=nil
+ruby-codex credentials=openai:codex-mac,chatgpt,openai-key agentName=Codex package=nil pinned=nil
+ruby-antigravity credentials=google:key agentName=Antigravity CLI package=nil pinned=nil
+ruby-gemini credentials=google:key agentName=Gemini CLI package=nil pinned=nil
+ruby-grok credentials=xai:key agentName=Grok Build package=nil pinned=nil
+ruby-fabric credentials=google:key agentName=Fabric package=nil pinned=nil
+ruby-openclaw credentials=google:key agentName=OpenClaw package=nil pinned=nil
+ruby-nanobot credentials=xai:key agentName=nanobot package=nil pinned=nil
+ruby-gptme credentials=xai:key agentName=gptme package=nil pinned=nil
+ruby-llm credentials=xai:key agentName=llm package=nil pinned=nil
+ruby-shell-gpt credentials=xai:key agentName=ShellGPT package=nil pinned=nil
+ruby-zeroclaw credentials=xai:key agentName=ZeroClaw package=nil pinned=nil
+ruby-aichat credentials=xai:key agentName=AIChat package=nil pinned=nil
+ruby-tgpt credentials=google:key agentName=tgpt package=nil pinned=nil
+ruby-opencode credentials=xai:key agentName=OpenCode package=nil pinned=nil
+ruby-smolagents credentials=xai:key agentName=smolagents package=nil pinned=nil
+ruby-adk credentials=google:key agentName=Agent Development Kit package=nil pinned=nil
+ruby-promptfoo credentials=xai:key agentName=promptfoo package=nil pinned=nil
+ruby-clai credentials=xai:key agentName=clai (Pydantic AI) package=nil pinned=nil
+ruby-copilot credentials=xai:key agentName=GitHub Copilot CLI package=nil pinned=nil
+ruby-qwen-code credentials=xai:key agentName=Qwen Code package=nil pinned=nil
+ruby-goose credentials=xai:key agentName=Goose package=nil pinned=nil
+ruby-kilo credentials=xai:key agentName=Kilo Code CLI package=nil pinned=nil
+ruby-mistral-vibe credentials=xai:key agentName=Mistral Vibe package=nil pinned=nil
+ruby-droid credentials=xai:key agentName=Factory Droid package=nil pinned=nil
+ruby-dirac credentials=xai:key agentName=Dirac package=nil pinned=nil
+ruby-kimi-code credentials=xai:key agentName=Kimi Code package=nil pinned=nil
+ruby-cline credentials=xai:key agentName=Cline CLI package=nil pinned=nil
+ruby-openhands credentials=xai:key agentName=OpenHands CLI package=nil pinned=nil
+ruby-letta-code credentials=xai:key agentName=Letta Code package=nil pinned=nil
+ruby-docker-agent credentials=xai:key agentName=Docker Agent package=nil pinned=nil
+ruby-nanocoder credentials=xai:key agentName=Nanocoder package=nil pinned=nil
+ruby-mini-swe-agent credentials=xai:key agentName=mini-swe-agent package=nil pinned=nil
+ruby-open-interpreter credentials=xai:key agentName=Open Interpreter package=nil pinned=nil
+ruby-crush credentials=xai:key agentName=Crush package=nil pinned=nil
+ruby-mimo-code credentials=xai:key agentName=MiMo Code package=nil pinned=nil
+ruby-codewhale credentials=xai:key agentName=CodeWhale package=nil pinned=nil
+ruby-maki credentials=xai:key agentName=Maki package=nil pinned=nil
+ruby-omp credentials=xai:key agentName=oh-my-pi package=nil pinned=nil
+ruby-tau credentials=xai:key agentName=Tau package=nil pinned=nil
+ruby-stitch credentials=google-stitch:key agentName=Google Stitch CLI package=nil pinned=nil
+dotnet-claude-code credentials=anthropic:mac,setup-token,api-key agentName=Claude Code package=nil pinned=nil
+dotnet-pi credentials=anthropic:api-key agentName=pi package=nil pinned=nil
+dotnet credentials=nil agentName=nil package=nil pinned=nil
+dotnet-codex credentials=openai:codex-mac,chatgpt,openai-key agentName=Codex package=nil pinned=nil
+dotnet-antigravity credentials=google:key agentName=Antigravity CLI package=nil pinned=nil
+dotnet-gemini credentials=google:key agentName=Gemini CLI package=nil pinned=nil
+dotnet-grok credentials=xai:key agentName=Grok Build package=nil pinned=nil
+dotnet-fabric credentials=google:key agentName=Fabric package=nil pinned=nil
+dotnet-openclaw credentials=google:key agentName=OpenClaw package=nil pinned=nil
+dotnet-nanobot credentials=xai:key agentName=nanobot package=nil pinned=nil
+dotnet-gptme credentials=xai:key agentName=gptme package=nil pinned=nil
+dotnet-llm credentials=xai:key agentName=llm package=nil pinned=nil
+dotnet-shell-gpt credentials=xai:key agentName=ShellGPT package=nil pinned=nil
+dotnet-zeroclaw credentials=xai:key agentName=ZeroClaw package=nil pinned=nil
+dotnet-aichat credentials=xai:key agentName=AIChat package=nil pinned=nil
+dotnet-tgpt credentials=google:key agentName=tgpt package=nil pinned=nil
+dotnet-opencode credentials=xai:key agentName=OpenCode package=nil pinned=nil
+dotnet-smolagents credentials=xai:key agentName=smolagents package=nil pinned=nil
+dotnet-adk credentials=google:key agentName=Agent Development Kit package=nil pinned=nil
+dotnet-promptfoo credentials=xai:key agentName=promptfoo package=nil pinned=nil
+dotnet-clai credentials=xai:key agentName=clai (Pydantic AI) package=nil pinned=nil
+dotnet-copilot credentials=xai:key agentName=GitHub Copilot CLI package=nil pinned=nil
+dotnet-qwen-code credentials=xai:key agentName=Qwen Code package=nil pinned=nil
+dotnet-goose credentials=xai:key agentName=Goose package=nil pinned=nil
+dotnet-kilo credentials=xai:key agentName=Kilo Code CLI package=nil pinned=nil
+dotnet-mistral-vibe credentials=xai:key agentName=Mistral Vibe package=nil pinned=nil
+dotnet-droid credentials=xai:key agentName=Factory Droid package=nil pinned=nil
+dotnet-dirac credentials=xai:key agentName=Dirac package=nil pinned=nil
+dotnet-kimi-code credentials=xai:key agentName=Kimi Code package=nil pinned=nil
+dotnet-cline credentials=xai:key agentName=Cline CLI package=nil pinned=nil
+dotnet-openhands credentials=xai:key agentName=OpenHands CLI package=nil pinned=nil
+dotnet-letta-code credentials=xai:key agentName=Letta Code package=nil pinned=nil
+dotnet-docker-agent credentials=xai:key agentName=Docker Agent package=nil pinned=nil
+dotnet-nanocoder credentials=xai:key agentName=Nanocoder package=nil pinned=nil
+dotnet-mini-swe-agent credentials=xai:key agentName=mini-swe-agent package=nil pinned=nil
+dotnet-open-interpreter credentials=xai:key agentName=Open Interpreter package=nil pinned=nil
+dotnet-crush credentials=xai:key agentName=Crush package=nil pinned=nil
+dotnet-mimo-code credentials=xai:key agentName=MiMo Code package=nil pinned=nil
+dotnet-codewhale credentials=xai:key agentName=CodeWhale package=nil pinned=nil
+dotnet-maki credentials=xai:key agentName=Maki package=nil pinned=nil
+dotnet-omp credentials=xai:key agentName=oh-my-pi package=nil pinned=nil
+dotnet-tau credentials=xai:key agentName=Tau package=nil pinned=nil
+dotnet-stitch credentials=google-stitch:key agentName=Google Stitch CLI package=nil pinned=nil
+debian-claude-code credentials=anthropic:mac,setup-token,api-key agentName=Claude Code package=nil pinned=nil
+debian-pi credentials=anthropic:api-key agentName=pi package=nil pinned=nil
+debian credentials=nil agentName=nil package=nil pinned=nil
+debian-codex credentials=openai:codex-mac,chatgpt,openai-key agentName=Codex package=nil pinned=nil
+antigravity credentials=google:key agentName=Antigravity CLI package=nil pinned=1.3.4+5524158944247808 sha512-JKHUYzGXAfSUOy1JMsuGyjTWDS6f7c2QGMoxgJdz1xnyclEgaJEWMtsXXXIzCIVRAzvOzAoqVrG8+gQSaWh+rw==
+debian-gemini credentials=google:key agentName=Gemini CLI package=nil pinned=nil
+grok credentials=xai:key agentName=Grok Build package=@xai-official/grok pinned=1.0.52 sha512-aweQyHPi5r+qMG0BUp1XH22R7RGeQNYhqQMpePlsjyGesd5/v79HQPs9PIkKLjrcX4uz5cFFe8RcnkKu5J5zCA==
+fabric credentials=google:key agentName=Fabric package=nil pinned=1.4.518 sha512-qTS9O3ps0FqHLqmgi1sV4U3u8LdRvJNV7Y5WYOQ48agmaIJoEVBKD9ghZ6LoakoFFQxc1wBr1LXKszCSCeH6kQ==
+openclaw credentials=google:key agentName=OpenClaw package=openclaw pinned=2026.10.3 sha512-ncl6LntMlf76K39LFhVrDXQTbaGNAG5j52f7PL5P8vIn0knWmCrvfAe9DHMslFq+47HeOWBH2CBYQH8zEb+UAA==
+nanobot credentials=xai:key agentName=nanobot package=nanobot-ai pinned=0.3.5 sha512-DccObCniXz2dUajdZrvWhwSjrJMH7K45OqpiUovWFjhOwIvZz2DBMF0MSDPLYh2z+PSf877yAnR5DNmhYQLLaA==
+gptme credentials=xai:key agentName=gptme package=gptme pinned=0.34.0 sha512-A065mIqznI15ogh80XbWn0poFD8xs85ib5cR+HBavWHzZ+Ga1mXRJSVjQxkYoYXNtvPaQjWC58eqbQz/hZZxzA==
+llm credentials=xai:key agentName=llm package=llm pinned=0.36 sha512-4FONrqeisXCQbzGIznoMxBPT1NcG/QHc8uW5M9zCtif4s1X3R/FDMvfQEmAm0YTUko2Ga/JJkdS96htIWXcykw==
+shell-gpt credentials=xai:key agentName=ShellGPT package=shell-gpt pinned=1.5.1 sha512-wtiD9Hjrac0l5s1jfrEzncC0o7Wl61cJM/22qeBHKya9eYsJ7cxBk0wxRRXilNbON/2lrJaM1onMNWApQcVBNg==
+zeroclaw credentials=xai:key agentName=ZeroClaw package=nil pinned=0.8.5 sha512-z05xgONSrtERDekKh7jpbQuSrKNq2e9W2Zux3W5gDw3z9zKZyW6QHUpA9dGU3do4spzNTDSfeR1PtNjsX5lCmQ==
+aichat credentials=xai:key agentName=AIChat package=nil pinned=0.30.0 sha512-j+5lNCpZW9rhWwziKvT9KpQB17zLUKKEazhlPD4C9425uczt5zGEJxYXGHzrQH6DiutwpSZeaKdcZiBPm9UHmg==
+tgpt credentials=google:key agentName=tgpt package=nil pinned=2.15.0 sha512-EcCxUb8C5DTvpeY7PpRxbOQFOBL6875cweRzAokS4aY0/m3pHKvS2+g6niA4SlqzT8G1Wp7SGGxxUezmH8rv4w==
+opencode credentials=xai:key agentName=OpenCode package=opencode-ai pinned=1.19.0 sha512-XD1qcVN4jEiaYHqtx40p8cEPJxBc1mcB99ksgQ81akZsGGwcNFyG6GH857jVEplbGgdzWiWxDCrSii56sHjmRQ==
+smolagents credentials=xai:key agentName=smolagents package=smolagents pinned=1.26.0 sha512-pILyUgYQX7m3SyYmADBbYmx9ab/aRsJ4vOHdhbSw0DlwOQIDMToq8acWqLfkIK0sv0NlttXNjJqwaQQspljiPg==
+adk credentials=google:key agentName=Agent Development Kit package=google-adk pinned=2.12.0 sha512-76G+COIXjWA72IGkBmebzttRgvC4sQQrRljMlVD95eL1Af6VeJXYNJMZvGg8hx9fWEI87M5RCNnFrojYvs1wiw==
+promptfoo credentials=xai:key agentName=promptfoo package=promptfoo pinned=0.124.1 sha512-Y6fq/WGTL7lPvDsirNSmmmcPLhURwRao03iv8fCoLbFq6H1eqg5VVTmXiap5Jl+fiRaQQZXYMHb2N1gQm1tGyQ==
+clai credentials=xai:key agentName=clai (Pydantic AI) package=clai pinned=2.55.0 sha512-nlbupA+j3uyuetCpA2w1XKDiWfbiPmhOUJmkFGzFr9t4VxCrjL9kD4rsQDZgnqf7xw4Nox1gNr4v/cY99mM9mA==
+copilot credentials=xai:key agentName=GitHub Copilot CLI package=@github/copilot pinned=1.0.97 sha512-iWtoEeG4kN1tz5f1tsHQKdwCQ24Dpx8+rGZ1GBn42U57QU5yjIhIeYR8DXJGFWTtoHwQn0uAlacbhDlqKYddYQ==
+debian-qwen-code credentials=xai:key agentName=Qwen Code package=nil pinned=nil
+goose credentials=xai:key agentName=Goose package=nil pinned=1.54.0 sha512-dopMlnmnYA443NEV1YLTTt5wO5FMSxfHL5e93GjkV97Q2Q9SxyNk7zKnMrdNXrfHYpXS+uLAuR8MbvnnavhutQ==
+kilo credentials=xai:key agentName=Kilo Code CLI package=@kilocode/cli pinned=7.8.8 sha512-JrZu4EsdaajRsafvgXN+dEcscV7VKM6sGp3Xm51EndrTnI7+76tKeyrPs6J5Bvn2yR/BNKhoId4LEjwjQGSHYg==
+mistral-vibe credentials=xai:key agentName=Mistral Vibe package=mistral-vibe pinned=2.26.1 sha512-KZrMkRaK8CxRmXEgQUadnFakofvUDwysdxDyAVA1EIk+STDpQLfdUZHjT1U3jJYp2lpGXoKUDGnJlLJhJUcWAg==
+droid credentials=xai:key agentName=Factory Droid package=nil pinned=0.240.1 sha512-GmruvHDRWTbSNZ76lfS5iGWSTlekbTicf2EGNkzj/griE3bmR9uIaXqmFqp4fjBibjWlkX9q66BnjXl2B9/5vg==
+debian-dirac credentials=xai:key agentName=Dirac package=nil pinned=nil
+debian-kimi-code credentials=xai:key agentName=Kimi Code package=nil pinned=nil
+cline credentials=xai:key agentName=Cline CLI package=cline pinned=3.0.71 sha512-d0z0d//cOfuMaPWmU++0eg6L4jmE9E0t8DZPIWlqoBLdax4o3u7E2MqkKenrtX6mTG7LiA4wrRk3KIF/zXMdOA==
+openhands credentials=xai:key agentName=OpenHands CLI package=nil pinned=1.16.0 sha512-wh73oUH4wtdNUftFo20QXOa2IujQTFOhmp3y8EYk8kUpahRtjnZRKYutNo1/VZGcAOS7HfFtrn9wnt5hCqNOSg==
+debian-letta-code credentials=xai:key agentName=Letta Code package=nil pinned=nil
+docker-agent credentials=xai:key agentName=Docker Agent package=nil pinned=1.150.0 sha512-KklBky8+usd4CK6S48S940vZJpxg1wn1cKqmGgJmsfBw3YAkRWusE/nlnDqT4TM0l4Lh/SVPgAvC/d8XQdAVmA==
+debian-nanocoder credentials=xai:key agentName=Nanocoder package=nil pinned=nil
+mini-swe-agent credentials=xai:key agentName=mini-swe-agent package=mini-swe-agent pinned=2.4.6 sha512-nKAiYWd2x7qCDYjFdFltPDty8e8qCBYZ6qeaWRfhmheH6RJX49J6zccUrHEuZScu7xhKzvgB00EbPjDyznr9xQ==
+open-interpreter credentials=xai:key agentName=Open Interpreter package=nil pinned=0.0.56 sha512-+wUeWOq+twYjtpVk+J5dfAgCXveoIlTyn3zkGCgsAwCkxzPKCq3ZzZWxq//uHBzQfGflqbpi0UEl3EDVPBG6FA==
+crush credentials=xai:key agentName=Crush package=nil pinned=0.98.1 sha512-VbfBLF8cxG8tzN4xTkFwCmzcTYSYAbnMNNKs8y+tQGJzKWnj9QsXFRtD7m+pfvtfe0sqixU6ttLtx1Doc7MFFg==
+mimo-code credentials=xai:key agentName=MiMo Code package=@mimo-ai/cli pinned=0.1.15 sha512-x5x7cRstiRlSuXIPUcXs8UTH5JxbJwrd2XwKlX4Z8bxuXf8kxu7udm0qMuti7QRQ3U2vY/G4uTSZ5B1Vz3S4yw==
+codewhale credentials=xai:key agentName=CodeWhale package=nil pinned=0.10.1 sha512-F/gS+8C4eANXPF15cRvzss7lowLk96a1tlOPZWxdNHveKURQdU9cRQ+RlW4Di0lg4TgXsfRCebR/AS1i0qhpzw==
+maki credentials=xai:key agentName=Maki package=nil pinned=0.6.3 sha512-EvaWRSZieLvjTQGM83oAAUl8OsC9qwwvRKRsUt6UGk7o+aKVUM4CYOMgLS60chUWcv1WG2T2xQ5yaksD6Xmsww==
+omp credentials=xai:key agentName=oh-my-pi package=nil pinned=18.10.4 sha512-3ZmxKel2M9fL+bMtRZe9SLZSzJpW3CPn04l8ShQXjNx3r34o8iZKhReT1PEoPWr5N/s/fH+UIdhemFj0Ytv/yg==
+tau credentials=xai:key agentName=Tau package=tau-ai pinned=0.4.7 sha512-d4WAekaGnc6sVNtqtN57wIGdKTbGa/EsnvCPa2rKShDZ5u/UmycxtREaYLqCW7QRkW7WygD2slaHwb5SbNBe9Q==
+stitch credentials=google-stitch:key agentName=Google Stitch CLI package=@google/stitch pinned=0.11.1 sha512-MzzAvOMU8AuvmIDJpAONSs5oJuHLofMleWsTNChw0HmzrPIWdI9d597BTtQXOypzXqwwy+8E3dU0vzGtj0ucDg==
+ubuntu-claude-code credentials=anthropic:mac,setup-token,api-key agentName=Claude Code package=nil pinned=nil
+ubuntu-pi credentials=anthropic:api-key agentName=pi package=nil pinned=nil
+ubuntu credentials=nil agentName=nil package=nil pinned=nil
+ubuntu-codex credentials=openai:codex-mac,chatgpt,openai-key agentName=Codex package=nil pinned=nil
+ubuntu-antigravity credentials=google:key agentName=Antigravity CLI package=nil pinned=nil
+ubuntu-gemini credentials=google:key agentName=Gemini CLI package=nil pinned=nil
+ubuntu-grok credentials=xai:key agentName=Grok Build package=nil pinned=nil
+ubuntu-fabric credentials=google:key agentName=Fabric package=nil pinned=nil
+ubuntu-openclaw credentials=google:key agentName=OpenClaw package=nil pinned=nil
+ubuntu-nanobot credentials=xai:key agentName=nanobot package=nil pinned=nil
+ubuntu-gptme credentials=xai:key agentName=gptme package=nil pinned=nil
+ubuntu-llm credentials=xai:key agentName=llm package=nil pinned=nil
+ubuntu-shell-gpt credentials=xai:key agentName=ShellGPT package=nil pinned=nil
+ubuntu-zeroclaw credentials=xai:key agentName=ZeroClaw package=nil pinned=nil
+ubuntu-aichat credentials=xai:key agentName=AIChat package=nil pinned=nil
+ubuntu-tgpt credentials=google:key agentName=tgpt package=nil pinned=nil
+ubuntu-opencode credentials=xai:key agentName=OpenCode package=nil pinned=nil
+ubuntu-smolagents credentials=xai:key agentName=smolagents package=nil pinned=nil
+ubuntu-adk credentials=google:key agentName=Agent Development Kit package=nil pinned=nil
+ubuntu-promptfoo credentials=xai:key agentName=promptfoo package=nil pinned=nil
+ubuntu-clai credentials=xai:key agentName=clai (Pydantic AI) package=nil pinned=nil
+ubuntu-copilot credentials=xai:key agentName=GitHub Copilot CLI package=nil pinned=nil
+ubuntu-qwen-code credentials=xai:key agentName=Qwen Code package=nil pinned=nil
+ubuntu-goose credentials=xai:key agentName=Goose package=nil pinned=nil
+ubuntu-kilo credentials=xai:key agentName=Kilo Code CLI package=nil pinned=nil
+ubuntu-mistral-vibe credentials=xai:key agentName=Mistral Vibe package=nil pinned=nil
+ubuntu-droid credentials=xai:key agentName=Factory Droid package=nil pinned=nil
+ubuntu-dirac credentials=xai:key agentName=Dirac package=nil pinned=nil
+ubuntu-kimi-code credentials=xai:key agentName=Kimi Code package=nil pinned=nil
+ubuntu-cline credentials=xai:key agentName=Cline CLI package=nil pinned=nil
+ubuntu-openhands credentials=xai:key agentName=OpenHands CLI package=nil pinned=nil
+ubuntu-letta-code credentials=xai:key agentName=Letta Code package=nil pinned=nil
+ubuntu-docker-agent credentials=xai:key agentName=Docker Agent package=nil pinned=nil
+ubuntu-nanocoder credentials=xai:key agentName=Nanocoder package=nil pinned=nil
+ubuntu-mini-swe-agent credentials=xai:key agentName=mini-swe-agent package=nil pinned=nil
+ubuntu-open-interpreter credentials=xai:key agentName=Open Interpreter package=nil pinned=nil
+ubuntu-crush credentials=xai:key agentName=Crush package=nil pinned=nil
+ubuntu-mimo-code credentials=xai:key agentName=MiMo Code package=nil pinned=nil
+ubuntu-codewhale credentials=xai:key agentName=CodeWhale package=nil pinned=nil
+ubuntu-maki credentials=xai:key agentName=Maki package=nil pinned=nil
+ubuntu-omp credentials=xai:key agentName=oh-my-pi package=nil pinned=nil
+ubuntu-tau credentials=xai:key agentName=Tau package=nil pinned=nil
+ubuntu-stitch credentials=google-stitch:key agentName=Google Stitch CLI package=nil pinned=nil
+alpine-claude-code credentials=anthropic:mac,setup-token,api-key agentName=Claude Code package=nil pinned=nil
+alpine-pi credentials=anthropic:api-key agentName=pi package=nil pinned=nil
+alpine-codex credentials=openai:codex-mac,chatgpt,openai-key agentName=Codex package=nil pinned=nil
+alpine-antigravity credentials=google:key agentName=Antigravity CLI package=nil pinned=nil
+alpine-gemini credentials=google:key agentName=Gemini CLI package=nil pinned=nil
+alpine-grok credentials=xai:key agentName=Grok Build package=nil pinned=nil
+alpine-fabric credentials=google:key agentName=Fabric package=nil pinned=nil
+alpine-openclaw credentials=google:key agentName=OpenClaw package=nil pinned=nil
+alpine-nanobot credentials=xai:key agentName=nanobot package=nil pinned=nil
+alpine-gptme credentials=xai:key agentName=gptme package=nil pinned=nil
+alpine-llm credentials=xai:key agentName=llm package=nil pinned=nil
+alpine-shell-gpt credentials=xai:key agentName=ShellGPT package=nil pinned=nil
+alpine-zeroclaw credentials=xai:key agentName=ZeroClaw package=nil pinned=nil
+alpine-aichat credentials=xai:key agentName=AIChat package=nil pinned=nil
+alpine-tgpt credentials=google:key agentName=tgpt package=nil pinned=nil
+alpine-opencode credentials=xai:key agentName=OpenCode package=nil pinned=nil
+alpine-smolagents credentials=xai:key agentName=smolagents package=nil pinned=nil
+alpine-adk credentials=google:key agentName=Agent Development Kit package=nil pinned=nil
+alpine-promptfoo credentials=xai:key agentName=promptfoo package=nil pinned=nil
+alpine-clai credentials=xai:key agentName=clai (Pydantic AI) package=nil pinned=nil
+alpine-copilot credentials=xai:key agentName=GitHub Copilot CLI package=nil pinned=nil
+alpine-qwen-code credentials=xai:key agentName=Qwen Code package=nil pinned=nil
+alpine-goose credentials=xai:key agentName=Goose package=nil pinned=nil
+alpine-kilo credentials=xai:key agentName=Kilo Code CLI package=nil pinned=nil
+alpine-mistral-vibe credentials=xai:key agentName=Mistral Vibe package=nil pinned=nil
+alpine-droid credentials=xai:key agentName=Factory Droid package=nil pinned=nil
+alpine-dirac credentials=xai:key agentName=Dirac package=nil pinned=nil
+alpine-kimi-code credentials=xai:key agentName=Kimi Code package=nil pinned=nil
+alpine-cline credentials=xai:key agentName=Cline CLI package=nil pinned=nil
+alpine-openhands credentials=xai:key agentName=OpenHands CLI package=nil pinned=nil
+alpine-letta-code credentials=xai:key agentName=Letta Code package=nil pinned=nil
+alpine-docker-agent credentials=xai:key agentName=Docker Agent package=nil pinned=nil
+alpine-nanocoder credentials=xai:key agentName=Nanocoder package=nil pinned=nil
+alpine-mini-swe-agent credentials=xai:key agentName=mini-swe-agent package=nil pinned=nil
+alpine-open-interpreter credentials=xai:key agentName=Open Interpreter package=nil pinned=nil
+alpine-crush credentials=xai:key agentName=Crush package=nil pinned=nil
+alpine-mimo-code credentials=xai:key agentName=MiMo Code package=nil pinned=nil
+alpine-codewhale credentials=xai:key agentName=CodeWhale package=nil pinned=nil
+alpine-maki credentials=xai:key agentName=Maki package=nil pinned=nil
+alpine-omp credentials=xai:key agentName=oh-my-pi package=nil pinned=nil
+alpine-tau credentials=xai:key agentName=Tau package=nil pinned=nil
+alpine-stitch credentials=google-stitch:key agentName=Google Stitch CLI package=nil pinned=nil
+df-0123456789ab-claude-code credentials=anthropic:mac,setup-token,api-key agentName=Claude Code package=nil pinned=nil
+df-0123456789ab-pi credentials=anthropic:api-key agentName=pi package=nil pinned=nil
+df-0123456789ab credentials=nil agentName=nil package=nil pinned=nil
+df-0123456789ab-codex credentials=openai:codex-mac,chatgpt,openai-key agentName=Codex package=nil pinned=nil
+df-0123456789ab-antigravity credentials=google:key agentName=Antigravity CLI package=nil pinned=nil
+df-0123456789ab-gemini credentials=google:key agentName=Gemini CLI package=nil pinned=nil
+df-0123456789ab-grok credentials=xai:key agentName=Grok Build package=nil pinned=nil
+df-0123456789ab-fabric credentials=google:key agentName=Fabric package=nil pinned=nil
+df-0123456789ab-openclaw credentials=google:key agentName=OpenClaw package=nil pinned=nil
+df-0123456789ab-nanobot credentials=xai:key agentName=nanobot package=nil pinned=nil
+df-0123456789ab-gptme credentials=xai:key agentName=gptme package=nil pinned=nil
+df-0123456789ab-llm credentials=xai:key agentName=llm package=nil pinned=nil
+df-0123456789ab-shell-gpt credentials=xai:key agentName=ShellGPT package=nil pinned=nil
+df-0123456789ab-zeroclaw credentials=xai:key agentName=ZeroClaw package=nil pinned=nil
+df-0123456789ab-aichat credentials=xai:key agentName=AIChat package=nil pinned=nil
+df-0123456789ab-tgpt credentials=google:key agentName=tgpt package=nil pinned=nil
+df-0123456789ab-opencode credentials=xai:key agentName=OpenCode package=nil pinned=nil
+df-0123456789ab-smolagents credentials=xai:key agentName=smolagents package=nil pinned=nil
+df-0123456789ab-adk credentials=google:key agentName=Agent Development Kit package=nil pinned=nil
+df-0123456789ab-promptfoo credentials=xai:key agentName=promptfoo package=nil pinned=nil
+df-0123456789ab-clai credentials=xai:key agentName=clai (Pydantic AI) package=nil pinned=nil
+df-0123456789ab-copilot credentials=xai:key agentName=GitHub Copilot CLI package=nil pinned=nil
+df-0123456789ab-qwen-code credentials=xai:key agentName=Qwen Code package=nil pinned=nil
+df-0123456789ab-goose credentials=xai:key agentName=Goose package=nil pinned=nil
+df-0123456789ab-kilo credentials=xai:key agentName=Kilo Code CLI package=nil pinned=nil
+df-0123456789ab-mistral-vibe credentials=xai:key agentName=Mistral Vibe package=nil pinned=nil
+df-0123456789ab-droid credentials=xai:key agentName=Factory Droid package=nil pinned=nil
+df-0123456789ab-dirac credentials=xai:key agentName=Dirac package=nil pinned=nil
+df-0123456789ab-kimi-code credentials=xai:key agentName=Kimi Code package=nil pinned=nil
+df-0123456789ab-cline credentials=xai:key agentName=Cline CLI package=nil pinned=nil
+df-0123456789ab-openhands credentials=xai:key agentName=OpenHands CLI package=nil pinned=nil
+df-0123456789ab-letta-code credentials=xai:key agentName=Letta Code package=nil pinned=nil
+df-0123456789ab-docker-agent credentials=xai:key agentName=Docker Agent package=nil pinned=nil
+df-0123456789ab-nanocoder credentials=xai:key agentName=Nanocoder package=nil pinned=nil
+df-0123456789ab-mini-swe-agent credentials=xai:key agentName=mini-swe-agent package=nil pinned=nil
+df-0123456789ab-open-interpreter credentials=xai:key agentName=Open Interpreter package=nil pinned=nil
+df-0123456789ab-crush credentials=xai:key agentName=Crush package=nil pinned=nil
+df-0123456789ab-mimo-code credentials=xai:key agentName=MiMo Code package=nil pinned=nil
+df-0123456789ab-codewhale credentials=xai:key agentName=CodeWhale package=nil pinned=nil
+df-0123456789ab-maki credentials=xai:key agentName=Maki package=nil pinned=nil
+df-0123456789ab-omp credentials=xai:key agentName=oh-my-pi package=nil pinned=nil
+df-0123456789ab-tau credentials=xai:key agentName=Tau package=nil pinned=nil
+df-0123456789ab-stitch credentials=google-stitch:key agentName=Google Stitch CLI package=nil pinned=nil

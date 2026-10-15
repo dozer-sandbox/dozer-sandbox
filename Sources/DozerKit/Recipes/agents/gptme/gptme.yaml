@@ -1,0 +1,314 @@
+# yaml-language-server: $schema=../../../../../schema/dozer-recipe-2.schema.json
+# gptme — Dozer's recipe (schema 2). The format: docs/recipes/RECIPE-FORMAT.md.
+# Edit this file, then run make recipes (it writes Recipes/compiled/gptme.json, which Dozer embeds).
+schema: 2
+kind: workload
+id: gptme/gptme
+displayName: gptme
+description: A terminal agent with shell, Python, file and browser tools, on an Anthropic, OpenAI, xAI, Google AI, OpenRouter or Vercel AI Gateway key.
+author: Erik Bjäreholt and contributors
+sourceUrl: https://github.com/gptme/gptme
+licenses:
+- MIT
+args:
+  version:
+    description: The gptme release Dozer installs (its pin).
+    default: '0.34.0'
+    pattern: '[0-9]+\.[0-9]+(\.[0-9]+)?([-+][0-9A-Za-z.-]+)?'
+    buildArg: GPTME_VERSION
+provides:
+- com.dozersandbox/gptme@${{ kit.args.version }}
+capabilities:
+- type: com.docker.sandbox/network-policy@1
+  config:
+    runtime:
+      allow:
+      - api.anthropic.com:443
+      - api.openai.com:443
+      - api.x.ai:443
+      - generativelanguage.googleapis.com:443
+      - openrouter.ai:443
+      - ai-gateway.vercel.sh:443
+      - openaipublic.blob.core.windows.net:443
+    dozer:
+      model:
+        id: model:gptme
+        title: Talk to its model provider
+        summary: gptme's model — the provider or gateway its key is for (Anthropic, OpenAI, xAI, Google AI, OpenRouter or Vercel AI Gateway), with an API key. Needed for gptme to answer.
+        phrase: talk to your AI model
+        hosts:
+        - host: api.anthropic.com
+          reason: Anthropic — when the sandbox's key is Anthropic's
+        - host: api.openai.com
+          reason: OpenAI — when the sandbox's key is OpenAI's
+        - host: api.x.ai
+          reason: xAI — when the sandbox's key is xAI's
+        - host: generativelanguage.googleapis.com
+          reason: Google AI — when the sandbox's key is Google AI's
+        - host: openrouter.ai
+          reason: OpenRouter — when the sandbox's key is OpenRouter's
+        - host: ai-gateway.vercel.sh
+          reason: Vercel AI Gateway — when the sandbox's key is Vercel AI Gateway's
+      update: []
+      excluded: []
+      vendor:
+      - host: openaipublic.blob.core.windows.net
+        paths:
+        - /encodings/
+        reason: tiktoken (gptme counts tokens with it) downloads its tokenizer file from OpenAI's public blob store at the first turn
+- type: com.docker.sandbox/credential@1
+  description: xAI API access
+  config:
+    service: xai
+    phase: runtime
+    apiKey:
+      name: XAI_API_KEY
+      proxyManaged: true
+      inject:
+      - domain: api.x.ai
+        header: authorization
+        format: Bearer %s
+    dozer:
+      accounts:
+      - key
+- type: com.docker.sandbox/volume@1
+  config:
+    path: /home/agent/.config/gptme
+- type: com.docker.sandbox/volume@1
+  config:
+    path: /home/agent/.local/share/gptme
+- type: com.dozersandbox/install@1
+  config:
+    kind: pypi
+    package: gptme
+    binary: gptme
+    integrity: sha512-A065mIqznI15ogh80XbWn0poFD8xs85ib5cR+HBavWHzZ+Ga1mXRJSVjQxkYoYXNtvPaQjWC58eqbQz/hZZxzA==
+    requirements:
+    - annotated-types==0.8.0 --hash=sha256:f072f4d804ea359e4eaf198b1af7a8b0943881a87f31bb764f8bf219bb9419e0
+    - anthropic==0.120.2 --hash=sha256:0f0bc2b381dc0eb41c8d886b815d79c2041cd2374f83aed36f574b6dc9c579c1
+    - anyio==4.15.1 --hash=sha256:6152fdbbf9a77fdec97731721bebf7c4c44f7c29b424b0065826173efc7ed101
+    - asttokens==3.0.2 --hash=sha256:9da13157f5b28becde0bd374fc677dcd3c290614264eff096f167c469cd9f933
+    - attrs==26.1.0 --hash=sha256:c647aa4a12dfbad9333ca4e71fe62ddc36f4e63b2d260a37a8b83d2f043ac309
+    - bashlex==0.18 --hash=sha256:91d73a23a3e51711919c1c899083890cdecffc91d8c088942725ac13e9dcfffa
+    - certifi==2026.7.22 --hash=sha256:62f22742b58a1a33014a2b6b706588a8d7e2a88ae7bd1a6ebe8c992928483775
+    - cffi==2.1.1 --hash=sha256:f16c709686a78c727bbbf059f92b0bf41c6fc60deec706d2dc19f529175a6125
+    - charset-normalizer==3.5.2 --hash=sha256:849df64e889b2e17230d58410a03dba311a65b163508fd33679b2b737d4b7858
+    - click-default-group==1.2.4 --hash=sha256:9b60486923720e7fc61731bdb32b617039aba820e22e1c88766b1125592eaa5f
+    - click==8.5.0 --hash=sha256:255bc9599cf7748b4b1a446ccc735421bd08a2ae529a8b88597d3de5664ee360
+    - cryptography==50.0.2 --hash=sha256:87e9ce85beb6b328ba370cc6e6aea483c92617b4c95b1d33a49297eb662bfb04
+    - decorator==5.3.1 --hash=sha256:f47fe6fdbd2edd623ecfe36875d37aba411624e2670dd395dddae1358689bb3c
+    - distro==1.9.0 --hash=sha256:7bffd925d65168f85027d8da9af6bddab658135b840670a223589bc0c8ef02b2
+    - docstring_parser==0.18.0 --hash=sha256:b3fcbed555c47d8479be0796ef7e19c2670d428d72e96da63f3a40122860374b
+    - executing==2.3.0 --hash=sha256:736e859c9f8701f11fcf516856f26f562e04776387824b43a35a1dfe21c84122
+    - gptme==0.34.0 --hash=sha256:cc33e2dac71def4660ade7a89d2d9f7cc0a05df85d16036fcc5e07e13ce5a407
+    - h11==0.16.0 --hash=sha256:63cf8bbe7522de3bf65932fda1d9c2772064ffb3dae62d55932da54b31cb6c86
+    - httpcore==1.0.9 --hash=sha256:2d400746a40668fc9dec9810239072b40b4484b640a8c38fd654a024c7a1bf55
+    - httpx-sse==0.4.3 --hash=sha256:0ac1c9fe3c0afad2e0ebb25a934a59f4c7823b60792691f779fad2c5568830fc
+    - httpx==0.28.1 --hash=sha256:d909fcccc110f8c7faf814ca82a9a4d816bc5a6dbfea25d6591d6985b8ba59ad
+    - idna==3.20 --hash=sha256:ab7ae7122974553370f0bdb919e1a960b2cd1bc1ef0276416d896db81c14582c
+    - ipython==8.39.0 --hash=sha256:bb3c51c4fa8148ab1dea07a79584d1c854e234ea44aa1283bcb37bc75054651f
+    - jedi==0.20.1 --hash=sha256:0fb16d86c4a4c73c37ba518c77419975e30fcc620658a8d14fbb5720cdd34142
+    - jiter==0.17.0 --hash=sha256:4e3f052c671d5f425cca5ea5901cf11a831369fba4a55a3862cab93c323b4c3b
+    - json_repair==0.61.7 --hash=sha256:45c99b8cffef404e846b60d3dc21fc6f0fd5a4595cebad169dfab083ffb8246a
+    - jsonschema-specifications==2025.9.1 --hash=sha256:98802fee3a11ee76ecaca44429fda8a41bff98b00a0f2838151b113f210cc6fe
+    - jsonschema==4.26.0 --hash=sha256:d489f15263b8d200f8387e64b4c3a75f06629559fb73deb8fdfb525f2dab50ce
+    - markdown-it-py==4.2.0 --hash=sha256:9f7ebbcd14fe59494226453aed97c1070d83f8d24b6fc3a3bcf9a38092641c4a
+    - matplotlib-inline==0.2.2 --hash=sha256:3c821cf1c209f59fb2d2d64abbf5b23b67bcb2210d663f9918dd851c6da1fcf6
+    - mcp==1.30.0 --hash=sha256:666edb5009503e1047c9d60346a756f94b261f05cc2625f23d41c728ffc484d0
+    - mdurl==0.1.2 --hash=sha256:84008a41e51615a49fc9966191ff91509e3c40b939176e643fd50a5c2196b8f8
+    - multiprocessing-logging==0.3.4 --hash=sha256:8a5be02b02edbd6fa6e3e89499af7680db69db9e2d8707fcd28d445fa248f23e
+    - openai==2.54.0 --hash=sha256:89089789197ccdb87f173a03145ed1598d00795220c93e96cf712b1cbf5e5f2b
+    - parso==0.8.7 --hash=sha256:a8926eb2a1b915486941fdbd31e86a4baf88fe8c210f25f2f35ecec5b574ca1c
+    - pexpect==4.9.0 --hash=sha256:7236d1e080e4936be2dc3e326cec0af72acf9212a7e1d060210e70a47e253523
+    - pick==2.6.0 --hash=sha256:2acd5cad09be96398fba3b8be89454929de7b05362e01c69d94a05801820871f
+    - pillow==12.3.0 --hash=sha256:f7401aebd7f581d7f83a439d87d474999317ee099218e5ad25d125290990ba65
+    - platformdirs==4.13.0 --hash=sha256:3dbcf4cd708f21cf876c4eaa90e58412bc4f033d87143f41b1493ff77c25b7e1
+    - prompt_toolkit==3.0.53 --hash=sha256:01c0891d7f9237d5e339f7d3e42cdae80b7534abb1c7c0e3352efba6231492f2
+    - ptyprocess==0.7.0 --hash=sha256:4b41f3967fce3af57cc7e94b888626c18bf37a083e3651ca8feeb66d492fef35
+    - pure_eval==0.2.4 --hash=sha256:96cae060a313cfaad51bb761278bfb0e62dc0248d9315a81173752dc546cd37a
+    - pycparser==3.11 --hash=sha256:51d5a8ba2be0bbe440b99d2112604c95bbbc3c2748a64260186c541e1729cd80
+    - pydantic-settings==2.15.0 --hash=sha256:0ba092c291c94baceb5eff768aa0d56400a457585bc0175925a5a5510303da42
+    - pydantic==2.14.1 --hash=sha256:9195d967ec791692a04438115466764fb8b9a27b31f14a760437694f40d6b454
+    - pydantic_core==2.50.1 --hash=sha256:409e0ea40ec30d9158f33574fd758e689f6045a0f2596701828c27816ca9687d
+    - pygments==2.21.0 --hash=sha256:2363c69b61c4a97c838da3b130dcd6468f4848992b21a82f2a63ec34377137d9
+    - pyjwt==2.15.1 --hash=sha256:42d59d631f7768a1028a64c7ff581a9bf7519804daf91fc5b6c56e30eec5e193
+    - python-dateutil==2.9.0.post0 --hash=sha256:a8b2bc7bffae282281c8140a97d3aa9c14da0b136dfe83f850eea9a5f7470427
+    - python-dotenv==1.2.4 --hash=sha256:42269a8a5b3fd54ffa6f3d84b18abed50064717576b4ecf03dc4a55d8aa04fdc
+    - python-multipart==0.0.32 --hash=sha256:ff6d3f776f16878c894e52e107296ffc890e913c611b1a4ec6c44e2821fe2e23
+    - pyyaml==6.0.3 --hash=sha256:ee2922902c45ae8ccada2c5b501ab86c36525b883eff4255313a253a3160861c
+    - questionary==2.1.1 --hash=sha256:a51af13f345f1cdea62347589fbb6df3b290306ab8930713bfae4d475a7d4a59
+    - referencing==0.37.0 --hash=sha256:381329a9f99628c9069361716891d34ad94af76e461dcb0335825aecc7692231
+    - regex==2026.9.29 --hash=sha256:e11edba5bc344a32b029a7af9d4b3173982dd79eeafa0b9dbd787364414b0509
+    - requests==2.34.2 --hash=sha256:2a0d60c172f83ac6ab31e4554906c0f3b3588d37b5cb939b1c061f4907e278e0
+    - rich==15.0.0 --hash=sha256:33bd4ef74232fb73fe9279a257718407f169c09b78a87ad3d296f548e27de0bb
+    - rpds-py==2026.9.1 --hash=sha256:457866b85daf5034296666168b84a69e0b2e89dc4f1af102b46f6448a60b9063
+    - six==1.17.0 --hash=sha256:4721f391ed90541fddacab5acf947aa0d3dc7d27b2e1e8eda2be8970586c3274
+    - sniffio==1.3.1 --hash=sha256:2f6da418d1f1e0fddd844478f41680e794e6051915791a034ff65e5f100525a2
+    - sse-starlette==3.5.0 --hash=sha256:3e6e1070df3f0f5d9cea81496de92dbb72f6721871d99748ece67441dd8b7997
+    - stack-data==0.6.3 --hash=sha256:d5558e0c25a4cb0853cddad3d77da9891a08cb85dd9f9f91b9f8cd66e511e695
+    - starlette==1.8.0 --hash=sha256:dfdd6b29c26483288088d990eee59631dedadd66ce20d203402a7ca8e3c4656f
+    - tabulate==0.10.0 --hash=sha256:f0b0622e567335c8fabaaa659f1b33bcb6ddfe2e496071b743aa113f8774f2d3
+    - tiktoken==0.14.0 --hash=sha256:2157f52e4b4d7ac5ecc7457b3716834706e7ef9a46f5144029bfeb7cf71f4e06
+    - tomlkit==0.15.1 --hash=sha256:177a05aece5a8ca5266fd3c448abb47b8d352f09d477d3ca8332db4d89b24304
+    - tqdm==4.70.1 --hash=sha256:c293e525e6fef9c20e8728fd4612df02a0aa31bb5fe91ecd93e123b1b7bffa73
+    - traitlets==5.16.1 --hash=sha256:f775618166caa0396c8e337099240f2bd3e5e917d203b2e6fbe21a58d3cb1f6b
+    - tree-sitter-bash==0.25.1 --hash=sha256:e76c4cfb20b076552406782b7f8c2a3946835993df0a44df006de54b7030c7dc
+    - tree-sitter==0.25.2 --hash=sha256:bd88fbb0f6c3a0f28f0a68d72df88e9755cf5215bae146f5a1bdc8362b772053
+    - typing-inspection==0.4.4 --hash=sha256:65b8397ba37ccbce054456aaccddfc91e6e3083c92824df348d96ca832f3f147
+    - typing_extensions==4.16.0 --hash=sha256:481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8
+    - urllib3==2.8.0 --hash=sha256:0cf3cae568d36aa9576b28dfb35f11328f1cb974ca7647d9475ebb86c75ac6e3
+    - uvicorn==0.54.0 --hash=sha256:505bdb0f318731d45f1f712071fc781a8981f6847a31c902c9f5e652d4f67faf
+    - wcwidth==0.9.2 --hash=sha256:674b518af28d38ee645ff97b74f5760abee5fad4bac74413bfc4b881ef2ce724
+- type: com.dozersandbox/launch@1
+  config:
+    command:
+    - gptme
+    no_prompts_args:
+    - '--no-confirm'
+    passthrough:
+    - '--version'
+    - '--help'
+    - '-h'
+    env: {}
+    state_env: {}
+    status: none
+    verify:
+    - argv:
+      - gptme
+      - '--version'
+      expect: '${{ kit.args.version }}'
+    check:
+      argv:
+      - gptme
+      - '--non-interactive'
+      - say ok
+      expect: DOZ_FAKE_OK
+- type: com.dozersandbox/auth@1
+  config:
+    methods:
+    - kind: api-key
+      provider: xai
+      accounts:
+      - key
+      keys_page: https://console.x.ai/
+      note: 'Dozer sets MODEL to provider/model for the chosen source (xai/grok-4-1-fast by default; markdown tools on xAI and Google AI); Vercel AI Gateway through its OpenAI-compatible local provider (OPENAI_BASE_URL). Its ChatGPT/SuperGrok subscription sign-ins are not offered.'
+      checked: '2026-10-14'
+    - kind: api-key
+      provider: anthropic
+      accounts:
+      - api-key
+      keys_page: https://console.anthropic.com/settings/keys
+      note: 'gptme through Anthropic: doz try gptme --provider anthropic (or choose it in the try setup); the model with --model.'
+      checked: '2026-10-14'
+    - kind: api-key
+      provider: openai
+      accounts:
+      - openai-key
+      keys_page: https://platform.openai.com/api-keys
+      note: 'gptme through OpenAI: doz try gptme --provider openai (or choose it in the try setup); the model with --model.'
+      checked: '2026-10-14'
+    - kind: api-key
+      provider: google
+      accounts:
+      - key
+      keys_page: https://aistudio.google.com/apikey
+      note: 'gptme through Google AI: doz try gptme --provider google (or choose it in the try setup); the model with --model.'
+      checked: '2026-10-14'
+    - kind: api-key
+      provider: openrouter
+      accounts:
+      - key
+      keys_page: https://openrouter.ai/keys
+      note: 'gptme through OpenRouter: doz try gptme --gateway openrouter (or choose it in the try setup); the model with --model.'
+      checked: '2026-10-14'
+    - kind: api-key
+      provider: vercel-ai-gateway
+      accounts:
+      - key
+      keys_page: https://vercel.com/docs/ai-gateway/authentication-and-byok
+      note: 'gptme through Vercel AI Gateway: doz try gptme --gateway vercel-ai-gateway (or choose it in the try setup); the model with --model.'
+      checked: '2026-10-14'
+- type: com.dozersandbox/gateways@1
+  config:
+    entries:
+    - gateway: openrouter
+      level: verified
+      shape: openai-chat
+      endpoint: v1
+      how:
+        env:
+          MODEL: 'openrouter/${{ dozer.model }}'
+      evidence: 'make recipe-check: its check turn through a stand-in OpenRouter (doz try with --gateway openrouter; models@1)'
+      checked: '2026-10-14'
+    - gateway: vercel-ai-gateway
+      level: verified
+      shape: openai-chat
+      endpoint: v1
+      how:
+        env:
+          MODEL: 'openrouter/${{ dozer.model }}'
+      evidence: 'make recipe-check: its check turn through a stand-in Vercel AI Gateway (doz try with --gateway vercel-ai-gateway; models@1)'
+      checked: '2026-10-14'
+- type: com.dozersandbox/models@1
+  config:
+    default: xai
+    native:
+    - source: anthropic
+      env:
+        MODEL: 'anthropic/${{ dozer.model }}'
+    - source: openai
+      env:
+        MODEL: 'openai/${{ dozer.model }}'
+    - source: xai
+      env:
+        MODEL: 'xai/${{ dozer.model }}'
+        TOOL_FORMAT: markdown
+    - source: google
+      env:
+        MODEL: 'gemini/${{ dozer.model }}'
+        TOOL_FORMAT: markdown
+    - source: openrouter
+      env:
+        MODEL: 'openrouter/${{ dozer.model }}'
+    shapes:
+    - shape: openai-chat
+      env:
+        MODEL: 'local/${{ dozer.model }}'
+        OPENAI_BASE_URL: '${{ dozer.base_url }}'
+      key_env:
+      - OPENAI_API_KEY
+- type: com.dozersandbox/currency@1
+  config:
+    checked: '2026-10-14'
+- type: com.dozersandbox/directory@1
+  config:
+    kind: ai-tool
+    categories:
+    - personal-agent
+    - terminal-tool
+    icon: gptme
+    default_base: debian
+    platforms:
+      glibc: true
+      musl: false
+    tags:
+    - tag: headless
+      level: verified
+      notes:
+      - gptme --non-interactive PROMPT
+      evidence: 'A2 VM proof: its check turn answered DOZ_FAKE_OK through the fake provider (make recipe-check; probes/617-*/recipes/gptme)'
+      checked: '2026-10-14'
+    terms: Your API key of the provider or gateway you choose (xAI by default). Its browser tool needs Chromium in the image, and gptme-server's web UI a forwarded port, which Dozer does not offer yet.
+- type: com.dozersandbox/guide@1
+  config:
+    intro: "gptme is a terminal agent with shell, Python and file tools: its session on the left is a chat that acts in the sandbox."
+    steps:
+    - text: "Check it answers, without its chat."
+      command: "gptme --non-interactive \"say ok\""
+    - text: "Ask it something in its session on the left."
+    - text: "One task without the chat."
+      command: "gptme --non-interactive \"list the files in this folder\""
+    tips:
+    - "Its confirmation prompts are off: it runs the shell and Python it writes (the sandbox is the boundary)."
+    - "The model is `MODEL`, set for the key you chose; `--model provider/name` picks another."
+    docs: https://gptme.org/docs/

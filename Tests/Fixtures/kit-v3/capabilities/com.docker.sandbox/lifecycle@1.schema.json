@@ -1,0 +1,167 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "com.docker.sandbox/lifecycle@1",
+  "description": "What the engine executes on the kit's behalf across the sandbox's life: install hooks once at create (in dependency order, with the network policy's install phase open; a hook sees only the env it declares), startup hooks every boot (must tolerate re-running), files written at start because their content depends on runtime state, and the interactive argv tail for TTY sessions (the image config's Cmd is single-valued, so the interactive variant has no native slot). At least one must be declared. Not permission surface: hooks, files, and the interactive tail run inside the sandbox on the entrypoint's trust plane.",
+  "type": "object",
+  "additionalProperties": false,
+  "minProperties": 1,
+  "properties": {
+    "install": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "command"
+        ],
+        "properties": {
+          "command": {
+            "description": "A shell string (run via sh -c) or exec-style argv list.",
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "minItems": 1
+              }
+            ]
+          },
+          "user": {
+            "type": "string"
+          },
+          "env": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "anyOf": [
+                {
+                  "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+                },
+                {
+                  "$ref": "../../definitions/kit-arg.schema.json#/definitions/bearing"
+                }
+              ]
+            },
+            "description": "The only environment the hook sees \u2014 deny by default."
+          },
+          "description": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "startup": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "command"
+        ],
+        "properties": {
+          "command": {
+            "description": "A shell string (run via sh -c) or exec-style argv list.",
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "minItems": 1
+              }
+            ]
+          },
+          "user": {
+            "type": "string"
+          },
+          "background": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "$ref": "../../definitions/kit-arg.schema.json#/definitions/whole"
+              }
+            ]
+          },
+          "env": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "anyOf": [
+                {
+                  "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+                },
+                {
+                  "$ref": "../../definitions/kit-arg.schema.json#/definitions/bearing"
+                }
+              ]
+            }
+          },
+          "description": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "path",
+          "content"
+        ],
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "content": {
+            "type": "string"
+          },
+          "mode": {
+            "type": "string",
+            "anyOf": [
+              {
+                "pattern": "^[0-7]{3,4}$"
+              },
+              {
+                "$ref": "../../definitions/kit-arg.schema.json#/definitions/bearing"
+              }
+            ]
+          },
+          "overwrite": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "$ref": "../../definitions/kit-arg.schema.json#/definitions/whole"
+              }
+            ],
+            "default": true,
+            "description": "Set false to skip the write when the file already exists (e.g. on a persistent volume)."
+          },
+          "description": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "interactive": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Argv tail appended to the workload's launch command for an interactive (TTY) session."
+    }
+  }
+}

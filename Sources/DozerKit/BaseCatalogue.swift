@@ -161,17 +161,40 @@ public enum BaseCatalogue {
     public static var ids: [String] { all.map(\.id) }
 }
 
-/// 596 (B1): the agent a sandbox runs.
-public enum AgentKind: String, Sendable, Codable, CaseIterable, Equatable {
-    case claudeCode = "claude-code"
-    case pi
-    case none
-    /// 599i: the OpenAI Codex CLI (last, so `allCases` keeps its earlier order).
-    case codex
+/// 596 (B1): the agent a sandbox runs. 617: a recipe's id (`AgentRecipes`) — or `none`. The same raw strings as
+/// the enum it was, so `doz.json`, settings and every name encode as before; the four static members keep their
+/// names, and every agent a recipe adds joins `allCases` after them, in the recipes' order.
+public struct AgentKind: RawRepresentable, Sendable, Codable, Hashable, CaseIterable, CustomStringConvertible {
+    public let rawValue: String
 
-    public var title: String {
-        switch self { case .claudeCode: "Claude Code"; case .pi: "pi"; case .none: "none"; case .codex: "Codex" }
+    /// Only an agent this build has a recipe for (or `none`).
+    public init?(rawValue: String) {
+        guard rawValue == "none" || AgentRecipes.recipe(rawValue) != nil else { return nil }
+        self.rawValue = rawValue
     }
+
+    private init(known: String) { rawValue = known }
+
+    public static let claudeCode = AgentKind(known: "claude-code")
+    public static let pi = AgentKind(known: "pi")
+    public static let none = AgentKind(known: "none")
+    /// 599i: the OpenAI Codex CLI (after `none`, so `allCases` keeps its earlier order).
+    public static let codex = AgentKind(known: "codex")
+
+    /// The four that were the enum, then every other recipe in file order (Gemini CLI, Grok Build).
+    public static var allCases: [AgentKind] {
+        [.claudeCode, .pi, .none, .codex] + AgentRecipes.all.filter { !$0.isBuiltin }.map { AgentKind(known: $0.id) }
+    }
+
+    /// The recipe behind it (nil: `none`).
+    public var recipe: AgentRecipe? { self == .none ? nil : AgentRecipes.recipe(rawValue) }
+
+    public var title: String { self == .none ? "none" : recipe?.title ?? rawValue }
+
+    /// One of the three that existed before 617 (their images are `AgentImages`' Swift), or none.
+    public var isBuiltin: Bool { self == .none || recipe?.isBuiltin == true }
+
+    public var description: String { rawValue }
 }
 
 /// 596: which image a name means — its base (a catalogue id, or `df-<12 hex>` for a Dockerfile) and
@@ -186,16 +209,13 @@ public struct ImageChoice: Sendable, Equatable, Hashable {
         self.agent = agent
     }
 
-    /// The image's name in the store (`images/<name>/`), in settings and in `doz.json`.
+    /// The image's name in the store (`images/<name>/`), in settings and in `doz.json`. 617 (D9): an agent on its
+    /// recipe's default base is named by the agent alone (`claude-code`, `pi`, `codex` on Node — as before —
+    /// `gemini` on Node, `grok` on Debian); every other pair is `<base>-<agent>`.
     public var name: String {
-        switch (base, agent) {
-        case ("node", .claudeCode): "claude-code"
-        case ("node", .pi): "pi"
-        case ("node", .codex): "codex"
-        case ("alpine", .none): "lab"
-        case (_, .none): base
-        default: "\(base)-\(agent.rawValue)"
-        }
+        if agent == .none { return base == "alpine" ? "lab" : base }
+        if let r = agent.recipe, r.defaultBase == base { return agent.rawValue }
+        return "\(base)-\(agent.rawValue)"
     }
 
     public var isDockerfile: Bool { Self.isDockerfileBase(base) }
@@ -209,14 +229,12 @@ public struct ImageChoice: Sendable, Equatable, Hashable {
     /// The pair a name means (nil: not a base × agent name — a template, or unknown). Accepts the
     /// long forms of the three old names too (`node-claude-code`, `alpine`).
     public static func parse(_ name: String) -> ImageChoice? {
-        switch name {
-        case "claude-code": return ImageChoice(base: "node", agent: .claudeCode)
-        case "pi": return ImageChoice(base: "node", agent: .pi)
-        case "codex": return ImageChoice(base: "node", agent: .codex)
-        case "lab": return ImageChoice(base: "alpine", agent: .none)
-        default: break
-        }
-        for a in [AgentKind.claudeCode, .pi, .codex] where name.hasSuffix("-" + a.rawValue) {
+        if name == "lab" { return ImageChoice(base: "alpine", agent: .none) }
+        // 617 (D9): an agent's id alone is that agent on its recipe's default base.
+        if let r = AgentRecipes.recipe(name), let a = AgentKind(rawValue: r.id) { return ImageChoice(base: r.defaultBase, agent: a) }
+        // `<base>-<agent>`, the longest agent id first (no id is a suffix of another's today; this keeps it so).
+        for a in AgentKind.allCases.filter({ $0 != .none }).sorted(by: { $0.rawValue.count > $1.rawValue.count })
+        where name.hasSuffix("-" + a.rawValue) {
             let b = String(name.dropLast(a.rawValue.count + 1))
             if isBase(b) { return ImageChoice(base: b, agent: a) }
         }
@@ -289,6 +307,30 @@ public enum NodeRuntime {
     public static let version = "22.23.3"
     public static let sha256 = "a44aeb94849a299b22df10b9e622ec2f605c2183501bc40590705131de7c740f"
     public static var url: String { "https://nodejs.org/dist/v\(version)/node-v\(version)-linux-arm64.tar.xz" }
+    /// The major `version` is (what the bases' Node and this runtime give an npm recipe).
+    public static let major = 22
+
+    /// 617: Node 24 LTS, for an npm recipe whose `needs_node` is above 22 (OpenClaw needs ≥ 24.16) — installed under
+    /// /opt/node on every glibc base, the Node base included (its own Node 22 stays the sessions'). Checksum-pinned.
+    public enum V24 {
+        public static let version = "24.21.0"
+        public static let sha256 = "6ad1325edbdb5649c379b75a237147a666c95d4f9ae8d340fef2d1575d289ad2"
+        public static var url: String { "https://nodejs.org/dist/v\(version)/node-v\(version)-linux-arm64.tar.xz" }
+    }
+}
+
+/// 617: the Python a `pypi` recipe's venv is made from, whatever the base: python-build-standalone's CPython for
+/// aarch64 glibc (install_only, stripped), checksum-verified, under /opt/python — so a recipe's hash-pinned wheels are
+/// always for the same interpreter (cp313). The base's own python3 is left alone.
+public enum PythonRuntime {
+    public static let version = "3.13.15"
+    public static let build = "20260929"
+    public static let sha256 = "3807936bef22d3e347454df4f8774c786f98c7caa5e7328425e7b40766a9cff8"
+    public static var url: String {
+        "https://github.com/astral-sh/python-build-standalone/releases/download/\(build)/cpython-\(version)%2B\(build)-aarch64-unknown-linux-gnu-install_only_stripped.tar.gz"
+    }
+    /// Where the download is served from (GitHub redirects a release asset to its asset host).
+    public static let bakeHosts = ["github.com", "release-assets.githubusercontent.com", "objects.githubusercontent.com"]
 }
 
 /// 596: what a base contributes to an image spec — resolved (a digest-pinned reference) and described.
@@ -341,7 +383,7 @@ public enum ImageComposer {
             switch agent {
             case .claudeCode: return AgentImages.claudeCode(release, base: base.reference)
             case .pi: return AgentImages.pi(release, base: base.reference)
-            case .none, .codex: break          // 599i: Codex has no pre-596 Node image — composed below
+            default: break          // 599i: Codex has no pre-596 Node image — composed below (617: nor has any recipe agent)
             }
         }
         var steps = [createUser(base.packageManager), baseline(base.packageManager)]
@@ -400,6 +442,22 @@ public enum ImageComposer {
             persist = ["~/.codex"]
             env["CODEX_HOME"] = home + "/.codex"
             agentPackage = AgentPackage(package: AgentImages.codexPackage, version: release.version)
+        default:
+            // 617: an agent from its recipe alone — its install, a generic launcher, its verify, state and environment.
+            guard let r = agent.recipe, !r.isBuiltin else { throw SandboxError.invalidSpec("no recipe for the agent \(agent.rawValue)") }
+            guard let release else { throw SandboxError.invalidSpec("\(r.title) needs a version") }
+            guard release.isWellFormed else { throw SandboxError.invalidSpec("\(r.title) \(release.version): not an exact version with an integrity") }
+            if base.musl == true, !r.platforms.musl { throw SandboxError.invalidSpec(r.muslRefusal) }
+            if base.musl == false, !r.platforms.glibc { throw SandboxError.invalidSpec("\(r.title) has only a musl build — choose Alpine") }
+            let installed = AgentImages.recipeInstall(r, release, base: base)
+            steps += installed.steps
+            hosts += installed.bakeHosts + (r.install.bakeHosts ?? [])
+            steps.append(AgentImages.recipeLauncher(r))
+            verify.insert(contentsOf: r.verifyChecks(version: release.version)
+                          + [VerifyCheck(["sh", "-c", "test -x /home/agent/.local/bin/\(r.install.binary) && echo launcher-ok"], expect: "launcher-ok")], at: 0)
+            persist = r.state.persist
+            env.merge(r.state.env) { _, b in b }
+            agentPackage = AgentPackage(package: r.install.package ?? r.id, version: release.version, integrity: release.integrity)
         }
         var s = ImageSpec(name: name, base: base.reference, steps: steps, verify: verify, user: user, home: home,
                           persistDirs: persist, sessionEnvironment: env, rootfsMiB: base.rootfsMiB)
@@ -411,9 +469,12 @@ public enum ImageComposer {
 
     // MARK: this build's recipe for an image (594 W28)
 
-    /// The keys `spec(…)` itself adds to a session's environment (the rest come from the base).
-    static let composerKeys: Set<String> = ["PATH", "CLAUDE_CONFIG_DIR", "DISABLE_AUTOUPDATER", "DISABLE_UPDATES", "PI_CODING_AGENT_DIR", "USE_BUILTIN_RIPGREP",
-                                            "CODEX_HOME"]
+    /// The keys `spec(…)` itself adds to a session's environment (the rest come from the base). 617: and every
+    /// recipe's own state environment (`GROK_HOME`).
+    static var composerKeys: Set<String> {
+        Set(["PATH", "CLAUDE_CONFIG_DIR", "DISABLE_AUTOUPDATER", "DISABLE_UPDATES", "PI_CODING_AGENT_DIR", "USE_BUILTIN_RIPGREP", "CODEX_HOME"])
+            .union(AgentRecipes.all.flatMap { $0.state.env.keys })
+    }
 
     /// 594 W28 × 596: what THIS build bakes for what `spec` installs — the same base (its digest, or a
     /// Dockerfile's build as the spec describes it), the same agent release (its npm integrity or its
@@ -425,7 +486,8 @@ public enum ImageComposer {
         var native: NativeClaudeBuild?
         if choice.agent != .none {
             guard let v = spec.agent?.version else { return nil }
-            let npm = npmIntegrity(in: spec)
+            // 617: a recipe agent's image records its integrity (the builtin three's is read from the install step).
+            let npm = spec.agent?.integrity ?? npmIntegrity(in: spec)
             native = nativeBuild(in: spec, version: v)
             guard npm != nil || native != nil else { return nil }
             release = AgentRelease(version: v, integrity: npm ?? "sha512-A")
@@ -574,7 +636,11 @@ public enum ImageComposer {
 
     /// pi's Node on a base without it: Node's official tarball under /opt/node (checksum-verified) —
     /// on Alpine, Alpine's own `nodejs`/`npm` (Node publishes no musl arm64 build), linked there too.
-    static func nodeForPi(_ pm: PackageManager) -> BakeStep {
+    static func nodeForPi(_ pm: PackageManager) -> BakeStep { nodeRuntime(pm, for: "pi") }
+
+    /// 617: the same Node for any npm agent on a base without it (`for`: the agent's name in the step's title —
+    /// "pi" gives pi's step byte for byte).
+    static func nodeRuntime(_ pm: PackageManager, for agent: String) -> BakeStep {
         let tarball = """
             command -v xz >/dev/null 2>&1 || { export DEBIAN_FRONTEND=noninteractive; apt-get install -y --no-install-recommends -o Dpkg::Use-Pty=0 xz-utils; }
             cd "$(mktemp -d)"
@@ -594,10 +660,10 @@ public enum ImageComposer {
             /opt/node/bin/node --version
             """
         switch pm {
-        case .apt: return BakeStep.script("install Node \(NodeRuntime.version) for pi (/opt/node, checksum-verified)", tarball)
-        case .apk: return BakeStep.script("install Node for pi (Alpine's nodejs, /opt/node)", apk)
+        case .apt: return BakeStep.script("install Node \(NodeRuntime.version) for \(agent) (/opt/node, checksum-verified)", tarball)
+        case .apk: return BakeStep.script("install Node for \(agent) (Alpine's nodejs, /opt/node)", apk)
         case .auto:
-            return BakeStep.script("install Node for pi (/opt/node)", """
+            return BakeStep.script("install Node for \(agent) (/opt/node)", """
                 if command -v apk >/dev/null 2>&1; then
                 \(apk)
                 else
@@ -607,16 +673,36 @@ public enum ImageComposer {
         }
     }
 
+    /// 617: Node 24 (`NodeRuntime.V24`) under /opt/node for an npm recipe that needs it, on a glibc base (validated).
+    static func node24Runtime(for agent: String) -> BakeStep {
+        BakeStep.script("install Node \(NodeRuntime.V24.version) for \(agent) (/opt/node, checksum-verified)", """
+            command -v xz >/dev/null 2>&1 || { export DEBIAN_FRONTEND=noninteractive; apt-get install -y --no-install-recommends -o Dpkg::Use-Pty=0 xz-utils; }
+            cd "$(mktemp -d)"
+            curl -fsSL --retry 3 -o node.tar.xz '\(NodeRuntime.V24.url)'
+            got=$(sha256sum node.tar.xz | cut -d' ' -f1)
+            [ "$got" = '\(NodeRuntime.V24.sha256)' ] || { echo "checksum mismatch for Node \(NodeRuntime.V24.version): $got" >&2; exit 1; }
+            rm -rf /opt/node
+            mkdir -p /opt/node && tar -xJf node.tar.xz -C /opt/node --strip-components=1 --no-same-owner
+            rm -f node.tar.xz
+            /opt/node/bin/node --version
+            """)
+    }
+
     /// `/usr/local/bin/pi`: pi with /opt/node first on its PATH — Node is pi's, not on the sessions' PATH.
-    static let piWrapper = BakeStep.script("install the pi wrapper (/usr/local/bin/pi)", """
-        test -x /opt/node/bin/pi
-        cat > /usr/local/bin/pi <<'SH'
-        #!/bin/sh
-        # doz: pi runs on the Node under /opt/node (the base has none of its own).
-        PATH=/opt/node/bin:$PATH exec /opt/node/bin/pi "$@"
-        SH
-        chmod 0755 /usr/local/bin/pi
-        """, needsNetworkFalse: ())
+    static let piWrapper = nodeWrapper("pi")
+
+    /// 617: the same wrapper for any npm agent's program on a base without Node ("pi" gives pi's byte for byte).
+    static func nodeWrapper(_ binary: String) -> BakeStep {
+        BakeStep.script("install the \(binary) wrapper (/usr/local/bin/\(binary))", """
+            test -x /opt/node/bin/\(binary)
+            cat > /usr/local/bin/\(binary) <<'SH'
+            #!/bin/sh
+            # doz: \(binary) runs on the Node under /opt/node (the base has none of its own).
+            PATH=/opt/node/bin:$PATH exec /opt/node/bin/\(binary) "$@"
+            SH
+            chmod 0755 /usr/local/bin/\(binary)
+            """, needsNetworkFalse: ())
+    }
 }
 
 /// 596: a tag's current digest, asked of its registry (the index's — never a layer). The host asks

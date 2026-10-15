@@ -38,6 +38,8 @@ final class WebActionTests: XCTestCase {
         "account-default": #"{"action":"account-default","account":"none"}"#,
         "account-keepalive": #"{"action":"account-keepalive","enabled":true}"#,
         "account-verify": #"{"action":"account-verify","account":"work"}"#,
+        // 617: read a key kept in 1Password, AWS or a command again (adding a source stays the CLI's).
+        "account-refresh": #"{"action":"account-refresh","account":"work"}"#,
         "account-rm": #"{"action":"account-rm","account":"work","confirm":"work"}"#,
         "onboard": #"{"action":"onboard","images":["claude-code","lab"]}"#,
         "prepare-cancel": #"{"action":"prepare-cancel","images":["pi"]}"#,
@@ -59,7 +61,7 @@ final class WebActionTests: XCTestCase {
     static let allowedOps: Set<HostOp> = [
         .create, .start, .wake, .pause, .resume, .sleep, .hibernate, .shutdown, .reset, .rm, .openSession,
         .pointTake, .pointRevert, .pointFork, .pointRm, .pointSaveImage, .imageBake, .imageRm, .netPolicy,
-        .keyPolicy, .keyRm, .accountUse, .accountDefault, .accountKeepalive, .accountVerify, .accountRemove,
+        .keyPolicy, .keyRm, .accountUse, .accountDefault, .accountKeepalive, .accountVerify, .accountRefresh, .accountRemove,
         .templateCreate, .duplicate, .onboard, .prepareCancel, .resourcesRemove, .resourcesClean, .resourcesKernel, .ping,
         // 596 (B7): consented by the person's click on a button that said what it does.
         .builderStart, .builderInstall,

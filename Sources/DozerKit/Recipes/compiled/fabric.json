@@ -1,0 +1,393 @@
+{
+  "args" : {
+    "version" : {
+      "buildArg" : "FABRIC_VERSION",
+      "default" : "1.4.518",
+      "description" : "The Fabric release Dozer installs (its pin).",
+      "pattern" : "[0-9]+\\.[0-9]+\\.[0-9]+([-+][0-9A-Za-z.-]+)?"
+    }
+  },
+  "author" : "Daniel Miessler",
+  "capabilities" : [
+    {
+      "config" : {
+        "dozer" : {
+          "excluded" : [
+
+          ],
+          "model" : {
+            "hosts" : [
+              {
+                "host" : "api.anthropic.com",
+                "reason" : "Anthropic — when the sandbox's key is Anthropic's"
+              },
+              {
+                "host" : "api.openai.com",
+                "reason" : "OpenAI — when the sandbox's key is OpenAI's"
+              },
+              {
+                "host" : "api.x.ai",
+                "reason" : "xAI — when the sandbox's key is xAI's"
+              },
+              {
+                "host" : "generativelanguage.googleapis.com",
+                "reason" : "Google AI — when the sandbox's key is Google AI's"
+              },
+              {
+                "host" : "openrouter.ai",
+                "reason" : "OpenRouter — when the sandbox's key is OpenRouter's"
+              }
+            ],
+            "id" : "model:fabric",
+            "phrase" : "talk to your AI model",
+            "summary" : "Fabric's model — the provider or gateway its key is for (Anthropic, OpenAI, xAI, Google AI or OpenRouter), with an API key. Needed for Fabric to answer.",
+            "title" : "Talk to its model provider"
+          },
+          "update" : [
+
+          ]
+        },
+        "runtime" : {
+          "allow" : [
+            "api.anthropic.com:443",
+            "api.openai.com:443",
+            "api.x.ai:443",
+            "generativelanguage.googleapis.com:443",
+            "openrouter.ai:443"
+          ]
+        }
+      },
+      "type" : "com.docker.sandbox/network-policy@1"
+    },
+    {
+      "config" : {
+        "apiKey" : {
+          "inject" : [
+            {
+              "domain" : "generativelanguage.googleapis.com",
+              "format" : "%s",
+              "header" : "x-goog-api-key"
+            }
+          ],
+          "name" : "GEMINI_API_KEY",
+          "proxyManaged" : true
+        },
+        "dozer" : {
+          "accounts" : [
+            "key"
+          ]
+        },
+        "phase" : "runtime",
+        "service" : "google"
+      },
+      "description" : "Google AI (Gemini API) API access",
+      "type" : "com.docker.sandbox/credential@1"
+    },
+    {
+      "config" : {
+        "path" : "/home/agent/.config/fabric"
+      },
+      "type" : "com.docker.sandbox/volume@1"
+    },
+    {
+      "config" : {
+        "bake_hosts" : [
+          "github.com",
+          "release-assets.githubusercontent.com"
+        ],
+        "binary" : "fabric",
+        "extras" : [
+          {
+            "path" : "Fabric-${{ kit.args.version }}/data/patterns",
+            "sha256" : "2cef4d13f3dc884ccd7474b4b66e66248bffb7ccd23e3f05d5ee27aa19b743ae",
+            "to" : "/opt/fabric/patterns",
+            "url" : "https://codeload.github.com/danielmiessler/fabric/tar.gz/refs/tags/v${{ kit.args.version }}",
+            "what" : "patterns"
+          }
+        ],
+        "integrity" : "sha512-qTS9O3ps0FqHLqmgi1sV4U3u8LdRvJNV7Y5WYOQ48agmaIJoEVBKD9ghZ6LoakoFFQxc1wBr1LXKszCSCeH6kQ==",
+        "kind" : "release-binary",
+        "payload" : "fabric",
+        "url" : "https://github.com/danielmiessler/Fabric/releases/download/v${{ kit.args.version }}/fabric_Linux_arm64.tar.gz"
+      },
+      "type" : "com.dozersandbox/install@1"
+    },
+    {
+      "config" : {
+        "check" : {
+          "argv" : [
+            "sh",
+            "-c",
+            "echo hello | fabric \"say ok\""
+          ],
+          "expect" : "DOZ_FAKE_OK"
+        },
+        "command" : [
+          "fabric"
+        ],
+        "env" : {
+          "CUSTOM_PATTERNS_DIRECTORY" : "/opt/fabric/patterns"
+        },
+        "first_run" : [
+          {
+            "file" : "~/.config/fabric/.env",
+            "set" : {
+              "DEFAULT_MODEL" : "gemini-2.5-flash",
+              "DEFAULT_VENDOR" : "Gemini"
+            }
+          }
+        ],
+        "no_prompts_args" : [
+
+        ],
+        "passthrough" : [
+          "--version",
+          "--help",
+          "-h",
+          "--setup",
+          "-S",
+          "--serve"
+        ],
+        "session" : "shell",
+        "state_env" : {
+
+        },
+        "status" : "none",
+        "verify" : [
+          {
+            "argv" : [
+              "fabric",
+              "--version"
+            ],
+            "expect" : "${{ kit.args.version }}"
+          }
+        ]
+      },
+      "type" : "com.dozersandbox/launch@1"
+    },
+    {
+      "config" : {
+        "methods" : [
+          {
+            "accounts" : [
+              "key"
+            ],
+            "checked" : "2026-10-14",
+            "keys_page" : "https://aistudio.google.com/apikey",
+            "kind" : "api-key",
+            "note" : "Fabric's vendor and model come from DEFAULT_VENDOR and DEFAULT_MODEL, which Dozer sets for the chosen source (Gemini by default; GrokAI reads GROKAI_API_KEY too).",
+            "provider" : "google"
+          },
+          {
+            "accounts" : [
+              "api-key"
+            ],
+            "checked" : "2026-10-14",
+            "keys_page" : "https://console.anthropic.com/settings/keys",
+            "kind" : "api-key",
+            "note" : "Fabric through Anthropic: doz try fabric --provider anthropic (or choose it in the try setup); the model with --model.",
+            "provider" : "anthropic"
+          },
+          {
+            "accounts" : [
+              "openai-key"
+            ],
+            "checked" : "2026-10-14",
+            "keys_page" : "https://platform.openai.com/api-keys",
+            "kind" : "api-key",
+            "note" : "Fabric through OpenAI: doz try fabric --provider openai (or choose it in the try setup); the model with --model.",
+            "provider" : "openai"
+          },
+          {
+            "accounts" : [
+              "key"
+            ],
+            "checked" : "2026-10-14",
+            "keys_page" : "https://console.x.ai/",
+            "kind" : "api-key",
+            "note" : "Fabric through xAI: doz try fabric --provider xai (or choose it in the try setup); the model with --model.",
+            "provider" : "xai"
+          },
+          {
+            "accounts" : [
+              "key"
+            ],
+            "checked" : "2026-10-14",
+            "keys_page" : "https://openrouter.ai/keys",
+            "kind" : "api-key",
+            "note" : "Fabric through OpenRouter: doz try fabric --gateway openrouter (or choose it in the try setup); the model with --model.",
+            "provider" : "openrouter"
+          }
+        ]
+      },
+      "type" : "com.dozersandbox/auth@1"
+    },
+    {
+      "config" : {
+        "entries" : [
+          {
+            "checked" : "2026-10-14",
+            "endpoint" : "v1",
+            "evidence" : "make recipe-check: its check turn through a stand-in OpenRouter (doz try with --gateway openrouter; models@1)",
+            "gateway" : "openrouter",
+            "how" : {
+              "env" : {
+                "DEFAULT_MODEL" : "${{ dozer.model }}",
+                "DEFAULT_VENDOR" : "OpenRouter"
+              }
+            },
+            "level" : "verified",
+            "shape" : "openai-chat"
+          },
+          {
+            "checked" : "2026-10-14",
+            "gateway" : "vercel-ai-gateway",
+            "level" : "no",
+            "reason" : "its own client has no Vercel AI Gateway setting (an OpenAI-compatible base URL), so it is not offered"
+          }
+        ]
+      },
+      "type" : "com.dozersandbox/gateways@1"
+    },
+    {
+      "config" : {
+        "default" : "google",
+        "native" : [
+          {
+            "env" : {
+              "DEFAULT_MODEL" : "${{ dozer.model }}",
+              "DEFAULT_VENDOR" : "Anthropic"
+            },
+            "source" : "anthropic"
+          },
+          {
+            "env" : {
+              "DEFAULT_MODEL" : "${{ dozer.model }}",
+              "DEFAULT_VENDOR" : "OpenAI"
+            },
+            "source" : "openai"
+          },
+          {
+            "env" : {
+              "DEFAULT_MODEL" : "${{ dozer.model }}",
+              "DEFAULT_VENDOR" : "GrokAI"
+            },
+            "key_env" : [
+              "GROKAI_API_KEY"
+            ],
+            "source" : "xai"
+          },
+          {
+            "env" : {
+              "DEFAULT_MODEL" : "${{ dozer.model }}",
+              "DEFAULT_VENDOR" : "Gemini"
+            },
+            "source" : "google"
+          },
+          {
+            "env" : {
+              "DEFAULT_MODEL" : "${{ dozer.model }}",
+              "DEFAULT_VENDOR" : "OpenRouter"
+            },
+            "source" : "openrouter"
+          }
+        ]
+      },
+      "type" : "com.dozersandbox/models@1"
+    },
+    {
+      "config" : {
+        "checked" : "2026-10-14"
+      },
+      "type" : "com.dozersandbox/currency@1"
+    },
+    {
+      "config" : {
+        "categories" : [
+          "terminal-tool"
+        ],
+        "default_base" : "debian",
+        "icon" : "fabric",
+        "kind" : "ai-tool",
+        "platforms" : {
+          "glibc" : true,
+          "musl" : true
+        },
+        "tags" : [
+          {
+            "checked" : "2026-10-14",
+            "evidence" : "A2 VM proof: echo hello | fabric \"say ok\" answered DOZ_FAKE_OK through the fake provider (probes/617-*/recipes/fabric)",
+            "level" : "verified",
+            "notes" : [
+              "echo TEXT | fabric -p PATTERN, or fabric \"a question\""
+            ],
+            "tag" : "headless"
+          }
+        ],
+        "terms" : "Your API key of the provider or gateway you choose (Google AI by default). Its patterns come with it (baked at the pin)."
+      },
+      "type" : "com.dozersandbox/directory@1"
+    },
+    {
+      "config" : {
+        "ports" : [
+          {
+            "check" : "/swagger/index.html",
+            "path" : "/swagger/index.html",
+            "port" : 8080,
+            "title" : "Fabric REST API"
+          }
+        ],
+        "serve" : [
+          "fabric",
+          "--serve"
+        ]
+      },
+      "type" : "com.dozersandbox/ports@1"
+    },
+    {
+      "config" : {
+        "docs" : "https://github.com/danielmiessler/Fabric",
+        "intro" : "Fabric applies ready-made prompts — patterns — to text you pipe into it: summaries, wisdom extraction, code review and some 260 more. It is not a chat: it answers in your shell and exits.",
+        "steps" : [
+          {
+            "command" : "echo hello | fabric \"say ok\"",
+            "text" : "Check it answers."
+          },
+          {
+            "command" : "fabric -l",
+            "text" : "See the patterns it has."
+          },
+          {
+            "command" : "echo \"Dozer runs each agent in its own VM\" | fabric -p summarize",
+            "text" : "Summarise some text with one."
+          },
+          {
+            "command" : "fabric -p extract_wisdom < notes.md",
+            "edit" : true,
+            "text" : "Use a file from your folder — put it there first, then change the name:"
+          }
+        ],
+        "tips" : [
+          "`fabric -s` streams the answer as it comes.",
+          "Another model: `fabric -m MODEL -p summarize`.",
+          "`fabric --readpattern summarize` shows what a pattern asks the model.",
+          "Web pages (`-u`) and YouTube (`-y`) need the open web: refused while the network is Locked."
+        ]
+      },
+      "type" : "com.dozersandbox/guide@1"
+    }
+  ],
+  "description" : "A command-line prompt toolkit that applies crowd-sourced patterns to text, on a Google AI, Anthropic, OpenAI, xAI or OpenRouter key.",
+  "displayName" : "Fabric",
+  "id" : "danielmiessler/fabric",
+  "kind" : "workload",
+  "licenses" : [
+    "MIT"
+  ],
+  "provides" : [
+    "com.dozersandbox/fabric@${{ kit.args.version }}"
+  ],
+  "schema" : 2,
+  "sourceUrl" : "https://github.com/danielmiessler/Fabric"
+}

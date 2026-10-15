@@ -7,8 +7,12 @@ init
 uninstall
 upgrade
 new
+try
+search
+guide
 create
 up
+down
 start
 pause
 resume
@@ -27,6 +31,9 @@ sessions/restart
 attach
 run
 exec
+get
+put
+cp
 image
 point
 net
@@ -45,6 +52,7 @@ builder/start
 builder/install
 image/ls
 image/bake
+image/log
 image/rm
 image/pull
 image/push
@@ -67,6 +75,8 @@ key/policy
 account/ls
 account/add
 account/verify
+account/show
+account/refresh
 account/rm
 account/default
 account/use
@@ -78,6 +88,8 @@ tools
 ignore
 ignore/check
 ignore/show
+ports
+open
 host/start
 host/stop
 host/restart

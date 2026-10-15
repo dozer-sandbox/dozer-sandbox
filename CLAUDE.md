@@ -79,7 +79,7 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
 | `Sources/DozerHost/ImageTree.swift`; `Sources/DozerCLI/TemplateCommands.swift`; `Sources/doz-vmtest/TemplatesSuite.swift` | the lineage (`image-tree`, built from `DiskAccounting`; `doz image ls --tree`, Images › Lineage); templates (`template-create`) and `duplicate` (`Sandbox.duplicate`); `make test-vm-templates` |
 | `Sources/DozerHost/Preparations.swift`, `Onboarding.swift`, `AgentPrompt.swift`; `Sources/DozerCLI/OnboardCommands.swift`, `ProjectFile.swift`, `Prompting.swift`, `UninstallCommand.swift`; `Sources/doz-vmtest/OnboardingSuite.swift`, `PullBench.swift` | image preparation in the host (single-flight, joined, cancelled) + `onboarded.json`; onboarding's checks / account step / settings-only-when-missing; the agent's environment prompt + the `dozer` skill; `doz onboard`/`init`/`uninstall`, `doz_project.yaml` (Yams), TTY questions; `make test-cli`'s onboarding part (`make test-cli-onboarding`); `make pullbench` (D12) |
 | `Sources/DozerKit/SavedScreens.swift`; `Sources/DozerHost/TerminalLayout.swift`; `Sources/DozerWeb/WebSessionMemory.swift` | 593 §9: the sessions' saved screens (`<sandbox>/screens/NAME.{vt,txt,json}`; the capture is `Sandbox.captureScreensLocked`, the `.captureScreens` step); the web UI's terminal layout kept by the host (`terminal-layout.json`); their web projections and the layout's strict decoder |
-| `Sources/DozerHost/BootLogs.swift`; `Sources/DozerWeb/WebBootLogs.swift` | each sandbox's kept boots (`<sandbox>/boots/`), the recorder, the one renderer; the web's Boot log projections |
+| `Sources/DozerHost/BootLogs.swift`, `BuildLogs.swift`; `Sources/DozerWeb/WebBootLogs.swift` | each sandbox's kept boots (`<sandbox>/boots/`), the recorder, the one renderer; 617: each image's last build log (`<store>/build-logs/`); the web's Boot log and build log projections |
 | `Scripts/release.sh` (`make release`), `Makefile.config.example`; `ReleaseStamp` in `Sources/DozerCLI/DozerCommand.swift`; `HostUpgradeCheck` in `GroupCommands.swift`; `HostCore.programGone`; `Tests/DozerCLITests/ReleaseTests.swift` | the Homebrew artefact (signed; Developer ID + notarised when configured), the version stamp, `doz host upgrade-check`, the refusal when an upgrade removed a running host's keg |
 | `Sources/DozerHost/Resources.swift`, `HostCore+Resources.swift`; `Sources/DozerCLI/ResourcesCommands.swift`; `Sources/DozerWeb/WebResources.swift`; `Tests/DozerCLITests/ResourcesTests.swift` | the account of everything Dozer uses (the walk, one leaf per entry, the three numbers from `DiskAccounting.exclusive`), refusals, the plan and the deletion; the host ops `resources` / `resources-rm` / `resources-clean` / `resources-kernel`; `doz resources`; the web projection + preview route |
 | `Sources/DozerKit/BaseCatalogue.swift`, `OCIImport.swift`; `Sources/DozerHost/BaseImages.swift`, `ContainerTool.swift`, `AppleContainerResources.swift`; `Sources/DozerCLI/BaseCommands.swift`; `Sources/DozerWeb/WebBases.swift`; `Sources/doz-vmtest/BasesSuite.swift` | base × agent images — the catalogue, `ImageChoice` names, `ImageComposer` (+ `recompose` for W28), native Claude Code, pi's Node, digests; the store's base digests and Dockerfiles; Apple's `container` (status/start/install/build) and its storage in Resources; `doz base`, `doz builder`; the bases route and the Dockerfile picker; `make test-cli-bases` |
@@ -440,7 +440,10 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   `HostWebData.restartHost` refuses unless the running host is an OLDER build than the UI). Destructive ones (reset, rm,
   point revert/rm, image rm, account rm) carry `confirm` equal to the name. Shutdown keeps the disk,
   so it carries no `confirm`: the page asks with a plain dialog that can stop asking
-  (the setting `ui.confirm_shutdown`, doz.toml — no longer localStorage). **No secret is ever an
+  (the setting `ui.confirm_shutdown`, doz.toml — no longer localStorage). 617 (owner: "same simplified delete
+  experience"): the page confirms every destructive one with ONE component, a box to tick (`confirmAction` /
+  `confirmWithCheck`, `components/dialog.js`: "Yes, reset demo") — never a name to type; the request still carries
+  `confirm`. **No secret is ever an
   action's input** (590's D3). Since 594 an ACCOUNT's key or token may be typed in a
   masked field — through the one typed route `POST /api/v1/accounts`, never an action, while
   `ui.allow_secret_entry` (see the 594 section); and a sandbox's own key through `POST
@@ -529,8 +532,12 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   statements and wrote each, byte for byte, into the module `map.mjs` names; `verify-move.mjs` proves every
   statement and comment line is kept exactly once. New code goes into the module of its area; a new module is a
   file in its layer's directory, imported by what uses it (and by `app.js` if nothing else does).
-- **The look is the 603 style guide** (the design notes; its decisions in
-  603.02-PLAN.md). Keep to it when adding UI:
+- **The look is the dashboard style guide, `docs/style-guide/index.html`** — a LIVING specimen: it loads the real
+  `WebSource/app.css`, the vendored Lucide set (VENDOR.json) and the icon registry's marks, light and dark side by side
+  (view: `python3 -m http.server 8000` from the repo root, then http://localhost:8000/docs/style-guide/). **A change to
+  the dashboard's UI updates the style guide IN THE SAME COMMIT** — a new component gets a specimen, a changed one its
+  markup. Its own CSS (`style-guide.css`) lays out the specimens only and uses `sg-` names (`.sw` and `.row` are the
+  app's). Keep to it when adding UI:
   - **Tokens** only (`app.css` `:root`): every colour once, with `light-dark()` — `color-scheme` IS the theme
     (`ui.theme` sets `data-theme`); never a literal colour outside `:root` (the terminal chrome is `--term-*`;
     `frame.css` has its own `--term-bg`). Type `--fs-*` (13 px is THE UI size), space `--sp-*`, radii `--r-*`,
@@ -550,7 +557,7 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
     successes; `toast(text, true)` routes to the page notices.
   - **Never `append`/`replaceChildren` a `null`** — the DOM writes it as the text "null" (the Split menu's bug);
     `h()` skips nulls, those do not.
-  - **Structure**: the sidebar's four groups are static markup in `index.html` (`#nav > a[data-view]` stay direct
+  - **Structure**: the sidebar's five groups (Sandboxes, Try, Store, Activity, Setup) are static markup in `index.html` (`#nav > a[data-view]` stay direct
     children; the rail below 980 px). The sandbox page: `lifecycleBar` (the group + Shut down) + ⋯ + the status
     slot + the details toggle; the terminal strip's actions (`termUI.acts`, `paintStripActs`) on the rightmost
     pane; the inspector's tabs `INSP_TABS`, the chosen tab per sandbox in `sview(name).inspTab` (page memory, no
@@ -761,7 +768,13 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   `createElementNS` (aria-hidden; the button keeps its text or aria-label); `btn()` takes `opts.icon`,
   else `iconFor(label)` (ONE map: the exact label, then its first word). The fallback `circle-dot` is a
   bug the probe fails on. Colour is CSS (`stroke: currentColor`). The CSP is unchanged (`img-src 'self'`
-  covers `<use>`). The compiler's external-URL rule ignores only the SVG namespace string.
+  covers `<use>`). **Icons refer to symbols IN the page** (617, the owner's "icons flicker every few seconds"):
+  Chrome resolves a `<use>` of ANOTHER document anew for each element made, so every re-render (the sandbox page's
+  bar, banners and tabs at each refresh) drew its icons blank for a frame. `dom/icons.js` fetches the sprite once,
+  copies its `<symbol>`s (only those) into a hidden `<svg id="doz-icon-symbols">` with ids `doz-icon-NAME` (prefixed:
+  no page id can shadow one), points the icons already drawn at them, and `icon()` uses `#doz-icon-NAME` from then
+  on (the sprite's URL until then, or if the fetch fails). `probes/617-*/stageE/browser-icon-flicker.mjs` measures
+  every icon a forced refresh adds one frame later (0 blank; the build before: 60 of 225). The compiler's external-URL rule ignores only the SVG namespace string.
 - **A template NEVER contains the state disk** (the agent's logins and history) — `saveAsImage` clones
   the root only; `RestorePointTests.test_aTemplateNeverHoldsTheStateDisk` and `make test-vm-templates`
   keep it. From a live sandbox, `template-create` and `duplicate` go through a TEMPORARY restore point
@@ -1322,6 +1335,13 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   NOT changed: the emulator and every viewer get them as written (`SessionBridgeScanner` does not own 7501 —
   `SessionStatusTests` cuts it at every offset). OSC 133 `A` deliberately does NOT end working/blocked: Claude
   Code writes it at its own turn start and reports only on change. Codex does not report (nothing shown).
+  Grok Build ≥ 1.0.52 reports too (`app=grok-build`; its `ui.notifications.program_status = "auto"` default, nothing set):
+  it sends the query only where it already asks the terminal for its version — deckhold's `TERM=xterm-256color` with no
+  `TERM_PROGRAM` is such a terminal — and never inside tmux (it would need `program_status = "on"` and tmux's
+  `allow-passthrough`, neither set). Its `working` carries a msg ("Waiting for response…", "Service unavailable (502) |
+  Retrying (n/15)"), its `done` "Turn complete in 4.0s."; `blocked` is `state=blocked:app=grok-build:kind=permission:msg=<the command>`
+  (seen in its ask mode, `DOZ_GROK_PERMISSIONS=ask` + `--permission-mode default`, on a network command — a write to
+  /tmp ran without asking). `probes/617-*/stageF/grok-status-run.sh` and `grok-blocked-run.sh` are the VM proofs.
 - **What deckhold exposes is the ROOT record**: in `deckhold ls`'s INFO (`status=<canonical report body>\tstatus_age=S`,
   BEFORE the command — an older parser takes an unknown field for the command, which comes last) and as STATUS
   ('T') frames to a client that sent WATCH ('W'). Frame types are only ever appended (the header comment). An
@@ -1603,6 +1623,329 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   Mac, the guest's renewal answered, no token anywhere in the guest, no silent fallback, the API key. `CODEX_KEEP=1`
   keeps its store (`/tmp/dzo-codex-keep`) and the prepared images.
 
+### Agent recipes and key providers
+
+- **Every agent is a recipe** (`Sources/DozerKit/AgentRecipe.swift`; data in `Sources/DozerKit/Recipes/compiled/*.json`,
+  `providers.json`, `gateways.json`, `tags.json`, each ONE `.embedInCode` line in Package.swift with a unique basename —
+  `AgentRecipeTests` ties the folder to the manifest).
+  **A recipe's SOURCE is YAML** (owner: one file per recipe, aligned with Docker Sandbox Kit v3):
+  `Recipes/agents/VENDOR/PRODUCT.yaml`, `schema: 2` — the spec is `docs/recipes/RECIPE-FORMAT.md`, the contract
+  `schema/dozer-recipe-2.schema.json` (each YAML's first line points editors at it). DozerKit never parses YAML (the
+  audit keeps Yams in DozerCLI): `make recipes` compiles each to `Recipes/compiled/PRODUCT.json` (`RecipeSource`,
+  YAML 1.2 core schema — `no` is a word — no anchors), committed and embedded; `RecipeSourceTests` fails when one
+  drifts. `RecipeDocument` decodes it STRICTLY (unknown key anywhere = error; Kit's DERIVED parts — runtime allow/deny,
+  a credential's apiKey — must equal what Dozer derives) and maps it one for one to `AgentRecipe`, which everything
+  else uses unchanged. `RecipeSchemaTests`: every recipe valid against the schema, the loader refuses what the schema
+  refuses (mutations), the Kit view (`kitDescriptor()`) valid against Kit v3's own schema
+  (`Tests/Fixtures/kit-v3/`, vendored at a pinned commit), the mapping lossless. Edit the YAML, run `make recipes`,
+  commit both; never edit `compiled/` by hand. Decoded once, validated, unknown keys refused; an invalid
+  built-in recipe is a test failure. `AgentKind` is a recipe-backed struct (the same raw strings); `allCases` is the
+  four that were the enum, then the recipe agents in file order. `AgentRecipes.registerForTests` is the only way to
+  add one at run time — no environment variable loads a recipe.
+- **The built-in three (Claude Code, pi, Codex) keep every byte**: their recipes are `builtin` and only DESCRIBE them
+  (credentials, sessions, resume, settings keys, prompt); their install steps and launchers stay `AgentImages`' Swift.
+  `RecipePinTests` (Codex included) must stay green; `RecipeAgentsTests.test_builtinRecipesDescribeTheirImages` proves
+  each recipe matches its image. `AgentPackage.integrity` is nil for them (absent from the canonical JSON).
+- **A recipe agent** (Gemini CLI, Grok Build) is composed from its recipe alone: its install (npm with Node on a base
+  without it; an npm platform package at the main package's version, sha512-checked, brotli payload decompressed in
+  the bake), the generic launcher (`AgentImages.recipeLauncherScript`: approval prompts off unless
+  `DOZ_<SHORT>_PERMISSIONS=ask` or root, passthrough arguments run as they are, first-run settings written ONLY when
+  absent), its persist dirs and session environment. A recipe names no credential (validated). Its version resolves
+  from the MAIN npm package (Grok's platform package's own `latest` tag is stale).
+- **Keys** (`KeyProviders`): a `key` account carries its provider (`doz account add NAME --provider xai|google`,
+  `doz-<provider>:NAME`, per-provider defaults in `AccountsFile.providerDefaults`); the binding is the provider's
+  (xAI: Bearer on api.x.ai; Google: `x-goog-api-key` on generativelanguage.googleapis.com — never
+  `GEMINI_API_KEY_AUTH_MECHANISM`). A key agent's sandbox NEVER gets an Anthropic binding (`applyKeyAccount`). The key
+  check is the provider's (`KeyProvider.check`; xAI and Google answer a bad key with 400). The proxy refuses in each
+  provider's error shape. Test seam: `DOZ_TEST_PROVIDER_UPSTREAM` + `DOZ_TEST_PROVIDER_CA` (the proxy's leg and the
+  key check go to a fake, trusting only its CA; `probes/617-*/stageA/` is the VM proof).
+- **Model sources** (`ModelSources.swift`; RECIPE-FORMAT.md "Model sources"; owner: "add OpenAI and Anthropic AND gateway
+  support"): providers.json lists each provider's endpoints by API shape (openai-chat, openai-responses,
+  anthropic-messages, gemini) with a default model; OpenRouter and Vercel AI Gateway are key providers (`gateway: true`,
+  endpoints from gateways.json). A recipe may declare `models@1` (the shapes it speaks with `${{ dozer.base_url }}` /
+  `${{ dozer.model }}` env and `key_env`, native sources, except, per-source models); it is then offered every source
+  serving one (`AgentRecipe.offeredSources`). The sandbox's ACCOUNT decides the source (`AgentCredentials.source(of:)`:
+  `api-key` = Anthropic, `openai-key` = OpenAI, `key` = its provider — never a subscription); `applyMainAccount` binds
+  that source's key (its hosts only), `HostCore.recipeEnvironment` sets the selection's env at every session open and
+  exec (never over the caller's; nothing baked), `SandboxConfig.models` keeps a chosen model per source. `--provider` /
+  `--gateway` / `--model` (ChoiceOptions → `CreateOptions.modelSource/model`; `AgentCredentials.account(forSource:)` picks
+  that source's key), the plan's `model` (+ every offered source), the Quick try setup's Model section, New Sandbox's
+  chooser (`WebAccounts.sources`). **A recipe agent's sandbox decrypts every model source's hosts**
+  (`EgressProxy.leakGuardHosts`) so a placeholder sent to another source is refused, never tunnelled unseen. Codex keeps
+  its own flow (`AgentCredentials.codexFlow` — never "provider == openai"). `make recipe-check` runs a models@1 recipe
+  once per offered source (`RECIPE_SELECTIONS`), `ModelSourcesTests`, `probes/617-*/recipes/models/browser-try-models.mjs`.
+- **The guide** (617.11, owner: "i tried fabric and it just gave me a terminal … our companion guide"; `RecipeGuide.swift`,
+  `SandboxGuide.swift`, `components/try-guide.js`, RECIPE-FORMAT.md "The guide"): `guide@1` = intro, ≤ 8 steps
+  `{text, command?, edit?}`, ≤ 6 tips, docs, a `notice` (`doz try` says it first). The first step WITH a command is the check turn as a person types it
+  (a step without one may come before it — Antigravity CLI's terms, the person's to accept; owner 2026-10-15)
+  (`guideMatchesCheck`: `sh -c X` = X, a `${{ dozer.* }}` = the models@1 variable set to it); every command starts with
+  the tool's program/command/short name or a plain shell builtin (validated). Every recipe has one (`GuideTests`);
+  `make recipe-check` runs every later non-edit step (exit 0). Dozer writes the preamble and facts (`SandboxGuide.make`:
+  version, source · model · the account's NAME, network, folder, persist dirs) — `SandboxDetail.guide` → `WebGuide` →
+  the inspector's Guide tab (first and chosen on a try, the details open on its first visit; Run = `sendInput` +
+  Enter into a live pane — the tool's own session for `launch.session: shell`, a shell beside an agent's screen; Type
+  without Enter); `doz guide NAME`; `doz try` prints "Start here" for a shell tool; `deliverGuideNote` writes
+  `/etc/profile.d/doz-guide.sh` (a shell tool's default session only) — the steps once per user (a stamp in
+  `~/.local/state/dozer`). `install.extras` bakes pinned file sets (Fabric's patterns at `/opt/fabric/patterns`,
+  sha256-checked; `CUSTOM_PATTERNS_DIRECTORY`). `probes/617-*/stageE/browser-try-guide.mjs`.
+- **Permissions**: a recipe agent's own `model:<provider>` (Grok's path-conditioned to the API paths it uses — the VM
+  proof found `/v1/responses` against the real base) and a hidden `update:<id>` (only beside "Update itself"). D5: a
+  sandbox with a recipe agent's own model has NO Anthropic `model` (`normalized` drops it; its Locked is its own model
+  only); the built-in three's presets are unchanged. A fresh try shows NO refusal (owner): what an agent calls on its
+  own vendor's sites at a normal first run is allowed, each host with its `reason` (the plan's reach lists them) — a
+  recipe agent's in its model permission, every agent's (the built-in three's too) in recipe `network.vendor` → the
+  hidden `vendor:<id>` added at create like Codex's `model:openai` (new sandboxes only; never in a preset, the
+  checklist, the facts' list or a suggestion; permissions are not bake inputs — `RecipePinTests` unchanged). GitHub-
+  hosted vendor content only by path (validated; Codex's plugins clone by exact info/refs + git-upload-pack, so never a
+  push). `exact_paths` allow one path exactly (`$` in `EgressRule`'s conditions — Grok's key-less `GET /`), and a
+  provider's `swap_only` keeps such a call key-less. Self-update is off by the agent's own switch (`launch.session_env`,
+  set by the host at session open — pi's `PI_SKIP_VERSION_CHECK`), and `network.off_without` turns off what a permission
+  that is off would refuse (Claude Code's `DISABLE_ERROR_REPORTING`/`DISABLE_TELEMETRY` without "Send error reports"),
+  said in the plan and the facts (`HostCore.withRecipeEnvironment`). `FirstRunTests`; the VM proof is
+  `probes/617-*/stageD/firstrun-netlog.sh` (0 refusals for all five, and example.com from the guest still counted).
+  What an agent calls that no setting of its own turns off, when it is to be kept out, is
+  `network.quiet` (no recipe uses it now: Antigravity CLI's usage log to play.googleapis.com is `vendor`, owner: do not
+  block it), each with its reason: denied first like `excluded`, logged, NEVER counted (`ConnectionLog.quietHosts`,
+  set from the policy by `EgressProxy.policy`; `PermissionReport` skips it). `localhost` (RFC 6761) is answered by the
+  proxy's DNS as the loopback, never judged or logged.
+- **The icon registry** (`Recipes/icons/`: `icons.json` + one mono SVG per entry, `AgentIcons.swift`; docs/DOZERKIT.md
+  says how to add one): vendor and product marks, a recipe's `icon` names its product; resolution product → vendor →
+  a generated lettermark (never blank). A mono file is ONE currentColor path (`MonoSVG.check`, byte-exact); `allowed`
+  official | lettermark, with the source, the brand terms checked and the date. Every mark is a Dozer lettermark today
+  (`Lettermark`, stroke letters — the file must be exactly what it draws: `AgentIconsTests` draws an empty one). Colour:
+  `variants.color`/`color-dark` accepted, never drawn yet. The directory index carries each entry's `icon`.
+- **Gemini CLI's `SANDBOX` is NOT set** (checked against 0.63.0's bundle, `probes/617-*/stageE/gemini-sandbox-env.py`).
+  It is more than a label. Any value:
+  - skips the relaunch that raises Node's heap to half the VM's memory (512 MiB instead of 1 GiB on 2 GiB);
+  - removes the supervisor, so an in-app restart (trust change, Google sign-in, admin settings) exits instead;
+  - turns off its exit when the terminal goes away;
+  - turns off its own docker sandbox;
+  - makes /docs and /extensions print their URL instead of opening a browser;
+  - turns off its browser agent;
+  - changes the system prompt from "outside of sandbox" to "running in a sandbox container".
+
+  The footer would then read "current process", not the value; only /about and /bug show the value. Hiding the red
+  "no sandbox" without those side effects is `ui.footer.hideSandboxStatus: true`, which is not set either: that is the
+  owner's call. Antigravity CLI reads no such variable: its "sandbox" is its own command sandbox (`--sandbox`,
+  `enableSandbox`).
+- **Network profiles** (`make profile-agents [AGENTS=…] [DIFF=1]`, `Scripts/profile-agents.sh` + `Scripts/agent-profile.py`
+  + `Scripts/fake-provider.py`): a fresh try per agent with the Open network in a scratch store (`/tmp/doz-profile`),
+  every HTTPS request decrypted and logged by the PROFILING seam `DOZ_TEST_PROFILE_NETWORK=1`
+  (`EgressProxy.inspectEverythingForProfiling`), its first start + a scripted task (`-p`/`exec`, FAKE keys) →
+  `profiles/AGENT.json` (version, date, how, each endpoint with credential and a determination: allow / allow-path /
+  off-by-setting / refuse + reason). New endpoints come in with `null` — `AgentProfileTests` fails until a person
+  decides them, and checks every determination against the recipe under a fresh try's policy (refuse ⇒ quiet;
+  off-by-setting ⇒ a setting the recipe sets). `DIFF=1` reports new/missing endpoints and writes nothing; nothing is
+  ever allowed by the profiler. Re-profile when an agent's version moves. A profile is of the release Dozer installs:
+  `profile-agents.sh` sets each recipe agent's version setting to its PIN (the built-in three: `latest`) before the
+  try, and fails when the sandbox reports another version (an updater that ran, or a wrong install — the profile of
+  Antigravity 1.3.4 against a 1.3.3 pin was this); `recipe-check` checks the image holds the pin and runs `verify`
+  again AFTER the smoke turn; `agent-currency`'s TODOs compare the latest with the recipe's pin (built-ins: with the
+  profile), never with the last report.
+- **Every recipe is checked for real** (`make recipe-check RECIPES="grok gemini"|all`, `Scripts/recipe-check.py`, driven by
+  the recipe's own data — nothing per agent): in a scratch store (`RECIPE_STORE`, default `/tmp/doz-recipe-check`; images
+  kept, sandboxes never; it runs a COPY of the build) — build at the pin (the built-in three at `latest`: their pins are
+  RecipePinTests' frozen fallbacks), verify again in a fresh try, the recipe's **`launch@1.check`** turn (REQUIRED in every
+  recipe: `{argv, expect, exit?, timeout?}`; the stand-in `Scripts/fake-provider.py` — xAI, Google, Anthropic Messages,
+  OpenAI Responses, started by `fake-provider-up.sh` — answers `DOZ_FAKE_OK`), the fake key seen by the stand-in and only a
+  placeholder in the guest, no key anywhere in it, the leak guard, and for `status: osc7501` idle/working/done held by
+  deckhold in an interactive turn (a pty attach typing `say ok DOZ_SLOW`); and FIRST, for every recipe whose default
+  session is the agent, its **first screen** (attached on a pty, nothing typed, ~15 s, read back with `deckhold dump`):
+  no setup wizard, sign-in, consent, trust or theme question (`SETUP_SCREEN`, less `check.screen.allow`; plus the
+  recipe's `check.screen.expect/refuse`) — the owner's first `doz try goose` opened Goose's own wizard, which the
+  headless check never sees; `RECIPE_ONLY=screen` runs it alone. A first-run file may be YAML (top-level keys, Goose's
+  `config.yaml`; `merge_yaml` is emitted only into such a recipe's helper). A JSON report; `--changed BASE` and
+  `--prune-days N` serve the **Recipes** workflow (`.github/workflows/recipes.yml`: m1b, label `doz-recipes`, changed
+  recipes per PR/push, all nightly + `agent-currency` + `profile-agents DIFF=1`, a persistent store in
+  `~/Library/Caches/DozerKit-ci/recipes-store`). A new recipe passes it before it ships.
+- **OpenCode** (`opencode`, npm `opencode-ai` + the platform package `opencode-linux-arm64`, glibc only; an xAI key, model
+  `xai/grok-build-0.1`): it installs `@opencode-ai/plugin` into each config dir in the background (`Npm.install`: skipped
+  when `node_modules` exists and `package-lock.json`'s root lists the package) — 28 npm requests at a try's first start,
+  refusals under Locked. Its first-run files seed exactly that (an empty `node_modules/.package-lock.json`, the lock's
+  root dependency), so it calls nothing but its model; `OPENCODE_DISABLE_MODELS_FETCH` keeps models.dev out (the model
+  must then be in its bundled list — `opencode models xai`). No OSC 7501 (recipe-check's status probe saw nothing).
+- **Is it current?** (owner: "record the latest version and how old it is and is it current"). MEASURED: the host checks
+  every agent's latest release hourly while it runs (`HostCore.refreshAgentVersions` → `AgentVersions.refresh`, the same
+  cache as a preparation's) and, once per new latest, when it came out and npm's deprecation (`NpmRegistry.releaseInfo`:
+  npm's full document, or a manifest archive's Last-Modified) → agent-versions.json (`latestReleased`,
+  `latestDeprecated`, `infoVersion`). `AgentCurrency` reads it (never the network): active ≤ 90 days, quiet > 90, stale >
+  180, deprecated wins, "not checked yet" before a check. RECORDED: `lifecycle` on a recipe or known entry
+  (`AgentLifecycle`: current | superseded `by` | retired | discontinued, note, source, checked — `by` must name a recipe or
+  known id). Shown in `doz search` (a second line; a superseded hit brings its replacement), `doz try`'s list (and a note
+  before a superseded try), the Quick try cards (`WebTryCatalog.Agent.latest/standing`, superseded last), the index
+  (`Entry.lifecycle`, `Entry.latest`), the manual (26). `make agent-currency` (`Scripts/agent-currency.py`) is the
+  people's report → `profiles/currency.json`, with TODO lines (a new release → re-profile; deprecated/archived → review).
+- **Other AI tools are recipes too** (617, RT list; the manual's 28): same shape, same rules. Two install kinds for them,
+  both pinned-only (`AgentRecipe.pinnedOnlyKinds`: nothing looked up, `latest` = the pin, `AgentVersions.refreshPackage`
+  returns early): `release-binary` (one program from a release download, `{version}` in the url, tar.gz/zip/raw by the
+  url's end, sha512-checked) and `pypi` (Dozer's own Python — `PythonRuntime`, python-build-standalone 3.13 glibc,
+  sha256-pinned, /opt/python — a venv at /opt/<id>/venv holding EXACTLY `install.requirements`, every line
+  `name==version --hash=sha256:…`, pip `--require-hashes --no-deps`, the package's own file also against the sha512
+  integrity; the lock is resolved once in a scratch VM). `launch.session: shell` makes the default session `bash -l`
+  (a tool that answers and exits: `DozerStore.defaultSession`); a first-run file may be `~/…/.env` (Fabric) — its merge
+  code is emitted only into such a recipe's helper, so the other launchers and bake keys are unchanged
+  (`ToolRecipeKindsTests`). The VM proofs: workspace `probes/617-*/recipes/` (`setup.sh`, `proof.sh TOOL 'CMD'`, a fake
+  provider for xAI + Gemini on 18xxx).
+- **Antigravity CLI** (`antigravity`, alias `agy`; Google's lead agent — Gemini CLI is superseded by it): closed source,
+  installed by the `manifest-binary` kind — Google's release manifest (`{version, url, sha512}`) read on the Mac
+  (`NpmRegistry.manifest`, `parseManifest`: the url must be the recipe's `url` with `{build}`), the release recorded as
+  `<version>+<build>` with the sha512 as SRI, checked in the bake; glibc only (`platforms.musl` false). A Gemini API key
+  (`modelProvider: gemini` first-run setting + `GEMINI_API_KEY`, the google provider); `AGY_CLI_DISABLE_AUTO_UPDATE=1`;
+  `--dangerously-skip-permissions`; the facts as a skill in `~/.agents/skills/dozer`.
+  A recipe's `excluded` hosts are denied BEFORE the user's rules and
+  every permission (Open included), never suggested, never grantable as a site — and are in no permission (validated).
+- **Keys read on use** (`SecretSources.swift`, `HostCore+Secrets.swift`): an API-key account (`api-key`, `openai-key`,
+  `key`) may carry `AccountRecord.source` — `1password` (op://…), `aws` (an ARN, `#jsonKey`), `command` (absolute
+  program + argv) — plus allow-listed `sourceEnv` and `ttlSeconds`. accounts.json holds the REFERENCE only; the value
+  never reaches the keychain, a file, a log, a row or an event (`SecretSourcesTests` scans the store). A record without
+  `source` is its keychain item, as before. `applyKeySecret` is the ONE place an account's key enters a vault: keychain →
+  `setCredential`; a source → `vault.setProvider` (TTL, version = fingerprint(reference+env) + the account's generation
+  in `HostCore.secretSourceState`; `refresh`, an edit and an upstream 401 — at most once per 10 s — bump it), prefetched
+  when applied and at every session open. The runner (`SecretSources.run`): posix_spawn, argv only (never `sh`), own
+  process group killed on timeout (op 20 s, others 10 s), stdin /dev/null, stdout ≤ 8 KiB, stderr ONLY to classify,
+  the environment = who/where + `OP_*`/`AWS_*` of the host + the standard PATH + the account's allow-listed variables
+  (never a `DOZ_` one). A failure is the vault's notice (the proxy's provider-shaped 401: cause + fix), never another
+  key. A command inside the store is refused. **Tests never run the real op/aws**: `DOZ_TEST_OP` / `DOZ_TEST_AWS` are
+  the seams; a guarded run without them gets TestSafety's refusal (`DOZ_TEST_REAL_MAC=1` lifts it).
+- **Custom keys** (`CustomKey`, provider `custom`, binding `custom:NAME`, swap-only, `doz-custom:NAME` or a source):
+  attached by `SandboxConfig.extraKeys` (`--key`, `account use … --extra/--remove-extra`), applied after the main
+  account (`applyExtraKeys`; `vault.onStale` handlers chain within one apply — `detachWatcher` resets them), refused
+  at attach unless the policy allows every host, withheld with a notice when a policy change denies one (`netPolicy`
+  re-applies them). Never a host another binding owns. The dashboard shows source/state and Refresh (`account-refresh`,
+  one HostOp) — never adds or changes a source (D7).
+- **One set of choices, one plan** (D13): `ChoiceOptions` (LifecycleCommands; `CreateArguments` is its old name) is
+  what new, create, up and try take — `--permissions` canonical, `--allow` its alias. The host's read-only op `plan`
+  (`CreatePlan.swift`, `CreatePlanner.plan` — pure given `PlanFacts`) is the ONE place a sandbox's defaults are decided
+  for new/try (name, workspace, Locked for a try) and what `--dry-run` prints (command, project file, reach from
+  `DozerImages.spec`'s policy). A new choice is a ChoiceOptions option + `CreatePlanner.argv` + `yaml` + a pin line.
+- **`doz try`** (`TryCommand.swift`, `Try.swift`): a try is `SandboxConfig.trial`; its card comes from recipe `auth`
+  only (`TryCard`); its exit prompt runs after `AttachClient.attach` — the RETURNING attach: every way out is recorded
+  (`endAttach`), the keyboard thread is stopped by a self-pipe (`stoppableRead`) so the prompt gets its first key; keep
+  it that way (`KitchenTests.testTheKeyboardThreadIsStoppable`). `run` still exits.
+- **The dashboard's Quick try** (`#/try`, `#/try/AGENT` — the wizards' modal over the app, like onboarding (owner: the
+  app visible behind the scrim; larger, less margin); Esc/Close return to where it was opened; the app inert; opened from
+  the nav's TRY section — its one item and the + on its heading; `views/try.js`, `WebTry.swift`). The details pane is
+  INFORMATION ONLY (description, versions, tags, what it can reach, the command — what a published recipe page shows);
+  **Try** opens the SETUP (`dialog.dlg.try-setup`, `openSetup`): the key, what is not offered, the image, the plan and
+  Start. The setup PLANS WITH the account it uses (`POST plan {account}`; the catalog's `usableAccounts` —
+  `AgentCredentials.accepts`): a key saved there, one chosen, or — when the provider's default cannot serve the agent
+  (pi with the Mac's Claude login) — the first usable one (the owner's "adding a key did not work": it planned with the
+  default again). Deleting a try asks with a box to tick (`confirmWithCheck`), never a typed name. The owner's
+  redesign (mock 616 quick-try-v2): two panes — search (`core/agent-search.js`: `DirectorySearch`'s matching ported, +
+  fuzzy within one word, + its did-you-mean) with pills (Ready · Open source · Current · Headless · Through a gateway,
+  AND) and the count over the results (cards | list, `localStorage doz.tryView` in try/catch; superseded, then coming,
+  last), the chosen agent on the right; `/` ↑ ↓ Enter; stacked below 760 px with a back control. Search and pills
+  redraw IN PLACE (`paint`) so the search box keeps focus; a full `renderModal` only re-reads. The catalog carries each
+  agent's mark (`AgentIcons.resolve` → `ResolvedIcon`, drawn by `dom/icons.js mark()` from its path — never fetched,
+  no markup parsed) and the pills' facts (`ready`, `openSource`, `headless`, `gateway`, `current`, `version`, `age`).
+  `version` is what a try INSTALLS now (`WebTryCatalog.installs` = `AgentVersions.spec(.create)` — never the built-in
+  three's frozen fallback pin when the host resolved a latest), `age` only when that version is the latest looked up.
+  `probes/617-*/stageE/browser-quick-try.mjs` (screenshots 10–16). `GET
+  /api/v1/try` (each recipe agent's try plan + `TryCard` when its provider has no key; the coming ones with why) and
+  `POST /api/v1/plan` (strict; the host's read-only `plan` — never a second planner). **The modal draws at once**
+  (owner: "a blank modal with a considerable delay"; it waited ~25 s on `GET try`, one `plan` per agent, each re-reading
+  every image's readiness): `viewTry` never awaits — the last list (kept for the page's life) or skeleton cards, then
+  `GET /api/v1/try/list` (`WebTryCatalog.list`: the recipes alone, no plan, ms), then `GET try` (`plans`: a read-only
+  host op planning every agent on ONE reading of the store; an older host gets one `plan` each, six at a time) fills in
+  readiness; one read at a time (`tr.reader`, aborted on close), a failure said in the list with Retry, never "nothing
+  matches" while loading (`data-try-state` loading|list|full). `TryPlansTests`, `probes/617-*/stageE/browser-try-open-fast.mjs`
+  (its control against 16e91ea shows the delay). It makes the try with the
+  ORDINARY `create` action (`trial`, the plan's `create` fields) — browsing prepares NOTHING (owner: no build per recipe looked at; the CLI's `doz try AGENT` still prepares early: an agent named on purpose) — pastes a
+  provider's key only through `POST /api/v1/accounts` (kind `key` + provider; sources stay CLI-only). A try's page has
+  the try bar (its message, Delete… · Keep — owner, 617.05: Sleep is the action bar's). `doz try --ui [AGENT]` (`showDashboardPage`, UICommand.swift — the
+  only CoreServices file): starts doz ui detached when none runs; an open page is pointed there by `ui.sock`'s `show
+  try[/AGENT]` line (SSE `show`; `WebControl.showPage` and the page both allow ONLY that hash) — a page cannot raise its
+  own window, so the CLI activates the default browser through LaunchServices (`bringBrowserForward`, no AppleScript)
+  and the page calls `window.focus()` and marks its title "▶ Quick try — …" for 10 s (an installed dashboard app is
+  its own window: the title is the cue); with no page open, a browser still signed in for this port
+  (`WebSessionStore.keptSessions`) gets the plain `origin/#/try/AGENT`, else a new link with
+  `&to=try/AGENT` in its fragment (the bootstrap strips the capability first). The New Sandbox review shows the plan
+  for `up` (`project/preview`'s `plan`), and its name follows the agent/base until edited. `WebTryTests`;
+  `probes/617-*/stageD/browser-try.mjs` (headless Chrome, scratch profile, screenshots).
+- **The start sequence** (617.05, owner: "a confusing flash of activity"; one stable page): from Start the sandbox
+  page is there at once (header, action bar, try banner, the nav entry) and NOTHING later moves it. 617 (owner, 2026-10-15:
+  "fix the delay when clicking the Try button"): `tryCreate` moves in the click's own frame — Start says Starting… (spinner), both
+  modals close, the try's page draws its header from the PLAN (`state.pendingTry`, `drawPendingTry`: the same parts as its detail
+  will, so nothing moves; the nav lists it) and an indeterminate "Preparing NAME" panel, while the create runs behind it (a 404
+  meanwhile is the pending try, not "gone"). A create that fails stays on that page: "NAME was not made", the reason, Back to setup
+  (`backToTrySetup`: the setup again with its plan and the error). `probes/617-*/stageE/browser-try-start-latency.mjs` (feedback ≤
+  100 ms, modals closed ≤ 300 ms; was 0.9–1.8 s). The terminal area shows, in the same place: (1) while the image is prepared, the build panel
+  (`components/start-progress.js`, over `#terminals`): a bar for the whole build — the preparation's own estimate when
+  this Mac built the recipe before (`seconds / (seconds + remainingSeconds)`), else a fixed weight per step by its
+  wording; a download fills its share by bytes (`transferFraction`); a step past its estimate creeps; monotonic per
+  operation (`state.spBar`) — "Step N of M · step · elapsed", the finished steps (`WebOperation.progress`), the raw
+  output under "Show details"; a cached image has no preparation, so no bar; a failure keeps the panel (error, log,
+  Start again / Dismiss); a running preparation is JOINED (the host's single flight), never started again; the header
+  pill says Preparing…, then Booting…; (2) tab zero, **Console** — terminal mode `console` (ticket `{"mode":"console"}`,
+  no session, no size): the bridge's `consoleLoop` streams `data.bootConsole` (what `doz console NAME --follow` shows)
+  as inert text, read-only, never an attach; first in the strip, icon `cpu`, no number, no close box, never persisted;
+  it exists exactly while the VM is powered on (`syncConsoleTab` on each sandbox refresh and on the pending pane's phase);
+  (3) the agent's tab: `openPendingTerminal` makes it at Start, laid out but `visibility: hidden` and tab-less
+  (`t.pending`), its ticket `quiet` — the bridge then never enters the boot view for it (the old boot view wrote
+  `console --follow` into the agent's own pane: vminitd's lines for every exec of the start in Codex's tab, owner's shot
+  7625) — and it becomes a tab on its first binary frame: selected, or with `ui.boot_view_on_start` (now default
+  FALSE: "stay on Console") an activity dot. No blank terminal, no "Attaching…". What the agent was refused is the
+  header's "N denied" menu (`deniedChip` → Review in Network), never a banner. A start from a Sandboxes row is the
+  plain start; its page shows Console when opened. `WebTerminalUnitTests` (console + quiet decode);
+  `probes/617-*/stageE/browser-start-sequence.mjs` (records the page every 100 ms: nothing moves, the stages in
+  order, the bar never back, no vminitd byte on the agent's socket; screenshots 22–25). The panel is never a card and
+  is at its final width from its first frame (`.start-progress .sp-box`: the terminal area up to `--build-max`, 1100 px —
+  it used to open as a 720 px card until the preparation's data arrived); while it shows, the action bar's status slot
+  has no running line (`paintRowOps`: a failure and the result still show there; a Sandboxes row keeps its line). **The build log** (owner: "keep its log as a
+  small tab to the LEFT of Console"): the library hands each bake step's WHOLE output (`StepOutputLines`, every line in
+  order, inert, head 200 + tail 1800) as `SandboxEvent.stepOutput` — never a `HostEvent` (runPreparation passes it to
+  `HostCore.buildOutputSink`, a task-local the preparation sets, so no client, host.log or Activity ever sees it); the
+  preparation keeps it with its steps and, when it ends (done or failed), writes `<store>/build-logs/<image>.json`
+  (`BuildLogs`, 0600 in 0700, atomic, ≤ 8000 lines; Resources: Dozer's own records) — so it survives a ui and a host
+  restart, and a sandbox whose start built nothing shows the log of the build that made its image (none kept → no
+  tab). Read by the host op `build-log` (by sandbox; in-process when no host runs) → `GET /api/v1/sandboxes/NAME/build-log`
+  (`WebBuildLog`: `BuildLogs.render` — the steps with their times, then each step's output, inert again). The page:
+  `syncBuildLogTab` (each sandbox refresh and each preparations event) opens `openBuildLogTerminal` — a saved-mode,
+  socketless record (`t.buildlog`, like a Boot log; keys never wake) — only after the read found one; hidden while its
+  image builds and replaced when that build ends; first in the strip, icon `list-checks`, tooltip "Build log", no
+  close box, never chosen by itself, never persisted, kept through shutdown and sleep (`promoteSaved` skips it;
+  `isAux` in `core/terminals.js` names the page's own panes). `BuildLogsTests`, the HTTP test.
+  **It is the record of how the image was made** (owner: "including all the commands to build and configure"): the
+  baker hands out `BakePlan` once per bake (`SandboxEvent.bakePlan`, built by `ImageBaker.plan` — the SAME argv, user and
+  environment each exec gets, the checks, the trim, the inputs: base@digest, kernel, guest init, the agent package and
+  version/integrity, the bake policy's rules), each check's output is a `stepOutput` too, and nothing a bake DOES changes
+  (bake keys, scripts, checks — `RecipePinTests`). `BuildLogDocument` (DozerHost) is the ONE builder: the inputs (early
+  steps with "cached"), each step under a display-only plain title (`BuildLogs.title(ofStep:)`/`title(ofCheck:)` —
+  never part of a key), its command or script verbatim, every file its script writes (`files(inScript:)`: the
+  `cat > PATH <<'TAG'` heredocs), its output; the checks (command, expects, got); the trim. The web tab draws it as
+  HTML (`components/build-log.js`, text only), `doz image log IMAGE [--json]` prints `plainText(document)` (host op
+  `build-log` with `image`). Every string is scrubbed when the log is saved and again when shown (`BuildLogs.redact`:
+  key/token/JWT/placeholder/URL-password/private-key shapes → "[redacted]"; a credential-named variable dropped) and
+  made inert (`verbatim`: whole escape sequences and control characters removed, indentation kept). A log kept by an
+  earlier build has no plan and says so. Waiting for an operation is
+  EVENT-driven (`waitOp`/`waitForOp` settle in `trackOp`): a hidden tab's short timers run once a minute (Chrome's
+  intensive throttling — the owner's 68 s pause). `browser-try-twice.mjs` (throttling emulated), `browser-start-progress.mjs`.
+- **A try's folder and bridges** (owner, after the demo): a try gets a NEW EMPTY folder under `defaults.projects_dir`
+  (`CreatePlanner.tryName` skips a name whose folder holds anything; a given one is a plan problem), recorded as
+  `SandboxConfig.trialFolder` ONLY when Dozer made it; `rm` removes it with the sandbox when empty (host), the CLI asks
+  about one with files (`cleanUpTryFolder`). The plan's reach says the folder and the bridges (`folder`/`bridge` lines).
+  Copying works in every agent: sessions get `GROK_OSC52_SINK=1` while the clipboard bridge is on
+  (`HostCore.withClipboardSink` — Grok Build otherwise picks no OSC 52 route in a VM), and `xclip`/`xsel`/`wl-copy`
+  are the guest's `doz-copy` shim (`GuestCommand.copyShim`, beside the open shim, stamp — bump it on any change):
+  OSC 52 out, reads refused, PRIMARY not sent. `CopyShimTests` runs the real shim.
+- **`doz get` / `doz put` / `doz cp`** (`FileCopy.swift`, `HostCore+Copy.swift`, `HostServer.copy`, `FileCommands.swift`):
+  the host op `copy` (never a `WebAction`) checks in the guest FIRST (`CopyPaths.getCheckScript`/`putCheckScript` —
+  a missing path, a link escaping the folder, an existing destination without `--force`, who may write), answers
+  `CopyReady`, then the connection carries `CopyFrame`s (type + length + payload, ≤ 1 MiB) and a tar stream over
+  `Sandbox.openGuestStream` (now with `user:` and its stderr) — no new guest→host channel; it ends with `CopyDone`.
+  The Mac side is `/usr/bin/tar` (`COPYFILE_DISABLE`, gnutar format, no xattrs/ACLs/flags; `-s …/S` renames —
+  uppercase flags SUPPRESS in bsdtar's `-s`, `~` is the match): unpacked into a `mkdtemp` folder BESIDE the
+  destination, checked again for escaping links (`LocalCopy.escapingLinks`), then `LocalCopy.place` (a rename;
+  `--force`: a file replaces a file, a folder merges) — never into the store (`LocalCopy.inStore`, links resolved).
+  In the guest, put runs as the image's user, as root only where it cannot write (`-o`: never the archive's owner).
+  Woken/started as `exec`. `FileCopyTests` (the scripts run under /bin/sh), `probes/617-*/stageC/copy-run.sh` (the VM
+  proof: an isolated try and busybox).
+- **`doz search` and the index** (`DirectorySearch.swift`, `DirectoryIndex.swift`, `Recipes/known.json`): exit codes
+  0 / 8 limited / 6 coming / 2 unknown; a known entry whose id a recipe gains is a test failure (the recipe wins).
+- **Read model for later stages** (data + tests only so far): `auth.methods`, `gateways[]` (support level per model
+  gateway, `how` as templates over `{gateway.endpoint.<id>}`, `{placeholder}`, `{model}`), `capabilityTags` (derived
+  from the data; only `headless` is declared). `UsageSchema.agents` must contain every agent id (`RecipeHostTests`).
+
 ### Browser terminals
 
 - **A terminal is two steps.** `POST …/terminal-ticket` (CSRF, strict body) mints a 256-bit ticket that
@@ -1711,6 +2054,7 @@ make test-cli-bases  # 596: base × agent — cli, Dockerfiles via a fake contai
 make test-cli-permissions # 597: agent permissions — net show/allow/deny/permissions, create --allow, Claude Code's hosts reached under Standard, suggestions, live changes, facts, stored by name (prepares claude-code; network)
 make test-cli-points # 594 W25–W27: point names/lookup, check before asking, exec/run start an off sandbox
 make test-cli-agentsudo # 594 W23: the agent's sudo in a fresh claude-code sandbox (prepares it; network), --no-agent-sudo, the setting at the next boot, root reaches no more
+make recipe-check RECIPES=all # 617: every recipe for real — build, verify, a fresh try, its check turn against a stand-in provider, keys, leak guard, OSC 7501 states (report: $RECIPE_STORE/report.json)
 make test-cli-codex # 599i: Codex through seams (a fake OpenAI over TLS, the browser seam): Dozer's own ChatGPT sign-in, the swap, the Mac's renewal, no token in the guest, an API key, Alpine (prepares codex + alpine-codex)
 make test-cli-github # 599d: GitHub as the user through seams (a fake GitHub, a fake gh, a throwaway ssh-agent): swap, read-only, push, no leak, identity, key source, off, SSH
 make test-cli-openfiles # 599b: workspace files opened on the Mac through the opener seam — every refusal, isolated, off, --app, URLs as before
@@ -1735,6 +2079,13 @@ would use the default store, read the Mac's real `~/.codex`, or touch the login 
 items. The only way out is explicit: `DOZ_TEST_REAL_MAC=1`. A new code path that reads something of the
 Mac's own must go through a seam the Makefile sets (`CredentialServices.forHost`, `macLoginKeychain`) —
 `TestSafetyTests` pins the decisions.
+
+**Paths are SHOWN with `~`** (617): `DisplayPath` (DozerHost: `tilde`, `tildeIn`, `homes`) and its twin `core/paths.js`
+(`tildePath`, `tildeIn`, fed the session info's `homes`) are the ONE way a Mac path is shown — the sidebar's store, the
+try banner, the Guide's facts, the details' workspace, a Dockerfile, the plan's lines, Doctor, and the CLI's human lines
+that name a folder. Display only: stored values, requests and every JSON field stay absolute. Home is the REAL one
+(`TestSafety.realHome`); the seam `DOZ_TEST_HOME=/tmp/…` stands in for it on screen only, and only in a guarded run (the
+release post's screenshots: `probes/617-*/stageE/release-shots.mjs`). Nothing else reads it.
 
 ### The VM integration tests need an ENTITLED host — how
 

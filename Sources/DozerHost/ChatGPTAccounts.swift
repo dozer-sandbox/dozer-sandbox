@@ -263,7 +263,7 @@ extension HostCore {
             let why = "the account \(n) this sandbox uses no longer exists — doz account use \(m.name) ACCOUNT"
             clearChatGPT(why)
             sb.setCredential(.openai, secret: nil, expiresAt: nil, environment: [:], notice: why)
-        case .record(let a) where !AgentCredentials.accepts(sb.spec.imageSpec?.name, a.kind):
+        case .record(let a) where !AgentCredentials.accepts(sb.spec.imageSpec?.name, a):
             let why = AgentCredentials.sandboxProblem(image: sb.spec.imageSpec?.name, account: a, missing: nil)
             clearChatGPT(why)
             sb.setCredential(.openai, secret: nil, expiresAt: nil, environment: [:], notice: why)
@@ -310,15 +310,8 @@ extension HostCore {
                 }
             } else {
                 clearChatGPT(nil)
-                let read = services.keychain.read(service: a.keychainService ?? "", account: a.adopted == true ? nil : Keychain.user)
-                if let secret = read.value {
-                    sb.setCredential(.openai, secret: secret, expiresAt: nil, environment: [:],
-                                     notice: "the OpenAI key of account \(a.name) is not available — doz account add \(a.name) --openai-key --force")
-                } else {
-                    sb.setCredential(.openai, secret: nil, expiresAt: nil, environment: [:],
-                                     notice: "the keychain item \(a.keychainService ?? "?") of account \(a.name) is \(read == .locked ? "locked" : "missing") — "
-                                             + (read == .locked ? "unlock the login keychain" : "add it again: doz account add \(a.name) --openai-key --force"))
-                }
+                // 617: from the keychain, or read on use from 1Password, AWS or a command.
+                applyKeySecret(m, a, binding: .openai, addAgain: "doz account add \(a.name) --openai-key --force")
             }
         }
     }

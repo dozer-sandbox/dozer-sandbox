@@ -1,0 +1,438 @@
+{
+  "args" : {
+    "version" : {
+      "buildArg" : "NANOBOT_VERSION",
+      "default" : "0.3.5",
+      "description" : "The nanobot release Dozer installs (its pin).",
+      "pattern" : "[0-9]+\\.[0-9]+(\\.[0-9]+)?([-+][0-9A-Za-z.-]+)?"
+    }
+  },
+  "author" : "HKU Data Intelligence Lab",
+  "capabilities" : [
+    {
+      "config" : {
+        "dozer" : {
+          "excluded" : [
+
+          ],
+          "model" : {
+            "hosts" : [
+              {
+                "host" : "api.openai.com",
+                "reason" : "OpenAI — when the sandbox's key is OpenAI's"
+              },
+              {
+                "host" : "api.x.ai",
+                "reason" : "xAI — when the sandbox's key is xAI's"
+              },
+              {
+                "host" : "generativelanguage.googleapis.com",
+                "reason" : "Google AI — when the sandbox's key is Google AI's"
+              },
+              {
+                "host" : "openrouter.ai",
+                "reason" : "OpenRouter — when the sandbox's key is OpenRouter's"
+              },
+              {
+                "host" : "ai-gateway.vercel.sh",
+                "reason" : "Vercel AI Gateway — when the sandbox's key is Vercel AI Gateway's"
+              }
+            ],
+            "id" : "model:nanobot",
+            "phrase" : "talk to your AI model",
+            "summary" : "nanobot's model — the provider or gateway its key is for (OpenAI, xAI, Google AI, OpenRouter or Vercel AI Gateway), with an API key. Needed for nanobot to answer.",
+            "title" : "Talk to its model provider"
+          },
+          "update" : [
+
+          ],
+          "vendor" : [
+            {
+              "host" : "openaipublic.blob.core.windows.net",
+              "paths" : [
+                "/encodings/"
+              ],
+              "reason" : "tiktoken (a library nanobot uses to count tokens) downloads its tokenizer files from OpenAI's public blob store at the first turn"
+            }
+          ]
+        },
+        "runtime" : {
+          "allow" : [
+            "api.openai.com:443",
+            "api.x.ai:443",
+            "generativelanguage.googleapis.com:443",
+            "openrouter.ai:443",
+            "ai-gateway.vercel.sh:443",
+            "openaipublic.blob.core.windows.net:443"
+          ]
+        }
+      },
+      "type" : "com.docker.sandbox/network-policy@1"
+    },
+    {
+      "config" : {
+        "apiKey" : {
+          "inject" : [
+            {
+              "domain" : "api.x.ai",
+              "format" : "Bearer %s",
+              "header" : "authorization"
+            }
+          ],
+          "name" : "XAI_API_KEY",
+          "proxyManaged" : true
+        },
+        "dozer" : {
+          "accounts" : [
+            "key"
+          ]
+        },
+        "phase" : "runtime",
+        "service" : "xai"
+      },
+      "description" : "xAI API access",
+      "type" : "com.docker.sandbox/credential@1"
+    },
+    {
+      "config" : {
+        "path" : "/home/agent/.nanobot"
+      },
+      "type" : "com.docker.sandbox/volume@1"
+    },
+    {
+      "config" : {
+        "binary" : "nanobot",
+        "integrity" : "sha512-DccObCniXz2dUajdZrvWhwSjrJMH7K45OqpiUovWFjhOwIvZz2DBMF0MSDPLYh2z+PSf877yAnR5DNmhYQLLaA==",
+        "kind" : "pypi",
+        "package" : "nanobot-ai",
+        "requirements" : [
+          "annotated-doc==0.0.5 --hash=sha256:117bac03a25ede5df5440e855b32d556049ca169ead221505badf432fed4b101",
+          "annotated-types==0.8.0 --hash=sha256:f072f4d804ea359e4eaf198b1af7a8b0943881a87f31bb764f8bf219bb9419e0",
+          "anthropic==0.125.0 --hash=sha256:3486013602eca76d8b12540764e53654f02cf4951110bca86cf06e67428a9f21",
+          "anyio==4.15.1 --hash=sha256:6152fdbbf9a77fdec97731721bebf7c4c44f7c29b424b0065826173efc7ed101",
+          "attrs==26.1.0 --hash=sha256:c647aa4a12dfbad9333ca4e71fe62ddc36f4e63b2d260a37a8b83d2f043ac309",
+          "certifi==2026.7.22 --hash=sha256:62f22742b58a1a33014a2b6b706588a8d7e2a88ae7bd1a6ebe8c992928483775",
+          "cffi==2.1.1 --hash=sha256:f16c709686a78c727bbbf059f92b0bf41c6fc60deec706d2dc19f529175a6125",
+          "chardet==5.2.0 --hash=sha256:e1cf59446890a00105fe7b7912492ea04b6e6f06d4b742b2c788469e34c82970",
+          "charset-normalizer==3.5.2 --hash=sha256:849df64e889b2e17230d58410a03dba311a65b163508fd33679b2b737d4b7858",
+          "click==8.5.0 --hash=sha256:255bc9599cf7748b4b1a446ccc735421bd08a2ae529a8b88597d3de5664ee360",
+          "croniter==6.2.4 --hash=sha256:8ef3d544107a5c05a150a2d78f8bf5a8eb9c5c4d93405a736b824109574e3f4d",
+          "cryptography==50.0.2 --hash=sha256:87e9ce85beb6b328ba370cc6e6aea483c92617b4c95b1d33a49297eb662bfb04",
+          "cssselect==1.3.0 --hash=sha256:56d1bf3e198080cc1667e137bc51de9cadfca259f03c2d4e09037b3e01e30f0d",
+          "ddgs==9.16.0 --hash=sha256:175d9198c958a263f51a06a54368ba0b41294942c0cd29f4aa71be03dbcd5f4a",
+          "defusedxml==0.7.1 --hash=sha256:a352e7e428770286cc899e2542b6cdaedb2b4953ff269a210103ec58f6198a61",
+          "distro==1.9.0 --hash=sha256:7bffd925d65168f85027d8da9af6bddab658135b840670a223589bc0c8ef02b2",
+          "docstring_parser==0.18.0 --hash=sha256:b3fcbed555c47d8479be0796ef7e19c2670d428d72e96da63f3a40122860374b",
+          "dulwich==0.25.2 --hash=sha256:e7ec5bc1e769b19312d1ae431981096aa046925e9cb278b8efff6bebdb679b12",
+          "et_xmlfile==2.0.0 --hash=sha256:7a91720bc756843502c3b7504c77b8fe44217c85c537d85037f0f536151b2caa",
+          "filelock==4.1.1 --hash=sha256:3f4a557945a7b0f95efeb1f432267affe5d45ac8ddde2aed1b97ebb62382c089",
+          "h11==0.16.0 --hash=sha256:63cf8bbe7522de3bf65932fda1d9c2772064ffb3dae62d55932da54b31cb6c86",
+          "httpcore2==2.13.1 --hash=sha256:e1e05d4f25f7d7d496bfb96748f6f4b67657b03da069b3a68c36069f3db73d0a",
+          "httpcore==1.0.9 --hash=sha256:2d400746a40668fc9dec9810239072b40b4484b640a8c38fd654a024c7a1bf55",
+          "httpx-sse==0.4.3 --hash=sha256:0ac1c9fe3c0afad2e0ebb25a934a59f4c7823b60792691f779fad2c5568830fc",
+          "httpx2==2.13.1 --hash=sha256:6dff50fabc270ee5fd25d845d0b078ed20564579744d6d962850975996d2f9a4",
+          "httpx==0.28.1 --hash=sha256:d909fcccc110f8c7faf814ca82a9a4d816bc5a6dbfea25d6591d6985b8ba59ad",
+          "idna==3.20 --hash=sha256:ab7ae7122974553370f0bdb919e1a960b2cd1bc1ef0276416d896db81c14582c",
+          "jinja2==3.1.6 --hash=sha256:85ece4451f492d0c13c5dd7c13a64681a86afae63a5f347908daf103ce6d2f67",
+          "jiter==0.17.0 --hash=sha256:4e3f052c671d5f425cca5ea5901cf11a831369fba4a55a3862cab93c323b4c3b",
+          "json_repair==0.64.0 --hash=sha256:3bf14cf14d8ae96f7bc467e6964d8accd52aaad084f973e38ebe4e43f9d051e4",
+          "jsonschema-specifications==2025.9.1 --hash=sha256:98802fee3a11ee76ecaca44429fda8a41bff98b00a0f2838151b113f210cc6fe",
+          "jsonschema==4.26.0 --hash=sha256:d489f15263b8d200f8387e64b4c3a75f06629559fb73deb8fdfb525f2dab50ce",
+          "loguru==0.7.3 --hash=sha256:31a33c10c8e1e10422bfd431aeb5d351c7cf7fa671e3c4df004162264b28220c",
+          "lxml==6.1.3 --hash=sha256:5cffe18571ccc51d742cd08cbb3f8b756de9311d18c7ea98f5d92f37b8fb60c2",
+          "lxml_html_clean==0.4.5 --hash=sha256:c76fcadd1e5bfb9b8bafc2200d51e4e78eb0dad67f56881c21dfb6484c7e7746",
+          "markdown-it-py==4.2.0 --hash=sha256:9f7ebbcd14fe59494226453aed97c1070d83f8d24b6fc3a3bcf9a38092641c4a",
+          "markupsafe==3.0.4 --hash=sha256:7018d4af1cd272e847aa5917983ab5e83e4f6579f9dbfecd4a79c0ca80b144c2",
+          "mcp==1.30.0 --hash=sha256:666edb5009503e1047c9d60346a756f94b261f05cc2625f23d41c728ffc484d0",
+          "mdurl==0.1.2 --hash=sha256:84008a41e51615a49fc9966191ff91509e3c40b939176e643fd50a5c2196b8f8",
+          "nanobot-ai==0.3.5 --hash=sha256:eb75bbdb30340a78a4df6ad4ce1f9415b047a901b1c31d4070e1333db7a6286c",
+          "oauth-cli-kit==0.1.6 --hash=sha256:d4a73beae7333ae642a9e5766ab0a04de53279667fefdf064c23db77a3494e7f",
+          "openai==3.29.0 --hash=sha256:860d3bad424c5d38cd9ba0a0a2050d558b58ce027596a39f9ccbc0f51a2090b7",
+          "openpyxl==3.1.5 --hash=sha256:5282c12b107bffeef825f4617dc029afaf41d0ea60823bbb665ef3079dc79de2",
+          "packaging==26.3 --hash=sha256:d7193f7c8e4e93f444fde0262bf90af30e16fa0ad0ad44cb553c87339b23cd1c",
+          "pillow==12.3.0 --hash=sha256:f7401aebd7f581d7f83a439d87d474999317ee099218e5ad25d125290990ba65",
+          "platformdirs==4.13.0 --hash=sha256:3dbcf4cd708f21cf876c4eaa90e58412bc4f033d87143f41b1493ff77c25b7e1",
+          "primp==2.0.1 --hash=sha256:aa85a55b1c53ef8c2d14f1c61f0b7ab0ff300b349b2768a52d6c2f3f3f9ca80c",
+          "prompt_toolkit==3.0.53 --hash=sha256:01c0891d7f9237d5e339f7d3e42cdae80b7534abb1c7c0e3352efba6231492f2",
+          "pycparser==3.11 --hash=sha256:51d5a8ba2be0bbe440b99d2112604c95bbbc3c2748a64260186c541e1729cd80",
+          "pydantic-settings==2.15.0 --hash=sha256:0ba092c291c94baceb5eff768aa0d56400a457585bc0175925a5a5510303da42",
+          "pydantic==2.14.1 --hash=sha256:9195d967ec791692a04438115466764fb8b9a27b31f14a760437694f40d6b454",
+          "pydantic_core==2.50.1 --hash=sha256:409e0ea40ec30d9158f33574fd758e689f6045a0f2596701828c27816ca9687d",
+          "pygments==2.21.0 --hash=sha256:2363c69b61c4a97c838da3b130dcd6468f4848992b21a82f2a63ec34377137d9",
+          "pyjwt==2.15.1 --hash=sha256:42d59d631f7768a1028a64c7ff581a9bf7519804daf91fc5b6c56e30eec5e193",
+          "pypdf==5.9.0 --hash=sha256:be10a4c54202f46d9daceaa8788be07aa8cd5ea8c25c529c50dd509206382c35",
+          "python-dateutil==2.9.0.post0 --hash=sha256:a8b2bc7bffae282281c8140a97d3aa9c14da0b136dfe83f850eea9a5f7470427",
+          "python-docx==1.2.0 --hash=sha256:3fd478f3250fbbbfd3b94fe1e985955737c145627498896a8a6bf81f4baf66c7",
+          "python-dotenv==1.2.4 --hash=sha256:42269a8a5b3fd54ffa6f3d84b18abed50064717576b4ecf03dc4a55d8aa04fdc",
+          "python-multipart==0.0.32 --hash=sha256:ff6d3f776f16878c894e52e107296ffc890e913c611b1a4ec6c44e2821fe2e23",
+          "python-pptx==1.0.2 --hash=sha256:160838e0b8565a8b1f67947675886e9fea18aa5e795db7ae531606d68e785cba",
+          "pyyaml==6.0.3 --hash=sha256:ee2922902c45ae8ccada2c5b501ab86c36525b883eff4255313a253a3160861c",
+          "qrcode==8.2 --hash=sha256:16e64e0716c14960108e85d853062c9e8bba5ca8252c0b4d0231b9df4060ff4f",
+          "questionary==2.1.1 --hash=sha256:a51af13f345f1cdea62347589fbb6df3b290306ab8930713bfae4d475a7d4a59",
+          "rapidfuzz==3.14.6 --hash=sha256:0b34b7ee4f4f760690d6477163aabbec05705b5dd764cb6c3a6ba95aa1fffc42",
+          "readability-lxml==0.9 --hash=sha256:f43cf9ee74a15996581ae9ba1968d224d54344f6d134738bd0a5d5ea4b3ef55f",
+          "referencing==0.37.0 --hash=sha256:381329a9f99628c9069361716891d34ad94af76e461dcb0335825aecc7692231",
+          "regex==2026.9.29 --hash=sha256:e11edba5bc344a32b029a7af9d4b3173982dd79eeafa0b9dbd787364414b0509",
+          "requests==2.34.2 --hash=sha256:2a0d60c172f83ac6ab31e4554906c0f3b3588d37b5cb939b1c061f4907e278e0",
+          "rich==14.3.4 --hash=sha256:07e7adb4690f68864777b1450859253bed81a99a31ac321ac1817b2313558952",
+          "rpds-py==2026.9.1 --hash=sha256:457866b85daf5034296666168b84a69e0b2e89dc4f1af102b46f6448a60b9063",
+          "setproctitle==1.3.8 --hash=sha256:8bb543b4b58ad839f7f0d335a7f4b40cef6989952e7239de3532de0b7771607e",
+          "shellingham==1.5.4 --hash=sha256:7ecfff8f2fd72616f7481040475a65b2bf8af90a56c89140852d1120324e8686",
+          "six==1.17.0 --hash=sha256:4721f391ed90541fddacab5acf947aa0d3dc7d27b2e1e8eda2be8970586c3274",
+          "sniffio==1.3.1 --hash=sha256:2f6da418d1f1e0fddd844478f41680e794e6051915791a034ff65e5f100525a2",
+          "socksio==1.0.0 --hash=sha256:95dc1f15f9b34e8d7b16f06d74b8ccf48f609af32ab33c608d08761c5dcbb1f3",
+          "sse-starlette==3.5.0 --hash=sha256:3e6e1070df3f0f5d9cea81496de92dbb72f6721871d99748ece67441dd8b7997",
+          "starlette==1.8.0 --hash=sha256:dfdd6b29c26483288088d990eee59631dedadd66ce20d203402a7ca8e3c4656f",
+          "tiktoken==0.14.0 --hash=sha256:2157f52e4b4d7ac5ecc7457b3716834706e7ef9a46f5144029bfeb7cf71f4e06",
+          "truststore==0.10.5 --hash=sha256:9aaaedaefaf06d8b206278cf8b5012bc897f485a874503501e12d776df78951c",
+          "typer==0.27.3 --hash=sha256:e50022f28b82a86313e54501317a1db64bf8f8d036ff8cfe5ca7e47675454aff",
+          "typing-inspection==0.4.4 --hash=sha256:65b8397ba37ccbce054456aaccddfc91e6e3083c92824df348d96ca832f3f147",
+          "typing_extensions==4.16.0 --hash=sha256:481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8",
+          "tzdata==2026.5 --hash=sha256:b683bd1b6659ddcd810ff02ad09ba821d4bf1065072805063eb35c49617905ac",
+          "tzlocal==5.4.4 --hash=sha256:aae09f0126a8a86fa736be266eb4a471380d26a0de3bc14844e7821fee3e2a15",
+          "urllib3==2.8.0 --hash=sha256:0cf3cae568d36aa9576b28dfb35f11328f1cb974ca7647d9475ebb86c75ac6e3",
+          "uvicorn==0.54.0 --hash=sha256:505bdb0f318731d45f1f712071fc781a8981f6847a31c902c9f5e652d4f67faf",
+          "watchfiles==1.3.0 --hash=sha256:4af9c464d410e8c44b58ddf1cbec7c3a02c1cb2c6c80df9c74659ba2fbda0ab5",
+          "wcwidth==0.9.2 --hash=sha256:674b518af28d38ee645ff97b74f5760abee5fad4bac74413bfc4b881ef2ce724",
+          "websockets==16.1.1 --hash=sha256:bae954c382e013d5ea5b190d2830526bfa45ad121c326da0049b8c769f185db6",
+          "xlsxwriter==3.2.9 --hash=sha256:9a5db42bc5dff014806c58a20b9eae7322a134abb6fce3c92c181bfb275ec5b3"
+        ]
+      },
+      "type" : "com.dozersandbox/install@1"
+    },
+    {
+      "config" : {
+        "check" : {
+          "argv" : [
+            "nanobot",
+            "agent",
+            "-m",
+            "say ok"
+          ],
+          "expect" : "DOZ_FAKE_OK"
+        },
+        "command" : [
+          "nanobot"
+        ],
+        "env" : {
+
+        },
+        "first_run" : [
+          {
+            "file" : "~/.nanobot/config.json",
+            "set" : {
+              "agents.defaults.modelPreset" : "primary",
+              "modelPresets.primary.model" : "${DOZ_MODEL}",
+              "modelPresets.primary.provider" : "custom",
+              "providers.custom.apiBase" : "${DOZ_MODEL_BASE_URL}",
+              "providers.custom.apiKey" : "${DOZ_MODEL_API_KEY}"
+            }
+          }
+        ],
+        "no_prompts_args" : [
+
+        ],
+        "passthrough" : [
+          "--version",
+          "--help",
+          "-h",
+          "onboard",
+          "status",
+          "provider"
+        ],
+        "state_env" : {
+
+        },
+        "status" : "none",
+        "verify" : [
+          {
+            "argv" : [
+              "nanobot",
+              "--version"
+            ],
+            "expect" : "${{ kit.args.version }}"
+          }
+        ]
+      },
+      "type" : "com.dozersandbox/launch@1"
+    },
+    {
+      "config" : {
+        "methods" : [
+          {
+            "accounts" : [
+              "key"
+            ],
+            "checked" : "2026-10-14",
+            "keys_page" : "https://console.x.ai/",
+            "kind" : "api-key",
+            "note" : "nanobot is set up with its custom OpenAI-compatible provider pointed at the chosen source (providers.custom from DOZ_MODEL_BASE_URL and DOZ_MODEL_API_KEY, the model from DOZ_MODEL); change it in ~/.nanobot/config.json.",
+            "provider" : "xai"
+          },
+          {
+            "accounts" : [
+              "openai-key"
+            ],
+            "checked" : "2026-10-14",
+            "keys_page" : "https://platform.openai.com/api-keys",
+            "kind" : "api-key",
+            "note" : "nanobot through OpenAI: doz try nanobot --provider openai (or choose it in the try setup); the model with --model.",
+            "provider" : "openai"
+          },
+          {
+            "accounts" : [
+              "key"
+            ],
+            "checked" : "2026-10-14",
+            "keys_page" : "https://aistudio.google.com/apikey",
+            "kind" : "api-key",
+            "note" : "nanobot through Google AI: doz try nanobot --provider google (or choose it in the try setup); the model with --model.",
+            "provider" : "google"
+          },
+          {
+            "accounts" : [
+              "key"
+            ],
+            "checked" : "2026-10-14",
+            "keys_page" : "https://openrouter.ai/keys",
+            "kind" : "api-key",
+            "note" : "nanobot through OpenRouter: doz try nanobot --gateway openrouter (or choose it in the try setup); the model with --model.",
+            "provider" : "openrouter"
+          },
+          {
+            "accounts" : [
+              "key"
+            ],
+            "checked" : "2026-10-14",
+            "keys_page" : "https://vercel.com/docs/ai-gateway/authentication-and-byok",
+            "kind" : "api-key",
+            "note" : "nanobot through Vercel AI Gateway: doz try nanobot --gateway vercel-ai-gateway (or choose it in the try setup); the model with --model.",
+            "provider" : "vercel-ai-gateway"
+          }
+        ]
+      },
+      "type" : "com.dozersandbox/auth@1"
+    },
+    {
+      "config" : {
+        "entries" : [
+          {
+            "checked" : "2026-10-14",
+            "endpoint" : "v1",
+            "evidence" : "make recipe-check: its check turn through a stand-in OpenRouter (doz try with --gateway openrouter; models@1)",
+            "gateway" : "openrouter",
+            "how" : {
+              "env" : {
+                "DOZ_MODEL" : "${{ dozer.model }}",
+                "DOZ_MODEL_BASE_URL" : "${{ dozer.gateway.endpoint.v1 }}"
+              }
+            },
+            "level" : "verified",
+            "shape" : "openai-chat"
+          },
+          {
+            "checked" : "2026-10-14",
+            "endpoint" : "v1",
+            "evidence" : "make recipe-check: its check turn through a stand-in Vercel AI Gateway (doz try with --gateway vercel-ai-gateway; models@1)",
+            "gateway" : "vercel-ai-gateway",
+            "how" : {
+              "env" : {
+                "DOZ_MODEL" : "${{ dozer.model }}",
+                "DOZ_MODEL_BASE_URL" : "${{ dozer.gateway.endpoint.v1 }}"
+              }
+            },
+            "level" : "verified",
+            "shape" : "openai-chat"
+          }
+        ]
+      },
+      "type" : "com.dozersandbox/gateways@1"
+    },
+    {
+      "config" : {
+        "default" : "xai",
+        "shapes" : [
+          {
+            "env" : {
+              "DOZ_MODEL" : "${{ dozer.model }}",
+              "DOZ_MODEL_BASE_URL" : "${{ dozer.base_url }}"
+            },
+            "key_env" : [
+              "DOZ_MODEL_API_KEY"
+            ],
+            "shape" : "openai-chat"
+          }
+        ]
+      },
+      "type" : "com.dozersandbox/models@1"
+    },
+    {
+      "config" : {
+        "checked" : "2026-10-14"
+      },
+      "type" : "com.dozersandbox/currency@1"
+    },
+    {
+      "config" : {
+        "categories" : [
+          "personal-agent"
+        ],
+        "default_base" : "debian",
+        "icon" : "nanobot",
+        "kind" : "ai-tool",
+        "platforms" : {
+          "glibc" : true,
+          "musl" : false
+        },
+        "tags" : [
+          {
+            "checked" : "2026-10-14",
+            "evidence" : "A2 VM proof: its check turn answered DOZ_FAKE_OK through the fake provider (make recipe-check; probes/617-*/recipes/nanobot)",
+            "level" : "verified",
+            "notes" : [
+              "nanobot agent -m PROMPT"
+            ],
+            "tag" : "headless"
+          }
+        ],
+        "terms" : "Your API key of the provider or gateway you choose (xAI by default). Its gateway (chat channels) and web UI need a background service and a forwarded port, which Dozer does not offer yet."
+      },
+      "type" : "com.dozersandbox/directory@1"
+    },
+    {
+      "config" : {
+        "docs" : "https://github.com/HKUDS/nanobot",
+        "intro" : "nanobot is a small personal agent: its session on the left is its terminal UI, and `nanobot agent -m` answers one message.",
+        "steps" : [
+          {
+            "command" : "nanobot agent -m \"say ok\"",
+            "text" : "Check it answers."
+          },
+          {
+            "text" : "Talk to it in its session on the left."
+          },
+          {
+            "command" : "nanobot agent -m \"what can you do?\"",
+            "text" : "One message without the UI."
+          }
+        ],
+        "tips" : [
+          "Its settings are `~/.nanobot/config.json` (kept on the sandbox's state disk)."
+        ]
+      },
+      "type" : "com.dozersandbox/guide@1"
+    }
+  ],
+  "description" : "A small, auditable personal agent (an OpenClaw-style assistant) in the terminal, on an xAI, OpenAI, Google AI, OpenRouter or Vercel AI Gateway key.",
+  "displayName" : "nanobot",
+  "id" : "hkuds/nanobot",
+  "kind" : "workload",
+  "licenses" : [
+    "MIT"
+  ],
+  "provides" : [
+    "com.dozersandbox/nanobot@${{ kit.args.version }}"
+  ],
+  "schema" : 2,
+  "sourceUrl" : "https://github.com/HKUDS/nanobot"
+}

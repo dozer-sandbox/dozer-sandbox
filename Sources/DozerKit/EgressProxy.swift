@@ -71,7 +71,11 @@ public final class EgressProxy: @unchecked Sendable {
 
     public var policy: NetworkPolicy {
         get { lock.lock(); defer { lock.unlock() }; return _policy }
-        set { lock.lock(); _policy = newValue; lock.unlock() }
+        set {
+            lock.lock(); _policy = newValue; lock.unlock()
+            // 617: what this agent is expected to be refused is logged, never counted.
+            log.quietHosts = Set(AgentPermissions.quietHosts(newValue.permissions ?? []))
+        }
     }
 
     /// 599d: this sandbox's GitHub login and its mode — read-only is enforced on every request that
@@ -116,8 +120,23 @@ public final class EgressProxy: @unchecked Sendable {
            policy.evaluateConnection(host: host, port: port).kind == .deny {
             return NetworkPolicy.ConnectionVerdict(kind: .inspect, rule: "ChatGPT sign-in renewal (answered by Dozer on the Mac)", ruleIndex: nil)
         }
-        return policy.evaluateConnection(host: host, port: port)
+        let v = policy.evaluateConnection(host: host, port: port)
+        // 617 PROFILING SEAM: every allowed HTTPS connection is decrypted so each request (host, method, path, which
+        // credential rode it) is logged — the network profile of an agent (`make profile-agents`). Nothing else changes:
+        // the policy still judges every request.
+        if inspectEverythingForProfiling, v.kind == .allow, port == 443, IPv4CIDR.parseAddress(host) == nil {
+            return NetworkPolicy.ConnectionVerdict(kind: .inspect, rule: v.rule, ruleIndex: v.ruleIndex)
+        }
+        return v
     }
+
+    /// 617 PROFILING SEAM (`DOZ_TEST_PROFILE_NETWORK=1`, set by the host only from that variable): decrypt and log every
+    /// allowed HTTPS request. Used by the network profiler in a scratch store; never on by default.
+    public var inspectEverythingForProfiling: Bool {
+        get { lock.lock(); defer { lock.unlock() }; return _inspectEverything }
+        set { lock.lock(); _inspectEverything = newValue; lock.unlock() }
+    }
+    private var _inspectEverything = false
 
     /// 599i TEST SEAM: the OpenAI hosts' upstream leg (chatgpt.com, api.openai.com, auth.openai.com) goes
     /// to a fake OpenAI, trusting ONLY its CA. The host sets it only from `DOZ_TEST_OPENAI_UPSTREAM` +
@@ -149,9 +168,34 @@ public final class EgressProxy: @unchecked Sendable {
         chatgptRenewal != nil && host.lowercased() == OpenAIAccess.authHost && method == "POST" && path == OpenAIAccess.tokenPath
     }
 
+    /// 617 TEST SEAM: the hosts of the key providers new in 617 (api.x.ai, generativelanguage.googleapis.com) go to a
+    /// fake provider, trusting ONLY its CA. The host sets it only from `DOZ_TEST_PROVIDER_UPSTREAM` + `DOZ_TEST_PROVIDER_CA`.
+    public var providerUpstreamForTests: UpstreamOverride? {
+        get { lock.lock(); defer { lock.unlock() }; return _providerUpstream }
+        set { lock.lock(); _providerUpstream = newValue; lock.unlock() }
+    }
+    private var _providerUpstream: UpstreamOverride?
+    /// 617 TEST SEAM: more hosts that go to that fake (`DOZ_TEST_PROVIDER_HOSTS` — a custom key's host in a VM proof).
+    public var providerSeamHostsForTests: Set<String> {
+        get { lock.lock(); defer { lock.unlock() }; return _providerSeamHosts }
+        set { lock.lock(); _providerSeamHosts = newValue; lock.unlock() }
+    }
+    private var _providerSeamHosts: Set<String> = []
+
+    /// 617 (models@1): hosts decrypted even with no binding of theirs, so the leak guard sees a placeholder sent there
+    /// (a recipe agent's sandbox: every model source's hosts — its key goes to ONE of them, and a placeholder sent to
+    /// any other is refused, never tunnelled unseen). A request there that carries none passes as before.
+    public var leakGuardHosts: Set<String> {
+        get { lock.lock(); defer { lock.unlock() }; return _leakGuardHosts }
+        set { lock.lock(); _leakGuardHosts = newValue; lock.unlock() }
+    }
+    private var _leakGuardHosts: Set<String> = []
+
     /// 599d test seam: where a GitHub host's upstream leg goes instead (nil: the real host). 599i: and the OpenAI hosts'.
+    /// 617: and the key providers'.
     func upstreamOverride(for host: String) -> UpstreamOverride? {
         if let o = openaiUpstreamForTests, OpenAIAccess.isOpenAIHost(host) { return o }
+        if let o = providerUpstreamForTests, KeyProviders.seamHosts.contains(host.lowercased()) || providerSeamHostsForTests.contains(host.lowercased()) { return o }
         guard let o = githubUpstreamForTests, GitHubAccess.credentialHosts.contains(host.lowercased()) else { return nil }
         return o
     }
@@ -275,6 +319,13 @@ public final class EgressProxy: @unchecked Sendable {
             return DNSReply(bytes: DNSMessage.response(to: q, questionEnd: qEnd, rcode: 0, answers: qtype == 1 ? [0x7F00_0101] : []),
                             name: nil, allowed: true, rule: "", summary: "the sandbox's own name")
         }
+        // 617: `localhost` (and any name under it — RFC 6761) is the loopback, answered here and never judged or logged:
+        // a program that asks DNS for it instead of reading /etc/hosts (Antigravity CLI does, at start-up) is no refusal.
+        let bare = name.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "."))
+        if bare == "localhost" || bare.hasSuffix(".localhost") {
+            return DNSReply(bytes: DNSMessage.response(to: q, questionEnd: qEnd, rcode: 0, answers: qtype == 1 ? [0x7F00_0001] : []),
+                            name: nil, allowed: true, rule: "", summary: "the loopback")
+        }
         let pol = policy
         guard allowsName(name) else {
             return DNSReply(bytes: DNSMessage.response(to: q, questionEnd: qEnd, rcode: 3, answers: []), name: name,
@@ -356,7 +407,7 @@ public final class EgressProxy: @unchecked Sendable {
         let v = connectionVerdict(host: host, port: port)
         var rec = ConnectionRecord(kind: kind, host: host, port: port, verdict: .allowed, rule: v.rule, open: true)
         // A credential is only ever inserted into HTTPS; SSH (599d, port 22) is end-to-end and passes as it is.
-        let bound = vault.boundHosts.contains(host) && port != 22
+        let bound = (vault.boundHosts.contains(host) || leakGuardHosts.contains(host.lowercased())) && port != 22
         let decrypt = (bound || v.kind == .inspect) && IPv4CIDR.parseAddress(host) == nil
         if v.kind == .deny || (v.kind == .inspect && (ca == nil || !decrypt)) {
             rec.verdict = .denied
@@ -685,8 +736,9 @@ public final class EgressProxy: @unchecked Sendable {
                         r.credential = code == 401 ? "unavailable: \(why)" : "refused: \(why)"
                         log.upsert(r)
                         current = nil
-                        // 599i: in OpenAI's error shape on OpenAI's hosts (Codex shows its message).
-                        reject(OpenAIAccess.isOpenAIHost(host) ? OpenAIAccess.refusal(code, why) : Self.refusal(code, why))
+                        // 599i: in OpenAI's error shape on OpenAI's hosts (Codex shows its message). 617: and in each key
+                        // provider's own shape on its hosts (xAI's is OpenAI's; Google's its own).
+                        reject(Self.refusal(host: host, code, why))
                         return
                     case .swapped(_, let b): r.credential = "swapped \(b)"; awaitingStatus = b
                     case .injected(_, let b): r.credential = "injected \(b)"; awaitingStatus = b
@@ -843,6 +895,26 @@ public final class EgressProxy: @unchecked Sendable {
 
     static func forbidden(_ why: String) -> [UInt8] {
         response(403, "refused by the sandbox proxy: \(why)\n", extra: "X-Sandbox-Policy: credential\r\n")
+    }
+
+    /// 617: the proxy's own answer in the error shape of the API on `host` — OpenAI's on OpenAI's hosts (and xAI's,
+    /// which is OpenAI-compatible), Google's on the Gemini API's, Anthropic's everywhere else (as before 617).
+    static func refusal(host: String, _ code: Int, _ message: String) -> [UInt8] {
+        if OpenAIAccess.isOpenAIHost(host) { return OpenAIAccess.refusal(code, message) }
+        switch KeyProviders.owning(host: host)?.errorShape {
+        case "openai"?: return OpenAIAccess.refusal(code, message)
+        case "google"?: return googleRefusal(code, message)
+        default: return refusal(code, message)
+        }
+    }
+
+    /// 617: Google's API error shape (`{"error":{"code":401,"message":…,"status":"UNAUTHENTICATED"}}`), which Gemini
+    /// CLI shows.
+    static func googleRefusal(_ code: Int, _ message: String) -> [UInt8] {
+        let obj: [String: Any] = ["error": ["code": code, "message": "doz: " + message, "status": code == 401 ? "UNAUTHENTICATED" : "PERMISSION_DENIED"]]
+        let b = (try? JSONSerialization.data(withJSONObject: obj, options: [.sortedKeys, .withoutEscapingSlashes])).map(Array.init) ?? []
+        let reason = code == 401 ? "Unauthorized" : "Forbidden"
+        return Array("HTTP/1.1 \(code) \(reason)\r\nContent-Type: application/json\r\nX-Sandbox-Policy: credential\r\nConnection: close\r\nContent-Length: \(b.count)\r\n\r\n".utf8) + b
     }
 
     /// The proxy's own answer in the shape of an Anthropic API error, so a client shows its message

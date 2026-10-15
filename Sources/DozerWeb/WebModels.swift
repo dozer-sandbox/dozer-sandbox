@@ -274,8 +274,17 @@ public struct WebSandboxRow: Codable, Equatable, Sendable {
     public var sessionStatuses: [WebAgentStatus]?
     public var agentStatus: WebAgentStatus?
     public var agentWorking: Bool?
+    /// 617: a try (the dashboard's Quick try, `doz try`): its page offers Sleep · Delete · Keep; `trialFolder` is the
+    /// folder Dozer made for it (nil: none, or one the person chose) — what a Delete removes when it is empty.
+    public var trial: Bool?
+    public var trialFolder: String?
+    /// 617 (RP-1): its web ports — the header's Open buttons (listening, with a URL) and the details' list.
+    public var ports: [WebPort]?
 
     public init(_ i: SandboxInfo) {
+        trial = i.trial
+        trialFolder = i.trialFolder
+        ports = i.ports.map { $0.map(WebPort.init) }
         sessionStatuses = i.sessionStatuses.map { $0.map(WebAgentStatus.init) }
         agentStatus = i.agentStatus.map(WebAgentStatus.init)
         agentWorking = i.agentWorking
@@ -310,6 +319,35 @@ public struct WebSandboxRow: Codable, Equatable, Sendable {
         credentialState = i.credentialState
         credentialPolicy = i.credentialPolicy
         foreignCredentials = i.foreignCredentials
+    }
+}
+
+/// 617 (RP-1): one web port of a sandbox, for the page (field by field; camelCase like every projection). The URL is
+/// only ever this Mac's loopback forward — anything else is dropped, so the page's Open link can never point elsewhere.
+public struct WebPort: Codable, Equatable, Sendable {
+    public var port: Int
+    public var title: String
+    public var path: String
+    public var `protocol`: String
+    public var origin: String
+    public var state: String
+    public var macPort: Int?
+    public var url: String?
+    public var moved: Bool?
+    public var why: String?
+    public var auth: String?
+    /// Where a port that asks for a sign-in gets it (the recipe's words, e.g. "printed in its session") — a hint, never
+    /// a value; named so no API field is secret-shaped.
+    public var askHint: String?
+    /// A program in the sandbox listens on the port (nil: not checked); the recipe's command that serves it.
+    public var serving: Bool?
+    public var serveHint: String?
+
+    public init(_ r: PortForwardRow) {
+        serving = r.serving; serveHint = r.serveHint
+        port = r.port; title = r.title; path = r.path; `protocol` = r.protocol; origin = r.origin; state = r.state
+        macPort = r.macPort; moved = r.moved; why = r.why; auth = r.auth; askHint = r.tokenHint
+        url = r.url.flatMap { u in u.hasPrefix("http://127.0.0.1:") ? u : nil }
     }
 }
 
@@ -570,6 +608,8 @@ public struct WebSandboxDetail: Codable, Equatable, Sendable {
     public var agentPrompt: WebAgentPrompt?
     /// 594: the doz_project.yaml it was made from.
     public var project: String?
+    /// 617.11: a recipe agent's guide (the Guide tab) — nil: none.
+    public var guide: WebGuide?
 
     public init(_ d: SandboxDetail, attachCommand: String) {
         info = WebSandboxRow(d.info)
@@ -592,6 +632,35 @@ public struct WebSandboxDetail: Codable, Equatable, Sendable {
         self.attachCommand = attachCommand
         agentPrompt = d.agentPrompt.map(WebAgentPrompt.init)
         project = d.project
+        guide = d.guide.map(WebGuide.init)
+    }
+}
+
+/// 617.11: a recipe agent's guide, field by field (the recipe's text and Dozer's facts — never a secret).
+public struct WebGuide: Codable, Equatable, Sendable {
+    public struct Fact: Codable, Equatable, Sendable { public var id: String; public var label: String; public var value: String }
+    public struct Step: Codable, Equatable, Sendable { public var text: String; public var command: String?; public var edit: Bool }
+    public var agent: String
+    public var title: String
+    public var what: String
+    /// shell (steps run in its own session) | screen (its session is its own screen: steps run in a shell beside it).
+    public var session: String
+    public var agentSession: String
+    public var howTo: String
+    public var intro: String
+    public var trial: Bool
+    public var facts: [Fact]
+    public var steps: [Step]
+    public var tips: [String]
+    public var docs: String?
+    public var checked: String?
+
+    public init(_ g: SandboxGuide) {
+        agent = g.agent; title = g.title; what = g.what; session = g.session; agentSession = g.agentSession; howTo = g.howTo; intro = g.intro
+        trial = g.trial
+        facts = g.facts.map { Fact(id: $0.id, label: $0.label, value: $0.value) }
+        steps = g.steps.map { Step(text: $0.text, command: $0.command, edit: $0.edit == true) }
+        tips = g.tips; docs = g.docs; checked = g.checked
     }
 }
 
@@ -974,8 +1043,25 @@ public struct WebAccount: Codable, Equatable, Sendable {
     /// The keychain item's NAME (service) — never its contents.
     public var keychainService: String?
     public var fingerprint: String?
+    /// 617: a key's provider (xai, google, custom …).
+    public var provider: String?
+    /// 617 (§7): where a key read on use comes from ("1Password: op://…") and the last read — never a value. The page
+    /// shows them and offers Refresh; it never adds or changes a source (D7).
+    public var sourceLabel: String?
+    public var sourceState: String?
+    public var sourceProblem: String?
+    /// 617 (D6): a custom key's hosts (read-only in the page).
+    public var hosts: [String]?
+    /// 617: when its key was last checked and worked (nil: never).
+    public var verifiedAt: Date?
 
     public init(_ a: AccountRow) {
+        verifiedAt = a.verifiedAt
+        provider = a.provider
+        sourceLabel = a.sourceLabel
+        sourceState = a.sourceState
+        sourceProblem = a.sourceProblem
+        hosts = a.hosts
         name = a.name
         kind = a.kind
         plan = a.plan
@@ -990,6 +1076,155 @@ public struct WebAccount: Codable, Equatable, Sendable {
     }
 }
 
+/// 617: the plan (the host's `plan` op) as the New sandbox wizard's review will show it — field by field (stage D adds
+/// its route). Never a secret: an account's name, kind and where its key comes from only.
+public struct WebPlan: Codable, Equatable, Sendable {
+    public struct Line: Codable, Equatable, Sendable { public var kind: String; public var text: String }
+    public struct Image: Codable, Equatable, Sendable { public var name: String; public var title: String?; public var state: String }
+    public struct Account: Codable, Equatable, Sendable { public var name: String?; public var kind: String?; public var provider: String?; public var sourceLabel: String? }
+    public struct Problem: Codable, Equatable, Sendable { public var code: String; public var text: String; public var fix: String? }
+    /// 617 (models@1): the model source and model, and every source the agent could use instead (its default first).
+    public struct Model: Codable, Equatable, Sendable {
+        public struct Source: Codable, Equatable, Sendable {
+            public var id: String
+            public var title: String
+            public var gateway: Bool
+            public var defaultModel: String
+            /// `key` (with the provider), `api-key` (Anthropic), `openai-key` — what a pasted key is saved as.
+            public var accountKind: String
+            public var keyHint: String?
+        }
+        public var source: String
+        public var title: String
+        public var gateway: Bool
+        public var model: String
+        public var offered: [Source]
+    }
+    public var model: Model?
+
+    public var name: String
+    public var image: Image
+    public var workspace: String?
+    public var trial: Bool?
+    public var command: String
+    public var argv: [String]
+    public var yaml: String
+    public var yamlNote: String?
+    public var reach: [Line]
+    public var account: Account?
+    public var problems: [Problem]
+    /// 617 (stage D): what the ordinary `create` action takes to make exactly this (the page sends these fields).
+    public struct Create: Codable, Equatable, Sendable {
+        public var image: String
+        public var network: String?
+        public var workspace: String?
+        public var isolated: Bool?
+        public var account: String?
+        public var trial: Bool?
+        public var modelSource: String?
+        public var model: String?
+    }
+    public var create: Create?
+
+    public init(_ p: CreatePlan) {
+        name = p.name
+        image = Image(name: p.imageState.name, title: p.imageState.title, state: p.imageState.state)
+        workspace = p.workspace
+        trial = p.trial
+        command = p.command
+        argv = p.argv
+        yaml = p.yaml
+        yamlNote = p.yamlNote
+        reach = p.reach.map { Line(kind: $0.kind, text: $0.text) }
+        account = p.account.map { Account(name: $0.name, kind: $0.kind, provider: $0.provider, sourceLabel: $0.sourceLabel) }
+        problems = p.problems.map { Problem(code: $0.code, text: $0.text, fix: $0.fix) }
+        create = Create(image: p.create.image, network: p.create.network, workspace: p.create.workspace, isolated: p.create.isolated,
+                        account: p.create.account, trial: p.create.trial, modelSource: p.create.modelSource, model: p.create.model)
+        model = p.model.map { m in
+            Model(source: m.source, title: m.title, gateway: m.gateway, model: m.model,
+                  offered: m.offered.map { Model.Source(id: $0.id, title: $0.title, gateway: $0.gateway, defaultModel: $0.defaultModel,
+                                                        accountKind: $0.accountKind, keyHint: $0.keyHint) })
+        }
+    }
+}
+
+/// 617 (stage D): the Quick try page's list — every agent this build has a recipe for, its plan for a try (key, image,
+/// folder and bridges), its "What you need" card when a key is missing, and the agents that are coming (dimmed, why).
+public struct WebTryCatalog: Codable, Equatable, Sendable {
+    public struct Option: Codable, Equatable, Sendable { public var kind: String; public var label: String; public var consequence: String }
+    public struct Card: Codable, Equatable, Sendable {
+        public var title: String
+        public var options: [Option]
+        public var notOffered: [String]
+        public var getKey: String?
+        /// The CLI command that adds a key of this provider (1Password, AWS and commands are CLI-only).
+        public var addCommand: String?
+    }
+    public struct Agent: Codable, Equatable, Sendable {
+        public var id: String
+        public var title: String
+        public var publisher: String
+        public var provider: String?
+        public var providerTitle: String?
+        /// The base it runs on by default (title, e.g. "Debian").
+        public var base: String?
+        /// nil in the list alone (`WebTryCatalog.list`): the plan comes with the whole list.
+        public var plan: WebPlan?
+        public var card: Card?
+        /// 617: its latest release as this Mac last saw it (`latest 1.3.3 · released 10 Oct 2026 (2 days ago) · active`).
+        public var latest: String? = nil
+        /// 617: its standing with its maker when not current (the note), and what replaces it.
+        public var standing: String? = nil
+        public var supersededBy: String? = nil
+        /// 617 (the Quick try redesign): its mark from the icon registry (product → vendor → a lettermark; drawn from
+        /// `d`, never fetched), what the search matches (`aliases`, the supported `tags`), and the pills' facts.
+        public var icon: ResolvedIcon? = nil
+        public var aliases: [String] = []
+        public var tags: [String] = []
+        public var openSource = false
+        public var headless = false
+        /// Works through a model gateway (documented or verified for at least one).
+        public var gateway = false
+        /// Current with its maker (not superseded or retired).
+        public var current = true
+        /// Its key is there and nothing else blocks it: Start works now.
+        public var ready = false
+        /// The version Dozer installs, and how long ago its latest release came out ("4 days"), when measured.
+        public var version: String? = nil
+        public var age: String? = nil
+        /// 617: one sentence about it (the recipe's description).
+        public var description: String? = nil
+        /// 617: the accounts it can use (name, kind, where the key comes from, the provider's default) — never a secret.
+        public var usableAccounts: [Usable] = []
+        /// 617 (owner: "split them"): `coding-agent` | `ai-tool`, and its categories (the pills).
+        public var catalogKind: String? = nil
+        public var categories: [String] = []
+        public struct Usable: Codable, Equatable, Sendable {
+            public var name: String
+            public var kind: String
+            public var source: String?
+            public var isDefault: Bool
+            /// 617 (models@1): the model source its key is of (`openai`, `openrouter` …), for a recipe agent's choice.
+            public var modelSource: String? = nil
+        }
+    }
+    public struct Coming: Codable, Equatable, Sendable {
+        public var id: String; public var title: String; public var publisher: String; public var reason: String
+        public var aliases: [String] = []
+        public var icon: ResolvedIcon? = nil
+        public var catalogKind: String? = nil
+        public var categories: [String] = []
+    }
+    public var agents: [Agent]
+    public var coming: [Coming]
+    /// 617 (owner): the two sections and the categories (the pills), in the vocabulary's order — tags.json's words.
+    public struct Word: Codable, Equatable, Sendable { public var id: String; public var title: String; public var meaning: String }
+    public var kinds: [Word] = Categories.kinds.map { Word(id: $0.id, title: $0.title, meaning: $0.meaning) }
+    public var categories: [Word] = Categories.all.map { Word(id: $0.id, title: $0.title, meaning: $0.meaning) }
+    /// `ui.allow_secret_entry` (and a secure enough connection): a key may be pasted here.
+    public var secretEntry: Bool
+}
+
 public struct WebAccounts: Codable, Equatable, Sendable {
     public var accounts: [WebAccount]
     public var defaultAccount: String
@@ -1000,7 +1235,22 @@ public struct WebAccounts: Codable, Equatable, Sendable {
     /// 599i: the OpenAI account Codex sandboxes follow (nil: none).
     public var openaiDefault: String?
 
-    public init(accounts: [WebAccount], defaultAccount: String, keepalive: Bool, openaiDefault: String? = nil) {
+    /// 617 (models@1): each recipe agent's model sources (its default first) — a key account fits it when its source is
+    /// one of these (`api-key` = anthropic, `openai-key` = openai, `key` = its provider) — and the account it follows by
+    /// default (the first source's default, as the host decides); the sources' names.
+    public var sources: [String: [String]] = [:]
+    public var recipeDefaults: [String: String] = [:]
+    public var sourceTitles: [String: String] = [:]
+    /// 617 (the Accounts & keys redesign): the providers in Dozer's order (Anthropic, OpenAI, then providers.json's), the
+    /// tools each one's key serves (agent ids, in the try list's order — `agentTitles` names them), and the providers whose
+    /// key has no check (a custom key has none either).
+    public var providers: [String] = []
+    public var providerTools: [String: [String]] = [:]
+    public var agentTitles: [String: String] = [:]
+    public var uncheckedProviders: [String] = []
+
+    public init(accounts: [WebAccount], defaultAccount: String, keepalive: Bool, openaiDefault: String? = nil,
+                providerDefaults: [String: String] = [:]) {
         self.accounts = accounts
         self.defaultAccount = defaultAccount
         self.keepalive = keepalive
@@ -1008,6 +1258,25 @@ public struct WebAccounts: Codable, Equatable, Sendable {
         for image in ["claude-code", "pi", "codex"] {
             if let c = AgentImages.credentials(image) { agents[image] = c.flatMap(\.accountKinds) }
         }
+        let kinds = Dictionary(accounts.compactMap { a in AccountKind(rawValue: a.kind).map { (a.name, $0) } }) { a, _ in a }
+        for kind in AgentKind.allCases {
+            guard let r = kind.recipe, !r.isBuiltin, let s = AgentCredentials.sources(r.id), let k = AgentCredentials.kinds(r.id) else { continue }
+            agents[r.id] = k.map(\.rawValue).sorted()
+            sources[r.id] = s
+            recipeDefaults[r.id] = AgentCredentials.defaultAccount(for: r.id, anthropic: defaultAccount, openai: openaiDefault,
+                                                                   providers: providerDefaults, kinds: kinds)
+        }
+        for id in ModelSources.ids { sourceTitles[id] = ModelSources.title(id) }
+        providers = ["anthropic", "openai"] + ModelSources.ids.filter { $0 != "anthropic" && $0 != "openai" }
+        for kind in AgentKind.allCases where kind != .none {
+            guard let r = kind.recipe else { continue }
+            agentTitles[r.id] = r.title
+            // The built-in three: Claude Code and pi take Anthropic accounts, Codex OpenAI's; a recipe agent its sources.
+            let srcs = AgentCredentials.sources(r.id) ?? (r.id == "codex" ? ["openai"] : ["anthropic"])
+            for s in srcs { providerTools[s, default: []].append(r.id) }
+        }
+        // Anthropic's and OpenAI's keys are checked by Dozer itself; another provider's only when providers.json says how.
+        uncheckedProviders = ModelSources.ids.filter { $0 != "anthropic" && $0 != "openai" && KeyProviders.provider($0)?.check == nil }
     }
 }
 
@@ -1102,6 +1371,9 @@ public struct WebSessionInfo: Codable, Equatable, Sendable {
     public var serverRun: String
     public var store: String
     public var version: String
+    /// 617: the Mac user's home (and its resolved spelling) — the page shows a path under it as `~/…`
+    /// (`core/paths.js`; `DisplayPath`). Display only: every path field stays absolute.
+    public var homes: [String] = []
     /// 606: doz serve — what this browser is and may do (nil on doz ui).
     public var serve: WebServeSessionInfo? = nil
     /// 611: this build has Dozer's own ChatGPT sign-in (a public build does not: the page never offers it).

@@ -81,6 +81,16 @@ public final class ConnectionLog: @unchecked Sendable {
     private var subscribers: [UUID: AsyncStream<ConnectionRecord>.Continuation] = [:]
     private var _denied = 0
     private var _total = 0
+    private var _quiet: Set<String> = []
+
+    /// 617 (owner: a fresh try shows no refusal): hosts the agent is EXPECTED to be refused (its recipe's `quiet` list —
+    /// what it calls that no setting of its own turns off, e.g. Antigravity CLI's usage log). Still refused and logged;
+    /// never counted as a denial (the "N denied" chip, the page's refusal banner).
+    public var quietHosts: Set<String> {
+        get { lock.lock(); defer { lock.unlock() }; return _quiet }
+        set { lock.lock(); _quiet = Set(newValue.map { $0.lowercased() }); lock.unlock() }
+    }
+    public func isQuiet(_ host: String) -> Bool { lock.lock(); defer { lock.unlock() }; return _quiet.contains(host.lowercased()) }
 
     public init(capacity: Int = 5000) { self.capacity = capacity }
 
@@ -90,9 +100,9 @@ public final class ConnectionLog: @unchecked Sendable {
         if byID[r.id] == nil {
             order.append(r.id)
             _total += 1
-            if r.verdict == .denied { _denied += 1 }
+            if r.verdict == .denied, !_quiet.contains(r.host.lowercased()) { _denied += 1 }
             if order.count > capacity { byID[order.removeFirst()] = nil }
-        } else if byID[r.id]?.verdict != .denied, r.verdict == .denied {
+        } else if byID[r.id]?.verdict != .denied, r.verdict == .denied, !_quiet.contains(r.host.lowercased()) {
             _denied += 1
         }
         byID[r.id] = r

@@ -8,6 +8,45 @@ import { h } from './h.js';
 export const SVG_NS = 'http://www.w3.org/2000/svg';
 const SPRITE = (() => { const m = document.querySelector('meta[name="doz-icons"]'); return m ? m.getAttribute('content') : ''; })();
 const ICON_FALLBACK = 'circle-dot';
+// 617 (owner: "all the glyphs flicker every few seconds"): a `<use>` of ANOTHER document is resolved anew for every
+// element made, so each re-render (the sandbox page's bar, banners and tabs, at every refresh) drew its icons blank
+// for a frame or more. The sprite's symbols are therefore copied into this document once (the same-origin, hashed,
+// compiler-checked file — geometry only; only its `<symbol>`s are taken) and icons refer to them by `#name`, which
+// draws at once. Until that is done (or if it fails) icons keep the sprite's URL, as before.
+let localSymbols = false;
+const SPRITE_HOST_ID = 'doz-icon-symbols', LOCAL_PREFIX = 'doz-icon-';
+(async () => {
+  if (!SPRITE) return;
+  try {
+    const r = await fetch(SPRITE, { credentials: 'same-origin' });
+    if (!r.ok) return;
+    const doc = new DOMParser().parseFromString(await r.text(), 'image/svg+xml');
+    const root = doc.documentElement;
+    if (!root || root.namespaceURI !== SVG_NS || root.localName !== 'svg') return;
+    const host = document.createElementNS(SVG_NS, 'svg');
+    host.setAttribute('id', SPRITE_HOST_ID);
+    host.setAttribute('aria-hidden', 'true');
+    host.setAttribute('focusable', 'false');
+    host.setAttribute('width', '0');
+    host.setAttribute('height', '0');
+    host.style.position = 'absolute'; host.style.width = '0'; host.style.height = '0'; host.style.overflow = 'hidden';
+    // Prefixed, so no element of the page with an icon's name as its id (`terminal`, `info` …) can take its place.
+    for (const s of root.children) {
+      if (s.namespaceURI !== SVG_NS || s.localName !== 'symbol' || !s.id) continue;
+      const n = document.importNode(s, true);
+      n.setAttribute('id', LOCAL_PREFIX + s.id);
+      host.append(n);
+    }
+    if (!host.firstChild) return;
+    document.body.append(host);
+    localSymbols = true;
+    // The icons already drawn move to the local symbols too.
+    for (const u of document.querySelectorAll('svg.icon > use')) {
+      const href = u.getAttribute('href') || '';
+      if (href.startsWith(SPRITE + '#')) u.setAttribute('href', '#' + LOCAL_PREFIX + href.slice(SPRITE.length + 1));
+    }
+  } catch (_) { /* keep the sprite's URL */ }
+})();
 /// 593 (owner): Sleep and Hibernate are told apart by a second glyph — Sleep keeps the machine in
 /// memory (a CPU), Hibernate frees it and keeps the state on disk (a cylinder — storage). Used
 /// wherever those states show.
@@ -30,9 +69,27 @@ export function icon(name) {
   svg.setAttribute('focusable', 'false');
   svg.setAttribute('data-icon', name);
   const use = document.createElementNS(SVG_NS, 'use');
-  use.setAttribute('href', SPRITE + '#' + name);
+  use.setAttribute('href', localSymbols ? '#' + LOCAL_PREFIX + name : SPRITE + '#' + name);
   svg.append(use);
   return svg;
+}
+/// 617: an agent's or vendor's MARK from the icon registry (`ResolvedIcon`: a viewBox and one path, drawn in
+/// currentColor — stroked, or filled). Built from the path data with createElementNS (never parsed markup); decorative
+/// (the name is always in the text beside it).
+export function mark(m, cls) {
+  const span = h('span', { class: 'mark' + (cls ? ' ' + cls : ''), 'aria-hidden': 'true', 'data-mark': m ? m.id : '' });
+  if (!m || !m.d) return span;
+  const svg = document.createElementNS(SVG_NS, 'svg');
+  svg.setAttribute('viewBox', m.viewBox || '0 0 48 48');
+  svg.setAttribute('focusable', 'false');
+  const p = document.createElementNS(SVG_NS, 'path');
+  p.setAttribute('d', m.d);
+  if (m.stroke) {
+    for (const [k, v] of [['fill', 'none'], ['stroke', 'currentColor'], ['stroke-width', String(m.stroke)], ['stroke-linecap', 'round'], ['stroke-linejoin', 'round']]) p.setAttribute(k, v);
+  } else p.setAttribute('fill', 'currentColor');
+  svg.append(p);
+  span.append(svg);
+  return span;
 }
 /// A label's icon: the exact label, else its first word; the fallback is a visible "missing" (the probe fails on it).
 const ICON_EXACT = {

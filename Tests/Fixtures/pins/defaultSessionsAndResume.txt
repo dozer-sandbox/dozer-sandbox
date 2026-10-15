@@ -1,0 +1,54 @@
+lab → image lab session shell argv bash -l
+claude-code → image claude-code session claude argv claude
+pi → image pi session pi argv pi
+codex → image codex session codex argv codex
+python-claude-code → image python-claude-code session claude argv claude
+go-pi → image go-pi session pi argv pi
+alpine-codex → image alpine-codex session codex argv codex
+debian → image debian session shell argv bash -l
+ubuntu-pi → image ubuntu-pi session pi argv pi
+rust-codex → image rust-codex session codex argv codex
+resume claude-code --continue check=d="$HOME/.claude/projects/$(pwd -P | sed 's/[^A-Za-z0-9]/-/g')"; ls "$d"/*.jsonl >/dev/null 2>&1 && echo resumable || echo none
+resume pi --continue check=nil
+resume none  check=nil
+resume codex resume --last check=nil
+resume antigravity --continue check=nil
+resume gemini --resume latest check=nil
+resume grok  check=nil
+resume fabric  check=nil
+resume openclaw  check=nil
+resume nanobot  check=nil
+resume gptme  check=nil
+resume llm  check=nil
+resume shell-gpt  check=nil
+resume zeroclaw  check=nil
+resume aichat  check=nil
+resume tgpt  check=nil
+resume opencode --continue check=nil
+resume smolagents  check=nil
+resume adk  check=nil
+resume promptfoo  check=nil
+resume clai  check=nil
+resume copilot --continue check=nil
+resume qwen-code --continue check=nil
+resume goose session --resume check=nil
+resume kilo --continue check=nil
+resume mistral-vibe --continue check=nil
+resume droid --resume --last check=nil
+resume dirac  check=nil
+resume kimi-code --continue check=nil
+resume cline  check=nil
+resume openhands --resume --last check=nil
+resume letta-code  check=nil
+resume docker-agent  check=nil
+resume nanocoder  check=nil
+resume mini-swe-agent  check=nil
+resume open-interpreter resume --last check=nil
+resume crush  check=nil
+resume mimo-code --continue check=nil
+resume codewhale --continue check=nil
+resume maki --continue check=nil
+resume omp --continue check=nil
+resume tau  check=nil
+resume stitch  check=nil
+resume nil 

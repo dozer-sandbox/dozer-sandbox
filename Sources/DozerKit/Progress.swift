@@ -109,6 +109,57 @@ public final class OutputTail: @unchecked Sendable {
     }
 }
 
+/// A bake step's WHOLE output, every line in the order it was written (stdout and stderr as they came), as inert text —
+/// for the image's build log (`OutputTail` keeps only the newest line, four a second). A line redrawn with \r keeps its
+/// last state. Capped: the first `head` lines and the last `tail` lines are kept, the count dropped between is said.
+public final class StepOutputLines: @unchecked Sendable {
+    private let lock = NSLock()
+    private var partial = Data()
+    private var first: [String] = []
+    private var last: [String] = []
+    private var dropped = 0
+    private let head: Int, tail: Int
+    private static let maximumPartial = 16 << 10
+    public static let maximumLineBytes = 1000
+
+    public init(head: Int = 200, tail: Int = 1800) {
+        self.head = head
+        self.tail = tail
+    }
+
+    public func add(_ data: Data) {
+        lock.withLock {
+            partial.append(data)
+            let text = String(decoding: partial, as: UTF8.self)
+            let parts = text.split(separator: "\n", omittingEmptySubsequences: false)
+            for l in parts.dropLast() { keep(InertText.line(l, limit: Self.maximumLineBytes)) }
+            partial = Data((parts.last.map(String.init) ?? "").utf8.suffix(Self.maximumPartial))
+        }
+    }
+
+    private func keep(_ line: String) {
+        if first.count < head { first.append(line); return }
+        last.append(line)
+        if last.count > tail { last.removeFirst(); dropped += 1 }
+    }
+
+    /// Every line kept, with the partial last line; then empty again.
+    public func finish() -> [String] {
+        lock.withLock {
+            if !partial.isEmpty {
+                let s = InertText.line(Substring(String(decoding: partial, as: UTF8.self)), limit: Self.maximumLineBytes)
+                if !s.isEmpty { keep(s) }
+                partial = Data()
+            }
+            var out = first
+            if dropped > 0 { out.append("… \(dropped) lines not kept …") }
+            out += last
+            first = []; last = []; dropped = 0
+            return out
+        }
+    }
+}
+
 /// An OCI pull's progress events (Containerization's `ProgressHandler`) → `.transfer` events with
 /// the running totals, at most 4 a second, and always the last.
 public final class PullMeter: @unchecked Sendable {

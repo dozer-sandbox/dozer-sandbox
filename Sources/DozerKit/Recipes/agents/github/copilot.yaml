@@ -1,0 +1,217 @@
+# yaml-language-server: $schema=../../../../../schema/dozer-recipe-2.schema.json
+# GitHub Copilot CLI — Dozer's recipe (schema 2). The format: docs/recipes/RECIPE-FORMAT.md.
+# Edit this file, then run make recipes (it writes Recipes/compiled/copilot.json, which Dozer embeds).
+schema: 2
+kind: workload
+id: github/copilot
+displayName: GitHub Copilot CLI
+description: GitHub's coding agent for the terminal, here with your own model key (xAI) instead of a Copilot plan.
+author: GitHub
+sourceUrl: https://github.com/github/copilot-cli
+licenses:
+- LicenseRef-GitHub-Copilot-CLI
+args:
+  version:
+    description: The GitHub Copilot CLI release Dozer installs (its pin).
+    default: 1.0.97
+    pattern: '[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?'
+    buildArg: COPILOT_VERSION
+provides:
+- com.dozersandbox/copilot@${{ kit.args.version }}
+capabilities:
+- type: com.docker.sandbox/network-policy@1
+  config:
+    runtime:
+      allow:
+      - api.x.ai:443
+    dozer:
+      model:
+        id: model:copilot
+        title: Talk to xAI
+        summary: GitHub Copilot CLI's model here (the xAI API, with your key) — needed for it to answer.
+        phrase: talk to your AI model (xAI)
+        hosts:
+        - host: api.x.ai
+          paths:
+          - /v1/models
+          - /v1/chat/completions
+          - /v1/responses
+      update: []
+      excluded: []
+- type: com.docker.sandbox/credential@1
+  description: xAI API access
+  config:
+    service: xai
+    phase: runtime
+    apiKey:
+      name: XAI_API_KEY
+      proxyManaged: true
+      inject:
+      - domain: api.x.ai
+        header: authorization
+        format: Bearer %s
+    dozer:
+      accounts:
+      - key
+      env_aliases:
+      - COPILOT_PROVIDER_API_KEY
+- type: com.docker.sandbox/volume@1
+  config:
+    path: /home/agent/.copilot
+- type: com.docker.sandbox/agent-context@1
+  config:
+    directory: /home/agent/.copilot/skills/dozer
+    filename: SKILL.md
+    dozer:
+      kind: skill
+- type: com.dozersandbox/install@1
+  config:
+    kind: npm-platform-binary
+    package: '@github/copilot'
+    platform_package: '@github/copilot-linux-arm64'
+    payload: copilot
+    binary: copilot
+    integrity: sha512-iWtoEeG4kN1tz5f1tsHQKdwCQ24Dpx8+rGZ1GBn42U57QU5yjIhIeYR8DXJGFWTtoHwQn0uAlacbhDlqKYddYQ==
+- type: com.dozersandbox/launch@1
+  config:
+    command:
+    - copilot
+    no_prompts_args:
+    - --allow-all
+    passthrough:
+    - --version
+    - -v
+    - --help
+    - -h
+    - help
+    - version
+    - login
+    - init
+    - config
+    - update
+    - sessions
+    - memories
+    - plugin
+    - mcp
+    - skill
+    - instruction
+    - lsp
+    - sandbox
+    - completion
+    - app
+    - workflow
+    env:
+      COPILOT_OFFLINE: 'true'
+      COPILOT_AUTO_UPDATE: 'false'
+      COPILOT_PROVIDER_TYPE: openai
+      COPILOT_PROVIDER_BASE_URL: https://api.x.ai/v1
+      COPILOT_MODEL: grok-code-fast-1
+    state_env:
+      COPILOT_HOME: /home/agent/.copilot
+    # /workspace is trusted at the first start, as Claude Code's and Codex's are (the VM is the boundary), so the
+    # session opens on the agent, not on its trust question.
+    first_run:
+    - file: ~/.copilot/config.json
+      set:
+        trustedFolders:
+        - /workspace
+    status: none
+    resume:
+    - --continue
+    verify:
+    - argv:
+      - copilot
+      - --version
+      expect: ${{ kit.args.version }}
+    check:
+      argv:
+      - copilot
+      - -p
+      - say ok
+      expect: DOZ_FAKE_OK
+- type: com.dozersandbox/auth@1
+  config:
+    methods:
+    - kind: api-key
+      provider: xai
+      accounts:
+      - key
+      keys_page: https://console.x.ai/
+      note: GitHub Copilot CLI's own BYOK mode (COPILOT_PROVIDER_*), offline from GitHub — no Copilot plan or GitHub sign-in. Dozer offers it on an xAI key for now.
+      checked: '2026-10-14'
+    - kind: vendor-sign-in
+      account: a GitHub account with a Copilot plan
+      in_sandbox: false
+      note: Copilot's own sign-in (copilot login, or a fine-grained token with Copilot Requests) would live in the sandbox's state; Dozer does not offer it yet.
+      checked: '2026-10-14'
+- type: com.dozersandbox/gateways@1
+  config:
+    entries:
+    - gateway: openrouter
+      level: documented
+      shape: openai-chat
+      endpoint: v1
+      how:
+        env:
+          COPILOT_PROVIDER_TYPE: openai
+          COPILOT_PROVIDER_BASE_URL: ${{ dozer.gateway.endpoint.v1 }}
+          COPILOT_PROVIDER_API_KEY: ${{ dozer.placeholder }}
+          COPILOT_MODEL: ${{ dozer.model }}
+      limits:
+      - the model must support tool calls and streaming
+      source: https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/use-byok-models
+      checked: '2026-10-14'
+    - gateway: vercel-ai-gateway
+      level: documented
+      shape: openai-chat
+      endpoint: v1
+      how:
+        env:
+          COPILOT_PROVIDER_TYPE: openai
+          COPILOT_PROVIDER_BASE_URL: ${{ dozer.gateway.endpoint.v1 }}
+          COPILOT_PROVIDER_API_KEY: ${{ dozer.placeholder }}
+          COPILOT_MODEL: ${{ dozer.model }}
+      limits:
+      - the model must support tool calls and streaming
+      source: https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/use-byok-models
+      checked: '2026-10-14'
+- type: com.dozersandbox/currency@1
+  config:
+    checked: '2026-10-14'
+- type: com.dozersandbox/directory@1
+  config:
+    kind: coding-agent
+    categories:
+    - coding-agent
+    aliases:
+    - copilot-cli
+    icon: copilot
+    default_base: debian
+    platforms:
+      glibc: true
+      musl: false
+    limits:
+    - musl: true
+      reason: Dozer installs Copilot CLI's glibc build; its musl build is a separate package, not used yet
+    tags:
+    - tag: headless
+      level: documented
+      notes:
+      - copilot -p "…"
+      source: https://docs.github.com/en/copilot/how-tos/copilot-cli/automate-copilot-cli/run-cli-programmatically
+      checked: '2026-10-14'
+    terms: Your xAI API key — a key from console.x.ai. GitHub Copilot CLI is GitHub's software under its own licence; Dozer installs it from the npm registry.
+    licence: Proprietary (GitHub Copilot CLI License)
+- type: com.dozersandbox/guide@1
+  config:
+    intro: "GitHub Copilot CLI is a coding agent with its own screen: the session on the left. Ask it to read, change and run the code in your folder."
+    steps:
+    - text: "Check it answers, without its screen."
+      command: "copilot -p \"say ok\""
+    - text: "Ask it something in its own screen — the session on the left."
+    - text: "One task without its screen."
+      command: "copilot -p \"list the files in this folder\""
+    tips:
+    - "Files it makes are in /workspace — your folder on the Mac."
+    - "Restart its session from the session's ⋯ menu; End stops it."
+    docs: https://github.com/github/copilot-cli

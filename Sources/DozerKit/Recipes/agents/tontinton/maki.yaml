@@ -1,0 +1,176 @@
+# yaml-language-server: $schema=../../../../../schema/dozer-recipe-2.schema.json
+# Maki — Dozer's recipe (schema 2). The format: docs/recipes/RECIPE-FORMAT.md.
+# Edit this file, then run make recipes (it writes Recipes/compiled/maki.json, which Dozer embeds).
+schema: 2
+kind: workload
+id: tontinton/maki
+displayName: Maki
+description: A Rust coding agent for the terminal with Lua plugins, here on an xAI API key.
+author: Tony Solomonik and contributors
+sourceUrl: https://github.com/tontinton/maki
+licenses:
+- MIT
+args:
+  version:
+    description: The Maki release Dozer installs (its pin).
+    default: 0.6.3
+    pattern: '[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?'
+    buildArg: MAKI_VERSION
+provides:
+- com.dozersandbox/maki@${{ kit.args.version }}
+capabilities:
+- type: com.docker.sandbox/network-policy@1
+  config:
+    runtime:
+      allow:
+      - api.x.ai:443
+      - api.github.com:443
+      deny:
+      - models.dev:443
+    dozer:
+      model:
+        id: model:maki
+        title: Talk to xAI
+        summary: Maki's model here (the xAI API, with your key) — needed for it to answer.
+        phrase: talk to your AI model (xAI)
+        hosts:
+        - host: api.x.ai
+          paths:
+          - /v1/models
+          - /v1/chat/completions
+      update: []
+      excluded: []
+      vendor:
+      - host: api.github.com
+        paths:
+        - /repos/tontinton/maki/releases/latest
+        reason: Maki's TUI asks GitHub for its latest release when it starts (read-only; no setting turns it off) and only shows a notice
+      quiet:
+      - host: models.dev
+        reason: Maki's TUI fetches the public models.dev catalogue when it starts (cached a day); with its model named it does without it when refused
+- type: com.docker.sandbox/credential@1
+  description: xAI API access
+  config:
+    service: xai
+    phase: runtime
+    apiKey:
+      name: XAI_API_KEY
+      proxyManaged: true
+      inject:
+      - domain: api.x.ai
+        header: authorization
+        format: Bearer %s
+    dozer:
+      accounts:
+      - key
+- type: com.docker.sandbox/volume@1
+  config:
+    path: /home/agent/.config/maki
+- type: com.docker.sandbox/volume@1
+  config:
+    path: /home/agent/.local/state/maki
+- type: com.dozersandbox/install@1
+  config:
+    kind: release-binary
+    url: https://github.com/tontinton/maki/releases/download/v${{ kit.args.version }}/maki-v${{ kit.args.version }}-aarch64-unknown-linux-musl.tar.gz
+    payload: maki
+    binary: maki
+    bake_hosts:
+    - github.com
+    - release-assets.githubusercontent.com
+    integrity: sha512-EvaWRSZieLvjTQGM83oAAUl8OsC9qwwvRKRsUt6UGk7o+aKVUM4CYOMgLS60chUWcv1WG2T2xQ5yaksD6Xmsww==
+- type: com.dozersandbox/launch@1
+  config:
+    command:
+    - maki
+    - -m
+    - xai/grok-build-0.1
+    no_prompts_args:
+    - --yolo
+    passthrough:
+    - --version
+    - -V
+    - --help
+    - -h
+    - help
+    - auth
+    - models
+    - session
+    - mcp
+    - update
+    - trust
+    - -p
+    - --print
+    env: {}
+    state_env: {}
+    status: none
+    resume:
+    - --continue
+    verify:
+    - argv:
+      - maki
+      - --version
+      expect: ${{ kit.args.version }}
+    check:
+      argv:
+      - maki
+      - -p
+      - -m
+      - xai/grok-build-0.1
+      - say ok
+      expect: DOZ_FAKE_OK
+- type: com.dozersandbox/auth@1
+  config:
+    methods:
+    - kind: api-key
+      provider: xai
+      accounts:
+      - key
+      keys_page: https://console.x.ai/
+      note: Maki's xai provider reads XAI_API_KEY each run; model xai/grok-build-0.1 (its default would be an Anthropic model).
+      checked: '2026-10-14'
+- type: com.dozersandbox/gateways@1
+  config:
+    entries:
+    - gateway: openrouter
+      level: unknown
+      reason: Maki reads OPENROUTER_API_KEY; not checked
+      checked: '2026-10-14'
+    - gateway: vercel-ai-gateway
+      level: unknown
+      reason: not checked against Maki
+      checked: '2026-10-14'
+- type: com.dozersandbox/currency@1
+  config:
+    checked: '2026-10-14'
+- type: com.dozersandbox/directory@1
+  config:
+    kind: coding-agent
+    categories:
+    - coding-agent
+    icon: maki
+    default_base: debian
+    platforms:
+      glibc: true
+      musl: true
+    tags:
+    - tag: headless
+      level: verified
+      notes:
+      - maki -p -m xai/grok-build-0.1 "…"
+      evidence: 'make recipe-check: maki -p "say ok" printed the stand-in''s answer and exited in a fresh try'
+      checked: '2026-10-14'
+    terms: Your xAI API key — a key from console.x.ai.
+- type: com.dozersandbox/guide@1
+  config:
+    intro: "Maki is a coding agent with its own screen: the session on the left. Ask it to read, change and run the code in your folder."
+    steps:
+    - text: "Check it answers, without its screen."
+      command: "maki -p -m xai/grok-build-0.1 \"say ok\""
+    - text: "Ask it something in its own screen — the session on the left."
+    - text: "One task without its screen."
+      command: "maki -p -m xai/grok-build-0.1 \"list the files in this folder\""
+    tips:
+    - "Files it makes are in /workspace — your folder on the Mac."
+    - "Restart its session from the session's ⋯ menu; End stops it."
+    docs: https://github.com/tontinton/maki

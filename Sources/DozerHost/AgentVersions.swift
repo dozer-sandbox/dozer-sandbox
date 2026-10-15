@@ -29,11 +29,103 @@ public struct NpmRegistry: Sendable {
     /// (the catalogue's pin, or what the store resolved before).
     public typealias DigestLookup = @Sendable (_ reference: String) async throws -> String
     public let digest: DigestLookup?
+    /// 617: a vendor's release manifest (Antigravity CLI's) → its bytes. nil: never asked (the recipe's pin).
+    public typealias ManifestLookup = @Sendable (_ url: URL) async throws -> Data
+    public let manifest: ManifestLookup?
+    /// 617: when a release came out and whether it is deprecated — npm's full document (`time`, `deprecated`) for an npm
+    /// agent, the archive's Last-Modified for a manifest one. nil: never asked.
+    public typealias ReleaseInfoLookup = @Sendable (_ recipe: AgentRecipe, _ release: AgentRelease) async throws -> ReleaseInfo
+    public var releaseInfo: ReleaseInfoLookup? = nil
+    public struct ReleaseInfo: Sendable, Equatable {
+        public var released: Date?
+        public var deprecated: String?
+        public init(released: Date?, deprecated: String?) { self.released = released; self.deprecated = deprecated }
+    }
 
-    public init(lookup: Lookup?, native: NativeLookup? = nil, digest: DigestLookup? = nil) {
+    /// 617: the release info over HTTPS (`base`: the npm registry).
+    public static func httpReleaseInfo(_ base: URL, timeout: TimeInterval = 20) -> ReleaseInfoLookup {
+        { r, release in
+            if AgentRecipe.pinnedOnlyKinds.contains(r.install.kind) { return ReleaseInfo(released: nil, deprecated: nil) }
+            if r.install.kind == "manifest-binary" {
+                guard let s = AgentImages.manifestArchiveURL(r, release), let url = URL(string: s) else { return ReleaseInfo(released: nil, deprecated: nil) }
+                var req = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: timeout)
+                req.httpMethod = "HEAD"
+                let (_, response) = try await URLSession.shared.data(for: req)
+                let lm = (response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Last-Modified")
+                let f = DateFormatter()
+                f.locale = Locale(identifier: "en_US_POSIX")
+                f.dateFormat = "EEE, dd MMM yyyy HH:mm:ss zzz"
+                return ReleaseInfo(released: lm.flatMap { f.date(from: $0) }, deprecated: nil)
+            }
+            guard let package = r.install.package ?? AgentImages.package(r.id) else { return ReleaseInfo(released: nil, deprecated: nil) }
+            let path = package.replacingOccurrences(of: "/", with: "%2F")
+            guard let url = URL(string: base.absoluteString.hasSuffix("/") ? base.absoluteString + path : base.absoluteString + "/" + path) else {
+                throw HostError(.invalid, "no registry URL for \(package)")
+            }
+            var req = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: timeout)
+            req.setValue("application/json", forHTTPHeaderField: "Accept")
+            let (data, response) = try await URLSession.shared.data(for: req)
+            guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+                throw HostError(.failed, "the npm registry answered \((response as? HTTPURLResponse)?.statusCode ?? 0) for \(package)")
+            }
+            return parseReleaseInfo(data, version: String(release.version.split(separator: "+").first ?? Substring(release.version)))
+        }
+    }
+
+    /// 617: npm's full package document → when `version` was published and its deprecation message (nil: none).
+    public static func parseReleaseInfo(_ data: Data, version: String) -> ReleaseInfo {
+        guard let o = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return ReleaseInfo(released: nil, deprecated: nil) }
+        let time = (o["time"] as? [String: Any])?[version] as? String
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let released = time.flatMap { f.date(from: $0) ?? ISO8601DateFormatter().date(from: $0) }
+        let dep = ((o["versions"] as? [String: Any])?[version] as? [String: Any])?["deprecated"] as? String
+        return ReleaseInfo(released: released, deprecated: dep.map { String($0.prefix(300)) })
+    }
+
+    public init(lookup: Lookup?, native: NativeLookup? = nil, digest: DigestLookup? = nil, manifest: ManifestLookup? = nil) {
         self.lookup = lookup
         self.native = native
         self.digest = digest
+        self.manifest = manifest
+    }
+
+    /// 617: a manifest over HTTPS (or a test server over http on loopback), at most `timeout` seconds.
+    public static func httpManifest(timeout: TimeInterval = 10) -> ManifestLookup {
+        { url in
+            var req = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: timeout)
+            req.setValue("application/json", forHTTPHeaderField: "Accept")
+            let (data, response) = try await URLSession.shared.data(for: req)
+            guard let http = response as? HTTPURLResponse, http.statusCode == 200, data.count <= 64 << 10 else {
+                throw HostError(.failed, "\(url.host ?? "the vendor") answered \((response as? HTTPURLResponse)?.statusCode ?? 0) for its release manifest")
+            }
+            return data
+        }
+    }
+
+    /// 617: a vendor manifest → the release, or why not: the version well formed, the url exactly the recipe's archive
+    /// url for that build, the sha512 128 hex (made the SRI integrity a bake checks).
+    public static func parseManifest(_ data: Data, recipe r: AgentRecipe) throws -> AgentRelease {
+        guard let o = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let v = o["version"] as? String,
+              let url = o["url"] as? String, let hex = o["sha512"] as? String,
+              hex.range(of: "^[0-9a-f]{128}$", options: .regularExpression) != nil else {
+            throw HostError(.failed, "\(r.title)'s release manifest is not one Dozer can read")
+        }
+        // The build part: the path segment `<version>-<build>` in the url.
+        let segment = url.split(separator: "/").first { $0.hasPrefix(v + "-") }.map(String.init) ?? ""
+        let build = String(segment.dropFirst(v.count + 1))
+        let release = AgentRelease(version: v + "+" + build, integrity: "sha512-" + Data(hexBytes(hex)).base64EncodedString())
+        guard !build.isEmpty, build.range(of: "^[0-9A-Za-z.]+$", options: .regularExpression) != nil, release.isWellFormed,
+              AgentImages.manifestArchiveURL(r, release) == url else {
+            throw HostError(.failed, "\(r.title)'s release manifest names an archive Dozer does not expect (\(url.prefix(120)))")
+        }
+        return release
+    }
+    static func hexBytes(_ hex: String) -> [UInt8] {
+        var out: [UInt8] = []
+        var i = hex.startIndex
+        while i < hex.endIndex { let j = hex.index(i, offsetBy: 2); out.append(UInt8(hex[i..<j], radix: 16) ?? 0); i = j }
+        return out
     }
 
     /// No lookups at all (in-process hosts and tests): resolution uses only what the store has, then
@@ -93,6 +185,16 @@ public struct NpmRegistry: Sendable {
     /// The real host's registry: `DOZ_TEST_NPM_REGISTRY` = `offline` (every lookup fails) or a URL
     /// (a stub server) — tests only; otherwise registry.npmjs.org.
     public static func fromEnvironment(_ env: [String: String] = ProcessInfo.processInfo.environment) -> NpmRegistry {
+        var r = fromEnvironmentLookups(env)
+        switch env["DOZ_TEST_NPM_REGISTRY"] {
+        case "offline": r.releaseInfo = { rec, _ in throw HostError(.unavailable, "offline (DOZ_TEST_NPM_REGISTRY): \(rec.id)'s release date not looked up") }
+        case let s? where !s.isEmpty: r.releaseInfo = httpReleaseInfo(URL(string: s).flatMap { ["http", "https"].contains($0.scheme ?? "") ? $0 : nil } ?? npmjs)
+        default: r.releaseInfo = httpReleaseInfo(npmjs)
+        }
+        return r
+    }
+
+    static func fromEnvironmentLookups(_ env: [String: String]) -> NpmRegistry {
         // 596: Claude Code's native manifests — `DOZ_TEST_CLAUDE_DOWNLOADS` = offline or a URL (tests only).
         let native: NativeLookup
         switch env["DOZ_TEST_CLAUDE_DOWNLOADS"] {
@@ -115,12 +217,15 @@ public struct NpmRegistry: Sendable {
         switch env["DOZ_TEST_NPM_REGISTRY"] {
         case "offline":
             return NpmRegistry(lookup: { p, t in throw HostError(.unavailable, "offline (DOZ_TEST_NPM_REGISTRY): \(p)@\(t) not looked up") },
-                               native: native, digest: digest)
+                               native: native, digest: digest,
+                               manifest: { u in throw HostError(.unavailable, "offline (DOZ_TEST_NPM_REGISTRY): \(u.host ?? "a manifest") not looked up") })
         case let s? where !s.isEmpty:
-            guard let u = URL(string: s), ["http", "https"].contains(u.scheme ?? "") else { return NpmRegistry(lookup: http(npmjs).lookup, native: native, digest: digest) }
-            return NpmRegistry(lookup: http(u).lookup, native: native, digest: digest)
+            guard let u = URL(string: s), ["http", "https"].contains(u.scheme ?? "") else {
+                return NpmRegistry(lookup: http(npmjs).lookup, native: native, digest: digest, manifest: httpManifest())
+            }
+            return NpmRegistry(lookup: http(u).lookup, native: native, digest: digest, manifest: httpManifest())
         default:
-            return NpmRegistry(lookup: http(npmjs).lookup, native: native, digest: digest)
+            return NpmRegistry(lookup: http(npmjs).lookup, native: native, digest: digest, manifest: httpManifest())
         }
     }
 }
@@ -136,6 +241,11 @@ public struct AgentVersionRecord: Codable, Equatable, Sendable {
     public var known: [AgentRelease]
     /// 596 (Claude Code): the native builds' checksums resolved before (the newest 20).
     public var native: [NativeClaudeBuild]?
+    /// 617 (owner: "record the latest version and how old it is and is it current"): when `latest` was released, and
+    /// the registry's deprecation message for it — looked up once per new latest (`infoVersion`), never by a look.
+    public var latestReleased: Date?
+    public var latestDeprecated: String?
+    public var infoVersion: String?
 
     public init(latest: AgentRelease? = nil, checkedAt: Date? = nil, failedAt: Date? = nil, lastError: String? = nil, known: [AgentRelease] = []) {
         self.latest = latest
@@ -398,6 +508,43 @@ public enum AgentVersions {
         let want = setting(image, settings)
         let rec = all(store)[image]
         var f = Freshness(image: image, setting: want, latest: rec?.latest?.version, checkedAt: rec?.checkedAt, error: nil, looked: false)
+        // 617: an agent from its vendor's own release manifest (Antigravity CLI) — only its latest can be looked up.
+        if let r = AgentRecipes.recipe(image), r.install.kind == "manifest-binary" {
+            guard let fetch = registry.manifest, let m = r.install.manifest.flatMap(URL.init(string:)) else { return f }
+            if want != "latest" {
+                if known(image, version: want, store: store) == nil {
+                    f.error = "\(r.title) can be prepared at its latest or at a version this store has seen, not \(want)"
+                }
+                return f
+            }
+            if !force {
+                if let c = rec?.checkedAt, rec?.latest != nil, now.timeIntervalSince(c) < maxAge { return f }
+                if let failed = rec?.failedAt, now.timeIntervalSince(failed) < retryAfterFailure, rec?.latest != nil || rec?.lastError != nil {
+                    f.error = rec?.lastError
+                    return f
+                }
+            }
+            do {
+                let rel = try NpmRegistry.parseManifest(try await fetch(m), recipe: r)
+                update(image, store) { $0.latest = rel; $0.checkedAt = now; $0.failedAt = nil; $0.lastError = nil; $0.remember(rel) }
+                await rememberReleaseInfo(image, r, rel, registry: registry, store: store)
+                f.latest = rel.version
+                f.checkedAt = now
+            } catch {
+                f.error = HostError.from(error).message
+                update(image, store) { $0.failedAt = now; $0.lastError = f.error }
+            }
+            f.looked = true
+            return f
+        }
+        // 617: a pypi or release-binary recipe is prepared at its pin only (its requirements lock or download is for that
+        // release) — nothing is looked up, and a setting naming another version says so.
+        if let r = AgentRecipes.recipe(image), AgentRecipe.pinnedOnlyKinds.contains(r.install.kind) {
+            if want != "latest", want != r.install.pinned.version {
+                f.error = "\(r.title) is prepared at the release its recipe pins (\(r.install.pinned.version)), not \(want)"
+            }
+            return f
+        }
         guard let package = AgentImages.package(image), let npm = registry.lookup else { return f }
         // 599i: Codex is installed from its linux-arm64 platform package — its release is the version of
         // `@openai/codex` and the integrity of `@openai/codex@<version>-linux-arm64` (the tarball a bake downloads).
@@ -407,6 +554,16 @@ public enum AgentVersions {
                 var v = tag
                 if tag == "latest" { v = try await npm(p, "latest").version }
                 let platform = try await npm(p, AgentImages.codexPlatformVersion(v))
+                return AgentRelease(version: v, integrity: platform.integrity)
+            }
+        } else if let r = AgentRecipes.recipe(image), r.install.kind == "npm-platform-binary", let platformPackage = r.install.platformPackage {
+            // 617: an agent whose program is a SEPARATE platform package at the same version (Grok Build): the version
+            // is the MAIN package's latest (the platform package's own `latest` tag is stale), the integrity the
+            // platform package's at that version — the tarball a bake downloads.
+            lookup = { p, tag in
+                var v = tag
+                if tag == "latest" { v = try await npm(p, "latest").version }
+                let platform = try await npm(platformPackage, v)
                 return AgentRelease(version: v, integrity: platform.integrity)
             }
         } else {
@@ -434,6 +591,7 @@ public enum AgentVersions {
         do {
             let r = try await lookup(package, "latest")
             update(image, store) { $0.latest = r; $0.checkedAt = now; $0.failedAt = nil; $0.lastError = nil; $0.remember(r) }
+            if let recipe = AgentRecipes.recipe(image) { await rememberReleaseInfo(image, recipe, r, registry: registry, store: store) }
             f.latest = r.version
             f.checkedAt = now
             f.looked = true
@@ -443,6 +601,17 @@ public enum AgentVersions {
             f.looked = true
         }
         return f
+    }
+
+    /// 617: when `release` came out and whether it is deprecated — asked once per new latest (the npm document is large).
+    static func rememberReleaseInfo(_ image: String, _ recipe: AgentRecipe, _ release: AgentRelease, registry: NpmRegistry, store: DozerStore) async {
+        guard all(store)[image]?.infoVersion != release.version, let look = registry.releaseInfo else { return }
+        do {
+            let info = try await look(recipe, release)
+            update(image, store) { $0.latestReleased = info.released; $0.latestDeprecated = info.deprecated; $0.infoVersion = release.version }
+        } catch {
+            HostLog.line("\(image): when \(release.version) was released could not be looked up (\(HostError.from(error).message))")
+        }
     }
 
     /// The prepared version that a create uses now, and the version a preparation would make — the

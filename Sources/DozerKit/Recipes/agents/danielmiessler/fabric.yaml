@@ -1,0 +1,247 @@
+# yaml-language-server: $schema=../../../../../schema/dozer-recipe-2.schema.json
+# Fabric — Dozer's recipe (schema 2). The format: docs/recipes/RECIPE-FORMAT.md.
+# Edit this file, then run make recipes (it writes Recipes/compiled/fabric.json, which Dozer embeds).
+schema: 2
+kind: workload
+id: danielmiessler/fabric
+displayName: Fabric
+description: A command-line prompt toolkit that applies crowd-sourced patterns to text, on a Google AI, Anthropic, OpenAI, xAI or OpenRouter key.
+author: Daniel Miessler
+sourceUrl: https://github.com/danielmiessler/Fabric
+licenses:
+- MIT
+args:
+  version:
+    description: The Fabric release Dozer installs (its pin).
+    default: 1.4.518
+    pattern: '[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?'
+    buildArg: FABRIC_VERSION
+provides:
+- com.dozersandbox/fabric@${{ kit.args.version }}
+capabilities:
+- type: com.docker.sandbox/network-policy@1
+  config:
+    runtime:
+      allow:
+      - api.anthropic.com:443
+      - api.openai.com:443
+      - api.x.ai:443
+      - generativelanguage.googleapis.com:443
+      - openrouter.ai:443
+    dozer:
+      model:
+        id: model:fabric
+        title: Talk to its model provider
+        summary: Fabric's model — the provider or gateway its key is for (Anthropic, OpenAI, xAI, Google AI or OpenRouter), with an API key. Needed for Fabric to answer.
+        phrase: talk to your AI model
+        hosts:
+        - host: api.anthropic.com
+          reason: Anthropic — when the sandbox's key is Anthropic's
+        - host: api.openai.com
+          reason: OpenAI — when the sandbox's key is OpenAI's
+        - host: api.x.ai
+          reason: xAI — when the sandbox's key is xAI's
+        - host: generativelanguage.googleapis.com
+          reason: Google AI — when the sandbox's key is Google AI's
+        - host: openrouter.ai
+          reason: OpenRouter — when the sandbox's key is OpenRouter's
+      update: []
+      excluded: []
+- type: com.docker.sandbox/credential@1
+  description: Google AI (Gemini API) API access
+  config:
+    service: google
+    phase: runtime
+    apiKey:
+      name: GEMINI_API_KEY
+      proxyManaged: true
+      inject:
+      - domain: generativelanguage.googleapis.com
+        header: x-goog-api-key
+        format: '%s'
+    dozer:
+      accounts:
+      - key
+- type: com.docker.sandbox/volume@1
+  config:
+    path: /home/agent/.config/fabric
+- type: com.dozersandbox/install@1
+  config:
+    kind: release-binary
+    url: https://github.com/danielmiessler/Fabric/releases/download/v${{ kit.args.version }}/fabric_Linux_arm64.tar.gz
+    payload: fabric
+    binary: fabric
+    bake_hosts:
+    - github.com
+    - release-assets.githubusercontent.com
+    integrity: sha512-qTS9O3ps0FqHLqmgi1sV4U3u8LdRvJNV7Y5WYOQ48agmaIJoEVBKD9ghZ6LoakoFFQxc1wBr1LXKszCSCeH6kQ==
+    extras:
+    - url: https://codeload.github.com/danielmiessler/fabric/tar.gz/refs/tags/v${{ kit.args.version }}
+      sha256: 2cef4d13f3dc884ccd7474b4b66e66248bffb7ccd23e3f05d5ee27aa19b743ae
+      path: Fabric-${{ kit.args.version }}/data/patterns
+      to: /opt/fabric/patterns
+      what: patterns
+- type: com.dozersandbox/launch@1
+  config:
+    command:
+    - fabric
+    no_prompts_args: []
+    passthrough:
+    - --version
+    - --help
+    - -h
+    - --setup
+    - -S
+    - --serve
+    env:
+      CUSTOM_PATTERNS_DIRECTORY: /opt/fabric/patterns
+    state_env: {}
+    first_run:
+    - file: ~/.config/fabric/.env
+      set:
+        DEFAULT_VENDOR: Gemini
+        DEFAULT_MODEL: gemini-2.5-flash
+    session: shell
+    status: none
+    verify:
+    - argv:
+      - fabric
+      - --version
+      expect: ${{ kit.args.version }}
+    check:
+      argv:
+      - sh
+      - -c
+      - echo hello | fabric "say ok"
+      expect: DOZ_FAKE_OK
+- type: com.dozersandbox/auth@1
+  config:
+    methods:
+    - kind: api-key
+      provider: google
+      accounts:
+      - key
+      keys_page: https://aistudio.google.com/apikey
+      note: 'Fabric''s vendor and model come from DEFAULT_VENDOR and DEFAULT_MODEL, which Dozer sets for the chosen source (Gemini by default; GrokAI reads GROKAI_API_KEY too).'
+      checked: '2026-10-14'
+    - kind: api-key
+      provider: anthropic
+      accounts:
+      - api-key
+      keys_page: https://console.anthropic.com/settings/keys
+      note: 'Fabric through Anthropic: doz try fabric --provider anthropic (or choose it in the try setup); the model with --model.'
+      checked: '2026-10-14'
+    - kind: api-key
+      provider: openai
+      accounts:
+      - openai-key
+      keys_page: https://platform.openai.com/api-keys
+      note: 'Fabric through OpenAI: doz try fabric --provider openai (or choose it in the try setup); the model with --model.'
+      checked: '2026-10-14'
+    - kind: api-key
+      provider: xai
+      accounts:
+      - key
+      keys_page: https://console.x.ai/
+      note: 'Fabric through xAI: doz try fabric --provider xai (or choose it in the try setup); the model with --model.'
+      checked: '2026-10-14'
+    - kind: api-key
+      provider: openrouter
+      accounts:
+      - key
+      keys_page: https://openrouter.ai/keys
+      note: 'Fabric through OpenRouter: doz try fabric --gateway openrouter (or choose it in the try setup); the model with --model.'
+      checked: '2026-10-14'
+- type: com.dozersandbox/gateways@1
+  config:
+    entries:
+    - gateway: openrouter
+      level: verified
+      shape: openai-chat
+      endpoint: v1
+      how:
+        env:
+          DEFAULT_VENDOR: 'OpenRouter'
+          DEFAULT_MODEL: '${{ dozer.model }}'
+      evidence: 'make recipe-check: its check turn through a stand-in OpenRouter (doz try with --gateway openrouter; models@1)'
+      checked: '2026-10-14'
+    - gateway: vercel-ai-gateway
+      level: 'no'
+      reason: 'its own client has no Vercel AI Gateway setting (an OpenAI-compatible base URL), so it is not offered'
+      checked: '2026-10-14'
+- type: com.dozersandbox/models@1
+  config:
+    default: google
+    native:
+    - source: anthropic
+      env:
+        DEFAULT_VENDOR: Anthropic
+        DEFAULT_MODEL: '${{ dozer.model }}'
+    - source: openai
+      env:
+        DEFAULT_VENDOR: OpenAI
+        DEFAULT_MODEL: '${{ dozer.model }}'
+    - source: xai
+      env:
+        DEFAULT_VENDOR: GrokAI
+        DEFAULT_MODEL: '${{ dozer.model }}'
+      key_env:
+      - GROKAI_API_KEY
+    - source: google
+      env:
+        DEFAULT_VENDOR: Gemini
+        DEFAULT_MODEL: '${{ dozer.model }}'
+    - source: openrouter
+      env:
+        DEFAULT_VENDOR: OpenRouter
+        DEFAULT_MODEL: '${{ dozer.model }}'
+- type: com.dozersandbox/currency@1
+  config:
+    checked: '2026-10-14'
+- type: com.dozersandbox/directory@1
+  config:
+    kind: ai-tool
+    categories:
+    - terminal-tool
+    icon: fabric
+    default_base: debian
+    platforms:
+      glibc: true
+      musl: true
+    tags:
+    - tag: headless
+      level: verified
+      notes:
+      - echo TEXT | fabric -p PATTERN, or fabric "a question"
+      evidence: 'A2 VM proof: echo hello | fabric "say ok" answered DOZ_FAKE_OK through the fake provider (probes/617-*/recipes/fabric)'
+      checked: '2026-10-14'
+    terms: Your API key of the provider or gateway you choose (Google AI by default). Its patterns come with it (baked at the pin).
+- type: com.dozersandbox/ports@1
+  config:
+    ports:
+    - port: 8080
+      title: Fabric REST API
+      path: /swagger/index.html
+      check: /swagger/index.html
+    serve:
+    - fabric
+    - --serve
+- type: com.dozersandbox/guide@1
+  config:
+    intro: "Fabric applies ready-made prompts — patterns — to text you pipe into it: summaries, wisdom extraction, code review and some 260 more. It is not a chat: it answers in your shell and exits."
+    steps:
+    - text: "Check it answers."
+      command: "echo hello | fabric \"say ok\""
+    - text: "See the patterns it has."
+      command: "fabric -l"
+    - text: "Summarise some text with one."
+      command: "echo \"Dozer runs each agent in its own VM\" | fabric -p summarize"
+    - text: "Use a file from your folder — put it there first, then change the name:"
+      command: "fabric -p extract_wisdom < notes.md"
+      edit: true
+    tips:
+    - "`fabric -s` streams the answer as it comes."
+    - "Another model: `fabric -m MODEL -p summarize`."
+    - "`fabric --readpattern summarize` shows what a pattern asks the model."
+    - "Web pages (`-u`) and YouTube (`-y`) need the open web: refused while the network is Locked."
+    docs: https://github.com/danielmiessler/Fabric

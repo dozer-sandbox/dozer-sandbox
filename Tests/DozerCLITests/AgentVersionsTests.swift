@@ -90,6 +90,10 @@ final class AgentVersionsTests: XCTestCase {
         let d = try XCTUnwrap(DozerSettings.definition(SettingKey.claudeCodeVersion))
         for ok in ["latest", "2.1.227", "3.0.0-beta.2"] { XCTAssertNoThrow(try d.parse(ok), ok) }
         for bad in ["2.1", "^2.1.0", "next", "2.1.227 ; x", "~1.0.0", ""] { XCTAssertThrowsError(try d.parse(bad), bad) }
+        // 617: a pinned-only recipe's own two-part pin is a version of its setting (llm 0.36), and only that one.
+        let llm = try XCTUnwrap(DozerSettings.definition("images.llm_version"))
+        XCTAssertNoThrow(try llm.parse("0.36"))
+        XCTAssertThrowsError(try llm.parse("0.35"))
         let pinned = DozerSettings(text: "[images]\nclaude_code_version = \"2.1.227\"\npi_version = \"latest\"\n")
         XCTAssertEqual(pinned.warnings, [])
         XCTAssertEqual(AgentVersions.setting("claude-code", pinned), "2.1.227")

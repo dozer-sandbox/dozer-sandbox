@@ -1,0 +1,300 @@
+{
+  "args" : {
+    "version" : {
+      "buildArg" : "GOOSE_VERSION",
+      "default" : "1.54.0",
+      "description" : "The Goose release Dozer installs (its pin).",
+      "pattern" : "[0-9]+\\.[0-9]+\\.[0-9]+([-+][0-9A-Za-z.-]+)?"
+    }
+  },
+  "author" : "Agentic AI Foundation",
+  "capabilities" : [
+    {
+      "config" : {
+        "dozer" : {
+          "excluded" : [
+
+          ],
+          "model" : {
+            "hosts" : [
+              {
+                "host" : "api.x.ai",
+                "paths" : [
+                  "/v1/models",
+                  "/v1/chat/completions",
+                  "/v1/responses"
+                ]
+              }
+            ],
+            "id" : "model:goose",
+            "phrase" : "talk to your AI model (xAI)",
+            "summary" : "Goose's model here (the xAI API, with your key) — needed for Goose to answer.",
+            "title" : "Talk to xAI"
+          },
+          "update" : [
+
+          ]
+        },
+        "runtime" : {
+          "allow" : [
+            "api.x.ai:443"
+          ]
+        }
+      },
+      "type" : "com.docker.sandbox/network-policy@1"
+    },
+    {
+      "config" : {
+        "apiKey" : {
+          "inject" : [
+            {
+              "domain" : "api.x.ai",
+              "format" : "Bearer %s",
+              "header" : "authorization"
+            }
+          ],
+          "name" : "XAI_API_KEY",
+          "proxyManaged" : true
+        },
+        "dozer" : {
+          "accounts" : [
+            "key"
+          ]
+        },
+        "phase" : "runtime",
+        "service" : "xai"
+      },
+      "description" : "xAI API access",
+      "type" : "com.docker.sandbox/credential@1"
+    },
+    {
+      "config" : {
+        "path" : "/home/agent/.config/goose"
+      },
+      "type" : "com.docker.sandbox/volume@1"
+    },
+    {
+      "config" : {
+        "path" : "/home/agent/.local/share/goose"
+      },
+      "type" : "com.docker.sandbox/volume@1"
+    },
+    {
+      "config" : {
+        "directory" : "/home/agent/.agents/skills/dozer",
+        "dozer" : {
+          "kind" : "skill"
+        },
+        "filename" : "SKILL.md"
+      },
+      "type" : "com.docker.sandbox/agent-context@1"
+    },
+    {
+      "config" : {
+        "bake_hosts" : [
+          "github.com",
+          "release-assets.githubusercontent.com"
+        ],
+        "binary" : "goose",
+        "integrity" : "sha512-dopMlnmnYA443NEV1YLTTt5wO5FMSxfHL5e93GjkV97Q2Q9SxyNk7zKnMrdNXrfHYpXS+uLAuR8MbvnnavhutQ==",
+        "kind" : "release-binary",
+        "payload" : "goose",
+        "url" : "https://github.com/aaif-goose/goose/releases/download/v${{ kit.args.version }}/goose-aarch64-unknown-linux-musl.tar.gz"
+      },
+      "type" : "com.dozersandbox/install@1"
+    },
+    {
+      "config" : {
+        "check" : {
+          "argv" : [
+            "goose",
+            "run",
+            "--no-session",
+            "-t",
+            "say ok"
+          ],
+          "expect" : "DOZ_FAKE_OK",
+          "screen" : {
+            "expect" : [
+              "goose is ready"
+            ]
+          }
+        },
+        "command" : [
+          "goose"
+        ],
+        "env" : {
+          "GOOSE_DISABLE_KEYRING" : "1",
+          "GOOSE_MODE" : "auto",
+          "GOOSE_MODEL" : "grok-code-fast-1",
+          "GOOSE_PROVIDER" : "xai",
+          "GOOSE_TELEMETRY_ENABLED" : "false",
+          "GOOSE_TELEMETRY_OFF" : "1"
+        },
+        "first_run" : [
+          {
+            "file" : "~/.config/goose/config.yaml",
+            "set" : {
+              "GOOSE_MODEL" : "grok-code-fast-1",
+              "GOOSE_PROVIDER" : "xai",
+              "GOOSE_TELEMETRY_ENABLED" : false
+            }
+          }
+        ],
+        "no_prompts_args" : [
+
+        ],
+        "passthrough" : [
+          "--version",
+          "-V",
+          "--help",
+          "-h",
+          "configure",
+          "info",
+          "update",
+          "mcp",
+          "recipe",
+          "schedule",
+          "project",
+          "projects",
+          "web",
+          "completion"
+        ],
+        "resume" : [
+          "session",
+          "--resume"
+        ],
+        "state_env" : {
+
+        },
+        "status" : "none",
+        "verify" : [
+          {
+            "argv" : [
+              "goose",
+              "--version"
+            ],
+            "expect" : "${{ kit.args.version }}"
+          }
+        ]
+      },
+      "type" : "com.dozersandbox/launch@1"
+    },
+    {
+      "config" : {
+        "methods" : [
+          {
+            "accounts" : [
+              "key"
+            ],
+            "checked" : "2026-10-14",
+            "keys_page" : "https://console.x.ai/",
+            "kind" : "api-key",
+            "note" : "Goose's xAI provider (GOOSE_PROVIDER=xai, XAI_API_KEY, model grok-code-fast-1). Its other providers Dozer does not offer here yet.",
+            "provider" : "xai"
+          }
+        ]
+      },
+      "type" : "com.dozersandbox/auth@1"
+    },
+    {
+      "config" : {
+        "entries" : [
+          {
+            "checked" : "2026-10-14",
+            "gateway" : "openrouter",
+            "how" : {
+              "env" : {
+                "GOOSE_MODEL" : "${{ dozer.model }}",
+                "GOOSE_PROVIDER" : "openrouter",
+                "OPENROUTER_API_KEY" : "${{ dozer.placeholder }}"
+              }
+            },
+            "level" : "documented",
+            "notes" : [
+              "OpenRouter is one of Goose's built-in providers"
+            ],
+            "shape" : "openai-chat",
+            "source" : "https://goose-docs.ai/docs/getting-started/providers"
+          },
+          {
+            "checked" : "2026-10-14",
+            "gateway" : "vercel-ai-gateway",
+            "level" : "unknown",
+            "reason" : "Goose documents no Vercel AI Gateway provider; its OpenAI-compatible host setting was not checked against it"
+          }
+        ]
+      },
+      "type" : "com.dozersandbox/gateways@1"
+    },
+    {
+      "config" : {
+        "checked" : "2026-10-14"
+      },
+      "type" : "com.dozersandbox/currency@1"
+    },
+    {
+      "config" : {
+        "categories" : [
+          "coding-agent"
+        ],
+        "default_base" : "debian",
+        "icon" : "goose",
+        "kind" : "coding-agent",
+        "platforms" : {
+          "glibc" : true,
+          "musl" : true
+        },
+        "tags" : [
+          {
+            "checked" : "2026-10-14",
+            "level" : "documented",
+            "notes" : [
+              "goose run -t \"…\""
+            ],
+            "source" : "https://goose-docs.ai/docs/guides/goose-cli-commands",
+            "tag" : "headless"
+          }
+        ],
+        "terms" : "Your xAI API key — a key from console.x.ai."
+      },
+      "type" : "com.dozersandbox/directory@1"
+    },
+    {
+      "config" : {
+        "docs" : "https://github.com/aaif-goose/goose",
+        "intro" : "Goose is a coding agent with its own screen: the session on the left. Ask it to read, change and run the code in your folder.",
+        "steps" : [
+          {
+            "command" : "goose run --no-session -t \"say ok\"",
+            "text" : "Check it answers, without its screen."
+          },
+          {
+            "text" : "Ask it something in its own screen — the session on the left."
+          },
+          {
+            "command" : "goose run --no-session -t \"list the files in this folder\"",
+            "text" : "One task without its screen."
+          }
+        ],
+        "tips" : [
+          "Files it makes are in /workspace — your folder on the Mac.",
+          "Restart its session from the session's ⋯ menu; End stops it."
+        ]
+      },
+      "type" : "com.dozersandbox/guide@1"
+    }
+  ],
+  "description" : "An open-source, extensible AI agent for the terminal (Agentic AI Foundation, ex-Block), here on an xAI API key.",
+  "displayName" : "Goose",
+  "id" : "aaif/goose",
+  "kind" : "workload",
+  "licenses" : [
+    "Apache-2.0"
+  ],
+  "provides" : [
+    "com.dozersandbox/goose@${{ kit.args.version }}"
+  ],
+  "schema" : 2,
+  "sourceUrl" : "https://github.com/aaif-goose/goose"
+}

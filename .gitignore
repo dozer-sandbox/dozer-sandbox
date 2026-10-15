@@ -24,3 +24,9 @@ Guest/deckhold/test/out/
 *private-key*
 *.p8
 *.p12
+
+# Stray outputs a test build sometimes leaves at the repository root (e.g. TestSafetyTests-2.swiftmodule).
+/*Tests-2.d
+/*Tests-2.dia
+/*Tests-2.swiftdeps
+/*Tests-2.swiftmodule

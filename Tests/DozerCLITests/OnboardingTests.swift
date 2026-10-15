@@ -71,7 +71,9 @@ final class OnboardingTests: XCTestCase {
         fails("name: a\nimage: lab\nagent: pi\n", "not both")
         fails("name: a\nbase: python\ndockerfile: ./Dockerfile\n", "base or dockerfile")
         fails("name: a\nbase: cobol\n", "base: node, python")
-        fails("name: a\nagent: gemini\nbase: go\n", "agent: claude-code, pi, codex or none")
+        // 617: gemini is an agent now — an unknown one is still refused, naming every agent.
+        XCTAssertTrue(DozerProject.agentWords.hasPrefix("claude-code, pi, codex, antigravity, gemini, grok"))
+        fails("name: a\nagent: cobol-agent\nbase: go\n", "agent: " + DozerProject.agentWords)
         fails("name: a\nimage: lab\ncpus: 100\n", "cpus")
         fails("name: a\nimage: lab\ncpus: two\n", "cpus")
         fails("name: a\nimage: lab\nmemory: lots\n", "memory")
@@ -397,7 +399,7 @@ final class OnboardingTests: XCTestCase {
         XCTAssertEqual(OnboardingRecord.read(DozerStore(root: root))?.images, ["claude-code"], "the host records the onboarding when it is ready")
         let after = try await c.handle(HostRequest(.prepareStatus)).result!.decode(PrepareStatus.self)
         XCTAssertEqual(after.preparations.first?.state, "done")
-        XCTAssertTrue(after.preparations.first?.lines.contains { $0.contains("pulled the base image node") } == true)
+        XCTAssertTrue(after.preparations.first?.lines.contains { $0.contains("Downloaded the Node.js base image") } == true)
     }
 
     func testAFailedPreparationRecordsNoOnboardingAndCancelCancels() async throws {

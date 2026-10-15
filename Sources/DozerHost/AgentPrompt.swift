@@ -208,6 +208,9 @@ public enum AgentPrompt {
         // 599i: Codex's own state, and its provider (OpenAI) — Claude Code and pi read exactly as before.
         let codex = agent == "codex"
         v["agent.state"] = codex ? "`~/.codex`" : "`~/.claude`, `~/.pi/agent`"
+        // 617: a recipe agent's own state and key provider.
+        let keyAgent = agent.flatMap(AgentRecipes.recipe).flatMap { $0.isBuiltin ? nil : $0 }
+        if let r = keyAgent { v["agent.state"] = r.state.persist.map { "`\($0)`" }.joined(separator: ", ") }
         // 599g: only while a view serves the user's rules (it is the guest's state, not the Mac's files).
         switch workspaceRules {
         case .lock?:
@@ -309,6 +312,10 @@ public enum AgentPrompt {
         case .proxied(let p):
             // 597 (P7): what the agent may do, in plain words — and the permission to ask for.
             v["network.permissions"] = PermissionPolicy.facts(p, sandbox: name)
+            // 617: what the agent's own switches turned off because a permission is off (HostCore.withRecipeEnvironment).
+            if p.permissions != nil, let r = ImageChoice.parse(image)?.agent.recipe {
+                for o in r.network.offWithout ?? [] where !(p.permissions ?? []).contains(o.permission) { v["network.permissions"]! += " " + o.says + "." }
+            }
             let allowed = p.effectiveRules.filter { $0.action == .allow }.map(\.host)
             var unique: [String] = []
             for h in allowed where !unique.contains(h) { unique.append(h) }
@@ -332,6 +339,8 @@ public enum AgentPrompt {
             v["account.name"] = "none usable (\(account ?? "none"))"
             v["credentials.description"] = "no credential you can use is attached (\(problem)), so your requests to the model will fail. "
                 + "Do not log in or ask for a key inside the sandbox — tell the user to choose an account in Dozer: `doz account use \(name) ACCOUNT` on the Mac, or the sandbox's page in `doz ui`."
+        } else if network.policy != nil, let account, let r = keyAgent, let p = r.provider.flatMap(KeyProviders.provider) {
+            v["credentials.description"] = "the Mac's proxy puts the account's key (\(account)) into your requests to \(p.title) on the way out; the value in \(p.env) is a placeholder — that is expected; never log in, and never ask the user for a key."
         } else if network.policy != nil, account == "mac", codex {
             v["credentials.description"] = "the Mac's proxy puts the user's own Codex login on their Mac (the account mac) into your requests to OpenAI on the way out; the Mac's Codex renews it. The tokens in ~/.codex/auth.json and the key-like values in your environment are placeholders — that is expected; never run `codex login` or `codex logout`, and never ask the user for a key. If a request says the Mac's Codex login has expired, tell the user to run codex on their Mac."
         } else if network.policy != nil, let account, codex {
@@ -395,13 +404,10 @@ public enum AgentPrompt {
 
     /// The agent a sandbox runs, by its image spec (a template follows the image it was saved from).
     /// 596: whatever its base (`python-claude-code` runs claude-code).
+    /// 617: any agent with a recipe that has a place for the facts (Gemini CLI's extension, Grok Build's rules file).
     public static func agent(of spec: SandboxSpec) -> String? {
-        switch spec.imageSpec.flatMap({ ImageChoice.parse($0.name) })?.agent {
-        case .claudeCode?: "claude-code"
-        case .pi?: "pi"
-        case .codex?: "codex"          // 599i
-        default: nil
-        }
+        guard let a = spec.imageSpec.flatMap({ ImageChoice.parse($0.name) })?.agent, let r = a.recipe, r.prompt != nil else { return nil }
+        return a.rawValue
     }
 
     /// 596: the base as the facts say it — "Python (python:3.13-bookworm)", "the user's Dockerfile
@@ -418,8 +424,24 @@ public enum AgentPrompt {
         case "pi": "\(home)/.pi/agent/skills/dozer"
         // 599i: Codex's user skills (`~/.agents/skills`; `$CODEX_HOME/skills` is deprecated) — never AGENTS.md.
         case "codex": "\(home)/.agents/skills/dozer"
+        // 617: a recipe agent's own place for the facts — never the workspace.
+        case let a where AgentRecipes.recipe(a).map({ !$0.isBuiltin }) ?? false:
+            (AgentRecipes.recipe(a)?.prompt?.dir).map { home + "/" + $0.dropFirst(2) } ?? "\(home)/.claude/skills/dozer"
         default: "\(home)/.claude/skills/dozer"
         }
+    }
+
+    /// 617: the file the facts go in for a context-file agent (`~/.grok/rules/dozer.md`), and its manifest; nil: a skill.
+    static func contextFile(agent: String, home: String) -> (path: String, manifest: (path: String, text: String)?)? {
+        guard let r = AgentRecipes.recipe(agent), !r.isBuiltin, let p = r.prompt, p.kind == "context-file", let file = p.file else { return nil }
+        let dir = skillDirectory(agent: agent, home: home)
+        let manifest = p.manifest.flatMap { m -> (String, String)? in
+            let enc = JSONEncoder()
+            enc.outputFormatting = [.sortedKeys, .prettyPrinted, .withoutEscapingSlashes]
+            guard let d = try? enc.encode(m.json) else { return nil }
+            return (dir + "/" + m.file, String(decoding: d, as: UTF8.self) + "\n")
+        }
+        return (dir + "/" + file, manifest)
     }
 
     /// The prompt and skill a sandbox gets at its next session. nil: its image runs no agent.
@@ -448,7 +470,8 @@ public enum AgentPrompt {
                           tools: tools, workspaceRules: workspaceRules, agent: agent)
         var r = AgentPromptReport(enabled: settings.bool(SettingKey.agentPrompt), agent: agent, text: nil, error: nil, layers: [],
                                   skill: nil, promptPath: guestPromptPath,
-                                  skillPath: skillDirectory(agent: agent, home: imageSpec.home) + "/SKILL.md")
+                                  // 617: a context-file agent's facts file (Gemini CLI's extension, Grok Build's rules).
+                                  skillPath: contextFile(agent: agent, home: imageSpec.home)?.path ?? skillDirectory(agent: agent, home: imageSpec.home) + "/SKILL.md")
         guard r.enabled else { return r }
         var template = builtInTemplate
         var source = "the built-in template"
@@ -482,6 +505,7 @@ public enum AgentPrompt {
     /// The guest script (run as root, a utility exec — never a session) that writes both parts, or
     /// removes them when the prompt is off. Contents travel base64-encoded in the script.
     public static func deliveryScript(_ r: AgentPromptReport, user: String) -> String {
+        if let s = contextDeliveryScript(r, user: user) { return s }
         let dir = (r.skillPath as NSString).deletingLastPathComponent
         let skills = (dir as NSString).deletingLastPathComponent
         guard r.enabled, let text = r.text, let skill = r.skill else {
@@ -501,6 +525,43 @@ public enum AgentPrompt {
         chown '\(user):\(user)' '\(dir)' '\(dir)/SKILL.md'
         chmod 0644 '\(dir)/SKILL.md'
         """
+    }
+
+    /// 617: a context-file agent (Gemini CLI, Grok Build): the facts as the agent's own user-level context file —
+    /// `~/.gemini/extensions/dozer/DOZER.md` with its `gemini-extension.json` (a bare file is not loaded), or
+    /// `~/.grok/rules/dozer.md` — never in the workspace. Folders it makes are the user's; off removes only Dozer's
+    /// files (Grok's rules folder may hold the person's own). nil: not such an agent.
+    static func contextDeliveryScript(_ r: AgentPromptReport, user: String) -> String? {
+        guard let recipe = AgentRecipes.recipe(r.agent), !recipe.isBuiltin, recipe.prompt?.kind == "context-file" else { return nil }
+        let file = r.skillPath, dir = (file as NSString).deletingLastPathComponent
+        let manifest = recipe.prompt?.manifest.map { m -> (String, String) in
+            let enc = JSONEncoder()
+            enc.outputFormatting = [.sortedKeys, .prettyPrinted, .withoutEscapingSlashes]
+            return (dir + "/" + m.file, String(decoding: (try? enc.encode(m.json)) ?? Data(), as: UTF8.self) + "\n")
+        }
+        guard r.enabled, let text = r.text else {
+            return "rm -f '\(guestPromptPath)' '\(file)'" + (manifest.map { " '\($0.0)'" } ?? "")
+        }
+        // Each folder from the home down, made as the user's (a root mkdir -p would leave root-owned parents).
+        let home = "/home/\(user)"
+        var made: [String] = []
+        var p = dir
+        while p.hasPrefix(home + "/") { made.insert(p, at: 0); p = (p as NSString).deletingLastPathComponent }
+        let t = Data((text + "\n").utf8).base64EncodedString()
+        var s = """
+            set -e
+            mkdir -p /run/dozer
+            printf %s '\(t)' | base64 -d > '\(guestPromptPath).tmp'
+            chmod 0644 '\(guestPromptPath).tmp'
+            mv -f '\(guestPromptPath).tmp' '\(guestPromptPath)'
+
+            """
+        for d in made { s += "[ -d '\(d)' ] || install -d -o '\(user)' -g '\(user)' '\(d)'\n" }
+        s += "cp '\(guestPromptPath)' '\(file)'\nchown '\(user):\(user)' '\(file)'\nchmod 0644 '\(file)'\n"
+        if let (mpath, mtext) = manifest {
+            s += "printf %s '\(Data(mtext.utf8).base64EncodedString())' | base64 -d > '\(mpath)'\nchown '\(user):\(user)' '\(mpath)'\nchmod 0644 '\(mpath)'\n"
+        }
+        return s
     }
 }
 

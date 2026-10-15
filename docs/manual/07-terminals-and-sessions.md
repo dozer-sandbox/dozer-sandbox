@@ -23,7 +23,7 @@ sandbox sleeps or hibernates.
 ## In the terminal
 
 ```sh
-doz attach my-app                 # the sandbox's own session
+doz attach my-app                 # the sandbox's own session (opened first when it is not running)
 doz attach my-app server          # a session by name
 doz run my-app -- htop            # a NEW session running a program, attached
 doz run my-app -d --session worker -- bash -lc 'make watch'    # start one in the background
@@ -43,6 +43,30 @@ doz exec my-app -- ls /workspace  # a one-off command: no terminal, output and e
 - A program the sandbox does not have is said plainly — "`sudo` is not installed in this sandbox's
   image (not on its PATH)" — and `doz` exits `125`. There is no `sudo` in the lab; it isn't needed
   there: `exec` already runs as root unless `--user` names another user.
+
+### Copying files in and out: `doz get`, `doz put`, `doz cp`
+
+```sh
+doz get my-app report.md                  # out of the sandbox, into the current folder (a path relative to /workspace)
+doz get my-app /workspace/site ./backup/  # a folder, whole, into ./backup/site
+doz get my-app out.csv results.csv        # a new name
+doz put my-app ./data                     # into the sandbox: /workspace/data
+doz put my-app notes.md /tmp/n.md         # somewhere else, under a new name
+doz cp my-app:/workspace/report.md .      # the Docker spelling: NAME:PATH on one side (NAME: alone is /workspace)
+```
+
+- They work in every sandbox, **an isolated one included** — the way files come out of a try made with
+  `--isolated`. A sleeping sandbox is woken and one that is off is started, as for `exec` (`--no-wake`,
+  `--no-start` refuse instead).
+- Into an existing folder the item keeps its name; otherwise the last part of the destination is its new
+  name. **What is already there is not replaced** unless `--force` (a file replaces a file; a folder is
+  merged into a folder, files of the same name replaced — never a folder over a file).
+- File modes are kept (an executable stays executable). On your Mac the files are yours; in the sandbox
+  they belong to the image's user — or to root where that user cannot write (it says so).
+- **Only what you named is written.** On the Mac the copy is unpacked in a temporary folder beside the
+  destination, checked, then moved into place; nothing is ever written into Dozer's own store. A folder
+  holding a link that points outside it is not copied, either way (the copy says which link).
+- A large copy shows its progress; `--json` gives the result as data.
 
 ### Restarting or ending a session
 
@@ -174,7 +198,30 @@ Which agents say it:
 |---|---|
 | Claude Code | 2.1.295 and later (images install the newest by default) |
 | pi | 1.1.0 and later |
+| Grok Build | 1.0.52 and later (the version Dozer installs) |
 | Codex | no — its sessions show nothing, and everything else works as usual |
+| OpenCode | no (checked with 1.19.0) |
+| GitHub Copilot CLI | no (checked with 1.0.96) |
+| Qwen Code | no (checked with 0.25.1) |
+| Goose | no (checked with 1.54.0) |
+| Kilo Code CLI | no (checked with 7.8.8) |
+| Mistral Vibe | no (checked with 2.26.1) |
+| Factory Droid | 0.240.1 (the version Dozer installs) |
+| Dirac | no (checked with 0.5.20) |
+| Kimi Code | no (checked with 2.1.1) |
+| Cline CLI | no (checked with 3.0.71) |
+| OpenHands CLI | no (checked with 1.16.0) |
+| Letta Code | no (checked with 0.34.13) |
+| Docker Agent | 1.150.0 (the version Dozer installs) |
+| Nanocoder | no (checked with 1.31.0) |
+| mini-swe-agent | no (checked with 2.4.6) |
+| Open Interpreter | no (checked with 0.0.56) |
+| Crush | partly (0.98.1 reports idle and working, never done; not used yet) |
+| MiMo Code | no (checked with 0.1.15) |
+| CodeWhale | no (checked with 0.10.1) |
+| Maki | no (checked with 0.6.3) |
+| oh-my-pi | partly (18.10.4 reports idle, never working or done; not used yet) |
+| Tau | no (checked with 0.4.7) |
 
 How it works: a program reports its state with a terminal escape sequence (the *program status*
 protocol, OSC 7501) — but only after the terminal answers that it understands it. Dozer's session

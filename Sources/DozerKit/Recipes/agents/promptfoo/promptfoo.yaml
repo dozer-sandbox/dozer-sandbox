@@ -1,0 +1,212 @@
+# yaml-language-server: $schema=../../../../../schema/dozer-recipe-2.schema.json
+# promptfoo — Dozer's recipe (schema 2). The format: docs/recipes/RECIPE-FORMAT.md.
+# Edit this file, then run make recipes (it writes Recipes/compiled/promptfoo.json, which Dozer embeds).
+schema: 2
+kind: workload
+id: promptfoo/promptfoo
+displayName: promptfoo
+description: A command line for evaluating and red-teaming LLM prompts and apps, on an xAI, OpenAI, Google AI, OpenRouter or Vercel AI Gateway key.
+author: promptfoo
+sourceUrl: https://github.com/promptfoo/promptfoo
+licenses:
+- MIT
+args:
+  version:
+    description: The promptfoo release Dozer installs (its pin).
+    default: '0.124.1'
+    pattern: '[0-9]+\.[0-9]+(\.[0-9]+)?([-+][0-9A-Za-z.-]+)?'
+    buildArg: PROMPTFOO_VERSION
+provides:
+- com.dozersandbox/promptfoo@${{ kit.args.version }}
+capabilities:
+- type: com.docker.sandbox/network-policy@1
+  config:
+    runtime:
+      allow:
+      - api.openai.com:443
+      - api.x.ai:443
+      - generativelanguage.googleapis.com:443
+      - openrouter.ai:443
+      - ai-gateway.vercel.sh:443
+      deny:
+      - r.promptfoo.app:443
+    dozer:
+      model:
+        id: model:promptfoo
+        title: Talk to its model provider
+        summary: promptfoo's model — the provider or gateway its key is for (OpenAI, xAI, Google AI, OpenRouter or Vercel AI Gateway), with an API key. Needed for promptfoo to answer.
+        phrase: talk to your AI model
+        hosts:
+        - host: api.openai.com
+          reason: OpenAI — when the sandbox's key is OpenAI's
+        - host: api.x.ai
+          reason: xAI — when the sandbox's key is xAI's
+        - host: generativelanguage.googleapis.com
+          reason: Google AI — when the sandbox's key is Google AI's
+        - host: openrouter.ai
+          reason: OpenRouter — when the sandbox's key is OpenRouter's
+        - host: ai-gateway.vercel.sh
+          reason: Vercel AI Gateway — when the sandbox's key is Vercel AI Gateway's
+      update: []
+      excluded: []
+      quiet:
+      - host: r.promptfoo.app
+        reason: promptfoo reports that its telemetry is off (one "telemetry disabled" event each run) even with PROMPTFOO_DISABLE_TELEMETRY; no setting stops it
+- type: com.docker.sandbox/credential@1
+  description: xAI API access
+  config:
+    service: xai
+    phase: runtime
+    apiKey:
+      name: XAI_API_KEY
+      proxyManaged: true
+      inject:
+      - domain: api.x.ai
+        header: authorization
+        format: Bearer %s
+    dozer:
+      accounts:
+      - key
+- type: com.docker.sandbox/volume@1
+  config:
+    path: /home/agent/.promptfoo
+- type: com.dozersandbox/install@1
+  config:
+    kind: npm
+    package: promptfoo
+    binary: promptfoo
+    needs_node: '22'
+    integrity: sha512-Y6fq/WGTL7lPvDsirNSmmmcPLhURwRao03iv8fCoLbFq6H1eqg5VVTmXiap5Jl+fiRaQQZXYMHb2N1gQm1tGyQ==
+- type: com.dozersandbox/launch@1
+  config:
+    command:
+    - promptfoo
+    no_prompts_args: []
+    passthrough:
+    - '--version'
+    - '-V'
+    - '--help'
+    - '-h'
+    env:
+      PROMPTFOO_DISABLE_TELEMETRY: '1'
+      PROMPTFOO_DISABLE_UPDATE: '1'
+    state_env: {}
+    session: shell
+    status: none
+    verify:
+    - argv:
+      - promptfoo
+      - '--version'
+      expect: '${{ kit.args.version }}'
+    check:
+      argv:
+      - sh
+      - '-c'
+      - 'echo "say ok" > /tmp/prompt.txt && promptfoo eval -p /tmp/prompt.txt -r "openai:chat:$DOZ_MODEL" --no-cache'
+      expect: DOZ_FAKE_OK
+      timeout: 300
+- type: com.dozersandbox/auth@1
+  config:
+    methods:
+    - kind: api-key
+      provider: xai
+      accounts:
+      - key
+      keys_page: https://console.x.ai/
+      note: 'promptfoo''s openai provider is pointed at the chosen source (OPENAI_BASE_URL, the key under OPENAI_API_KEY; providers: [openai:chat:$DOZ_MODEL] in a config); its xai provider reads XAI_API_KEY too. Its telemetry and update check are off.'
+      checked: '2026-10-14'
+    - kind: api-key
+      provider: openai
+      accounts:
+      - openai-key
+      keys_page: https://platform.openai.com/api-keys
+      note: 'promptfoo through OpenAI: doz try promptfoo --provider openai (or choose it in the try setup); the model with --model.'
+      checked: '2026-10-14'
+    - kind: api-key
+      provider: google
+      accounts:
+      - key
+      keys_page: https://aistudio.google.com/apikey
+      note: 'promptfoo through Google AI: doz try promptfoo --provider google (or choose it in the try setup); the model with --model.'
+      checked: '2026-10-14'
+    - kind: api-key
+      provider: openrouter
+      accounts:
+      - key
+      keys_page: https://openrouter.ai/keys
+      note: 'promptfoo through OpenRouter: doz try promptfoo --gateway openrouter (or choose it in the try setup); the model with --model.'
+      checked: '2026-10-14'
+    - kind: api-key
+      provider: vercel-ai-gateway
+      accounts:
+      - key
+      keys_page: https://vercel.com/docs/ai-gateway/authentication-and-byok
+      note: 'promptfoo through Vercel AI Gateway: doz try promptfoo --gateway vercel-ai-gateway (or choose it in the try setup); the model with --model.'
+      checked: '2026-10-14'
+- type: com.dozersandbox/gateways@1
+  config:
+    entries:
+    - gateway: openrouter
+      level: verified
+      shape: openai-chat
+      endpoint: v1
+      how:
+        env:
+          OPENAI_BASE_URL: '${{ dozer.gateway.endpoint.v1 }}'
+          DOZ_MODEL: '${{ dozer.model }}'
+      evidence: 'make recipe-check: its check turn through a stand-in OpenRouter (doz try with --gateway openrouter; models@1)'
+      checked: '2026-10-14'
+    - gateway: vercel-ai-gateway
+      level: verified
+      shape: openai-chat
+      endpoint: v1
+      how:
+        env:
+          OPENAI_BASE_URL: '${{ dozer.gateway.endpoint.v1 }}'
+          DOZ_MODEL: '${{ dozer.model }}'
+      evidence: 'make recipe-check: its check turn through a stand-in Vercel AI Gateway (doz try with --gateway vercel-ai-gateway; models@1)'
+      checked: '2026-10-14'
+- type: com.dozersandbox/models@1
+  config:
+    default: xai
+    shapes:
+    - shape: openai-chat
+      env:
+        OPENAI_BASE_URL: '${{ dozer.base_url }}'
+        DOZ_MODEL: '${{ dozer.model }}'
+      key_env:
+      - OPENAI_API_KEY
+- type: com.dozersandbox/currency@1
+  config:
+    checked: '2026-10-14'
+- type: com.dozersandbox/directory@1
+  config:
+    kind: ai-tool
+    categories:
+    - evaluation
+    icon: promptfoo
+    default_base: debian
+    platforms:
+      glibc: true
+      musl: false
+    tags:
+    - tag: headless
+      level: verified
+      notes:
+      - promptfoo eval -c CONFIG
+      evidence: 'A2 VM proof: its check turn answered DOZ_FAKE_OK through the fake provider (make recipe-check; probes/617-*/recipes/promptfoo)'
+      checked: '2026-10-14'
+    terms: Your API key of the provider or gateway you choose (xAI by default). promptfoo view (its web viewer) needs a forwarded port, which Dozer does not offer yet.
+- type: com.dozersandbox/guide@1
+  config:
+    intro: "promptfoo evaluates and red-teams prompts and LLM apps from a config of prompts, providers and tests. It runs in your shell and exits."
+    steps:
+    - text: "Check it answers: one prompt against your model."
+      command: "echo \"say ok\" > /tmp/prompt.txt && promptfoo eval -p /tmp/prompt.txt -r \"openai:chat:$DOZ_MODEL\" --no-cache"
+    - text: "See its commands."
+      command: "promptfoo --help"
+    tips:
+    - "`promptfoo init` writes an example `promptfooconfig.yaml` in your folder."
+    - "`DOZ_MODEL` is the model for the key you chose: `openai:chat:$DOZ_MODEL`."
+    - "Its telemetry and update check are off."
+    docs: https://www.promptfoo.dev/docs/intro/

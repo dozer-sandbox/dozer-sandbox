@@ -45,11 +45,11 @@ public enum WebExposure {
         case .index, .asset, .terminalFrame, .offline, .serviceWorker, .sessionBootstrap, .sessionInfo, .sessionRenew, .sessionEnd:
             return .page
         case .overview, .sandbox, .sandboxSessions, .sandboxNetwork, .sandboxTools, .images, .imageTree, .accounts, .metrics,
-             .metricsCSV, .events, .doctor, .stream, .operations, .settings, .sessionScreen, .terminalLayout, .bootLogs, .bootLog,
-             .onboarding, .preparations, .resources, .bases, .access:
+             .metricsCSV, .events, .doctor, .stream, .operations, .settings, .sessionScreen, .terminalLayout, .bootLogs, .bootLog, .buildLog,
+             .onboarding, .preparations, .resources, .bases, .access, .tryCatalog, .tryList:
             return .read
         case .actions, .policyPreview, .terminalTicket, .terminalSocket, .settingsChange, .terminalLayoutSet, .onboardingConfig,
-             .workspaceCheck, .quickAdd, .projectOpen, .projectPreview, .projectWrite, .resourcesPreview, .accessCheck, .signup:
+             .workspaceCheck, .quickAdd, .plan, .projectOpen, .projectPreview, .projectWrite, .resourcesPreview, .accessCheck, .signup:
             return .change
         case .accountAdd, .sandboxKey, .accessGithubKey:
             return .secretEntry

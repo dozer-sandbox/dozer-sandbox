@@ -35,8 +35,8 @@ public struct QuickAddPlan: Codable, Equatable, Sendable {
     }
 
     /// "claude-sandbox-2 · claude-code · ~/dozer-sandbox-workspaces/claude-sandbox-2".
-    public func line(home: String = FileManager.default.homeDirectoryForCurrentUser.path) -> String {
-        let ws = workspace.map { $0.hasPrefix(home + "/") ? "~" + $0.dropFirst(home.count) : $0 } ?? "isolated"
+    public func line(homes: [String] = DisplayPath.homes()) -> String {
+        let ws = workspace.map { DisplayPath.tilde($0, homes: homes) } ?? "isolated"
         return "\(name) · \(image) · \(ws)"
     }
 }
@@ -64,10 +64,12 @@ public enum QuickAdd {
     /// standing line when it is prepared but out of date.
     public static func requirement(image: String, network: String?, defaultAccount: String,
                                    accountKinds: [String: AccountKind], outOfDate: String?, openaiDefault: String? = nil,
-                                   codexMac: Bool = false) -> (kind: String, text: String)? {
+                                   codexMac: Bool = false, providers: [String: String] = [:],
+                                   providerDefaults: [String: String] = [:]) -> (kind: String, text: String)? {
         if AgentCredentials.kinds(image) != nil, network != "nat", network != "none",
            let problem = AgentCredentials.createProblem(image: image, account: nil, defaultAccount: defaultAccount, kinds: accountKinds,
-                                                        openaiDefault: openaiDefault, codexMac: codexMac) {
+                                                        openaiDefault: openaiDefault, codexMac: codexMac,
+                                                        providers: providers, providerDefaults: providerDefaults) {
             return ("account", problem)
         }
         if let s = outOfDate {

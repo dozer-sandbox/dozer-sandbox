@@ -76,7 +76,7 @@ public enum PermissionPolicy {
         if let names = p.permissions { return (names, p.rules) }
         var names: [String] = []
         // 599d: never inferred — the user's GitHub login is only ever on because it was switched on by name.
-        for perm in AgentPermissions.all where perm.id != "web" && perm.group != "github" && !AgentPermissions.isAgentModel(perm.id) {
+        for perm in AgentPermissions.all where perm.id != "web" && perm.group != "github" && !AgentPermissions.isAgentOwn(perm.id) {
             let covered = perm.hosts.allSatisfy { h in
                 let host = h.host.hasPrefix("*.") ? "x" + h.host.dropFirst(1) : h.host
                 return p.evaluateConnection(host: host, port: h.ports?.first ?? 443).kind != .deny
@@ -108,6 +108,10 @@ public enum PermissionPolicy {
         for g in grant {
             if g.hasPrefix("site:") {
                 let host = try site(g)
+                // 617: a host the sandbox's agent is known to call and Dozer keeps out — whatever is chosen.
+                if AgentPermissions.excludedHosts((p.permissions ?? []) + AgentPermissions.agentPermissions(agent)).contains(host) {
+                    throw HostError(.invalid, "\(host) is kept out of a \(agent?.title ?? "this agent's") sandbox (Dozer never lets the agent reach it) — it cannot be allowed")
+                }
                 p.rules.removeAll { $0.host == host && $0.action == .deny && !$0.hasHTTPConditions }
                 if !p.rules.contains(where: { $0.host == host && $0.action == .allow && $0.ports == nil && !$0.hasHTTPConditions }) {
                     p.rules.insert(EgressRule(host: host, note: "site you allowed"), at: 0)
@@ -116,6 +120,10 @@ public enum PermissionPolicy {
                 for e in AgentPermissions.ecosystems { names.insert("install:" + e.id) }
             } else {
                 guard AgentPermissions.isValid(g) else { throw HostError(.invalid, "no permission \(g) — doz net permissions lists them (or site:HOST)") }
+                // 617 (D5): a recipe agent talks to its own model only.
+                if g == "model", AgentPermissions.hasOwnModel(AgentPermissions.agentPermissions(agent)) {
+                    throw HostError(.invalid, "\(agent?.title ?? "this agent") talks to its own model — Anthropic's (model) is not part of its sandbox")
+                }
                 names.insert(g)
                 // 599d: "Push to GitHub" is a step of "Use GitHub as you" — granting it grants both.
                 if g == AgentPermissions.gitHubPush { names.insert(AgentPermissions.gitHubAsYou) }
@@ -155,8 +163,12 @@ public enum PermissionPolicy {
         let inferredMode = policy.permissions == nil
         let (names, own) = inferred(policy)
         let standard = Set(AgentPermissions.preset("agent", base: base) ?? [])
-        // 599i: an agent's own model permission is listed only where it is on (a Codex sandbox).
-        let rows = AgentPermissions.all.filter { !AgentPermissions.isAgentModel($0.id) || names.contains($0.id) }.map { p in
+        // 599i: an agent's own model permission is listed only where it is on (a Codex sandbox). 617: an agent's own
+        // update hosts are never a switch; Anthropic's model is not listed where a recipe agent has its own.
+        let ownModel = AgentPermissions.hasOwnModel(names)
+        let rows = AgentPermissions.all.filter {
+            (!AgentPermissions.isAgentModel($0.id) || names.contains($0.id)) && !AgentPermissions.isAgentUpdate($0.id) && !AgentPermissions.isAgentVendor($0.id) && !(ownModel && $0.id == "model")
+        }.map { p in
             PermissionRow(id: p.id, title: p.title, summary: p.summary, on: names.contains(p.id),
                           locked: p.locked || AgentPermissions.isAgentModel(p.id), warning: p.warning,
                           group: p.group, hosts: p.hosts.map { h in h.host + (h.pathPrefixes != nil ? " (the agent's own package)" : "") },
@@ -166,11 +178,15 @@ public enum PermissionPolicy {
         tmp.permissions = names
         tmp.rules = own
         let sites = own.filter { $0.action == .allow && !$0.hasHTTPConditions }.map(\.host)
-        let deniedRecs = log.filter { $0.verdict == .denied }
+        // 617: what the agent is expected to be refused (its recipe's quiet list) is no refusal to report.
+        let quiet = Set(AgentPermissions.quietHosts(names))
+        let deniedRecs = log.filter { $0.verdict == .denied && !quiet.contains($0.host.lowercased()) }
         var byGrant: [String: PermissionSuggestion] = [:]
         var order: [String] = []
+        let excluded = Set(AgentPermissions.excludedHosts(names))
         for r in deniedRecs {
             let host = r.host.lowercased()
+            if excluded.contains(host) { continue }              // 617: kept out on purpose — never suggested
             let grant: String, what: String, perm: String?
             if let p = AgentPermissions.permission(forHost: host) {
                 guard !names.contains(p.id) else { continue }       // on, but a rule of the user's denied it
@@ -192,8 +208,10 @@ public enum PermissionPolicy {
     /// on — ask for it by name (e.g. "Browse the web": doz net allow NAME web)."
     public static func facts(_ policy: NetworkPolicy, sandbox: String) -> String {
         let (names, own) = inferred(policy)
-        let on = AgentPermissions.all.filter { names.contains($0.id) }.map(\.phrase)
-        let off = AgentPermissions.all.filter { !names.contains($0.id) && !AgentPermissions.isAgentModel($0.id) }
+        // 617: an agent's own update hosts are part of "update yourself"; Anthropic's model is not a recipe agent's.
+        let ownModel = AgentPermissions.hasOwnModel(names)
+        let on = AgentPermissions.all.filter { names.contains($0.id) && !AgentPermissions.isAgentUpdate($0.id) && !AgentPermissions.isAgentVendor($0.id) }.map(\.phrase)
+        let off = AgentPermissions.all.filter { !names.contains($0.id) && !AgentPermissions.isAgentOwn($0.id) && !(ownModel && $0.id == "model") }
         var s = "You may " + list(on) + "."
         let sites = own.filter { $0.action == .allow && !$0.hasHTTPConditions }.map(\.host)
         if !sites.isEmpty { s += " Sites the user allowed: " + sites.prefix(20).joined(separator: ", ") + "." }

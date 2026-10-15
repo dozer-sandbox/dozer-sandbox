@@ -1,0 +1,297 @@
+{
+  "args" : {
+    "version" : {
+      "buildArg" : "GEMINI_VERSION",
+      "default" : "0.63.0",
+      "description" : "The Gemini CLI release Dozer installs (its pin).",
+      "pattern" : "[0-9]+\\.[0-9]+\\.[0-9]+([-+][0-9A-Za-z.-]+)?"
+    }
+  },
+  "author" : "Google",
+  "capabilities" : [
+    {
+      "config" : {
+        "dozer" : {
+          "excluded" : [
+            "play.googleapis.com",
+            "accounts.google.com",
+            "oauth2.googleapis.com",
+            "cloudcode-pa.googleapis.com"
+          ],
+          "model" : {
+            "hosts" : [
+              {
+                "host" : "generativelanguage.googleapis.com"
+              }
+            ],
+            "id" : "model:google",
+            "phrase" : "talk to your AI model (Google AI)",
+            "summary" : "Gemini CLI's model (the Gemini API, with an API key) — needed for Gemini CLI to work.",
+            "title" : "Talk to Google AI"
+          },
+          "update" : [
+            {
+              "host" : "registry.npmjs.org",
+              "paths" : [
+                "/@google/gemini-cli",
+                "/@google%2fgemini-cli",
+                "/@google%2Fgemini-cli"
+              ]
+            }
+          ]
+        },
+        "runtime" : {
+          "allow" : [
+            "generativelanguage.googleapis.com:443"
+          ],
+          "deny" : [
+            "play.googleapis.com:443",
+            "accounts.google.com:443",
+            "oauth2.googleapis.com:443",
+            "cloudcode-pa.googleapis.com:443"
+          ]
+        }
+      },
+      "type" : "com.docker.sandbox/network-policy@1"
+    },
+    {
+      "config" : {
+        "apiKey" : {
+          "inject" : [
+            {
+              "domain" : "generativelanguage.googleapis.com",
+              "format" : "%s",
+              "header" : "x-goog-api-key"
+            }
+          ],
+          "name" : "GEMINI_API_KEY",
+          "proxyManaged" : true
+        },
+        "dozer" : {
+          "accounts" : [
+            "key"
+          ]
+        },
+        "phase" : "runtime",
+        "service" : "google"
+      },
+      "description" : "Google AI (Gemini API) API access",
+      "type" : "com.docker.sandbox/credential@1"
+    },
+    {
+      "config" : {
+        "path" : "/home/agent/.gemini"
+      },
+      "type" : "com.docker.sandbox/volume@1"
+    },
+    {
+      "config" : {
+        "directory" : "/home/agent/.gemini/extensions/dozer",
+        "dozer" : {
+          "kind" : "context-file",
+          "manifest" : {
+            "file" : "gemini-extension.json",
+            "json" : {
+              "contextFileName" : "DOZER.md",
+              "name" : "dozer",
+              "version" : "1.0.0"
+            }
+          }
+        },
+        "filename" : "DOZER.md"
+      },
+      "type" : "com.docker.sandbox/agent-context@1"
+    },
+    {
+      "config" : {
+        "binary" : "gemini",
+        "integrity" : "sha512-mmhqMmAdsoplCzrLQQC4yJBqr4uSKXghnrLspgUU6N9drmsaq7pi7oF09skRYzEq2dYK6eMT4UpFQP6rG2o/ew==",
+        "kind" : "npm",
+        "needs_node" : "20",
+        "npm_args" : [
+          "--ignore-scripts"
+        ],
+        "package" : "@google/gemini-cli"
+      },
+      "type" : "com.dozersandbox/install@1"
+    },
+    {
+      "config" : {
+        "check" : {
+          "argv" : [
+            "gemini",
+            "-p",
+            "say ok"
+          ],
+          "expect" : "DOZ_FAKE_OK"
+        },
+        "command" : [
+          "gemini"
+        ],
+        "env" : {
+          "GEMINI_CLI_TRUST_WORKSPACE" : "true"
+        },
+        "first_run" : [
+          {
+            "file" : "~/.gemini/settings.json",
+            "set" : {
+              "general.enableAutoUpdate" : false,
+              "general.enableAutoUpdateNotification" : false,
+              "privacy.usageStatisticsEnabled" : false,
+              "security.auth.selectedType" : "gemini-api-key"
+            }
+          }
+        ],
+        "no_prompts_args" : [
+          "--approval-mode=yolo"
+        ],
+        "passthrough" : [
+          "--version",
+          "-v",
+          "--help",
+          "-h",
+          "mcp",
+          "extensions"
+        ],
+        "resume" : [
+          "--resume",
+          "latest"
+        ],
+        "state_env" : {
+
+        },
+        "status" : "none",
+        "verify" : [
+          {
+            "argv" : [
+              "gemini",
+              "--version"
+            ],
+            "expect" : "${{ kit.args.version }}"
+          }
+        ]
+      },
+      "type" : "com.dozersandbox/launch@1"
+    },
+    {
+      "config" : {
+        "methods" : [
+          {
+            "accounts" : [
+              "key"
+            ],
+            "checked" : "2026-10-12",
+            "keys_page" : "https://aistudio.google.com/apikey",
+            "kind" : "api-key",
+            "note" : "API key only: Google's terms forbid third-party tools from using the Google sign-in behind Gemini CLI, so Dozer never offers it.",
+            "provider" : "google"
+          }
+        ]
+      },
+      "type" : "com.dozersandbox/auth@1"
+    },
+    {
+      "config" : {
+        "entries" : [
+          {
+            "checked" : "2026-10-12",
+            "gateway" : "openrouter",
+            "level" : "no",
+            "reason" : "Gemini CLI speaks only the Gemini API (GOOGLE_GEMINI_BASE_URL); OpenRouter serves Chat Completions, Responses and Anthropic Messages, no Gemini API",
+            "source" : "https://openrouter.ai/docs/_llms/api-reference.txt"
+          },
+          {
+            "checked" : "2026-10-12",
+            "gateway" : "vercel-ai-gateway",
+            "level" : "no",
+            "reason" : "Gemini CLI speaks only the Gemini API (GOOGLE_GEMINI_BASE_URL); AI Gateway serves Chat Completions, Responses and Anthropic Messages, no Gemini API",
+            "source" : "https://vercel.com/docs/ai-gateway/sdks-and-apis"
+          }
+        ]
+      },
+      "type" : "com.dozersandbox/gateways@1"
+    },
+    {
+      "config" : {
+        "checked" : "2026-10-12",
+        "lifecycle" : {
+          "by" : "antigravity",
+          "checked" : "2026-10-12",
+          "note" : "Superseded by Antigravity CLI — Google retired Gemini CLI for personal accounts; it still works with a paid Gemini API key",
+          "source" : "https://github.com/google-gemini/gemini-cli/discussions/27274",
+          "status" : "superseded"
+        }
+      },
+      "type" : "com.dozersandbox/currency@1"
+    },
+    {
+      "config" : {
+        "categories" : [
+          "coding-agent"
+        ],
+        "default_base" : "node",
+        "icon" : "gemini-cli",
+        "kind" : "coding-agent",
+        "limits" : [
+          {
+            "musl" : true,
+            "reason" : "on Alpine (musl), Gemini CLI's shell tool runs without a terminal: its PTY module has no musl build"
+          }
+        ],
+        "platforms" : {
+          "glibc" : true,
+          "musl" : true
+        },
+        "tags" : [
+          {
+            "checked" : "2026-10-12",
+            "evidence" : "617 step 0: gemini -p \"say ok\" --approval-mode=yolo answered and exited in a sandbox (617.01 §2.2–2.3)",
+            "level" : "verified",
+            "notes" : [
+              "gemini -p"
+            ],
+            "tag" : "headless"
+          }
+        ],
+        "terms" : "API key only — Google's terms forbid third-party tools from using the Google sign-in behind Gemini CLI."
+      },
+      "type" : "com.dozersandbox/directory@1"
+    },
+    {
+      "config" : {
+        "docs" : "https://github.com/google-gemini/gemini-cli",
+        "intro" : "Gemini CLI is a coding agent with its own screen: the session on the left. Ask it to read, change and run the code in your folder.",
+        "steps" : [
+          {
+            "command" : "gemini -p \"say ok\"",
+            "text" : "Check it answers, without its screen."
+          },
+          {
+            "text" : "Ask it something in its own screen — the session on the left."
+          },
+          {
+            "command" : "gemini -p \"list the files in this folder\"",
+            "text" : "One task without its screen."
+          }
+        ],
+        "tips" : [
+          "Files it makes are in /workspace — your folder on the Mac.",
+          "Restart its session from the session's ⋯ menu; End stops it."
+        ]
+      },
+      "type" : "com.dozersandbox/guide@1"
+    }
+  ],
+  "description" : "Google's earlier open-source coding agent, superseded by Antigravity CLI.",
+  "displayName" : "Gemini CLI",
+  "id" : "google/gemini",
+  "kind" : "workload",
+  "licenses" : [
+    "Apache-2.0"
+  ],
+  "provides" : [
+    "com.dozersandbox/gemini@${{ kit.args.version }}"
+  ],
+  "schema" : 2,
+  "sourceUrl" : "https://github.com/google-gemini/gemini-cli"
+}

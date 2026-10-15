@@ -3,13 +3,14 @@ import { h } from '../dom/h.js';
 import { iconFor } from '../dom/icons.js';
 import { act, actOrThrow, beginTransition, TRANSITION_LABEL, transitionOf } from '../core/operations.js';
 import { DESTRUCTIVE, NEXT_VERB, opRunningFor, PRIMARY_VERB, VERBS, verbsFor } from '../core/sandboxes.js';
-import { bootViewOnStart, saveSetting, setting } from '../core/settings.js';
-import { terminals } from '../core/terminals.js';
+import { saveSetting, setting } from '../core/settings.js';
+import { state } from '../core/state.js';
+import { pageTerminals } from '../core/terminals.js';
 import { btn } from './button.js';
 import { confirmAction, dialog } from './dialog.js';
 import { moreMenu } from './menus.js';
 import { pageFailure } from './notices.js';
-import { openTerminal } from './terminal.js';
+import { openPendingTerminal } from './terminal.js';
 
 /// Shut Down keeps the disk, so it asks with a plain confirmation (and can stop asking); Reset and
 /// Remove destroy data and keep the typed name. "Don't ask again" is the setting ui.confirm_shutdown
@@ -27,24 +28,24 @@ function confirmShutdown(name) {
 export function lifecycle(verb, name) {
   if (verb === 'shutdown') confirmShutdown(name);
   else if (DESTRUCTIVE[verb]) confirmAction(VERBS[verb][0] + ' ' + name, DESTRUCTIVE[verb], name, { action: verb, sandbox: name });
-  else if (verb === 'start' && bootViewOnStart()) startWithBootView(name);
+  // 617: from its own page, the start sequence; elsewhere (a row of Sandboxes) the plain start — its page, when
+  // opened, shows the boot as it is (tab zero, Console).
+  else if (verb === 'start' && state.view === 'sandbox' && state.param === name) startWithBootView(name);
   else act({ action: verb, sandbox: name });
 }
 /// 591 — Start shows the boot: a terminal pane streams the host's steps and the kernel's console,
 /// then becomes the image's own session (the UI process does the switch; the boot stays in the scrollback).
+/// 617 (owner: one stable page after Start — the build panel, then tab zero Console, then the agent's tab, nothing
+/// moving): the start of a sandbox from its page. The agent's terminal is prepared at once but stays out of sight
+/// (`openPendingTerminal`: it attaches QUIETLY once the sandbox runs and becomes a tab when it has drawn its first
+/// frame); while the image is prepared the terminal area shows the build (components/start-progress.js); tab zero,
+/// Console, appears when the VM powers on (`syncConsoleTab`). Never the old boot view writing the console into the
+/// agent's own terminal (owner's shot 7625: vminitd's lines in Codex's tab).
 export async function startWithBootView(name) {
-  // The terminal first: once the UI process shows it waiting on the shut-down sandbox, it is following
-  // the host's events — then the start, so not one step is missed (a warm start takes half a second).
-  // The transition starts at the click (the bar says "Booting…" at once), and the boot view's cover says
-  // it is starting from its first paint — never "Sandbox shut down" while the start is being sent.
   beginTransition(name, 'start');
-  const before = new Set(terminals.keys());
-  openTerminal(name, null, 'interactive', undefined, { bootIntent: true });
-  const t = [...terminals.values()].find((x) => !before.has(x.id));
-  const end = Date.now() + 15000;
-  while (t && Date.now() < end && !t.closed && !t.errorText && !(t.state && ['shutDown', 'failed', 'boot'].includes(t.state.cover.kind))) {
-    await new Promise((r) => setTimeout(r, 100));
-  }
+  // The terminal is registered at once (synchronously) and lays itself out on its own: the start never waits for it —
+  // a hidden tab's timers can be a minute late (Chrome's intensive throttling).
+  if (!pageTerminals(name).some((t) => t.pending && !t.closed && !t.ended)) openPendingTerminal(name);
   await act({ action: 'start', sandbox: name });
 }
 export function rowLifecycle(s) {

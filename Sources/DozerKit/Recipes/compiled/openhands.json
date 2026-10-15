@@ -1,0 +1,286 @@
+{
+  "args" : {
+    "version" : {
+      "buildArg" : "OPENHANDS_VERSION",
+      "default" : "1.16.0",
+      "description" : "The OpenHands CLI release Dozer installs (its pin).",
+      "pattern" : "[0-9]+\\.[0-9]+\\.[0-9]+([-+][0-9A-Za-z.-]+)?"
+    }
+  },
+  "author" : "OpenHands",
+  "capabilities" : [
+    {
+      "config" : {
+        "dozer" : {
+          "excluded" : [
+
+          ],
+          "model" : {
+            "hosts" : [
+              {
+                "host" : "api.x.ai",
+                "paths" : [
+                  "/v1/chat/completions"
+                ]
+              }
+            ],
+            "id" : "model:openhands",
+            "phrase" : "talk to your AI model (xAI)",
+            "summary" : "OpenHands' model here (the xAI API, with your key) — needed for it to answer.",
+            "title" : "Talk to xAI"
+          },
+          "update" : [
+
+          ],
+          "vendor" : [
+            {
+              "host" : "github.com",
+              "paths" : [
+                "/OpenHands/extensions/"
+              ],
+              "reason" : "OpenHands clones its public skills (github.com/OpenHands/extensions) at each start; no setting turns it off"
+            },
+            {
+              "host" : "pypi.org",
+              "paths" : [
+                "/pypi/openhands/json"
+              ],
+              "reason" : "OpenHands asks PyPI for its latest release when it starts (read-only; no setting turns it off) and only shows a notice"
+            }
+          ]
+        },
+        "runtime" : {
+          "allow" : [
+            "api.x.ai:443",
+            "github.com:443",
+            "pypi.org:443"
+          ]
+        }
+      },
+      "type" : "com.docker.sandbox/network-policy@1"
+    },
+    {
+      "config" : {
+        "apiKey" : {
+          "inject" : [
+            {
+              "domain" : "api.x.ai",
+              "format" : "Bearer %s",
+              "header" : "authorization"
+            }
+          ],
+          "name" : "XAI_API_KEY",
+          "proxyManaged" : true
+        },
+        "dozer" : {
+          "accounts" : [
+            "key"
+          ],
+          "env_aliases" : [
+            "LLM_API_KEY"
+          ]
+        },
+        "phase" : "runtime",
+        "service" : "xai"
+      },
+      "description" : "xAI API access",
+      "type" : "com.docker.sandbox/credential@1"
+    },
+    {
+      "config" : {
+        "path" : "/home/agent/.openhands"
+      },
+      "type" : "com.docker.sandbox/volume@1"
+    },
+    {
+      "config" : {
+        "bake_hosts" : [
+          "github.com",
+          "release-assets.githubusercontent.com"
+        ],
+        "binary" : "openhands",
+        "integrity" : "sha512-wh73oUH4wtdNUftFo20QXOa2IujQTFOhmp3y8EYk8kUpahRtjnZRKYutNo1/VZGcAOS7HfFtrn9wnt5hCqNOSg==",
+        "kind" : "release-binary",
+        "url" : "https://github.com/OpenHands/OpenHands-CLI/releases/download/${{ kit.args.version }}/openhands-linux-arm64"
+      },
+      "type" : "com.dozersandbox/install@1"
+    },
+    {
+      "config" : {
+        "check" : {
+          "argv" : [
+            "openhands",
+            "--override-with-envs",
+            "--headless",
+            "-t",
+            "say ok"
+          ],
+          "expect" : "DOZ_FAKE_OK"
+        },
+        "command" : [
+          "openhands",
+          "--override-with-envs"
+        ],
+        "env" : {
+          "LITELLM_LOCAL_MODEL_COST_MAP" : "True",
+          "LLM_BASE_URL" : "https://api.x.ai/v1",
+          "LLM_MODEL" : "openai/grok-build-0.1",
+          "OPENHANDS_SUPPRESS_BANNER" : "1"
+        },
+        "no_prompts_args" : [
+          "--always-approve"
+        ],
+        "passthrough" : [
+          "--version",
+          "-v",
+          "--help",
+          "-h",
+          "mcp",
+          "view",
+          "login",
+          "logout",
+          "cloud"
+        ],
+        "resume" : [
+          "--resume",
+          "--last"
+        ],
+        "state_env" : {
+
+        },
+        "status" : "none",
+        "verify" : [
+          {
+            "argv" : [
+              "openhands",
+              "--version"
+            ],
+            "expect" : "${{ kit.args.version }}"
+          }
+        ]
+      },
+      "type" : "com.dozersandbox/launch@1"
+    },
+    {
+      "config" : {
+        "methods" : [
+          {
+            "accounts" : [
+              "key"
+            ],
+            "checked" : "2026-10-14",
+            "keys_page" : "https://console.x.ai/",
+            "kind" : "api-key",
+            "note" : "OpenHands reads LLM_API_KEY, LLM_MODEL and LLM_BASE_URL only with --override-with-envs (in Dozer's command); xAI's API as an OpenAI-compatible endpoint, model grok-build-0.1. Nothing is written to its settings.",
+            "provider" : "xai"
+          },
+          {
+            "account" : "an OpenHands Cloud account (openhands login)",
+            "checked" : "2026-10-14",
+            "in_sandbox" : false,
+            "kind" : "vendor-sign-in",
+            "note" : "OpenHands Cloud needs its own sign-in; Dozer does not offer it yet."
+          }
+        ]
+      },
+      "type" : "com.dozersandbox/auth@1"
+    },
+    {
+      "config" : {
+        "entries" : [
+          {
+            "checked" : "2026-10-14",
+            "gateway" : "openrouter",
+            "level" : "unknown",
+            "reason" : "OpenHands takes any LiteLLM model and base URL; OpenRouter was not checked"
+          },
+          {
+            "checked" : "2026-10-14",
+            "gateway" : "vercel-ai-gateway",
+            "level" : "unknown",
+            "reason" : "not checked against OpenHands"
+          }
+        ]
+      },
+      "type" : "com.dozersandbox/gateways@1"
+    },
+    {
+      "config" : {
+        "checked" : "2026-10-14"
+      },
+      "type" : "com.dozersandbox/currency@1"
+    },
+    {
+      "config" : {
+        "aliases" : [
+          "openhands-cli"
+        ],
+        "categories" : [
+          "coding-agent"
+        ],
+        "default_base" : "debian",
+        "icon" : "openhands",
+        "kind" : "coding-agent",
+        "limits" : [
+          {
+            "musl" : true,
+            "reason" : "OpenHands publishes a glibc linux-arm64 build only"
+          }
+        ],
+        "platforms" : {
+          "glibc" : true,
+          "musl" : false
+        },
+        "tags" : [
+          {
+            "checked" : "2026-10-14",
+            "evidence" : "make recipe-check: openhands --headless -t \"say ok\" printed the stand-in's answer and exited in a fresh try",
+            "level" : "verified",
+            "notes" : [
+              "openhands --override-with-envs --headless -t \"…\""
+            ],
+            "tag" : "headless"
+          }
+        ],
+        "terms" : "Your xAI API key — a key from console.x.ai."
+      },
+      "type" : "com.dozersandbox/directory@1"
+    },
+    {
+      "config" : {
+        "docs" : "https://github.com/OpenHands/OpenHands-CLI",
+        "intro" : "OpenHands CLI is a coding agent with its own screen: the session on the left. Ask it to read, change and run the code in your folder.",
+        "steps" : [
+          {
+            "command" : "openhands --override-with-envs --headless -t \"say ok\"",
+            "text" : "Check it answers, without its screen."
+          },
+          {
+            "text" : "Ask it something in its own screen — the session on the left."
+          },
+          {
+            "command" : "openhands --override-with-envs --headless -t \"list the files in this folder\"",
+            "text" : "One task without its screen."
+          }
+        ],
+        "tips" : [
+          "Files it makes are in /workspace — your folder on the Mac.",
+          "Restart its session from the session's ⋯ menu; End stops it."
+        ]
+      },
+      "type" : "com.dozersandbox/guide@1"
+    }
+  ],
+  "description" : "OpenHands' coding agent for the terminal, here on an xAI API key (its LLM settings from the environment).",
+  "displayName" : "OpenHands CLI",
+  "id" : "openhands/openhands",
+  "kind" : "workload",
+  "licenses" : [
+    "MIT"
+  ],
+  "provides" : [
+    "com.dozersandbox/openhands@${{ kit.args.version }}"
+  ],
+  "schema" : 2,
+  "sourceUrl" : "https://github.com/OpenHands/OpenHands-CLI"
+}

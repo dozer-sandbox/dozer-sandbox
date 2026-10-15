@@ -382,6 +382,29 @@ final class WebHTTPIntegrationTests: XCTestCase {
                                                                  "Content-Type": "application/json"], method: "POST", body: "{}").status, 404, "reading only")
     }
 
+    /// 617: the build log of a sandbox's image — a session-only, rendered, inert read.
+    func testTheBuildLogIsASessionOnlyRenderedRead() async throws {
+        try await start()
+        XCTAssertEqual(try get("/api/v1/sandboxes/demo/build-log").status, 401)
+        let (cookie, csrf) = try signIn()
+        let r = try get("/api/v1/sandboxes/demo/build-log", ["Cookie": cookie])
+        XCTAssertEqual(r.status, 200, r.text)
+        let log = try WebJSON.decoder.decode(WebBuildLog.self, from: r.body)
+        XCTAssertEqual(log.image, "pi")
+        XCTAssertEqual(log.state, "done")
+        let text = String(decoding: Data(base64Encoded: log.vt) ?? Data(), as: UTF8.self)
+        XCTAssertTrue(text.contains("How pi was built") && text.contains("step: install pi") && text.contains("added 1 package"), text)
+        // 617: the document the tab draws — the same record.
+        XCTAssertEqual(log.document.image, "pi")
+        XCTAssertEqual(log.document.steps.first?.output.first, "added 1 package")
+        XCTAssertFalse(r.text.contains("]52;"), "no OSC anywhere in the answer")
+        XCTAssertFalse(text.contains("\u{1B}]52"), "no OSC reaches the terminal")
+        XCTAssertEqual(try get("/api/v1/sandboxes/nope/build-log", ["Cookie": cookie]).status, 404)
+        XCTAssertEqual(try get("/api/v1/sandboxes/demo/build-log/raw", ["Cookie": cookie]).status, 404)
+        XCTAssertEqual(try get("/api/v1/sandboxes/demo/build-log", ["Cookie": cookie, "Origin": origin, "X-Doz-CSRF": csrf,
+                                                                    "Content-Type": "application/json"], method: "POST", body: "{}").status, 404, "reading only")
+    }
+
     // MARK: server-sent events
 
     func testTheStreamSaysHelloThenChangedAndActivity() async throws {
@@ -806,6 +829,14 @@ final class FakeData: DozerWebData, @unchecked Sendable {
     func bootLogs(_ name: String) async throws -> WebBootList {
         guard name == "demo" else { throw HostError(.notFound, "no sandbox \(name)") }
         return WebBootList(BootLogList(name: name, boots: Self.boots))
+    }
+    // 617 — the build log of demo's image.
+    func buildLog(_ name: String) async throws -> WebBuildLog {
+        guard name == "demo" else { throw HostError(.notFound, "no sandbox \(name)") }
+        return WebBuildLog(BuildLog(image: "pi", state: "done", startedAt: Date(timeIntervalSince1970: 1_800_000_000),
+                                    finishedAt: Date(timeIntervalSince1970: 1_800_000_090), seconds: 90, error: nil,
+                                    steps: [PreparationStep(label: "step: install pi", kind: "step", seconds: 42)],
+                                    sections: [.init(label: "step: install pi", lines: ["added 1 package", "evil \u{1B}]52;c;eA==\u{07}line"])]))
     }
     func bootLog(_ name: String, number: Int) async throws -> WebBootLog {
         guard name == "demo", (1...2).contains(number) else { throw HostError(.notFound, "no boot \(number) of \(name)") }

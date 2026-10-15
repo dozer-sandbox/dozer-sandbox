@@ -125,6 +125,10 @@ channel to your Mac.
 
 The agent is told about all three, including that you see a notice every time.
 
+**Web ports** are not a bridge the sandbox uses: you choose them (a tool's declared port, or `doz ports add`). A
+forward lets your Mac's browser reach a program inside the sandbox, on `127.0.0.1` only and only while the sandbox
+runs; it never lets the sandbox reach anything, and no key crosses it — see [Web ports](29-web-ports.md).
+
 One limit of the files bridge, stated plainly: the file is checked and then handed to macOS to open,
 so an agent racing that moment (a few milliseconds) could swap in another file from your shared
 folder. It can only ever name something the shared folder reaches, and macOS is only ever given a

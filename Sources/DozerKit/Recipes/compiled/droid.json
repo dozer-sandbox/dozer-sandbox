@@ -1,0 +1,297 @@
+{
+  "args" : {
+    "version" : {
+      "buildArg" : "DROID_VERSION",
+      "default" : "0.240.1",
+      "description" : "The Factory Droid release Dozer installs (its pin).",
+      "pattern" : "[0-9]+\\.[0-9]+\\.[0-9]+([-+][0-9A-Za-z.-]+)?"
+    }
+  },
+  "author" : "Factory",
+  "capabilities" : [
+    {
+      "config" : {
+        "dozer" : {
+          "excluded" : [
+
+          ],
+          "model" : {
+            "hosts" : [
+              {
+                "host" : "api.x.ai",
+                "paths" : [
+                  "/v1/chat/completions"
+                ]
+              }
+            ],
+            "id" : "model:droid",
+            "phrase" : "talk to your AI model (xAI)",
+            "summary" : "Factory Droid's model here (the xAI API, with your key) — needed for it to answer.",
+            "title" : "Talk to xAI"
+          },
+          "update" : [
+
+          ]
+        },
+        "runtime" : {
+          "allow" : [
+            "api.x.ai:443"
+          ]
+        }
+      },
+      "type" : "com.docker.sandbox/network-policy@1"
+    },
+    {
+      "config" : {
+        "apiKey" : {
+          "inject" : [
+            {
+              "domain" : "api.x.ai",
+              "format" : "Bearer %s",
+              "header" : "authorization"
+            }
+          ],
+          "name" : "XAI_API_KEY",
+          "proxyManaged" : true
+        },
+        "dozer" : {
+          "accounts" : [
+            "key"
+          ]
+        },
+        "phase" : "runtime",
+        "service" : "xai"
+      },
+      "description" : "xAI API access",
+      "type" : "com.docker.sandbox/credential@1"
+    },
+    {
+      "config" : {
+        "path" : "/home/agent/.factory"
+      },
+      "type" : "com.docker.sandbox/volume@1"
+    },
+    {
+      "config" : {
+        "directory" : "/home/agent/.factory/skills/dozer",
+        "dozer" : {
+          "kind" : "skill"
+        },
+        "filename" : "SKILL.md"
+      },
+      "type" : "com.docker.sandbox/agent-context@1"
+    },
+    {
+      "config" : {
+        "bake_hosts" : [
+          "downloads.factory.ai"
+        ],
+        "binary" : "droid",
+        "integrity" : "sha512-GmruvHDRWTbSNZ76lfS5iGWSTlekbTicf2EGNkzj/griE3bmR9uIaXqmFqp4fjBibjWlkX9q66BnjXl2B9/5vg==",
+        "kind" : "release-binary",
+        "url" : "https://downloads.factory.ai/factory-cli/releases/${{ kit.args.version }}/linux/arm64/droid"
+      },
+      "type" : "com.dozersandbox/install@1"
+    },
+    {
+      "config" : {
+        "check" : {
+          "argv" : [
+            "droid",
+            "exec",
+            "-m",
+            "custom:grok-build-0.1",
+            "say ok"
+          ],
+          "expect" : "DOZ_FAKE_OK"
+        },
+        "command" : [
+          "droid"
+        ],
+        "env" : {
+          "FACTORY_AIRGAP_ENABLED" : "1"
+        },
+        "first_run" : [
+          {
+            "file" : "~/.factory/settings.json",
+            "set" : {
+              "customModels" : [
+                {
+                  "apiKeyHelper" : "printenv XAI_API_KEY",
+                  "baseUrl" : "https://api.x.ai/v1",
+                  "displayName" : "Grok Build",
+                  "maxOutputTokens" : 8192,
+                  "model" : "grok-build-0.1",
+                  "provider" : "generic-chat-completion-api"
+                }
+              ],
+              "trustedFolders" : {
+                "/workspace" : {
+                  "trustedAt" : "2026-10-14T00:00:00.000Z"
+                }
+              }
+            }
+          }
+        ],
+        "no_prompts_args" : [
+          "--auto",
+          "high"
+        ],
+        "passthrough" : [
+          "--version",
+          "-v",
+          "--help",
+          "-h",
+          "help",
+          "exec",
+          "search",
+          "find",
+          "update",
+          "mcp",
+          "plugin",
+          "doctor"
+        ],
+        "resume" : [
+          "--resume",
+          "--last"
+        ],
+        "state_env" : {
+
+        },
+        "status" : "osc7501",
+        "verify" : [
+          {
+            "argv" : [
+              "droid",
+              "--version"
+            ],
+            "expect" : "${{ kit.args.version }}"
+          }
+        ]
+      },
+      "type" : "com.dozersandbox/launch@1"
+    },
+    {
+      "config" : {
+        "methods" : [
+          {
+            "accounts" : [
+              "key"
+            ],
+            "checked" : "2026-10-14",
+            "keys_page" : "https://console.x.ai/",
+            "kind" : "api-key",
+            "note" : "Droid's airgap mode (FACTORY_AIRGAP_ENABLED) with a custom model on xAI's API; its key comes from apiKeyHelper (printenv XAI_API_KEY), so it is never written into Droid's settings (an apiKey value would be).",
+            "provider" : "xai"
+          },
+          {
+            "account" : "a Factory account (FACTORY_API_KEY or its sign-in)",
+            "checked" : "2026-10-14",
+            "in_sandbox" : false,
+            "kind" : "vendor-sign-in",
+            "note" : "Factory's own models and account need its servers, which airgap mode keeps out; Dozer does not offer them yet."
+          }
+        ]
+      },
+      "type" : "com.dozersandbox/auth@1"
+    },
+    {
+      "config" : {
+        "entries" : [
+          {
+            "checked" : "2026-10-14",
+            "gateway" : "openrouter",
+            "level" : "unknown",
+            "reason" : "Droid takes any OpenAI-compatible custom model; OpenRouter was not checked"
+          },
+          {
+            "checked" : "2026-10-14",
+            "gateway" : "vercel-ai-gateway",
+            "level" : "unknown",
+            "reason" : "not checked against Droid"
+          }
+        ]
+      },
+      "type" : "com.dozersandbox/gateways@1"
+    },
+    {
+      "config" : {
+        "checked" : "2026-10-14"
+      },
+      "type" : "com.dozersandbox/currency@1"
+    },
+    {
+      "config" : {
+        "aliases" : [
+          "factory",
+          "factory-droid"
+        ],
+        "categories" : [
+          "coding-agent"
+        ],
+        "default_base" : "debian",
+        "icon" : "droid",
+        "kind" : "coding-agent",
+        "limits" : [
+          {
+            "musl" : true,
+            "reason" : "Factory publishes a glibc linux-arm64 build only"
+          }
+        ],
+        "platforms" : {
+          "glibc" : true,
+          "musl" : false
+        },
+        "tags" : [
+          {
+            "checked" : "2026-10-14",
+            "evidence" : "make recipe-check: droid exec printed the stand-in's answer and exited in a fresh try",
+            "level" : "verified",
+            "notes" : [
+              "droid exec -m custom:grok-build-0.1 \"…\""
+            ],
+            "tag" : "headless"
+          }
+        ],
+        "terms" : "Your xAI API key — a key from console.x.ai. Droid runs in its airgap mode; Factory's account, models and cloud features are not used."
+      },
+      "type" : "com.dozersandbox/directory@1"
+    },
+    {
+      "config" : {
+        "docs" : "https://docs.factory.com/droid-cli/overview",
+        "intro" : "Factory Droid is a coding agent with its own screen: the session on the left. Ask it to read, change and run the code in your folder.",
+        "steps" : [
+          {
+            "command" : "droid exec -m custom:grok-build-0.1 \"say ok\"",
+            "text" : "Check it answers, without its screen."
+          },
+          {
+            "text" : "Ask it something in its own screen — the session on the left."
+          },
+          {
+            "command" : "droid exec -m custom:grok-build-0.1 \"list the files in this folder\"",
+            "text" : "One task without its screen."
+          }
+        ],
+        "tips" : [
+          "Files it makes are in /workspace — your folder on the Mac.",
+          "Restart its session from the session's ⋯ menu; End stops it."
+        ]
+      },
+      "type" : "com.dozersandbox/guide@1"
+    }
+  ],
+  "description" : "Factory's coding agent for the terminal, in its airgap mode with your own xAI API key (no Factory account).",
+  "displayName" : "Factory Droid",
+  "id" : "factory-ai/droid",
+  "kind" : "workload",
+  "licenses" : [
+    "LicenseRef-Factory-Droid"
+  ],
+  "provides" : [
+    "com.dozersandbox/droid@${{ kit.args.version }}"
+  ],
+  "schema" : 2,
+  "sourceUrl" : "https://docs.factory.com/droid-cli/overview"
+}

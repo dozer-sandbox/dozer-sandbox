@@ -13,7 +13,6 @@ struct List: AsyncParsableCommand {
         if g.json { Out.json(rows); return }
         if rows.isEmpty { Out.stdout("no sandboxes — doz up NAME --image lab|claude-code|pi\n"); return }
         var t = [["NAME", "IMAGE", "PHASE", "RAM", "DISK", "SESSIONS", "AGENT", "NETWORK", "ACCOUNT", "WORKSPACE"]]
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
         for r in rows {
             var phase = Out.phaseLabel(r.phase) + (r.busy ? "…" : "")
             if r.diedWithHost == true { phase += " (died with host)" }
@@ -23,8 +22,8 @@ struct List: AsyncParsableCommand {
             if let s = r.credentialState, s != "ok" { account += " (\(s))" }
             if r.credentialPolicy == "strict" { account += " · strict" }
             // 594 (D17): no workspace is said, not left blank.
-            let ws = r.workspace.map { $0.hasPrefix(home + "/") ? "~" + $0.dropFirst(home.count) : $0 } ?? "isolated"
-            t.append([r.name, r.image, phase, Out.mib(r.ramHeldMiB), DozerImages.formatBytes(r.diskBytes),
+            let ws = r.workspace.map { DisplayPath.tilde($0) } ?? "isolated"
+            t.append([r.name + (r.trial == true ? " (try)" : ""), r.image, phase, Out.mib(r.ramHeldMiB), DozerImages.formatBytes(r.diskBytes),
                       r.sessions.map(String.init) ?? "—", r.agentStatus?.label ?? "—", net, account, ws])
         }
         Out.stdout(Out.table(t, rightAligned: [3, 4, 5]))

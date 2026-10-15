@@ -5,6 +5,7 @@ import { icon, PHASE_GLYPH } from '../dom/icons.js';
 import { TRANSITION_LABEL, transitionOf } from '../core/operations.js';
 import { state } from '../core/state.js';
 import { terminals } from '../core/terminals.js';
+import { startStage } from './start-progress.js';
 import { paintCover } from './terminal.js';
 // Calls up the layers (provided by app.js — core/hooks.js):
 const paintTermEmpty = upcall('paintTermEmpty');
@@ -24,7 +25,7 @@ const STATUS_GLYPH = { ok: 'check', warn: 'triangle-alert', fail: 'x', off: 'pow
 export function statusPill(s) { return h('span', { class: 'pill st-' + s }, STATUS_GLYPH[s] ? icon(STATUS_GLYPH[s]) : null, s); }
 function transitionPill(t, name) {
   return h('span', { class: 'pill ph-busy', 'data-pill-for': name, 'data-transition': t.action },
-    h('span', { class: 'mini-spin', 'aria-hidden': 'true' }), ' ' + TRANSITION_LABEL[t.action]);
+    h('span', { class: 'mini-spin', 'aria-hidden': 'true' }), ' ' + (t.action === 'start' ? startStage(name) : TRANSITION_LABEL[t.action]));   // 617: preparing, then booting
 }
 /// Put a sandbox into its transition where it is shown NOW — in place, no re-render: its pills say so
 /// and its lifecycle buttons are disabled (nothing is swapped).

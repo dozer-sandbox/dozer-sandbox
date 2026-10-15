@@ -1,0 +1,301 @@
+{
+  "args" : {
+    "version" : {
+      "buildArg" : "MIMO_CODE_VERSION",
+      "default" : "0.1.15",
+      "description" : "The MiMo Code release Dozer installs (its pin).",
+      "pattern" : "[0-9]+\\.[0-9]+\\.[0-9]+([-+][0-9A-Za-z.-]+)?"
+    }
+  },
+  "author" : "Xiaomi",
+  "capabilities" : [
+    {
+      "config" : {
+        "dozer" : {
+          "excluded" : [
+
+          ],
+          "model" : {
+            "hosts" : [
+              {
+                "host" : "api.x.ai",
+                "paths" : [
+                  "/v1/responses",
+                  "/v1/chat/completions"
+                ]
+              }
+            ],
+            "id" : "model:mimo-code",
+            "phrase" : "talk to your AI model (xAI)",
+            "summary" : "MiMo Code's model here (the xAI API, with your key) — needed for it to answer.",
+            "title" : "Talk to xAI"
+          },
+          "update" : [
+
+          ]
+        },
+        "runtime" : {
+          "allow" : [
+            "api.x.ai:443"
+          ]
+        }
+      },
+      "type" : "com.docker.sandbox/network-policy@1"
+    },
+    {
+      "config" : {
+        "apiKey" : {
+          "inject" : [
+            {
+              "domain" : "api.x.ai",
+              "format" : "Bearer %s",
+              "header" : "authorization"
+            }
+          ],
+          "name" : "XAI_API_KEY",
+          "proxyManaged" : true
+        },
+        "dozer" : {
+          "accounts" : [
+            "key"
+          ]
+        },
+        "phase" : "runtime",
+        "service" : "xai"
+      },
+      "description" : "xAI API access",
+      "type" : "com.docker.sandbox/credential@1"
+    },
+    {
+      "config" : {
+        "path" : "/home/agent/.local/share/mimocode"
+      },
+      "type" : "com.docker.sandbox/volume@1"
+    },
+    {
+      "config" : {
+        "path" : "/home/agent/.config/mimocode"
+      },
+      "type" : "com.docker.sandbox/volume@1"
+    },
+    {
+      "config" : {
+        "binary" : "mimo",
+        "integrity" : "sha512-x5x7cRstiRlSuXIPUcXs8UTH5JxbJwrd2XwKlX4Z8bxuXf8kxu7udm0qMuti7QRQ3U2vY/G4uTSZ5B1Vz3S4yw==",
+        "kind" : "npm-platform-binary",
+        "package" : "@mimo-ai/cli",
+        "payload" : "bin/mimo",
+        "platform_package" : "@mimo-ai/mimocode-linux-arm64"
+      },
+      "type" : "com.dozersandbox/install@1"
+    },
+    {
+      "config" : {
+        "check" : {
+          "argv" : [
+            "mimo",
+            "run",
+            "-m",
+            "xai/grok-build-0.1",
+            "say ok"
+          ],
+          "expect" : "DOZ_FAKE_OK",
+          "screen" : {
+            "allow" : [
+              "Tip .*(/login|sign in)"
+            ],
+            "expect" : [
+              "Type your message"
+            ]
+          }
+        },
+        "command" : [
+          "mimo"
+        ],
+        "env" : {
+          "MIMOCODE_DISABLE_AUTOUPDATE" : "1",
+          "MIMOCODE_DISABLE_LSP_DOWNLOAD" : "1",
+          "MIMOCODE_DISABLE_MODELS_FETCH" : "1",
+          "MIMOCODE_DISABLE_SHARE" : "1",
+          "MIMOCODE_ENABLE_ANALYSIS" : "false"
+        },
+        "first_run" : [
+          {
+            "file" : "~/.config/mimocode/mimocode.json",
+            "set" : {
+              "autoupdate" : false,
+              "model" : "xai/grok-build-0.1",
+              "share" : "disabled"
+            }
+          },
+          {
+            "file" : "~/.local/share/mimocode/trusted-workspaces.json",
+            "set" : {
+              "trustedPaths" : [
+                "/workspace"
+              ],
+              "version" : 1
+            }
+          }
+        ],
+        "no_prompts_args" : [
+
+        ],
+        "no_prompts_env" : {
+          "MIMOCODE_DANGEROUSLY_SKIP_PERMISSIONS" : "1"
+        },
+        "passthrough" : [
+          "--version",
+          "-v",
+          "--help",
+          "-h",
+          "run",
+          "auth",
+          "models",
+          "upgrade",
+          "mcp",
+          "stats"
+        ],
+        "resume" : [
+          "--continue"
+        ],
+        "state_env" : {
+
+        },
+        "status" : "none",
+        "verify" : [
+          {
+            "argv" : [
+              "mimo",
+              "--version"
+            ],
+            "expect" : "${{ kit.args.version }}"
+          }
+        ]
+      },
+      "type" : "com.dozersandbox/launch@1"
+    },
+    {
+      "config" : {
+        "methods" : [
+          {
+            "accounts" : [
+              "key"
+            ],
+            "checked" : "2026-10-14",
+            "keys_page" : "https://console.x.ai/",
+            "kind" : "api-key",
+            "note" : "MiMo Code's xai provider reads XAI_API_KEY, model xai/grok-build-0.1. Its MiMo Platform and ChatGPT sign-ins are not offered.",
+            "provider" : "xai"
+          },
+          {
+            "account" : "a MiMo Platform account (Xiaomi)",
+            "checked" : "2026-10-14",
+            "in_sandbox" : false,
+            "kind" : "vendor-sign-in",
+            "note" : "MiMo's own models need its sign-in; Dozer does not offer it yet."
+          }
+        ]
+      },
+      "type" : "com.dozersandbox/auth@1"
+    },
+    {
+      "config" : {
+        "entries" : [
+          {
+            "checked" : "2026-10-14",
+            "gateway" : "openrouter",
+            "level" : "unknown",
+            "reason" : "MiMo Code has OpenCode's providers; OpenRouter was not checked"
+          },
+          {
+            "checked" : "2026-10-14",
+            "gateway" : "vercel-ai-gateway",
+            "level" : "unknown",
+            "reason" : "not checked against MiMo Code"
+          }
+        ]
+      },
+      "type" : "com.dozersandbox/gateways@1"
+    },
+    {
+      "config" : {
+        "checked" : "2026-10-14"
+      },
+      "type" : "com.dozersandbox/currency@1"
+    },
+    {
+      "config" : {
+        "aliases" : [
+          "mimo",
+          "mimocode"
+        ],
+        "categories" : [
+          "coding-agent"
+        ],
+        "default_base" : "debian",
+        "icon" : "mimo-code",
+        "kind" : "coding-agent",
+        "limits" : [
+          {
+            "musl" : true,
+            "reason" : "Dozer installs MiMo Code's glibc build; its musl build is a separate package, not used yet"
+          }
+        ],
+        "platforms" : {
+          "glibc" : true,
+          "musl" : false
+        },
+        "tags" : [
+          {
+            "checked" : "2026-10-14",
+            "evidence" : "make recipe-check: mimo run \"say ok\" printed the stand-in's answer and exited in a fresh try",
+            "level" : "verified",
+            "notes" : [
+              "mimo run -m xai/grok-build-0.1 \"…\""
+            ],
+            "tag" : "headless"
+          }
+        ],
+        "terms" : "Your xAI API key — a key from console.x.ai. MiMo Code comes with Xiaomi's use restrictions beside its MIT licence; its usage analytics are off."
+      },
+      "type" : "com.dozersandbox/directory@1"
+    },
+    {
+      "config" : {
+        "docs" : "https://mimo.xiaomi.com",
+        "intro" : "MiMo Code is a coding agent with its own screen: the session on the left. Ask it to read, change and run the code in your folder.",
+        "steps" : [
+          {
+            "command" : "mimo run -m xai/grok-build-0.1 \"say ok\"",
+            "text" : "Check it answers, without its screen."
+          },
+          {
+            "text" : "Ask it something in its own screen — the session on the left."
+          },
+          {
+            "command" : "mimo run -m xai/grok-build-0.1 \"list the files in this folder\"",
+            "text" : "One task without its screen."
+          }
+        ],
+        "tips" : [
+          "Files it makes are in /workspace — your folder on the Mac.",
+          "Restart its session from the session's ⋯ menu; End stops it."
+        ]
+      },
+      "type" : "com.dozersandbox/guide@1"
+    }
+  ],
+  "description" : "Xiaomi's coding agent for the terminal (an OpenCode derivative), here on an xAI API key.",
+  "displayName" : "MiMo Code",
+  "id" : "xiaomi/mimo-code",
+  "kind" : "workload",
+  "licenses" : [
+    "MIT"
+  ],
+  "provides" : [
+    "com.dozersandbox/mimo-code@${{ kit.args.version }}"
+  ],
+  "schema" : 2,
+  "sourceUrl" : "https://mimo.xiaomi.com"
+}

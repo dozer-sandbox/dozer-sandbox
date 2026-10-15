@@ -202,9 +202,14 @@ public struct AgentCredentialSupport: Sendable, Codable, Equatable, Hashable {
 public struct AgentPackage: Sendable, Codable, Equatable, Hashable {
     public var package: String
     public var version: String
-    public init(package: String, version: String) {
+    /// 617: a recipe agent's sha512 integrity (what its install step checks), so `recompose` reads its release from
+    /// data. nil for the three built-in agents — and then ABSENT from the canonical JSON, so their bake keys are
+    /// unchanged (RecipePinTests).
+    public var integrity: String?
+    public init(package: String, version: String, integrity: String? = nil) {
         self.package = package
         self.version = version
+        self.integrity = integrity
     }
 }
 
@@ -222,7 +227,8 @@ public struct AgentRelease: Sendable, Codable, Equatable, Hashable {
     /// integrity — nothing a registry answer could use to break out of the script's quotes.
     public var isWellFormed: Bool {
         version.count <= 64 && integrity.count <= 200
-            && version.range(of: #"^\d+\.\d+\.\d+([-+][0-9A-Za-z.-]+)?$"#, options: .regularExpression) != nil
+            // 617: a PyPI release may have two parts (llm 0.36).
+            && version.range(of: #"^\d+\.\d+(\.\d+)?([-+][0-9A-Za-z.-]+)?$"#, options: .regularExpression) != nil
             && integrity.range(of: #"^sha512-[A-Za-z0-9+/]+={0,2}$"#, options: .regularExpression) != nil
     }
 
@@ -265,37 +271,529 @@ public enum AgentImages {
     /// API key only (it reads ANTHROPIC_API_KEY — the proxy's placeholder); a Claude subscription is
     /// never given to it. Other providers can be added per agent later. nil: no agent (the lab).
     /// 596: by the image's AGENT, whatever its base (`python-pi` is pi's).
+    /// 617: from the agent's recipe (Claude Code: any Anthropic account; pi: an Anthropic API key only; Codex: an OpenAI
+    /// account — this Mac's Codex login first, the least setup; Gemini CLI / Grok Build: a key of their provider).
     public static func credentials(_ image: String) -> [AgentCredentialSupport]? {
-        switch ImageChoice.parse(image)?.agent {
-        case .claudeCode?: [AgentCredentialSupport(provider: "anthropic", accountKinds: ["mac", "setup-token", "api-key"])]
-        case .pi?: [AgentCredentialSupport(provider: "anthropic", accountKinds: ["api-key"])]
-        // 599i: Codex — OpenAI only: Dozer's own ChatGPT sign-in, or an OpenAI API key.
-        // rc.3: and `mac` — this Mac's own Codex login (read-only), first: the least setup.
-        case .codex?: [AgentCredentialSupport(provider: "openai", accountKinds: ["codex-mac", "chatgpt", "openai-key"])]
-        default: nil
-        }
+        guard let r = ImageChoice.parse(image)?.agent.recipe else { return nil }
+        return r.credentials.map { AgentCredentialSupport(provider: $0.provider, accountKinds: $0.accounts) }
     }
 
     /// The agent's name as a person reads it (596: any image of that agent).
     public static func agentName(_ image: String) -> String? {
-        switch ImageChoice.parse(image)?.agent { case .claudeCode?: "Claude Code"; case .pi?: "pi"; case .codex?: "Codex"; default: nil }
+        ImageChoice.parse(image)?.agent.recipe?.title
     }
 
-    /// The npm package of an agent image (nil: not an agent image).
+    /// The npm package of an agent image (nil: not an agent image). By the agent's own name only (`codex`, `gemini`).
     public static func package(_ image: String) -> String? {
-        switch image { case "claude-code": claudeCodePackage; case "pi": piPackage; case "codex": codexPackage; default: nil }
+        AgentRecipes.recipe(image)?.install.package
     }
+    /// The release an agent's recipe pins (the built-in three: the constants below, which their recipes repeat).
     public static func pinned(_ image: String) -> AgentRelease? {
-        switch image { case "claude-code": claudeCodePinned; case "pi": piPinned; case "codex": codexPinned; default: nil }
+        switch image {
+        case "claude-code": claudeCodePinned
+        case "pi": piPinned
+        case "codex": codexPinned
+        default: AgentRecipes.recipe(image)?.pinnedRelease
+        }
     }
-    /// The agent image's spec at `release`.
+    /// The agent image's spec at `release` (617: a recipe agent's on its default base).
     public static func spec(_ image: String, release: AgentRelease) -> ImageSpec? {
         switch image {
-        case "claude-code": claudeCode(release)
-        case "pi": pi(release)
-        case "codex": try? ImageComposer.spec(name: "codex", base: BaseCatalogue.base("node")!.source(), agent: .codex, release: release, native: nil)
-        default: nil
+        case "claude-code": return claudeCode(release)
+        case "pi": return pi(release)
+        case "codex": return try? ImageComposer.spec(name: "codex", base: BaseCatalogue.base("node")!.source(), agent: .codex, release: release, native: nil)
+        default:
+            guard let r = AgentRecipes.recipe(image), !r.isBuiltin, let a = AgentKind(rawValue: r.id), let b = BaseCatalogue.base(r.defaultBase) else { return nil }
+            return try? ImageComposer.spec(name: r.id, base: b.source(), agent: a, release: release, native: nil)
         }
+    }
+
+    // MARK: 617 — an agent from its recipe
+
+    /// A recipe agent's install steps on `base`, and the hosts its bake reaches beyond the registries.
+    static func recipeInstall(_ r: AgentRecipe, _ release: AgentRelease, base: BaseSource) -> (steps: [BakeStep], bakeHosts: [String]) {
+        var steps: [BakeStep] = []
+        var hosts: [String] = []
+        // A Dockerfile's base: its libc is known only in the bake.
+        if base.musl == nil, !r.platforms.musl {
+            steps.append(BakeStep.script("check \(r.title) can run here (glibc)", """
+                if [ -e /lib/ld-musl-aarch64.so.1 ]; then echo "doz: \(r.muslRefusal)" >&2; exit 1; fi
+                echo glibc
+                """, needsNetworkFalse: ()))
+        }
+        switch r.install.kind {
+        case "npm":
+            var install = npmInstall(r.install.package!, version: release.version, integrity: release.integrity, extraArgs: r.install.npmArgs ?? [])
+            if let n = r.install.needsNode.flatMap(Int.init), n > NodeRuntime.major {
+                // 617: a newer Node than the bases' (OpenClaw: ≥ 24) — Dozer's Node 24 under /opt/node, on any glibc base.
+                steps.append(ImageComposer.node24Runtime(for: r.title))
+                install.environment["PATH"] = "/opt/node/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+                steps.append(install)
+                steps.append(ImageComposer.nodeWrapper(r.install.binary))
+                hosts.append("nodejs.org")
+            } else if base.hasNode {
+                steps.append(install)
+            } else {
+                steps.append(ImageComposer.nodeRuntime(base.packageManager, for: r.title))
+                install.environment["PATH"] = "/opt/node/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+                steps.append(install)
+                steps.append(ImageComposer.nodeWrapper(r.install.binary))
+                if base.packageManager != .apk { hosts.append("nodejs.org") }
+            }
+        case "manifest-binary":
+            steps.append(manifestBinaryInstall(r, release))
+        case "pypi":
+            steps.append(pythonRuntime(for: r.title))
+            steps.append(pypiInstall(r, release))
+            hosts += PythonRuntime.bakeHosts + ["pypi.org", "files.pythonhosted.org"]
+        case "release-binary":
+            steps.append(releaseBinaryInstall(r, release))
+        default:            // npm-platform-binary (validated)
+            steps.append(platformBinaryInstall(r, release, base: base))
+        }
+        // 617.11: the file sets it needs beside its program (Fabric's patterns), each sha256-checked here.
+        for e in r.install.extras ?? [] {
+            steps.append(extraInstall(r, e, release))
+            if let h = URL(string: e.url)?.host, !hosts.contains(h) { hosts.append(h) }
+        }
+        return (steps, hosts)
+    }
+
+    /// 617.11: one folder of a pinned archive (`{version}` = the release), unpacked to `to` (under /opt/<id>), root's,
+    /// read-only to the agent. A recipe without extras never reaches this (its bake key is unchanged).
+    static func extraInstall(_ r: AgentRecipe, _ e: AgentRecipe.Install.Extra, _ release: AgentRelease) -> BakeStep {
+        let v = release.version.split(separator: "+").first.map(String.init) ?? release.version
+        let url = e.url.replacingOccurrences(of: "{version}", with: v), path = e.path.replacingOccurrences(of: "{version}", with: v)
+        let depth = path.split(separator: "/").count
+        // Every recipe string is in single quotes (a quote in it closed and escaped): nothing in it is run.
+        let quoted = { (x: String) in "'" + x.replacingOccurrences(of: "'", with: "'\\''") + "'" }
+        return BakeStep.script("install \(r.title)'s \(e.what) (\(v), checksum-verified)", """
+            label=\(quoted(r.title + "'s " + e.what))
+            cd "$(mktemp -d)"
+            curl -fsSL --retry 3 -o extra.tar.gz \(quoted(url))
+            got=$(sha256sum extra.tar.gz | cut -d' ' -f1)
+            [ "$got" = \(quoted(e.sha256)) ] || { echo "checksum mismatch for $label: $got" >&2; exit 1; }
+            rm -rf '\(e.to)'
+            mkdir -p '\(e.to)'
+            tar -xzf extra.tar.gz -C '\(e.to)' --strip-components=\(depth) --no-same-owner \(quoted(path))
+            rm -f extra.tar.gz
+            chown -R root:root '\(e.to)'
+            chmod -R a+rX,go-w '\(e.to)'
+            echo "$label: $(find '\(e.to)' -type f | wc -l) files in \(e.to)"
+            """)
+    }
+
+    /// 617: the archive a manifest-binary release is (its url with `{build}` = `<version>-<build>`).
+    public static func manifestArchiveURL(_ r: AgentRecipe, _ release: AgentRelease) -> String? {
+        guard let u = r.install.url, release.version.contains("+") else { return nil }
+        return u.replacingOccurrences(of: "{build}", with: release.version.replacingOccurrences(of: "+", with: "-"))
+    }
+
+    /// 617: an agent's program from its vendor's own release archive (Antigravity CLI: a tar.gz on Google's storage),
+    /// its sha512 checked against the release's integrity (read from the vendor's manifest on the Mac — in the script, so
+    /// in the bake key), installed under /opt/<id> and linked as /usr/local/bin/<binary>.
+    static func manifestBinaryInstall(_ r: AgentRecipe, _ release: AgentRelease) -> BakeStep {
+        let bin = r.install.binary, payload = r.install.payload!, dest = "/opt/\(r.id)/\(bin)"
+        let url = manifestArchiveURL(r, release) ?? ""
+        return BakeStep.script("install \(r.title) \(release.version) (linux-arm64, integrity-pinned)", """
+            cd "$(mktemp -d)"
+            curl -fsSL --retry 3 -o pkg.tgz '\(url)'
+            got="sha512-$(python3 -c 'h=__import__("hashlib").sha512(open(__import__("sys").argv[1],"rb").read()).digest(); print(__import__("base64").b64encode(h).decode(), end="")' pkg.tgz)"
+            [ "$got" = '\(release.integrity)' ] || { echo "integrity mismatch for \(r.title) \(release.version): $got" >&2; exit 1; }
+            mkdir x && tar -xzf pkg.tgz -C x
+            src=x/\(payload)
+            test -f "$src"
+            rm -rf /opt/\(r.id)
+            mkdir -p /opt/\(r.id)
+            cp "$src" \(dest)
+            chmod 0755 \(dest)
+            chown -R root:root /opt/\(r.id)
+            ln -sf \(dest) /usr/local/bin/\(bin)
+            rm -rf x pkg.tgz
+            echo "\(r.title) \(release.version) (linux-arm64) installed under /opt/\(r.id), sha256 $(sha256sum \(dest) | cut -d' ' -f1)"
+            """)
+    }
+
+    /// 617: the sha512 check every pinned download gets, in npm's integrity form (python3 — the dev baseline has it).
+    static func sha512Check(_ file: String, _ integrity: String, what: String) -> String {
+        """
+        got="sha512-$(python3 -c 'h=__import__("hashlib").sha512(open(__import__("sys").argv[1],"rb").read()).digest(); print(__import__("base64").b64encode(h).decode(), end="")' "\(file)")"
+        [ "$got" = '\(integrity)' ] || { echo "integrity mismatch for \(what): $got" >&2; exit 1; }
+        """
+    }
+
+    /// 617: Dozer's pinned Python (`PythonRuntime`) under /opt/python, for a pypi recipe's venv.
+    static func pythonRuntime(for agent: String) -> BakeStep {
+        BakeStep.script("install Python \(PythonRuntime.version) for \(agent) (/opt/python, checksum-verified)", """
+            cd "$(mktemp -d)"
+            curl -fsSL --retry 3 -o python.tar.gz '\(PythonRuntime.url)'
+            got=$(sha256sum python.tar.gz | cut -d' ' -f1)
+            [ "$got" = '\(PythonRuntime.sha256)' ] || { echo "checksum mismatch for Python \(PythonRuntime.version): $got" >&2; exit 1; }
+            rm -rf /opt/python
+            mkdir -p /opt/python && tar -xzf python.tar.gz -C /opt/python --strip-components=1 --no-same-owner
+            rm -f python.tar.gz
+            chown -R root:root /opt/python
+            /opt/python/bin/python3 --version
+            """)
+    }
+
+    /// 617: a Python tool from PyPI — every distribution in the recipe's requirements, hash-checked by pip
+    /// (`--require-hashes`, nothing else installed: `--no-deps`), the package's own file also against the sha512
+    /// integrity; in its own venv (/opt/<id>/venv) on Dozer's Python, the program linked as /usr/local/bin/<binary>.
+    static func pypiInstall(_ r: AgentRecipe, _ release: AgentRelease) -> BakeStep {
+        let venv = "/opt/\(r.id)/venv", bin = r.install.binary
+        let main = AgentRecipe.Install.wheelName(r.install.package ?? r.id) + "-" + release.version
+        let pip = "\(venv)/bin/pip --disable-pip-version-check --no-input"
+        return BakeStep.script("install \(r.title) \(release.version) (PyPI, every distribution hash-pinned)", """
+            cd "$(mktemp -d)"
+            cat > requirements.txt <<'REQ'
+            \((r.install.requirements ?? []).joined(separator: "\n"))
+            REQ
+            rm -rf /opt/\(r.id)
+            mkdir -p /opt/\(r.id)
+            /opt/python/bin/python3 -m venv \(venv)
+            \(pip) download --no-deps --require-hashes -d dist -r requirements.txt
+            main=$(ls dist | grep -i '^\(main)[-.]' | head -n 1)
+            test -n "$main"
+            \(sha512Check("dist/$main", release.integrity, what: "\(r.install.package ?? r.id) \(release.version)"))
+            \(pip) install --no-index --find-links dist --no-deps --require-hashes -r requirements.txt
+            chown -R root:root /opt/\(r.id)
+            ln -sf \(venv)/bin/\(bin) /usr/local/bin/\(bin)
+            rm -rf dist requirements.txt
+            echo "\(r.title) \(release.version) installed under \(venv), \((r.install.requirements ?? []).count) distributions"
+            """, timeoutSeconds: 1800)
+    }
+
+    /// 617: one program from a release download (`url`, `{version}` in it): a tar.gz or zip unpacked and its `payload`
+    /// taken, or the download itself; sha512-checked against the integrity; under /opt/<id>, linked as /usr/local/bin/<binary>.
+    static func releaseBinaryInstall(_ r: AgentRecipe, _ release: AgentRelease) -> BakeStep {
+        let bin = r.install.binary, dest = "/opt/\(r.id)/\(bin)"
+        let url = (r.install.url ?? "").replacingOccurrences(of: "{version}", with: String(release.version.split(separator: "+")[0]))
+        let unpack: String
+        switch r.install.archive {
+        case "tar.gz": unpack = "mkdir x && tar -xzf dl -C x --no-same-owner\nsrc=x/\(r.install.payload!)"
+        case "zip": unpack = "mkdir x && python3 -c 'import sys,zipfile; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])' dl x\nsrc=x/\(r.install.payload!)"
+        default: unpack = "src=dl"
+        }
+        return BakeStep.script("install \(r.title) \(release.version) (linux-arm64 release, integrity-pinned)", """
+            cd "$(mktemp -d)"
+            curl -fsSL --retry 3 -o dl '\(url)'
+            \(sha512Check("dl", release.integrity, what: "\(r.title) \(release.version)"))
+            \(unpack)
+            test -f "$src"
+            rm -rf /opt/\(r.id)
+            mkdir -p /opt/\(r.id)
+            cp "$src" \(dest)
+            chmod 0755 \(dest)
+            chown -R root:root /opt/\(r.id)
+            ln -sf \(dest) /usr/local/bin/\(bin)
+            rm -rf x dl
+            echo "\(r.title) \(release.version) (linux-arm64) installed under /opt/\(r.id), sha256 $(sha256sum \(dest) | cut -d' ' -f1)"
+            """)
+    }
+
+    /// The registry's tarball URL of `package` at `version` (`@scope/name` → `…/@scope/name/-/name-<version>.tgz`).
+    static func tarballURL(_ package: String, _ version: String) -> String {
+        let short = package.split(separator: "/").last.map(String.init) ?? package
+        return "https://registry.npmjs.org/\(package)/-/\(short)-\(version).tgz"
+    }
+
+    /// 617: an agent's program from the npm registry's linux-arm64 PLATFORM package at the agent's version (Grok Build:
+    /// `@xai-official/grok-linux-arm64`), its sha512 checked against the release's integrity (resolved on the Mac — in
+    /// the script, so in the bake key; the check line has npm installs' shape, so the integrity reads back), the
+    /// payload decompressed when it is (brotli: Node's zlib where the base has Node, else the distribution's `brotli`),
+    /// installed under /opt/<id> and linked as /usr/local/bin/<binary>.
+    static func platformBinaryInstall(_ r: AgentRecipe, _ release: AgentRelease, base: BaseSource) -> BakeStep {
+        let pkg = r.install.platformPackage!, bin = r.install.binary, payload = r.install.payload!
+        let dest = "/opt/\(r.id)/\(bin)"
+        let place: String
+        if r.install.compression == "brotli" {
+            let node = #"node -e 'const z=require("zlib"),f=require("fs");f.writeFileSync(process.argv[2],z.brotliDecompressSync(f.readFileSync(process.argv[1])))' "$src" "$dst""#
+            let apt = "export DEBIAN_FRONTEND=noninteractive; apt-get install -y --no-install-recommends -o Dpkg::Use-Pty=0 brotli\nbrotli -d -f -o \"$dst\" \"$src\""
+            let apk = "apk add brotli\nbrotli -d -f -o \"$dst\" \"$src\""
+            if base.hasNode {
+                place = node
+            } else {
+                switch base.packageManager {
+                case .apt: place = apt
+                case .apk: place = apk
+                case .auto:
+                    place = """
+                        if command -v node >/dev/null 2>&1; then
+                        \(node)
+                        elif command -v apt-get >/dev/null 2>&1; then
+                        \(apt)
+                        else
+                        \(apk)
+                        fi
+                        """
+                }
+            }
+        } else {
+            place = "cp \"$src\" \"$dst\""
+        }
+        return BakeStep.script("install \(r.title) \(release.version) (linux-arm64, integrity-pinned)", """
+            cd "$(mktemp -d)"
+            curl -fsSL --retry 3 -o pkg.tgz '\(tarballURL(pkg, release.version))'
+            got="sha512-$(python3 -c 'h=__import__("hashlib").sha512(open(__import__("sys").argv[1],"rb").read()).digest(); print(__import__("base64").b64encode(h).decode(), end="")' pkg.tgz)"
+            [ "$got" = '\(release.integrity)' ] || { echo "integrity mismatch for \(pkg)@\(release.version): $got" >&2; exit 1; }
+            tar -xzf pkg.tgz
+            src=package/\(payload)
+            test -f "$src"
+            rm -rf /opt/\(r.id)
+            mkdir -p /opt/\(r.id)
+            dst=\(dest)
+            \(place)
+            chmod 0755 "$dst"
+            chown -R root:root /opt/\(r.id)
+            ln -sf "$dst" /usr/local/bin/\(bin)
+            rm -rf package pkg.tgz
+            echo "\(r.title) \(release.version) (linux-arm64) installed under /opt/\(r.id), sha256 $(sha256sum "$dst" | cut -d' ' -f1)"
+            """)
+    }
+
+    /// 617: a recipe agent starts ready to work, like Claude Code and Codex: `~/.local/bin/<binary>` (first on the
+    /// agent's PATH) exports the recipe's environment; runs the recipe's first arguments that need nothing (its
+    /// `--version`, `login`, `mcp` …) as they are; otherwise writes the recipe's first-run settings that are NOT there
+    /// yet (a person's own choice is kept; python3, an atomic 0600 replace) and puts the recipe's approval-off
+    /// arguments first — unless `DOZ_<ID>_PERMISSIONS=ask` (the setting `<id>.permissions`) or root. It names no
+    /// credential (ImageSpecTests). `DOZ_<ID>_LAUNCHER_ECHO=1` prints the command it would run instead (the VM suite).
+    static func recipeLauncher(_ r: AgentRecipe) -> BakeStep {
+        BakeStep.script("install the doz \(r.install.binary) launcher", recipeLauncherScript(r), needsNetworkFalse: ())
+    }
+
+    static func shellQuoted(_ s: String) -> String { "'" + s + "'" }       // recipe strings hold no quote (validated)
+
+    static func recipeLauncherScript(_ r: AgentRecipe) -> String {
+        let bin = r.install.binary, setup = "/usr/local/lib/dozer/\(r.id)-setup.py"
+        let echoVar = r.permissionsVariable.replacingOccurrences(of: "_PERMISSIONS", with: "_LAUNCHER_ECHO")
+        var sh = """
+            #!/bin/sh
+            # doz: \(r.title) with its first-run settings in place and, by default, its approval prompts off.
+            mode=skip
+            [ "${\(r.permissionsVariable):-skip}" = ask ] && mode=ask
+            [ "$(id -u)" = 0 ] && mode=ask
+
+            """
+        for (k, v) in r.launch.env.sorted(by: { $0.key < $1.key }) { sh += "export \(k)=\(shellQuoted(v))\n" }
+        if !r.launch.passthrough.isEmpty {
+            sh += "case \"$1\" in\n  \(r.launch.passthrough.joined(separator: "|"))) exec /usr/local/bin/\(bin) \"$@\" ;;\nesac\n"
+        }
+        if r.launch.firstRun?.isEmpty == false {
+            sh += "python3 \(setup) || echo \"doz: could not pre-seed \(r.title)'s settings\" >&2\n"
+        }
+        if !r.launch.noPromptsArgs.isEmpty {
+            sh += "[ \"$mode\" = skip ] && set -- \(r.launch.noPromptsArgs.map(shellQuoted).joined(separator: " ")) \"$@\"\n"
+        }
+        for (k, v) in (r.launch.noPromptsEnv ?? [:]).sorted(by: { $0.key < $1.key }) {
+            sh += "[ \"$mode\" = skip ] && export \(k)=\(shellQuoted(v))\n"
+        }
+        sh += """
+            if [ "${\(echoVar):-}" = 1 ]; then printf '%s\\n' /usr/local/bin/\(bin) "$@"; exit 0; fi
+            exec /usr/local/bin/\(bin) "$@"
+            """
+        var script = "mkdir -p /usr/local/lib/dozer /home/agent/.local/bin\n"
+        if let merges = r.launch.firstRun, !merges.isEmpty {
+            script += "cat > \(setup) <<'PY'\n\(recipeSetupPython(merges))\nPY\n"
+        }
+        script += "cat > /home/agent/.local/bin/\(bin) <<'SH'\n\(sh)\nSH\n"
+        script += "chmod 0755 /home/agent/.local/bin/\(bin) /usr/local/lib/dozer\n"
+        if r.launch.firstRun?.isEmpty == false { script += "chmod 0644 \(setup)\n" }
+        script += "chown -R agent:agent /home/agent/.local"
+        return script
+    }
+
+    /// 617: the dotenv merge (a recipe whose first-run file is `…/.env` — Fabric); only in such a recipe's helper, so the
+    /// other recipes' launchers (and bake keys) are unchanged. KEY=value lines; a key already there (set or commented
+    /// out by the person) is kept; the file is made when missing even with nothing to add.
+    static let dotenvPython = #"""
+        def merge_env(f, keys):
+            try:
+                with open(f, encoding='utf-8') as h: text = h.read()
+            except FileNotFoundError:
+                text = None
+            lines = text.split('\n') if text else []
+            while lines and lines[-1] == '': lines.pop()
+            have = set(l.split('=', 1)[0].strip().lstrip('#').strip() for l in lines if '=' in l)
+            add = [k + '=' + str(v) for k, v in sorted(keys.items()) if k not in have]
+            if add or text is None: put(f, '\n'.join(lines + add) + '\n')
+
+        """#
+
+    /// 617: a first-run TOML key with no table (ZeroClaw's `schema_version`) — written above the first table, only when
+    /// absent; emitted only into such a recipe's helper (the other launchers and bake keys are unchanged).
+    /// 617: a first-run YAML file (Goose's `~/.config/goose/config.yaml`) — emitted only into such a recipe's helper (the
+    /// other launchers and bake keys are unchanged).
+    static func hasYAML(_ merges: [AgentRecipe.FirstRun]) -> Bool {
+        merges.contains { $0.file.hasSuffix(".yaml") || $0.file.hasSuffix(".yml") }
+    }
+
+    /// Top-level `KEY: value` lines (a JSON scalar is a YAML scalar), each added only when no line of the file starts with
+    /// that key — a person's own value, or a key they commented out, is kept; the file is made when missing. No YAML parser
+    /// in the guest: anything the file says otherwise is left as it is.
+    static let yamlTopPython = #"""
+        def merge_yaml(f, keys):
+            try:
+                with open(f, encoding='utf-8') as h: text = h.read()
+            except FileNotFoundError:
+                text = None
+            lines = text.split('\n') if text else []
+            while lines and lines[-1] == '': lines.pop()
+            have = set(l.lstrip('#').strip().split(':', 1)[0].strip() for l in lines if ':' in l and not l.startswith((' ', '\t', '-')))
+            add = [k + ': ' + json.dumps(v) for k, v in sorted(keys.items()) if k not in have]
+            if add or text is None: put(f, '\n'.join(lines + add) + '\n')
+
+        """#
+
+    /// 617: a TOML key with a segment in double quotes (Open Interpreter's `projects."/workspace".trust_level`) — the
+    /// quoted-key merge is emitted only into such a recipe's helper (the other launchers and bake keys are unchanged).
+    static func hasQuotedTOML(_ merges: [AgentRecipe.FirstRun]) -> Bool {
+        merges.contains { $0.file.hasSuffix(".toml") && $0.set.keys.contains { $0.contains("\"") } }
+    }
+
+    /// merge_toml again, its keys split into segments where a segment in double quotes is one key: the header keeps the
+    /// quotes (`[projects."/workspace"]`), the parsed file is looked up without them.
+    static let tomlQuotedPython = #"""
+        def toml_parts(k):
+            return __import__('re').findall(r'"[^"]*"|[^.]+', k)
+        def merge_toml(f, keys):
+            try:
+                with open(f, encoding='utf-8') as h: text = h.read()
+            except FileNotFoundError:
+                text = ''
+            try:
+                cfg = __import__('tomllib').loads(text)
+            except Exception:
+                return
+            lines = text.split('\n') if text else []
+            while lines and lines[-1] == '': lines.pop()
+            changed = False
+            for k, v in sorted(keys.items()):
+                parts = toml_parts(k)
+                table, key = parts[:-1], parts[-1]
+                d = cfg
+                for p in table:
+                    d = d.get(p.strip('"')) if isinstance(d, dict) else None
+                if isinstance(d, dict) and key.strip('"') in d: continue
+                header = '[' + '.'.join(table) + ']'
+                at = next((i for i, l in enumerate(lines) if l.strip() == header), None)
+                if at is None:
+                    if d is not None: continue
+                    if lines: lines.append('')
+                    lines += [header, key + ' = ' + toml_value(v)]
+                else:
+                    lines.insert(at + 1, key + ' = ' + toml_value(v))
+                t = cfg
+                for p in table: t = t.setdefault(p.strip('"'), {})
+                t[key.strip('"')] = v
+                changed = True
+            if changed: put(f, '\n'.join(lines) + '\n')
+
+        """#
+
+    static func hasTopLevelTOML(_ merges: [AgentRecipe.FirstRun]) -> Bool {
+        merges.contains { $0.file.hasSuffix(".toml") && $0.set.keys.contains { !$0.contains(".") } }
+    }
+
+    static let tomlTopPython = #"""
+        def merge_toml_top(f, keys):
+            try:
+                with open(f, encoding='utf-8') as h: text = h.read()
+            except FileNotFoundError:
+                text = ''
+            try:
+                cfg = __import__('tomllib').loads(text)
+            except Exception:
+                return
+            add = [k + ' = ' + toml_value(v) for k, v in sorted(keys.items()) if k not in cfg]
+            if add: put(f, '\n'.join(add) + ('\n' + text if text else '\n'))
+        for m in MERGES:
+            if m['file'].endswith('.toml'):
+                top = {k: v for k, v in m['set'].items() if '.' not in k}
+                if top:
+                    g = os.path.join(home, m['file'][2:]) if m['file'].startswith('~/') else m['file']
+                    merge_toml_top(g, top)
+                    m['set'] = {k: v for k, v in m['set'].items() if '.' in k}
+
+        """#
+
+    /// The launcher's helper: each first-run file's keys that are absent are set (JSON: nested objects; TOML: under
+    /// their table, a table the file defines some other way is left alone); a file that does not parse is left as it is.
+    static func recipeSetupPython(_ merges: [AgentRecipe.FirstRun]) -> String {
+        let enc = JSONEncoder()
+        enc.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        let data = String(decoding: (try? enc.encode(merges)) ?? Data("[]".utf8), as: UTF8.self)
+        return #"""
+            json, os, sys = __import__('json'), __import__('os'), __import__('sys')   # (no line starts with an import: the audit reads Swift's)
+            MERGES = json.loads(r'''\#(data)''')
+            home = os.environ.get('HOME') or '/home/agent'
+            def put(f, text):
+                os.makedirs(os.path.dirname(f), exist_ok=True)
+                t = f + '.doz-tmp'
+                with os.fdopen(os.open(t, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), 'w', encoding='utf-8') as h: h.write(text)
+                os.replace(t, f)
+            def merge_json(f, keys):
+                try:
+                    with open(f, encoding='utf-8') as h: c = json.load(h)
+                except FileNotFoundError:
+                    c = {}
+                except Exception:
+                    return
+                if not isinstance(c, dict): return
+                changed = False
+                for k, v in sorted(keys.items()):
+                    parts, d = k.split('.'), c
+                    for p in parts[:-1]:
+                        if p not in d:
+                            d[p] = {}
+                            changed = True
+                        d = d[p] if isinstance(d[p], dict) else None
+                        if d is None: break
+                    if d is not None and parts[-1] not in d:
+                        d[parts[-1]] = v
+                        changed = True
+                if changed: put(f, json.dumps(c, indent=2) + '\n')
+            def toml_value(v):
+                if isinstance(v, bool): return 'true' if v else 'false'
+                if isinstance(v, (int, float)): return str(int(v)) if float(v).is_integer() else str(v)
+                return json.dumps(v)
+            def merge_toml(f, keys):
+                try:
+                    with open(f, encoding='utf-8') as h: text = h.read()
+                except FileNotFoundError:
+                    text = ''
+                try:
+                    cfg = __import__('tomllib').loads(text)
+                except Exception:
+                    return
+                lines = text.split('\n') if text else []
+                while lines and lines[-1] == '': lines.pop()
+                changed = False
+                for k, v in sorted(keys.items()):
+                    parts = k.split('.')
+                    table, key = parts[:-1], parts[-1]
+                    d = cfg
+                    for p in table:
+                        d = d.get(p) if isinstance(d, dict) else None
+                    if isinstance(d, dict) and key in d: continue
+                    header = '[' + '.'.join(table) + ']'
+                    at = next((i for i, l in enumerate(lines) if l.strip() == header), None)
+                    if at is None:
+                        if d is not None: continue
+                        if lines: lines.append('')
+                        lines += [header, key + ' = ' + toml_value(v)]
+                    else:
+                        lines.insert(at + 1, key + ' = ' + toml_value(v))
+                    t = cfg
+                    for p in table: t = t.setdefault(p, {})
+                    t[key] = v
+                    changed = True
+                if changed: put(f, '\n'.join(lines) + '\n')
+            \#(merges.contains { $0.file.hasSuffix("/.env") } ? dotenvPython : "")\#(Self.hasYAML(merges) ? yamlTopPython : "")\#(Self.hasQuotedTOML(merges) ? tomlQuotedPython : "")\#(Self.hasTopLevelTOML(merges) ? tomlTopPython : "")for m in MERGES:
+                f = m['file']
+                f = os.path.join(home, f[2:]) if f.startswith('~/') else f
+                (\#(merges.contains { $0.format != nil } ? "merge_json if m.get('format') == 'json' else " : "")merge_toml if f.endswith('.toml') else \#(merges.contains { $0.file.hasSuffix("/.env") } ? "merge_env if f.endswith('/.env') else " : "")\#(Self.hasYAML(merges) ? "merge_yaml if f.endswith(('.yaml', '.yml')) else " : "")merge_json)(f, m['set'])
+            """#
     }
 
     // MARK: 599i — Codex

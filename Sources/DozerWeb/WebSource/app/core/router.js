@@ -20,12 +20,14 @@ const acknowledgeOps = upcall('acknowledgeOps'), callout = upcall('callout'),
 // 603 (owner, on rc.1): #/new and #/onboarding are MODALS over the page under them — that page (state.view, its
 // hash state.bgHash) is never re-rendered or torn down by opening or closing one (the sandbox page's terminals
 // stay as they are). A deep link opens the modal over Sandboxes.
-export const MODAL_VIEWS = new Set(['new', 'onboarding']);
+export const MODAL_VIEWS = new Set(['new', 'onboarding', 'try']);
 export function route() {
   const m = /^#\/([a-z]+)(?:\/([a-z0-9-]{1,40})(?:\/([A-Za-z0-9_-][A-Za-z0-9._-]{0,63}))?)?$/.exec(location.hash);
   if (m && m[1] === 'terminals') { location.replace('#/sessions'); return; }      // 591's name for the grid's place
   const v = m ? m[1] : 'overview';
-  if (MODAL_VIEWS.has(v) && !m[2]) {
+  // 617: #/try/AGENT — the Quick try modal with that agent chosen.
+  if (MODAL_VIEWS.has(v) && (!m[2] || v === 'try')) {
+    if (v === 'try') state.tryAgent = m[2] || null;
     const first = !state.bgHash;
     if (first) { state.view = 'overview'; state.param = null; state.session = null; state.bgHash = '#/overview'; routePage(); }
     openWizardModal(v, !first);

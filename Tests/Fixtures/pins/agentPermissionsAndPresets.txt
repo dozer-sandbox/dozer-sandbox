@@ -1,0 +1,156 @@
+perm model locked=true hosts=api.anthropic.com statsig.anthropic.com
+perm model:openai locked=false hosts=chatgpt.com api.openai.com ab.chatgpt.com
+perm model:antigravity locked=false hosts=generativelanguage.googleapis.com
+perm model:google locked=false hosts=generativelanguage.googleapis.com
+perm model:xai locked=false hosts=api.x.ai[/v1/models,/v1/api-key,/v1/chat/completions,/v1/responses] api.x.ai[/$] x.ai
+perm model:fabric locked=false hosts=api.anthropic.com api.openai.com api.x.ai generativelanguage.googleapis.com openrouter.ai
+perm model:openclaw locked=false hosts=api.anthropic.com api.openai.com api.x.ai generativelanguage.googleapis.com openrouter.ai
+perm model:nanobot locked=false hosts=api.openai.com api.x.ai generativelanguage.googleapis.com openrouter.ai ai-gateway.vercel.sh
+perm model:gptme locked=false hosts=api.anthropic.com api.openai.com api.x.ai generativelanguage.googleapis.com openrouter.ai ai-gateway.vercel.sh
+perm model:llm locked=false hosts=api.openai.com api.x.ai
+perm model:shell-gpt locked=false hosts=api.openai.com api.x.ai generativelanguage.googleapis.com openrouter.ai ai-gateway.vercel.sh
+perm model:zeroclaw locked=false hosts=api.openai.com api.x.ai generativelanguage.googleapis.com openrouter.ai ai-gateway.vercel.sh
+perm model:aichat locked=false hosts=api.anthropic.com api.openai.com api.x.ai generativelanguage.googleapis.com openrouter.ai
+perm model:tgpt locked=false hosts=generativelanguage.googleapis.com
+perm model:opencode locked=false hosts=api.x.ai[/v1/models,/v1/chat/completions,/v1/responses]
+perm model:smolagents locked=false hosts=api.openai.com api.x.ai generativelanguage.googleapis.com openrouter.ai ai-gateway.vercel.sh
+perm model:adk locked=false hosts=generativelanguage.googleapis.com
+perm model:promptfoo locked=false hosts=api.openai.com api.x.ai generativelanguage.googleapis.com openrouter.ai ai-gateway.vercel.sh
+perm model:clai locked=false hosts=api.x.ai
+perm model:copilot locked=false hosts=api.x.ai[/v1/models,/v1/chat/completions,/v1/responses]
+perm model:qwen-code locked=false hosts=api.x.ai[/v1/models,/v1/chat/completions,/v1/responses]
+perm model:goose locked=false hosts=api.x.ai[/v1/models,/v1/chat/completions,/v1/responses]
+perm model:kilo locked=false hosts=api.x.ai[/v1/models,/v1/chat/completions,/v1/responses]
+perm model:mistral-vibe locked=false hosts=api.x.ai[/v1/chat/completions]
+perm model:droid locked=false hosts=api.x.ai[/v1/chat/completions]
+perm model:dirac locked=false hosts=api.x.ai[/v1/chat/completions]
+perm model:kimi-code locked=false hosts=api.x.ai[/v1/chat/completions]
+perm model:cline locked=false hosts=api.x.ai[/v1/chat/completions]
+perm model:openhands locked=false hosts=api.x.ai[/v1/chat/completions]
+perm model:letta-code locked=false hosts=api.x.ai[/v1/responses]
+perm model:docker-agent locked=false hosts=api.x.ai[/v1/chat/completions]
+perm model:nanocoder locked=false hosts=api.x.ai[/v1/chat/completions]
+perm model:mini-swe-agent locked=false hosts=api.x.ai[/v1/chat/completions]
+perm model:open-interpreter locked=false hosts=api.x.ai[/v1/chat/completions]
+perm model:crush locked=false hosts=api.x.ai[/v1/chat/completions]
+perm model:mimo-code locked=false hosts=api.x.ai[/v1/responses,/v1/chat/completions]
+perm model:codewhale locked=false hosts=api.x.ai[/v1/chat/completions]
+perm model:maki locked=false hosts=api.x.ai[/v1/models,/v1/chat/completions]
+perm model:omp locked=false hosts=api.x.ai[/v1/models,/v1/responses,/v1/chat/completions]
+perm model:tau locked=false hosts=api.x.ai[/v1/chat/completions]
+perm model:stitch locked=false hosts=stitch.googleapis.com[/mcp,/v2alpha/]
+perm sign-in locked=false hosts=console.anthropic.com claude.ai platform.claude.com
+perm update locked=false hosts=downloads.claude.ai pi.dev registry.npmjs.org[/@anthropic-ai/claude-code,/@anthropic-ai%2fclaude-code,/@anthropic-ai%2Fclaude-code,/@earendil-works/pi-coding-agent,/@earendil-works%2fpi-coding-agent,/@earendil-works%2Fpi-coding-agent]
+perm install:system locked=false hosts=deb.debian.org security.debian.org *.ubuntu.com dl-cdn.alpinelinux.org
+perm install:node locked=false hosts=registry.npmjs.org
+perm install:python locked=false hosts=pypi.org files.pythonhosted.org
+perm install:go locked=false hosts=proxy.golang.org sum.golang.org storage.googleapis.com
+perm install:rust locked=false hosts=crates.io index.crates.io static.crates.io static.rust-lang.org
+perm install:java locked=false hosts=repo.maven.apache.org repo1.maven.org services.gradle.org downloads.gradle.org plugins.gradle.org
+perm install:ruby locked=false hosts=rubygems.org index.rubygems.org
+perm install:dotnet locked=false hosts=api.nuget.org globalcdn.nuget.org
+perm github locked=false hosts=github.com raw.githubusercontent.com codeload.github.com objects.githubusercontent.com
+perm github:as-you locked=false hosts=github.com api.github.com uploads.github.com codeload.github.com
+perm github:push locked=false hosts=
+perm error-reports locked=false hosts=http-intake.logs.us5.datadoghq.com browser-intake-us5-datadoghq.com
+perm web locked=false hosts=*
+perm update:antigravity locked=false hosts=antigravity-cli-auto-updater-974169037036.us-central1.run.app storage.googleapis.com[/antigravity-public/antigravity-cli/]
+perm update:gemini locked=false hosts=registry.npmjs.org[/@google/gemini-cli,/@google%2fgemini-cli,/@google%2Fgemini-cli]
+perm vendor:claude-code locked=false hosts=downloads.claude.ai[/model-catalog/] downloads.claude.ai[/claude-code-releases/plugins/] raw.githubusercontent.com[/anthropics/claude-code/refs/heads/main/CHANGELOG.md$]
+perm vendor:pi locked=false hosts=pi.dev
+perm vendor:codex locked=false hosts=raw.githubusercontent.com[/openai/codex/main/announcement_tip.toml$] github.com[/openai/plugins.git/info/refs$,/openai/plugins.git/git-upload-pack$] files.openai.com
+perm vendor:antigravity locked=false hosts=antigravity-unleash.goog play.googleapis.com
+perm vendor:nanobot locked=false hosts=openaipublic.blob.core.windows.net[/encodings/]
+perm vendor:gptme locked=false hosts=openaipublic.blob.core.windows.net[/encodings/]
+perm vendor:openhands locked=false hosts=github.com[/OpenHands/extensions/] pypi.org[/pypi/openhands/json]
+perm vendor:open-interpreter locked=false hosts=raw.githubusercontent.com[/openai/codex/main/announcement_tip.toml]
+perm vendor:crush locked=false hosts=api.github.com[/repos/charmbracelet/crush/releases/latest]
+perm vendor:maki locked=false hosts=api.github.com[/repos/tontinton/maki/releases/latest]
+agentPermissions claude-code ["vendor:claude-code"]
+agentPermissions pi ["vendor:pi"]
+agentPermissions none []
+agentPermissions codex ["model:openai", "vendor:codex"]
+agentPermissions antigravity ["model:antigravity", "update:antigravity", "vendor:antigravity"]
+agentPermissions gemini ["model:google", "update:gemini"]
+agentPermissions grok ["model:xai"]
+agentPermissions fabric ["model:fabric"]
+agentPermissions openclaw ["model:openclaw"]
+agentPermissions nanobot ["model:nanobot", "vendor:nanobot"]
+agentPermissions gptme ["model:gptme", "vendor:gptme"]
+agentPermissions llm ["model:llm"]
+agentPermissions shell-gpt ["model:shell-gpt"]
+agentPermissions zeroclaw ["model:zeroclaw"]
+agentPermissions aichat ["model:aichat"]
+agentPermissions tgpt ["model:tgpt"]
+agentPermissions opencode ["model:opencode"]
+agentPermissions smolagents ["model:smolagents"]
+agentPermissions adk ["model:adk"]
+agentPermissions promptfoo ["model:promptfoo"]
+agentPermissions clai ["model:clai"]
+agentPermissions copilot ["model:copilot"]
+agentPermissions qwen-code ["model:qwen-code"]
+agentPermissions goose ["model:goose"]
+agentPermissions kilo ["model:kilo"]
+agentPermissions mistral-vibe ["model:mistral-vibe"]
+agentPermissions droid ["model:droid"]
+agentPermissions dirac ["model:dirac"]
+agentPermissions kimi-code ["model:kimi-code"]
+agentPermissions cline ["model:cline"]
+agentPermissions openhands ["model:openhands", "vendor:openhands"]
+agentPermissions letta-code ["model:letta-code"]
+agentPermissions docker-agent ["model:docker-agent"]
+agentPermissions nanocoder ["model:nanocoder"]
+agentPermissions mini-swe-agent ["model:mini-swe-agent"]
+agentPermissions open-interpreter ["model:open-interpreter", "vendor:open-interpreter"]
+agentPermissions crush ["model:crush", "vendor:crush"]
+agentPermissions mimo-code ["model:mimo-code"]
+agentPermissions codewhale ["model:codewhale"]
+agentPermissions maki ["model:maki", "vendor:maki"]
+agentPermissions omp ["model:omp"]
+agentPermissions tau ["model:tau"]
+agentPermissions stitch ["model:stitch"]
+agentPermissions nil []
+preset locked base=nil model name=locked
+preset agent base=nil model,update,install:system,github,error-reports name=agent
+preset standard base=nil model,update,install:system,github,error-reports name=agent
+preset open base=nil model,sign-in,update,install:system,install:node,install:python,install:go,install:rust,install:java,install:ruby,install:dotnet,github,error-reports,web name=open
+preset locked base=node model name=locked
+preset agent base=node model,update,install:system,install:node,github,error-reports name=agent
+preset standard base=node model,update,install:system,install:node,github,error-reports name=agent
+preset open base=node model,sign-in,update,install:system,install:node,install:python,install:go,install:rust,install:java,install:ruby,install:dotnet,github,error-reports,web name=open
+preset locked base=python model name=locked
+preset agent base=python model,update,install:system,install:python,github,error-reports name=agent
+preset standard base=python model,update,install:system,install:python,github,error-reports name=agent
+preset open base=python model,sign-in,update,install:system,install:node,install:python,install:go,install:rust,install:java,install:ruby,install:dotnet,github,error-reports,web name=open
+preset locked base=go model name=locked
+preset agent base=go model,update,install:system,install:go,github,error-reports name=agent
+preset standard base=go model,update,install:system,install:go,github,error-reports name=agent
+preset open base=go model,sign-in,update,install:system,install:node,install:python,install:go,install:rust,install:java,install:ruby,install:dotnet,github,error-reports,web name=open
+preset locked base=rust model name=locked
+preset agent base=rust model,update,install:system,install:rust,github,error-reports name=agent
+preset standard base=rust model,update,install:system,install:rust,github,error-reports name=agent
+preset open base=rust model,sign-in,update,install:system,install:node,install:python,install:go,install:rust,install:java,install:ruby,install:dotnet,github,error-reports,web name=open
+preset locked base=java model name=locked
+preset agent base=java model,update,install:system,install:java,github,error-reports name=agent
+preset standard base=java model,update,install:system,install:java,github,error-reports name=agent
+preset open base=java model,sign-in,update,install:system,install:node,install:python,install:go,install:rust,install:java,install:ruby,install:dotnet,github,error-reports,web name=open
+preset locked base=ruby model name=locked
+preset agent base=ruby model,update,install:system,install:ruby,github,error-reports name=agent
+preset standard base=ruby model,update,install:system,install:ruby,github,error-reports name=agent
+preset open base=ruby model,sign-in,update,install:system,install:node,install:python,install:go,install:rust,install:java,install:ruby,install:dotnet,github,error-reports,web name=open
+preset locked base=dotnet model name=locked
+preset agent base=dotnet model,update,install:system,install:dotnet,github,error-reports name=agent
+preset standard base=dotnet model,update,install:system,install:dotnet,github,error-reports name=agent
+preset open base=dotnet model,sign-in,update,install:system,install:node,install:python,install:go,install:rust,install:java,install:ruby,install:dotnet,github,error-reports,web name=open
+preset locked base=debian model name=locked
+preset agent base=debian model,update,install:system,github,error-reports name=agent
+preset standard base=debian model,update,install:system,github,error-reports name=agent
+preset open base=debian model,sign-in,update,install:system,install:node,install:python,install:go,install:rust,install:java,install:ruby,install:dotnet,github,error-reports,web name=open
+preset locked base=ubuntu model name=locked
+preset agent base=ubuntu model,update,install:system,github,error-reports name=agent
+preset standard base=ubuntu model,update,install:system,github,error-reports name=agent
+preset open base=ubuntu model,sign-in,update,install:system,install:node,install:python,install:go,install:rust,install:java,install:ruby,install:dotnet,github,error-reports,web name=open
+preset locked base=alpine model name=locked
+preset agent base=alpine model,update,install:system,github,error-reports name=agent
+preset standard base=alpine model,update,install:system,github,error-reports name=agent
+preset open base=alpine model,sign-in,update,install:system,install:node,install:python,install:go,install:rust,install:java,install:ruby,install:dotnet,github,error-reports,web name=open

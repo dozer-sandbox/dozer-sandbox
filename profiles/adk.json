@@ -1,0 +1,24 @@
+{
+  "schema": 1,
+  "agent": "adk",
+  "version": "adk, version 2.12.0",
+  "profiled": "2026-10-14",
+  "how": "a fresh try with the Open network, every HTTPS request decrypted and logged; its first start, then a scripted task (read a file, edit it, run a command) run non-interactively with FAKE keys — xAI and Google through a fake provider that answers text only, Anthropic and OpenAI refused by the real API (401). A real-key run would see more: the model's turns and what its tool calls fetch.",
+  "taskEnded": "credential_service = InMemoryCredentialService() / /opt/adk/venv/lib/python3.13/site-packages/google/adk/auth/credential_service/in_memory_credential_service.py:33: UserWarning: [EXPERIMENTAL] BaseCredentialService: This feature is experimental and may change or be removed in future versions without",
+  "endpoints": [
+    {
+      "host": "generativelanguage.googleapis.com",
+      "method": "POST",
+      "path": "/v1beta/models/{model}:generateContent",
+      "when": "task",
+      "count": 1,
+      "credential": [
+        "placeholder swapped for key:google"
+      ],
+      "refusedWhenProfiled": false,
+      "determination": "allow",
+      "reason": "the Gemini API — the model (the key is swapped in by Dozer's proxy)",
+      "seen": true
+    }
+  ]
+}

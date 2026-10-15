@@ -1,0 +1,38 @@
+{
+  "schema": 1,
+  "agent": "docker-agent",
+  "version": "docker-agent version v1.150.0",
+  "profiled": "2026-10-14",
+  "how": "a fresh try with the Open network, every HTTPS request decrypted and logged; its first start, then a scripted task (read a file, edit it, run a command) run non-interactively with FAKE keys — xAI and Google through a fake provider that answers text only, Anthropic and OpenAI refused by the real API (401). A real-key run would see more: the model's turns and what its tool calls fetch.",
+  "taskEnded": "DOZ_FAKE_OK",
+  "endpoints": [
+    {
+      "host": "api.x.ai",
+      "method": "POST",
+      "path": "/v1/chat/completions",
+      "when": "task",
+      "count": 1,
+      "credential": [
+        "placeholder swapped for key:xai"
+      ],
+      "refusedWhenProfiled": false,
+      "determination": "allow-path",
+      "reason": "xAI's API — the model (the key is swapped in by Dozer's proxy)",
+      "seen": true
+    },
+    {
+      "host": "models.dev",
+      "method": "CONNECT",
+      "path": null,
+      "when": "start+task",
+      "count": 9,
+      "credential": [
+        "none"
+      ],
+      "refusedWhenProfiled": true,
+      "determination": "refuse",
+      "reason": "the public models.dev catalogue Docker Agent reads at each run (no setting turns it off); with its model named it does without it — refused quietly (network.quiet)",
+      "seen": true
+    }
+  ]
+}

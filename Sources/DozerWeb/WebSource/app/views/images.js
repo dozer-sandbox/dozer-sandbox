@@ -11,6 +11,7 @@ import { panel, table } from '../components/blocks.js';
 import { btn } from '../components/button.js';
 import { confirmAction, dialog } from '../components/dialog.js';
 import { moreMenu } from '../components/menus.js';
+import { tildePath } from '../core/paths.js';
 
 /// 593: Images › Table | Lineage. The lineage is measured by the host (every disk's extent map), so
 /// it is fetched only when shown, or on Refresh — never on a live update.
@@ -81,7 +82,7 @@ export async function viewImages() {
         h('div', { class: 'muted' }, r.versionSetting === 'latest'
           ? 'latest' + (r.latest ? ' (npm: ' + r.latest + ')' : '') : 'pinned: ' + r.versionSetting),
       ] : '—'),
-    h('td', null, [r.versionSetting ? null : r.note, r.fromSandbox ? 'from ' + r.fromSandbox : null, r.dockerfile ? 'Dockerfile ' + r.dockerfile : null,
+    h('td', null, [r.versionSetting ? null : r.note, r.fromSandbox ? 'from ' + r.fromSandbox : null, r.dockerfile ? 'Dockerfile ' + tildePath(r.dockerfile) : null,
       r.baseUpdate].filter(Boolean).join(' · ') || '—'),
     h('td', { class: 'row-acts-cell' }, h('div', { class: 'row-acts' },
       // 594 W28: rebuilding is one explained step. 603: the row's next verb; Remove… in ⋯.

@@ -1,0 +1,192 @@
+# yaml-language-server: $schema=../../../../../schema/dozer-recipe-2.schema.json
+# oh-my-pi — Dozer's recipe (schema 2). The format: docs/recipes/RECIPE-FORMAT.md.
+# Edit this file, then run make recipes (it writes Recipes/compiled/omp.json, which Dozer embeds).
+schema: 2
+kind: workload
+id: can1357/omp
+displayName: oh-my-pi
+description: A batteries-included derivative of the pi coding agent (omp), here on an xAI API key.
+author: can1357 and contributors
+sourceUrl: https://github.com/can1357/oh-my-pi
+licenses:
+- MIT
+args:
+  version:
+    description: The oh-my-pi release Dozer installs (its pin).
+    default: 18.10.4
+    pattern: '[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?'
+    buildArg: OMP_VERSION
+provides:
+- com.dozersandbox/omp@${{ kit.args.version }}
+capabilities:
+- type: com.docker.sandbox/network-policy@1
+  config:
+    runtime:
+      allow:
+      - api.x.ai:443
+      deny:
+      - api.commandcode.ai:443
+      - api.kilo.ai:443
+      - api.venice.ai:443
+      - build.stencil.so:443
+      - catalog.stencil.so:443
+      - coding-intl.dashscope.aliyuncs.com:443
+      - hyper.charm.land:443
+      - zenmux.ai:443
+    dozer:
+      model:
+        id: model:omp
+        title: Talk to xAI
+        summary: oh-my-pi's model here (the xAI API, with your key) — needed for it to answer.
+        phrase: talk to your AI model (xAI)
+        hosts:
+        - host: api.x.ai
+          paths:
+          - /v1/models
+          - /v1/responses
+          - /v1/chat/completions
+      update: []
+      excluded: []
+      quiet:
+      - host: api.commandcode.ai
+        reason: oh-my-pi asks several model gateways for their public model lists when it starts (no setting turns it off); it does without them when refused
+      - host: api.kilo.ai
+        reason: the same start-up model-list discovery (Kilo Gateway)
+      - host: api.venice.ai
+        reason: the same start-up model-list discovery (Venice)
+      - host: build.stencil.so
+        reason: oh-my-pi's release check when it starts (Dozer installs the pinned release); it carries on without it
+      - host: catalog.stencil.so
+        reason: the same start-up model-list discovery (a public model catalogue)
+      - host: coding-intl.dashscope.aliyuncs.com
+        reason: the same start-up model-list discovery (Alibaba Model Studio)
+      - host: hyper.charm.land
+        reason: the same start-up model-list discovery (Charm Hyper)
+      - host: zenmux.ai
+        reason: the same start-up model-list discovery (ZenMux)
+- type: com.docker.sandbox/credential@1
+  description: xAI API access
+  config:
+    service: xai
+    phase: runtime
+    apiKey:
+      name: XAI_API_KEY
+      proxyManaged: true
+      inject:
+      - domain: api.x.ai
+        header: authorization
+        format: Bearer %s
+    dozer:
+      accounts:
+      - key
+- type: com.docker.sandbox/volume@1
+  config:
+    path: /home/agent/.omp
+- type: com.dozersandbox/install@1
+  config:
+    kind: release-binary
+    url: https://github.com/can1357/oh-my-pi/releases/download/v${{ kit.args.version }}/omp-linux-arm64
+    binary: omp
+    bake_hosts:
+    - github.com
+    - release-assets.githubusercontent.com
+    integrity: sha512-3ZmxKel2M9fL+bMtRZe9SLZSzJpW3CPn04l8ShQXjNx3r34o8iZKhReT1PEoPWr5N/s/fH+UIdhemFj0Ytv/yg==
+- type: com.dozersandbox/launch@1
+  config:
+    command:
+    - omp
+    - --model
+    - xai/grok-build-0.1
+    no_prompts_args: []
+    passthrough:
+    - --version
+    - -v
+    - --help
+    - -h
+    - -p
+    - --print
+    - toks
+    env: {}
+    state_env: {}
+    # Its first start runs a five-step setup (sign in to providers, default model, glyphs, composer, theme) until
+    # ~/.omp/agent/config.yml records it done (what skipping every step writes): Dozer gives it its model and key.
+    first_run:
+    - file: ~/.omp/agent/config.yml
+      set:
+        setupVersion: 2
+    status: none
+    resume:
+    - --continue
+    verify:
+    - argv:
+      - omp
+      - --version
+      expect: ${{ kit.args.version }}
+    check:
+      argv:
+      - omp
+      - -p
+      - --model
+      - xai/grok-build-0.1
+      - say ok
+      expect: DOZ_FAKE_OK
+- type: com.dozersandbox/auth@1
+  config:
+    methods:
+    - kind: api-key
+      provider: xai
+      accounts:
+      - key
+      keys_page: https://console.x.ai/
+      note: oh-my-pi's built-in xAI provider reads XAI_API_KEY; model xai/grok-build-0.1 in the command.
+      checked: '2026-10-14'
+- type: com.dozersandbox/gateways@1
+  config:
+    entries:
+    - gateway: openrouter
+      level: unknown
+      reason: oh-my-pi reads OPENROUTER_API_KEY; not checked
+      checked: '2026-10-14'
+    - gateway: vercel-ai-gateway
+      level: unknown
+      reason: oh-my-pi reads AI_GATEWAY_API_KEY; not checked
+      checked: '2026-10-14'
+- type: com.dozersandbox/currency@1
+  config:
+    checked: '2026-10-14'
+- type: com.dozersandbox/directory@1
+  config:
+    kind: coding-agent
+    categories:
+    - coding-agent
+    aliases:
+    - oh-my-pi
+    icon: omp
+    default_base: debian
+    platforms:
+      glibc: true
+      musl: false
+    limits:
+    - musl: true
+      reason: Dozer installs oh-my-pi's glibc build; its musl build is a separate download, not used yet
+    tags:
+    - tag: headless
+      level: verified
+      notes:
+      - omp -p --model xai/grok-build-0.1 "…"
+      evidence: 'make recipe-check: omp -p "say ok" printed the stand-in''s answer and exited in a fresh try'
+      checked: '2026-10-14'
+    terms: Your xAI API key — a key from console.x.ai.
+- type: com.dozersandbox/guide@1
+  config:
+    intro: "oh-my-pi is a coding agent with its own screen: the session on the left. Ask it to read, change and run the code in your folder."
+    steps:
+    - text: "Check it answers, without its screen."
+      command: "omp -p --model xai/grok-build-0.1 \"say ok\""
+    - text: "Ask it something in its own screen — the session on the left."
+    - text: "One task without its screen."
+      command: "omp -p --model xai/grok-build-0.1 \"list the files in this folder\""
+    tips:
+    - "Files it makes are in /workspace — your folder on the Mac."
+    - "Restart its session from the session's ⋯ menu; End stops it."
+    docs: https://github.com/can1357/oh-my-pi

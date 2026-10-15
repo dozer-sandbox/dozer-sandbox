@@ -36,6 +36,8 @@ public enum WebAction: Equatable, Sendable {
     case accountDefault(String)
     case accountKeepalive(Bool)
     case accountVerify(String)
+    /// 617: read a key kept in 1Password, AWS or a command again (never adds or changes a source — D7).
+    case accountRefresh(String)
     case accountRemove(String)
     /// 594: onboard — prepare these built-in images in the host (in the background: the action ends
     /// at once; the preparation shows in the wizard and in Operations) and record the onboarding.
@@ -86,7 +88,7 @@ public enum WebAction: Equatable, Sendable {
              .keyRemove(let n, _), .accountUse(let n, _), .templateCreate(let n, _, _, _), .duplicate(let n, _, _, _), .toolsApply(let n),
              .sessionEnd(let n, _), .sessionRestart(let n, _, _):
             return n
-        case .imageBake, .imageRemove, .accountDefault, .accountKeepalive, .accountVerify, .accountRemove, .onboard, .prepareCancel,
+        case .imageBake, .imageRemove, .accountDefault, .accountKeepalive, .accountVerify, .accountRefresh, .accountRemove, .onboard, .prepareCancel,
              .resourcesRemove, .resourcesClean, .resourcesKernel, .hostStart, .hostRestart, .builderStart, .builderInstall:
             return nil
         }
@@ -217,6 +219,10 @@ public enum WebAction: Equatable, Sendable {
             r.account = a
             r.verify = true
             return r
+        case .accountRefresh(let a):
+            var r = HostRequest(.accountRefresh)
+            r.account = a
+            return r
         case .accountRemove(let a):
             var r = HostRequest(.accountRemove)
             r.account = a
@@ -277,7 +283,8 @@ public enum WebAction: Equatable, Sendable {
     /// Fields each action may carry (besides `action`).
     static let fields: [String: Set<String>] = {
         var f: [String: Set<String>] = [
-            "create": ["sandbox", "image", "cpus", "memoryMiB", "workspace", "isolated", "network", "subnet", "account", "rebuild", "dockerfile", "permissions", "sites"],
+            "create": ["sandbox", "image", "cpus", "memoryMiB", "workspace", "isolated", "network", "subnet", "account", "rebuild", "dockerfile", "permissions", "sites", "trial",
+                       "modelSource", "model"],
             "open-session": ["sandbox", "session", "argv"],
             "point-take": ["sandbox", "point", "note"],
             "point-revert": ["sandbox", "point", "confirm"],
@@ -295,6 +302,7 @@ public enum WebAction: Equatable, Sendable {
             "account-default": ["account"],
             "account-keepalive": ["enabled"],
             "account-verify": ["account"],
+            "account-refresh": ["account"],
             "account-rm": ["account", "confirm"],
             "onboard": ["images"],
             "prepare-cancel": ["images"],
@@ -333,6 +341,15 @@ public enum WebAction: Equatable, Sendable {
             o.isolated = try f.flag("isolated")
             // 594 W28: the New Sandbox form's "Rebuild first" (an out-of-date image is otherwise used as it is).
             o.rebuild = try f.flag("rebuild")
+            // 617: a try (the Quick try page) — marked, so its exit offers sleep/delete and doz ls says so.
+            o.trial = try f.flag("trial")
+            // 617 (models@1): the model source (a provider or gateway of this build) and the model — the host checks
+            // that the agent is offered it and picks that source's key.
+            o.modelSource = try f.oneOf("modelSource", ModelSources.ids)
+            o.model = try f.string("model", max: 128).map { m in
+                guard ModelSelection.isModelID(m) else { throw Invalid("model: a model id (letters, digits and . _ : / @ + -)") }
+                return m
+            }
             // 597 (P4): the form's switches — exactly these permissions; its sites on top.
             if d["permissions"] != nil, !(d["permissions"] is NSNull) {
                 let p = try f.permissionWords("permissions")
@@ -411,6 +428,8 @@ public enum WebAction: Equatable, Sendable {
             a = .accountKeepalive(on)
         case "account-verify":
             a = .accountVerify(try f.account("account"))
+        case "account-refresh":
+            a = .accountRefresh(try f.account("account"))
         case "account-rm":
             a = .accountRemove(try f.account("account"))
         case "onboard":
@@ -690,4 +709,56 @@ public struct WebOperation: Codable, Equatable, Sendable {
     public var lines: [String]? = nil
     /// 605: started by an earlier `doz ui` that restarted while it ran (loaded from `ui.operations.json`).
     public var interrupted: Bool? = nil
+    /// 617 (owner: "while the build completes, we should show the progress in that area"): the steps in plain words
+    /// (StepWording), the one under way with when it began, and a short live tail of its output — what the sandbox
+    /// page's progress panel draws in the terminal area until the session is there.
+    public var progress: WebOpProgress? = nil
+}
+
+public struct WebOpProgress: Codable, Equatable, Sendable {
+    public struct Step: Codable, Equatable, Sendable {
+        public var text: String
+        public var seconds: Double?
+        public var failed: Bool?
+    }
+    /// Finished steps, in order (at most the last 40).
+    public var steps: [Step] = []
+    /// The step under way, in present-tense words, and when it began.
+    public var current: String?
+    public var since: Date?
+    /// A download's progress, said plainly ("312 MiB of 640 MiB").
+    public var transfer: String?
+    /// The last lines of a build's output (inert text, at most 3).
+    public var tail: [String] = []
+
+    public init() {}
+
+    /// One host event folded in.
+    public mutating func apply(_ e: HostEvent) {
+        let label = e.text ?? ""
+        switch e.kind {
+        case .started:
+            current = StepWording.of(label).running
+            since = e.time
+            transfer = nil
+            tail = []
+        case .step:
+            steps.append(Step(text: StepWording.of(label).done, seconds: e.milliseconds.map { $0 / 1000 }))
+            current = nil; since = nil; transfer = nil
+        case .failed:
+            steps.append(Step(text: StepWording.of(e.startedAs ?? label).running.replacingOccurrences(of: "…", with: "") + (e.error.map { " — \($0)" } ?? ""),
+                              seconds: e.milliseconds.map { $0 / 1000 }, failed: true))
+            current = nil; since = nil; transfer = nil
+        case .output:
+            let line = InertText.line(Substring(label))
+            if !line.isEmpty { tail = Array((tail + [line]).suffix(3)) }
+        case .progress:
+            if let c = e.completedBytes, let t = e.totalBytes, t > 0 {
+                transfer = "\(ProgressFormat.bytes(c)) of \(ProgressFormat.bytes(t))"
+            }
+        default:
+            break
+        }
+        if steps.count > 40 { steps.removeFirst(steps.count - 40) }
+    }
 }

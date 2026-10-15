@@ -23,7 +23,11 @@ struct Init: AsyncParsableCommand {
     @OptionGroup var g: GlobalOptions
     @Argument(help: "The folder (default: the current one; made when missing).") var directory: String?
     @Option(name: .long, help: "The sandbox's name (default: from the folder's name).") var name: String?
-    @Option(name: .long, help: "claude-code, pi, codex, lab, a base × agent image or a template (default: the settings' defaults.image).") var image: String?
+    @Option(name: .long, help: "claude-code, pi, codex, lab, a base × agent image or a template (default: the settings' defaults.image). Shorthand for --agent/--base.") var image: String?
+    // 617 (D13): the agent and the base, as the file names them (`agent:`, `base:`, `dockerfile:`).
+    @Option(name: .long, help: "The agent: \(DozerProject.agentWords) (the file's agent:).") var agent: String?
+    @Option(name: .long, help: "A recommended base (doz base ls; the file's base:). Default: the agent's own.") var base: String?
+    @Option(name: .long, help: "Your own Dockerfile as the base (the file's dockerfile:, relative to the folder).") var dockerfile: String?
     @Option(name: .long, help: "Virtual CPUs.") var cpus: Int?
     @Option(name: .long, help: "Guest RAM: 2G, 512M, 2048 (MiB).") var memory: String?
     @Option(name: .long, help: "agent, bake, locked, open, nat or none.") var network: String?
@@ -145,7 +149,22 @@ struct Init: AsyncParsableCommand {
         step("image")
         let img: String
         var p: DozerProject
-        if let image {
+        if agent != nil || base != nil || dockerfile != nil {
+            // 617: the file's own keys — checked as `doz create --agent/--base` checks them.
+            guard image == nil else { throw invalid("--image, or --agent/--base/--dockerfile — not both") }
+            guard base == nil || dockerfile == nil else { throw invalid("--base or --dockerfile — not both") }
+            var args: [String] = []
+            if let a = agent { args += ["--agent", a] }
+            if let b = base { args += ["--base", b] }
+            do { _ = try ChoiceOptions.from(args).planChoices() } catch { throw invalid(DozerCommand.message(for: error)) }
+            p = existing ?? DozerProject(name: sandbox, image: "")
+            p.agent = agent.flatMap { $0 == "shell" ? "none" : AgentRecipes.matching($0)?.id ?? $0 } ?? p.agent ?? "claude-code"
+            p.base = base
+            p.dockerfile = dockerfile
+            p.name = sandbox
+            p.image = p.chosenImage
+            img = p.image
+        } else if let image {
             img = image
             p = existing ?? DozerProject(name: sandbox, image: img)
             p.agent = nil; p.base = nil; p.dockerfile = nil

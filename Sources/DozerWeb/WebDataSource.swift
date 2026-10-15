@@ -43,6 +43,8 @@ public protocol DozerWebData: Sendable {
     /// 593: the kept boots (the host's `boot-log`; in-process when no host runs), and one rendered.
     func bootLogs(_ name: String) async throws -> WebBootList
     func bootLog(_ name: String, number: Int) async throws -> WebBootLog
+    /// 617: the build log of the sandbox's image (the host's `build-log`; in-process when no host runs).
+    func buildLog(_ name: String) async throws -> WebBuildLog
     /// 594: the onboarding wizard's facts — the checks, the account step, the images, the preparations,
     /// the store's onboarding record (the settings file's part is the server's).
     func onboarding() async throws -> WebOnboarding
@@ -78,10 +80,16 @@ public protocol DozerWebData: Sendable {
     func setAccessGitHubKey(_ k: WebAccessGitHubKey) async throws -> AccessReport
     /// 599h: a sandbox's tools layer — the plan and the last apply (the host's `tools`; a host must run).
     func tools(_ name: String) async throws -> ToolsLayerReport
+    /// 617: the host's read-only `plan` for a try or a new sandbox (in-process when no host runs).
+    func plan(_ r: PlanRequest) async throws -> WebPlan
+    /// 617: many plans on one reading of the store (the Quick try's readiness); nil: that one could not be planned.
+    func plans(_ rs: [PlanRequest]) async -> [WebPlan?]
 }
 
 extension DozerWebData {
     public func tools(_ name: String) async throws -> ToolsLayerReport { throw HostError(.notImplemented, "tools") }
+    public func plan(_ r: PlanRequest) async throws -> WebPlan { throw HostError(.notImplemented, "plan") }
+    public func plans(_ rs: [PlanRequest]) async -> [WebPlan?] { var out: [WebPlan?] = []; for r in rs { out.append(try? await plan(r)) }; return out }
     public func access(check: WebAccessCheck?) async throws -> AccessReport { throw HostError(.notImplemented, "access") }
     public func setAccessGitHubKey(_ k: WebAccessGitHubKey) async throws -> AccessReport { throw HostError(.notImplemented, "access") }
     public func bases() async throws -> WebBases { throw HostError(.notImplemented, "bases") }
@@ -204,7 +212,8 @@ public final class HostWebData: DozerWebData, @unchecked Sendable {
 
     public func addAccount(_ a: WebAccountAdd) async throws -> WebAccounts {
         let store = self.store
-        let r = HostRequest.accountAdd(name: a.name, kind: a.kind, plan: a.plan, secret: a.secret)
+        let r = a.provider.map { HostRequest.keyAccountAdd(name: a.name, provider: $0, secret: a.secret) }
+            ?? HostRequest.accountAdd(name: a.name, kind: a.kind, plan: a.plan, secret: a.secret)
         let m = try await blocking { try HostClient.request(r, store: store, autostart: true) }
         guard m.ok == true else { throw m.error ?? HostError(.failed, "the host gave no reason") }
         return try await accounts()
@@ -434,7 +443,8 @@ public final class HostWebData: DozerWebData, @unchecked Sendable {
         let rows = try await query(HostRequest(.accountList)).0.decode([AccountRow].self)
         let file = AccountStore(store: store, settings: .load()).load()
         return WebAccounts(accounts: rows.map(WebAccount.init), defaultAccount: file.defaultAccount, keepalive: file.keepalive,
-                           openaiDefault: rows.first { $0.isDefault && AccountKind(rawValue: $0.kind)?.provider == "openai" }?.name)
+                           openaiDefault: rows.first { $0.isDefault && AccountKind(rawValue: $0.kind)?.provider == "openai" }?.name,
+                           providerDefaults: file.providerDefaults ?? [:])
     }
 
     public func metrics(_ q: WebMetricsQuery) async throws -> WebMetrics {
@@ -570,6 +580,10 @@ public final class HostWebData: DozerWebData, @unchecked Sendable {
         var r = HostRequest(.bootLog, name: name)
         r.boot = number
         return WebBootLog(try await query(r).0.decode(BootLogRecord.self))
+    }
+
+    public func buildLog(_ name: String) async throws -> WebBuildLog {
+        WebBuildLog(try await query(HostRequest(.buildLog, name: name)).0.decode(BuildLog.self))
     }
 
     /// `doz attach NAME`, with `--store` when this is not the default store (shell-quoted). The UI

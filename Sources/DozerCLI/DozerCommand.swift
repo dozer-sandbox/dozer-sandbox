@@ -44,10 +44,10 @@ public struct DozerCommand: AsyncParsableCommand {
         """,
         version: version,
         subcommands: [
-            Onboard.self, Init.self, New.self, Create.self, Up.self, Start.self, Pause.self, Resume.self, SleepCommand.self, Hibernate.self, Wake.self,
+            Onboard.self, Init.self, New.self, TryCommand.self, SearchCommand.self, GuideCommand.self, AgentCommand.self, Create.self, Up.self, Down.self, Start.self, Pause.self, Resume.self, SleepCommand.self, Hibernate.self, Wake.self,
             Shutdown.self, Reset.self, Remove.self,
-            List.self, Inspect.self, Sessions.self, Attach.self, Run.self, Exec.self,
-            ImageCommand.self, BaseCommand.self, BuilderCommand.self, ResourcesCommand.self, TemplateCommand.self, Duplicate.self, PointCommand.self, NetCommand.self, KeyCommand.self, AccountCommand.self, AccessCommand.self, ToolsCommand.self, IgnoreCommand.self,
+            List.self, Inspect.self, Sessions.self, Attach.self, Run.self, Exec.self, GetCommand.self, PutCommand.self, CpCommand.self,
+            ImageCommand.self, BaseCommand.self, BuilderCommand.self, ResourcesCommand.self, TemplateCommand.self, Duplicate.self, PointCommand.self, NetCommand.self, KeyCommand.self, AccountCommand.self, AccessCommand.self, ToolsCommand.self, IgnoreCommand.self, PortsCommand.self, OpenCommand.self,
             MetricsCommand.self, Doctor.self, HostCommand.self, Events.self, Console.self, UICommand.self, ServeCommand.self, ConfigCommand.self,
             TelemetryCommand.self, SignupCommand.self, UpdateCommand.self, Uninstall.self,
         ]
@@ -88,7 +88,7 @@ public struct GlobalOptions: ParsableArguments {
     @Flag(name: .long, help: "Machine-readable output (JSON on stdout).")
     public var json = false
 
-    @Flag(name: [.short, .long], help: "Print every progress step (by default only an operation slower than a second shows them).")
+    @Flag(name: [.short, .long], help: "Print every progress step (by default an operation slower than a second shows only its main steps — downloading, unpacking, installing the agent, starting — and anything that fails).")
     public var verbose = false
 
     @Flag(name: [.short, .long], help: "Print no progress.")
@@ -127,6 +127,8 @@ public enum DozerExit {
     public static let declined: Int32 = 5
     public static let unavailable: Int32 = 6
     public static let notImplemented: Int32 = 7
+    /// 617: `doz search` — supported, but not with what was asked (`--base alpine`).
+    public static let limited: Int32 = 8
     public static let usage: Int32 = 64
     /// exec / run / attach: doz itself failed (the program's own codes pass through).
     public static let dozerFailed: Int32 = 125
@@ -247,6 +249,8 @@ final class Progress: @unchecked Sendable {
         self.write = write
         measureWidth = width == nil
         view = ProgressTerminal(mode: mode, color: true, plainPrefix: "  · ")
+        // 617: the few steps a person cares about by default; every step with -v (plain mode shows them all).
+        view.verbose = verbose
         if let width { view.width = width }
         guard !quiet, !verbose else { return }
         let t = DispatchSource.makeTimerSource(queue: .global())

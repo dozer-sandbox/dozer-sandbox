@@ -5,10 +5,11 @@ import { state } from '../core/state.js';
 import { panel, table } from '../components/blocks.js';
 import { btn } from '../components/button.js';
 import { statusPill } from '../components/pills.js';
+import { tildeIn } from '../core/paths.js';
 
 export async function viewDoctor() {
   const checks = await api('doctor');
-  const rows = checks.map((c) => h('tr', null, h('td', null, statusPill(c.status)), h('td', null, c.check), h('td', null, c.detail)));
+  const rows = checks.map((c) => h('tr', null, h('td', null, statusPill(c.status)), h('td', null, c.check), h('td', null, tildeIn(c.detail))));
   return h('div', null,
     h('div', { class: 'head' }, h('h1', null, 'Doctor'),
       btn('Run onboarding again', () => { state.wiz = null; location.hash = '#/onboarding'; },

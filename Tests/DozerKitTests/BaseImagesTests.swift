@@ -72,6 +72,11 @@ final class BaseImagesTests: XCTestCase {
         for b in BaseCatalogue.all {
             for a in AgentKind.allCases {
                 let name = ImageChoice(base: b.id, agent: a).name
+                // An agent with no musl build (Antigravity CLI) is refused on a musl base, with its reason.
+                if b.musl, a.recipe?.platforms.musl == false {
+                    XCTAssertThrowsError(try ImageComposer.spec(name: name, base: b.source(), agent: a, release: release, native: native), name)
+                    continue
+                }
                 let s = try ImageComposer.spec(name: name, base: b.source(), agent: a, release: a == .none ? nil : release, native: native)
                 XCTAssertNoThrow(try s.validate(), name)
                 let script = s.steps.map { $0.argv.joined(separator: " ") }.joined(separator: "\n")
@@ -104,6 +109,13 @@ final class BaseImagesTests: XCTestCase {
                 case .none:
                     XCTAssertNil(s.agent)
                     XCTAssertTrue(s.persistDirs.isEmpty)
+                default:
+                    // 617: a recipe agent — its install (integrity-checked), its launcher, its state, its integrity recorded.
+                    let r = try XCTUnwrap(a.recipe)
+                    XCTAssertTrue(script.contains("[ \"$got\" = 'sha512-AAAA' ]"), name)
+                    XCTAssertTrue(script.contains("cat > /home/agent/.local/bin/\(r.install.binary) <<'SH'"), name)
+                    XCTAssertEqual(s.persistDirs, r.state.persist, name)
+                    XCTAssertEqual(s.agent, AgentPackage(package: r.install.package ?? r.id, version: "2.1.285", integrity: "sha512-AAAA"))
                 }
                 if let t = b.toolchain, !(b.id == "node" && a != .none) { XCTAssertTrue(s.verify.contains(t), name) }
                 XCTAssertTrue(script.contains(b.packageManager == .apk ? "apk add" : "apt-get install"), name)

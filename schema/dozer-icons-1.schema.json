@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/dozer-sandbox/dozer-sandbox/main/schema/dozer-icons-1.schema.json",
+  "title": "Dozer Sandbox icon registry (schema 1)",
+  "description": "The vendor and product marks beside the recipes (Sources/DozerKit/Recipes/icons/icons.json). Each entry names its monochrome file (one currentColor path), where the mark came from, the brand terms checked and when. Strict: an unknown key is an error. See docs/DOZERKIT.md, The icon registry.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "icons"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "schema": { "const": 1 },
+    "icons": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "kind", "name", "variants", "source", "allowed", "checked"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+          "kind": { "enum": ["vendor", "product"] },
+          "name": { "type": "string", "minLength": 1 },
+          "vendor": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$", "description": "A product's maker (a vendor id); absent for one with no company." },
+          "variants": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["mono"],
+            "properties": {
+              "mono": { "$ref": "#/$defs/svgFile" },
+              "color": { "$ref": "#/$defs/svgFile", "description": "Accepted now, drawn later." },
+              "color-dark": { "$ref": "#/$defs/svgFile", "description": "Accepted now, drawn later." }
+            }
+          },
+          "source": { "type": "string", "minLength": 1 },
+          "terms": { "type": "string", "pattern": "^https://" },
+          "allowed": { "enum": ["official", "lettermark"] },
+          "checked": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+          "notes": { "type": "string" },
+          "lettermark": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["text", "frame"],
+            "properties": {
+              "text": { "type": "string", "minLength": 1, "maxLength": 2 },
+              "frame": { "enum": ["square", "circle", "hex", "diamond", "octagon"] }
+            }
+          }
+        },
+        "allOf": [
+          { "if": { "properties": { "allowed": { "const": "lettermark" } } }, "then": { "required": ["lettermark"] } },
+          { "if": { "properties": { "allowed": { "const": "official" } } }, "then": { "required": ["terms"], "properties": { "source": { "pattern": "^https://" } } } },
+          { "if": { "properties": { "kind": { "const": "vendor" } } }, "then": { "not": { "required": ["vendor"] } } }
+        ]
+      }
+    }
+  },
+  "$defs": {
+    "svgFile": { "type": "string", "pattern": "^[a-z0-9-]+\\.svg$" }
+  }
+}

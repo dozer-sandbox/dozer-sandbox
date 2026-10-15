@@ -12,7 +12,14 @@
 export const AGENTS = [['claude-code', 'Claude Code'], ['pi', 'pi'], ['codex', 'Codex'], ['none', 'none']];
 /// B9, the same words as the server's (`Dockerfiles.outsidePolicyNote`).
 export const DOCKERFILE_POLICY_NOTE = 'Dockerfile builds run in Apple’s builder (container build), OUTSIDE Dozer’s network policy: its RUN steps reach the internet directly, without Dozer’s proxy or allow list. The sandbox made from the image is under the policy as usual.';
+/// 617 (owner: "split them"): every agent and tool a sandbox can be made of (the server's `bases.catalog`: id, title,
+/// kind, categories, its own base, musl) — known once a picker has read it. An agent on its own base is named by its id
+/// (`grok` = Debian · Grok Build), as the host names it.
+export const CATALOG = [];
+export function registerCatalog(list) { if (Array.isArray(list) && list.length) CATALOG.splice(0, CATALOG.length, ...list); }
 export function imageNameOf(base, agent) {
+  const c = CATALOG.find((x) => x.id === agent);
+  if (c && !['claude-code', 'pi', 'codex'].includes(agent) && base === c.defaultBase) return agent;
   if (base === 'node' && agent === 'claude-code') return 'claude-code';
   if (base === 'node' && agent === 'pi') return 'pi';
   if (base === 'node' && agent === 'codex') return 'codex';
@@ -24,7 +31,9 @@ export function parseImageName(name, baseIDs) {
   if (name === 'pi') return { base: 'node', agent: 'pi' };
   if (name === 'codex') return { base: 'node', agent: 'codex' };
   if (name === 'lab') return { base: 'alpine', agent: 'none' };
-  for (const a of ['claude-code', 'pi', 'codex']) if (name.endsWith('-' + a) && baseIDs.includes(name.slice(0, -a.length - 1))) return { base: name.slice(0, -a.length - 1), agent: a };
+  const own = CATALOG.find((x) => x.id === name && !['claude-code', 'pi', 'codex'].includes(x.id));
+  if (own) return { base: own.defaultBase, agent: own.id };
+  for (const a of ['claude-code', 'pi', 'codex', ...CATALOG.map((x) => x.id)]) if (name.endsWith('-' + a) && baseIDs.includes(name.slice(0, -a.length - 1))) return { base: name.slice(0, -a.length - 1), agent: a };
   return baseIDs.includes(name) ? { base: name, agent: 'none' } : null;
 }
 

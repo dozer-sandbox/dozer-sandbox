@@ -61,6 +61,8 @@ public enum WebRoute: Equatable, Sendable {
     // 593 — the Boot log (WebBootLogs.swift): the kept boots, and one of them rendered (read-only).
     case bootLogs(String)               // GET  /api/v1/sandboxes/{name}/boots
     case bootLog(String, Int)           // GET  /api/v1/sandboxes/{name}/boots/{n}   (1 = the latest; 1–99)
+    // 617 — the build log of the sandbox's image (WebBootLogs.swift), rendered (read-only).
+    case buildLog(String)               // GET  /api/v1/sandboxes/{name}/build-log
     // 594 — onboarding: the wizard's facts; the settings file + prompt template written only when
     // missing (CSRF, strict {defaultImage, account}); the host's image preparations.
     case onboarding                // GET  /api/v1/onboarding
@@ -96,6 +98,9 @@ public enum WebRoute: Equatable, Sendable {
     // 596 — base images (WebBases.swift): the catalogue + Apple's container tool (read); the Mac's
     // file picker for a Dockerfile (one at a time; the answer is a path and its folder).
     case bases                     // GET  /api/v1/bases
+    case tryCatalog                // GET  /api/v1/try (617: the Quick try page's list)
+    case tryList                   // GET  /api/v1/try/list (617: the same list without the plans — the page draws at once)
+    case plan                      // POST /api/v1/plan  ({purpose, name?, agent?, base?, isolated?} — 617)
     case dockerfileChoose          // POST /api/v1/dockerfile/choose  ({start?})
     // 599e — Access: each credential's choice and last confirmation (read, never starts a host); a live
     // check (changes no setting; POST + CSRF: it carries choices to confirm before they are written);
@@ -158,6 +163,7 @@ public enum WebRoute: Equatable, Sendable {
         case (.post, 2) where rest == ["workspace", "check"]: return .workspaceCheck
         case (.post, 2) where rest == ["workspace", "choose"]: return .workspaceChoose
         case (.post, 1) where rest[0] == "quick-add": return .quickAdd
+        case (.post, 1) where rest[0] == "plan": return .plan
         case (.post, 2) where rest == ["project", "open"]: return .projectOpen
         case (.post, 2) where rest == ["project", "preview"]: return .projectPreview
         case (.post, 2) where rest == ["project", "write"]: return .projectWrite
@@ -200,10 +206,13 @@ public enum WebRoute: Equatable, Sendable {
             case "preparations": return .preparations
             case "resources": return .resources
             case "bases": return .bases
+            case "try": return .tryCatalog
             case "access": return .access
             case "serve": return .serveStatus
             default: return nil
             }
+        case 2 where rest == ["try", "list"]:
+            return .tryList
         case 2 where rest == ["images", "tree"]:
             return .imageTree
         case 2 where rest == ["serve", "devices"]:
@@ -220,6 +229,7 @@ public enum WebRoute: Equatable, Sendable {
             case "terminal-socket": return .terminalSocket(rest[1])
             case "layout": return .terminalLayout(rest[1])
             case "boots": return .bootLogs(rest[1])
+            case "build-log": return .buildLog(rest[1])
             default: return nil
             }
         case 4 where rest[0] == "sandboxes" && isSandboxName(rest[1]) && rest[2] == "boots":

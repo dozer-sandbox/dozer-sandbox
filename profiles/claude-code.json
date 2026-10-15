@@ -1,0 +1,221 @@
+{
+  "schema": 1,
+  "agent": "claude-code",
+  "version": "2.1.296 (Claude Code)",
+  "profiled": "2026-10-12",
+  "how": "a fresh try with the Open network, every HTTPS request decrypted and logged; its first start, then a scripted task (read a file, edit it, run a command) run non-interactively with FAKE keys — xAI and Google through a fake provider that answers text only, Anthropic and OpenAI refused by the real API (401). A real-key run would see more: the model's turns and what its tool calls fetch.",
+  "taskEnded": "Invalid API key · Fix external API key",
+  "endpoints": [
+    {
+      "host": "api.anthropic.com",
+      "method": "GET",
+      "path": "/api/claude_cli/bootstrap",
+      "when": "start+task",
+      "count": 2,
+      "credential": [
+        "placeholder swapped for anthropic"
+      ],
+      "refusedWhenProfiled": false,
+      "determination": "allow",
+      "reason": "Anthropic's API — the model and Claude Code's own account calls (the credential is Dozer's)",
+      "seen": true
+    },
+    {
+      "host": "api.anthropic.com",
+      "method": "GET",
+      "path": "/api/claude_code/organizations/metrics_enabled",
+      "when": "task",
+      "count": 1,
+      "credential": [
+        "placeholder swapped for anthropic"
+      ],
+      "refusedWhenProfiled": false,
+      "determination": "allow",
+      "reason": "Anthropic's API — the model and Claude Code's own account calls (the credential is Dozer's)",
+      "seen": true
+    },
+    {
+      "host": "api.anthropic.com",
+      "method": "GET",
+      "path": "/api/claude_code/policy_limits",
+      "when": "start+task",
+      "count": 2,
+      "credential": [
+        "placeholder swapped for anthropic"
+      ],
+      "refusedWhenProfiled": false,
+      "determination": "allow",
+      "reason": "Anthropic's API — the model and Claude Code's own account calls (the credential is Dozer's)",
+      "seen": true
+    },
+    {
+      "host": "api.anthropic.com",
+      "method": "GET",
+      "path": "/api/claude_code/settings",
+      "when": "start+task",
+      "count": 2,
+      "credential": [
+        "placeholder swapped for anthropic"
+      ],
+      "refusedWhenProfiled": false,
+      "determination": "allow",
+      "reason": "Anthropic's API — the model and Claude Code's own account calls (the credential is Dozer's)",
+      "seen": true
+    },
+    {
+      "host": "api.anthropic.com",
+      "method": "GET",
+      "path": "/api/claude_code_penguin_mode",
+      "when": "start+task",
+      "count": 2,
+      "credential": [
+        "placeholder swapped for anthropic"
+      ],
+      "refusedWhenProfiled": false,
+      "determination": "allow",
+      "reason": "Anthropic's API — the model and Claude Code's own account calls (the credential is Dozer's)",
+      "seen": true
+    },
+    {
+      "host": "api.anthropic.com",
+      "method": "POST",
+      "path": "/api/eval/sdk-zAZezfDKGoZuXXKe",
+      "when": "start+task",
+      "count": 2,
+      "credential": [
+        "placeholder swapped for anthropic"
+      ],
+      "refusedWhenProfiled": false,
+      "determination": "allow",
+      "reason": "Anthropic's API — the model and Claude Code's own account calls (the credential is Dozer's)",
+      "seen": true
+    },
+    {
+      "host": "api.anthropic.com",
+      "method": "POST",
+      "path": "/api/event_logging/v2/batch",
+      "when": "start+task",
+      "count": 5,
+      "credential": [
+        "placeholder swapped for anthropic"
+      ],
+      "refusedWhenProfiled": false,
+      "determination": "allow",
+      "reason": "Anthropic's API — the model and Claude Code's own account calls (the credential is Dozer's)",
+      "seen": true
+    },
+    {
+      "host": "api.anthropic.com",
+      "method": "GET",
+      "path": "/mcp-registry/v0/servers",
+      "when": "start+task",
+      "count": 8,
+      "credential": [
+        "key added for anthropic"
+      ],
+      "refusedWhenProfiled": false,
+      "determination": "allow",
+      "reason": "Anthropic's API — the model and Claude Code's own account calls (the credential is Dozer's)",
+      "seen": true
+    },
+    {
+      "host": "api.anthropic.com",
+      "method": "POST",
+      "path": "/v1/messages",
+      "when": "task",
+      "count": 1,
+      "credential": [
+        "placeholder swapped for anthropic"
+      ],
+      "refusedWhenProfiled": false,
+      "determination": "allow",
+      "reason": "Anthropic's API — the model and Claude Code's own account calls (the credential is Dozer's)",
+      "seen": true
+    },
+    {
+      "host": "downloads.claude.ai",
+      "method": "GET",
+      "path": "/claude-code-releases/plugins/claude-plugins-official/latest",
+      "when": "start",
+      "count": 1,
+      "credential": [
+        "none"
+      ],
+      "refusedWhenProfiled": false,
+      "determination": "allow-path",
+      "reason": "Claude Code reads Anthropic's official plugin list and fetches those plugins",
+      "seen": true
+    },
+    {
+      "host": "downloads.claude.ai",
+      "method": "GET",
+      "path": "/claude-code-releases/plugins/claude-plugins-official/{id}.zip",
+      "when": "start",
+      "count": 1,
+      "credential": [
+        "none"
+      ],
+      "refusedWhenProfiled": false,
+      "determination": "allow-path",
+      "reason": "Claude Code reads Anthropic's official plugin list and fetches those plugins",
+      "seen": true
+    },
+    {
+      "host": "downloads.claude.ai",
+      "method": "GET",
+      "path": "/model-catalog/v1/catalog.json",
+      "when": "start",
+      "count": 1,
+      "credential": [
+        "none"
+      ],
+      "refusedWhenProfiled": false,
+      "determination": "allow-path",
+      "reason": "Claude Code reads Anthropic's list of models when it starts",
+      "seen": true
+    },
+    {
+      "host": "downloads.claude.ai",
+      "method": "GET",
+      "path": "/model-catalog/v1/catalog.json.raw-sig.json",
+      "when": "start",
+      "count": 1,
+      "credential": [
+        "none"
+      ],
+      "refusedWhenProfiled": false,
+      "determination": "allow-path",
+      "reason": "Claude Code reads Anthropic's list of models when it starts",
+      "seen": true
+    },
+    {
+      "host": "http-intake.logs.us5.datadoghq.com",
+      "method": "POST",
+      "path": "/api/v2/logs",
+      "when": "start+task",
+      "count": 2,
+      "credential": [
+        "none"
+      ],
+      "refusedWhenProfiled": false,
+      "determination": "off-by-setting",
+      "reason": "its error reports and usage data — turned off by DISABLE_ERROR_REPORTING and DISABLE_TELEMETRY when Send error reports is off",
+      "seen": true,
+      "setting": "DISABLE_ERROR_REPORTING"
+    },
+    {
+      "host": "raw.githubusercontent.com",
+      "method": "GET",
+      "path": "/anthropics/claude-code/refs/heads/main/CHANGELOG.md",
+      "when": "start",
+      "count": 1,
+      "credential": [
+        "none"
+      ],
+      "refusedWhenProfiled": false,
+      "determination": "allow-path",
+      "reason": "Claude Code reads its release notes (CHANGELOG.md, exact path)",
+      "seen": true
+    }
+  ]
+}

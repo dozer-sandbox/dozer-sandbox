@@ -1,0 +1,38 @@
+{
+  "schema": 1,
+  "gateways": [
+    {
+      "id": "openrouter",
+      "title": "OpenRouter",
+      "homepage": "https://openrouter.ai",
+      "hosts": ["openrouter.ai"],
+      "endpoints": [
+        { "id": "v1", "shapes": ["openai-chat", "openai-responses"], "base_url": "https://openrouter.ai/api/v1", "default_model": "openai/gpt-5.4-mini" },
+        { "id": "anthropic", "shapes": ["anthropic-messages"], "base_url": "https://openrouter.ai/api", "default_model": "anthropic/claude-sonnet-4.6" }
+      ],
+      "key_env": "OPENROUTER_API_KEY",
+      "keys_page": "https://openrouter.ai/keys",
+      "model_id": "{creator}/{name}",
+      "source": "https://openrouter.ai/docs/_llms/api-reference.txt",
+      "checked": "2026-10-12"
+    },
+    {
+      "id": "vercel-ai-gateway",
+      "title": "Vercel AI Gateway",
+      "homepage": "https://vercel.com/docs/ai-gateway",
+      "hosts": ["ai-gateway.vercel.sh"],
+      "endpoints": [
+        { "id": "v1", "shapes": ["openai-chat", "openai-responses"], "base_url": "https://ai-gateway.vercel.sh/v1", "default_model": "openai/gpt-5.4-mini" },
+        { "id": "anthropic", "shapes": ["anthropic-messages"], "base_url": "https://ai-gateway.vercel.sh", "default_model": "anthropic/claude-sonnet-4.6" },
+        { "id": "coding-agent", "shapes": ["openai-chat", "openai-responses"], "base_url": "https://ai-gateway.vercel.sh/coding-agent/v1" },
+        { "id": "claude-code", "shapes": ["anthropic-messages"], "base_url": "https://ai-gateway.vercel.sh/claude-code" },
+        { "id": "codex", "shapes": ["openai-responses"], "base_url": "https://ai-gateway.vercel.sh/codex/v1" }
+      ],
+      "key_env": "AI_GATEWAY_API_KEY",
+      "keys_page": "https://vercel.com/d?to=%2F%5Bteam%5D%2F%7E%2Fai-gateway%2Fapi-keys&title=AI+Gateway+API+Keys",
+      "model_id": "{creator}/{name}",
+      "source": "https://vercel.com/docs/ai-gateway/sdks-and-apis",
+      "checked": "2026-10-12"
+    }
+  ]
+}

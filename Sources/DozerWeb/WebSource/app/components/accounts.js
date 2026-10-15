@@ -27,12 +27,25 @@ export function accountCommandsNode(kind) {
     h('div', { 'data-secret-why': secretEntryAllowed() ? null : '1' }, secretEntryAllowed() ? 'In a terminal on this Mac:' : 'Not here: ' + secretEntryWhy() + ' in a terminal on this Mac:'),
     h('pre', { class: 'mono' }, ACCOUNT_COMMANDS[kind].join('\n')));
 }
-/// opts: {kind (fixed) | null (a choice), name, onAdded(result, name)}.
+/// 617 (models@1): the model source an account's key is of (nil: a subscription or a login).
+export function sourceOf(x) { return x.kind === 'api-key' ? 'anthropic' : x.kind === 'openai-key' ? 'openai' : x.kind === 'key' ? x.provider : null; }
+/// The account kind a source's key is added as.
+function kindForSource(src) { return src === 'anthropic' ? 'api-key' : src === 'openai' ? 'openai-key' : 'key'; }
+
+/// opts: {kind (fixed) | null (a choice), name, onAdded(result, name)}; 617: or {sources, titles} — a key of one of
+/// these model sources (a provider or gateway), chosen in the form.
 export function accountForm(opts) {
-  const kindSel = h('select', { name: 'acct-kind', 'aria-label': 'Kind' },
-    h('option', { value: 'api-key' }, 'Anthropic API key'), h('option', { value: 'setup-token' }, 'Claude setup token'),
-    h('option', { value: 'openai-key' }, 'OpenAI API key (Codex)'));
+  const kindSel = opts.sources
+    ? h('select', { name: 'acct-source', 'aria-label': 'Provider or gateway' }, ...opts.sources.map((x) => h('option', { value: x }, (opts.titles || {})[x] || x)))
+    : h('select', { name: 'acct-kind', 'aria-label': 'Kind' },
+      h('option', { value: 'api-key' }, 'Anthropic API key'), h('option', { value: 'setup-token' }, 'Claude setup token'),
+      h('option', { value: 'openai-key' }, 'OpenAI API key'),
+      // 617: every other provider's or gateway's key (xAI, Google, OpenRouter, …) — a `key` account of that provider.
+      ...(opts.keyProviders || []).map((p) => h('option', { value: 'key:' + p.id }, p.title + ' key')));
   if (opts.kind) kindSel.value = opts.kind;
+  const keyProvider = () => (!opts.sources && kindSel.value.startsWith('key:') ? kindSel.value.slice(4) : null);
+  const keyTitle = () => ((opts.keyProviders || []).find((p) => p.id === keyProvider()) || {}).title || keyProvider();
+  const kindNow = () => (opts.sources ? kindForSource(kindSel.value) : keyProvider() ? 'key' : kindSel.value);
   const name = h('input', { type: 'text', name: 'acct-name', autocomplete: 'off', spellcheck: 'false', placeholder: 'a-z 0-9 -' });
   name.value = opts.name || 'work';
   const plan = h('select', { name: 'acct-plan', 'aria-label': 'Plan' }, ['max', 'pro', 'team', 'enterprise'].map((p) => h('option', { value: p }, p)));
@@ -43,10 +56,12 @@ export function accountForm(opts) {
   const secretLabel = h('span', null, '');
   const hint = h('small', null, '');
   const paint = () => {
-    const token = kindSel.value === 'setup-token';
+    const token = kindNow() === 'setup-token';
     planRow.hidden = !token;
     secretLabel.textContent = token ? 'Setup token' : 'API key';
-    hint.textContent = token ? 'Run claude setup-token on this Mac and paste what it prints (it starts sk-ant-oat…; valid a year). Not shown, not kept in this page.'
+    hint.textContent = opts.sources ? 'A ' + ((opts.titles || {})[kindSel.value] || kindSel.value) + ' key — only ever sent there. Not shown, not kept in this page.'
+      : keyProvider() ? 'Your ' + keyTitle() + ' key — only ever sent there. Not shown, not kept in this page.'
+      : token ? 'Run claude setup-token on this Mac and paste what it prints (it starts sk-ant-oat…; valid a year). Not shown, not kept in this page.'
       : kindSel.value === 'openai-key' ? 'An OpenAI API key (sk-…) for Codex. Not shown, not kept in this page.'
       : 'An Anthropic API key (sk-ant-api…). Not shown, not kept in this page.';
   };
@@ -59,11 +74,13 @@ export function accountForm(opts) {
     secret.value = '';                                     // gone from the page before the request
     const n = name.value.trim();
     if (!/^[a-z0-9][a-z0-9-]{0,39}$/.test(n) || n === 'default' || n === 'none') { error.textContent = 'The name: 1–40 of a-z 0-9 - (not default or none).'; return; }
-    if (value.trim().length < 20) { error.textContent = 'Paste the whole ' + (kindSel.value === 'setup-token' ? 'token' : 'key') + '.'; return; }
+    if (value.trim().length < 20) { error.textContent = 'Paste the whole ' + (kindNow() === 'setup-token' ? 'token' : 'key') + '.'; return; }
     b.disabled = true;
     try {
-      const body = { name: n, kind: kindSel.value, secret: value };
-      if (kindSel.value === 'setup-token') body.plan = plan.value;
+      const body = { name: n, kind: kindNow(), secret: value };
+      if (kindNow() === 'setup-token') body.plan = plan.value;
+      if (opts.sources && kindNow() === 'key') body.provider = kindSel.value;
+      if (keyProvider()) body.provider = keyProvider();
       const r = await api('accounts', { method: 'POST', json: body });
       opts.onAdded(r, n);
     } catch (e) {
@@ -73,7 +90,7 @@ export function accountForm(opts) {
     }
   }, { primary: true, icon: 'key-round' });
   return h('div', { class: 'panel acct-form' },
-    opts.kind ? null : h('label', { class: 'field' }, h('span', null, 'Kind'), kindSel),
+    opts.kind ? null : h('label', { class: 'field' }, h('span', null, opts.sources ? 'Provider or gateway' : 'Kind'), kindSel),
     h('label', { class: 'field' }, h('span', null, 'Account name'), name),
     planRow,
     h('label', { class: 'field' }, secretLabel, secret, hint),
@@ -84,24 +101,30 @@ export function accountChooser({ accounts, agent, same = null, defaultValue = ''
   let acc = accounts, current = agent(), chosen = value;            // 599f: `value` pre-selects (a project file's account)
   const el = h('div', { class: 'field acct-chooser', 'data-acct-chooser': '' });
   const kindsOf = (a) => (a && acc.agents ? acc.agents[agentKey(a, acc.agents)] : null);
-  const fits = (kinds) => acc.accounts.filter((x) => !kinds || kinds.includes(x.kind));
+  // 617 (models@1): a recipe agent takes a key of one of its model sources (a provider or gateway) — never a subscription.
+  const sourcesOf = (a) => (a && acc.sources ? acc.sources[agentKey(a, acc.sources)] || null : null);
+  const fits = (kinds, srcs) => acc.accounts.filter((x) => (!kinds || kinds.includes(x.kind)) && (!srcs || srcs.includes(sourceOf(x))));
+  const title = (src) => (acc.sourceTitles || {})[src] || src;
   function state() {
     const kinds = kindsOf(current);
+    const srcs = sourcesOf(current);
     const needs = !!kinds && !kinds.includes('mac');
-    const usable = fits(kinds);
-    // 599i: Codex follows the store's OpenAI default (none until one is chosen), never the Anthropic one.
-    const defName = isOpenAIAgent(kinds) ? (acc.openaiDefault || 'none') : acc.defaultAccount;
+    const usable = fits(kinds, srcs);
+    // 599i: Codex follows the store's OpenAI default (none until one is chosen), never the Anthropic one. 617: a recipe
+    // agent the default of its first source that has one (the host's own choice).
+    const defName = srcs ? ((acc.recipeDefaults || {})[agentKey(current, acc.sources)] || 'none')
+      : isOpenAIAgent(kinds) ? (acc.openaiDefault || 'none') : acc.defaultAccount;
     // Two rows can be named mac (Claude's and, rc.3, this Mac's Codex login): the one this agent can use.
-    const def = acc.accounts.find((x) => x.name === defName && (!kinds || kinds.includes(x.kind)));
-    const defFits = defName !== 'none' ? (!!def && (!kinds || kinds.includes(def.kind))) : !needs;
-    return { kinds, needs, usable, defFits, defName };
+    const def = usable.find((x) => x.name === defName);
+    const defFits = defName !== 'none' ? !!def : !needs;
+    return { kinds, srcs, needs, usable, defFits, defName };
   }
   function render() {
     const s = state();
     const opts = [];
     if (same) opts.push(['', same]);
     if (s.defFits) opts.push([defaultValue, 'the store default (' + s.defName + ')']);
-    for (const x of s.usable) opts.push([x.name, x.name + ' (' + (KIND_LABELS[x.kind] || x.kind) + ')']);
+    for (const x of s.usable) opts.push([x.name, x.name + ' (' + (s.srcs ? title(sourceOf(x)) + ' key' : KIND_LABELS[x.kind] || x.kind) + ')']);
     if (!s.needs) opts.push(['none', 'none']);
     const sel = h('select', { name: 'account', 'aria-label': 'Account' }, opts.map(([v, l]) => h('option', { value: v }, l)));
     if (chosen !== null && opts.some(([v]) => v === chosen)) sel.value = chosen;
@@ -112,11 +135,24 @@ export function accountChooser({ accounts, agent, same = null, defaultValue = ''
     el.dataset.acctOk = String(!missing);
     const parts = [h('span', null, 'Account')];
     if (!missing) parts.push(sel);
-    if (s.kinds && current) {
+    if (s.srcs && current) {
+      parts.push(h('small', { class: 'muted' }, name + ' can use a key of ' + s.srcs.map(title).join(', ')
+        + ' — the account decides which; never a subscription'));
+    } else if (s.kinds && current) {
       parts.push(h('small', { class: 'muted' }, name + ' can use: ' + s.kinds.map((k) => KIND_LABELS[k] || k).join(', ')
         + (isOpenAIAgent(s.kinds) ? ' — never a Claude account' : s.needs ? ' — never a Claude subscription' : '')));
     }
-    if (missing && isOpenAIAgent(s.kinds)) {
+    if (missing && s.srcs) {
+      // 617 (models@1): a key of one of its sources, typed here (or the command).
+      const first = s.srcs[0];
+      parts.push(callout('warn', { cls: 'acct-need', icon: 'key-round', attrs: { 'data-acct-need': current }, title: name + ' needs an API key',
+        body: [h('small', null, 'A key of ' + s.srcs.map(title).join(', ') + ' — stored as `doz account add` stores it (the login keychain); the sandbox only ever sees a placeholder.'),
+          secretEntryAllowed()
+            ? accountForm({ sources: s.srcs, titles: acc.sourceTitles || {}, name: acc.accounts.some((x) => x.name === first) ? first + '-2' : first,
+                onAdded: (r, n) => { acc = r; chosen = n; toast('account ' + n + ' added'); render(); onChange(); } })
+            : h('div', { class: 'panel wiz-cmds' }, h('pre', { class: 'mono' }, 'doz account add NAME --provider ' + first)),
+          btn('Check again', async () => { try { acc = await api('accounts'); } catch (_) { /* keep */ } render(); onChange(); }, { small: true, icon: 'refresh-cw' })].filter(Boolean) }));
+    } else if (missing && isOpenAIAgent(s.kinds)) {
       // 599i: Codex — Dozer's own ChatGPT sign-in runs in a terminal (the browser opens on this Mac); a key can be typed here.
       parts.push(callout('warn', { cls: 'acct-need', icon: 'key-round', attrs: { 'data-acct-need': current }, title: name + ' needs an OpenAI account',
         body: [h('small', null, (state.chatgptSignIn ? 'Sign in with ChatGPT (your plan) in a terminal, or add an OpenAI API key' : 'Sign in with Codex on this Mac (the account mac), or add an OpenAI API key')

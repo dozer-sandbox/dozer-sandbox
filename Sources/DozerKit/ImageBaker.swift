@@ -154,8 +154,12 @@ public struct ImageBaker: Sendable {
         try fm.createDirectory(at: staging, withIntermediateDirectories: true)
         let root = staging.appendingPathComponent("root.ext4")
         let t0 = ContinuousClock.now
+        // 617: the unpack's own progress (bytes and files of the layers' known uncompressed size — the unpacker
+        // scans the headers first, +~0.3 s in a release build for Node's base) as a transfer, like a pull's.
+        let meter = PullMeter(label: "unpacking \(Self.shortReference(imageSpec.base))", events: events)
         _ = try await EXT4Unpacker(capacityInBytes: imageSpec.rootfsMiB * 1_048_576, journal: imageSpec.journalConfig)
-            .unpack(image, for: .current, at: root)
+            .unpack(image, for: .current, at: root, progress: { batch in meter.add(batch) })
+        meter.finish()
         let ms = milliseconds(since: t0)
         let (apparent, allocated) = Self.sizes(root)
         chmod(root.path, 0o444)
@@ -166,8 +170,7 @@ public struct ImageBaker: Sendable {
         let final = baseLocation(key)
         try? fm.removeItem(at: final)
         guard rename(staging.path, final.path) == 0 else { throw CocoaError(.fileWriteUnknown) }
-        events(.step("flattened the base \(imageSpec.base.split(separator: "@").first ?? "") once (\(imageSpec.rootfsMiB) MiB\(imageSpec.journalMiB.map { ", \($0) MiB journal" } ?? ", no journal"); \(Self.mib(allocated)) MiB) — base \(key.prefix(12))",
-                     milliseconds: ms))
+        // 617: no step of its own here — the bake's ONE base step reports it (it was said twice).
         return BaseDisk(root: final.appendingPathComponent("root.ext4"), manifest: m)
     }
 
@@ -231,6 +234,24 @@ public struct ImageBaker: Sendable {
         }
     }
 
+    /// 617: what a bake of `imageSpec` runs — the SAME values the bake below passes to each exec (the step's argv, its
+    /// user, its environment: the spec's, scrubbed, with the user's and the proxy's), its checks and the trim; with the
+    /// inputs. The bake emits it; tests read it from here.
+    public static func plan(_ imageSpec: ImageSpec, key: String, kernelFile: String, kernelSHA256: String, initfsReference: String,
+                            policy: NetworkPolicy?, networkEnvironment: [String: String], cpus: Int, memoryMiB: UInt64) -> BakePlan {
+        let steps = imageSpec.steps.map { step in
+            BakePlan.Step(name: step.name, argv: step.argv, user: step.user,
+                          environment: BakeEnvironment.scrubbed(step.environment.merging(userEnv(step.user, imageSpec)) { a, _ in a }).merging(networkEnvironment) { a, _ in a },
+                          timeoutSeconds: step.timeoutSeconds)
+        }
+        let checks = imageSpec.verify.map { BakePlan.Check(argv: $0.argv, expect: $0.expect, user: imageSpec.user) }
+        return BakePlan(image: imageSpec.name, base: imageSpec.base, key: key, baseKey: imageSpec.baseKey, agent: imageSpec.agent,
+                        kernelFile: kernelFile, kernelSHA256: kernelSHA256, initfsReference: initfsReference,
+                        network: policy != nil ? "proxy" : "nat", policyPreset: policy?.preset, policyRules: policy?.rules.map(BakePlan.describe) ?? [],
+                        policyDefault: policy.map { $0.defaultAction.rawValue }, cpus: cpus, memoryMiB: memoryMiB,
+                        user: imageSpec.user, home: imageSpec.home, steps: steps, checks: checks, trimCommand: ["sh", "-c", GuestCommand.trimRoot])
+    }
+
     /// The baked disk for `imageSpec`: a cache hit, or a bake.
     public func ensure(_ imageSpec: ImageSpec, inputs: BakeInputs,
                        events: @escaping @Sendable (SandboxEvent) -> Void = { _ in }) async throws -> BakedImage {
@@ -289,11 +310,27 @@ public struct ImageBaker: Sendable {
         let dns = proxied ? ["127.0.0.1"] : inputs.dnsServers
         let cpus = inputs.cpus, mem = inputs.memoryMiB
         let proxy = try inputs.egress.map { try EgressProxy(policy: $0, ca: nil, log: inputs.egressLog ?? ConnectionLog()) }
+        // 617: what this bake runs, exactly as it will run it (the spec's argv and checks, the environment each step is
+        // given, the inputs) — for the image's build log. Nothing here changes the bake.
+        events(.bakePlan(Self.plan(imageSpec, key: key, kernelFile: inputs.kernel.path.lastPathComponent, kernelSHA256: inputs.kernelSHA256,
+                                   initfsReference: inputs.initfsReference, policy: proxy?.policy, networkEnvironment: proxy?.guestEnvironment ?? [:],
+                                   cpus: cpus, memoryMiB: mem)))
         // 587: the base is flattened once per base key; this bake starts from an APFS clone of it.
         let hadBaseDisk = cachedBase(imageSpec.baseKey) != nil
-        let base = try await timed(hadBaseDisk ? "base disk ready (cached, \(imageSpec.baseKey.prefix(12)))" : "base disk flattened (\(imageSpec.baseKey.prefix(12)))") {
-            try await ensureBase(imageSpec, image: image, events: events)
+        let baseLabel = hadBaseDisk ? "base disk ready (cached, \(imageSpec.baseKey.prefix(12)))" : "base disk flattened (\(Self.shortReference(imageSpec.base)), \(imageSpec.baseKey.prefix(12)))"
+        let tb = ContinuousClock.now
+        events(.stepStarted(baseLabel))
+        let base: BaseDisk
+        do { base = try await ensureBase(imageSpec, image: image, events: events) } catch {
+            events(.stepFailed(baseLabel, milliseconds: milliseconds(since: tb), error: error.localizedDescription))
+            throw error
         }
+        let bms = milliseconds(since: tb)
+        timings.append(.init(step: baseLabel, milliseconds: bms))
+        // 617: ONE line for the base, with what it made (ends the step started above: "label → …").
+        events(.step(hadBaseDisk ? baseLabel
+                     : "\(baseLabel) → \(Self.mib(base.manifest.allocatedBytes)) MiB written, a \(imageSpec.rootfsMiB) MiB disk",
+                     milliseconds: bms))
         try await timed("cloned the base disk (APFS clone)") {
             guard clonefile(base.root.path, root.path, 0) == 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
             chmod(root.path, 0o644)
@@ -337,13 +374,24 @@ public struct ImageBaker: Sendable {
                 try Task.checkCancellation()
                 // 593: the step's own output, live — a tail of it, as inert text, at most 4 lines a second.
                 let tail = OutputTail { events(.output($0)) }
-                let r = try await timed("step: \(step.name)") {
-                    try await Sandbox.exec(on: c, step.argv,
-                                           environment: BakeEnvironment.scrubbed(step.environment.merging(Self.userEnv(step.user, imageSpec)) { a, _ in a }.merging(netEnv) { a, _ in a }),
-                                           workingDirectory: "/", privileged: false, timeout: step.timeoutSeconds, user: step.user,
-                                           onOutput: { tail.add($0) })
+                // 617: and all of it, for the image's build log (the step's lines, in the order they came).
+                let whole = StepOutputLines()
+                let label = "step: \(step.name)"
+                let r: ExecResult
+                do {
+                    r = try await timed(label) {
+                        try await Sandbox.exec(on: c, step.argv,
+                                               environment: BakeEnvironment.scrubbed(step.environment.merging(Self.userEnv(step.user, imageSpec)) { a, _ in a }.merging(netEnv) { a, _ in a }),
+                                               workingDirectory: "/", privileged: false, timeout: step.timeoutSeconds, user: step.user,
+                                               onOutput: { tail.add($0); whole.add($0) })
+                    }
+                } catch {
+                    tail.flush()
+                    events(.stepOutput(label, lines: whole.finish()))
+                    throw error
                 }
                 tail.flush()
+                events(.stepOutput(label, lines: whole.finish()))
                 guard r.exitCode == 0 else {
                     throw SandboxError.commandFailed(command: "bake step \(step.name)", exitCode: r.exitCode, output: r.output + r.errorOutput)
                 }
@@ -365,6 +413,10 @@ public struct ImageBaker: Sendable {
                 }
                 let ms = milliseconds(since: t0)
                 let out = (r.output + r.errorOutput).trimmingCharacters(in: .whitespacesAndNewlines)
+                // 617: what the check got, whole, for the build log (before the verdict: a failed check's too).
+                let got = StepOutputLines()
+                got.add(Data((out + "\n").utf8))
+                events(.stepOutput(label, lines: got.finish()))
                 guard r.exitCode == 0, check.expect.map({ out.contains($0) }) ?? true else {
                     events(.stepFailed(label, milliseconds: ms, error: "exit \(r.exitCode): \(out.prefix(200))"))
                     throw SandboxError.commandFailed(command: "verify \(check.argv.joined(separator: " "))", exitCode: r.exitCode, output: out)

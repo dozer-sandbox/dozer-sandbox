@@ -1,0 +1,108 @@
+{
+  "schema": 1,
+  "agent": "codex",
+  "version": "codex-cli 0.162.1",
+  "profiled": "2026-10-12",
+  "how": "a fresh try with the Open network, every HTTPS request decrypted and logged; its first start, then a scripted task (read a file, edit it, run a command) run non-interactively with FAKE keys — xAI and Google through a fake provider that answers text only, Anthropic and OpenAI refused by the real API (401). A real-key run would see more: the model's turns and what its tool calls fetch.",
+  "taskEnded": "ERROR: Reconnecting... 5/5 / ERROR: unexpected status 401 Unauthorized: Incorrect API key provided: sk-proj-********************************************wxyz. You can find your API key at https://platform.openai.com/account/api-keys., url: https://api.openai.com/v1/responses, cf-ray: a495b51b69189866",
+  "endpoints": [
+    {
+      "host": "api.openai.com",
+      "method": "GET",
+      "path": "/v1/responses",
+      "when": "start+task",
+      "count": 8,
+      "credential": [
+        "placeholder swapped for openai"
+      ],
+      "refusedWhenProfiled": false,
+      "determination": "allow",
+      "reason": "OpenAI's API — the model (part of Talk to OpenAI)",
+      "seen": true
+    },
+    {
+      "host": "api.openai.com",
+      "method": "POST",
+      "path": "/v1/responses",
+      "when": "task",
+      "count": 6,
+      "credential": [
+        "placeholder swapped for openai"
+      ],
+      "refusedWhenProfiled": false,
+      "determination": "allow",
+      "reason": "OpenAI's API — the model (part of Talk to OpenAI)",
+      "seen": true
+    },
+    {
+      "host": "chatgpt.com",
+      "method": "GET",
+      "path": "/backend-api/codex/models",
+      "when": "start+task",
+      "count": 7,
+      "credential": [
+        "rejected"
+      ],
+      "refusedWhenProfiled": true,
+      "determination": "allow",
+      "reason": "OpenAI — Codex's model and its account (part of Talk to OpenAI)",
+      "seen": true
+    },
+    {
+      "host": "chatgpt.com",
+      "method": "GET",
+      "path": "/backend-api/plugins/featured",
+      "when": "start+task",
+      "count": 2,
+      "credential": [
+        "none"
+      ],
+      "refusedWhenProfiled": false,
+      "determination": "allow",
+      "reason": "OpenAI — Codex's model and its account (part of Talk to OpenAI)",
+      "seen": true
+    },
+    {
+      "host": "github.com",
+      "method": "POST",
+      "path": "/openai/plugins.git/git-upload-pack",
+      "when": "start+task",
+      "count": 3,
+      "credential": [
+        "none"
+      ],
+      "refusedWhenProfiled": false,
+      "determination": "allow-path",
+      "reason": "Codex fetches OpenAI's curated plugins (read only: info/refs and git-upload-pack)",
+      "seen": true
+    },
+    {
+      "host": "github.com",
+      "method": "GET",
+      "path": "/openai/plugins.git/info/refs",
+      "when": "start+task",
+      "count": 3,
+      "credential": [
+        "none"
+      ],
+      "refusedWhenProfiled": false,
+      "determination": "allow-path",
+      "reason": "Codex fetches OpenAI's curated plugins (read only: info/refs and git-upload-pack)",
+      "seen": true
+    },
+    {
+      "host": "raw.githubusercontent.com",
+      "method": "GET",
+      "path": "/openai/codex/main/announcement_tip.toml",
+      "when": "start",
+      "count": 1,
+      "credential": [
+        "none"
+      ],
+      "refusedWhenProfiled": false,
+      "determination": "allow-path",
+      "reason": "Codex reads OpenAI's start-up tips (announcement_tip.toml, exact path)",
+      "seen": true
+    }
+  ]
+}

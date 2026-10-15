@@ -122,6 +122,20 @@ public struct SandboxConfig: Codable, Equatable, Sendable {
     /// clipboard and browser bridges, tmux) — a key absent follows the setting. (`sandbox.agent_sudo`
     /// keeps its own field above.)
     public var settings: [String: TOMLValue]?
+    /// 617 (D6): custom key accounts attached beside the account (`--key NAME`), each swapped only on its own hosts,
+    /// only while the policy allows them. Absent for every sandbox before 617.
+    public var extraKeys: [String]?
+    /// 617 (D14): made by `doz try` (nil for every other sandbox).
+    public var trial: Bool?
+    /// 617: the folder Dozer MADE for this try (a delete offers to remove it: at once when empty, asked otherwise).
+    public var trialFolder: String?
+    /// 617 (models@1): the model chosen for a recipe agent, by model source (`--model` with `--provider`/`--gateway`) —
+    /// used while the sandbox's account is of that source; the source's default model otherwise. Absent before 617.
+    public var models: [String: String]?
+    /// 617 (RP-1): the web ports forwarded beside the recipe's own (`doz ports add`), and the Mac port each guest port
+    /// (recipe or added) had last — preferred again at the next start. Absent before 617.
+    public var ports: [PortForwardEntry]?
+    public var portMacPorts: [String: Int]?
 
     public init(name: String, image: String, spec: SandboxSpec, workspace: String?, createdAt: Date = Date(),
                 credentialSources: [String: String] = [:], diedWithHostAt: Date? = nil) {
@@ -149,13 +163,12 @@ public struct SandboxConfig: Codable, Equatable, Sendable {
 
     /// The session `up` and `attach` use when none is named, and what it runs.
     public var defaultSession: (name: String, argv: [String]) {
-        // 596: by the image's AGENT, whatever its base (`python-claude-code` runs claude).
-        switch spec.imageSpec.flatMap({ ImageChoice.parse($0.name) })?.agent {
-        case .claudeCode?: ("claude", ["claude"])
-        case .pi?: ("pi", ["pi"])
-        case .codex?: ("codex", ["codex"])          // 599i
-        default: ("shell", ["bash", "-l"])
-        }
+        // 596: by the image's AGENT, whatever its base (`python-claude-code` runs claude). 617: its recipe's command,
+        // named by its short name (claude, pi, codex, gemini, grok).
+        guard let r = spec.imageSpec.flatMap({ ImageChoice.parse($0.name) })?.agent.recipe else { return ("shell", ["bash", "-l"]) }
+        // 617: a command-line tool that answers and exits (Fabric, llm) opens a login shell, named for the tool.
+        if r.launch.session == "shell" { return (r.shortName, ["bash", "-l"]) }
+        return (r.shortName, r.launch.command)
     }
 
     /// 596: the image's base × agent (nil: a template of an older image, or the lab's own path).

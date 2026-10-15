@@ -230,7 +230,7 @@ final class AccessTests: XCTestCase {
         let (fm, _) = try DozerImages.spec(name: "g4", options: f, store: store, environment: env)
         XCTAssertNil(AgentPermissions.gitHubMode(fm.network.policy?.permissions), "the form's exact permissions win")
         let (lk, _) = try DozerImages.spec(name: "g6", options: CreateOptions(image: "python-claude-code", network: "locked"), store: store, environment: env)
-        XCTAssertEqual(lk.network.policy?.permissions, ["model"], "a named network is exactly its preset")
+        XCTAssertEqual(lk.network.policy?.permissions, ["model", "vendor:claude-code"], "a named network is exactly its preset (+ the agent's own sites)")
         // …and off (the default) adds nothing.
         try Access.write(github: "off", githubSource: nil, ssh: nil, environment: env)
         let (n, _) = try DozerImages.spec(name: "g5", options: CreateOptions(image: "python-claude-code"), store: store, environment: env)

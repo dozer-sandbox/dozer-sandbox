@@ -8,7 +8,7 @@ import DozerHost
 
 struct ImageCommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(commandName: "image", abstract: "Images: the built-in lab, claude-code and pi, and custom images saved from restore points.",
-                                                    subcommands: [ImageList.self, ImageBake.self, ImageRemove.self, ImagePull.self, ImagePush.self],
+                                                    subcommands: [ImageList.self, ImageBake.self, ImageLog.self, ImageRemove.self, ImagePull.self, ImagePush.self],
                                                     defaultSubcommand: ImageList.self)
 }
 
@@ -89,6 +89,22 @@ struct ImageBake: AsyncParsableCommand {
         r.image = image
         let row = try decode(try call(r, g), ImageRow.self, g)
         if g.json { Out.json(row) } else { Out.stdout("\(row.name) baked\(row.allocatedBytes.map { " (\(DozerImages.formatBytes($0)))" } ?? "")\n") }
+    }
+}
+
+struct ImageLog: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "log",
+        abstract: "How an image was built: its inputs, every command and script as it ran, the files each step wrote, the checks, the output.",
+        discussion: "The log of this store's last build of IMAGE (kept when a build ends, done or failed). The same record as the dashboard's build-log tab.")
+    @OptionGroup var g: GlobalOptions
+    @Argument(help: "The image (doz image ls).") var image: String
+    func run() async throws {
+        var r = HostRequest(.buildLog)
+        r.image = image
+        let log = try decode(try await query(r, g), BuildLog.self, g)
+        let doc = BuildLogs.document(log)
+        if g.json { Out.json(doc) } else { Out.stdout(BuildLogs.plainText(doc)) }
     }
 }
 

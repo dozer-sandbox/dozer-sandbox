@@ -1,0 +1,87 @@
+{
+  "schema": 1,
+  "providers": [
+    {
+      "id": "anthropic",
+      "title": "Anthropic",
+      "hosts": ["api.anthropic.com"],
+      "inject": { "header": "x-api-key", "format": "%s" },
+      "env": "ANTHROPIC_API_KEY",
+      "builtin_binding": "anthropic",
+      "key_hint": "sk-ant-",
+      "error_shape": "anthropic",
+      "endpoints": [
+        { "id": "messages", "shapes": ["anthropic-messages"], "base_url": "https://api.anthropic.com", "default_model": "claude-sonnet-4-6" }
+      ]
+    },
+    {
+      "id": "openai",
+      "title": "OpenAI",
+      "hosts": ["api.openai.com"],
+      "inject": { "header": "authorization", "format": "Bearer %s" },
+      "env": "OPENAI_API_KEY",
+      "builtin_binding": "openai",
+      "key_hint": "sk-",
+      "error_shape": "openai",
+      "endpoints": [
+        { "id": "v1", "shapes": ["openai-chat", "openai-responses"], "base_url": "https://api.openai.com/v1", "default_model": "gpt-5.4-mini" }
+      ]
+    },
+    {
+      "id": "xai", "swap_only": true,
+      "title": "xAI",
+      "hosts": ["api.x.ai"],
+      "inject": { "header": "authorization", "format": "Bearer %s" },
+      "env": "XAI_API_KEY",
+      "key_hint": "xai-",
+      "check": { "method": "GET", "url": "https://api.x.ai/v1/api-key", "rejected": [400, 401, 403] },
+      "error_shape": "openai",
+      "endpoints": [
+        { "id": "v1", "shapes": ["openai-chat", "openai-responses"], "base_url": "https://api.x.ai/v1", "default_model": "grok-4-1-fast" }
+      ]
+    },
+    {
+      "id": "google",
+      "title": "Google AI (Gemini API)",
+      "hosts": ["generativelanguage.googleapis.com"],
+      "inject": { "header": "x-goog-api-key", "format": "%s" },
+      "env": "GEMINI_API_KEY",
+      "key_hint": "AIza",
+      "check": { "method": "GET", "url": "https://generativelanguage.googleapis.com/v1beta/models", "rejected": [400, 401, 403] },
+      "error_shape": "google",
+      "endpoints": [
+        { "id": "gemini", "shapes": ["gemini"], "base_url": "https://generativelanguage.googleapis.com", "default_model": "gemini-2.5-flash" },
+        { "id": "openai", "shapes": ["openai-chat"], "base_url": "https://generativelanguage.googleapis.com/v1beta/openai", "default_model": "gemini-2.5-flash" }
+      ]
+    },
+    {
+      "id": "google-stitch", "swap_only": true,
+      "title": "Google Stitch",
+      "hosts": ["stitch.googleapis.com"],
+      "inject": { "header": "x-goog-api-key", "format": "%s" },
+      "env": "STITCH_API_KEY",
+      "key_hint": "AQ.",
+      "error_shape": "google"
+    },
+    {
+      "id": "openrouter",
+      "title": "OpenRouter",
+      "gateway": true,
+      "hosts": ["openrouter.ai"],
+      "inject": { "header": "authorization", "format": "Bearer %s" },
+      "env": "OPENROUTER_API_KEY",
+      "key_hint": "sk-or-",
+      "check": { "method": "GET", "url": "https://openrouter.ai/api/v1/key", "rejected": [401, 403] },
+      "error_shape": "openai"
+    },
+    {
+      "id": "vercel-ai-gateway",
+      "title": "Vercel AI Gateway",
+      "gateway": true,
+      "hosts": ["ai-gateway.vercel.sh"],
+      "inject": { "header": "authorization", "format": "Bearer %s" },
+      "env": "AI_GATEWAY_API_KEY",
+      "error_shape": "openai"
+    }
+  ]
+}

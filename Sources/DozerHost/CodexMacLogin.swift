@@ -277,7 +277,9 @@ extension HostCore {
 
     /// The default account that applies to a sandbox of `image` (Codex: the OpenAI default above).
     func defaultAccount(for image: String?, _ file: AccountsFile) -> String {
-        AgentCredentials.provider(image) == "openai" ? (effectiveOpenAIDefault(file) ?? "none") : file.defaultAccount
+        // 617: a key agent follows its provider's default (none until one is chosen).
+        if AgentCredentials.sources(image) != nil { return file.defaultAccount(for: image) }
+        return AgentCredentials.codexFlow(image) ? (effectiveOpenAIDefault(file) ?? "none") : file.defaultAccount
     }
 
     /// `account ls`'s row for this Mac's Codex login — only when there is one to speak of (never a token).

@@ -25,19 +25,28 @@ public enum AccountKind: String, Codable, Sendable, CaseIterable {
     case chatgpt
     /// 599i rc.3: THIS Mac's own Codex login, read-only (the account `mac` of a Codex sandbox) — never written.
     case codexMac = "codex-mac"
+    /// 617: an API key of a key provider (`AccountRecord.provider`: xai, google) in `doz-<provider>:NAME`.
+    case key
 
-    /// The vault binding its secret goes in.
+    /// The vault binding its secret goes in (a `key` account's is its provider's — `AccountRecord.binding`).
     public var binding: CredentialBinding {
         switch self {
         case .apiKey: .anthropic
         case .mac, .setupToken: .claudeOAuth
         case .openaiKey: .openai
         case .chatgpt, .codexMac: .chatgpt
+        case .key: CredentialBinding(id: "key:?", hosts: [], header: .bearer)       // never used: see AccountRecord.binding
         }
     }
 
-    /// 599i: whose credential it is — `anthropic` (Claude Code, pi) or `openai` (Codex).
-    public var provider: String { self == .openaiKey || self == .chatgpt || self == .codexMac ? "openai" : "anthropic" }
+    /// 599i: whose credential it is — `anthropic` (Claude Code, pi) or `openai` (Codex). 617: `key` — its record's provider.
+    public var provider: String {
+        switch self {
+        case .openaiKey, .chatgpt, .codexMac: "openai"
+        case .key: "key"
+        default: "anthropic"
+        }
+    }
 }
 
 public struct AccountRecord: Codable, Equatable, Sendable {
@@ -64,6 +73,39 @@ public struct AccountRecord: Codable, Equatable, Sendable {
     /// 599i: a ChatGPT sign-in's email and account id (from its id_token's claims) — not secrets.
     public var email: String?
     public var accountID: String?
+    /// 617: a `key` account's key provider (`xai`, `google`, `custom`) — nil for every other kind (and in every older file).
+    public var provider: String?
+    /// 617 (§7): where the key is read from — nil = the keychain item `keychainService` (every older record).
+    public var source: SecretSource?
+    /// 617: the allow-listed, non-secret tool variables its source runs with (`OP_ACCOUNT`, `AWS_PROFILE`, …).
+    public var sourceEnv: [String: String]?
+    /// 617: how long a value read from its source is kept in the host's memory (default 3300 s).
+    public var ttlSeconds: Int?
+    /// 617 (D6): a custom key — the hosts it may go to and how (never a secret).
+    public var custom: CustomKey?
+
+    /// The source in effect (a record without one: its keychain item).
+    public var effectiveSource: SecretSource? { source ?? keychainService.map { .keychain(service: $0) } }
+
+    /// Read on use from a tool (1Password, AWS, a command) rather than the keychain.
+    public var readsOnUse: Bool { source.map { !$0.isKeychain } ?? false }
+
+    /// 617: whose credential it is — the provider of a `key` account, the kind's otherwise.
+    public var providerID: String { kind == .key ? (provider ?? "") : kind.provider }
+
+    /// 617: as a person reads it ("an xAI API key").
+    public var label: String {
+        if let c = custom { return c.label }
+        guard kind == .key, let p = provider.flatMap({ KeyProviders.provider($0) }) else { return kind.label }
+        return "a \(p.title) key"
+    }
+
+    /// 617: the vault binding its secret goes in.
+    public var binding: CredentialBinding {
+        guard kind == .key else { return kind.binding }
+        if let c = custom { return c.binding(account: name) }
+        return provider.flatMap { KeyProviders.provider($0) }?.binding ?? kind.binding
+    }
 
     public init(name: String, kind: AccountKind, keychainService: String? = nil, adopted: Bool? = nil, configDir: String? = nil,
                 plan: String? = nil, tier: String? = nil, identity: ClaudeIdentity? = nil, fingerprint: String? = nil,
@@ -89,6 +131,51 @@ public struct AccountRecord: Codable, Equatable, Sendable {
     public static let codexMac = AccountRecord(name: "mac", kind: .codexMac, addedAt: Date(timeIntervalSince1970: 0))
 }
 
+/// 617 (D6): a custom key's binding — like Docker's `set-custom`: the exact hosts it may go to, the header and its
+/// format, the variable its placeholder is in. Swap-only (never added to a request without its placeholder), and only
+/// ever on hosts the sandbox's policy allows on purpose (`--allow site:HOST`).
+public struct CustomKey: Codable, Equatable, Sendable {
+    public var hosts: [String]
+    /// `authorization` (with `Bearer %s`), or any header name (with `%s`).
+    public var header: String
+    public var format: String
+    public var env: String
+
+    public init(hosts: [String], header: String, format: String, env: String) {
+        self.hosts = hosts.map { $0.lowercased() }
+        self.header = header.lowercased()
+        self.format = format
+        self.env = env
+    }
+
+    public func binding(account: String) -> CredentialBinding {
+        let h: CredentialHeader = format == "Bearer %s" ? .bearer : .apiKey(name: header)
+        return CredentialBinding(id: "custom:" + account, hosts: hosts, header: h, environmentVariable: env, swapOnly: true)
+    }
+
+    public func validate() throws {
+        guard !hosts.isEmpty, hosts.count <= 8 else { throw HostError(.invalid, "a custom key needs --host (1–8 exact hosts)") }
+        for h in hosts where h.range(of: #"^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$"#, options: .regularExpression) == nil {
+            throw HostError(.invalid, "--host \(h): an exact host name like api.example.com")
+        }
+        for h in hosts where KeyProviders.owning(host: h) != nil || GitHubAccess.credentialHosts.contains(h) || OpenAIAccess.isOpenAIHost(h) {
+            throw HostError(.invalid, "--host \(h) is a host Dozer already holds keys for — use that account kind instead")
+        }
+        guard env.range(of: "^[A-Z][A-Z0-9_]{1,63}$", options: .regularExpression) != nil, !env.hasPrefix("DOZ_") else {
+            throw HostError(.invalid, "--env-var: an upper-case variable name like EXAMPLE_API_KEY")
+        }
+        guard ["%s", "Bearer %s"].contains(format) else { throw HostError(.invalid, "--format: %s (the key as it is) or use --bearer") }
+        if format == "Bearer %s", header != "authorization" { throw HostError(.invalid, "--bearer goes in the Authorization header") }
+        guard header.range(of: "^[a-z][a-z0-9-]{0,63}$", options: .regularExpression) != nil,
+              !["host", "cookie", "content-length", "transfer-encoding", "connection"].contains(header) else {
+            throw HostError(.invalid, "--header: a header name like x-api-key")
+        }
+    }
+
+    /// "a custom key for api.example.com".
+    public var label: String { "a custom key for \(hosts.joined(separator: ", "))" }
+}
+
 public struct AccountsFile: Codable, Equatable, Sendable {
     public var version = 1
     /// The account a sandbox that follows the default uses (`none`: no credential).
@@ -99,12 +186,16 @@ public struct AccountsFile: Codable, Equatable, Sendable {
     /// 599i: the OpenAI account Codex sandboxes that follow the default use (nil: none — never an
     /// Anthropic account). `doz account default NAME` with an OpenAI account sets it.
     public var openaiDefault: String?
+    /// 617: each key provider's default account (`xai` → `work-xai`); nil — none chosen.
+    public var providerDefaults: [String: String]?
 
     public init() {}
 
-    /// 599i: the default account that applies to a sandbox of `image` (Codex: the OpenAI one).
+    /// 599i: the default account that applies to a sandbox of `image` (Codex: the OpenAI one; 617: a key agent: its
+    /// provider's).
     public func defaultAccount(for image: String?) -> String {
-        AgentCredentials.defaultAccount(for: image, anthropic: defaultAccount, openai: openaiDefault)
+        AgentCredentials.defaultAccount(for: image, anthropic: defaultAccount, openai: openaiDefault, providers: providerDefaults ?? [:],
+                                        kinds: Dictionary(accounts.map { ($0.name, $0.kind) }) { a, _ in a })
     }
 }
 
@@ -135,6 +226,14 @@ public struct AccountStore: Sendable {
     /// 599i: an OpenAI API key, and a ChatGPT sign-in's tokens (a JSON document, never on disk).
     public static let openaiKeyPrefix = "doz-openai:"
     public static let chatgptPrefix = "doz-chatgpt:"
+    /// 617: a key provider's key: `doz-xai:NAME`, `doz-google:NAME`.
+    public static func keyPrefix(_ provider: String) -> String { "doz-\(provider):" }
+
+    /// 617: a keychain item Dozer made for an account (and so may delete): one of the prefixes above.
+    public static func isDozItem(_ service: String) -> Bool {
+        [setupTokenPrefix, apiKeyPrefix, openaiKeyPrefix, chatgptPrefix, keyPrefix("custom")].contains(where: service.hasPrefix)
+            || KeyProviders.all.filter { $0.builtinBinding == nil }.contains { service.hasPrefix(keyPrefix($0.id)) }
+    }
     /// A setup token lives one year (`claude setup-token`: 31 536 000 s).
     public static let setupTokenLifetime: TimeInterval = 31_536_000
 
@@ -193,6 +292,14 @@ extension HostRequest {
         return r
     }
 
+    /// 617: a key of a key provider (`--provider xai|google`) — the same one path.
+    public static func keyAccountAdd(name: String, provider: String, secret: String?, verify: Bool = true, force: Bool = false,
+                                     keychain: String? = nil) -> HostRequest {
+        var r = accountAdd(name: name, kind: .key, plan: nil, secret: secret, verify: verify, force: force, keychain: keychain)
+        r.provider = provider
+        return r
+    }
+
     /// The request `doz key set NAME --anthropic` sends — the ONE path a sandbox's own key takes (594:
     /// the web UI's masked field builds it here too). The host holds it in memory (a stdin/prompt/browser
     /// key lasts while the host runs), gives the guest a placeholder, and forgets the other credential.
@@ -215,10 +322,31 @@ public struct AccountRow: Codable, Equatable, Sendable {
     public var verification: String?
     public var isDefault: Bool
     public var usedBy: [String]
-    /// `ok`, `expires-soon`, `expired`, `signed-out`, `missing`, `locked`…
+    /// `ok`, `expires-soon`, `expired`, `signed-out`, `missing`, `locked`, `rejected` (its provider refused it at the
+    /// last check), `unavailable` (its source could not be read), `unchecked` (read on use, not read yet)…
     public var state: String
+
+    /// 617: a key's state once its last check is known — a key the provider REFUSED (`verification` "rejected: …") is
+    /// `rejected`, never `ok`. A state that already says the key cannot be used (missing, locked, expired, unavailable)
+    /// is kept: that is the first thing to fix. Never checked stays as it is (`ok` from the keychain, `unchecked`).
+    public static func keyState(_ state: String, verification: String?) -> String {
+        guard verification?.hasPrefix("rejected") == true, ["ok", "expires-soon", "unchecked"].contains(state) else { return state }
+        return "rejected"
+    }
     public var keychainService: String?
     public var fingerprint: String?
+    /// 617: whose key it is (`anthropic`, `openai`, `xai`, `google`, `custom`).
+    public var provider: String?
+    /// 617 (§7): where its key is read from, as a person reads it ("1Password: op://Dev/xai/credential") — never a value.
+    public var sourceLabel: String?
+    /// 617: the last read from that source: `ok`, `failed`, or `unchecked` (not read since this host started).
+    public var sourceState: String?
+    /// 617: why the last read failed (the proxy's 401 says the same) — the cause and the fix, never a value.
+    public var sourceProblem: String?
+    /// 617 (D6): a custom key's hosts.
+    public var hosts: [String]?
+    /// 617: when `verification` was decided — history ("last verified 12 Oct 16:21"), not a live state.
+    public var verifiedAt: Date? = nil
 }
 
 // MARK: verification
@@ -233,12 +361,63 @@ public enum AccountVerification: Equatable, Sendable {
 
 public protocol AccountVerifying: Sendable {
     func verify(kind: AccountKind, secret: String) async -> AccountVerification
+    /// 617: with a `key` account's provider.
+    func verify(kind: AccountKind, secret: String, provider: String?) async -> AccountVerification
+}
+
+extension AccountVerifying {
+    public func verify(kind: AccountKind, secret: String, provider: String?) async -> AccountVerification {
+        await verify(kind: kind, secret: secret)
+    }
+}
+
+/// 617 TEST SEAM: `DOZ_TEST_PROVIDER_UPSTREAM=host:port` + `DOZ_TEST_PROVIDER_CA=<pem>` — the key providers' hosts (the
+/// proxy's leg, the key check) go to a fake provider, trusting ONLY that CA.
+public enum ProviderSeam {
+    public static func upstream(environment env: [String: String] = ProcessInfo.processInfo.environment) -> EgressProxy.UpstreamOverride? {
+        guard let u = env["DOZ_TEST_PROVIDER_UPSTREAM"], !u.isEmpty, let caPath = env["DOZ_TEST_PROVIDER_CA"],
+              let pem = try? String(contentsOfFile: caPath, encoding: .utf8) else { return nil }
+        let parts = u.split(separator: ":")
+        guard parts.count == 2, let port = UInt16(parts[1]) else { return nil }
+        return EgressProxy.UpstreamOverride(host: String(parts[0]), port: port, anchorsPEM: pem)
+    }
+
+    /// 617 PROFILING SEAM: `DOZ_TEST_PROFILE_NETWORK=1` — every allowed HTTPS request is decrypted and logged.
+    public static func profiling(environment env: [String: String] = ProcessInfo.processInfo.environment) -> Bool {
+        env["DOZ_TEST_PROFILE_NETWORK"] == "1"
+    }
+
+    /// 617: more hosts the seam sends to the fake (`DOZ_TEST_PROVIDER_HOSTS=a.example,b.example`) — only with the seam set.
+    public static func extraHosts(environment env: [String: String] = ProcessInfo.processInfo.environment) -> Set<String> {
+        guard upstream(environment: env) != nil, let s = env["DOZ_TEST_PROVIDER_HOSTS"] else { return [] }
+        return Set(s.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces).lowercased() }.filter { !$0.isEmpty })
+    }
+
+    /// 617: a key provider's check, over the proxy's leg (the seam's fake in tests).
+    static func check(provider: String?, secret: String) async -> AccountVerification {
+        if provider == "custom" { return .unavailable("a custom key has no check") }
+        guard let p = provider.flatMap({ KeyProviders.provider($0) }) else { return .unavailable("no provider") }
+        let override = upstream()
+        return await Task.detached {
+            switch p.checkKey(secret, override: override) {
+            case .success(let r) where r.good: return AccountVerification.verified
+            case .success(let r): return .rejected("HTTP \(r.status) from \(p.check.flatMap { URL(string: $0.url)?.host } ?? p.title)")
+            case .failure(let f): return .unavailable(f.reason)
+            }
+        }.value
+    }
 }
 
 /// One minimal request, from the host, to api.anthropic.com only: `POST /v1/messages`, haiku,
 /// `max_tokens: 1`, the credential in its header. 200 verified · 401/403 rejected · else unavailable.
+/// 617: and a key provider's own check (`KeyProvider.check`: xAI `GET /v1/api-key`, Google `GET /v1beta/models`).
 public struct AnthropicVerifier: AccountVerifying {
     public init() {}
+
+    public func verify(kind: AccountKind, secret: String, provider: String?) async -> AccountVerification {
+        if kind == .key { return await ProviderSeam.check(provider: provider, secret: secret) }
+        return await verify(kind: kind, secret: secret)
+    }
 
     public func verify(kind: AccountKind, secret: String) async -> AccountVerification {
         // 599i: an OpenAI key — one GET api.openai.com/v1/models (over the proxy's leg; the test seam's CA in tests).

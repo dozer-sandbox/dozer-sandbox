@@ -75,13 +75,9 @@ public enum SessionResume {
     /// Claude Code `--continue` (the newest conversation in the folder); Codex `resume --last` (0.160.1:
     /// the newest session recorded in the folder — `--all` would ignore the folder — or a new one when there
     /// is none); pi `--continue` (the newest session in the folder, else a new one).
+    /// 617: the agent's recipe says it (`resume`; Gemini CLI `--resume latest`; Grok Build none yet — it restarts fresh).
     public static func arguments(for agent: AgentKind?) -> [String] {
-        switch agent {
-        case .claudeCode?: ["--continue"]
-        case .codex?: ["resume", "--last"]
-        case .pi?: ["--continue"]
-        default: []
-        }
+        agent?.recipe?.resume ?? []
     }
 
     /// A guest check (as the session's user, in its folder) that there IS a conversation to continue, for an
@@ -89,12 +85,9 @@ public enum SessionResume {
     /// exits). nil: the agent starts a new conversation by itself when there is none (Codex, pi).
     /// Claude Code keeps a folder's conversations in ~/.claude/projects/<the folder, every non-alphanumeric
     /// character a '-'>/*.jsonl.
+    /// 617: from the recipe (`resume_check` — Claude Code's).
     public static func check(for agent: AgentKind?) -> String? {
-        switch agent {
-        case .claudeCode?:
-            return #"d="$HOME/.claude/projects/$(pwd -P | sed 's/[^A-Za-z0-9]/-/g')"; ls "$d"/*.jsonl >/dev/null 2>&1 && echo resumable || echo none"#
-        default: return nil
-        }
+        agent?.recipe?.resumeCheck
     }
 }
 

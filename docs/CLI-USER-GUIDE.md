@@ -826,8 +826,16 @@ question names the point's name, id and when it was taken.
 doz image ls                   # built-in images and templates, and whether each is baked here
 doz image ls --tree            # the lineage, with each disk's size, shared bytes and own bytes
 doz image bake claude-code     # bake now rather than at the first start (minutes, needs network)
+doz image log claude-code      # how it was built: inputs, every command and script as it ran, the files, the checks, the output
 doz image rm NAME              # sandboxes already made from it keep working
 ```
+
+`doz image log IMAGE` prints this store's last build of an image — kept when a build ends, done or failed:
+the inputs (the base with its digest, the kernel, the guest init, the recipe and its version, the bake's network
+policy, which early steps were cached), then each step under a plain heading with its command or script exactly
+as it ran, every file it writes (path and contents), and its output; then each check (the command, what it
+expects, what it got). `--json` gives the same record as data. The dashboard's build-log tab shows the same.
+Nothing shaped like a secret is ever kept in it.
 
 `image pull` / `push` are not built yet (exit 7).
 
@@ -986,7 +994,7 @@ What you can do from it:
 | **Accounts & keys** | Make an account the default; verify one; remove one; keep-alive on or off. |
 | **Metrics** | Filter by image, time and steps; download the rows as CSV. |
 
-Reset, remove, revert and every delete ask you to **type the name** first. Shut down keeps the
+In the dashboard, reset, remove, revert and every delete ask you to **tick a box** first. Shut down keeps the
 disk, so it asks with a plain confirmation; "don't ask again" sets the setting
 `ui.confirm_shutdown = false` (the **Settings** page turns it back on). An
 operation's progress shows in the sandbox's row and in its control bar while it runs (the
@@ -1065,8 +1073,8 @@ already under way). The list has no session count, since counting asks every ses
 guest; each sandbox's page lists its sessions.
 
 **Keys and tokens in the browser** (594, owner ruling; the setting `ui.allow_secret_entry`, on by
-default). The setup wizard's account step and **Accounts & keys › Add an account** take an Anthropic
-API key or a Claude setup token (with its plan) in a masked field (`type=password`, no autocomplete, no
+default). The setup wizard's account step and **Accounts & keys › Add a key** take an
+API key of any provider, or a Claude setup token (with its plan), in a masked field (`type=password`, no autocomplete, no
 spellcheck). The page reads it once and empties the field at once; it goes out only in the body of one
 CSRF-checked `POST /api/v1/accounts` — never a URL, a log line, an event, an Operation or an error
 message — and the host stores it exactly as `doz account add` does (the login keychain, one tiny check
@@ -1087,12 +1095,14 @@ to its own session (starting it if needed); each session row has **Open** and **
 view — the session keeps running, as Ctrl-] does in `doz attach`.
 
 - **Watch** is read-only: nothing you type reaches the session, and it never resizes it.
-- **Watch it boot.** **Start** opens a terminal on the sandbox's page that shows
-  the start as it happens — doz's timed steps (on a first start, the download and the bake) and
-  the kernel's boot console — and then becomes the image's own session in the same pane, with the
-  boot log kept in the scrollback. `doz console NAME [--follow]` shows the same console in a
-  terminal; the whole boot is kept afterwards (**Boot log** on the control bar, `doz console NAME
-  --steps` — below). Turn it off with the setting `ui.boot_view_on_start = false`: Start then just starts.
+- **Watch it boot.** **Start** on the sandbox's page shows the start in its terminal area, in one
+  place: while the image is prepared, a bar for the whole build ("Step N of M · step · elapsed") over
+  doz's timed steps; once the VM is powered on, tab zero, **Console** — the kernel's and vminitd's
+  console, read-only, no close box, there exactly while the VM is on; then the agent's own tab, added
+  once it has drawn its screen (the console is never written into it). `doz console NAME [--follow]`
+  shows the same console in a terminal; the whole boot is kept afterwards (**Boot log** on the control
+  bar, `doz console NAME --steps` — below). With the setting `ui.boot_view_on_start = true` the page
+  stays on Console after Start and marks the agent's tab with a dot instead of switching to it.
   While a step runs it shows a spinner and its seconds so far, and becomes "✓ step — 1.2 s" (or
   "✗ step — why") when it ends; a first start's image pull shows a bar ("pulling node@1a2b3c4d5e6f
   ██████░░░░ 87 / 142 MB 6.1 MB/s ~9 s (3/5 layers)") and then "pulled … : 142 MB in 23 s"; a bake
@@ -1150,15 +1160,15 @@ commented out:
 # Start opens a terminal on the boot sequence (the kernel console) until the sandbox is up; false:
 # Start just starts it.
 # (boolean; applies at once (the UI re-reads it))
-# boot_view_on_start = true
+# boot_view_on_start = false
 ```
 
 Uncomment a line to set it — or let doz write it:
 
 ```bash
 doz config                               # every setting: value, source (flag / env / file / default), default
-doz config set ui.boot_view_on_start false
-doz config get ui.boot_view_on_start     # false
+doz config set ui.boot_view_on_start true
+doz config get ui.boot_view_on_start     # true
 doz config unset ui.boot_view_on_start   # back to the default
 doz config init                          # write the file with everything commented out
 doz config path
@@ -1171,7 +1181,7 @@ the others say when they apply (the next sandbox created, the next session, or a
 
 | Section | Settings |
 |---|---|
-| `[ui]` | `terminal_title` (`{sandbox} · {session} · {time}` — see "The title and the Ctrl-] menu"; `""` leaves the title to the session), `boot_view_on_start` (true), `confirm_shutdown` (true), `split_default` (`shell` · `watch` · `attach` · `dialog`), `terminals` (true), `terminal_font_size` (13), `theme` (`auto` · `light` · `dark`), `details_open` (true), `grid_live_tiles` (8, 1–12), `grid_tile_size` (`small` · `medium` · `large`), `progress` (`animated` · `plain`; `$DOZ_PROGRESS`, `--progress auto\|plain`), `open_browser` (`auto` · `always` · `never`; `doz ui --open\|--no-open` — when `doz ui` opens a tab; applies to the next `doz ui`) |
+| `[ui]` | `terminal_title` (`{sandbox} · {session} · {time}` — see "The title and the Ctrl-] menu"; `""` leaves the title to the session), `boot_view_on_start` (false), `confirm_shutdown` (true), `split_default` (`shell` · `watch` · `attach` · `dialog`), `terminals` (true), `terminal_font_size` (13), `theme` (`auto` · `light` · `dark`), `details_open` (true), `grid_live_tiles` (8, 1–12), `grid_tile_size` (`small` · `medium` · `large`), `progress` (`animated` · `plain`; `$DOZ_PROGRESS`, `--progress auto\|plain`), `open_browser` (`auto` · `always` · `never`; `doz ui --open\|--no-open` — when `doz ui` opens a tab; applies to the next `doz ui`) |
 | `[host]` | `idle_timeout_minutes` (5; `$DOZ_HOST_IDLE`), `boot_logs_kept` (5, 1–50; `$DOZ_BOOT_LOGS` — boots kept per sandbox for `doz console --boot N` and the Boot log), `screen_capture_minutes` (5, 0–1440; `$DOZ_SCREEN_CAPTURE` — how often a running sandbox's changed session screens are saved; 0 = only at pause, sleep and hibernate), `keepalive` (false — for a store that has not chosen with `doz account keepalive`) |
 | `[store]` | `path` (`--store`, `$DOZ_STORE`) |
 | `[claude]` | `permissions` (`skip` · `ask`) — Claude Code's own prompts in a claude-code sandbox; `-e DOZ_CLAUDE_PERMISSIONS=…` on `run`/`exec` still wins |

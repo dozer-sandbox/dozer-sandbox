@@ -1,4 +1,5 @@
 // components/terminal — A browser terminal (591): its sandboxed frame, socket, cover, paste, saved screen and boot log.
+import { buildLogNode } from './build-log.js';
 import { upcall } from '../core/hooks.js';
 import { h } from '../dom/h.js';
 import { icon, PHASE_GLYPH, setButton, withIcon } from '../dom/icons.js';
@@ -6,13 +7,13 @@ import { api } from '../core/api.js';
 import { bytes, elapsedText, ms, when } from '../core/format.js';
 import { act, TRANSITION_LABEL, transitionOf, waitForOp } from '../core/operations.js';
 import { sandboxBusy, sandboxImage, sandboxPhase } from '../core/sandboxes.js';
-import { setting, terminalsAllowed } from '../core/settings.js';
+import { bootViewOnStart, setting, terminalsAllowed } from '../core/settings.js';
 import { state } from '../core/state.js';
 import { INPUT_CHUNK, PASTE_CONFIRM_BYTES, PASTE_MAX_BYTES, sview, terminals, termUI } from '../core/terminals.js';
 import { isInt, quietly, utf8 } from '../core/util.js';
 import { bridgeNotice, failureFor } from './notices.js';
 // Calls up the layers (provided by app.js — core/hooks.js):
-const lifecycle = upcall('lifecycle'), paintTabs = upcall('paintTabs'), renderTerminals = upcall('renderTerminals');
+const lifecycle = upcall('lifecycle'), paintTabs = upcall('paintTabs'), renderTerminals = upcall('renderTerminals'), syncConsoleTab = upcall('syncConsoleTab');
 
 // This page never opens windows.
 window.open = function refuseToOpen() { return null; };
@@ -91,7 +92,7 @@ export async function bootTerm(t, fontSize) {
     if (t.closed) return false;
     const opened = new Promise((resolve, reject) => { t.onOpened = resolve; t.onFailed = reject; });
     t.onReady = () => {
-      t.initMode = t.saved ? 'saved' : t.mode;
+      t.initMode = t.saved ? 'saved' : t.mode === 'console' ? 'watch' : t.mode;     // 617: the console is read-only
       toFrame(t, { t: 'init', wasm: wasm.slice(0), mode: t.initMode, fontSize: isInt(fontSize, 9, 32) ? fontSize : 13 });
     };
     // The engine's frame: an opaque origin (allow-scripts only — no same-origin, no popups, no forms).
@@ -100,7 +101,7 @@ export async function bootTerm(t, fontSize) {
     t.els.host.append(t.frame);
     await opened;
   } catch (e) {
-    t.errorText = 'the terminal engine did not load (' + (e.message || e) + ')';
+    t.errorText = 'the terminal engine did not load (' + (e.message || e) + ')'; wakeStateWaiters(t);
     paintCover(t);
     return false;
   }
@@ -108,7 +109,7 @@ export async function bootTerm(t, fontSize) {
   t.booted = true;
   if (t.saved) { loadSavedScreen(t); return true; }       // 593 §9: no socket — the saved screen
   // A saved pane whose sandbox ran again while its engine loaded: the frame leaves saved mode first.
-  if (t.initMode === 'saved') toFrame(t, { t: 'live', mode: t.mode });
+  if (t.initMode === 'saved') toFrame(t, { t: 'live', mode: t.mode === 'console' ? 'watch' : t.mode });
   connectTerminal(t);
   return true;
 }
@@ -129,12 +130,74 @@ export async function openTerminal(sandbox, session, mode, pane, opts = {}) {
   if (await bootTerm(t, setting('ui.terminal_font_size', 13))) focusTerm(t);
 }
 
+/// 617 (owner: the agent's tab "appears once, ready"): the agent's terminal of a start, PREPARED but not shown — no tab,
+/// its pane laid out under the others (it has a size; a hidden frame has none) — attached QUIETLY once the sandbox
+/// runs (nothing of the boot written into it: tab zero, Console, shows that). It becomes a tab when it has drawn its
+/// first frame (`revealPending`): selected at once — or, with ui.boot_view_on_start (stay on Console), marked with an
+/// activity dot.
+export async function openPendingTerminal(sandbox) {
+  if (!terminalsAllowed()) return null;
+  const t = newTerm(sandbox, null, 'interactive');
+  t.pending = true;
+  t.quiet = true;
+  t.pane = 0;
+  paintCover(t);
+  if (state.view !== 'sandbox' || state.param !== sandbox) location.hash = '#/sandbox/' + sandbox;
+  else renderTerminals();
+  await new Promise((r) => setTimeout(r, 0));
+  renderTerminals();
+  bootTerm(t, setting('ui.terminal_font_size', 13));
+  return t;
+}
+function revealPending(t) {
+  if (!t.pending) return;
+  t.pending = false;
+  const v = sview(t.sandbox);
+  if (bootViewOnStart() && !t.errorText && !t.ended) t.activity = true;    // stay on Console; the agent's tab says it has something
+  else { v.selected[t.pane] = t.id; v.focusedPane = t.pane; }
+  renderTerminals();
+  if (!t.activity) focusTerm(t);
+}
+/// 617 (owner: "keep its log as a small tab to the LEFT of Console"): the build log of the sandbox's image — read-only,
+/// no socket (the frame's saved mode, like a Boot log), any phase: it stays across shutdown and sleep while the page
+/// shows the sandbox. Opened behind the others (never selected by itself). No log kept → no tab (404 closes it).
+export function openBuildLogTerminal(sandbox, log) {
+  const t = newTerm(sandbox, null, 'watch');
+  t.buildlog = true;
+  t.buildlogInfo = log ? { state: log.state, finishedAt: log.finishedAt, image: log.image } : null;
+  t.pane = 0;
+  // A document, not a terminal (owner: "show how the image was made including all the commands"): headings, the
+  // commands verbatim in monospace, the files folded when long — no engine, no socket.
+  t.savedShown = true;
+  t.els.host.replaceChildren(buildLogNode(log.document));
+  t.els.wrap.dataset.saved = 'build';
+  paintCover(t);
+  renderTerminals();
+  return t;
+}
+/// 617: tab zero — the sandbox's system console (read-only, the stream `doz console NAME` shows), while its VM is
+/// powered on. `select`: it becomes the pane's shown tab (a start under way); else it waits behind the others.
+export async function openConsoleTerminal(sandbox, select) {
+  if (!terminalsAllowed()) return null;
+  const t = newTerm(sandbox, null, 'console');
+  t.pane = 0;
+  const v = sview(sandbox);
+  if (select || v.selected[0] == null) v.selected[0] = t.id;
+  paintCover(t);
+  renderTerminals();
+  await new Promise((r) => setTimeout(r, 0));
+  renderTerminals();
+  bootTerm(t, setting('ui.terminal_font_size', 13));
+  return t;
+}
+
 /// 605: `opts.reattach` — the page had this terminal (doz ui restarted, or a sign-in again): the server
 /// keeps its scrollback; the answer is 'ok', 'retry' (busy: too many terminals or tickets) or 'failed'.
 async function connectTerminal(t, opts = {}) {
   const body = { mode: t.mode };
   if (t.session) body.session = t.session;
   if (opts.reattach) body.reattach = true;
+  if (t.quiet) body.quiet = true;
   if (t.mode === 'interactive') {
     body.cols = Math.max(2, Math.min(1000, t.cols));
     body.rows = Math.max(1, Math.min(500, t.rows));
@@ -148,7 +211,7 @@ async function connectTerminal(t, opts = {}) {
       if (e.status === 401) { t.reattach = true; paintCover(t); return 'failed'; }     // signedOut() follows
       t.disconnected = 'it could not reattach (' + (e.message || e) + ')';
     } else {
-      t.errorText = e.message || String(e);
+      t.errorText = e.message || String(e); wakeStateWaiters(t);
     }
     paintCover(t);
     paintTabs();
@@ -216,6 +279,7 @@ function termNote(t, text, ms = 4000) {
 function onTerminalMessage(t, ev) {
   if (typeof ev.data !== 'string') {
     toFrame(t, { t: 'write', data: ev.data }, [ev.data]);
+    if (t.pending) revealPending(t);                 // 617: its first frame — now it is a tab
     if (t.reattached) { t.reattached = false; t.els.wrap.dataset.reattached = String((+t.els.wrap.dataset.reattached || 0) + 1); termNote(t, 'Reconnected', 3000); }
     return;
   }
@@ -223,8 +287,12 @@ function onTerminalMessage(t, ev) {
   try { m = JSON.parse(ev.data); } catch (_) { return; }
   if (m.t === 'state') {
     t.state = m;
+    // 617: a start waiting for this pane to follow the host (startWithBootView) hears it at once — no polling.
+    wakeStateWaiters(t);
     if (t.bootIntent && m.cover && !['shutDown', 'failed', 'reattaching'].includes(m.cover.kind)) t.bootIntent = false;
     if (m.session) t.session = m.session;
+    // 617: the VM is on (the agent's quiet terminal hears it first): tab zero, Console, appears.
+    if (t.pending && ['booting', 'running', 'paused'].includes(m.phase)) syncConsoleTab(t.sandbox, m.phase);
     // "woke in 0.4 s": one line over the screen, for a few seconds.
     if (typeof m.notice === 'string' && m.notice) termNote(t, m.notice);
   } else if (m.t === 'notice') {
@@ -239,8 +307,10 @@ function onTerminalMessage(t, ev) {
     t.ended = true;
     t.endText = m.text || (m.ending === 'exited' ? 'exit ' + m.code : m.ending);
   } else if (m.t === 'error') {
-    t.errorText = m.message || m.code;
+    t.errorText = m.message || m.code; wakeStateWaiters(t);
   }
+  // 617: a quiet terminal that ended or failed before drawing anything is shown — with why.
+  if (t.pending && (t.ended || t.errorText)) revealPending(t);
   paintCover(t);
   paintTabs();
 }
@@ -281,7 +351,7 @@ export function sendInput(t, s) {
 export function closeTerminal(id) {
   const t = terminals.get(id);
   if (!t) return;
-  t.closed = true;
+  t.closed = true; wakeStateWaiters(t);
   clearInterval(t.pinger);
   if (t.ws) { try { t.ws.close(1000, 'closed'); } catch (_) { /* */ } }
   t.els.wrap.remove();                                 // its frame — and its engine instance — go with it
@@ -356,7 +426,7 @@ export function paintCover(t) {
   const e = t.els;
   let kind = 'none', headline = '', detail = '', action = null, spinner = false, glyphKey = null;
   if (t.errorText) { kind = 'error'; headline = 'This terminal could not open'; detail = t.errorText; }
-  else if (t.bootlog) { kind = t.savedShown ? 'none' : 'reattaching'; headline = 'Loading…'; spinner = !t.savedShown; }
+  else if (t.bootlog || t.buildlog) { kind = t.savedShown ? 'none' : 'reattaching'; headline = 'Loading…'; spinner = !t.savedShown; }
   else if (t.saved) { ({ headline, detail, action, glyphKey } = savedCover(t)); kind = 'saved'; }
   // A boot view asked for by Start: "Starting…" from its first paint until the host's steps take over
   // (never the shut-down cover the sandbox had a moment before the start reached the host).
@@ -457,7 +527,7 @@ function savedCoverFor(t) {
 }
 /// A key on a saved screen: the ordinary wake / resume action (the page's own; never a cold boot).
 function savedKey(t) {
-  if (!t.saved || t.grid) return;
+  if (!t.saved || t.grid || t.buildlog) return;      // 617: a build log is only read
   const w = SAVED_WAKE[sandboxPhase(t.sandbox)];
   if (!w || sandboxBusy(t.sandbox)) return;
   act({ action: w[1], sandbox: t.sandbox });
@@ -467,14 +537,16 @@ async function loadSavedScreen(t) {
   let s;
   try {
     // 593: a Boot log terminal draws a kept boot (rendered by the host's boot-view renderer) the same way.
-    s = await api(t.bootlog ? 'sandboxes/' + t.sandbox + '/boots/' + t.bootlog : 'sandboxes/' + t.sandbox + '/sessions/' + t.session + '/screen');
+    // 617: the build log's tab draws the image's build (rendered by the host) the same way.
+    s = await api(t.buildlog ? 'sandboxes/' + t.sandbox + '/build-log' : t.bootlog ? 'sandboxes/' + t.sandbox + '/boots/' + t.bootlog : 'sandboxes/' + t.sandbox + '/sessions/' + t.session + '/screen');
   } catch (e) {
+    if (t.buildlog && e.status === 404) { closeTerminal(t.id); return; }     // no build log is kept: no tab
     t.errorText = e.status === 404 ? (t.bootlog ? 'that boot is no longer kept' : 'no saved screen of ' + t.session) : e.message || String(e);
     paintCover(t);
     return;
   }
   if (t.closed || !t.saved) return;
-  if (!t.bootlog) t.saved = { ...t.saved, savedAt: s.savedAt, reason: s.reason };
+  if (!t.bootlog && !t.buildlog) t.saved = { ...t.saved, savedAt: s.savedAt, reason: s.reason };
   const bin = atob(s.vt);
   const bytes = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
@@ -482,9 +554,9 @@ async function loadSavedScreen(t) {
     const chunk = bytes.slice(i, i + (1 << 20)).buffer;
     toFrame(t, { t: 'write', data: chunk }, [chunk]);
   }
-  if (t.bootlog) toFrame(t, { t: 'top' });            // a Boot log opens at its steps
+  if (t.bootlog || t.buildlog) toFrame(t, { t: 'top' });   // a Boot log (and a build log) opens at its steps
   t.savedShown = true;
-  if (t.els.wrap) t.els.wrap.dataset.saved = t.bootlog ? 'boot' : s.reason;
+  if (t.els.wrap) t.els.wrap.dataset.saved = t.buildlog ? 'build' : t.bootlog ? 'boot' : s.reason;
   paintCover(t);
   paintTabs();
 }
@@ -551,4 +623,12 @@ export function goLive(t) {
   toFrame(t, { t: 'live', mode: t.mode });
   t.initMode = t.mode;
   connectTerminal(t);
+}
+
+/// 617: a start waiting for this pane (startWithBootView) is woken by its state, its error or its close — no polling.
+function wakeStateWaiters(t) {
+  if (!t.stateWaiters) return;
+  const ws = t.stateWaiters;
+  t.stateWaiters = null;
+  for (const w of ws) w();
 }

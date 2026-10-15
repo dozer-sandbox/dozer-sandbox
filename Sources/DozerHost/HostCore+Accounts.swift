@@ -89,6 +89,11 @@ public final class MemoryKeychain: KeychainAccess, @unchecked Sendable {
 public struct OfflineVerifier: AccountVerifying {
     public init() {}
     public func verify(kind: AccountKind, secret: String) async -> AccountVerification { .unavailable("not checked (DOZ_TEST_CREDENTIALS=memory)") }
+    /// 617: a key is checked against the test seam's fake provider when one is set (never a real provider).
+    public func verify(kind: AccountKind, secret: String, provider: String?) async -> AccountVerification {
+        guard kind == .key, ProviderSeam.upstream() != nil else { return await verify(kind: kind, secret: secret) }
+        return await ProviderSeam.check(provider: provider, secret: secret)
+    }
 }
 
 struct NoKeepalive: KeepaliveRunning {
@@ -129,7 +134,7 @@ extension HostCore {
         let name = a == "default" ? defaultAccount(for: image, file) : a
         if name == "none" { return .none }
         // rc.3: `mac` for Codex is this Mac's Codex login.
-        if name == "mac", AgentCredentials.provider(image) == "openai" { return .record(.codexMac) }
+        if name == "mac", AgentCredentials.codexFlow(image) { return .record(.codexMac) }
         return file.accounts.first { $0.name == name }.map(ResolvedAccount.record) ?? .missing(name)
     }
 
@@ -141,10 +146,18 @@ extension HostCore {
         return (file.defaultAccount, k)
     }
 
+    /// 617: each `key` account's provider, and each provider's default account.
+    func accountProviders() -> ([String: String], [String: String]) {
+        let file = accountStore.load()
+        var p: [String: String] = [:]
+        for a in file.accounts where a.kind == .key { p[a.name] = a.provider }
+        return (p, file.providerDefaults ?? [:])
+    }
+
     /// 599i: the store's OpenAI default (nil: none).
     /// Only for a Codex image (it may read this Mac's Codex login).
     func openaiDefault(for image: String?) -> String? {
-        AgentCredentials.provider(image) == "openai" ? effectiveOpenAIDefault(accountStore.load()) : nil
+        AgentCredentials.codexFlow(image) ? effectiveOpenAIDefault(accountStore.load()) : nil
     }
 
     /// 594: an existing sandbox whose account does not fit its agent — what its page says.
@@ -152,11 +165,24 @@ extension HostCore {
         guard m.sandbox.egress != nil else { return nil }
         // 599i rc.3: this Mac's Codex login that cannot be used (not signed in, the keyring, an API-key login).
         if case .record(let a) = resolvedAccount(m, accountStore.load()), a.kind == .codexMac, let p = codexMacSignInProblem() { return "Codex: " + p }
-        switch resolvedAccount(m, accountStore.load()) {
-        case .none: return AgentCredentials.sandboxProblem(image: m.sandbox.spec.imageSpec?.name, account: nil, missing: nil)
-        case .missing(let n): return AgentCredentials.sandboxProblem(image: m.sandbox.spec.imageSpec?.name, account: nil, missing: n)
-        case .record(let a): return AgentCredentials.sandboxProblem(image: m.sandbox.spec.imageSpec?.name, account: a, missing: nil)
+        // 617: a key read on use whose last read failed — the same reason the proxy's 401 gives.
+        if case .record(let a) = resolvedAccount(m, accountStore.load()), a.readsOnUse, let o = secretSourceState.outcome(a.name), !o.ok, let n = o.notice {
+            return n.prefix(1).uppercased() + n.dropFirst()
         }
+        let main: String?
+        switch resolvedAccount(m, accountStore.load()) {
+        case .none: main = AgentCredentials.sandboxProblem(image: m.sandbox.spec.imageSpec?.name, account: nil, missing: nil)
+        case .missing(let n): main = AgentCredentials.sandboxProblem(image: m.sandbox.spec.imageSpec?.name, account: nil, missing: n)
+        case .record(let a): main = AgentCredentials.sandboxProblem(image: m.sandbox.spec.imageSpec?.name, account: a, missing: nil)
+        }
+        if let main { return main }
+        // 617: a custom key the sandbox cannot use now (its host denied, its source failing, gone) — its notice.
+        if let vault = m.sandbox.egress?.vault {
+            for k in m.config.extraKeys ?? [] where !vault.hasSecret("custom:" + k) {
+                if let n = vault.notice("custom:" + k) { return n.prefix(1).uppercased() + n.dropFirst() }
+            }
+        }
+        return nil
     }
 
     /// The account's name as `ls` shows it (`mac`, `work (default)`…); nil: none.
@@ -184,7 +210,7 @@ extension HostCore {
         let account = resolvedAccount(m, file)
         let b: String
         switch account {
-        case .record(let a): b = a.kind.binding.id
+        case .record(let a): b = a.binding.id
         case .missing: return "missing"
         case .none:
             guard let id = binding ?? vault.allBindings.first(where: { vault.hasSecret($0.id) })?.id else { return nil }
@@ -268,15 +294,39 @@ extension HostCore {
         try? accountStore.save(f)
     }
 
-    /// Put the sandbox's account (or none) into its vault, and its policy into its proxy.
+    /// Put the sandbox's account (or none) into its vault, and its policy into its proxy; 617: then its custom keys.
     func applyAccount(_ m: Managed) {
         guard !readOnly, m.sandbox.egress != nil else { return }
+        applyMainAccount(m)
+        applyExtraKeys(m, accountStore.load())
+    }
+
+    func applyMainAccount(_ m: Managed) {
         detachWatcher(m)
         let file = accountStore.load()
         let sb = m.sandbox
+        // 617 TEST SEAM: the key providers' hosts go to a fake provider (DOZ_TEST_PROVIDER_UPSTREAM + _CA), whatever the agent.
+        sb.egress?.providerUpstreamForTests = ProviderSeam.upstream()
+        sb.egress?.providerSeamHostsForTests = ProviderSeam.extraHosts()
+        // 599i TEST SEAM (617: for a recipe agent on an OpenAI key too): api.openai.com's leg goes to the fake OpenAI.
+        sb.egress?.openaiUpstreamForTests = OpenAISeam.upstream()
+        // 617 PROFILING SEAM: the network profiler's scratch host logs every request (DOZ_TEST_PROFILE_NETWORK=1).
+        sb.egress?.inspectEverythingForProfiling = ProviderSeam.profiling()
         // 599i: Codex uses OpenAI accounts only — its own path; the Anthropic bindings stay empty.
-        if AgentCredentials.provider(sb.spec.imageSpec?.name) == "openai" {
+        if AgentCredentials.codexFlow(sb.spec.imageSpec?.name) {
             applyOpenAIAccount(m, resolvedAccount(m, file))
+            applyPolicy(m, file)
+            return
+        }
+        // 617: a key agent (Grok Build, Gemini CLI) uses its provider's key only — never an Anthropic binding.
+        // 617: a multi-source recipe agent takes the source of the account it is given (OpenAI, OpenRouter, …) — its
+        // default source's when it has none or one it cannot use.
+        if let p = AgentCredentials.keyProvider(sb.spec.imageSpec?.name) {
+            let resolved = resolvedAccount(m, file)
+            var source = p
+            if case .record(let a) = resolved, AgentCredentials.accepts(sb.spec.imageSpec?.name, a),
+               let s = AgentCredentials.source(of: a).flatMap(KeyProviders.provider) { source = s }
+            applyKeyAccount(m, source, resolved)
             applyPolicy(m, file)
             return
         }
@@ -290,7 +340,7 @@ extension HostCore {
             sb.setCredential(.anthropic, secret: nil, expiresAt: nil, environment: [:], notice: nil)
             sb.setCredential(.claudeOAuth, secret: nil, expiresAt: nil, environment: [:],
                              notice: "the account \(n) this sandbox uses no longer exists — doz account use \(m.name) ACCOUNT")
-        case .record(let a) where !AgentCredentials.accepts(sb.spec.imageSpec?.name, a.kind):
+        case .record(let a) where !AgentCredentials.accepts(sb.spec.imageSpec?.name, a):
             // 594: never hand an agent a credential it cannot use (a Claude subscription never reaches pi).
             let why = AgentCredentials.sandboxProblem(image: sb.spec.imageSpec?.name, account: a, missing: nil)
             sb.setCredential(.anthropic, secret: nil, expiresAt: nil, environment: [:], notice: why)
@@ -306,9 +356,12 @@ extension HostCore {
                 m.watcher = w
                 w.subscribe(m.name, sb)
                 sb.egress?.vault.onStale = { [weak w] _ in w?.stale() }
-            case .openaiKey, .chatgpt, .codexMac:
+            case .openaiKey, .chatgpt, .codexMac, .key:
                 break                                   // never here: an Anthropic agent does not accept them (above)
-            case .setupToken, .apiKey:
+            case .apiKey:
+                // 617: from the keychain, or read on use from 1Password, AWS or a command.
+                applyKeySecret(m, a, binding: .anthropic, addAgain: "doz account add \(a.name) --api-key --force")
+            case .setupToken:
                 let service = a.keychainService ?? ""
                 let read = services.keychain.read(service: service, account: a.adopted == true ? nil : Keychain.user)
                 if let secret = read.value {
@@ -328,6 +381,36 @@ extension HostCore {
             }
         }
         applyPolicy(m, file)
+    }
+
+    /// 617: put a key provider's account (or none) into a key agent's vault: its provider's binding gets the key from
+    /// the keychain; every other binding stays empty (no Anthropic, OpenAI or other provider's key in a Grok sandbox).
+    /// No silent fallback: a missing key is the proxy's 401 with what to do.
+    func applyKeyAccount(_ m: Managed, _ p: KeyProvider, _ resolved: ResolvedAccount) {
+        let sb = m.sandbox
+        // 617: with the recipe's own env aliases (the same placeholder under the name the tool reads).
+        let binding = sb.spec.imageSpec.flatMap { ImageChoice.parse($0.name)?.agent.recipe }?.keyBinding(p) ?? p.binding
+        for other in [CredentialBinding.anthropic, .claudeOAuth, .openai, .chatgpt] + KeyProviders.keyBindings where other.id != binding.id {
+            sb.egress?.vault.remove(other.id)
+        }
+        m.config.credentialSources[binding.id] = nil
+        // 617 (models@1): every model source's hosts are decrypted, so a placeholder sent to one that is not this key's is
+        // refused by the leak guard (never tunnelled unseen).
+        sb.egress?.leakGuardHosts = Set(ModelSources.ids.flatMap(ModelSources.hosts))
+        let add = "doz account add NAME --provider \(p.id)"
+        switch resolved {
+        case .none:
+            sb.setCredential(binding, secret: nil, expiresAt: nil, environment: [:],
+                             notice: "\(m.name) has no \(p.title) account — \(add), then doz account use \(m.name) NAME")
+        case .missing(let n):
+            sb.setCredential(binding, secret: nil, expiresAt: nil, environment: [:],
+                             notice: "the account \(n) this sandbox uses no longer exists — doz account use \(m.name) ACCOUNT")
+        case .record(let a) where !AgentCredentials.accepts(sb.spec.imageSpec?.name, a):
+            sb.setCredential(binding, secret: nil, expiresAt: nil, environment: [:],
+                             notice: AgentCredentials.sandboxProblem(image: sb.spec.imageSpec?.name, account: a, missing: nil))
+        case .record(let a):
+            applyKeySecret(m, a, binding: binding, addAgain: "doz account add \(a.name) --provider \(p.id) --force")
+        }
     }
 
     /// The foreign-credential policy, its refusal text, the sign-in block (D7), fingerprint names.
@@ -374,14 +457,14 @@ extension HostCore {
         var file = accountStore.load()
         let target = value == "default" ? defaultAccount(for: m.sandbox.spec.imageSpec?.name, file) : value
         // 599i rc.3: `mac` for Codex is this Mac's Codex login (read-only) — usable when it is signed in.
-        let codexMac = target == "mac" && AgentCredentials.provider(m.sandbox.spec.imageSpec?.name) == "openai"
+        let codexMac = target == "mac" && AgentCredentials.codexFlow(m.sandbox.spec.imageSpec?.name)
         if codexMac, let p = codexMacSignInProblem() { throw HostError(.invalid, p) }
         if target != "none", !codexMac {
             guard let a = file.accounts.first(where: { $0.name == target }) else { throw HostError(.notFound, "no account \(target) (doz account ls)") }
             // 594: only an account the sandbox's agent can use.
             let image = m.sandbox.spec.imageSpec?.name
-            guard AgentCredentials.accepts(image, a.kind) else {
-                throw HostError(.invalid, "\(AgentImages.agentName(image ?? "") ?? "its agent") can't use the account \(a.name) (\(a.kind.label)) — \(AgentCredentials.requirement(image ?? ""))")
+            guard AgentCredentials.accepts(image, a) else {
+                throw HostError(.invalid, "\(AgentImages.agentName(image ?? "") ?? "its agent") can't use the account \(a.name) (\(a.label)) — \(AgentCredentials.requirement(image ?? ""))")
             }
             switch a.kind {
             case .mac:
@@ -395,7 +478,8 @@ extension HostCore {
                 }
             case .codexMac:
                 break
-            case .setupToken, .apiKey, .openaiKey, .chatgpt:
+            case .setupToken, .apiKey, .openaiKey, .chatgpt, .key:
+                if a.readsOnUse { break }                // 617: read on use — its source answers at the first request
                 let read = services.keychain.read(service: a.keychainService ?? "", account: a.adopted == true ? nil : Keychain.user)
                 guard read.value != nil else {
                     throw HostError(.notFound, "the keychain item \(a.keychainService ?? "?") of account \(a.name) is \(read == .locked ? "locked" : "missing")")
@@ -406,8 +490,9 @@ extension HostCore {
         m.config.credentialSources = [:]
         try m.config.write(store.configFile(m.name))
         applyAccount(m)
-        let openai = AgentCredentials.provider(m.sandbox.spec.imageSpec?.name) == "openai"
-        if value == "none" {
+        let openai = AgentCredentials.codexFlow(m.sandbox.spec.imageSpec?.name)
+        let keyProvider = AgentCredentials.keyProvider(m.sandbox.spec.imageSpec?.name)
+        if value == "none", keyProvider == nil {          // 617: a key agent's binding already says why (applyKeyAccount)
             // Sessions still hold placeholders: tell them why their requests fail (E20), rather
             // than let the proxy stop decrypting (a TLS error in the guest).
             if openai {
@@ -426,7 +511,7 @@ extension HostCore {
             }
         }
         try m.config.write(store.configFile(m.name))
-        note(m.name, value == "none" ? "no \(openai ? "OpenAI" : "Anthropic") account (sessions get no credential)"
+        note(m.name, value == "none" ? "no \(keyProvider?.title ?? (openai ? "OpenAI" : "Anthropic")) account (sessions get no credential)"
              : "uses the account \(target)\(value == "default" ? " (the default)" : "") — open sessions switch on their next request")
         return credentials(m)
     }
@@ -466,10 +551,18 @@ extension HostCore {
                     plan = st.subscriptionType
                     if identity == nil { identity = st.identity?.label }
                 }
-            case .setupToken, .apiKey, .openaiKey:
+            case .setupToken, .apiKey, .openaiKey, .key:
+                if a.readsOnUse {
+                    // 617: read on use — the last read's outcome (none yet: unchecked).
+                    state = sourceRowFields(a).state.map { $0 == "failed" ? "unavailable" : $0 } ?? "unchecked"
+                    state = AccountRow.keyState(state, verification: a.verification)
+                    break
+                }
                 let read = services.keychain.read(service: a.keychainService ?? "", account: a.adopted == true ? nil : Keychain.user)
                 if read.value == nil { state = read == .locked ? "locked" : "missing" }
                 else if let e = a.expiresAt { state = e <= now ? "expired" : (e.timeIntervalSince(now) < 30 * 86_400 ? "expires-soon" : "ok") }
+                // 617: refused at its last check → `rejected`, never `ok` (the owner's page showed a refused key green).
+                state = AccountRow.keyState(state, verification: a.verification)
             case .codexMac:
                 break                                   // never in accounts.json — its row is added below
             case .chatgpt:
@@ -484,12 +577,17 @@ extension HostCore {
                     if read.value == nil { state = read == .locked ? "locked" : "missing" }
                 }
             }
-            let isDefault = a.kind.provider == "openai" ? effectiveOpenAIDefault(file) == a.name : file.defaultAccount == a.name
+            let isDefault = a.kind == .key ? file.providerDefaults?[a.provider ?? ""] == a.name
+                : a.kind.provider == "openai" ? effectiveOpenAIDefault(file) == a.name : file.defaultAccount == a.name
+            let src = sourceRowFields(a)
+            let extraUsers = managed.values.filter { $0.config.extraKeys?.contains(a.name) == true }.map(\.name).sorted()
             rows.append(AccountRow(name: a.name, kind: a.kind.rawValue, plan: plan, identity: identity, expiresAt: expires,
                                    verification: a.verification, isDefault: isDefault,
-                                   usedBy: sandboxesUsing(a.name, file).map(\.name), state: state,
+                                   usedBy: sandboxesUsing(a.name, file).map(\.name) + extraUsers, state: state,
                                    keychainService: a.kind == .mac ? ClaudeLogin.service(configDir: a.configDir) : a.keychainService,
-                                   fingerprint: a.fingerprint))
+                                   fingerprint: a.fingerprint, provider: a.providerID,
+                                   sourceLabel: src.label, sourceState: src.state, sourceProblem: src.problem, hosts: a.custom?.hosts,
+                                   verifiedAt: a.verifiedAt))
         }
         if let r = codexMacRow(file, now: now) { rows.append(r) }
         return rows
@@ -499,7 +597,7 @@ extension HostCore {
         guard let name = r.account else { throw HostError(.invalid, "which account? (a name)") }
         try AccountStore.validateName(name)
         guard let kind = r.accountKind.flatMap(AccountKind.init(rawValue:)) else {
-            throw HostError(.invalid, "which kind? --setup-token, --api-key, --claude-login, --openai-key or --chatgpt")
+            throw HostError(.invalid, "which kind? --setup-token, --api-key, --claude-login, --openai-key, --chatgpt or --provider xai|google")
         }
         var file = accountStore.load()
         if file.accounts.contains(where: { $0.name == name }) {
@@ -510,6 +608,43 @@ extension HostCore {
         var rec = AccountRecord(name: name, kind: kind, plan: r.plan.map { $0.lowercased() })
         var verifySecret: String?
         var chatgptTokens: ChatGPTTokens?
+        // 617 (§7, D6): a key read on use from 1Password, AWS or a command — the REFERENCE is stored, never the value
+        // (not in the keychain either); a custom key.
+        let sourced = r.secretSource.map { !$0.isKeychain } ?? false
+        if sourced || r.custom != nil, ![.apiKey, .openaiKey, .key].contains(kind) {
+            throw HostError(.invalid, "--from, --from-command and --custom are for API keys (--api-key, --openai-key, --provider, --custom)")
+        }
+        if let c = r.custom {
+            guard kind == .key else { throw HostError(.invalid, "--custom is a key of its own (not --api-key / --openai-key)") }
+            try c.validate()
+            rec.custom = c
+            rec.provider = "custom"
+        }
+        if sourced, let s = r.secretSource {
+            try validateSource(s)
+            let env = r.sourceEnv ?? [:]
+            try SecretSources.checkEnvironment(env)
+            if let t = r.ttlSeconds, !(60...86_400).contains(t) { throw HostError(.invalid, "--ttl: 1 minute to 24 hours") }
+            if kind == .key, rec.custom == nil {
+                guard let pid = r.provider, let p = KeyProviders.provider(pid), p.builtinBinding == nil else {
+                    throw HostError(.invalid, "which provider? --provider \(KeyProviders.all.filter { $0.builtinBinding == nil }.map(\.id).joined(separator: ", "))")
+                }
+                rec.provider = p.id
+            }
+            rec.source = s
+            rec.sourceEnv = env.isEmpty ? nil : env
+            rec.ttlSeconds = r.ttlSeconds
+            if r.verify != false {
+                // ONE live read now (and the provider's key check below) — so a wrong reference fails here, not in a sandbox.
+                let read = await Task.detached { SecretSources.read(s, account: name, sourceEnv: env) }.value
+                guard let v = read.secret else { throw HostError(.failed, read.notice ?? "its source answered nothing") }
+                verifySecret = v
+                rec.fingerprint = CredentialFingerprint.of(v)
+                secretSourceState.record(name, read)
+            } else {
+                rec.verification = "unverified: --no-verify (its source was not read)"
+            }
+        }
         switch kind {
         case .codexMac:
             throw HostError(.invalid, "this Mac's Codex login is built in — a Codex sandbox uses it as the account mac (nothing to add)")
@@ -534,6 +669,7 @@ extension HostCore {
             rec.fingerprint = CredentialFingerprint.of(t)
             rec.expiresAt = Date().addingTimeInterval(AccountStore.setupTokenLifetime)
         case .apiKey:
+            if sourced { break }
             if let svc = r.keychainService {
                 guard let k = services.keychain.read(service: svc, account: nil).value else {
                     throw HostError(.notFound, "no readable keychain item with service \(svc)")
@@ -551,6 +687,7 @@ extension HostCore {
             rec.fingerprint = verifySecret.map(CredentialFingerprint.of)
         case .openaiKey:
             // 599i: an OpenAI API key (Codex).
+            if sourced { break }
             if let svc = r.keychainService {
                 guard let k = services.keychain.read(service: svc, account: nil).value else {
                     throw HostError(.notFound, "no readable keychain item with service \(svc)")
@@ -565,6 +702,36 @@ extension HostCore {
                 guard k.hasPrefix("sk-") else { throw HostError(.invalid, "that isn't an OpenAI API key (they start sk-…)") }
                 verifySecret = k
                 rec.keychainService = AccountStore.openaiKeyPrefix + name
+            }
+            rec.fingerprint = verifySecret.map(CredentialFingerprint.of)
+        case .key:
+            // 617: a key provider's API key (`--provider xai|google`), in `doz-<provider>:NAME` — or an item the user names;
+            // a custom key (`--custom`) in `doz-custom:NAME`.
+            if sourced { break }
+            let env: String, what: String
+            if let c = rec.custom {
+                env = c.env; what = "the custom key"
+            } else {
+                guard let pid = r.provider, let p = KeyProviders.provider(pid), p.builtinBinding == nil else {
+                    let ids = KeyProviders.all.filter { $0.builtinBinding == nil }.map(\.id).joined(separator: ", ")
+                    throw HostError(.invalid, "which provider? --provider \(ids) (anthropic: --api-key, openai: --openai-key)")
+                }
+                rec.provider = p.id
+                env = p.env; what = "\(p.title) API key"
+            }
+            if let svc = r.keychainService {
+                guard let k = services.keychain.read(service: svc, account: nil).value else {
+                    throw HostError(.notFound, "no readable keychain item with service \(svc)")
+                }
+                rec.keychainService = svc
+                rec.adopted = true
+                verifySecret = k
+            } else {
+                guard let raw = r.secret, let k = AccountStore.normalizeToken(raw.replacingOccurrences(of: env + "=", with: "")) else {
+                    throw HostError(.invalid, "\(what) (on stdin, or at the prompt), or --keychain SERVICE")
+                }
+                verifySecret = k
+                rec.keychainService = AccountStore.keyPrefix(rec.provider ?? "custom") + name
             }
             rec.fingerprint = verifySecret.map(CredentialFingerprint.of)
         case .chatgpt:
@@ -589,12 +756,13 @@ extension HostCore {
         }
         if let secret = verifySecret {
             if r.verify != false {
-                switch await services.verifier.verify(kind: kind, secret: secret) {
+                switch await services.verifier.verify(kind: kind, secret: secret, provider: rec.provider) {
                 case .verified:
                     rec.verifiedAt = Date(); rec.verification = "verified"
                 case .rejected(let why):
                     throw HostError(.failed, kind == .setupToken
                         ? "Claude rejected this token (\(why)) — generate a fresh one with `claude setup-token` and try again"
+                        : kind == .key ? "\(rec.provider.flatMap(KeyProviders.provider)?.title ?? "The provider") rejected this key (\(why))"
                         : kind == .openaiKey ? "OpenAI rejected this key (\(why))" : "Anthropic rejected this key (\(why))")
                 case .unavailable(let why):
                     rec.verification = "unverified: \(why)"
@@ -606,13 +774,23 @@ extension HostCore {
                 try services.keychain.write(service: svc, account: Keychain.user, secret: secret)
             }
         }
+        // 617: an account switched (--force) to a key read on use leaves no copy of its old key in the keychain item Dozer
+        // made for it.
+        if let old = file.accounts.first(where: { $0.name == name }), old.adopted != true, old.kind != .mac, old.kind != .chatgpt,
+           let svc = old.keychainService, svc != rec.keychainService, AccountStore.isDozItem(svc) {
+            try? services.keychain.delete(service: svc, account: Keychain.user)
+        }
         file.accounts.removeAll { $0.name == name }
         file.accounts.append(rec)
+        // 617: the first key of a provider becomes that provider's default.
+        if kind == .key, let p = rec.provider, p != "custom", file.providerDefaults?[p] == nil { file.providerDefaults = (file.providerDefaults ?? [:]).merging([p: name]) { a, _ in a } }
         try accountStore.save(file)
-        note(nil, "account \(name) added (\(kind.rawValue)\(rec.verification.map { ", \($0)" } ?? ""))")
+        secretSourceState.bump(name)                  // 617: a value cached from the account's previous source is dropped
+        note(nil, "account \(name) added (\(kind == .key ? "key, \(rec.provider ?? "?")" : kind.rawValue)\(rec.verification.map { ", \($0)" } ?? ""))")
         // 599i: a sign-in made again replaces the session's tokens (its sandboxes switch on their next request).
         if let t = chatgptTokens { chatgptSession(file.accounts.last!).adopt(t) } else { chatgptSessions[name] = nil }
         for m in sandboxesUsing(name, file) { applyAccount(m) }
+        for m in managed.values where m.config.extraKeys?.contains(name) == true { applyAccount(m) }      // 617: a custom key replaced
         return await accountRows()
     }
 
@@ -628,12 +806,13 @@ extension HostCore {
         }
         let wasDefault = file.defaultAccount == name
         let wasOpenAIDefault = file.openaiDefault == name
+        let wasProviderDefault = file.providerDefaults?.values.contains(name) == true
         file.accounts.removeAll { $0.name == name }
         if wasDefault { file.defaultAccount = "mac" }
         if wasOpenAIDefault { file.openaiDefault = nil }          // 599i: none — never an Anthropic account
+        if wasProviderDefault { file.providerDefaults = file.providerDefaults?.filter { $0.value != name } }      // 617: none
         try accountStore.save(file)
-        if rec.adopted != true, rec.kind != .mac, let svc = rec.keychainService,
-           [AccountStore.setupTokenPrefix, AccountStore.apiKeyPrefix, AccountStore.openaiKeyPrefix, AccountStore.chatgptPrefix].contains(where: svc.hasPrefix) {
+        if rec.adopted != true, rec.kind != .mac, let svc = rec.keychainService, AccountStore.isDozItem(svc) {
             if rec.kind == .chatgpt { KeychainChunks.remove(services.keychain, service: svc) }      // and its parts
             else { try services.keychain.delete(service: svc, account: Keychain.user) }
         }
@@ -643,7 +822,8 @@ extension HostCore {
             m.config.account = "default"
             try? m.config.write(store.configFile(m.name))
         }
-        for m in managed.values where pinned.contains(where: { $0 === m }) || ((wasDefault || wasOpenAIDefault) && m.config.account == "default") {
+        for m in managed.values where pinned.contains(where: { $0 === m }) || ((wasDefault || wasOpenAIDefault || wasProviderDefault) && m.config.account == "default")
+            || m.config.extraKeys?.contains(name) == true {
             applyAccount(m)
             try? m.config.write(store.configFile(m.name))
         }
@@ -657,6 +837,21 @@ extension HostCore {
         guard name == "none" || file.accounts.contains(where: { $0.name == name }) else { throw HostError(.notFound, "no account \(name)") }
         // 599i: an OpenAI account is the default of Codex sandboxes; any other, of Claude Code and pi. rc.3: `--codex`
         // (`accountKind` "codex") sets the Codex default by name — `mac` (this Mac's Codex login) or none too.
+        // 617: a key account is the default of its provider's agents (`--provider P none` clears one).
+        let keyProvider = file.accounts.first { $0.name == name && $0.kind == .key }?.provider ?? (name == "none" ? r.provider : nil)
+        if let p = keyProvider {
+            guard KeyProviders.provider(p) != nil else { throw HostError(.invalid, "no provider \(p)") }
+            var d = file.providerDefaults ?? [:]
+            d[p] = name == "none" ? nil : name
+            file.providerDefaults = d.isEmpty ? nil : d
+            try accountStore.save(file)
+            for m in managed.values where m.config.account == "default" {
+                applyAccount(m)
+                try? m.config.write(store.configFile(m.name))
+            }
+            note(nil, "the default \(KeyProviders.provider(p)?.title ?? p) account is \(name)")
+            return await accountRows()
+        }
         let openai = r.accountKind == "codex" || file.accounts.first { $0.name == name }?.kind.provider == "openai"
         if r.accountKind == "codex", name != "none", name != "mac", file.accounts.first(where: { $0.name == name })?.kind.provider != "openai" {
             throw HostError(.invalid, "\(name) is not an OpenAI account — Codex can use mac (this Mac's Codex login), a ChatGPT sign-in or an OpenAI key")
@@ -683,8 +878,22 @@ extension HostCore {
         case .mac:
             secret = services.keychain.read(service: ClaudeLogin.service(configDir: a.configDir), account: Keychain.user).value
                 .flatMap(ClaudeLogin.parse)?.accessToken
-        case .setupToken, .apiKey, .openaiKey:
-            secret = services.keychain.read(service: a.keychainService ?? "", account: a.adopted == true ? nil : Keychain.user).value
+        case .setupToken, .apiKey, .openaiKey, .key:
+            if a.readsOnUse, let s = a.source {
+                // 617: read from its source now (that is the check), then the provider's key check.
+                let env = a.sourceEnv ?? [:], known = a.fingerprint
+                let read = await Task.detached { SecretSources.read(s, account: name, sourceEnv: env, knownFingerprint: known) }.value
+                secretSourceState.record(name, read)
+                guard let v = read.secret else {
+                    // Not the provider's refusal: the key could not be READ (the row's state says `unavailable`).
+                    file.accounts[i].verification = "unverified: its source could not be read — \(read.notice ?? "it answered nothing")"
+                    try accountStore.save(file)
+                    return await accountRows()
+                }
+                secret = v
+            } else {
+                secret = services.keychain.read(service: a.keychainService ?? "", account: a.adopted == true ? nil : Keychain.user).value
+            }
         case .chatgpt:
             // 599i: a sign-in is checked by its session (renewed on this Mac when it is due).
             let s = chatgptSession(a)
@@ -696,7 +905,7 @@ extension HostCore {
             return await accountRows()
         }
         guard let secret else { throw HostError(.notFound, "account \(name) has no credential to verify (doz account ls)") }
-        switch await services.verifier.verify(kind: a.kind, secret: secret) {
+        switch await services.verifier.verify(kind: a.kind, secret: secret, provider: a.custom == nil ? a.provider : "custom") {
         case .verified: file.accounts[i].verifiedAt = Date(); file.accounts[i].verification = "verified"
         case .rejected(let why): file.accounts[i].verification = "rejected: \(why)"
         case .unavailable(let why): file.accounts[i].verification = "unverified: \(why)"

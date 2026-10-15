@@ -1,0 +1,39 @@
+{
+  "schema": 1,
+  "agent": "qwen-code",
+  "version": "0.25.1",
+  "profiled": "2026-10-14",
+  "how": "a fresh try with the Open network, every HTTPS request decrypted and logged; its first start, then a scripted task (read a file, edit it, run a command) run non-interactively with FAKE keys — xAI and Google through a fake provider that answers text only, Anthropic and OpenAI refused by the real API (401). A real-key run would see more: the model's turns and what its tool calls fetch.",
+  "taskEnded": "DOZ_FAKE_OK / Warning: running headless with --yolo / approval-mode=yolo and no sandbox. All tool calls (shell, write, edit) auto-execute at this process's privilege level. Configure tools.executionSandbox on Linux or a supported legacy sandbox via --sandbox / QWEN_SANDBOX, or set QWEN_CODE_SUPPRESS",
+  "endpoints": [
+    {
+      "host": "api.x.ai",
+      "method": "POST",
+      "path": "/v1/chat/completions",
+      "when": "task",
+      "count": 2,
+      "credential": [
+        "placeholder swapped for key:xai"
+      ],
+      "refusedWhenProfiled": false,
+      "determination": "allow-path",
+      "reason": "xAI's API — the model (the key is swapped in by Dozer's proxy)",
+      "seen": true
+    },
+    {
+      "host": "models.dev",
+      "method": "GET",
+      "path": "/api.json",
+      "when": "start",
+      "count": 1,
+      "credential": [
+        "none"
+      ],
+      "refusedWhenProfiled": false,
+      "determination": "off-by-setting",
+      "reason": "the public model catalogue models.dev, read when it starts — turned off by QWEN_CODE_MODELS_DEV=off (its bundled catalogue is used)",
+      "seen": true,
+      "setting": "QWEN_CODE_MODELS_DEV"
+    }
+  ]
+}

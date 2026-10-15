@@ -1,0 +1,282 @@
+{
+  "args" : {
+    "version" : {
+      "buildArg" : "OPEN_INTERPRETER_VERSION",
+      "default" : "0.0.56",
+      "description" : "The Open Interpreter release Dozer installs (its pin).",
+      "pattern" : "[0-9]+\\.[0-9]+\\.[0-9]+([-+][0-9A-Za-z.-]+)?"
+    }
+  },
+  "author" : "Open Interpreter",
+  "capabilities" : [
+    {
+      "config" : {
+        "dozer" : {
+          "excluded" : [
+
+          ],
+          "model" : {
+            "hosts" : [
+              {
+                "host" : "api.x.ai",
+                "paths" : [
+                  "/v1/chat/completions"
+                ]
+              }
+            ],
+            "id" : "model:open-interpreter",
+            "phrase" : "talk to your AI model (xAI)",
+            "summary" : "Open Interpreter's model here (the xAI API, with your key) — needed for it to answer.",
+            "title" : "Talk to xAI"
+          },
+          "update" : [
+
+          ],
+          "vendor" : [
+            {
+              "host" : "raw.githubusercontent.com",
+              "paths" : [
+                "/openai/codex/main/announcement_tip.toml"
+              ],
+              "reason" : "its TUI reads Codex's announcement tips file when it starts (read-only; no setting turns it off)"
+            }
+          ]
+        },
+        "runtime" : {
+          "allow" : [
+            "api.x.ai:443",
+            "raw.githubusercontent.com:443"
+          ]
+        }
+      },
+      "type" : "com.docker.sandbox/network-policy@1"
+    },
+    {
+      "config" : {
+        "apiKey" : {
+          "inject" : [
+            {
+              "domain" : "api.x.ai",
+              "format" : "Bearer %s",
+              "header" : "authorization"
+            }
+          ],
+          "name" : "XAI_API_KEY",
+          "proxyManaged" : true
+        },
+        "dozer" : {
+          "accounts" : [
+            "key"
+          ]
+        },
+        "phase" : "runtime",
+        "service" : "xai"
+      },
+      "description" : "xAI API access",
+      "type" : "com.docker.sandbox/credential@1"
+    },
+    {
+      "config" : {
+        "path" : "/home/agent/.openinterpreter"
+      },
+      "type" : "com.docker.sandbox/volume@1"
+    },
+    {
+      "config" : {
+        "bake_hosts" : [
+          "github.com",
+          "release-assets.githubusercontent.com"
+        ],
+        "binary" : "interpreter",
+        "integrity" : "sha512-+wUeWOq+twYjtpVk+J5dfAgCXveoIlTyn3zkGCgsAwCkxzPKCq3ZzZWxq//uHBzQfGflqbpi0UEl3EDVPBG6FA==",
+        "kind" : "release-binary",
+        "payload" : "codex-aarch64-unknown-linux-musl",
+        "url" : "https://github.com/openinterpreter/openinterpreter/releases/download/rust-v${{ kit.args.version }}/codex-aarch64-unknown-linux-musl.tar.gz"
+      },
+      "type" : "com.dozersandbox/install@1"
+    },
+    {
+      "config" : {
+        "check" : {
+          "argv" : [
+            "interpreter",
+            "exec",
+            "--skip-git-repo-check",
+            "say ok"
+          ],
+          "expect" : "DOZ_FAKE_OK"
+        },
+        "command" : [
+          "interpreter"
+        ],
+        "env" : {
+
+        },
+        "first_run" : [
+          {
+            "file" : "~/.openinterpreter/config.toml",
+            "set" : {
+              "analytics.enabled" : false,
+              "check_for_update_on_startup" : false,
+              "features.apps" : false,
+              "features.plugins" : false,
+              "model" : "grok-build-0.1",
+              "model_provider" : "xai",
+              "model_providers.xai.base_url" : "https://api.x.ai/v1",
+              "model_providers.xai.env_key" : "XAI_API_KEY",
+              "model_providers.xai.name" : "xAI",
+              "model_providers.xai.wire_api" : "chat",
+              "projects.\"/workspace\".trust_level" : "trusted"
+            }
+          }
+        ],
+        "no_prompts_args" : [
+          "--dangerously-bypass-approvals-and-sandbox"
+        ],
+        "passthrough" : [
+          "--version",
+          "-V",
+          "--help",
+          "-h",
+          "help",
+          "exec",
+          "e",
+          "review",
+          "login",
+          "logout",
+          "mcp",
+          "doctor",
+          "completion"
+        ],
+        "resume" : [
+          "resume",
+          "--last"
+        ],
+        "state_env" : {
+          "CODEX_HOME" : "/home/agent/.openinterpreter"
+        },
+        "status" : "none",
+        "verify" : [
+          {
+            "argv" : [
+              "interpreter",
+              "--version"
+            ],
+            "expect" : "${{ kit.args.version }}"
+          }
+        ]
+      },
+      "type" : "com.dozersandbox/launch@1"
+    },
+    {
+      "config" : {
+        "methods" : [
+          {
+            "accounts" : [
+              "key"
+            ],
+            "checked" : "2026-10-14",
+            "keys_page" : "https://console.x.ai/",
+            "kind" : "api-key",
+            "note" : "A Codex-style model_providers.xai entry (env_key XAI_API_KEY, wire_api chat), model grok-build-0.1; its ChatGPT sign-in, analytics and plugins are off.",
+            "provider" : "xai"
+          }
+        ]
+      },
+      "type" : "com.dozersandbox/auth@1"
+    },
+    {
+      "config" : {
+        "entries" : [
+          {
+            "checked" : "2026-10-14",
+            "gateway" : "openrouter",
+            "level" : "unknown",
+            "reason" : "takes any model_providers entry, as Codex does; OpenRouter was not checked"
+          },
+          {
+            "checked" : "2026-10-14",
+            "gateway" : "vercel-ai-gateway",
+            "level" : "unknown",
+            "reason" : "not checked against Open Interpreter"
+          }
+        ]
+      },
+      "type" : "com.dozersandbox/gateways@1"
+    },
+    {
+      "config" : {
+        "checked" : "2026-10-14"
+      },
+      "type" : "com.dozersandbox/currency@1"
+    },
+    {
+      "config" : {
+        "aliases" : [
+          "interpreter",
+          "openinterpreter"
+        ],
+        "categories" : [
+          "coding-agent",
+          "personal-agent"
+        ],
+        "default_base" : "debian",
+        "icon" : "open-interpreter",
+        "kind" : "coding-agent",
+        "platforms" : {
+          "glibc" : true,
+          "musl" : true
+        },
+        "tags" : [
+          {
+            "checked" : "2026-10-14",
+            "evidence" : "make recipe-check: interpreter exec printed the stand-in's answer and exited in a fresh try",
+            "level" : "verified",
+            "notes" : [
+              "interpreter exec --skip-git-repo-check \"…\""
+            ],
+            "tag" : "headless"
+          }
+        ],
+        "terms" : "Your xAI API key — a key from console.x.ai."
+      },
+      "type" : "com.dozersandbox/directory@1"
+    },
+    {
+      "config" : {
+        "docs" : "https://github.com/openinterpreter/openinterpreter",
+        "intro" : "Open Interpreter is a coding agent with its own screen: the session on the left. Ask it to read, change and run the code in your folder.",
+        "steps" : [
+          {
+            "command" : "interpreter exec --skip-git-repo-check \"say ok\"",
+            "text" : "Check it answers, without its screen."
+          },
+          {
+            "text" : "Ask it something in its own screen — the session on the left."
+          },
+          {
+            "command" : "interpreter exec --skip-git-repo-check \"list the files in this folder\"",
+            "text" : "One task without its screen."
+          }
+        ],
+        "tips" : [
+          "Files it makes are in /workspace — your folder on the Mac.",
+          "Restart its session from the session's ⋯ menu; End stops it."
+        ]
+      },
+      "type" : "com.dozersandbox/guide@1"
+    }
+  ],
+  "description" : "Open Interpreter, rebuilt as a Codex CLI derivative, here on an xAI API key.",
+  "displayName" : "Open Interpreter",
+  "id" : "openinterpreter/open-interpreter",
+  "kind" : "workload",
+  "licenses" : [
+    "Apache-2.0"
+  ],
+  "provides" : [
+    "com.dozersandbox/open-interpreter@${{ kit.args.version }}"
+  ],
+  "schema" : 2,
+  "sourceUrl" : "https://github.com/openinterpreter/openinterpreter"
+}

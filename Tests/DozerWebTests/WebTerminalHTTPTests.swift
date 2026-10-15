@@ -346,7 +346,7 @@ final class WebTerminalHTTPTests: XCTestCase {
         let digest = String(repeating: "0123456789abcdef", count: 4)
         fake.emit(HostEvent(kind: .note, sandbox: "demo", text: "baking image pi from docker.io/library/node@sha256:\(digest) (one-time)"))
         fake.emit(HostEvent(kind: .started, sandbox: "demo", text: "pulled the base image node"))
-        try readUntil("⠋\u{1B}[0m pulled the base image node")
+        try readUntil("⠋\u{1B}[0m Downloading the Node.js base image…")
         var p = HostEvent(kind: .progress, sandbox: "demo", text: "pulling node@0123456789ab", completedBytes: 40_000_000, totalBytes: 100_000_000)
         p.completedItems = 1
         p.totalItems = 3
@@ -360,8 +360,8 @@ final class WebTerminalHTTPTests: XCTestCase {
         p.completedItems = 3
         fake.emit(p)
         fake.emit(HostEvent(kind: .step, sandbox: "demo", text: "pulled the base image node", milliseconds: 2100))
-        try readUntil("✓\u{1B}[0m pulled the base image node")
-        XCTAssertTrue(seen.contains("pulled node@0123456789ab: 100 MB in"), "the download's summary line")
+        try readUntil("✓\u{1B}[0m Downloaded the Node.js base image")
+        XCTAssertTrue(seen.contains("Downloaded node@0123456789ab: 100 MB in"), "the download's summary line")
         XCTAssertTrue(seen.contains("node@0123456789ab (one-time)") && !seen.contains(digest), "digests trimmed to 12")
         XCTAssertTrue(["⠙", "⠹", "⠸"].contains { seen.contains($0) }, "the spinner ticked")
         XCTAssertFalse(seen.contains("\u{1B}]52") || seen.contains("\u{1B}[31m"), "the guest's output is inert")
@@ -426,8 +426,8 @@ final class WebTerminalHTTPTests: XCTestCase {
         usleep(400_000)
         fake.emit(HostEvent(kind: .progress, sandbox: "demo", text: "pulling node@0123456789ab", completedBytes: 100_000_000, totalBytes: 100_000_000))
         fake.emit(HostEvent(kind: .step, sandbox: "demo", text: "pulled the base image node", milliseconds: 2100))
-        try readUntil("[doz] pulled the base image node — 2100 ms")
-        XCTAssertTrue(seen.contains("[doz] pulled node@0123456789ab: 100 MB in"), "the download's summary line")
+        try readUntil("[doz] Downloaded the Node.js base image — 2100 ms")
+        XCTAssertTrue(seen.contains("[doz] Downloaded node@0123456789ab: 100 MB in"), "the download's summary line")
         for animated in ["⠋", "⠙", "█", "░", "added 3 packages", "\u{1B}[J", "\u{1B}[1A"] {
             XCTAssertFalse(seen.contains(animated), "plain: no \(animated.debugDescription)")
         }

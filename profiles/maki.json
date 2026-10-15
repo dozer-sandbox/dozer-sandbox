@@ -1,0 +1,66 @@
+{
+  "schema": 1,
+  "agent": "maki",
+  "version": "maki 0.6.3",
+  "profiled": "2026-10-14",
+  "how": "a fresh try with the Open network, every HTTPS request decrypted and logged; its first start, then a scripted task (read a file, edit it, run a command) run non-interactively with FAKE keys — xAI and Google through a fake provider that answers text only, Anthropic and OpenAI refused by the real API (401). A real-key run would see more: the model's turns and what its tool calls fetch.",
+  "taskEnded": "DOZ_FAKE_OKsession: Cg1JC7ouRVJQhPQp2G5pp",
+  "endpoints": [
+    {
+      "host": "api.github.com",
+      "method": "GET",
+      "path": "/repos/tontinton/maki/releases/latest",
+      "when": "start",
+      "count": 1,
+      "credential": [
+        "none"
+      ],
+      "refusedWhenProfiled": false,
+      "determination": "allow-path",
+      "reason": "Maki's release check when its TUI starts (read-only GitHub API, that one path; a notice only)",
+      "seen": true
+    },
+    {
+      "host": "api.x.ai",
+      "method": "POST",
+      "path": "/v1/chat/completions",
+      "when": "task",
+      "count": 1,
+      "credential": [
+        "placeholder swapped for key:xai"
+      ],
+      "refusedWhenProfiled": false,
+      "determination": "allow-path",
+      "reason": "xAI's API — the model and its model list (the key is swapped in by Dozer's proxy)",
+      "seen": true
+    },
+    {
+      "host": "api.x.ai",
+      "method": "GET",
+      "path": "/v1/models",
+      "when": "start",
+      "count": 1,
+      "credential": [
+        "placeholder swapped for key:xai"
+      ],
+      "refusedWhenProfiled": false,
+      "determination": "allow-path",
+      "reason": "xAI's API — the model and its model list (the key is swapped in by Dozer's proxy)",
+      "seen": true
+    },
+    {
+      "host": "models.dev",
+      "method": "CONNECT",
+      "path": null,
+      "when": "start",
+      "count": 1,
+      "credential": [
+        "none"
+      ],
+      "refusedWhenProfiled": true,
+      "determination": "refuse",
+      "reason": "the public models.dev catalogue Maki's TUI fetches at start (cached a day); it does without it — refused quietly (network.quiet)",
+      "seen": true
+    }
+  ]
+}

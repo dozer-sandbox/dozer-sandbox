@@ -1,0 +1,8 @@
+lab 
+claude-code DOZ_CLAUDE_PERMISSIONS=ask
+pi 
+codex DOZ_CODEX_PERMISSIONS=ask
+python-claude-code DOZ_CLAUDE_PERMISSIONS=ask
+alpine-codex DOZ_CODEX_PERMISSIONS=ask
+go-pi 
+debian 

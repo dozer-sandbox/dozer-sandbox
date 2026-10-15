@@ -150,6 +150,12 @@ public enum WebControl {
         setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
         guard let line = LineReader(fd: fd).readLine(limit: 64) else { return }
         let command = String(decoding: line, as: UTF8.self)
+        // 617: `show try[/AGENT]` — the open pages go to the Quick try (`doz try --ui`); answers `shown N` (pages told).
+        if let page = WebControl.showPage(command) {
+            server.showPages("#/" + page)
+            _ = UnixSocket.writeAll(fd, Data("shown \(server.openPages)\n".utf8))
+            return
+        }
         guard ["link", "rotate", "status", "restart"].contains(command) else { return }
         if command == "restart" {
             guard let restarter else { _ = UnixSocket.writeAll(fd, Data("refused this doz ui cannot restart itself\n".utf8)); return }
@@ -192,6 +198,20 @@ public enum WebControl {
         guard let s, let url = URL(string: s), url.scheme == "http", url.host == WebLoopbackAddress.host,
               url.fragment?.hasPrefix("cap=") == true else { return nil }
         return url
+    }
+
+    /// 617: the one page a control line may show — the Quick try, with an agent or not (nil: not a `show` line).
+    public static func showPage(_ command: String) -> String? {
+        guard command.hasPrefix("show ") else { return nil }
+        let page = String(command.dropFirst(5))
+        return page.range(of: #"^try(/[a-z0-9][a-z0-9-]{0,39})?$"#, options: .regularExpression) != nil ? page : nil
+    }
+
+    /// 617: point the running UI's open pages at `page` (`try` or `try/AGENT`); the number of pages told, or nil when no
+    /// UI runs (or it is an older one that does not know the line).
+    public static func requestShow(_ store: DozerStore, page: String) -> Int? {
+        guard showPage("show " + page) != nil, let line = ask(store, "show " + page), line.hasPrefix("shown ") else { return nil }
+        return Int(line.dropFirst(6))
     }
 
     /// Ask the store's running UI for a new link; nil when no UI runs for this store.

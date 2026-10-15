@@ -1,0 +1,193 @@
+# yaml-language-server: $schema=../../../../../schema/dozer-recipe-2.schema.json
+# Gemini CLI — Dozer's recipe (schema 2). The format: docs/recipes/RECIPE-FORMAT.md.
+# Edit this file, then run make recipes (it writes Recipes/compiled/gemini.json, which Dozer embeds).
+schema: 2
+kind: workload
+id: google/gemini
+displayName: Gemini CLI
+description: Google's earlier open-source coding agent, superseded by Antigravity CLI.
+author: Google
+sourceUrl: https://github.com/google-gemini/gemini-cli
+licenses:
+- Apache-2.0
+args:
+  version:
+    description: The Gemini CLI release Dozer installs (its pin).
+    default: 0.63.0
+    pattern: '[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?'
+    buildArg: GEMINI_VERSION
+provides:
+- com.dozersandbox/gemini@${{ kit.args.version }}
+capabilities:
+- type: com.docker.sandbox/network-policy@1
+  config:
+    runtime:
+      allow:
+      - generativelanguage.googleapis.com:443
+      deny:
+      - play.googleapis.com:443
+      - accounts.google.com:443
+      - oauth2.googleapis.com:443
+      - cloudcode-pa.googleapis.com:443
+    dozer:
+      model:
+        id: model:google
+        title: Talk to Google AI
+        summary: Gemini CLI's model (the Gemini API, with an API key) — needed for Gemini CLI to work.
+        phrase: talk to your AI model (Google AI)
+        hosts:
+        - host: generativelanguage.googleapis.com
+      update:
+      - host: registry.npmjs.org
+        paths:
+        - /@google/gemini-cli
+        - /@google%2fgemini-cli
+        - /@google%2Fgemini-cli
+      excluded:
+      - play.googleapis.com
+      - accounts.google.com
+      - oauth2.googleapis.com
+      - cloudcode-pa.googleapis.com
+- type: com.docker.sandbox/credential@1
+  description: Google AI (Gemini API) API access
+  config:
+    service: google
+    phase: runtime
+    apiKey:
+      name: GEMINI_API_KEY
+      proxyManaged: true
+      inject:
+      - domain: generativelanguage.googleapis.com
+        header: x-goog-api-key
+        format: '%s'
+    dozer:
+      accounts:
+      - key
+- type: com.docker.sandbox/volume@1
+  config:
+    path: /home/agent/.gemini
+- type: com.docker.sandbox/agent-context@1
+  config:
+    directory: /home/agent/.gemini/extensions/dozer
+    filename: DOZER.md
+    dozer:
+      kind: context-file
+      manifest:
+        file: gemini-extension.json
+        json:
+          version: 1.0.0
+          name: dozer
+          contextFileName: DOZER.md
+- type: com.dozersandbox/install@1
+  config:
+    kind: npm
+    package: '@google/gemini-cli'
+    binary: gemini
+    needs_node: '20'
+    npm_args:
+    - --ignore-scripts
+    integrity: sha512-mmhqMmAdsoplCzrLQQC4yJBqr4uSKXghnrLspgUU6N9drmsaq7pi7oF09skRYzEq2dYK6eMT4UpFQP6rG2o/ew==
+- type: com.dozersandbox/launch@1
+  config:
+    command:
+    - gemini
+    no_prompts_args:
+    - --approval-mode=yolo
+    passthrough:
+    - --version
+    - -v
+    - --help
+    - -h
+    - mcp
+    - extensions
+    env:
+      GEMINI_CLI_TRUST_WORKSPACE: 'true'
+    state_env: {}
+    first_run:
+    - file: ~/.gemini/settings.json
+      set:
+        general.enableAutoUpdate: false
+        general.enableAutoUpdateNotification: false
+        privacy.usageStatisticsEnabled: false
+        security.auth.selectedType: gemini-api-key
+    status: none
+    resume:
+    - --resume
+    - latest
+    verify:
+    - argv:
+      - gemini
+      - --version
+      expect: ${{ kit.args.version }}
+    check:
+      argv:
+      - gemini
+      - -p
+      - say ok
+      expect: DOZ_FAKE_OK
+- type: com.dozersandbox/auth@1
+  config:
+    methods:
+    - kind: api-key
+      provider: google
+      accounts:
+      - key
+      keys_page: https://aistudio.google.com/apikey
+      note: 'API key only: Google''s terms forbid third-party tools from using the Google sign-in behind Gemini CLI, so Dozer never offers it.'
+      checked: '2026-10-12'
+- type: com.dozersandbox/gateways@1
+  config:
+    entries:
+    - gateway: openrouter
+      level: 'no'
+      reason: Gemini CLI speaks only the Gemini API (GOOGLE_GEMINI_BASE_URL); OpenRouter serves Chat Completions, Responses and Anthropic Messages, no Gemini API
+      source: https://openrouter.ai/docs/_llms/api-reference.txt
+      checked: '2026-10-12'
+    - gateway: vercel-ai-gateway
+      level: 'no'
+      reason: Gemini CLI speaks only the Gemini API (GOOGLE_GEMINI_BASE_URL); AI Gateway serves Chat Completions, Responses and Anthropic Messages, no Gemini API
+      source: https://vercel.com/docs/ai-gateway/sdks-and-apis
+      checked: '2026-10-12'
+- type: com.dozersandbox/currency@1
+  config:
+    checked: '2026-10-12'
+    lifecycle:
+      status: superseded
+      note: Superseded by Antigravity CLI — Google retired Gemini CLI for personal accounts; it still works with a paid Gemini API key
+      source: https://github.com/google-gemini/gemini-cli/discussions/27274
+      checked: '2026-10-12'
+      by: antigravity
+- type: com.dozersandbox/directory@1
+  config:
+    kind: coding-agent
+    categories:
+    - coding-agent
+    limits:
+    - reason: 'on Alpine (musl), Gemini CLI''s shell tool runs without a terminal: its PTY module has no musl build'
+      musl: true
+    icon: gemini-cli
+    default_base: node
+    platforms:
+      glibc: true
+      musl: true
+    tags:
+    - tag: headless
+      level: verified
+      notes:
+      - gemini -p
+      evidence: '617 step 0: gemini -p "say ok" --approval-mode=yolo answered and exited in a sandbox (617.01 §2.2–2.3)'
+      checked: '2026-10-12'
+    terms: API key only — Google's terms forbid third-party tools from using the Google sign-in behind Gemini CLI.
+- type: com.dozersandbox/guide@1
+  config:
+    intro: "Gemini CLI is a coding agent with its own screen: the session on the left. Ask it to read, change and run the code in your folder."
+    steps:
+    - text: "Check it answers, without its screen."
+      command: "gemini -p \"say ok\""
+    - text: "Ask it something in its own screen — the session on the left."
+    - text: "One task without its screen."
+      command: "gemini -p \"list the files in this folder\""
+    tips:
+    - "Files it makes are in /workspace — your folder on the Mac."
+    - "Restart its session from the session's ⋯ menu; End stops it."
+    docs: https://github.com/google-gemini/gemini-cli

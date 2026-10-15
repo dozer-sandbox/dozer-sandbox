@@ -1,0 +1,181 @@
+# yaml-language-server: $schema=../../../../../schema/dozer-recipe-2.schema.json
+# Crush — Dozer's recipe (schema 2). The format: docs/recipes/RECIPE-FORMAT.md.
+# Edit this file, then run make recipes (it writes Recipes/compiled/crush.json, which Dozer embeds).
+# Licence: FSL-1.1-MIT (each release becomes MIT two years on). The owner's reading (2026-10-14): installing it for a
+# user in their own sandbox is not a Competing Use — Dozer does not offer a competing product — so it is a recipe.
+schema: 2
+kind: workload
+id: charmbracelet/crush
+displayName: Crush
+description: Charmbracelet's coding agent for the terminal, here on an xAI API key.
+author: Charmbracelet
+sourceUrl: https://github.com/charmbracelet/crush
+licenses:
+- FSL-1.1-MIT
+args:
+  version:
+    description: The Crush release Dozer installs (its pin).
+    default: 0.98.1
+    pattern: '[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?'
+    buildArg: CRUSH_VERSION
+provides:
+- com.dozersandbox/crush@${{ kit.args.version }}
+capabilities:
+- type: com.docker.sandbox/network-policy@1
+  config:
+    runtime:
+      allow:
+      - api.x.ai:443
+      - api.github.com:443
+    dozer:
+      model:
+        id: model:crush
+        title: Talk to xAI
+        summary: Crush's model here (the xAI API, with your key) — needed for it to answer.
+        phrase: talk to your AI model (xAI)
+        hosts:
+        - host: api.x.ai
+          paths:
+          - /v1/chat/completions
+      update: []
+      excluded: []
+      vendor:
+      - host: api.github.com
+        paths:
+        - /repos/charmbracelet/crush/releases/latest
+        reason: Crush asks GitHub for its latest release at each run (read-only; no setting turns it off) and only shows a notice
+- type: com.docker.sandbox/credential@1
+  description: xAI API access
+  config:
+    service: xai
+    phase: runtime
+    apiKey:
+      name: XAI_API_KEY
+      proxyManaged: true
+      inject:
+      - domain: api.x.ai
+        header: authorization
+        format: Bearer %s
+    dozer:
+      accounts:
+      - key
+- type: com.docker.sandbox/volume@1
+  config:
+    path: /home/agent/.config/crush
+- type: com.docker.sandbox/volume@1
+  config:
+    path: /home/agent/.local/share/crush
+- type: com.dozersandbox/install@1
+  config:
+    kind: release-binary
+    url: https://github.com/charmbracelet/crush/releases/download/v${{ kit.args.version }}/crush_${{ kit.args.version }}_Linux_arm64.tar.gz
+    payload: crush_0.98.1_Linux_arm64/crush
+    binary: crush
+    bake_hosts:
+    - github.com
+    - release-assets.githubusercontent.com
+    integrity: sha512-VbfBLF8cxG8tzN4xTkFwCmzcTYSYAbnMNNKs8y+tQGJzKWnj9QsXFRtD7m+pfvtfe0sqixU6ttLtx1Doc7MFFg==
+- type: com.dozersandbox/launch@1
+  config:
+    command:
+    - crush
+    no_prompts_args:
+    - --yolo
+    passthrough:
+    - --version
+    - -v
+    - --help
+    - -h
+    - help
+    - run
+    - dirs
+    - logs
+    - models
+    - session
+    - stats
+    - login
+    - logout
+    - update-providers
+    env:
+      CRUSH_DISABLE_METRICS: '1'
+      CRUSH_DISABLE_PROVIDER_AUTO_UPDATE: '1'
+    state_env: {}
+    first_run:
+    - file: ~/.config/crush/crush.json
+      set:
+        models.large.provider: xai
+        models.large.model: grok-build-0.1
+        models.small.provider: xai
+        models.small.model: grok-build-0.1
+        options.disable_metrics: true
+        options.disable_provider_auto_update: true
+    status: none
+    verify:
+    - argv:
+      - crush
+      - --version
+      expect: ${{ kit.args.version }}
+    check:
+      argv:
+      - crush
+      - run
+      - -q
+      - -m
+      - xai/grok-build-0.1
+      - say ok
+      expect: DOZ_FAKE_OK
+- type: com.dozersandbox/auth@1
+  config:
+    methods:
+    - kind: api-key
+      provider: xai
+      accounts:
+      - key
+      keys_page: https://console.x.ai/
+      note: Crush's built-in xai provider reads XAI_API_KEY; its large and small models set to grok-build-0.1. Its own sign-in (Charm, Hyper) is not used.
+      checked: '2026-10-14'
+- type: com.dozersandbox/gateways@1
+  config:
+    entries:
+    - gateway: openrouter
+      level: unknown
+      reason: Crush has an OpenRouter provider; not checked
+      checked: '2026-10-14'
+    - gateway: vercel-ai-gateway
+      level: unknown
+      reason: not checked against Crush
+      checked: '2026-10-14'
+- type: com.dozersandbox/currency@1
+  config:
+    checked: '2026-10-14'
+- type: com.dozersandbox/directory@1
+  config:
+    kind: coding-agent
+    categories:
+    - coding-agent
+    icon: crush
+    default_base: debian
+    platforms:
+      glibc: true
+      musl: true
+    tags:
+    - tag: headless
+      level: verified
+      notes:
+      - crush run -q -m xai/grok-build-0.1 "…"
+      evidence: 'make recipe-check: crush run "say ok" printed the stand-in''s answer and exited in a fresh try'
+      checked: '2026-10-14'
+    terms: Your xAI API key — a key from console.x.ai. Crush is under the FSL-1.1-MIT licence (each release becomes MIT two years on).
+- type: com.dozersandbox/guide@1
+  config:
+    intro: "Crush is a coding agent with its own screen: the session on the left. Ask it to read, change and run the code in your folder."
+    steps:
+    - text: "Check it answers, without its screen."
+      command: "crush run -q -m xai/grok-build-0.1 \"say ok\""
+    - text: "Ask it something in its own screen — the session on the left."
+    - text: "One task without its screen."
+      command: "crush run -q -m xai/grok-build-0.1 \"list the files in this folder\""
+    tips:
+    - "Files it makes are in /workspace — your folder on the Mac."
+    - "Restart its session from the session's ⋯ menu; End stops it."
+    docs: https://github.com/charmbracelet/crush

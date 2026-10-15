@@ -1,0 +1,24 @@
+{
+  "schema": 1,
+  "agent": "smolagents",
+  "version": "1.26.0",
+  "profiled": "2026-10-14",
+  "how": "a fresh try with the Open network, every HTTPS request decrypted and logged; its first start, then a scripted task (read a file, edit it, run a command) run non-interactively with FAKE keys — xAI and Google through a fake provider that answers text only, Anthropic and OpenAI refused by the real API (401). A real-key run would see more: the model's turns and what its tool calls fetch.",
+  "taskEnded": "[Step 20: Duration 0.02 seconds| Input tokens: 20 | Output tokens: 20] / Reached max steps. / [Step 21: Duration 0.06 seconds| Input tokens: 21 | Output tokens: 21]",
+  "endpoints": [
+    {
+      "host": "api.x.ai",
+      "method": "POST",
+      "path": "/v1/chat/completions",
+      "when": "task",
+      "count": 21,
+      "credential": [
+        "placeholder swapped for key:xai"
+      ],
+      "refusedWhenProfiled": false,
+      "determination": "allow",
+      "reason": "the xAI API — the model (the key is swapped in by Dozer's proxy)",
+      "seen": true
+    }
+  ]
+}

@@ -2011,7 +2011,9 @@ public actor Sandbox {
     /// 599: run `argv` (as root, no terminal) with its stdin and stdout as a byte stream — the browser
     /// bridge's `deckhold connect -p PORT`. The stream's `output` finishes when the program exits (or
     /// the VM stops under it); `finishInput()` closes its stdin.
-    public func openGuestStream(_ argv: [String]) async throws -> GuestStream {
+    /// 617: `user` (default root) runs it as that guest user — `doz put` writes files the image's user owns; its stderr
+    /// is kept (`GuestStream.errorOutput`, at most 64 KiB) to say why it failed.
+    public func openGuestStream(_ argv: [String], user: String? = nil) async throws -> GuestStream {
         guard phase == .running, let container else { throw SandboxError.notRunning(phase) }
         let stream = GuestStream()
         let proc = try await container.exec("g-\(UUID().uuidString.prefix(12).lowercased())") { cfg in
@@ -2020,7 +2022,8 @@ public actor Sandbox {
             cfg.terminal = false
             cfg.stdin = ConnectionReader(source: stream.input)
             cfg.stdout = GuestStreamWriter(stream: stream)
-            cfg.stderr = OutputCollector()
+            cfg.stderr = stream.errors
+            if let user, user != "root" { cfg.user = .init(username: user) }
         }
         do { try await proc.start() } catch {
             stream.ended(nil)

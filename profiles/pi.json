@@ -1,0 +1,52 @@
+{
+  "schema": 1,
+  "agent": "pi",
+  "version": "1.2.0",
+  "profiled": "2026-10-14",
+  "how": "a fresh try with the Open network, every HTTPS request decrypted and logged; its first start, then a scripted task (read a file, edit it, run a command) run non-interactively with FAKE keys — xAI and Google through a fake provider that answers text only, Anthropic and OpenAI refused by the real API (401). A real-key run would see more: the model's turns and what its tool calls fetch.",
+  "taskEnded": "401 {\"type\":\"error\",\"error\":{\"type\":\"authentication_error\",\"message\":\"invalid x-api-key\"},\"request_id\":\"req_011CfzhBGwDrk6iYsC5Zq43B\"}",
+  "endpoints": [
+    {
+      "host": "api.anthropic.com",
+      "method": "POST",
+      "path": "/v1/messages",
+      "when": "task",
+      "count": 1,
+      "credential": [
+        "placeholder swapped for anthropic"
+      ],
+      "refusedWhenProfiled": false,
+      "determination": "allow",
+      "reason": "Anthropic's API — the model (the key is swapped in by Dozer's proxy)",
+      "seen": true
+    },
+    {
+      "host": "pi.dev",
+      "method": "GET",
+      "path": "/api/models/providers/anthropic",
+      "when": "start",
+      "count": 2,
+      "credential": [
+        "none"
+      ],
+      "refusedWhenProfiled": false,
+      "determination": "allow",
+      "reason": "pi's own site — called at start-up (its install report and other calls)",
+      "seen": true
+    },
+    {
+      "host": "pi.dev",
+      "method": "GET",
+      "path": "/api/report-install",
+      "when": "start",
+      "count": 1,
+      "credential": [
+        "none"
+      ],
+      "refusedWhenProfiled": false,
+      "determination": "allow",
+      "reason": "pi's own site — called at start-up (its install report and other calls)",
+      "seen": true
+    }
+  ]
+}

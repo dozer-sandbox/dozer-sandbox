@@ -46,11 +46,19 @@ public struct WebQuickAddQuery: Equatable, Sendable {
         var kinds: [String: AccountKind] = ["mac": .mac]
         for a in accounts.accounts where a.kind != AccountKind.codexMac.rawValue { if let k = AccountKind(rawValue: a.kind) { kinds[a.name] = k } }
         let codexMac = accounts.accounts.contains { $0.kind == AccountKind.codexMac.rawValue && ($0.state == "ok" || $0.state == "expired") }
+        // 617: key accounts by provider, and each provider's default (Grok, Gemini).
+        var providers: [String: String] = [:], providerDefaults: [String: String] = [:]
+        for a in accounts.accounts where a.kind == AccountKind.key.rawValue {
+            guard let p = a.provider else { continue }
+            providers[a.name] = p
+            if a.isDefault { providerDefaults[p] = a.name }
+        }
         let row = images.first { $0.name == p.image }
         let outOfDate = row.flatMap { $0.baked ? $0.standing : nil }
         if let r = QuickAdd.requirement(image: p.image, network: QuickAdd.network(image: p.image, settings: settings),
                                         defaultAccount: accounts.defaultAccount,
-                                        accountKinds: kinds, outOfDate: outOfDate, openaiDefault: accounts.openaiDefault, codexMac: codexMac) {
+                                        accountKinds: kinds, outOfDate: outOfDate, openaiDefault: accounts.openaiDefault, codexMac: codexMac,
+                                        providers: providers, providerDefaults: providerDefaults) {
             p.requirementKind = r.kind
             p.requirement = r.text
         }

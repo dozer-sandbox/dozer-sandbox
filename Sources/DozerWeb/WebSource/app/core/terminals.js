@@ -24,6 +24,8 @@ export function sview(name) {
 export const PASTE_CONFIRM_BYTES = 64 * 1024;
 export const PASTE_MAX_BYTES = 1024 * 1024;
 export const INPUT_CHUNK = 16 * 1024;
+/// 617: the page's own panes of a sandbox that are no session's — tab zero, Console, and the build log's tab.
+export function isAux(t) { return t.mode === 'console' || !!t.buildlog; }
 export function pageTerminals(name) { return [...terminals.values()].filter((t) => !t.grid && t.sandbox === name); }
 
 /// What a split adds on the right (the Split button's ▾ menu). Remembered per browser.

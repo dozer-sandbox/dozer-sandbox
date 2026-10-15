@@ -1,0 +1,303 @@
+{
+  "args" : {
+    "version" : {
+      "buildArg" : "KIMI_CODE_VERSION",
+      "default" : "2.1.1",
+      "description" : "The Kimi Code release Dozer installs (its pin).",
+      "pattern" : "[0-9]+\\.[0-9]+\\.[0-9]+([-+][0-9A-Za-z.-]+)?"
+    }
+  },
+  "author" : "Moonshot AI",
+  "capabilities" : [
+    {
+      "config" : {
+        "dozer" : {
+          "excluded" : [
+
+          ],
+          "model" : {
+            "hosts" : [
+              {
+                "host" : "api.x.ai",
+                "paths" : [
+                  "/v1/chat/completions"
+                ]
+              }
+            ],
+            "id" : "model:kimi-code",
+            "phrase" : "talk to your AI model (xAI)",
+            "summary" : "Kimi Code's model here (the xAI API, with your key) — needed for it to answer.",
+            "title" : "Talk to xAI"
+          },
+          "quiet" : [
+            {
+              "host" : "api.kimi.com",
+              "reason" : "Kimi Code fetches Moonshot's public client settings (POST /coding/v1/client_configs, no credential) at each start and does without them when refused; no setting of its own stops it"
+            }
+          ],
+          "update" : [
+
+          ]
+        },
+        "runtime" : {
+          "allow" : [
+            "api.x.ai:443"
+          ],
+          "deny" : [
+            "api.kimi.com:443"
+          ]
+        }
+      },
+      "type" : "com.docker.sandbox/network-policy@1"
+    },
+    {
+      "config" : {
+        "apiKey" : {
+          "inject" : [
+            {
+              "domain" : "api.x.ai",
+              "format" : "Bearer %s",
+              "header" : "authorization"
+            }
+          ],
+          "name" : "XAI_API_KEY",
+          "proxyManaged" : true
+        },
+        "dozer" : {
+          "accounts" : [
+            "key"
+          ]
+        },
+        "phase" : "runtime",
+        "service" : "xai"
+      },
+      "description" : "xAI API access",
+      "type" : "com.docker.sandbox/credential@1"
+    },
+    {
+      "config" : {
+        "path" : "/home/agent/.kimi-code"
+      },
+      "type" : "com.docker.sandbox/volume@1"
+    },
+    {
+      "config" : {
+        "binary" : "kimi",
+        "integrity" : "sha512-xClqcnTQUKgKDbeOGPU78qcwxGzL8wA2rqWuOX3CLpyQ1/NhSX7jAh6hZo/JFwThSX8obkgef3uw/li5JaJNyw==",
+        "kind" : "npm",
+        "needs_node" : "22",
+        "npm_args" : [
+          "--ignore-scripts"
+        ],
+        "package" : "@moonshot-ai/kimi-code"
+      },
+      "type" : "com.dozersandbox/install@1"
+    },
+    {
+      "config" : {
+        "check" : {
+          "argv" : [
+            "kimi",
+            "-p",
+            "say ok"
+          ],
+          "expect" : "DOZ_FAKE_OK",
+          "screen" : {
+            "allow" : [
+              "Welcome to Kimi Code"
+            ],
+            "expect" : [
+              "context"
+            ]
+          }
+        },
+        "command" : [
+          "kimi"
+        ],
+        "env" : {
+          "KIMI_CODE_NO_AUTO_UPDATE" : "1",
+          "KIMI_DISABLE_TELEMETRY" : "1"
+        },
+        "first_run" : [
+          {
+            "file" : "~/.kimi-code/config.toml",
+            "set" : {
+              "default_model" : "grok-build",
+              "models.grok-build.max_context_size" : 256000,
+              "models.grok-build.model" : "grok-build-0.1",
+              "models.grok-build.provider" : "xai",
+              "providers.xai.api_key_env" : "XAI_API_KEY",
+              "providers.xai.base_url" : "https://api.x.ai/v1",
+              "providers.xai.type" : "openai",
+              "telemetry" : false
+            }
+          },
+          {
+            "file" : "~/.kimi-code/workspace-trust/wd_workspace_c52ddf65534b",
+            "format" : "json",
+            "set" : {
+              "root" : "/workspace",
+              "trustedAt" : 1791936000000
+            }
+          }
+        ],
+        "no_prompts_args" : [
+          "--auto"
+        ],
+        "passthrough" : [
+          "--version",
+          "-V",
+          "--help",
+          "-h",
+          "help",
+          "provider",
+          "session",
+          "doctor",
+          "export",
+          "upgrade",
+          "update",
+          "-p",
+          "--prompt"
+        ],
+        "resume" : [
+          "--continue"
+        ],
+        "state_env" : {
+
+        },
+        "status" : "none",
+        "verify" : [
+          {
+            "argv" : [
+              "kimi",
+              "--version"
+            ],
+            "expect" : "${{ kit.args.version }}"
+          }
+        ]
+      },
+      "type" : "com.dozersandbox/launch@1"
+    },
+    {
+      "config" : {
+        "methods" : [
+          {
+            "accounts" : [
+              "key"
+            ],
+            "checked" : "2026-10-14",
+            "keys_page" : "https://console.x.ai/",
+            "kind" : "api-key",
+            "note" : "Kimi Code takes any OpenAI-compatible provider in its config.toml; Dozer names xAI's API (api_key_env XAI_API_KEY, so the key is read per request and never written there), model grok-build-0.1.",
+            "provider" : "xai"
+          },
+          {
+            "account" : "a Kimi account (kimi login, a device code) or a Moonshot platform key",
+            "checked" : "2026-10-14",
+            "in_sandbox" : false,
+            "kind" : "vendor-sign-in",
+            "note" : "Kimi's own models need Moonshot's sign-in or key, which Dozer does not hold yet."
+          }
+        ]
+      },
+      "type" : "com.dozersandbox/auth@1"
+    },
+    {
+      "config" : {
+        "entries" : [
+          {
+            "checked" : "2026-10-14",
+            "gateway" : "openrouter",
+            "level" : "unknown",
+            "reason" : "Kimi Code takes any OpenAI-compatible provider; OpenRouter was not checked"
+          },
+          {
+            "checked" : "2026-10-14",
+            "gateway" : "vercel-ai-gateway",
+            "level" : "unknown",
+            "reason" : "not checked against Kimi Code"
+          }
+        ]
+      },
+      "type" : "com.dozersandbox/gateways@1"
+    },
+    {
+      "config" : {
+        "checked" : "2026-10-14"
+      },
+      "type" : "com.dozersandbox/currency@1"
+    },
+    {
+      "config" : {
+        "aliases" : [
+          "kimi"
+        ],
+        "categories" : [
+          "coding-agent"
+        ],
+        "default_base" : "node",
+        "icon" : "kimi-code",
+        "kind" : "coding-agent",
+        "limits" : [
+          {
+            "musl" : true,
+            "reason" : "Kimi Code needs Node 22.19 or later; Alpine's Node is older"
+          }
+        ],
+        "platforms" : {
+          "glibc" : true,
+          "musl" : false
+        },
+        "tags" : [
+          {
+            "checked" : "2026-10-14",
+            "evidence" : "make recipe-check: kimi -p \"say ok\" printed the stand-in's answer and exited in a fresh try",
+            "level" : "verified",
+            "notes" : [
+              "kimi -p \"…\""
+            ],
+            "tag" : "headless"
+          }
+        ],
+        "terms" : "Your xAI API key — a key from console.x.ai. Kimi's own models (a Kimi account or Moonshot key) are not offered yet."
+      },
+      "type" : "com.dozersandbox/directory@1"
+    },
+    {
+      "config" : {
+        "docs" : "https://github.com/MoonshotAI/kimi-code",
+        "intro" : "Kimi Code is a coding agent with its own screen: the session on the left. Ask it to read, change and run the code in your folder.",
+        "steps" : [
+          {
+            "command" : "kimi -p \"say ok\"",
+            "text" : "Check it answers, without its screen."
+          },
+          {
+            "text" : "Ask it something in its own screen — the session on the left."
+          },
+          {
+            "command" : "kimi -p \"list the files in this folder\"",
+            "text" : "One task without its screen."
+          }
+        ],
+        "tips" : [
+          "Files it makes are in /workspace — your folder on the Mac.",
+          "Restart its session from the session's ⋯ menu; End stops it."
+        ]
+      },
+      "type" : "com.dozersandbox/guide@1"
+    }
+  ],
+  "description" : "Moonshot AI's coding agent for the terminal (the successor to kimi-cli), here on an xAI API key.",
+  "displayName" : "Kimi Code",
+  "id" : "moonshotai/kimi-code",
+  "kind" : "workload",
+  "licenses" : [
+    "MIT"
+  ],
+  "provides" : [
+    "com.dozersandbox/kimi-code@${{ kit.args.version }}"
+  ],
+  "schema" : 2,
+  "sourceUrl" : "https://github.com/MoonshotAI/kimi-code"
+}

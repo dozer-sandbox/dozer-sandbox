@@ -1,0 +1,231 @@
+# yaml-language-server: $schema=../../../../../schema/dozer-recipe-2.schema.json
+# AIChat — Dozer's recipe (schema 2). The format: docs/recipes/RECIPE-FORMAT.md.
+# Edit this file, then run make recipes (it writes Recipes/compiled/aichat.json, which Dozer embeds).
+schema: 2
+kind: workload
+id: sigoden/aichat
+displayName: AIChat
+description: 'An all-in-one LLM command line: a chat REPL, a shell assistant, roles, sessions and RAG; on an Anthropic, OpenAI, xAI, Google AI or OpenRouter key.'
+author: sigoden
+sourceUrl: https://github.com/sigoden/aichat
+licenses:
+- Apache-2.0
+args:
+  version:
+    description: The AIChat release Dozer installs (its pin).
+    default: '0.30.0'
+    pattern: '[0-9]+\.[0-9]+(\.[0-9]+)?([-+][0-9A-Za-z.-]+)?'
+    buildArg: AICHAT_VERSION
+provides:
+- com.dozersandbox/aichat@${{ kit.args.version }}
+capabilities:
+- type: com.docker.sandbox/network-policy@1
+  config:
+    runtime:
+      allow:
+      - api.anthropic.com:443
+      - api.openai.com:443
+      - api.x.ai:443
+      - generativelanguage.googleapis.com:443
+      - openrouter.ai:443
+    dozer:
+      model:
+        id: model:aichat
+        title: Talk to its model provider
+        summary: AIChat's model — the provider or gateway its key is for (Anthropic, OpenAI, xAI, Google AI or OpenRouter), with an API key. Needed for AIChat to answer.
+        phrase: talk to your AI model
+        hosts:
+        - host: api.anthropic.com
+          reason: Anthropic — when the sandbox's key is Anthropic's
+        - host: api.openai.com
+          reason: OpenAI — when the sandbox's key is OpenAI's
+        - host: api.x.ai
+          reason: xAI — when the sandbox's key is xAI's
+        - host: generativelanguage.googleapis.com
+          reason: Google AI — when the sandbox's key is Google AI's
+        - host: openrouter.ai
+          reason: OpenRouter — when the sandbox's key is OpenRouter's
+      update: []
+      excluded: []
+- type: com.docker.sandbox/credential@1
+  description: xAI API access
+  config:
+    service: xai
+    phase: runtime
+    apiKey:
+      name: XAI_API_KEY
+      proxyManaged: true
+      inject:
+      - domain: api.x.ai
+        header: authorization
+        format: Bearer %s
+    dozer:
+      accounts:
+      - key
+- type: com.docker.sandbox/volume@1
+  config:
+    path: /home/agent/.config/aichat
+- type: com.dozersandbox/install@1
+  config:
+    kind: release-binary
+    url: https://github.com/sigoden/aichat/releases/download/v${{ kit.args.version }}/aichat-v${{ kit.args.version }}-aarch64-unknown-linux-musl.tar.gz
+    payload: aichat
+    binary: aichat
+    bake_hosts:
+    - github.com
+    - release-assets.githubusercontent.com
+    integrity: sha512-j+5lNCpZW9rhWwziKvT9KpQB17zLUKKEazhlPD4C9425uczt5zGEJxYXGHzrQH6DiutwpSZeaKdcZiBPm9UHmg==
+- type: com.dozersandbox/launch@1
+  config:
+    command:
+    - aichat
+    no_prompts_args: []
+    passthrough:
+    - '--version'
+    - '-V'
+    - '--help'
+    - '-h'
+    - '--info'
+    - '--list-models'
+    - '--serve'
+    env: {}
+    state_env: {}
+    status: none
+    verify:
+    - argv:
+      - aichat
+      - '--version'
+      expect: aichat ${{ kit.args.version }}
+    check:
+      argv:
+      - aichat
+      - say ok
+      expect: DOZ_FAKE_OK
+- type: com.dozersandbox/auth@1
+  config:
+    methods:
+    - kind: api-key
+      provider: xai
+      accounts:
+      - key
+      keys_page: https://console.x.ai/
+      note: 'AIChat runs its built-in client of the chosen source with no config file (AICHAT_PROVIDER, which reads that source''s key; claude reads CLAUDE_API_KEY too); the model is AICHAT_MODEL (xai:grok-4-1-fast by default, or -m).'
+      checked: '2026-10-14'
+    - kind: api-key
+      provider: anthropic
+      accounts:
+      - api-key
+      keys_page: https://console.anthropic.com/settings/keys
+      note: 'AIChat through Anthropic: doz try aichat --provider anthropic (or choose it in the try setup); the model with --model.'
+      checked: '2026-10-14'
+    - kind: api-key
+      provider: openai
+      accounts:
+      - openai-key
+      keys_page: https://platform.openai.com/api-keys
+      note: 'AIChat through OpenAI: doz try aichat --provider openai (or choose it in the try setup); the model with --model.'
+      checked: '2026-10-14'
+    - kind: api-key
+      provider: google
+      accounts:
+      - key
+      keys_page: https://aistudio.google.com/apikey
+      note: 'AIChat through Google AI: doz try aichat --provider google (or choose it in the try setup); the model with --model.'
+      checked: '2026-10-14'
+    - kind: api-key
+      provider: openrouter
+      accounts:
+      - key
+      keys_page: https://openrouter.ai/keys
+      note: 'AIChat through OpenRouter: doz try aichat --gateway openrouter (or choose it in the try setup); the model with --model.'
+      checked: '2026-10-14'
+- type: com.dozersandbox/gateways@1
+  config:
+    entries:
+    - gateway: openrouter
+      level: verified
+      shape: openai-chat
+      endpoint: v1
+      how:
+        env:
+          AICHAT_PROVIDER: 'openrouter'
+          AICHAT_MODEL: 'openrouter:${{ dozer.model }}'
+      evidence: 'make recipe-check: its check turn through a stand-in OpenRouter (doz try with --gateway openrouter; models@1)'
+      checked: '2026-10-14'
+    - gateway: vercel-ai-gateway
+      level: 'no'
+      reason: 'its own client has no Vercel AI Gateway setting (an OpenAI-compatible base URL), so it is not offered'
+      checked: '2026-10-14'
+- type: com.dozersandbox/models@1
+  config:
+    default: xai
+    native:
+    - source: anthropic
+      env:
+        AICHAT_PROVIDER: claude
+        AICHAT_MODEL: 'claude:${{ dozer.model }}'
+      key_env:
+      - CLAUDE_API_KEY
+    - source: openai
+      env:
+        AICHAT_PROVIDER: openai
+        AICHAT_MODEL: 'openai:${{ dozer.model }}'
+    - source: xai
+      env:
+        AICHAT_PROVIDER: xai
+        AICHAT_MODEL: 'xai:${{ dozer.model }}'
+    - source: google
+      env:
+        AICHAT_PROVIDER: gemini
+        AICHAT_MODEL: 'gemini:${{ dozer.model }}'
+    - source: openrouter
+      env:
+        AICHAT_PROVIDER: openrouter
+        AICHAT_MODEL: 'openrouter:${{ dozer.model }}'
+- type: com.dozersandbox/currency@1
+  config:
+    checked: '2026-10-14'
+- type: com.dozersandbox/directory@1
+  config:
+    kind: ai-tool
+    categories:
+    - terminal-tool
+    icon: aichat
+    default_base: debian
+    platforms:
+      glibc: true
+      musl: true
+    tags:
+    - tag: headless
+      level: verified
+      notes:
+      - aichat PROMPT
+      evidence: 'A2 VM proof: its check turn answered DOZ_FAKE_OK through the fake provider (make recipe-check; probes/617-*/recipes/aichat)'
+      checked: '2026-10-14'
+    terms: Your API key of the provider or gateway you choose (xAI by default). Its --serve playground opens from the sandbox's Open button (doz open).
+- type: com.dozersandbox/ports@1
+  config:
+    ports:
+    - port: 8000
+      title: AIChat web
+      path: /playground
+      check: /playground
+    serve:
+    - aichat
+    - --serve
+- type: com.dozersandbox/guide@1
+  config:
+    intro: "AIChat is a chat REPL — its session is the screen on the left — and a command that answers in your shell and exits."
+    steps:
+    - text: "Check it answers."
+      command: "aichat \"say ok\""
+    - text: "Chat in its REPL: the session on the left (`.help` lists its commands)."
+    - text: "Pipe text in."
+      command: "echo \"Dozer runs each agent in its own VM\" | aichat \"summarise this in five words\""
+    - text: "See the models of its client."
+      command: "aichat --list-models"
+    tips:
+    - "`aichat -c \"…\"` prints code only."
+    - "`aichat -s NAME` starts or joins a session that is kept."
+    - "The model is `AICHAT_MODEL`, set for the key you chose; `-m` picks another."
+    docs: https://github.com/sigoden/aichat

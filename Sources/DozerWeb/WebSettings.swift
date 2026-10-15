@@ -1,4 +1,5 @@
 import Foundation
+import DozerKit
 import DozerHost
 
 // 591 settings — the UI's Settings page. GET /api/v1/settings answers every setting (value, default,
@@ -177,6 +178,8 @@ public struct WebAccountAdd: Equatable, Sendable, CustomStringConvertible, Custo
     public let kind: AccountKind
     public let plan: String?
     public let secret: String
+    /// 617: a provider's key (kind `key`): xai, google … — a pasted key only (sources stay CLI-only).
+    public var provider: String? = nil
 
     public var description: String { "WebAccountAdd(\(name), \(kind.rawValue), secret: <redacted>)" }
     public var debugDescription: String { description }
@@ -187,15 +190,25 @@ public struct WebAccountAdd: Equatable, Sendable, CustomStringConvertible, Custo
             throw WebAction.Invalid("the body must be a JSON object")
         }
         let keys = Set(d.keys)
-        guard keys.isSuperset(of: ["name", "kind", "secret"]), keys.isSubset(of: ["name", "kind", "secret", "plan"]) else {
-            throw WebAction.Invalid("exactly name, kind, secret (and plan for a setup token)")
+        guard keys.isSuperset(of: ["name", "kind", "secret"]), keys.isSubset(of: ["name", "kind", "secret", "plan", "provider"]) else {
+            throw WebAction.Invalid("exactly name, kind, secret (and plan for a setup token, provider for a key)")
         }
         guard let name = d["name"] as? String, name.count <= 40, (try? AccountStore.validateName(name)) != nil else {
             throw WebAction.Invalid("name: an account name, 1–40 of a-z 0-9 - (not default or none)")
         }
         // 599i: an OpenAI key too. A ChatGPT sign-in is never typed: it is Dozer's own browser sign-in (the CLI).
-        guard let k = d["kind"] as? String, let kind = AccountKind(rawValue: k), [.apiKey, .setupToken, .openaiKey].contains(kind) else {
-            throw WebAction.Invalid("kind: api-key, setup-token or openai-key")
+        guard let k = d["kind"] as? String, let kind = AccountKind(rawValue: k), [.apiKey, .setupToken, .openaiKey, .key].contains(kind) else {
+            throw WebAction.Invalid("kind: api-key, setup-token, openai-key or key")
+        }
+        var provider: String?
+        if kind == .key {
+            // A provider's own key (xAI, Google …) — never a custom key (its hosts are the CLI's to name).
+            guard let p = d["provider"] as? String, let kp = KeyProviders.provider(p), kp.builtinBinding == nil, p != "custom" else {
+                throw WebAction.Invalid("provider: a key provider (xai, google …)")
+            }
+            provider = p
+        } else if d["provider"] != nil, !(d["provider"] is NSNull) {
+            throw WebAction.Invalid("provider: only for kind key")
         }
         var plan: String?
         if let p = d["plan"], !(p is NSNull) {
@@ -207,7 +220,9 @@ public struct WebAccountAdd: Equatable, Sendable, CustomStringConvertible, Custo
         guard let secret = d["secret"] as? String, WebSecretText.valid(secret) else {
             throw WebAction.Invalid("secret: the key or token as it was printed (20–4096 characters)")
         }
-        return WebAccountAdd(name: name, kind: kind, plan: plan, secret: secret)
+        var a = WebAccountAdd(name: name, kind: kind, plan: plan, secret: secret)
+        a.provider = provider
+        return a
     }
 
     /// Any text with the secret (and its whitespace-free form) replaced — for an error message.
@@ -357,8 +372,10 @@ public struct WebOnboardingConfig: Equatable, Sendable {
         guard Set(d.keys).isSuperset(of: ["defaultImage", "account"]), Set(d.keys).isSubset(of: ["defaultImage", "account", "access", "ignoreMode"]) else {
             throw WebAction.Invalid("exactly defaultImage and account (and access, ignoreMode)")
         }
-        guard let i = d["defaultImage"] as? String, ["lab", "claude-code", "pi", "codex"].contains(i) else {
-            throw WebAction.Invalid("defaultImage: lab, claude-code, pi or codex")
+        // 617: every agent this build has a recipe for (its own default image: `grok` is Debian · Grok Build).
+        let images = ["lab"] + AgentKind.allCases.filter { $0 != .none }.map(\.rawValue)
+        guard let i = d["defaultImage"] as? String, images.contains(i) else {
+            throw WebAction.Invalid("defaultImage: " + images.joined(separator: ", "))
         }
         guard let a = d["account"] as? String, Onboarding.Account(rawValue: a) != nil else {
             throw WebAction.Invalid("account: \(Onboarding.Account.allCases.map(\.rawValue).joined(separator: ", "))")

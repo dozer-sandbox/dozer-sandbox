@@ -22,7 +22,7 @@ import { actOrThrow } from '../core/operations.js';
  * @typedef {object} DialogOptions
  * @property {boolean} [danger]          the submit button is destructive
  * @property {string}  [icon]            the submit button's icon (else `iconFor(submitLabel)`)
- * @property {string}  [confirmName]     the person types this name before submit is enabled
+ * @property {string}  [confirmCheck]    617: the person ticks this sentence before submit is enabled (no typing)
  * @typedef {{ extra: HTMLElement, error: HTMLElement, submit: HTMLButtonElement }} DialogParts
  */
 /**
@@ -75,13 +75,13 @@ export function dialog(title, intro, fields, submitLabel, onSubmit, opts = {}) {
   form.append(h('div', { class: 'dlg-head' }, h('h2', { class: 'h-title' }, title), close),
     h('div', { class: 'dlg-body' }, intro ? h('p', { class: 'sub' }, intro) : null, ...rows, extra, error),
     h('div', { class: 'dlg-foot dlg-buttons' }, why, cancel, submit));
-  if (opts.confirmName) {
+  // 617 (owner, on deleting a try: "i hate this" — typing the name): a box to tick instead.
+  if (opts.confirmCheck) {
     submit.disabled = true;
-    why.textContent = 'Type the name to ' + submitLabel.split(' ')[0].toLowerCase() + ' it';
-    const typed = h('input', { type: 'text', class: 'mono', autocomplete: 'off', spellcheck: 'false', 'aria-label': 'type the name to confirm' });
-    typed.addEventListener('input', () => { submit.disabled = typed.value !== opts.confirmName; why.hidden = !submit.disabled; });
-    inputs.__confirm = typed;
-    extra.before(h('label', { class: 'field' }, h('span', null, 'Type ', h('code', null, opts.confirmName), ' to confirm'), typed));
+    const box = h('input', { type: 'checkbox', 'data-confirm-check': '' });
+    box.addEventListener('change', () => { submit.disabled = !box.checked; });
+    inputs.__check = box;
+    extra.before(h('label', { class: 'field check confirm-check' }, box, h('span', null, opts.confirmCheck)));
   }
   form.addEventListener('submit', async (ev) => {
     ev.preventDefault();
@@ -96,22 +96,29 @@ export function dialog(title, intro, fields, submitLabel, onSubmit, opts = {}) {
     } catch (e) {
       error.textContent = e.message || String(e);
     } finally {
-      if (!opts.confirmName || (inputs.__confirm && inputs.__confirm.value === opts.confirmName)) submit.disabled = false;
+      if (!opts.confirmCheck || (inputs.__check && inputs.__check.checked)) submit.disabled = false;
     }
   });
   d.addEventListener('close', () => d.remove());
   d.append(form);
   document.body.append(d);
   d.showModal();
-  const first = form.querySelector('input,select,textarea');
+  const first = opts.confirmCheck ? cancel : form.querySelector('input,select,textarea');
   if (first) first.focus();
   return Object.assign(d, { inputs, why });
 }
 
-/// A destructive action: the person types the name; the request carries it as `confirm`.
+/// 617 (owner: "same simplified delete experience"): THE confirmation of a destructive action — a box to tick, never a
+/// name to type. The sentence says what will happen ("Yes, reset demo"); the button waits for the tick; the request
+/// still carries the name as `confirm`, as the host requires. Every destructive confirm uses it: Remove/Reset a
+/// sandbox, Delete/Revert a restore point, Remove an account, an image or a template, Delete a try.
+const CONFIRM_ICON = { remove: 'trash-2', delete: 'trash-2', reset: 'rotate-ccw', revert: 'history' };
+export function confirmWithCheck(title, text, check, name, body, submitLabel) {
+  const verb = (submitLabel || title).split(' ')[0];
+  dialog(title, text, [], submitLabel || verb, async () => actOrThrow({ ...body, confirm: name }),
+    { danger: true, confirmCheck: check, icon: CONFIRM_ICON[verb.toLowerCase()] || 'triangle-alert' });
+}
+/// The same, with the sentence made from the title: "Remove account work" → "Yes, remove account work".
 export function confirmAction(title, text, name, body) {
-  dialog(title, text, [], title, async () => {
-    const op = await actOrThrow({ ...body, confirm: name });
-    return op;
-  }, { danger: true, confirmName: name });
+  confirmWithCheck(title, text, 'Yes, ' + title.charAt(0).toLowerCase() + title.slice(1), name, body, title.split(' ')[0]);
 }

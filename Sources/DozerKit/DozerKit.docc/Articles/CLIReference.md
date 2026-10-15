@@ -108,6 +108,7 @@ See <doc:Concepts> for what each word means.
 | `sleep NAME` · `wake NAME` | pause + snapshot to disk; survives the host crashing | ~0.3 s | kept | continue |
 | `hibernate NAME` · `wake NAME` | snapshot, then the VM stops | ~0.35 s / ~0.3 s | **returned** | continue: same PIDs, same screens |
 | `shutdown NAME` | a cold stop; the disk is kept | | returned | end |
+| `down NAME [--sleep \| --shutdown [-y]]` | the opposite of `up`: hibernate (the default), sleep, or shut down (asked as `shutdown` is) — the same requests and output as those verbs | as those | as those | as those |
 | `reset NAME` | shut down and go back to a fresh copy of the image (restore points and the agent's state disk stay) | | | end |
 | `rm NAME` | remove the sandbox and everything it has on disk | | | end |
 
@@ -184,9 +185,12 @@ doz builder start [--yes]      # container system start --enable-kernel-install 
 
 | command | what |
 |---|---|
-| `attach NAME [SESSION] [--no-wake]` | Your terminal becomes that session. **Ctrl-]** opens a one-line menu over the bottom row (`d detach · n next · p prev · s sessions · Esc back`; n/p/s move this terminal to another session of the sandbox; removed by a clean redraw from the session's snapshot); a second Ctrl-] (quickly, or at the menu) detaches — in every keyboard encoding (`--detach-key ctrl-x\|none`; a pipe on stdin detaches at once). The terminal's title is `ui.terminal_title` (`{sandbox} · {session} · {time}`; `{image}` `{phase}` too), refreshed each minute, the terminal's own pushed and popped (CSI 22/23 t); the session's own title is kept out meanwhile (`""`: leave it to the session). A paused or sleeping sandbox wakes first unless `--no-wake`. Hibernated while attached: the client waits and reattaches by itself on wake. |
+| `attach NAME [SESSION] [--no-wake]` | Your terminal becomes that session; with no SESSION, the image's own session — opened first when it is not running (said). Before the session's screen is drawn both of the terminal's screens are cleared (no flash of an earlier program's). **Ctrl-]** opens a one-line menu over the bottom row (`d detach · n next · p prev · s sessions · Esc back`; n/p/s move this terminal to another session of the sandbox; removed by a clean redraw from the session's snapshot); a second Ctrl-] (quickly, or at the menu) detaches — in every keyboard encoding (`--detach-key ctrl-x\|none`; a pipe on stdin detaches at once). The terminal's title is `ui.terminal_title` (`{sandbox} · {session} · {time}`; `{image}` `{phase}` too), refreshed each minute, the terminal's own pushed and popped (CSI 22/23 t); the session's own title is kept out meanwhile (`""`: leave it to the session). A paused or sleeping sandbox wakes first unless `--no-wake`. Hibernated while attached: the client waits and reattaches by itself on wake. |
 | `run NAME [--session S] [-d] -- CMD …` | A **new** session running `CMD`, attached; exits with `CMD`'s exit code. No shell in front — write `bash -lc '…'` for one. |
 | `exec NAME [--user U] [--workdir D] [-e K=V] [--timeout S] -- CMD …` | One-shot, no terminal: stdout, stderr and the exit code pass straight through (default timeout 120 s). Agent images run as the agent's user in `/workspace`; `--user root` for root. A sleeping sandbox is woken and an off one started first (594; `--no-wake`, `--no-start`; `--json` has `started`, `woke`, `bootMilliseconds`) — `run` starts one too. |
+| `get NAME PATH [LOCAL] [--force]` | Copy a file or folder out of the sandbox (PATH relative = under `/workspace`; LOCAL default the current folder — into an existing folder it keeps its name, else it is the new name). Folders whole; modes kept; owned by you on the Mac. Unpacked in a temporary folder beside LOCAL, checked, then moved into place — never into Dozer's store; a link that points outside the folder stops it. An existing LOCAL needs `--force` (a file replaced, a folder merged). Woken/started as `exec` (`--no-wake`, `--no-start`). Isolated sandboxes too. `--json`. |
+| `put NAME LOCAL [PATH] [--force]` | Copy a file or folder from this Mac in (PATH default `/workspace`). Owned by the image's user — by root only where that user cannot write (said). The same rules as `get`. |
+| `cp SRC DST` | The Docker spelling of both: `cp NAME:PATH LOCAL` = `get`, `cp LOCAL NAME:PATH` = `put` (`NAME:` alone = `/workspace`). |
 | `sessions NAME` | The sandbox's terminal sessions. |
 | `sessions restart NAME SESSION [--fresh] [-d]` | End the session's program and start the same one again, in the same session and folder (an agent's own session continues its conversation; `--fresh`: a new one), then attach. Running sandboxes only. |
 | `sessions end NAME SESSION` | End the session's program (hung up, then terminated, then killed). |
@@ -291,6 +295,16 @@ doz account default work                         # every sandbox on the default 
 doz account verify work                          # one tiny request to api.anthropic.com
 doz account rm work [--force]                    # also deletes the keychain item doz made
 doz account keepalive on                          # off by default: runs `claude -p` near expiry
+doz try grok                                     # try an agent: a new empty folder, Locked + its model, attached; on exit sleep/delete/keep
+doz try --ui grok                                # the same in the dashboard's Quick try (#/try/grok; doz ui started in the background if needed)
+doz try grok --dry-run --json                    # the plan (also --dry-run on new, create, up)
+doz search grok                                  # supported? exit 0 supported · 8 limited · 6 coming · 2 unknown
+doz guide try-fabric                             # how to use its agent or tool: this sandbox's facts, the first steps, tips (--json)
+doz account add grok --provider xai --from op://Dev/xAI/credential   # read on use from 1Password / aws:ARN / --from-command 'ARGV'
+doz account show grok                            # where its key comes from and the last read — never the key
+doz account refresh grok                         # read it from its source again now
+doz account add search --custom --host api.search.example --env-var SEARCH_API_KEY --bearer   # a key for any host
+doz account use NAME search --extra              # attach a custom key beside the account (--remove-extra)
 doz create NAME --image claude-code --account work
 ```
 
@@ -356,6 +370,21 @@ paths read-only; `doz_project.yaml`, `.git/hooks` and the two rule files are rea
 compared without case or Unicode form on a case-insensitive Mac volume. Served by a filtering view
 inside the sandbox; no rule file, no view. `doz create`/`up`/`start` warn when a rule locks `.git` or
 git-tracked files. Not a security boundary: root in the sandbox can get around it.
+
+### Web ports
+
+```bash
+doz ports NAME                               # its forwarded ports: guest port, URL on this Mac, listening/stopped/failed
+doz ports add NAME PORT [--title T] [--path P]   # forward another port (a dev server) — kept until removed
+doz ports rm NAME PORT                       # stop forwarding a port you added
+doz open NAME [PORT] [--print]               # open its first web port (or PORT) in this Mac's browser
+```
+
+A forward makes a port a program listens on inside the sandbox reachable on this Mac's `127.0.0.1` (and `::1`), never
+the network, while the sandbox runs; it closes when the sandbox stops, sleeps or hibernates and comes back at the next
+start or wake (and after a host restart). The Mac port is the guest's when free and 1024 or above, otherwise another
+(said, and kept). A recipe's `ports@1` declares the tool's own (AIChat's playground). Inbound only: the network policy
+and the proxy do not apply, and no credential crosses it.
 
 ### The tools layer
 
@@ -465,6 +494,7 @@ doz image ls                   # built-in images and templates, whether each is 
                                # and an agent image's version: claude-code 2.1.227 (2.1.285 available — preparing)
 doz image ls --tree            # the lineage: OCI base → image → template → sandboxes, with sizes
 doz image bake claude-code     # prepare it now (joins a preparation already running; minutes, needs network)
+doz image log claude-code      # how it was built: inputs, every command/script verbatim, files written, checks, output (--json)
 doz image rm NAME              # sandboxes already made from it keep working
 ```
 
@@ -674,8 +704,8 @@ One settings file, `doz.toml`, lists every setting grouped in sections (`[ui]`, 
 `[store]`, `[claude]`, `[defaults]`, `[agent]`, `[telemetry]`, `[resources]`, `[sandbox]`, `[images.lab]`, `[images.claude-code]`, `[images.pi]`,
 `[kernel]`), each with a description and `# key = default` commented out; only what you set is
 uncommented. Precedence: a command-line flag, then its environment variable, then the file, then
-the default. `ui.boot_view_on_start` (default `true`) makes Start in the web UI open a terminal on
-the boot; the UI's **Settings** page edits the same file (a host path, or a value the environment
+the default. `ui.boot_view_on_start` (default `false`) keeps the web UI on the boot console (tab zero,
+Console) after Start instead of switching to the agent's tab; the UI's **Settings** page edits the same file (a host path, or a value the environment
 sets, is read-only there). The file is written whole, atomically, `0600`; an unknown key is a
 warning, and a file that doesn't parse is ignored (and never overwritten) until it's fixed. Not
 settable, by design: the web UI's security limits and checks, the terminal's paste cap and tickets,

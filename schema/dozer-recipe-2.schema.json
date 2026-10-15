@@ -1,0 +1,560 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/dozer-sandbox/dozer-sandbox/main/schema/dozer-recipe-2.schema.json",
+  "title": "Dozer Sandbox agent recipe (schema 2)",
+  "description": "One agent recipe: how Dozer Sandbox installs, launches and confines a coding agent. Laid out like a Docker Sandbox Kit v3 workload descriptor (its top-level fields and a capabilities list, Kit's own capability types where Kit has them, Dozer's additions under `dozer` keys and in com.dozersandbox/* types) so that exporting a Kit descriptor is mechanical. Strict: an unknown key anywhere is an error. The spec: docs/recipes/RECIPE-FORMAT.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "kind", "id", "displayName", "description", "author", "sourceUrl", "licenses", "args", "provides", "capabilities"],
+  "properties": {
+    "schema": { "const": 2, "description": "The recipe format's version (this schema)." },
+    "kind": { "const": "workload", "description": "Kit's kind: the agent a sandbox runs." },
+    "id": { "type": "string", "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?/[a-z][a-z0-9-]*$", "description": "VENDOR/PRODUCT — the file's path under Recipes/agents; PRODUCT is the agent's id." },
+    "displayName": { "type": "string", "minLength": 1 },
+    "description": { "type": "string", "minLength": 1 },
+    "author": { "type": "string", "minLength": 1, "description": "Kit's author: the publisher's name." },
+    "sourceUrl": { "type": "string", "pattern": "^https://" },
+    "licenses": { "type": "array", "minItems": 1, "items": { "type": "string", "pattern": "^(LicenseRef-[A-Za-z0-9.-]+|[A-Za-z0-9.+-]+)$" }, "description": "SPDX identifiers; LicenseRef-… for a licence SPDX has no id for." },
+    "args": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version"],
+      "properties": {
+        "version": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["default", "pattern", "buildArg"],
+          "properties": {
+            "default": { "type": "string", "minLength": 1, "description": "The pinned release." },
+            "pattern": { "type": "string", "minLength": 1 },
+            "buildArg": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*$" },
+            "description": { "type": "string" }
+          }
+        }
+      }
+    },
+    "provides": { "type": "array", "minItems": 1, "maxItems": 1, "items": { "type": "string", "pattern": "^com\\.dozersandbox/[a-z][a-z0-9-]*@\\$\\{\\{ kit\\.args\\.version \\}\\}$" } },
+    "capabilities": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          { "$ref": "#/$defs/networkPolicyCapability" },
+          { "$ref": "#/$defs/credentialCapability" },
+          { "$ref": "#/$defs/volumeCapability" },
+          { "$ref": "#/$defs/agentContextCapability" },
+          { "$ref": "#/$defs/installCapability" },
+          { "$ref": "#/$defs/launchCapability" },
+          { "$ref": "#/$defs/authCapability" },
+          { "$ref": "#/$defs/gatewaysCapability" },
+          { "$ref": "#/$defs/currencyCapability" },
+          { "$ref": "#/$defs/modelsCapability" },
+          { "$ref": "#/$defs/directoryCapability" },
+          { "$ref": "#/$defs/portsCapability" },
+          { "$ref": "#/$defs/guideCapability" }
+        ]
+      },
+      "allOf": [
+        { "contains": { "$ref": "#/$defs/isNetworkPolicy" }, "minContains": 1, "maxContains": 1 },
+        { "contains": { "$ref": "#/$defs/isInstall" }, "minContains": 1, "maxContains": 1 },
+        { "contains": { "$ref": "#/$defs/isLaunch" }, "minContains": 1, "maxContains": 1 },
+        { "contains": { "$ref": "#/$defs/isAuth" }, "minContains": 1, "maxContains": 1 },
+        { "contains": { "$ref": "#/$defs/isGateways" }, "minContains": 1, "maxContains": 1 },
+        { "contains": { "$ref": "#/$defs/isDirectory" }, "minContains": 1, "maxContains": 1 },
+        { "contains": { "$ref": "#/$defs/isAgentContext" }, "minContains": 0, "maxContains": 1 },
+        { "contains": { "$ref": "#/$defs/isCurrency" }, "minContains": 0, "maxContains": 1 },
+        { "contains": { "$ref": "#/$defs/isModels" }, "minContains": 0, "maxContains": 1 },
+        { "contains": { "$ref": "#/$defs/isPorts" }, "minContains": 0, "maxContains": 1 },
+        { "contains": { "$ref": "#/$defs/isGuide" }, "minContains": 0, "maxContains": 1 }
+      ]
+    }
+  },
+  "$defs": {
+    "date": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "host": { "type": "string", "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$" },
+    "guestPath": { "type": "string", "pattern": "^/home/agent/" },
+    "strings": { "type": "array", "items": { "type": "string" } },
+    "stringMap": { "type": "object", "additionalProperties": { "type": "string" } },
+    "kitHostPort": { "type": "string", "pattern": "^[a-z0-9.-]+:443$" },
+
+    "isNetworkPolicy": { "type": "object", "required": ["type"], "properties": { "type": { "const": "com.docker.sandbox/network-policy@1" } } },
+    "isInstall": { "type": "object", "required": ["type"], "properties": { "type": { "const": "com.dozersandbox/install@1" } } },
+    "isLaunch": { "type": "object", "required": ["type"], "properties": { "type": { "const": "com.dozersandbox/launch@1" } } },
+    "isAuth": { "type": "object", "required": ["type"], "properties": { "type": { "const": "com.dozersandbox/auth@1" } } },
+    "isGateways": { "type": "object", "required": ["type"], "properties": { "type": { "const": "com.dozersandbox/gateways@1" } } },
+    "isDirectory": { "type": "object", "required": ["type"], "properties": { "type": { "const": "com.dozersandbox/directory@1" } } },
+    "isAgentContext": { "type": "object", "required": ["type"], "properties": { "type": { "const": "com.docker.sandbox/agent-context@1" } } },
+    "isCurrency": { "type": "object", "required": ["type"], "properties": { "type": { "const": "com.dozersandbox/currency@1" } } },
+    "isModels": { "type": "object", "required": ["type"], "properties": { "type": { "const": "com.dozersandbox/models@1" } } },
+
+    "modelsCapability": {
+      "type": "object", "additionalProperties": false, "required": ["type", "config"],
+      "description": "com.dozersandbox/models@1: the model sources (providers and gateways) it can be tried with, and how a choice reaches its own settings. Dozer, never the recipe, owns the key's destination hosts.",
+      "properties": {
+        "type": { "const": "com.dozersandbox/models@1" },
+        "description": { "type": "string" },
+        "config": {
+          "type": "object", "additionalProperties": false, "required": ["default"],
+          "properties": {
+            "default": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+            "shapes": { "type": "array", "items": {
+              "type": "object", "additionalProperties": false, "required": ["shape", "env"],
+              "properties": {
+                "shape": { "enum": ["openai-chat", "openai-responses", "anthropic-messages", "gemini"] },
+                "env": { "$ref": "#/$defs/stringMap" },
+                "key_env": { "$ref": "#/$defs/strings" }
+              } } },
+            "native": { "type": "array", "items": {
+              "type": "object", "additionalProperties": false, "required": ["source", "env"],
+              "properties": {
+                "source": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+                "env": { "$ref": "#/$defs/stringMap" },
+                "key_env": { "$ref": "#/$defs/strings" }
+              } } },
+            "except": { "$ref": "#/$defs/strings" },
+            "models": { "$ref": "#/$defs/stringMap" }
+          }
+        }
+      }
+    },
+    "isPorts": { "type": "object", "required": ["type"], "properties": { "type": { "const": "com.dozersandbox/ports@1" } } },
+    "isGuide": { "type": "object", "required": ["type"], "properties": { "type": { "const": "com.dozersandbox/guide@1" } } },
+
+    "networkPolicyCapability": {
+      "type": "object", "additionalProperties": false, "required": ["type", "config"],
+      "description": "Kit's network-policy@1. runtime.allow/deny are DERIVED (host:443 for the model's and vendor's hosts; for the excluded and quiet ones) and must equal what Dozer derives; Dozer's network is under dozer.",
+      "properties": {
+        "type": { "const": "com.docker.sandbox/network-policy@1" },
+        "description": { "type": "string" },
+        "config": {
+          "type": "object", "additionalProperties": false, "required": ["dozer"],
+          "properties": {
+            "runtime": {
+              "type": "object", "additionalProperties": false,
+              "properties": { "allow": { "type": "array", "items": { "$ref": "#/$defs/kitHostPort" } }, "deny": { "type": "array", "items": { "$ref": "#/$defs/kitHostPort" } } }
+            },
+            "dozer": { "$ref": "#/$defs/network" }
+          }
+        }
+      }
+    },
+    "network": {
+      "type": "object", "additionalProperties": false, "required": ["model", "update", "excluded"],
+      "properties": {
+        "model": { "$ref": "#/$defs/model" },
+        "update": { "type": "array", "items": { "$ref": "#/$defs/hostEntry" } },
+        "excluded": { "type": "array", "items": { "$ref": "#/$defs/host" } },
+        "vendor": { "type": "array", "items": { "$ref": "#/$defs/hostEntry" } },
+        "quiet": { "type": "array", "items": { "$ref": "#/$defs/hostEntry" } },
+        "off_without": { "type": "array", "items": { "$ref": "#/$defs/offWithout" } }
+      }
+    },
+    "model": {
+      "type": "object", "additionalProperties": false, "required": ["id"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^model(:[a-z0-9-]+)?$" },
+        "shared": { "type": "boolean" },
+        "title": { "type": "string" },
+        "summary": { "type": "string" },
+        "phrase": { "type": "string" },
+        "hosts": { "type": "array", "items": { "$ref": "#/$defs/hostEntry" } }
+      }
+    },
+    "hostEntry": {
+      "type": "object", "additionalProperties": false, "required": ["host"],
+      "properties": {
+        "host": { "$ref": "#/$defs/host" },
+        "paths": { "type": "array", "items": { "type": "string", "pattern": "^/" } },
+        "exact_paths": { "type": "array", "items": { "type": "string", "pattern": "^/" } },
+        "reason": { "type": "string" }
+      }
+    },
+    "offWithout": {
+      "type": "object", "additionalProperties": false, "required": ["permission", "env", "says"],
+      "properties": { "permission": { "type": "string" }, "env": { "$ref": "#/$defs/stringMap" }, "says": { "type": "string" } }
+    },
+
+    "credentialCapability": {
+      "type": "object", "additionalProperties": false, "required": ["type", "config"],
+      "description": "Kit's credential@1. service is the key provider; apiKey is DERIVED from it (providers.json) and must equal what Dozer derives.",
+      "properties": {
+        "type": { "const": "com.docker.sandbox/credential@1" },
+        "description": { "type": "string" },
+        "config": {
+          "type": "object", "additionalProperties": false, "required": ["service", "phase", "apiKey", "dozer"],
+          "properties": {
+            "service": { "type": "string", "pattern": "^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$" },
+            "phase": { "const": "runtime" },
+            "apiKey": {
+              "type": "object", "additionalProperties": false, "required": ["name", "proxyManaged", "inject"],
+              "properties": {
+                "name": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*$" },
+                "proxyManaged": { "const": true },
+                "inject": {
+                  "type": "array", "minItems": 1,
+                  "items": {
+                    "type": "object", "additionalProperties": false, "required": ["domain", "header", "format"],
+                    "properties": { "domain": { "$ref": "#/$defs/host" }, "header": { "type": "string" }, "format": { "type": "string" } }
+                  }
+                }
+              }
+            },
+            "dozer": {
+              "type": "object", "additionalProperties": false, "required": ["accounts"],
+              "properties": {
+                "accounts": { "$ref": "#/$defs/strings" },
+                "env_aliases": { "type": "array", "items": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*$" },
+                                 "description": "More guest variables that hold the same placeholder." }
+              }
+            }
+          }
+        }
+      }
+    },
+
+    "volumeCapability": {
+      "type": "object", "additionalProperties": false, "required": ["type", "config"],
+      "description": "Kit's volume@1: one folder of the agent's state, kept with the sandbox.",
+      "properties": {
+        "type": { "const": "com.docker.sandbox/volume@1" },
+        "description": { "type": "string" },
+        "config": { "type": "object", "additionalProperties": false, "required": ["path"], "properties": { "path": { "$ref": "#/$defs/guestPath" } } }
+      }
+    },
+
+    "agentContextCapability": {
+      "type": "object", "additionalProperties": false, "required": ["type", "config"],
+      "description": "Kit's agent-context@1: where Dozer writes the facts the agent reads; how, under dozer.",
+      "properties": {
+        "type": { "const": "com.docker.sandbox/agent-context@1" },
+        "description": { "type": "string" },
+        "config": {
+          "type": "object", "additionalProperties": false, "required": ["directory", "filename", "dozer"],
+          "properties": {
+            "directory": { "$ref": "#/$defs/guestPath" },
+            "filename": { "type": "string", "pattern": "^[^/\\\\]+$" },
+            "dozer": {
+              "type": "object", "additionalProperties": false, "required": ["kind"],
+              "properties": {
+                "kind": { "enum": ["skill", "context-file"] },
+                "manifest": {
+                  "type": "object", "additionalProperties": false, "required": ["file", "json"],
+                  "properties": { "file": { "type": "string" }, "json": true }
+                },
+                "launcher_arg": { "$ref": "#/$defs/strings" }
+              }
+            }
+          }
+        }
+      }
+    },
+
+    "installCapability": {
+      "type": "object", "additionalProperties": false, "required": ["type", "config"],
+      "description": "com.dozersandbox/install@1: how Dozer installs the agent (the version is args.version).",
+      "properties": {
+        "type": { "const": "com.dozersandbox/install@1" },
+        "description": { "type": "string" },
+        "config": {
+          "type": "object", "additionalProperties": false, "required": ["kind", "binary"],
+          "properties": {
+            "kind": { "enum": ["builtin", "npm", "npm-platform-binary", "manifest-binary", "pypi", "release-binary"] },
+            "builtin": { "type": "boolean" },
+            "package": { "type": "string" },
+            "platform_package": { "type": "string" },
+            "payload": { "type": "string" },
+            "compression": { "enum": ["brotli"] },
+            "binary": { "type": "string", "pattern": "^[a-z][a-z0-9_-]{0,31}$" },
+            "needs_node": { "type": "string", "pattern": "^[0-9]+$" },
+            "npm_args": { "$ref": "#/$defs/strings" },
+            "manifest": { "type": "string", "pattern": "^https://" },
+            "url": { "type": "string", "pattern": "^https://" },
+            "bake_hosts": { "type": "array", "items": { "$ref": "#/$defs/host" } },
+            "integrity": { "type": "string", "pattern": "^sha512-[A-Za-z0-9+/]+=*$" },
+            "requirements": {
+              "type": "array", "minItems": 1,
+              "description": "pypi: every distribution the venv holds, each name==version --hash=sha256:<64 hex>.",
+              "items": { "type": "string", "pattern": "^[A-Za-z0-9]([A-Za-z0-9._-]*[A-Za-z0-9])?==[A-Za-z0-9.+!_-]+ --hash=sha256:[0-9a-f]{64}$" }
+            },
+            "extras": {
+              "type": "array", "minItems": 1,
+              "description": "File sets the tool needs beside its program, each one folder of a sha256-pinned archive, unpacked in the bake under /opt/<id>/.",
+              "items": {
+                "type": "object", "additionalProperties": false, "required": ["url", "sha256", "path", "to", "what"],
+                "properties": {
+                  "url": { "type": "string", "pattern": "^https://" },
+                  "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+                  "path": { "type": "string" },
+                  "to": { "type": "string", "pattern": "^/opt/" },
+                  "what": { "type": "string" }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+
+    "launchCapability": {
+      "type": "object", "additionalProperties": false, "required": ["type", "config"],
+      "description": "com.dozersandbox/launch@1: how Dozer runs the agent.",
+      "properties": {
+        "type": { "const": "com.dozersandbox/launch@1" },
+        "description": { "type": "string" },
+        "config": {
+          "type": "object", "additionalProperties": false,
+          "required": ["command", "no_prompts_args", "passthrough", "env", "state_env", "status", "verify", "check"],
+          "properties": {
+            "command": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+            "no_prompts_args": { "$ref": "#/$defs/strings" },
+            "no_prompts_env": { "$ref": "#/$defs/stringMap", "description": "Environment set only when the launcher puts no_prompts_args first (the same rule: not with <ID>.permissions = ask, nor as root)." },
+            "passthrough": { "$ref": "#/$defs/strings" },
+            "env": { "$ref": "#/$defs/stringMap" },
+            "state_env": { "$ref": "#/$defs/stringMap" },
+            "first_run": { "type": "array", "items": { "$ref": "#/$defs/firstRun" } },
+            "session_env": { "$ref": "#/$defs/stringMap" },
+            "session": { "enum": ["shell"], "description": "shell: the default session is a login shell with the program on its PATH (a tool that answers and exits)." },
+            "status": { "enum": ["osc7501", "none"] },
+            "resume": { "$ref": "#/$defs/strings" },
+            "resume_check": { "type": "string" },
+            "verify": {
+              "type": "array",
+              "items": {
+                "type": "object", "additionalProperties": false, "required": ["argv"],
+                "properties": { "argv": { "type": "array", "minItems": 1, "items": { "type": "string" } }, "expect": { "type": "string" } }
+              }
+            },
+            "check": {
+              "type": "object", "additionalProperties": false, "required": ["argv", "expect"],
+              "description": "The smoke turn `make recipe-check` runs in a fresh try against the stand-in provider: argv (through the launcher, as the agent), the text its output must contain, its exit status (default 0) and how long it may take in seconds (default 240).",
+              "properties": {
+                "argv": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+                "expect": { "type": "string", "minLength": 1 },
+                "exit": { "type": "integer", "minimum": 0, "maximum": 255 },
+                "timeout": { "type": "integer", "minimum": 10, "maximum": 1800 },
+                "screen": {
+                  "type": "object", "additionalProperties": false,
+                  "description": "The default session's first screen, with nothing typed (not for `session: shell`): expect — regular expressions each of which must match it; refuse — ones none may match, on top of the generic setup/sign-in/consent list; allow — a line matching one of these is not held against the generic list; wait — seconds to let it settle (default 15).",
+                  "properties": {
+                    "expect": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+                    "refuse": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+                    "allow": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+                    "wait": { "type": "integer", "minimum": 3, "maximum": 120 },
+                    "keys": { "type": "array", "maxItems": 8, "items": { "enum": ["enter", "esc", "up", "down", "tab", "space"] } }
+                  }
+                }
+              }
+            },
+            "settings": {
+              "type": "object", "additionalProperties": false,
+              "properties": { "version": { "type": "string" }, "permissions": { "type": "string" } }
+            }
+          }
+        }
+      }
+    },
+    "firstRun": {
+      "type": "object", "additionalProperties": false, "required": ["file", "set"],
+      "properties": { "file": { "type": "string", "pattern": "^~/" }, "set": { "type": "object" }, "format": { "enum": ["json"], "description": "json: a JSON file whose name has no extension." } }
+    },
+
+    "authCapability": {
+      "type": "object", "additionalProperties": false, "required": ["type", "config"],
+      "description": "com.dozersandbox/auth@1: the ways a person lets the agent reach its model, recommended first.",
+      "properties": {
+        "type": { "const": "com.dozersandbox/auth@1" },
+        "description": { "type": "string" },
+        "config": {
+          "type": "object", "additionalProperties": false, "required": ["methods"],
+          "properties": {
+            "methods": {
+              "type": "array", "minItems": 1,
+              "items": {
+                "type": "object", "additionalProperties": false, "required": ["kind"],
+                "properties": {
+                  "kind": { "enum": ["api-key", "vendor-sign-in", "none", "gateway"] },
+                  "provider": { "type": "string" },
+                  "account": { "type": "string" },
+                  "accounts": { "$ref": "#/$defs/strings" },
+                  "keys_page": { "type": "string", "pattern": "^https://" },
+                  "free_tier": { "type": "boolean" },
+                  "free_tier_note": { "type": "string" },
+                  "in_sandbox": { "type": "boolean" },
+                  "gateways": { "$ref": "#/$defs/strings" },
+                  "note": { "type": "string" },
+                  "checked": { "$ref": "#/$defs/date" }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+
+    "gatewaysCapability": {
+      "type": "object", "additionalProperties": false, "required": ["type", "config"],
+      "description": "com.dozersandbox/gateways@1: how the agent works through each model gateway.",
+      "properties": {
+        "type": { "const": "com.dozersandbox/gateways@1" },
+        "description": { "type": "string" },
+        "config": {
+          "type": "object", "additionalProperties": false, "required": ["entries"],
+          "properties": { "entries": { "type": "array", "items": { "$ref": "#/$defs/gatewaySupport" } } }
+        }
+      }
+    },
+    "gatewaySupport": {
+      "type": "object", "additionalProperties": false, "required": ["gateway", "level"],
+      "properties": {
+        "gateway": { "type": "string" },
+        "level": { "enum": ["documented", "verified", "experimental", "no", "unknown"] },
+        "shape": { "enum": ["openai-chat", "openai-responses", "anthropic-messages", "gemini"] },
+        "endpoint": { "type": "string" },
+        "how": {
+          "type": "object", "additionalProperties": false,
+          "properties": {
+            "env": { "$ref": "#/$defs/stringMap" },
+            "config": { "type": "array", "items": { "$ref": "#/$defs/firstRun" } },
+            "args": { "$ref": "#/$defs/strings" },
+            "model_args": { "$ref": "#/$defs/strings" }
+          }
+        },
+        "proxy_route": {
+          "type": "object", "additionalProperties": false, "required": ["from_host", "paths"],
+          "properties": { "from_host": { "$ref": "#/$defs/host" }, "paths": { "$ref": "#/$defs/stringMap" }, "unmapped": { "$ref": "#/$defs/strings" } }
+        },
+        "limits": { "$ref": "#/$defs/strings" },
+        "notes": { "$ref": "#/$defs/strings" },
+        "evidence": { "type": "string" },
+        "source": { "type": "string", "pattern": "^https://" },
+        "checked": { "$ref": "#/$defs/date" },
+        "reason": { "type": "string" }
+      }
+    },
+
+    "guideCapability": {
+      "type": "object", "additionalProperties": false, "required": ["type", "config"],
+      "description": "com.dozersandbox/guide@1: the companion guide — what it is, the first steps (the first with a command is the check turn), tips, docs, a notice. Dozer adds the sandbox's facts.",
+      "properties": {
+        "type": { "const": "com.dozersandbox/guide@1" },
+        "description": { "type": "string" },
+        "config": {
+          "type": "object", "additionalProperties": false, "required": ["intro", "steps"],
+          "properties": {
+            "intro": { "type": "string", "minLength": 1, "maxLength": 400 },
+            "steps": { "type": "array", "minItems": 1, "maxItems": 8, "items": {
+              "type": "object", "additionalProperties": false, "required": ["text"],
+              "properties": {
+                "text": { "type": "string", "minLength": 1, "maxLength": 200 },
+                "command": { "type": "string", "minLength": 1, "maxLength": 300 },
+                "edit": { "type": "boolean" }
+              } } },
+            "tips": { "type": "array", "maxItems": 6, "items": { "type": "string", "minLength": 1, "maxLength": 240 } },
+            "docs": { "type": "string", "pattern": "^https://" },
+            "notice": { "type": "string", "minLength": 1, "maxLength": 200, "description": "One short line doz try says first: what the person meets at the first start that Dozer leaves to them." }
+          }
+        }
+      }
+    },
+
+    "portsCapability": {
+      "type": "object", "additionalProperties": false, "required": ["type", "config"],
+      "description": "com.dozersandbox/ports@1 (RP-1): the web ports the program serves in the sandbox, each forwarded to the Mac's loopback (127.0.0.1) while the sandbox runs, with an Open button.",
+      "properties": {
+        "type": { "const": "com.dozersandbox/ports@1" },
+        "description": { "type": "string" },
+        "config": {
+          "type": "object", "additionalProperties": false, "required": ["ports"],
+          "properties": {
+            "ports": {
+              "type": "array", "minItems": 1, "maxItems": 16,
+              "items": {
+                "type": "object", "additionalProperties": false, "required": ["port", "title"],
+                "properties": {
+                  "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+                  "title": { "type": "string", "minLength": 1, "maxLength": 40 },
+                  "path": { "type": "string", "pattern": "^/[^\\s]*$" },
+                  "protocol": { "enum": ["http", "ws"] },
+                  "auth": { "enum": ["none", "token", "login"] },
+                  "token_hint": { "type": "string" },
+                  "check": { "type": "string", "pattern": "^/[^\\s]*$" }
+                }
+              }
+            },
+            "serve": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } }
+          }
+        }
+      }
+    },
+
+    "currencyCapability": {
+      "type": "object", "additionalProperties": false, "required": ["type", "config"],
+      "description": "com.dozersandbox/currency@1: where the agent stands with its maker, and when the recipe was last checked.",
+      "properties": {
+        "type": { "const": "com.dozersandbox/currency@1" },
+        "description": { "type": "string" },
+        "config": {
+          "type": "object", "additionalProperties": false, "minProperties": 1,
+          "properties": { "checked": { "$ref": "#/$defs/date" }, "lifecycle": { "$ref": "#/$defs/lifecycle" } }
+        }
+      }
+    },
+    "lifecycle": {
+      "type": "object", "additionalProperties": false, "required": ["status"],
+      "properties": {
+        "status": { "enum": ["current", "superseded", "retired", "discontinued"] },
+        "by": { "type": "string" },
+        "note": { "type": "string" },
+        "source": { "type": "string", "pattern": "^https://" },
+        "checked": { "$ref": "#/$defs/date" }
+      }
+    },
+
+    "directoryCapability": {
+      "type": "object", "additionalProperties": false, "required": ["type", "config"],
+      "description": "com.dozersandbox/directory@1: what the directory index, doz search and the Quick try show.",
+      "properties": {
+        "type": { "const": "com.dozersandbox/directory@1" },
+        "description": { "type": "string" },
+        "config": {
+          "type": "object", "additionalProperties": false, "required": ["default_base", "platforms", "tags", "kind", "categories"],
+          "properties": {
+            "kind": { "enum": ["coding-agent", "ai-tool"], "description": "What it is: the lists' two sections (tags.json kinds)." },
+            "categories": { "type": "array", "minItems": 1, "uniqueItems": true,
+              "items": { "enum": ["coding-agent", "personal-agent", "terminal-tool", "framework", "browser-agent", "mcp", "research", "evaluation", "workflow", "local-models", "chat-app"] },
+              "description": "Its categories (tags.json categories): the Quick try's filter pills, doz search --tag." },
+            "aliases": { "type": "array", "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" } },
+            "icon": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+            "default_base": { "type": "string" },
+            "platforms": {
+              "type": "object", "additionalProperties": false, "required": ["glibc", "musl"],
+              "properties": { "glibc": { "type": "boolean" }, "musl": { "type": "boolean" } }
+            },
+            "limits": {
+              "type": "array",
+              "items": {
+                "type": "object", "additionalProperties": false, "required": ["reason"],
+                "properties": { "musl": { "type": "boolean" }, "base": { "type": "string" }, "reason": { "type": "string" } }
+              }
+            },
+            "tags": {
+              "type": "array",
+              "items": {
+                "type": "object", "additionalProperties": false, "required": ["tag", "level"],
+                "properties": {
+                  "tag": { "type": "string" },
+                  "level": { "enum": ["documented", "verified", "experimental", "no", "unknown"] },
+                  "evidence": { "type": "string" },
+                  "source": { "type": "string", "pattern": "^https://" },
+                  "notes": { "$ref": "#/$defs/strings" },
+                  "checked": { "$ref": "#/$defs/date" }
+                }
+              }
+            },
+            "terms": { "type": "string" },
+            "licence": { "type": "string" }
+          }
+        }
+      }
+    }
+  }
+}

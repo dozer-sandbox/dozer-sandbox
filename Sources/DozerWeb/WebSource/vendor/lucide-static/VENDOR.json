@@ -163,6 +163,12 @@
       "serve": "icon"
     },
     {
+      "file": "list.svg",
+      "fromTarball": "package/icons/list.svg",
+      "sha256": "246b00033e64827952512995e3855b06d1051d0b1c5f750f29d1478f5c33c239",
+      "serve": "icon"
+    },
+    {
       "file": "list-checks.svg",
       "fromTarball": "package/icons/list-checks.svg",
       "sha256": "4dd751536caf91a9f5913acc85226a189c55055b432134b2bcd174be67a9e86f",

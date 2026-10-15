@@ -22,7 +22,8 @@ view`, `gh pr list` and the rest work — read-only unless **Push to GitHub** is
 
 ## When it runs
 
-- **The first start** of a sandbox sets the layer up and shows each tool as a step:
+- **The first start** of a sandbox sets the layer up and shows each tool as a step (on a terminal with `-v`, or with
+  `--progress plain`; by default only a tool that fails is shown):
 
   ```
   ✓ tools: gh 2.102.0 on this Mac (downloaded once, sha256 checked)

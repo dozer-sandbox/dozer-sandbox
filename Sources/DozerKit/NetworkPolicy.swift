@@ -215,12 +215,19 @@ public struct EgressRule: Sendable, Codable, Equatable, Identifiable {
 
     public var hasHTTPConditions: Bool { methods != nil || pathPrefixes != nil }
 
+    /// 617: a path condition ending in `$` is that path EXACTLY (`/$`: the root only — Grok Build's key-less start-up
+    /// check); any other is a prefix.
+    public static func isExactPath(_ p: String) -> Bool { p.count > 1 && p.hasSuffix("$") }
+    public static func pathMatches(_ condition: String, _ path: String) -> Bool {
+        isExactPath(condition) ? path == String(condition.dropLast()) : path.hasPrefix(condition)
+    }
+
     /// A one-line description, used as the log's "rule" column.
     public var label: String {
         var s = "\(action.rawValue) \(host)"
         if let ports { s += ":" + ports.map(String.init).joined(separator: ",") }
         if let methods { s += " " + methods.joined(separator: "|") }
-        if let pathPrefixes { s += " " + pathPrefixes.map { $0 + "*" }.joined(separator: " ") }
+        if let pathPrefixes { s += " " + pathPrefixes.map { EgressRule.isExactPath($0) ? String($0.dropLast()) : $0 + "*" }.joined(separator: " ") }
         return s
     }
 
@@ -242,7 +249,7 @@ public struct EgressRule: Sendable, Codable, Equatable, Identifiable {
 
     func matchesRequest(method: String, path: String) -> Bool {
         if let methods, !methods.contains(method.uppercased()) { return false }
-        if let pathPrefixes, !pathPrefixes.contains(where: { path.hasPrefix($0) }) { return false }
+        if let pathPrefixes, !pathPrefixes.contains(where: { EgressRule.pathMatches($0, path) }) { return false }
         return true
     }
 }

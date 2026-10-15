@@ -37,6 +37,15 @@ public struct WebSession: Equatable, Sendable {
 public actor WebSessionStore {
     private struct Stored: Codable { let csrf: String; var expiresAt: Date }
     private struct File: Codable { var port: Int; var sessions: [String: Stored] }
+
+    /// 617: how many unexpired sessions `file` keeps for `port` — a browser that will sign in by itself (`doz try --ui`
+    /// opens the plain origin then, not a new link). Reads digests and dates only.
+    public static func keptSessions(file: URL, port: Int, now: Date = Date()) -> Int {
+        guard let d = try? Data(contentsOf: file), let f = try? decoder.decode(File.self, from: d), f.port == port else {
+            return 0
+        }
+        return f.sessions.values.filter { $0.expiresAt > now }.count
+    }
     /// 605: why a cookie no longer signs in (`ui.revoked`).
     struct Ended: Codable { var reason: String; var until: Date }
     private struct RevokedFile: Codable { var revoked: [String: Ended] }

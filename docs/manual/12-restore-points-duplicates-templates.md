@@ -33,7 +33,7 @@ doz point rm my-app before-refactor
 
 **In the dashboard:** a sandbox's details › **Points** has **Take a restore point…**, and per point
 **Revert**, and under its **⋯** **Fork…**, **Save as template…**, **Duplicate…** and **Delete…** (revert
-and delete ask you to type the name).
+and delete ask you to tick a box first).
 
 ## Duplicates
 
