@@ -151,6 +151,14 @@ final class ModelSourcesTests: XCTestCase {
         let back = try ChoiceOptions.from(Array(p.argv.dropFirst(3)) + ["--agent", "shell-gpt"]).planChoices()
         XCTAssertEqual(back.modelSource, "openrouter")
         XCTAssertEqual(back.model, "anthropic/claude-sonnet-4.6")
+        // 618: pi on a gateway reaches that gateway, not Anthropic's model; on Anthropic it keeps that line.
+        let model = AgentPermissions.permission("model")!.title
+        let pg = CreatePlanner.plan(PlanRequest(purpose: "try", create: try ChoiceOptions.from(["--agent", "pi", "--gateway", "openrouter",
+                                                                                                 "--model", "anthropic/claude-sonnet-4.5"]).planChoices()), facts: facts)
+        XCTAssertEqual(pg.reach.first?.text, "Model: anthropic/claude-sonnet-4.5 through OpenRouter (openrouter.ai) — its key only ever goes there")
+        XCTAssertFalse(pg.reach.contains { $0.text.hasPrefix(model) }, pg.reach.map(\.text).joined(separator: " | "))
+        let pa = CreatePlanner.plan(PlanRequest(purpose: "try", create: try ChoiceOptions.from(["--agent", "pi"]).planChoices()), facts: facts)
+        XCTAssertTrue(pa.reach.contains { $0.text.hasPrefix(model) }, pa.reach.map(\.text).joined(separator: " | "))
         // No key of the chosen source: no account, the problem names the fix.
         let none = CreatePlanner.plan(PlanRequest(purpose: "try", create: try ChoiceOptions.from(["--agent", "shell-gpt", "--provider", "openai"]).planChoices()),
                                       facts: facts)

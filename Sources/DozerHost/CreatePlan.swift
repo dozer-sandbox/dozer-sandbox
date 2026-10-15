@@ -362,6 +362,11 @@ public enum CreatePlanner {
                                newFolder: newFolder, settings: f.settings,
                                bridgeSettings: o.settings, agent: choice?.agent)
         if let m = planModel {
+            // 618: a built-in agent (pi) on another source than Anthropic talks to that source only — its shared
+            // Anthropic model permission is not what it reaches (the source's line below is), as for a recipe agent.
+            if m.source != "anthropic", choice?.agent.recipe?.isBuiltin == true, let t = AgentPermissions.permission("model")?.title {
+                reach.removeAll { $0.kind == "model" && $0.text.hasPrefix(t) }
+            }
             let hosts = ModelSources.hosts(m.source).joined(separator: ", ")
             reach.insert(ReachLine("model", "Model: \(m.model) through \(m.title) (\(hosts)) — its key only ever goes there"), at: 0)
         }
