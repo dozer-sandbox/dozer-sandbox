@@ -1052,8 +1052,11 @@ public struct WebAccount: Codable, Equatable, Sendable {
     public var sourceProblem: String?
     /// 617 (D6): a custom key's hosts (read-only in the page).
     public var hosts: [String]?
+    /// 617: when its key was last checked and worked (nil: never).
+    public var verifiedAt: Date?
 
     public init(_ a: AccountRow) {
+        verifiedAt = a.verifiedAt
         provider = a.provider
         sourceLabel = a.sourceLabel
         sourceState = a.sourceState
@@ -1254,6 +1257,13 @@ public struct WebAccounts: Codable, Equatable, Sendable {
     public var sources: [String: [String]] = [:]
     public var recipeDefaults: [String: String] = [:]
     public var sourceTitles: [String: String] = [:]
+    /// 617 (the Accounts & keys redesign): the providers in Dozer's order (Anthropic, OpenAI, then providers.json's), the
+    /// tools each one's key serves (agent ids, in the try list's order — `agentTitles` names them), and the providers whose
+    /// key has no check (a custom key has none either).
+    public var providers: [String] = []
+    public var providerTools: [String: [String]] = [:]
+    public var agentTitles: [String: String] = [:]
+    public var uncheckedProviders: [String] = []
 
     public init(accounts: [WebAccount], defaultAccount: String, keepalive: Bool, openaiDefault: String? = nil,
                 providerDefaults: [String: String] = [:]) {
@@ -1273,6 +1283,16 @@ public struct WebAccounts: Codable, Equatable, Sendable {
                                                                    providers: providerDefaults, kinds: kinds)
         }
         for id in ModelSources.ids { sourceTitles[id] = ModelSources.title(id) }
+        providers = ["anthropic", "openai"] + ModelSources.ids.filter { $0 != "anthropic" && $0 != "openai" }
+        for kind in AgentKind.allCases where kind != .none {
+            guard let r = kind.recipe else { continue }
+            agentTitles[r.id] = r.title
+            // The built-in three: Claude Code and pi take Anthropic accounts, Codex OpenAI's; a recipe agent its sources.
+            let srcs = AgentCredentials.sources(r.id) ?? (r.id == "codex" ? ["openai"] : ["anthropic"])
+            for s in srcs { providerTools[s, default: []].append(r.id) }
+        }
+        // Anthropic's and OpenAI's keys are checked by Dozer itself; another provider's only when providers.json says how.
+        uncheckedProviders = ModelSources.ids.filter { $0 != "anthropic" && $0 != "openai" && KeyProviders.provider($0)?.check == nil }
     }
 }
 

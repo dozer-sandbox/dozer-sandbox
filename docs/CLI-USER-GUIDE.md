@@ -1073,8 +1073,8 @@ already under way). The list has no session count, since counting asks every ses
 guest; each sandbox's page lists its sessions.
 
 **Keys and tokens in the browser** (594, owner ruling; the setting `ui.allow_secret_entry`, on by
-default). The setup wizard's account step and **Accounts & keys › Add an account** take an Anthropic
-API key or a Claude setup token (with its plan) in a masked field (`type=password`, no autocomplete, no
+default). The setup wizard's account step and **Accounts & keys › Add a key** take an
+API key of any provider, or a Claude setup token (with its plan), in a masked field (`type=password`, no autocomplete, no
 spellcheck). The page reads it once and empties the field at once; it goes out only in the body of one
 CSRF-checked `POST /api/v1/accounts` — never a URL, a log line, an event, an Operation or an error
 message — and the host stores it exactly as `doz account add` does (the login keychain, one tiny check

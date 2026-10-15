@@ -84,11 +84,33 @@ only to that provider's or gateway's own API — a placeholder sent anywhere els
 
 ## Accounts — in the dashboard
 
-**Accounts & keys** lists your accounts with their state and expiry: **Add account** (a masked field
-for a key or token, with the plan for a token), **Verify** (or **Make default**) on each row with the
-rest — **Remove…** too — under its **⋯**, and keep-alive on or off. A sandbox's page shows its account,
-with **Account…** (the details' **Keys** tab) to change it; New sandbox
-offers only the accounts its agent can use.
+**Accounts & keys** shows one card per provider (Anthropic, OpenAI, then each provider and gateway),
+naming the tools its key serves. Each key is a row:
+
+- a **Default** radio: the key a sandbox that follows its provider's default uses. Anthropic also
+  offers **No default**.
+- the key's name, and where it lives in plain words: Keychain, 1Password, AWS, a command, or this
+  Mac's Claude login. **Details** shows the keychain item, the fingerprint, the source and the last check.
+- one status: **Works**, **Not checked**, **Refused** (its provider said no), **Can't read** (its source
+  did not answer, or its keychain item is gone) or **No check for this provider**.
+- the sandboxes that use it, then the one action that helps now: **Check**, **Read again** or **Fix**.
+  **Remove…** sits under **⋯**.
+
+A key that fails comes first, at the top of the page, with what the provider or source answered, the
+fix, and the sandboxes it affects. The same key stored twice is flagged ("same key as …"). The Claude
+Code keep-alive switch sits under the Mac login's row.
+
+**By sandbox** lists every sandbox with the key its tool uses now and how it got it (the provider's
+default, or chosen for it). **Change…** picks another; it applies from the sandbox's next session.
+
+**Add a key** asks for the provider first; type a tool's name (grok, codex, gemini) to find the
+providers it can use. Paste the key into the masked field: Dozer checks it with one small request
+and keeps it in your login keychain. The field is there only while the setting
+`ui.allow_secret_entry` is on. For a key kept in 1Password or AWS, read by a command, a custom key or a
+ChatGPT sign-in, the page gives the exact `doz account add` line to copy and run in Terminal.
+
+A sandbox's page shows its account, with **Account…** (the details' **Keys** tab) to change it; New
+sandbox offers only the accounts its agent can use.
 
 ## How the Mac login stays fresh
 

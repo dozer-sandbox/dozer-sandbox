@@ -447,14 +447,61 @@ name: todo-app</pre></details>
     The Overview tab lists every forward with its state (listening, stopped, failed and why). While nothing in the sandbox listens on the port the
     button is there but DISABLED, its tooltip how to start it — the recipe’s own command when it has one (“Not serving yet — start it in a session
     (fabric --serve)”); the details’ list says the same.</p>
-  <div class="pair"><div class="scheme"><div class="stats"><div class="stat" data-defaults><div class="k">Defaults</div>
-    <ul class="defaults-list"><li><span class="muted">Anthropic </span><strong>work-anthropic</strong></li><li><span class="muted">OpenAI </span><strong>work-openai</strong></li><li><span class="muted">xAI </span><strong>xai</strong></li></ul>
-    <div class="n">a sandbox that follows the default uses its provider’s</div></div>
-    <div class="stat"><div class="k">Claude Code keep-alive</div><div class="v">off</div></div></div></div></div>
-  <p>Accounts &amp; keys: each provider has its own default, listed together in one <strong>Defaults</strong> stat (the rows keep their “default”
-    badge); the keep-alive is Claude Code’s and says so. A key added without its check says “not checked yet”, never a command-line flag.
-    A row’s state is <span class="st-ok">ok</span> in <code>.st-ok</code>; a key its provider refused (<span class="st-fail">rejected</span>), one whose
-    source cannot be read (<span class="st-fail">unavailable</span>) or a missing item in <code>.st-fail</code>; anything else (signed out, expires soon) in <code>.st-warn</code>.</p>
+  <p>Accounts &amp; keys (<code>views/accounts.js</code>): one card per provider (<code>.ak-prov</code>) — its tools named in the header and an Add a key —
+    each key a row (<code>.ak-row</code>): a <b>Default</b> radio (Anthropic also has “No default”), the key’s name and where it lives in plain words
+    (Keychain · 1Password · a command · This Mac’s Claude login; the keychain item and fingerprint go in Details), ONE status pill — glyph and word —
+    who uses it, then the one verb that helps now (Check · Read again · Fix), Details (chevron) and ⋯ (Remove…). The statuses:
+    <span class="st-ok">Works</span>, <span class="st-off">Not checked</span>, <span class="st-fail">Refused</span> (its provider said no),
+    <span class="st-fail">Can’t read</span> (its source did not answer, or its keychain item is gone), <span class="st-off">No check for this provider</span>,
+    and for a login <span class="st-ok">Signed in</span> / <span class="st-warn">Signed out</span>. The same key stored twice wears a
+    <code>.tag.warn</code> “same key as …”. Failing keys come first, as bad callouts saying what the provider or source answered, the fix and
+    the sandboxes affected. The cards, callouts and table stop at 960px; under 640px a row stacks (radio, then the key, status and verbs).</p>
+  <div class="pair wide"><div class="scheme">
+    <div class="ak-attn">
+      <div class="callout bad" role="alert"><i data-i="circle-x"></i><div class="c-body"><div class="c-title">Refused: google-old (Google AI (Gemini API))</div>
+        <p>Google AI (Gemini API) refused it (HTTP 400 from generativelanguage.googleapis.com): the key is wrong, revoked or out of credit. Add a new key, then remove this one.</p>
+        <p>Used by box-gemini — their next session gets no Google AI (Gemini API) key.</p></div>
+        <div class="c-acts"><button type="button" class="btn sm"><i data-i="key-round"></i>Add a new key…</button><button type="button" class="btn sm quiet"><i data-i="badge-check"></i>Check again</button></div></div>
+    </div>
+    <section class="ak-prov">
+      <div class="ak-prov-h"><div class="ak-av" aria-hidden="true">x</div><h3>xAI</h3><div class="muted">For Grok Build, Fabric, OpenClaw and 4 more</div>
+        <div class="ak-add"><button type="button" class="btn sm"><i data-i="plus"></i>Add a key</button></div></div>
+      <div class="ak-rows">
+        <div class="ak-row ak-colhead" aria-hidden="true"><span>Default</span><span>Key</span><span class="h-state">Status</span><span class="h-used">Used by</span><span></span></div>
+        <div class="ak-row"><label class="ak-def"><input type="radio" name="sg-ak" checked>Default</label>
+          <div class="ak-keycell"><div class="ak-name">xai <span class="tag warn">same key as xai-copy</span></div><div class="ak-where"><i data-i="key-round"></i><span>Keychain</span></div></div>
+          <div class="ak-state"><span class="pill st-ok"><i data-i="circle-check"></i>Works</span><span class="muted">checked 2 min ago</span></div>
+          <div class="ak-used"><span class="ak-chip">box-grok</span></div>
+          <div class="ak-acts"><button type="button" class="btn sm quiet icon-only" aria-label="Details"><i data-i="chevron-down"></i></button><button type="button" class="btn sm quiet icon-only" aria-label="More"><i data-i="ellipsis"></i></button></div></div>
+        <div class="ak-row"><label class="ak-def"><input type="radio" name="sg-ak"></label>
+          <div class="ak-keycell"><div class="ak-name">xai-1p</div><div class="ak-where"><i data-i="shield"></i><span>1Password</span><code>op://Dev/xai/credential</code></div></div>
+          <div class="ak-state"><span class="pill st-fail"><i data-i="circle-x"></i>Can’t read</span><span class="muted">its source did not answer</span></div>
+          <div class="ak-used"><span>no sandbox</span></div>
+          <div class="ak-acts"><button type="button" class="btn sm"><i data-i="refresh-cw"></i>Read again</button><button type="button" class="btn sm quiet icon-only" aria-label="Details"><i data-i="chevron-down"></i></button><button type="button" class="btn sm quiet icon-only" aria-label="More"><i data-i="ellipsis"></i></button></div>
+          <dl class="ak-details"><dt>Source</dt><dd>1Password: op://Dev/xai/credential</dd><dt>Fingerprint</dt><dd>3f9a01c2 (a sha256 prefix — never the key)</dd><dt>Remove</dt><dd>only Dozer’s record — the source is not touched</dd></dl></div>
+        <div class="ak-row"><label class="ak-def"><input type="radio" name="sg-ak"></label>
+          <div class="ak-keycell"><div class="ak-name">xai-old</div><div class="ak-where"><i data-i="key-round"></i><span>Keychain</span></div></div>
+          <div class="ak-state"><span class="pill st-off"><i data-i="info"></i>Not checked</span><span class="muted">added without its check</span></div>
+          <div class="ak-used"><span>no sandbox</span></div>
+          <div class="ak-acts"><button type="button" class="btn sm quiet"><i data-i="badge-check"></i>Check</button><button type="button" class="btn sm quiet icon-only" aria-label="Details"><i data-i="chevron-down"></i></button><button type="button" class="btn sm quiet icon-only" aria-label="More"><i data-i="ellipsis"></i></button></div></div>
+      </div>
+    </section>
+    <div class="ak-tablewrap"><table class="ak-table"><thead><tr><th>Sandbox</th><th>Tool</th><th>Key</th><th>How</th><th>Status</th><th></th></tr></thead>
+      <tbody><tr><td><b>box-grok</b></td><td>Grok Build</td><td>xai <span class="muted">(xAI)</span></td><td>follows the xAI default</td><td><span class="pill st-ok"><i data-i="circle-check"></i>Works</span></td>
+        <td class="ak-tdacts"><button type="button" class="btn sm quiet"><i data-i="key-round"></i>Change…</button></td></tr></tbody></table></div>
+  </div></div>
+  <p>By sandbox (<code>.ak-table</code> in <code>.ak-tablewrap</code>, which scrolls inside its box on a phone): each sandbox, the key it uses now and how it
+    got it; Change… picks another from its next session. Add a key is a three-step dialog (<code>dialog.dlg.ak-flow</code>): the provider (searchable by a
+    tool’s name, <code>.ak-pick</code> tiles; a non-match is <code>.dim</code>), the key (a masked field while <code>ui.allow_secret_entry</code> is on; for
+    1Password, AWS, a command, a custom key or a ChatGPT sign-in, the exact <code>doz account add</code> line in <code>.ak-cmd</code> with Copy), then the check’s
+    result. With no keys at all the page is <code>.ak-empty</code>: three <code>.ak-card</code>s — this Mac’s Claude login, paste a key, keep it in 1Password or AWS.</p>
+  <div class="pair"><div class="scheme">
+    <div class="ak-steps"><span class="done">✓ Provider</span><span class="on">2 The key</span><span>3 Check</span></div>
+    <div class="ak-pgrid"><button type="button" class="ak-pick"><span class="ak-av" aria-hidden="true">x</span><b>xAI</b><small>Grok Build uses it</small></button>
+      <button type="button" class="ak-pick dim"><span class="ak-av" aria-hidden="true">A</span><b>Anthropic</b><small>2 keys · for Claude Code, pi…</small></button></div>
+    <pre class="ak-cmd">doz account add xai-2 --provider xai --from op://Dev/xai/credential</pre>
+    <div class="ak-result" role="status"><span class="pill st-ok"><i data-i="circle-check"></i>Works</span><div><b>xai-2 is ready.</b><div class="muted">xAI accepted it. It is in your login keychain.</div></div></div>
+  </div></div>
 </section>
 
 <section>
