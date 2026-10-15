@@ -174,6 +174,7 @@ capabilities:
         unmapped:
         - /v1/api-key
       limits:
+      - 'not offered in a Dozer try: Grok Build checks its key with xAI''s own API when it starts (api.x.ai/v1/api-key) and refuses to run ("Not signed in") unless an xAI key or sign-in passes it — with another source''s key that check is refused (the key goes only to its own source), so Dozer offers Grok Build on xAI only (make recipe-check, 2026-10-16)'
       - 'not supported by xAI or OpenRouter for this pair: an opt-in only'
       evidence: xAI's custom-models guide says any OpenAI Chat Completions or Responses server works through GROK_MODELS_BASE_URL (+ XAI_API_KEY); Dozer's step-0 run (617.01 §1.3) saw Grok Build 1.0.50 honour GROK_XAI_API_BASE_URL / GROK_MODELS_BASE_URL against a local OpenAI-compatible fake — evidence the variables are read, not a run against OpenRouter
       source: https://github.com/xai-org/grok-build/blob/main/crates/codegen/xai-grok-pager/docs/user-guide/11-custom-models.md
@@ -191,6 +192,7 @@ capabilities:
           GROK_CODE_XAI_API_KEY: ${{ dozer.placeholder }}
           GROK_MODELS_BASE_URL: ${{ dozer.gateway.endpoint.coding-agent }}
       limits:
+      - 'not offered in a Dozer try: Grok Build checks its key with xAI''s own API when it starts (api.x.ai/v1/api-key) and refuses to run ("Not signed in") unless an xAI key or sign-in passes it — with another source''s key that check is refused (the key goes only to its own source), so Dozer offers Grok Build on xAI only (make recipe-check, 2026-10-16)'
       - 'a grok login session takes precedence over the key: grok logout first'
       - web search needs a second, Responses-backed model entry
       notes:

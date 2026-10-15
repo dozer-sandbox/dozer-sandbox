@@ -5,7 +5,7 @@ schema: 2
 kind: workload
 id: kilo-org/kilo
 displayName: Kilo Code CLI
-description: Kilo Code's open-source coding agent for the terminal (an OpenCode derivative), here on an xAI API key.
+description: Kilo Code's open-source coding agent for the terminal (an OpenCode derivative), on the key of the provider or gateway you choose (xAI by default).
 author: Kilo Code
 sourceUrl: https://github.com/Kilo-Org/kilocode
 licenses:
@@ -23,19 +23,35 @@ capabilities:
   config:
     runtime:
       allow:
+      - api.anthropic.com:443
+      - api.openai.com:443
       - api.x.ai:443
+      - generativelanguage.googleapis.com:443
+      - openrouter.ai:443
+      - ai-gateway.vercel.sh:443
     dozer:
       model:
         id: model:kilo
-        title: Talk to xAI
-        summary: Kilo Code CLI's model here (the xAI API, with your key) — needed for it to answer.
-        phrase: talk to your AI model (xAI)
+        title: Talk to its model provider
+        summary: Kilo Code CLI's model — the provider or gateway its key is for (Anthropic, OpenAI, xAI, Google AI, OpenRouter or Vercel AI Gateway), with an API key. Needed for Kilo Code CLI to answer.
+        phrase: talk to your AI model
         hosts:
+        - host: api.anthropic.com
+          reason: Anthropic — when the sandbox's key is Anthropic's
+        - host: api.openai.com
+          reason: OpenAI — when the sandbox's key is OpenAI's
         - host: api.x.ai
           paths:
           - /v1/models
           - /v1/chat/completions
           - /v1/responses
+          reason: xAI — when the sandbox's key is xAI's
+        - host: generativelanguage.googleapis.com
+          reason: Google AI — when the sandbox's key is Google AI's
+        - host: openrouter.ai
+          reason: OpenRouter — when the sandbox's key is OpenRouter's
+        - host: ai-gateway.vercel.sh
+          reason: Vercel AI Gateway — when the sandbox's key is Vercel AI Gateway's
       update: []
       excluded: []
 - type: com.docker.sandbox/credential@1
@@ -106,6 +122,26 @@ capabilities:
         experimental.openTelemetry: false
         disabled_providers:
         - kilo
+    # The model source chosen: this file (KILO_CONFIG, read after its own settings) names the model from the environment
+    # ({env:DOZ_MODEL}) and declares the two providers a source can be — OpenAI-compatible and Anthropic — at the
+    # source's base URL, each key read from the variable its placeholder is in (never written here).
+    - file: ~/.config/kilo/doz.json
+      set:
+        model: '{env:DOZ_MODEL}'
+        provider.doz.npm: '@ai-sdk/openai-compatible'
+        provider.doz.name: Dozer (OpenAI-compatible)
+        provider.doz.options.baseURL: '{env:DOZ_BASE_URL}'
+        provider.doz.options.apiKey: '{env:OPENAI_API_KEY}'
+        provider.doz.models:
+          '{env:DOZ_MODEL_ID}':
+            name: '{env:DOZ_MODEL_ID}'
+        provider.dozanthropic.npm: '@ai-sdk/anthropic'
+        provider.dozanthropic.name: Dozer (Anthropic)
+        provider.dozanthropic.options.baseURL: '{env:DOZ_BASE_URL}'
+        provider.dozanthropic.options.apiKey: '{env:ANTHROPIC_API_KEY}'
+        provider.dozanthropic.models:
+          '{env:DOZ_MODEL_ID}':
+            name: '{env:DOZ_MODEL_ID}'
     status: none
     resume:
     - --continue
@@ -129,8 +165,43 @@ capabilities:
       accounts:
       - key
       keys_page: https://console.x.ai/
-      note: Kilo works with many providers; Dozer offers it on an xAI key (XAI_API_KEY, model xai/grok-build-0.1) for now, with the Kilo Gateway provider off.
-      checked: '2026-10-14'
+      note: 'Kilo Code CLI'' own xai provider on xAI (the default, model xai/grok-build-0.1); for the others, a provider of Dozer''s in its config (KILO_CONFIG): OpenAI-compatible at the chosen source''s base URL, or Anthropic, the key read from the variable its placeholder is in.'
+      checked: '2026-10-16'
+    - kind: api-key
+      provider: anthropic
+      accounts:
+      - api-key
+      keys_page: https://console.anthropic.com/settings/keys
+      note: 'Kilo Code CLI through Anthropic: doz try kilo --provider anthropic (or choose it in the try setup); the model with --model.'
+      checked: '2026-10-16'
+    - kind: api-key
+      provider: openai
+      accounts:
+      - openai-key
+      keys_page: https://platform.openai.com/api-keys
+      note: 'Kilo Code CLI through OpenAI: doz try kilo --provider openai (or choose it in the try setup); the model with --model.'
+      checked: '2026-10-16'
+    - kind: api-key
+      provider: google
+      accounts:
+      - key
+      keys_page: https://aistudio.google.com/apikey
+      note: 'Kilo Code CLI through Google AI: doz try kilo --provider google (or choose it in the try setup); the model with --model.'
+      checked: '2026-10-16'
+    - kind: api-key
+      provider: openrouter
+      accounts:
+      - key
+      keys_page: https://openrouter.ai/keys
+      note: 'Kilo Code CLI through OpenRouter: doz try kilo --gateway openrouter (or choose it in the try setup); the model with --model.'
+      checked: '2026-10-16'
+    - kind: api-key
+      provider: vercel-ai-gateway
+      accounts:
+      - key
+      keys_page: https://vercel.com/docs/ai-gateway/authentication-and-byok
+      note: 'Kilo Code CLI through Vercel AI Gateway: doz try kilo --gateway vercel-ai-gateway (or choose it in the try setup); the model with --model.'
+      checked: '2026-10-16'
     - kind: vendor-sign-in
       account: a Kilo Code account (Kilo Gateway)
       in_sandbox: false
@@ -140,22 +211,44 @@ capabilities:
   config:
     entries:
     - gateway: openrouter
-      level: documented
-      shape: openai-chat
-      how:
-        env:
-          OPENROUTER_API_KEY: ${{ dozer.placeholder }}
-        model_args:
-        - --model
-        - openrouter/${{ dozer.model }}
-      notes:
-      - OpenRouter is one of Kilo's built-in providers (as OpenCode's)
-      source: https://kilo.ai/docs/cli
-      checked: '2026-10-14'
+      level: verified
+      evidence: 'make recipe-check: its check turn through a stand-in OpenRouter (doz try with --gateway openrouter; models@1)'
+      checked: '2026-10-16'
     - gateway: vercel-ai-gateway
-      level: unknown
-      reason: Kilo documents no Vercel AI Gateway provider of its own; OpenCode's built-in one was not checked in Kilo
-      checked: '2026-10-14'
+      level: verified
+      evidence: 'make recipe-check: its check turn through a stand-in Vercel AI Gateway (doz try with --gateway vercel-ai-gateway; models@1)'
+      checked: '2026-10-16'
+- type: com.dozersandbox/models@1
+  config:
+    default: xai
+    shapes:
+    - shape: openai-chat
+      env:
+        KILO_CONFIG: /home/agent/.config/kilo/doz.json
+        DOZ_MODEL: 'doz/${{ dozer.model }}'
+        DOZ_MODEL_ID: '${{ dozer.model }}'
+        DOZ_BASE_URL: '${{ dozer.base_url }}'
+      key_env:
+      - OPENAI_API_KEY
+      source: https://kilo.ai/docs/cli
+    - shape: anthropic-messages
+      env:
+        KILO_CONFIG: /home/agent/.config/kilo/doz.json
+        DOZ_MODEL: 'dozanthropic/${{ dozer.model }}'
+        DOZ_MODEL_ID: '${{ dozer.model }}'
+        DOZ_BASE_URL: '${{ dozer.base_url }}/v1'
+      key_env:
+      - ANTHROPIC_API_KEY
+      source: https://kilo.ai/docs/cli
+    native:
+    - source: xai
+      env:
+        KILO_CONFIG: /home/agent/.config/kilo/doz.json
+        DOZ_MODEL: 'xai/${{ dozer.model }}'
+        DOZ_MODEL_ID: '${{ dozer.model }}'
+        DOZ_BASE_URL: https://api.x.ai/v1
+    models:
+      xai: grok-build-0.1
 - type: com.dozersandbox/currency@1
   config:
     checked: '2026-10-14'
@@ -181,7 +274,7 @@ capabilities:
       - kilo run --auto "…"
       evidence: 'make recipe-check: kilo run --auto "say ok" printed the stand-in''s answer and exited in a fresh try'
       checked: '2026-10-14'
-    terms: Your xAI API key — a key from console.x.ai.
+    terms: Your API key of the provider or gateway you choose (xAI by default).
 - type: com.dozersandbox/guide@1
   config:
     intro: "Kilo Code CLI is a coding agent with its own screen: the session on the left. Ask it to read, change and run the code in your folder."

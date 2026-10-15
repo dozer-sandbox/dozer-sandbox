@@ -66,7 +66,7 @@ final class ModelSourcesTests: XCTestCase {
         XCTAssertEqual(sgpt.selection(source: "vercel-ai-gateway", model: "anthropic/claude-sonnet-4.6")?.env["DEFAULT_MODEL"], "anthropic/claude-sonnet-4.6")
         XCTAssertNil(sgpt.selection(source: "anthropic"), "not offered")
         // An agent without models@1: its one provider, no selection (the built-in three included).
-        for id in ["claude-code", "pi", "codex", "grok"] {
+        for id in ["claude-code", "codex", "gemini"] {
             let r = try XCTUnwrap(AgentRecipes.recipe(id))
             XCTAssertNil(r.models)
             XCTAssertEqual(r.offeredSources, r.credentials.map(\.provider))
@@ -211,6 +211,44 @@ final class ModelSourcesTests: XCTestCase {
         XCTAssertEqual(mine["DEFAULT_MODEL"], "mine")
     }
 
+    /// 618: pi (built-in) on another source — that source's key only, its hosts through the hidden `sources:pi`, its
+    /// model on the session's command line; on Anthropic it keeps its own path and its own model pick.
+    func testPiOnAGatewayKey() async throws {
+        let c = await core()
+        _ = await c.handle(HostRequest.keyAccountAdd(name: "or", provider: "openrouter", secret: "sk-or-v1-FAKE0123456789abcdef"))
+        var r = HostRequest(.create, name: "p")
+        r.create = CreateOptions(image: "pi", network: "locked")
+        r.create?.modelSource = "openrouter"
+        let m = await c.handle(r)
+        XCTAssertNil(m.error, m.error?.message ?? "")
+        let v = try await XCTUnwrapAsync(await c.vault(of: "p"))
+        XCTAssertTrue(v.hasSecret("key:openrouter"))
+        XCTAssertFalse(v.hasSecret("anthropic"))
+        XCTAssertEqual(Set(v.sessionEnvironment().keys), ["OPENROUTER_API_KEY"], "pi reads OPENROUTER_API_KEY itself")
+        let perms = try await c.permissionsOf("p")
+        XCTAssertTrue(perms?.contains("sources:pi") == true)
+        let args = try await c.builtinModelArguments(of: "p")
+        XCTAssertEqual(args, ["--model", "openrouter/openai/gpt-5.4-mini"])
+        let pe = try await c.selectionEnvironment("p")
+        XCTAssertEqual(pe["DOZ_MODEL"], "openrouter/openai/gpt-5.4-mini")
+        // On Anthropic (its default): its own path and its own model — nothing on its command line.
+        _ = await c.handle(HostRequest.accountAdd(name: "ak", kind: .apiKey, plan: nil, secret: "sk-ant-api03-FAKE0123456789abcdef"))
+        var use = HostRequest(.accountUse, name: "p")
+        use.account = "ak"
+        let u = await c.handle(use)
+        XCTAssertNil(u.error, u.error?.message ?? "")
+        let v2 = try await XCTUnwrapAsync(await c.vault(of: "p"))
+        XCTAssertTrue(v2.hasSecret("anthropic"))
+        XCTAssertFalse(v2.hasSecret("key:openrouter"))
+        let none = try await c.builtinModelArguments(of: "p")
+        XCTAssertEqual(none, [])
+        let watched = try await XCTUnwrapAsync(await c.leakGuardHosts(of: "p"))
+        XCTAssertTrue(watched.contains("openrouter.ai"), "its other sources are watched: an Anthropic placeholder sent there is refused")
+        // Claude Code and Codex: never.
+        XCTAssertNil(AgentCredentials.sources("claude-code"))
+        XCTAssertNil(AgentCredentials.sources("codex"))
+    }
+
     func testCreateRefusesASourceItCannotUse() async throws {
         let c = await core()
         var r = HostRequest(.create, name: "sg")
@@ -221,7 +259,7 @@ final class ModelSourcesTests: XCTestCase {
         r.create?.modelSource = "anthropic"
         m = await c.handle(r)
         XCTAssertTrue(m.error?.message.contains("cannot use Anthropic") == true, m.error?.message ?? "")
-        r.create = CreateOptions(image: "grok", network: "locked")
+        r.create = CreateOptions(image: "gemini", network: "locked")
         r.create?.modelSource = "openai"
         m = await c.handle(r)
         XCTAssertTrue(m.error?.message.contains("no choice of model provider") == true, m.error?.message ?? "")
@@ -247,9 +285,15 @@ final class ModelSourcesTests: XCTestCase {
         refused({ $0.models?.models = ["openrouter": "bad model"] }, "a model id")
         refused({ $0.network.model.hosts?.removeAll { $0.host == "openrouter.ai" } }, "the model permission reaches every offered source")
         refused({ $0.models?.native = [AgentRecipe.Models.NativeEntry(source: "google", env: ["U": "{base_url}"])] }, "a native client has no base URL")
-        var b = try XCTUnwrap(AgentRecipes.recipe("pi"))
-        b.models = AgentRecipe.Models(default: "anthropic")
-        XCTAssertThrowsError(try b.validate(), "the built-in agents keep their own accounts")
+        var b = try XCTUnwrap(AgentRecipes.recipe("claude-code"))
+        b.models = AgentRecipe.Models(default: "anthropic", native: [.init(source: "anthropic", env: [:])])
+        XCTAssertThrowsError(try b.validate(), "Claude Code and Codex keep their own accounts")
+        // 618: pi declares its sources — native only (nothing baked: its image is Dozer's own).
+        var pi = try XCTUnwrap(AgentRecipes.recipe("pi"))
+        XCTAssertNoThrow(try pi.validate())
+        XCTAssertEqual(pi.offeredSources, ["anthropic", "openai", "xai", "google", "openrouter", "vercel-ai-gateway"])
+        pi.models?.shapes = [.init(shape: "openai-chat", env: ["X": "{base_url}"])]
+        XCTAssertThrowsError(try pi.validate(), "a built-in agent's sources are native only")
     }
 
     /// 618: an OpenAI-compatible shape is offered the gateways without listing them; what a try can do and what the
@@ -297,6 +341,8 @@ extension HostCore {
     }
 
     func leakGuardHosts(of name: String) -> Set<String>? { (try? get(name))?.sandbox.egress?.leakGuardHosts }
+    func builtinModelArguments(of name: String) throws -> [String] { builtinModelArguments(try get(name)) }
+    func permissionsOf(_ name: String) throws -> [String]? { try get(name).config.spec.network.policy?.permissions }
 }
 
 extension RecipeHostTests {

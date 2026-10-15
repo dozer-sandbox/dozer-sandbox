@@ -31,7 +31,7 @@ final class CodexWebTests: XCTestCase {
         XCTAssertTrue(a.providers.contains("xai"))
         XCTAssertTrue(a.providerTools["anthropic"]?.contains("claude-code") == true)
         XCTAssertTrue(a.providerTools["anthropic"]?.contains("pi") == true)
-        XCTAssertEqual(a.providerTools["openai"]?.first, "codex")
+        XCTAssertTrue(a.providerTools["openai"]?.contains("codex") == true)
         XCTAssertTrue(a.providerTools["xai"]?.contains("grok") == true, "\(a.providerTools["xai"] ?? [])")
         for ids in a.providerTools.values { for id in ids { XCTAssertNotNil(a.agentTitles[id], id) } }
         XCTAssertTrue(a.uncheckedProviders.contains("vercel-ai-gateway"))

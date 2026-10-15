@@ -14,7 +14,8 @@ import DozerKit
 public enum AgentCredentials {
     /// 617: the model sources a recipe agent of `image` can use (its default first); nil: a built-in agent or none.
     public static func sources(_ image: String?) -> [String]? {
-        guard let image, let r = ImageChoice.parse(image)?.agent.recipe, !r.isBuiltin else { return nil }
+        // 618: and a built-in agent that declares its sources (pi).
+        guard let image, let r = ImageChoice.parse(image)?.agent.recipe, !r.isBuiltin || r.models != nil else { return nil }
         return r.offeredSources
     }
 
@@ -134,7 +135,7 @@ public enum AgentCredentials {
         if let model, !ModelSelection.isModelID(model) {
             return (nil, ("that is not a model id (letters, digits and . _ : / @ + -, at most 128)", "--model creator/name"))
         }
-        let add = "doz account add NAME --provider \(source)"
+        let add = "doz account add NAME \(addFlag(source))"
         if let a = account, a != "default" {
             guard a != "none" else { return (nil, nil) }
             guard let rec = file.accounts.first(where: { $0.name == a }) else { return (nil, ("no account \(a)", add)) }
@@ -152,9 +153,18 @@ public enum AgentCredentials {
                       keys.isEmpty ? add : "--account " + keys.map(\.name).joined(separator: " | --account ")))
     }
 
+    /// 618: the `doz account add` flag for a source's key — Anthropic's and OpenAI's are their own kinds.
+    static func addFlag(_ source: String) -> String {
+        switch source {
+        case "anthropic": "--api-key"
+        case "openai": "--openai-key"
+        default: "--provider \(source)"
+        }
+    }
+
     /// The command that adds an account `image`'s agent can use.
     static func addCommand(_ image: String) -> String {
-        if let p = keyProvider(image) { return "doz account add NAME --provider \(p.id)" }
+        if let p = keyProvider(image) { return "doz account add NAME \(addFlag(p.id))" }
         return codexFlow(image) ? "doz account add NAME --chatgpt (or --openai-key)" : "doz account add NAME --api-key"
     }
 
@@ -204,9 +214,9 @@ public enum AgentCredentials {
         let agent = AgentImages.agentName(image) ?? image
         let choose: String
         if let s = sources(image), s.count > 1 {
-            choose = "choose a key account of " + s.map(ModelSources.title).joined(separator: ", ") + " (doz account add NAME --provider \(s[0]))"
+            choose = "choose a key account of " + s.map(ModelSources.title).joined(separator: ", ") + " (doz account add NAME \(addFlag(s[0])))"
         } else {
-            choose = keyProvider(image).map { "choose a \($0.title) key account (doz account add NAME --provider \($0.id))" }
+            choose = keyProvider(image).map { "choose a \($0.title) key account (doz account add NAME \(addFlag($0.id)))" }
                 ?? (k == [.apiKey] ? "choose an API-key account"
                     : codexFlow(image) ? "choose an OpenAI account (mac, a ChatGPT sign-in or an OpenAI API key)" : "choose an account \(agent) can use")
         }

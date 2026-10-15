@@ -18,16 +18,33 @@
           "model" : {
             "hosts" : [
               {
+                "host" : "api.openai.com",
+                "reason" : "OpenAI — when the sandbox's key is OpenAI's"
+              },
+              {
                 "host" : "api.x.ai",
                 "paths" : [
                   "/v1/chat/completions"
-                ]
+                ],
+                "reason" : "xAI — when the sandbox's key is xAI's"
+              },
+              {
+                "host" : "generativelanguage.googleapis.com",
+                "reason" : "Google AI — when the sandbox's key is Google AI's"
+              },
+              {
+                "host" : "openrouter.ai",
+                "reason" : "OpenRouter — when the sandbox's key is OpenRouter's"
+              },
+              {
+                "host" : "ai-gateway.vercel.sh",
+                "reason" : "Vercel AI Gateway — when the sandbox's key is Vercel AI Gateway's"
               }
             ],
             "id" : "model:open-interpreter",
-            "phrase" : "talk to your AI model (xAI)",
-            "summary" : "Open Interpreter's model here (the xAI API, with your key) — needed for it to answer.",
-            "title" : "Talk to xAI"
+            "phrase" : "talk to your AI model",
+            "summary" : "Open Interpreter's model — the provider or gateway its key is for (OpenAI, xAI, Google AI, OpenRouter or Vercel AI Gateway), with an API key. Needed for Open Interpreter to answer.",
+            "title" : "Talk to its model provider"
           },
           "update" : [
 
@@ -44,7 +61,11 @@
         },
         "runtime" : {
           "allow" : [
+            "api.openai.com:443",
             "api.x.ai:443",
+            "generativelanguage.googleapis.com:443",
+            "openrouter.ai:443",
+            "ai-gateway.vercel.sh:443",
             "raw.githubusercontent.com:443"
           ]
         }
@@ -130,6 +151,23 @@
             }
           }
         ],
+        "model_args" : [
+          "-m",
+          "$DOZ_MODEL",
+          "-c",
+          "model_provider=doz",
+          "-c",
+          "model_providers.doz.name=Dozer",
+          "-c",
+          "model_providers.doz.base_url=$DOZ_BASE_URL",
+          "-c",
+          "model_providers.doz.env_key=OPENAI_API_KEY",
+          "-c",
+          "model_providers.doz.wire_api=chat"
+        ],
+        "model_args_after" : [
+          "exec"
+        ],
         "no_prompts_args" : [
           "--dangerously-bypass-approvals-and-sandbox"
         ],
@@ -175,11 +213,51 @@
             "accounts" : [
               "key"
             ],
-            "checked" : "2026-10-14",
+            "checked" : "2026-10-16",
             "keys_page" : "https://console.x.ai/",
             "kind" : "api-key",
-            "note" : "A Codex-style model_providers.xai entry (env_key XAI_API_KEY, wire_api chat), model grok-build-0.1; its ChatGPT sign-in, analytics and plugins are off.",
+            "note" : "Open Interpreter's provider settings given on its command line (-c model_provider and model_providers.doz: the chosen source's base URL, the key's placeholder read from OPENAI_API_KEY; -m the model); on xAI (the default) the model is grok-build-0.1.",
             "provider" : "xai"
+          },
+          {
+            "accounts" : [
+              "openai-key"
+            ],
+            "checked" : "2026-10-16",
+            "keys_page" : "https://platform.openai.com/api-keys",
+            "kind" : "api-key",
+            "note" : "Open Interpreter through OpenAI: doz try open-interpreter --provider openai (or choose it in the try setup); the model with --model.",
+            "provider" : "openai"
+          },
+          {
+            "accounts" : [
+              "key"
+            ],
+            "checked" : "2026-10-16",
+            "keys_page" : "https://aistudio.google.com/apikey",
+            "kind" : "api-key",
+            "note" : "Open Interpreter through Google AI: doz try open-interpreter --provider google (or choose it in the try setup); the model with --model.",
+            "provider" : "google"
+          },
+          {
+            "accounts" : [
+              "key"
+            ],
+            "checked" : "2026-10-16",
+            "keys_page" : "https://openrouter.ai/keys",
+            "kind" : "api-key",
+            "note" : "Open Interpreter through OpenRouter: doz try open-interpreter --gateway openrouter (or choose it in the try setup); the model with --model.",
+            "provider" : "openrouter"
+          },
+          {
+            "accounts" : [
+              "key"
+            ],
+            "checked" : "2026-10-16",
+            "keys_page" : "https://vercel.com/docs/ai-gateway/authentication-and-byok",
+            "kind" : "api-key",
+            "note" : "Open Interpreter through Vercel AI Gateway: doz try open-interpreter --gateway vercel-ai-gateway (or choose it in the try setup); the model with --model.",
+            "provider" : "vercel-ai-gateway"
           }
         ]
       },
@@ -189,20 +267,42 @@
       "config" : {
         "entries" : [
           {
-            "checked" : "2026-10-14",
+            "checked" : "2026-10-16",
+            "evidence" : "make recipe-check: its check turn through a stand-in OpenRouter (doz try with --gateway openrouter; models@1)",
             "gateway" : "openrouter",
-            "level" : "unknown",
-            "reason" : "takes any model_providers entry, as Codex does; OpenRouter was not checked"
+            "level" : "verified"
           },
           {
-            "checked" : "2026-10-14",
+            "checked" : "2026-10-16",
+            "evidence" : "make recipe-check: its check turn through a stand-in Vercel AI Gateway (doz try with --gateway vercel-ai-gateway; models@1)",
             "gateway" : "vercel-ai-gateway",
-            "level" : "unknown",
-            "reason" : "not checked against Open Interpreter"
+            "level" : "verified"
           }
         ]
       },
       "type" : "com.dozersandbox/gateways@1"
+    },
+    {
+      "config" : {
+        "default" : "xai",
+        "models" : {
+          "xai" : "grok-build-0.1"
+        },
+        "shapes" : [
+          {
+            "env" : {
+              "DOZ_BASE_URL" : "${{ dozer.base_url }}",
+              "DOZ_MODEL" : "${{ dozer.model }}"
+            },
+            "key_env" : [
+              "OPENAI_API_KEY"
+            ],
+            "shape" : "openai-chat",
+            "source" : "https://github.com/openinterpreter/open-interpreter#configuration"
+          }
+        ]
+      },
+      "type" : "com.dozersandbox/models@1"
     },
     {
       "config" : {
@@ -238,7 +338,7 @@
             "tag" : "headless"
           }
         ],
-        "terms" : "Your xAI API key — a key from console.x.ai."
+        "terms" : "Your API key of the provider or gateway you choose (xAI by default)."
       },
       "type" : "com.dozersandbox/directory@1"
     },
@@ -267,7 +367,7 @@
       "type" : "com.dozersandbox/guide@1"
     }
   ],
-  "description" : "Open Interpreter, rebuilt as a Codex CLI derivative, here on an xAI API key.",
+  "description" : "Open Interpreter, rebuilt as a Codex CLI derivative, on the key of the provider or gateway you choose (xAI by default).",
   "displayName" : "Open Interpreter",
   "id" : "openinterpreter/open-interpreter",
   "kind" : "workload",

@@ -18,17 +18,38 @@
           "model" : {
             "hosts" : [
               {
+                "host" : "api.anthropic.com",
+                "reason" : "Anthropic — when the sandbox's key is Anthropic's"
+              },
+              {
+                "host" : "api.openai.com",
+                "reason" : "OpenAI — when the sandbox's key is OpenAI's"
+              },
+              {
                 "host" : "api.x.ai",
                 "paths" : [
                   "/v1/responses",
                   "/v1/chat/completions"
-                ]
+                ],
+                "reason" : "xAI — when the sandbox's key is xAI's"
+              },
+              {
+                "host" : "generativelanguage.googleapis.com",
+                "reason" : "Google AI — when the sandbox's key is Google AI's"
+              },
+              {
+                "host" : "openrouter.ai",
+                "reason" : "OpenRouter — when the sandbox's key is OpenRouter's"
+              },
+              {
+                "host" : "ai-gateway.vercel.sh",
+                "reason" : "Vercel AI Gateway — when the sandbox's key is Vercel AI Gateway's"
               }
             ],
             "id" : "model:mimo-code",
-            "phrase" : "talk to your AI model (xAI)",
-            "summary" : "MiMo Code's model here (the xAI API, with your key) — needed for it to answer.",
-            "title" : "Talk to xAI"
+            "phrase" : "talk to your AI model",
+            "summary" : "MiMo Code's model — the provider or gateway its key is for (Anthropic, OpenAI, xAI, Google AI, OpenRouter or Vercel AI Gateway), with an API key. Needed for MiMo Code to answer.",
+            "title" : "Talk to its model provider"
           },
           "update" : [
 
@@ -36,7 +57,12 @@
         },
         "runtime" : {
           "allow" : [
-            "api.x.ai:443"
+            "api.anthropic.com:443",
+            "api.openai.com:443",
+            "api.x.ai:443",
+            "generativelanguage.googleapis.com:443",
+            "openrouter.ai:443",
+            "ai-gateway.vercel.sh:443"
           ]
         }
       },
@@ -95,8 +121,6 @@
           "argv" : [
             "mimo",
             "run",
-            "-m",
-            "xai/grok-build-0.1",
             "say ok"
           ],
           "expect" : "DOZ_FAKE_OK",
@@ -182,11 +206,61 @@
             "accounts" : [
               "key"
             ],
-            "checked" : "2026-10-14",
+            "checked" : "2026-10-16",
             "keys_page" : "https://console.x.ai/",
             "kind" : "api-key",
-            "note" : "MiMo Code's xai provider reads XAI_API_KEY, model xai/grok-build-0.1. Its MiMo Platform and ChatGPT sign-ins are not offered.",
+            "note" : "MiMo Code's own providers (OpenCode's), each reading its key from the environment; the chosen model through MIMOCODE_CONFIG_CONTENT (xai/grok-build-0.1 on xAI, the default). Its MiMo Platform and ChatGPT sign-ins are not offered.",
             "provider" : "xai"
+          },
+          {
+            "accounts" : [
+              "api-key"
+            ],
+            "checked" : "2026-10-16",
+            "keys_page" : "https://console.anthropic.com/settings/keys",
+            "kind" : "api-key",
+            "note" : "MiMo Code through Anthropic: doz try mimo-code --provider anthropic (or choose it in the try setup); the model with --model.",
+            "provider" : "anthropic"
+          },
+          {
+            "accounts" : [
+              "openai-key"
+            ],
+            "checked" : "2026-10-16",
+            "keys_page" : "https://platform.openai.com/api-keys",
+            "kind" : "api-key",
+            "note" : "MiMo Code through OpenAI: doz try mimo-code --provider openai (or choose it in the try setup); the model with --model.",
+            "provider" : "openai"
+          },
+          {
+            "accounts" : [
+              "key"
+            ],
+            "checked" : "2026-10-16",
+            "keys_page" : "https://aistudio.google.com/apikey",
+            "kind" : "api-key",
+            "note" : "MiMo Code through Google AI: doz try mimo-code --provider google (or choose it in the try setup); the model with --model.",
+            "provider" : "google"
+          },
+          {
+            "accounts" : [
+              "key"
+            ],
+            "checked" : "2026-10-16",
+            "keys_page" : "https://openrouter.ai/keys",
+            "kind" : "api-key",
+            "note" : "MiMo Code through OpenRouter: doz try mimo-code --gateway openrouter (or choose it in the try setup); the model with --model.",
+            "provider" : "openrouter"
+          },
+          {
+            "accounts" : [
+              "key"
+            ],
+            "checked" : "2026-10-16",
+            "keys_page" : "https://vercel.com/docs/ai-gateway/authentication-and-byok",
+            "kind" : "api-key",
+            "note" : "MiMo Code through Vercel AI Gateway: doz try mimo-code --gateway vercel-ai-gateway (or choose it in the try setup); the model with --model.",
+            "provider" : "vercel-ai-gateway"
           },
           {
             "account" : "a MiMo Platform account (Xiaomi)",
@@ -203,20 +277,72 @@
       "config" : {
         "entries" : [
           {
-            "checked" : "2026-10-14",
+            "checked" : "2026-10-16",
+            "evidence" : "make recipe-check: its check turn through a stand-in OpenRouter (doz try with --gateway openrouter; models@1)",
             "gateway" : "openrouter",
-            "level" : "unknown",
-            "reason" : "MiMo Code has OpenCode's providers; OpenRouter was not checked"
+            "level" : "verified"
           },
           {
-            "checked" : "2026-10-14",
+            "checked" : "2026-10-16",
+            "evidence" : "make recipe-check: its check turn through a stand-in Vercel AI Gateway (doz try with --gateway vercel-ai-gateway; models@1)",
             "gateway" : "vercel-ai-gateway",
-            "level" : "unknown",
-            "reason" : "not checked against MiMo Code"
+            "level" : "verified"
           }
         ]
       },
       "type" : "com.dozersandbox/gateways@1"
+    },
+    {
+      "config" : {
+        "default" : "xai",
+        "models" : {
+          "xai" : "grok-build-0.1"
+        },
+        "native" : [
+          {
+            "env" : {
+              "MIMOCODE_CONFIG_CONTENT" : "{\"model\":\"anthropic/${{ dozer.model }}\"}"
+            },
+            "source" : "anthropic"
+          },
+          {
+            "env" : {
+              "MIMOCODE_CONFIG_CONTENT" : "{\"model\":\"openai/${{ dozer.model }}\"}"
+            },
+            "source" : "openai"
+          },
+          {
+            "env" : {
+              "MIMOCODE_CONFIG_CONTENT" : "{\"model\":\"xai/${{ dozer.model }}\"}"
+            },
+            "source" : "xai"
+          },
+          {
+            "env" : {
+              "MIMOCODE_CONFIG_CONTENT" : "{\"model\":\"google/${{ dozer.model }}\"}"
+            },
+            "key_env" : [
+              "GOOGLE_GENERATIVE_AI_API_KEY"
+            ],
+            "source" : "google"
+          },
+          {
+            "docs" : "https://mimo.xiaomi.com/coder",
+            "env" : {
+              "MIMOCODE_CONFIG_CONTENT" : "{\"model\":\"openrouter/${{ dozer.model }}\"}"
+            },
+            "source" : "openrouter"
+          },
+          {
+            "docs" : "https://mimo.xiaomi.com/coder",
+            "env" : {
+              "MIMOCODE_CONFIG_CONTENT" : "{\"model\":\"gateway/${{ dozer.model }}\",\"provider\":{\"gateway\":{\"npm\":\"@ai-sdk/openai-compatible\",\"name\":\"Vercel AI Gateway\",\"options\":{\"baseURL\":\"https://ai-gateway.vercel.sh/v1\",\"apiKey\":\"{env:AI_GATEWAY_API_KEY}\"},\"models\":{\"${{ dozer.model }}\":{}}}}}"
+            },
+            "source" : "vercel-ai-gateway"
+          }
+        ]
+      },
+      "type" : "com.dozersandbox/models@1"
     },
     {
       "config" : {
@@ -252,12 +378,12 @@
             "evidence" : "make recipe-check: mimo run \"say ok\" printed the stand-in's answer and exited in a fresh try",
             "level" : "verified",
             "notes" : [
-              "mimo run -m xai/grok-build-0.1 \"…\""
+              "mimo run \"…\""
             ],
             "tag" : "headless"
           }
         ],
-        "terms" : "Your xAI API key — a key from console.x.ai. MiMo Code comes with Xiaomi's use restrictions beside its MIT licence; its usage analytics are off."
+        "terms" : "Your API key of the provider or gateway you choose (xAI by default). MiMo Code comes with Xiaomi's use restrictions beside its MIT licence; its usage analytics are off."
       },
       "type" : "com.dozersandbox/directory@1"
     },
@@ -267,14 +393,14 @@
         "intro" : "MiMo Code is a coding agent with its own screen: the session on the left. Ask it to read, change and run the code in your folder.",
         "steps" : [
           {
-            "command" : "mimo run -m xai/grok-build-0.1 \"say ok\"",
+            "command" : "mimo run \"say ok\"",
             "text" : "Check it answers, without its screen."
           },
           {
             "text" : "Ask it something in its own screen — the session on the left."
           },
           {
-            "command" : "mimo run -m xai/grok-build-0.1 \"list the files in this folder\"",
+            "command" : "mimo run \"list the files in this folder\"",
             "text" : "One task without its screen."
           }
         ],
@@ -286,7 +412,7 @@
       "type" : "com.dozersandbox/guide@1"
     }
   ],
-  "description" : "Xiaomi's coding agent for the terminal (an OpenCode derivative), here on an xAI API key.",
+  "description" : "Xiaomi's coding agent for the terminal (an OpenCode derivative), on the key of the provider or gateway you choose (xAI by default).",
   "displayName" : "MiMo Code",
   "id" : "xiaomi/mimo-code",
   "kind" : "workload",

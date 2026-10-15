@@ -1676,7 +1676,17 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   offers needs no gateways@1 entry — `AgentRecipe.gatewaySupport` derives it (`documented`, citing the shape's `source` /
   the native entry's `docs`); an entry only overrides (`verified` + evidence once recipe-check ran it, no `how` needed),
   and a models@1 recipe's entries may never contradict what a try can do (`offersGateway`). The Quick try's "Through a
-  gateway" is `throughGateway`; `doz search` marks the offered ones; the tags read `gatewaySupport`. `make recipe-check` runs a models@1 recipe
+  gateway" is `throughGateway`; `doz search` marks the offered ones; the tags read `gatewaySupport`. A tool that takes its model
+  only on its command line declares `launch.model_args` (`[-m, $DOZ_MODEL]`; the launcher puts them first when
+  `DOZ_MODEL` is set, never over the run's own flag or for a passthrough subcommand — `RecipeModelArgsTests`); one that
+  takes it only from its settings file, a `first_run` entry with `each_run` (written at every run, `$DOZ_…` filled in,
+  never a key — `RecipeEachRunTests`; the helper then runs before the passthrough). Both only in such a recipe's launcher. pi (built-in) declares
+  models@1 too — native only, at session time: `AgentCredentials.sources` includes it, a non-Anthropic key goes the
+  recipe agents' way in `applyMainAccount` (an Anthropic one keeps pi's own path, `doz key set` included), its other
+  sources' hosts are the hidden `sources:pi` permission (added at create, like Codex's `model:openai`), and the host puts
+  its `--model` on the default session (`builtinModelArguments`: off Anthropic, or a model chosen there). Its image and
+  launcher are unchanged (`RecipePinTests`). Claude Code and Codex record why a gateway is not offered (their
+  gateways entries' `limits`). `make recipe-check` runs a models@1 recipe
   once per offered source (`RECIPE_SELECTIONS`), `ModelSourcesTests`, `probes/617-*/recipes/models/browser-try-models.mjs`.
 - **Model lists** (618, owner: "… its also missing the step to choose a model"; `ModelLists.swift`, `HostCore+Models.swift`):
   a gateway's PUBLIC list (OpenRouter `/api/v1/models`, Vercel AI Gateway `/v1/models` — no key) is read by the HOST on

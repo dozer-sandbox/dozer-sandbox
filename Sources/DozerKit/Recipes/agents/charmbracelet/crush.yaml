@@ -7,7 +7,7 @@ schema: 2
 kind: workload
 id: charmbracelet/crush
 displayName: Crush
-description: Charmbracelet's coding agent for the terminal, here on an xAI API key.
+description: Charmbracelet's coding agent for the terminal, on the key of the provider or gateway you choose (xAI by default).
 author: Charmbracelet
 sourceUrl: https://github.com/charmbracelet/crush
 licenses:
@@ -25,18 +25,34 @@ capabilities:
   config:
     runtime:
       allow:
+      - api.anthropic.com:443
+      - api.openai.com:443
       - api.x.ai:443
+      - generativelanguage.googleapis.com:443
+      - openrouter.ai:443
+      - ai-gateway.vercel.sh:443
       - api.github.com:443
     dozer:
       model:
         id: model:crush
-        title: Talk to xAI
-        summary: Crush's model here (the xAI API, with your key) — needed for it to answer.
-        phrase: talk to your AI model (xAI)
+        title: Talk to its model provider
+        summary: Crush's model — the provider or gateway its key is for (Anthropic, OpenAI, xAI, Google AI, OpenRouter or Vercel AI Gateway), with an API key. Needed for Crush to answer.
+        phrase: talk to your AI model
         hosts:
+        - host: api.anthropic.com
+          reason: Anthropic — when the sandbox's key is Anthropic's
+        - host: api.openai.com
+          reason: OpenAI — when the sandbox's key is OpenAI's
         - host: api.x.ai
           paths:
           - /v1/chat/completions
+          reason: xAI — when the sandbox's key is xAI's
+        - host: generativelanguage.googleapis.com
+          reason: Google AI — when the sandbox's key is Google AI's
+        - host: openrouter.ai
+          reason: OpenRouter — when the sandbox's key is OpenRouter's
+        - host: ai-gateway.vercel.sh
+          reason: Vercel AI Gateway — when the sandbox's key is Vercel AI Gateway's
       update: []
       excluded: []
       vendor:
@@ -109,6 +125,25 @@ capabilities:
         models.small.model: grok-build-0.1
         options.disable_metrics: true
         options.disable_provider_auto_update: true
+    # The model source chosen, at every run (Crush takes its model only from this file): one provider, doz, at the
+    # source's base URL; its key read from the variable Dozer puts the placeholder in ($OPENAI_API_KEY or
+    # $ANTHROPIC_API_KEY — Crush expands it, so the key is never written here).
+    - file: ~/.config/crush/crush.json
+      each_run: true
+      set:
+        providers.doz.name: Dozer
+        providers.doz.type: $DOZ_CRUSH_TYPE
+        providers.doz.base_url: $DOZ_BASE_URL
+        providers.doz.api_key: $DOZ_KEY_REF
+        providers.doz.models:
+        - id: $DOZ_MODEL
+          name: $DOZ_MODEL
+          context_window: 200000
+          default_max_tokens: 8192
+        models.large.provider: doz
+        models.large.model: $DOZ_MODEL
+        models.small.provider: doz
+        models.small.model: $DOZ_MODEL
     status: none
     verify:
     - argv:
@@ -120,8 +155,6 @@ capabilities:
       - crush
       - run
       - -q
-      - -m
-      - xai/grok-build-0.1
       - say ok
       expect: DOZ_FAKE_OK
 - type: com.dozersandbox/auth@1
@@ -132,19 +165,78 @@ capabilities:
       accounts:
       - key
       keys_page: https://console.x.ai/
-      note: Crush's built-in xai provider reads XAI_API_KEY; its large and small models set to grok-build-0.1. Its own sign-in (Charm, Hyper) is not used.
-      checked: '2026-10-14'
+      note: 'Crush''s model and provider are set in its settings file at every run (~/.config/crush/crush.json: one provider at the chosen source''s base URL, OpenAI-compatible or Anthropic; its key read from the variable the placeholder is in, never written there). On xAI (the default) the model is grok-build-0.1. Its own sign-in (Charm, Hyper) is not used.'
+      checked: '2026-10-16'
+    - kind: api-key
+      provider: anthropic
+      accounts:
+      - api-key
+      keys_page: https://console.anthropic.com/settings/keys
+      note: 'Crush through Anthropic: doz try crush --provider anthropic (or choose it in the try setup); the model with --model.'
+      checked: '2026-10-16'
+    - kind: api-key
+      provider: openai
+      accounts:
+      - openai-key
+      keys_page: https://platform.openai.com/api-keys
+      note: 'Crush through OpenAI: doz try crush --provider openai (or choose it in the try setup); the model with --model.'
+      checked: '2026-10-16'
+    - kind: api-key
+      provider: google
+      accounts:
+      - key
+      keys_page: https://aistudio.google.com/apikey
+      note: 'Crush through Google AI: doz try crush --provider google (or choose it in the try setup); the model with --model.'
+      checked: '2026-10-16'
+    - kind: api-key
+      provider: openrouter
+      accounts:
+      - key
+      keys_page: https://openrouter.ai/keys
+      note: 'Crush through OpenRouter: doz try crush --gateway openrouter (or choose it in the try setup); the model with --model.'
+      checked: '2026-10-16'
+    - kind: api-key
+      provider: vercel-ai-gateway
+      accounts:
+      - key
+      keys_page: https://vercel.com/docs/ai-gateway/authentication-and-byok
+      note: 'Crush through Vercel AI Gateway: doz try crush --gateway vercel-ai-gateway (or choose it in the try setup); the model with --model.'
+      checked: '2026-10-16'
 - type: com.dozersandbox/gateways@1
   config:
     entries:
     - gateway: openrouter
-      level: unknown
-      reason: Crush has an OpenRouter provider; not checked
-      checked: '2026-10-14'
+      level: verified
+      evidence: 'make recipe-check: its check turn through a stand-in OpenRouter (doz try with --gateway openrouter; models@1)'
+      checked: '2026-10-16'
     - gateway: vercel-ai-gateway
-      level: unknown
-      reason: not checked against Crush
-      checked: '2026-10-14'
+      level: verified
+      evidence: 'make recipe-check: its check turn through a stand-in Vercel AI Gateway (doz try with --gateway vercel-ai-gateway; models@1)'
+      checked: '2026-10-16'
+- type: com.dozersandbox/models@1
+  config:
+    default: xai
+    shapes:
+    - shape: openai-chat
+      env:
+        DOZ_CRUSH_TYPE: openai-compat
+        DOZ_BASE_URL: '${{ dozer.base_url }}'
+        DOZ_KEY_REF: $OPENAI_API_KEY
+        DOZ_MODEL: '${{ dozer.model }}'
+      key_env:
+      - OPENAI_API_KEY
+      source: https://github.com/charmbracelet/crush#custom-providers
+    - shape: anthropic-messages
+      env:
+        DOZ_CRUSH_TYPE: anthropic
+        DOZ_BASE_URL: '${{ dozer.base_url }}'
+        DOZ_KEY_REF: $ANTHROPIC_API_KEY
+        DOZ_MODEL: '${{ dozer.model }}'
+      key_env:
+      - ANTHROPIC_API_KEY
+      source: https://github.com/charmbracelet/crush#custom-providers
+    models:
+      xai: grok-build-0.1
 - type: com.dozersandbox/currency@1
   config:
     checked: '2026-10-14'
@@ -162,19 +254,19 @@ capabilities:
     - tag: headless
       level: verified
       notes:
-      - crush run -q -m xai/grok-build-0.1 "…"
+      - crush run -q "…"
       evidence: 'make recipe-check: crush run "say ok" printed the stand-in''s answer and exited in a fresh try'
       checked: '2026-10-14'
-    terms: Your xAI API key — a key from console.x.ai. Crush is under the FSL-1.1-MIT licence (each release becomes MIT two years on).
+    terms: Your API key of the provider or gateway you choose (xAI by default). Crush is under the FSL-1.1-MIT licence (each release becomes MIT two years on).
 - type: com.dozersandbox/guide@1
   config:
     intro: "Crush is a coding agent with its own screen: the session on the left. Ask it to read, change and run the code in your folder."
     steps:
     - text: "Check it answers, without its screen."
-      command: "crush run -q -m xai/grok-build-0.1 \"say ok\""
+      command: "crush run -q \"say ok\""
     - text: "Ask it something in its own screen — the session on the left."
     - text: "One task without its screen."
-      command: "crush run -q -m xai/grok-build-0.1 \"list the files in this folder\""
+      command: "crush run -q \"list the files in this folder\""
     tips:
     - "Files it makes are in /workspace — your folder on the Mac."
     - "Restart its session from the session's ⋯ menu; End stops it."

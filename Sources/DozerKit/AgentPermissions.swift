@@ -93,6 +93,7 @@ public enum AgentPermissions {
         a.insert(contentsOf: recipes.compactMap(modelPermission), at: 2)
         a += recipes.compactMap(updatePermission)
         a += AgentRecipes.all.compactMap(vendorPermission)
+        a += AgentRecipes.all.compactMap(sourcesPermission)
         cache = (g, a)
         return a
     }
@@ -125,6 +126,19 @@ public enum AgentPermissions {
         return AgentPermission(id: "vendor:" + r.id, title: "\(r.title)'s own sites", summary: "What \(r.title) reads from its maker when it starts.",
                                phrase: "read what your maker publishes for you at start-up",
                                hosts: v.map { PermissionHost($0.host, pathPrefixes: $0.conditions, reason: $0.reason) }, locked: false, hidden: true)
+    }
+
+    /// 618: a built-in agent's other model sources (pi on OpenAI, xAI, Google AI, OpenRouter, Vercel AI Gateway) — its
+    /// shared model permission is Anthropic's; hidden, added at create (`agentPermissions`), always on in its sandbox, like
+    /// Codex's "Talk to OpenAI". The key still goes only to the source its account names.
+    static func sourcesPermission(_ r: AgentRecipe) -> AgentPermission? {
+        guard r.isBuiltin, r.models != nil else { return nil }
+        let shared = Set(basePermissions.first { $0.id == "model" }?.hosts.map(\.host) ?? [])
+        let hosts = r.offeredSources.flatMap(ModelSources.hosts).filter { !shared.contains($0) }
+        guard !hosts.isEmpty else { return nil }
+        return AgentPermission(id: "sources:" + r.id, title: "\(r.title)'s other model providers",
+                               summary: "The providers and gateways \(r.title) can use besides Anthropic — the key goes only to the one its account names.",
+                               phrase: "talk to your AI model's provider", hosts: hosts.map { PermissionHost($0) }, locked: false, hidden: true)
     }
 
     /// The table before 617 — what every recipe is checked against (an excluded host is in none of these).
@@ -200,6 +214,8 @@ public enum AgentPermissions {
     public static func agentPermissions(_ agent: AgentKind?) -> [String] {
         let vendor = agent?.recipe.flatMap { ($0.network.vendor ?? []).isEmpty ? nil : ["vendor:" + $0.id] } ?? []
         if agent == .codex { return [openAIModel] + vendor }
+        // 618: pi's other model sources (hidden).
+        if let r = agent?.recipe, r.isBuiltin { return vendor + (sourcesPermission(r).map { [$0.id] } ?? []) }
         guard let r = agent?.recipe, !r.isBuiltin else { return vendor }
         var out: [String] = []
         if r.network.model.shared != true { out.append(r.network.model.id) }
@@ -217,7 +233,10 @@ public enum AgentPermissions {
     public static func isAgentUpdate(_ id: String) -> Bool { id.hasPrefix("update:") }
 
     /// 617: a permission only an agent has (its model, its update hosts): never in a preset, never inferred or suggested.
-    public static func isAgentOwn(_ id: String) -> Bool { isAgentModel(id) || isAgentUpdate(id) || isAgentVendor(id) }
+    public static func isAgentOwn(_ id: String) -> Bool { isAgentModel(id) || isAgentUpdate(id) || isAgentVendor(id) || isAgentSources(id) }
+
+    /// 618: a built-in agent's other model sources (`sources:pi`).
+    public static func isAgentSources(_ id: String) -> Bool { id.hasPrefix("sources:") }
 
     /// 617 (D5): whether `names` carry a recipe agent's own model (then Anthropic's `model` is not theirs).
     public static func hasOwnModel(_ names: [String]) -> Bool { !recipeModelPermissions.isDisjoint(with: names) }

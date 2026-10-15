@@ -151,11 +151,13 @@ A small terminal chat client.
 
 - **Installed** from the project's static linux-arm64 release on GitHub, checked against the SHA-512 Dozer recorded.
   Every base, Alpine included.
-- **Key:** a Gemini API key; tgpt is set to its Gemini provider (`AI_PROVIDER=gemini`, `GEMINI_MODEL`). It calls the
-  Gemini API's OpenAI-compatible endpoint, and Dozer's proxy sends the key as Google's `x-goog-api-key` header —
-  checked against a stand-in provider, not yet against Google itself.
+- **Providers:** **Google AI** (the default — its Gemini provider, `AI_PROVIDER=gemini`), **OpenAI**, **xAI**,
+  **OpenRouter** and **Vercel AI Gateway** (its OpenAI provider at the chosen source's chat endpoint, `OPENAI_URL`,
+  `OPENAI_MODEL`).
+- **Key:** an API key of that provider or gateway (a placeholder in the sandbox). On Google AI, Dozer's proxy sends the
+  key as Google's `x-goog-api-key` header — checked against a stand-in provider, not yet against Google itself.
 - **Use:** the session is its interactive mode (`tgpt -i`); one question is `tgpt -q "a question"`.
-- **May reach:** the Gemini API. Its key-less "free" providers are other companies' services, which Dozer does not allow
+- **May reach:** the API of the provider or gateway it was given. Its key-less "free" providers are other companies' services, which Dozer does not allow
   by default.
 
 ## smolagents
@@ -203,11 +205,14 @@ in a sandbox the key stays on the Mac.
 Pydantic AI's command line for chatting with models.
 
 - **Installed** from PyPI with every dependency pinned by its hash, on Dozer's own Python (Debian-based bases).
-- **Key:** an xAI API key, through Pydantic AI's OpenAI provider: `OPENAI_BASE_URL` is xAI's API and the key's placeholder
-  is also `OPENAI_API_KEY`. The session starts `clai -m openai:grok-4-1-fast`.
-- **Use:** one question is `clai -m openai:grok-4-1-fast "a question"`.
-- **May reach:** xAI's API. Other providers are not offered: its model is fixed in the session's command (`-m`), which
-  Dozer cannot set per sandbox yet.
+- **Providers:** **xAI** (the default), **Anthropic**, **OpenAI**, **Google AI**, **OpenRouter** and **Vercel AI
+  Gateway** — Pydantic AI's OpenAI-compatible model at the chosen source's base URL (`OPENAI_BASE_URL`), or its
+  Anthropic model (`ANTHROPIC_BASE_URL`). Dozer puts the model on its command line (`-m openai-chat:MODEL`; on xAI,
+  `grok-4-1-fast`), unless you give your own `-m`.
+- **Key:** an API key of that provider or gateway (a placeholder in the sandbox, also under `OPENAI_API_KEY` or
+  `ANTHROPIC_API_KEY`).
+- **Use:** one question is `clai --no-stream "a question"`.
+- **May reach:** the API of the provider or gateway it was given.
 - **Later:** `clai web` (its chat page) needs a forwarded port.
 
 ## Fabric

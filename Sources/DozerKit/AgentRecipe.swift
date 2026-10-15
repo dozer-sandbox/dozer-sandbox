@@ -280,6 +280,12 @@ public struct AgentRecipe: Codable, Sendable, Equatable {
         /// the environment of the command that started it, so the launcher restarts it first when it runs with another
         /// value of `env` than this run has (a model or source chosen since). Emitted only into such a recipe's launcher.
         public var service: Service? = nil
+        /// 618: the arguments that choose its model when the tool takes it ONLY on its command line (`[-m, $DOZ_MODEL]`):
+        /// the launcher puts them first when `DOZ_MODEL` is set (models@1 sets it per source — `xai/${{ dozer.model }}`)
+        /// and the run gives no flag of its own. Emitted only into such a recipe's launcher.
+        public var modelArgs: [String]? = nil
+        /// 618: subcommands whose own flags they are (`exec`, `run`): there the arguments go AFTER the subcommand.
+        public var modelArgsAfter: [String]? = nil
 
         public struct Service: Codable, Sendable, Equatable {
             /// The service process's arguments after the program (`[serve, --service]`).
@@ -295,7 +301,8 @@ public struct AgentRecipe: Codable, Sendable, Equatable {
 
         enum CodingKeys: String, CodingKey {
             case command, passthrough, env, session, service
-            case noPromptsArgs = "no_prompts_args", firstRun = "first_run", sessionEnv = "session_env", noPromptsEnv = "no_prompts_env"
+            case noPromptsArgs = "no_prompts_args", firstRun = "first_run", sessionEnv = "session_env", noPromptsEnv = "no_prompts_env",
+                 modelArgs = "model_args", modelArgsAfter = "model_args_after"
         }
     }
 
@@ -308,6 +315,12 @@ public struct AgentRecipe: Codable, Sendable, Equatable {
         /// 617: `json` — a JSON file whose name has no extension (Kimi Code's `workspace-trust/wd_workspace_…` record);
         /// nil: the kind of file follows from its name.
         public var format: String? = nil
+        /// 618: written at EVERY run, its keys set (not only when absent), each `$DOZ_…` in a value replaced by the
+        /// run's own (models@1 sets them per source) — for a tool that takes its model only from its settings file
+        /// (Crush's `models.large`). A JSON file; skipped when the run has no model source chosen.
+        public var eachRun: Bool? = nil
+
+        enum CodingKeys: String, CodingKey { case file, set, format, eachRun = "each_run" }
     }
 
     public struct State: Codable, Sendable, Equatable {
@@ -1252,6 +1265,32 @@ extension AgentRecipe {
         for a in launch.command + launch.noPromptsArgs + launch.passthrough + (resume ?? []) where !scriptSafe(a) || a.isEmpty {
             throw bad("an argument holds a quote, a backslash or a newline: \(a)")
         }
+        if let m = launch.modelArgs {
+            // 618: plain words written into the launcher; `$DOZ_…` variables in them are the selection's (every models@1
+            // entry sets each one named), exactly one word names the model ($DOZ_MODEL), none names a credential.
+            let vars = { (w: String) -> [String] in
+                let ns = w as NSString
+                return (try! NSRegularExpression(pattern: "\\$(DOZ_[A-Z0-9_]+)")).matches(in: w, range: NSRange(location: 0, length: ns.length))
+                    .map { ns.substring(with: $0.range(at: 1)) }
+            }
+            let word = { (w: String) in
+                w.replacingOccurrences(of: "\\$DOZ_[A-Z0-9_]+", with: "x", options: .regularExpression)
+                    .range(of: "^[A-Za-z0-9-][A-Za-z0-9._=:/@-]*$", options: .regularExpression) != nil
+            }
+            let named = Set(m.flatMap(vars))
+            // (A built-in agent's are put on its default session by the host at session open — never baked.)
+            guard let models, let flag = m.first, flag.hasPrefix("-"), !flag.contains("$"), m.allSatisfy(word),
+                  m.filter({ vars($0).contains("DOZ_MODEL") }).count == 1, !named.contains(where: BakeEnvironment.isCredential) else {
+                throw bad("launch.model_args: a recipe agent with models@1; a flag first, plain words, one naming $DOZ_MODEL, no credential")
+            }
+            for a in launch.modelArgsAfter ?? [] where a.range(of: "^[a-z][a-z0-9-]*$", options: .regularExpression) == nil {
+                throw bad("launch.model_args_after: subcommand words")
+            }
+            let envs = (models.shapes ?? []).map(\.env) + (models.native ?? []).map(\.env)
+            guard envs.allSatisfy({ e in named.allSatisfy { e[$0] != nil } }) else {
+                throw bad("launch.model_args: every models@1 entry sets each variable it names (\(named.sorted().joined(separator: ", ")))")
+            }
+        }
         if let s = launch.service {
             // 618: plain words only — they are written into the launcher (a shell script).
             let word = { (w: String) in w.range(of: "^[A-Za-z0-9-][A-Za-z0-9._=-]*$", options: .regularExpression) != nil }
@@ -1267,6 +1306,19 @@ extension AgentRecipe {
         for (k, v) in everyEnv {
             guard k.range(of: "^[A-Z_][A-Z0-9_]*$", options: .regularExpression) != nil, !BakeEnvironment.isCredential(k), scriptSafe(v) else {
                 throw bad("env \(k): a variable name that names no credential, and a value with no quote")
+            }
+        }
+        for f in launch.firstRun ?? [] where f.eachRun == true {
+            // 618: a JSON file, its `$DOZ_…` values the selection's (every models@1 entry sets each), never a credential's.
+            let named = Set(f.set.values.flatMap(\.strings).flatMap { s -> [String] in
+                let ns = s as NSString
+                return (try! NSRegularExpression(pattern: "\\$(DOZ_[A-Z0-9_]+)")).matches(in: s, range: NSRange(location: 0, length: ns.length))
+                    .map { ns.substring(with: $0.range(at: 1)) }
+            })
+            let envs = (models?.shapes ?? []).map(\.env) + (models?.native ?? []).map(\.env)
+            guard !isBuiltin, models != nil, f.file.hasSuffix(".json") || f.format == "json", named.contains("DOZ_MODEL"),
+                  !named.contains(where: BakeEnvironment.isCredential), envs.allSatisfy({ e in named.allSatisfy { e[$0] != nil } }) else {
+                throw bad("first_run each_run \(f.file): a JSON file of a recipe agent with models@1, naming $DOZ_MODEL, each $DOZ_… set by every models@1 entry, none a credential")
             }
         }
         for f in launch.firstRun ?? [] {

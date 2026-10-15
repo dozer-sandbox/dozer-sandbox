@@ -18,16 +18,37 @@
           "model" : {
             "hosts" : [
               {
+                "host" : "api.anthropic.com",
+                "reason" : "Anthropic — when the sandbox's key is Anthropic's"
+              },
+              {
+                "host" : "api.openai.com",
+                "reason" : "OpenAI — when the sandbox's key is OpenAI's"
+              },
+              {
                 "host" : "api.x.ai",
                 "paths" : [
                   "/v1/chat/completions"
-                ]
+                ],
+                "reason" : "xAI — when the sandbox's key is xAI's"
+              },
+              {
+                "host" : "generativelanguage.googleapis.com",
+                "reason" : "Google AI — when the sandbox's key is Google AI's"
+              },
+              {
+                "host" : "openrouter.ai",
+                "reason" : "OpenRouter — when the sandbox's key is OpenRouter's"
+              },
+              {
+                "host" : "ai-gateway.vercel.sh",
+                "reason" : "Vercel AI Gateway — when the sandbox's key is Vercel AI Gateway's"
               }
             ],
             "id" : "model:tau",
-            "phrase" : "talk to your AI model (xAI)",
-            "summary" : "Tau's model here (the xAI API, with your key) — needed for it to answer.",
-            "title" : "Talk to xAI"
+            "phrase" : "talk to your AI model",
+            "summary" : "Tau's model — the provider or gateway its key is for (Anthropic, OpenAI, xAI, Google AI, OpenRouter or Vercel AI Gateway), with an API key. Needed for Tau to answer.",
+            "title" : "Talk to its model provider"
           },
           "update" : [
 
@@ -35,7 +56,12 @@
         },
         "runtime" : {
           "allow" : [
-            "api.x.ai:443"
+            "api.anthropic.com:443",
+            "api.openai.com:443",
+            "api.x.ai:443",
+            "generativelanguage.googleapis.com:443",
+            "openrouter.ai:443",
+            "ai-gateway.vercel.sh:443"
           ]
         }
       },
@@ -114,25 +140,23 @@
           "argv" : [
             "tau",
             "-p",
-            "--provider",
-            "xai",
-            "-m",
-            "grok-build-0.1",
             "say ok"
           ],
           "expect" : "DOZ_FAKE_OK"
         },
         "command" : [
-          "tau",
-          "--provider",
-          "xai",
-          "-m",
-          "grok-build-0.1"
+          "tau"
         ],
         "env" : {
           "TAU_NO_UPDATE_CHECK" : "1",
           "TAU_OFFLINE" : "1"
         },
+        "model_args" : [
+          "--provider",
+          "$DOZ_MODEL_PROVIDER",
+          "-m",
+          "$DOZ_MODEL"
+        ],
         "no_prompts_args" : [
 
         ],
@@ -167,11 +191,61 @@
             "accounts" : [
               "key"
             ],
-            "checked" : "2026-10-14",
+            "checked" : "2026-10-16",
             "keys_page" : "https://console.x.ai/",
             "kind" : "api-key",
-            "note" : "Tau's built-in xai provider reads XAI_API_KEY (api_key_env in its catalogue) each run; --provider xai -m grok-build-0.1 in the command. Its /login is not needed.",
+            "note" : "Tau's own providers (its catalogue), each reading its key from the environment; Dozer puts the provider and model on its command line (--provider xai -m grok-build-0.1 on xAI, the default).",
             "provider" : "xai"
+          },
+          {
+            "accounts" : [
+              "api-key"
+            ],
+            "checked" : "2026-10-16",
+            "keys_page" : "https://console.anthropic.com/settings/keys",
+            "kind" : "api-key",
+            "note" : "Tau through Anthropic: doz try tau --provider anthropic (or choose it in the try setup); the model with --model.",
+            "provider" : "anthropic"
+          },
+          {
+            "accounts" : [
+              "openai-key"
+            ],
+            "checked" : "2026-10-16",
+            "keys_page" : "https://platform.openai.com/api-keys",
+            "kind" : "api-key",
+            "note" : "Tau through OpenAI: doz try tau --provider openai (or choose it in the try setup); the model with --model.",
+            "provider" : "openai"
+          },
+          {
+            "accounts" : [
+              "key"
+            ],
+            "checked" : "2026-10-16",
+            "keys_page" : "https://aistudio.google.com/apikey",
+            "kind" : "api-key",
+            "note" : "Tau through Google AI: doz try tau --provider google (or choose it in the try setup); the model with --model.",
+            "provider" : "google"
+          },
+          {
+            "accounts" : [
+              "key"
+            ],
+            "checked" : "2026-10-16",
+            "keys_page" : "https://openrouter.ai/keys",
+            "kind" : "api-key",
+            "note" : "Tau through OpenRouter: doz try tau --gateway openrouter (or choose it in the try setup); the model with --model.",
+            "provider" : "openrouter"
+          },
+          {
+            "accounts" : [
+              "key"
+            ],
+            "checked" : "2026-10-16",
+            "keys_page" : "https://vercel.com/docs/ai-gateway/authentication-and-byok",
+            "kind" : "api-key",
+            "note" : "Tau through Vercel AI Gateway: doz try tau --gateway vercel-ai-gateway (or choose it in the try setup); the model with --model.",
+            "provider" : "vercel-ai-gateway"
           }
         ]
       },
@@ -181,20 +255,75 @@
       "config" : {
         "entries" : [
           {
-            "checked" : "2026-10-14",
+            "checked" : "2026-10-16",
+            "evidence" : "make recipe-check: its check turn through a stand-in OpenRouter (doz try with --gateway openrouter; models@1)",
             "gateway" : "openrouter",
-            "level" : "unknown",
-            "reason" : "Tau has an OpenRouter provider; not checked"
+            "level" : "verified"
           },
           {
-            "checked" : "2026-10-14",
+            "checked" : "2026-10-16",
+            "evidence" : "make recipe-check: its check turn through a stand-in Vercel AI Gateway (doz try with --gateway vercel-ai-gateway; models@1)",
             "gateway" : "vercel-ai-gateway",
-            "level" : "unknown",
-            "reason" : "not checked against Tau"
+            "level" : "verified"
           }
         ]
       },
       "type" : "com.dozersandbox/gateways@1"
+    },
+    {
+      "config" : {
+        "default" : "xai",
+        "models" : {
+          "xai" : "grok-build-0.1"
+        },
+        "native" : [
+          {
+            "env" : {
+              "DOZ_MODEL" : "${{ dozer.model }}",
+              "DOZ_MODEL_PROVIDER" : "anthropic"
+            },
+            "source" : "anthropic"
+          },
+          {
+            "env" : {
+              "DOZ_MODEL" : "${{ dozer.model }}",
+              "DOZ_MODEL_PROVIDER" : "openai"
+            },
+            "source" : "openai"
+          },
+          {
+            "env" : {
+              "DOZ_MODEL" : "${{ dozer.model }}",
+              "DOZ_MODEL_PROVIDER" : "xai"
+            },
+            "source" : "xai"
+          },
+          {
+            "env" : {
+              "DOZ_MODEL" : "${{ dozer.model }}",
+              "DOZ_MODEL_PROVIDER" : "google"
+            },
+            "source" : "google"
+          },
+          {
+            "docs" : "https://github.com/huggingface/tau/blob/v0.4.7/website/content/guides/providers-and-models.md",
+            "env" : {
+              "DOZ_MODEL" : "${{ dozer.model }}",
+              "DOZ_MODEL_PROVIDER" : "openrouter"
+            },
+            "source" : "openrouter"
+          },
+          {
+            "docs" : "https://github.com/huggingface/tau/blob/v0.4.7/website/content/guides/providers-and-models.md",
+            "env" : {
+              "DOZ_MODEL" : "${{ dozer.model }}",
+              "DOZ_MODEL_PROVIDER" : "vercel-ai-gateway"
+            },
+            "source" : "vercel-ai-gateway"
+          }
+        ]
+      },
+      "type" : "com.dozersandbox/models@1"
     },
     {
       "config" : {
@@ -220,12 +349,12 @@
             "evidence" : "make recipe-check: tau -p \"say ok\" printed the stand-in's answer and exited in a fresh try",
             "level" : "verified",
             "notes" : [
-              "tau -p --provider xai -m grok-build-0.1 \"…\""
+              "tau -p \"…\""
             ],
             "tag" : "headless"
           }
         ],
-        "terms" : "Your xAI API key — a key from console.x.ai."
+        "terms" : "Your API key of the provider or gateway you choose (xAI by default)."
       },
       "type" : "com.dozersandbox/directory@1"
     },
@@ -235,14 +364,14 @@
         "intro" : "Tau is a coding agent with its own screen: the session on the left. Ask it to read, change and run the code in your folder.",
         "steps" : [
           {
-            "command" : "tau -p --provider xai -m grok-build-0.1 \"say ok\"",
+            "command" : "tau -p \"say ok\"",
             "text" : "Check it answers, without its screen."
           },
           {
             "text" : "Ask it something in its own screen — the session on the left."
           },
           {
-            "command" : "tau -p --provider xai -m grok-build-0.1 \"list the files in this folder\"",
+            "command" : "tau -p \"list the files in this folder\"",
             "text" : "One task without its screen."
           }
         ],
@@ -254,7 +383,7 @@
       "type" : "com.dozersandbox/guide@1"
     }
   ],
-  "description" : "Hugging Face's Python port of the pi coding agent, here on an xAI API key.",
+  "description" : "Hugging Face's Python port of the pi coding agent, on the key of the provider or gateway you choose (xAI by default).",
   "displayName" : "Tau",
   "id" : "huggingface/tau",
   "kind" : "workload",

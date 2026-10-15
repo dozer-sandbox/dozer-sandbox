@@ -577,12 +577,19 @@ public enum AgentImages {
             """
         for (k, v) in r.launch.env.sorted(by: { $0.key < $1.key }) { sh += "export \(k)=\(shellQuoted(v))\n" }
         if let s = r.launch.service { sh += recipeServiceCheck(r, s) }
+        // Before the passthrough: a flag run (`maki -p …`) gets the model too; a subcommand (`maki models`) does not.
+        if let m = r.launch.modelArgs, let flag = m.first {
+            let after = r.launch.modelArgsAfter ?? []
+            sh += recipeModelArgs(m, flag: flag, subcommands: r.launch.passthrough.filter { !$0.hasPrefix("-") && !after.contains($0) }, after: after)
+        }
+        // 618: a file written at every run (`each_run`) is for every run, a passthrough one too (`crush run`).
+        let eachRun = r.launch.firstRun?.contains { $0.eachRun == true } == true
+        let setupLine = "python3 \(setup) || echo \"doz: could not pre-seed \(r.title)'s settings\" >&2\n"
+        if eachRun { sh += setupLine }
         if !r.launch.passthrough.isEmpty {
             sh += "case \"$1\" in\n  \(r.launch.passthrough.joined(separator: "|"))) exec /usr/local/bin/\(bin) \"$@\" ;;\nesac\n"
         }
-        if r.launch.firstRun?.isEmpty == false {
-            sh += "python3 \(setup) || echo \"doz: could not pre-seed \(r.title)'s settings\" >&2\n"
-        }
+        if r.launch.firstRun?.isEmpty == false, !eachRun { sh += setupLine }
         if !r.launch.noPromptsArgs.isEmpty {
             sh += "[ \"$mode\" = skip ] && set -- \(r.launch.noPromptsArgs.map(shellQuoted).joined(separator: " ")) \"$@\"\n"
         }
@@ -602,6 +609,37 @@ public enum AgentImages {
         if r.launch.firstRun?.isEmpty == false { script += "chmod 0644 \(setup)\n" }
         script += "chown -R agent:agent /home/agent/.local"
         return script
+    }
+
+    /// 618: the model a source's choice names (`DOZ_MODEL`), put on the command line of a tool that takes it only there —
+    /// unless the run gives its own flag (`-m X` or `-m=X`) or is one of its subcommands. Only in such a recipe's launcher.
+    static func recipeModelArgs(_ args: [String], flag: String, subcommands: [String], after: [String] = []) -> String {
+        // Each `$DOZ_…` variable is itself, double-quoted; the rest of the word single-quoted.
+        let words = args.map { w -> String in
+            var out = "", rest = Substring(w)
+            while let r = rest.range(of: "\\$DOZ_[A-Z0-9_]+", options: .regularExpression) {
+                if r.lowerBound > rest.startIndex { out += shellQuoted(String(rest[..<r.lowerBound])) }
+                out += "\"" + rest[r] + "\""
+                rest = rest[r.upperBound...]
+            }
+            return rest.isEmpty && !out.isEmpty ? out : out + shellQuoted(String(rest))
+        }
+        return """
+            # doz: the model chosen for this source, unless the command names one itself.
+            if [ -n "${DOZ_MODEL:-}" ]; then
+              doz_own=0
+            \(subcommands.isEmpty ? "" : "  case \"${1:-}\" in \(subcommands.joined(separator: "|"))) doz_own=1 ;; esac\n")  for a in "$@"; do case "$a" in \(shellQuoted(flag))|\(shellQuoted(flag))=*) doz_own=1 ;; esac; done
+            \(after.isEmpty ? "  [ \"$doz_own\" = 1 ] || set -- \(words.joined(separator: " ")) \"$@\"" : """
+              if [ "$doz_own" = 0 ]; then
+                case "${1:-}" in
+                  \(after.joined(separator: "|"))) doz_sub=$1; shift; set -- "$doz_sub" \(words.joined(separator: " ")) "$@" ;;
+                  *) set -- \(words.joined(separator: " ")) "$@" ;;
+                esac
+              fi
+            """)
+            fi
+
+            """
     }
 
     /// 618: a background service that keeps the environment of the run that started it (OpenCode 2's `opencode serve
@@ -635,6 +673,41 @@ public enum AgentImages {
 
             """
     }
+
+    /// 618: a first-run file written at EVERY run (`each_run`): its keys SET, each `$DOZ_…` in a string the run's own value
+    /// — skipped when one is not set (no model source chosen). Only in such a recipe's helper.
+    static let eachRunPython = #"""
+        def fill_doz(v, env):
+            if isinstance(v, str):
+                for n in sorted(set(__import__('re').findall(r'\$(DOZ_[A-Z0-9_]+)', v)), key=len, reverse=True):
+                    if n not in env: raise KeyError(n)
+                    v = v.replace('$' + n, env[n])
+                return v
+            if isinstance(v, list): return [fill_doz(x, env) for x in v]
+            if isinstance(v, dict): return {k: fill_doz(x, env) for k, x in v.items()}
+            return v
+        def set_json(f, keys):
+            try:
+                keys = fill_doz(keys, os.environ)
+            except KeyError:
+                return
+            try:
+                with open(f, encoding='utf-8') as h: c = json.load(h)
+            except FileNotFoundError:
+                c = {}
+            except Exception:
+                return
+            if not isinstance(c, dict): return
+            before = json.dumps(c, sort_keys=True)
+            for k, v in sorted(keys.items()):
+                parts, d = k.split('.'), c
+                for p in parts[:-1]:
+                    if not isinstance(d.get(p), dict): d[p] = {}
+                    d = d[p]
+                d[parts[-1]] = v
+            if json.dumps(c, sort_keys=True) != before: put(f, json.dumps(c, indent=2) + '\n')
+
+        """#
 
     /// 617: the dotenv merge (a recipe whose first-run file is `…/.env` — Fabric); only in such a recipe's helper, so the
     /// other recipes' launchers (and bake keys) are unchanged. KEY=value lines; a key already there (set or commented
@@ -822,10 +895,10 @@ public enum AgentImages {
                     t[key] = v
                     changed = True
                 if changed: put(f, '\n'.join(lines) + '\n')
-            \#(merges.contains { $0.file.hasSuffix("/.env") } ? dotenvPython : "")\#(Self.hasYAML(merges) ? yamlTopPython : "")\#(Self.hasQuotedTOML(merges) ? tomlQuotedPython : "")\#(Self.hasTopLevelTOML(merges) ? tomlTopPython : "")for m in MERGES:
+            \#(merges.contains { $0.eachRun == true } ? eachRunPython : "")\#(merges.contains { $0.file.hasSuffix("/.env") } ? dotenvPython : "")\#(Self.hasYAML(merges) ? yamlTopPython : "")\#(Self.hasQuotedTOML(merges) ? tomlQuotedPython : "")\#(Self.hasTopLevelTOML(merges) ? tomlTopPython : "")for m in MERGES:
                 f = m['file']
                 f = os.path.join(home, f[2:]) if f.startswith('~/') else f
-                (\#(merges.contains { $0.format != nil } ? "merge_json if m.get('format') == 'json' else " : "")merge_toml if f.endswith('.toml') else \#(merges.contains { $0.file.hasSuffix("/.env") } ? "merge_env if f.endswith('/.env') else " : "")\#(Self.hasYAML(merges) ? "merge_yaml if f.endswith(('.yaml', '.yml')) else " : "")merge_json)(f, m['set'])
+            \#(merges.contains { $0.eachRun == true } ? "    if m.get('each_run'):\n        set_json(f, m['set'])\n        continue\n" : "")    (\#(merges.contains { $0.format != nil } ? "merge_json if m.get('format') == 'json' else " : "")merge_toml if f.endswith('.toml') else \#(merges.contains { $0.file.hasSuffix("/.env") } ? "merge_env if f.endswith('/.env') else " : "")\#(Self.hasYAML(merges) ? "merge_yaml if f.endswith(('.yaml', '.yml')) else " : "")merge_json)(f, m['set'])
             """#
     }
 

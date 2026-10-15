@@ -220,7 +220,7 @@ final class WebTryTests: XCTestCase {
         let catalog = await WebTryCatalog.build(plan: { r in WebPlan(CreatePlan.sample(name: "try-" + r.create.image, image: r.create.image)) },
                                                 secretEntry: true, accounts: accounts)
         let by = Dictionary(uniqueKeysWithValues: catalog.agents.map { ($0.id, $0) })
-        XCTAssertEqual(by["pi"]?.usableAccounts.map(\.name), ["anthropic"], "pi: an API key, never the Mac's login")
+        XCTAssertEqual(by["pi"]?.usableAccounts.map(\.name), ["anthropic", "oai", "xai1", "google"], "pi: an API key of a source it is offered (618), never the Mac's login")
         XCTAssertEqual(by["claude-code"]?.usableAccounts.map(\.name), ["mac", "anthropic"])
         XCTAssertEqual(by["codex"]?.usableAccounts.map(\.name), ["oai"])
         XCTAssertEqual(by["grok"]?.usableAccounts.map(\.name), ["xai1"], "a key of its own provider only")

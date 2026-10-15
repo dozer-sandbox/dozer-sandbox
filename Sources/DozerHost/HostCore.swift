@@ -1539,6 +1539,24 @@ public actor HostCore {
         }
         return e
     }
+    /// 618: a built-in agent with model sources (pi) gets `launch.model_args` on its default session, filled from the
+    /// selection — only off its default source or with a model chosen there (on its own default it keeps its own pick).
+    func builtinModelArguments(_ m: Managed) -> [String] {
+        let image = m.sandbox.spec.imageSpec?.name
+        guard let r = image.flatMap({ ImageChoice.parse($0) })?.agent.recipe, r.isBuiltin, let args = r.launch.modelArgs,
+              let sel = modelSelection(m), sel.source != r.models?.default || m.config.models?[sel.source] != nil else { return [] }
+        return Self.filledModelArguments(args, sel.env)
+    }
+
+    /// Each `$DOZ_…` in `args` replaced by its value in `env` (none missing: models@1 is validated to set each).
+    static func filledModelArguments(_ args: [String], _ env: [String: String]) -> [String] {
+        args.map { a in
+            var out = a
+            for (k, v) in env.sorted(by: { $0.key.count > $1.key.count }) where k.hasPrefix("DOZ_") { out = out.replacingOccurrences(of: "$" + k, with: v) }
+            return out
+        }
+    }
+
     func recipeEnvironment(_ env: [String: String], _ m: Managed) -> [String: String] {
         var e = Self.withRecipeEnvironment(env, imageSpec: m.config.spec.imageSpec?.name, permissions: m.sandbox.egress?.policy.permissions)
         // 617 (models@1): the chosen model source's settings (base URL, model), never over the caller's own value.
@@ -1664,6 +1682,8 @@ public actor HostCore {
                 argv += ["--append-system-prompt", AgentPrompt.guestPromptPath]
             }
         }
+        // 618: a built-in agent's model on its command line (pi's --model), at session open — never baked.
+        if recordArgv == m.config.defaultSession.argv { argv += builtinModelArguments(m) }
         if argv == m.config.defaultSession.argv { await deliverGuideNote(m) }    // 617.11: a shell tool's first steps, once
         argv += extraArguments
         // 599i: Codex's credentials for this session — its auth.json with placeholders only (or none).

@@ -18,16 +18,37 @@
           "model" : {
             "hosts" : [
               {
+                "host" : "api.anthropic.com",
+                "reason" : "Anthropic — when the sandbox's key is Anthropic's"
+              },
+              {
+                "host" : "api.openai.com",
+                "reason" : "OpenAI — when the sandbox's key is OpenAI's"
+              },
+              {
                 "host" : "api.x.ai",
                 "paths" : [
                   "/v1/chat/completions"
-                ]
+                ],
+                "reason" : "xAI — when the sandbox's key is xAI's"
+              },
+              {
+                "host" : "generativelanguage.googleapis.com",
+                "reason" : "Google AI — when the sandbox's key is Google AI's"
+              },
+              {
+                "host" : "openrouter.ai",
+                "reason" : "OpenRouter — when the sandbox's key is OpenRouter's"
+              },
+              {
+                "host" : "ai-gateway.vercel.sh",
+                "reason" : "Vercel AI Gateway — when the sandbox's key is Vercel AI Gateway's"
               }
             ],
             "id" : "model:crush",
-            "phrase" : "talk to your AI model (xAI)",
-            "summary" : "Crush's model here (the xAI API, with your key) — needed for it to answer.",
-            "title" : "Talk to xAI"
+            "phrase" : "talk to your AI model",
+            "summary" : "Crush's model — the provider or gateway its key is for (Anthropic, OpenAI, xAI, Google AI, OpenRouter or Vercel AI Gateway), with an API key. Needed for Crush to answer.",
+            "title" : "Talk to its model provider"
           },
           "update" : [
 
@@ -44,7 +65,12 @@
         },
         "runtime" : {
           "allow" : [
+            "api.anthropic.com:443",
+            "api.openai.com:443",
             "api.x.ai:443",
+            "generativelanguage.googleapis.com:443",
+            "openrouter.ai:443",
+            "ai-gateway.vercel.sh:443",
             "api.github.com:443"
           ]
         }
@@ -108,8 +134,6 @@
             "crush",
             "run",
             "-q",
-            "-m",
-            "xai/grok-build-0.1",
             "say ok"
           ],
           "expect" : "DOZ_FAKE_OK"
@@ -131,6 +155,28 @@
               "models.small.provider" : "xai",
               "options.disable_metrics" : true,
               "options.disable_provider_auto_update" : true
+            }
+          },
+          {
+            "each_run" : true,
+            "file" : "~/.config/crush/crush.json",
+            "set" : {
+              "models.large.model" : "$DOZ_MODEL",
+              "models.large.provider" : "doz",
+              "models.small.model" : "$DOZ_MODEL",
+              "models.small.provider" : "doz",
+              "providers.doz.api_key" : "$DOZ_KEY_REF",
+              "providers.doz.base_url" : "$DOZ_BASE_URL",
+              "providers.doz.models" : [
+                {
+                  "context_window" : 200000,
+                  "default_max_tokens" : 8192,
+                  "id" : "$DOZ_MODEL",
+                  "name" : "$DOZ_MODEL"
+                }
+              ],
+              "providers.doz.name" : "Dozer",
+              "providers.doz.type" : "$DOZ_CRUSH_TYPE"
             }
           }
         ],
@@ -176,11 +222,61 @@
             "accounts" : [
               "key"
             ],
-            "checked" : "2026-10-14",
+            "checked" : "2026-10-16",
             "keys_page" : "https://console.x.ai/",
             "kind" : "api-key",
-            "note" : "Crush's built-in xai provider reads XAI_API_KEY; its large and small models set to grok-build-0.1. Its own sign-in (Charm, Hyper) is not used.",
+            "note" : "Crush's model and provider are set in its settings file at every run (~/.config/crush/crush.json: one provider at the chosen source's base URL, OpenAI-compatible or Anthropic; its key read from the variable the placeholder is in, never written there). On xAI (the default) the model is grok-build-0.1. Its own sign-in (Charm, Hyper) is not used.",
             "provider" : "xai"
+          },
+          {
+            "accounts" : [
+              "api-key"
+            ],
+            "checked" : "2026-10-16",
+            "keys_page" : "https://console.anthropic.com/settings/keys",
+            "kind" : "api-key",
+            "note" : "Crush through Anthropic: doz try crush --provider anthropic (or choose it in the try setup); the model with --model.",
+            "provider" : "anthropic"
+          },
+          {
+            "accounts" : [
+              "openai-key"
+            ],
+            "checked" : "2026-10-16",
+            "keys_page" : "https://platform.openai.com/api-keys",
+            "kind" : "api-key",
+            "note" : "Crush through OpenAI: doz try crush --provider openai (or choose it in the try setup); the model with --model.",
+            "provider" : "openai"
+          },
+          {
+            "accounts" : [
+              "key"
+            ],
+            "checked" : "2026-10-16",
+            "keys_page" : "https://aistudio.google.com/apikey",
+            "kind" : "api-key",
+            "note" : "Crush through Google AI: doz try crush --provider google (or choose it in the try setup); the model with --model.",
+            "provider" : "google"
+          },
+          {
+            "accounts" : [
+              "key"
+            ],
+            "checked" : "2026-10-16",
+            "keys_page" : "https://openrouter.ai/keys",
+            "kind" : "api-key",
+            "note" : "Crush through OpenRouter: doz try crush --gateway openrouter (or choose it in the try setup); the model with --model.",
+            "provider" : "openrouter"
+          },
+          {
+            "accounts" : [
+              "key"
+            ],
+            "checked" : "2026-10-16",
+            "keys_page" : "https://vercel.com/docs/ai-gateway/authentication-and-byok",
+            "kind" : "api-key",
+            "note" : "Crush through Vercel AI Gateway: doz try crush --gateway vercel-ai-gateway (or choose it in the try setup); the model with --model.",
+            "provider" : "vercel-ai-gateway"
           }
         ]
       },
@@ -190,20 +286,57 @@
       "config" : {
         "entries" : [
           {
-            "checked" : "2026-10-14",
+            "checked" : "2026-10-16",
+            "evidence" : "make recipe-check: its check turn through a stand-in OpenRouter (doz try with --gateway openrouter; models@1)",
             "gateway" : "openrouter",
-            "level" : "unknown",
-            "reason" : "Crush has an OpenRouter provider; not checked"
+            "level" : "verified"
           },
           {
-            "checked" : "2026-10-14",
+            "checked" : "2026-10-16",
+            "evidence" : "make recipe-check: its check turn through a stand-in Vercel AI Gateway (doz try with --gateway vercel-ai-gateway; models@1)",
             "gateway" : "vercel-ai-gateway",
-            "level" : "unknown",
-            "reason" : "not checked against Crush"
+            "level" : "verified"
           }
         ]
       },
       "type" : "com.dozersandbox/gateways@1"
+    },
+    {
+      "config" : {
+        "default" : "xai",
+        "models" : {
+          "xai" : "grok-build-0.1"
+        },
+        "shapes" : [
+          {
+            "env" : {
+              "DOZ_BASE_URL" : "${{ dozer.base_url }}",
+              "DOZ_CRUSH_TYPE" : "openai-compat",
+              "DOZ_KEY_REF" : "$OPENAI_API_KEY",
+              "DOZ_MODEL" : "${{ dozer.model }}"
+            },
+            "key_env" : [
+              "OPENAI_API_KEY"
+            ],
+            "shape" : "openai-chat",
+            "source" : "https://github.com/charmbracelet/crush#custom-providers"
+          },
+          {
+            "env" : {
+              "DOZ_BASE_URL" : "${{ dozer.base_url }}",
+              "DOZ_CRUSH_TYPE" : "anthropic",
+              "DOZ_KEY_REF" : "$ANTHROPIC_API_KEY",
+              "DOZ_MODEL" : "${{ dozer.model }}"
+            },
+            "key_env" : [
+              "ANTHROPIC_API_KEY"
+            ],
+            "shape" : "anthropic-messages",
+            "source" : "https://github.com/charmbracelet/crush#custom-providers"
+          }
+        ]
+      },
+      "type" : "com.dozersandbox/models@1"
     },
     {
       "config" : {
@@ -229,12 +362,12 @@
             "evidence" : "make recipe-check: crush run \"say ok\" printed the stand-in's answer and exited in a fresh try",
             "level" : "verified",
             "notes" : [
-              "crush run -q -m xai/grok-build-0.1 \"…\""
+              "crush run -q \"…\""
             ],
             "tag" : "headless"
           }
         ],
-        "terms" : "Your xAI API key — a key from console.x.ai. Crush is under the FSL-1.1-MIT licence (each release becomes MIT two years on)."
+        "terms" : "Your API key of the provider or gateway you choose (xAI by default). Crush is under the FSL-1.1-MIT licence (each release becomes MIT two years on)."
       },
       "type" : "com.dozersandbox/directory@1"
     },
@@ -244,14 +377,14 @@
         "intro" : "Crush is a coding agent with its own screen: the session on the left. Ask it to read, change and run the code in your folder.",
         "steps" : [
           {
-            "command" : "crush run -q -m xai/grok-build-0.1 \"say ok\"",
+            "command" : "crush run -q \"say ok\"",
             "text" : "Check it answers, without its screen."
           },
           {
             "text" : "Ask it something in its own screen — the session on the left."
           },
           {
-            "command" : "crush run -q -m xai/grok-build-0.1 \"list the files in this folder\"",
+            "command" : "crush run -q \"list the files in this folder\"",
             "text" : "One task without its screen."
           }
         ],
@@ -263,7 +396,7 @@
       "type" : "com.dozersandbox/guide@1"
     }
   ],
-  "description" : "Charmbracelet's coding agent for the terminal, here on an xAI API key.",
+  "description" : "Charmbracelet's coding agent for the terminal, on the key of the provider or gateway you choose (xAI by default).",
   "displayName" : "Crush",
   "id" : "charmbracelet/crush",
   "kind" : "workload",

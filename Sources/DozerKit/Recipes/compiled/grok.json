@@ -230,6 +230,7 @@
             },
             "level" : "experimental",
             "limits" : [
+              "not offered in a Dozer try: Grok Build checks its key with xAI's own API when it starts (api.x.ai/v1/api-key) and refuses to run (\"Not signed in\") unless an xAI key or sign-in passes it — with another source's key that check is refused (the key goes only to its own source), so Dozer offers Grok Build on xAI only (make recipe-check, 2026-10-16)",
               "not supported by xAI or OpenRouter for this pair: an opt-in only"
             ],
             "proxy_route" : {
@@ -266,6 +267,7 @@
             },
             "level" : "documented",
             "limits" : [
+              "not offered in a Dozer try: Grok Build checks its key with xAI's own API when it starts (api.x.ai/v1/api-key) and refuses to run (\"Not signed in\") unless an xAI key or sign-in passes it — with another source's key that check is refused (the key goes only to its own source), so Dozer offers Grok Build on xAI only (make recipe-check, 2026-10-16)",
               "a grok login session takes precedence over the key: grok logout first",
               "web search needs a second, Responses-backed model entry"
             ],

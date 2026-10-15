@@ -167,13 +167,13 @@ capabilities:
   config:
     entries:
     - gateway: openrouter
-      level: unknown
-      reason: Antigravity CLI speaks the Gemini API with a key (GOOGLE_GEMINI_BASE_URL); its program also names undocumented AGY_LLM_GATEWAY_* settings, not checked
-      checked: '2026-10-12'
+      level: 'no'
+      reason: 'Antigravity CLI speaks only the Gemini API (its one endpoint setting is GOOGLE_GEMINI_BASE_URL, the Gemini shape); it documents no OpenAI-compatible endpoint, and its AGY_LLM_GATEWAY_* names are undocumented'
+      checked: '2026-10-16'
     - gateway: vercel-ai-gateway
-      level: unknown
-      reason: Antigravity CLI speaks the Gemini API with a key (GOOGLE_GEMINI_BASE_URL); its program also names undocumented AGY_LLM_GATEWAY_* settings, not checked
-      checked: '2026-10-12'
+      level: 'no'
+      reason: 'Antigravity CLI speaks only the Gemini API (its one endpoint setting is GOOGLE_GEMINI_BASE_URL, the Gemini shape); it documents no OpenAI-compatible endpoint, and its AGY_LLM_GATEWAY_* names are undocumented'
+      checked: '2026-10-16'
 - type: com.dozersandbox/currency@1
   config:
     checked: '2026-10-12'

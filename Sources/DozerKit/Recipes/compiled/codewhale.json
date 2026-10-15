@@ -18,16 +18,33 @@
           "model" : {
             "hosts" : [
               {
+                "host" : "api.anthropic.com",
+                "reason" : "Anthropic — when the sandbox's key is Anthropic's"
+              },
+              {
+                "host" : "api.openai.com",
+                "reason" : "OpenAI — when the sandbox's key is OpenAI's"
+              },
+              {
                 "host" : "api.x.ai",
                 "paths" : [
                   "/v1/chat/completions"
-                ]
+                ],
+                "reason" : "xAI — when the sandbox's key is xAI's"
+              },
+              {
+                "host" : "generativelanguage.googleapis.com",
+                "reason" : "Google AI — when the sandbox's key is Google AI's"
+              },
+              {
+                "host" : "openrouter.ai",
+                "reason" : "OpenRouter — when the sandbox's key is OpenRouter's"
               }
             ],
             "id" : "model:codewhale",
-            "phrase" : "talk to your AI model (xAI)",
-            "summary" : "CodeWhale's model here (the xAI API, with your key) — needed for it to answer.",
-            "title" : "Talk to xAI"
+            "phrase" : "talk to your AI model",
+            "summary" : "CodeWhale's model — the provider or gateway its key is for (Anthropic, OpenAI, xAI, Google AI or OpenRouter), with an API key. Needed for CodeWhale to answer.",
+            "title" : "Talk to its model provider"
           },
           "quiet" : [
             {
@@ -41,7 +58,11 @@
         },
         "runtime" : {
           "allow" : [
-            "api.x.ai:443"
+            "api.anthropic.com:443",
+            "api.openai.com:443",
+            "api.x.ai:443",
+            "generativelanguage.googleapis.com:443",
+            "openrouter.ai:443"
           ],
           "deny" : [
             "models.dev:443"
@@ -108,9 +129,7 @@
           "--skip-onboarding"
         ],
         "env" : {
-          "CODEWHALE_MODEL" : "grok-build-0.1",
           "CODEWHALE_NO_UPDATE_CHECK" : "1",
-          "CODEWHALE_PROVIDER" : "xai",
           "CODEWHALE_TELEMETRY" : "0"
         },
         "no_prompts_args" : [
@@ -156,18 +175,51 @@
             "accounts" : [
               "key"
             ],
-            "checked" : "2026-10-14",
+            "checked" : "2026-10-16",
             "keys_page" : "https://console.x.ai/",
             "kind" : "api-key",
-            "note" : "CodeWhale's built-in xai provider (CODEWHALE_PROVIDER=xai) reads XAI_API_KEY each run; model grok-build-0.1. Its own account (hosted keys) is not used.",
+            "note" : "CodeWhale's built-in providers (CODEWHALE_PROVIDER, CODEWHALE_MODEL), each reading its own key from the environment; on xAI (the default) the model is grok-build-0.1. Its own account (hosted keys) is not used.",
             "provider" : "xai"
           },
           {
-            "account" : "a CodeWhale account (codewhale login)",
-            "checked" : "2026-10-14",
-            "in_sandbox" : false,
-            "kind" : "vendor-sign-in",
-            "note" : "CodeWhale's account keeps provider keys on its servers; Dozer does not offer it."
+            "accounts" : [
+              "api-key"
+            ],
+            "checked" : "2026-10-16",
+            "keys_page" : "https://console.anthropic.com/settings/keys",
+            "kind" : "api-key",
+            "note" : "CodeWhale through Anthropic: doz try codewhale --provider anthropic (or choose it in the try setup); the model with --model.",
+            "provider" : "anthropic"
+          },
+          {
+            "accounts" : [
+              "openai-key"
+            ],
+            "checked" : "2026-10-16",
+            "keys_page" : "https://platform.openai.com/api-keys",
+            "kind" : "api-key",
+            "note" : "CodeWhale through OpenAI: doz try codewhale --provider openai (or choose it in the try setup); the model with --model.",
+            "provider" : "openai"
+          },
+          {
+            "accounts" : [
+              "key"
+            ],
+            "checked" : "2026-10-16",
+            "keys_page" : "https://aistudio.google.com/apikey",
+            "kind" : "api-key",
+            "note" : "CodeWhale through Google AI: doz try codewhale --provider google (or choose it in the try setup); the model with --model.",
+            "provider" : "google"
+          },
+          {
+            "accounts" : [
+              "key"
+            ],
+            "checked" : "2026-10-16",
+            "keys_page" : "https://openrouter.ai/keys",
+            "kind" : "api-key",
+            "note" : "CodeWhale through OpenRouter: doz try codewhale --gateway openrouter (or choose it in the try setup); the model with --model.",
+            "provider" : "openrouter"
           }
         ]
       },
@@ -177,20 +229,68 @@
       "config" : {
         "entries" : [
           {
-            "checked" : "2026-10-14",
+            "checked" : "2026-10-16",
+            "evidence" : "make recipe-check: its check turn through a stand-in OpenRouter (doz try with --gateway openrouter; models@1)",
             "gateway" : "openrouter",
-            "level" : "unknown",
-            "reason" : "CodeWhale has an OpenRouter route; not checked"
+            "level" : "verified"
           },
           {
-            "checked" : "2026-10-14",
+            "checked" : "2026-10-16",
             "gateway" : "vercel-ai-gateway",
-            "level" : "unknown",
-            "reason" : "not checked against CodeWhale"
+            "level" : "no",
+            "reason" : "CodeWhale has no Vercel AI Gateway provider, and it sends a key from the environment only to a built-in provider's own endpoint (a custom base URL needs its own stored credential)",
+            "source" : "https://github.com/Hmbown/CodeWhale/blob/v0.10.1/docs/PROVIDERS.md"
           }
         ]
       },
       "type" : "com.dozersandbox/gateways@1"
+    },
+    {
+      "config" : {
+        "default" : "xai",
+        "models" : {
+          "xai" : "grok-build-0.1"
+        },
+        "native" : [
+          {
+            "env" : {
+              "CODEWHALE_MODEL" : "${{ dozer.model }}",
+              "CODEWHALE_PROVIDER" : "xai"
+            },
+            "source" : "xai"
+          },
+          {
+            "env" : {
+              "CODEWHALE_MODEL" : "${{ dozer.model }}",
+              "CODEWHALE_PROVIDER" : "openai"
+            },
+            "source" : "openai"
+          },
+          {
+            "env" : {
+              "CODEWHALE_MODEL" : "${{ dozer.model }}",
+              "CODEWHALE_PROVIDER" : "anthropic"
+            },
+            "source" : "anthropic"
+          },
+          {
+            "docs" : "https://github.com/Hmbown/CodeWhale/blob/v0.10.1/docs/PROVIDERS.md",
+            "env" : {
+              "CODEWHALE_MODEL" : "${{ dozer.model }}",
+              "CODEWHALE_PROVIDER" : "openrouter"
+            },
+            "source" : "openrouter"
+          },
+          {
+            "env" : {
+              "CODEWHALE_MODEL" : "${{ dozer.model }}",
+              "CODEWHALE_PROVIDER" : "google"
+            },
+            "source" : "google"
+          }
+        ]
+      },
+      "type" : "com.dozersandbox/models@1"
     },
     {
       "config" : {
@@ -224,7 +324,7 @@
             "tag" : "headless"
           }
         ],
-        "terms" : "Your xAI API key — a key from console.x.ai."
+        "terms" : "Your API key of the provider or gateway you choose (xAI by default)."
       },
       "type" : "com.dozersandbox/directory@1"
     },
@@ -253,7 +353,7 @@
       "type" : "com.dozersandbox/guide@1"
     }
   ],
-  "description" : "A provider-neutral coding agent for the terminal (formerly DeepSeek TUI), here on an xAI API key.",
+  "description" : "A provider-neutral coding agent for the terminal (formerly DeepSeek TUI), on the key of the provider or gateway you choose (xAI by default).",
   "displayName" : "CodeWhale",
   "id" : "hmbown/codewhale",
   "kind" : "workload",

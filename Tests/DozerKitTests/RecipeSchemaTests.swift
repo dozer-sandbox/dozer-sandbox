@@ -77,7 +77,7 @@ final class RecipeSchemaTests: XCTestCase {
             ("a check timeout of a day", { editConfig(&$0, T.launch) { $0["check"] = ["argv": ["grok"], "expect": "x", "timeout": 86400] } }),
             ("an unknown key in a check", { editConfig(&$0, T.launch) { $0["check"] = ["argv": ["grok"], "expect": "x", "stdin": "y"] } }),
             ("an unknown auth kind", { editConfig(&$0, T.auth) { c in var m = c["methods"] as! [[String: Any]]; m[0]["kind"] = "password"; c["methods"] = m } }),
-            ("an unknown gateway level", { editConfig(&$0, T.gateways) { c in var e = c["entries"] as! [[String: Any]]; e[0]["level"] = "maybe"; c["entries"] = e } }),
+            ("an unknown gateway level", { editConfig(&$0, T.gateways) { c in var e = c["entries"] as! [[String: Any]]; if e.isEmpty { e = [["gateway": "openrouter"]] }; e[0]["level"] = "maybe"; c["entries"] = e } }),
             ("an unknown tag level", { editConfig(&$0, T.directory) { c in var tg = c["tags"] as! [[String: Any]]; tg[0]["level"] = "maybe"; c["tags"] = tg } }),
             ("an unknown key in a tag", { editConfig(&$0, T.directory) { c in var tg = c["tags"] as! [[String: Any]]; tg[0]["colour"] = "red"; c["tags"] = tg } }),
         ]

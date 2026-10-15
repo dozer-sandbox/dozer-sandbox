@@ -125,7 +125,11 @@ extension AgentRecipe {
     /// models@1's own rules (from `validate()`).
     func validateModels(_ bad: (String) -> SandboxError) throws {
         guard let m = models else { return }
-        guard !isBuiltin else { throw bad("models@1 is a recipe agent's (the built-in agents keep their own accounts)") }
+        // 618: a built-in agent (pi) may declare its sources — native only, at session time (nothing baked: its image is
+        // Dozer's own); Claude Code and Codex keep their own accounts.
+        if isBuiltin, (id == "claude-code" || id == "codex" || !(m.shapes ?? []).isEmpty) {
+            throw bad("models@1 of a built-in agent: pi's only, native sources only (Claude Code and Codex keep their own accounts)")
+        }
         let ids = Set(ModelSources.ids)
         guard ids.contains(m.default) else { throw bad("models default \(m.default) is not a provider or gateway") }
         guard credentials.first?.provider == m.default else { throw bad("models default \(m.default) is its credential's provider") }
@@ -147,9 +151,10 @@ extension AgentRecipe {
         for (s, v) in m.models ?? [:] {
             guard offered.contains(s), ModelSelection.isModelID(v) else { throw bad("models.\(s): an offered source and a model id") }
         }
-        // Its model permission reaches every source it is offered (the key still goes only to the source chosen).
+        // Its model permission reaches every source it is offered (the key still goes only to the source chosen) — a
+        // built-in agent's other sources through its hidden `sources:` permission (AgentPermissions.sourcesPermission).
         let reach = Set((network.model.hosts ?? []).map(\.host))
-        for s in offered {
+        for s in offered where !isBuiltin {
             for h in ModelSources.hosts(s) where !reach.contains(h) { throw bad("its model permission does not reach \(h) (\(s))") }
         }
     }

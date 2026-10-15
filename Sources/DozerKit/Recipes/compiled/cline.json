@@ -18,16 +18,37 @@
           "model" : {
             "hosts" : [
               {
+                "host" : "api.anthropic.com",
+                "reason" : "Anthropic — when the sandbox's key is Anthropic's"
+              },
+              {
+                "host" : "api.openai.com",
+                "reason" : "OpenAI — when the sandbox's key is OpenAI's"
+              },
+              {
                 "host" : "api.x.ai",
                 "paths" : [
                   "/v1/chat/completions"
-                ]
+                ],
+                "reason" : "xAI — when the sandbox's key is xAI's"
+              },
+              {
+                "host" : "generativelanguage.googleapis.com",
+                "reason" : "Google AI — when the sandbox's key is Google AI's"
+              },
+              {
+                "host" : "openrouter.ai",
+                "reason" : "OpenRouter — when the sandbox's key is OpenRouter's"
+              },
+              {
+                "host" : "ai-gateway.vercel.sh",
+                "reason" : "Vercel AI Gateway — when the sandbox's key is Vercel AI Gateway's"
               }
             ],
             "id" : "model:cline",
-            "phrase" : "talk to your AI model (xAI)",
-            "summary" : "Cline's model here (the xAI API, with your key) — needed for it to answer.",
-            "title" : "Talk to xAI"
+            "phrase" : "talk to your AI model",
+            "summary" : "Cline's model — the provider or gateway its key is for (Anthropic, OpenAI, xAI, Google AI, OpenRouter or Vercel AI Gateway), with an API key. Needed for Cline to answer.",
+            "title" : "Talk to its model provider"
           },
           "quiet" : [
             {
@@ -49,7 +70,12 @@
         },
         "runtime" : {
           "allow" : [
-            "api.x.ai:443"
+            "api.anthropic.com:443",
+            "api.openai.com:443",
+            "api.x.ai:443",
+            "generativelanguage.googleapis.com:443",
+            "openrouter.ai:443",
+            "ai-gateway.vercel.sh:443"
           ],
           "deny" : [
             "api.cline.bot:443",
@@ -106,20 +132,12 @@
         "check" : {
           "argv" : [
             "cline",
-            "-P",
-            "xai",
-            "-m",
-            "grok-build-0.1",
             "say ok"
           ],
           "expect" : "DOZ_FAKE_OK"
         },
         "command" : [
-          "cline",
-          "-P",
-          "xai",
-          "-m",
-          "grok-build-0.1"
+          "cline"
         ],
         "env" : {
           "CLINE_DISABLE_CLINE_PASS_NOTICE" : "1",
@@ -133,6 +151,12 @@
               "telemetryOptOut" : true
             }
           }
+        ],
+        "model_args" : [
+          "-P",
+          "$DOZ_MODEL_PROVIDER",
+          "-m",
+          "$DOZ_MODEL"
         ],
         "no_prompts_args" : [
 
@@ -172,11 +196,61 @@
             "accounts" : [
               "key"
             ],
-            "checked" : "2026-10-14",
+            "checked" : "2026-10-16",
             "keys_page" : "https://console.x.ai/",
             "kind" : "api-key",
-            "note" : "Cline reads XAI_API_KEY with -P xai (its key is not saved; providers.json keeps only the provider and model). Its default Cline account provider is not offered here.",
+            "note" : "Cline's own providers, each reading its key from the environment; Dozer puts the provider and model on its command line (-P xai -m grok-build-0.1 on xAI, the default). Cline saves only the provider and model.",
             "provider" : "xai"
+          },
+          {
+            "accounts" : [
+              "api-key"
+            ],
+            "checked" : "2026-10-16",
+            "keys_page" : "https://console.anthropic.com/settings/keys",
+            "kind" : "api-key",
+            "note" : "Cline through Anthropic: doz try cline --provider anthropic (or choose it in the try setup); the model with --model.",
+            "provider" : "anthropic"
+          },
+          {
+            "accounts" : [
+              "openai-key"
+            ],
+            "checked" : "2026-10-16",
+            "keys_page" : "https://platform.openai.com/api-keys",
+            "kind" : "api-key",
+            "note" : "Cline through OpenAI: doz try cline --provider openai (or choose it in the try setup); the model with --model.",
+            "provider" : "openai"
+          },
+          {
+            "accounts" : [
+              "key"
+            ],
+            "checked" : "2026-10-16",
+            "keys_page" : "https://aistudio.google.com/apikey",
+            "kind" : "api-key",
+            "note" : "Cline through Google AI: doz try cline --provider google (or choose it in the try setup); the model with --model.",
+            "provider" : "google"
+          },
+          {
+            "accounts" : [
+              "key"
+            ],
+            "checked" : "2026-10-16",
+            "keys_page" : "https://openrouter.ai/keys",
+            "kind" : "api-key",
+            "note" : "Cline through OpenRouter: doz try cline --gateway openrouter (or choose it in the try setup); the model with --model.",
+            "provider" : "openrouter"
+          },
+          {
+            "accounts" : [
+              "key"
+            ],
+            "checked" : "2026-10-16",
+            "keys_page" : "https://vercel.com/docs/ai-gateway/authentication-and-byok",
+            "kind" : "api-key",
+            "note" : "Cline through Vercel AI Gateway: doz try cline --gateway vercel-ai-gateway (or choose it in the try setup); the model with --model.",
+            "provider" : "vercel-ai-gateway"
           },
           {
             "account" : "a Cline account (ClinePass)",
@@ -193,20 +267,75 @@
       "config" : {
         "entries" : [
           {
-            "checked" : "2026-10-14",
+            "checked" : "2026-10-16",
+            "evidence" : "make recipe-check: its check turn through a stand-in OpenRouter (doz try with --gateway openrouter; models@1)",
             "gateway" : "openrouter",
-            "level" : "unknown",
-            "reason" : "Cline has an OpenRouter provider; not checked"
+            "level" : "verified"
           },
           {
-            "checked" : "2026-10-14",
+            "checked" : "2026-10-16",
+            "evidence" : "make recipe-check: its check turn through a stand-in Vercel AI Gateway (doz try with --gateway vercel-ai-gateway; models@1)",
             "gateway" : "vercel-ai-gateway",
-            "level" : "unknown",
-            "reason" : "not checked against Cline"
+            "level" : "verified"
           }
         ]
       },
       "type" : "com.dozersandbox/gateways@1"
+    },
+    {
+      "config" : {
+        "default" : "xai",
+        "models" : {
+          "xai" : "grok-build-0.1"
+        },
+        "native" : [
+          {
+            "env" : {
+              "DOZ_MODEL" : "${{ dozer.model }}",
+              "DOZ_MODEL_PROVIDER" : "anthropic"
+            },
+            "source" : "anthropic"
+          },
+          {
+            "env" : {
+              "DOZ_MODEL" : "${{ dozer.model }}",
+              "DOZ_MODEL_PROVIDER" : "openai-native"
+            },
+            "source" : "openai"
+          },
+          {
+            "env" : {
+              "DOZ_MODEL" : "${{ dozer.model }}",
+              "DOZ_MODEL_PROVIDER" : "xai"
+            },
+            "source" : "xai"
+          },
+          {
+            "env" : {
+              "DOZ_MODEL" : "${{ dozer.model }}",
+              "DOZ_MODEL_PROVIDER" : "gemini"
+            },
+            "source" : "google"
+          },
+          {
+            "docs" : "https://docs.cline.bot/cline-cli/overview",
+            "env" : {
+              "DOZ_MODEL" : "${{ dozer.model }}",
+              "DOZ_MODEL_PROVIDER" : "openrouter"
+            },
+            "source" : "openrouter"
+          },
+          {
+            "docs" : "https://docs.cline.bot/cline-cli/overview",
+            "env" : {
+              "DOZ_MODEL" : "${{ dozer.model }}",
+              "DOZ_MODEL_PROVIDER" : "vercel-ai-gateway"
+            },
+            "source" : "vercel-ai-gateway"
+          }
+        ]
+      },
+      "type" : "com.dozersandbox/models@1"
     },
     {
       "config" : {
@@ -238,15 +367,15 @@
         "tags" : [
           {
             "checked" : "2026-10-14",
-            "evidence" : "make recipe-check: cline -P xai -m grok-build-0.1 \"say ok\" printed the stand-in's answer and exited in a fresh try",
+            "evidence" : "make recipe-check: cline \"say ok\" printed the stand-in's answer and exited in a fresh try",
             "level" : "verified",
             "notes" : [
-              "cline -P xai -m grok-build-0.1 \"…\""
+              "cline \"…\""
             ],
             "tag" : "headless"
           }
         ],
-        "terms" : "Your xAI API key — a key from console.x.ai."
+        "terms" : "Your API key of the provider or gateway you choose (xAI by default)."
       },
       "type" : "com.dozersandbox/directory@1"
     },
@@ -256,14 +385,14 @@
         "intro" : "Cline CLI is a coding agent with its own screen: the session on the left. Ask it to read, change and run the code in your folder.",
         "steps" : [
           {
-            "command" : "cline -P xai -m grok-build-0.1 \"say ok\"",
+            "command" : "cline \"say ok\"",
             "text" : "Check it answers, without its screen."
           },
           {
             "text" : "Ask it something in its own screen — the session on the left."
           },
           {
-            "command" : "cline -P xai -m grok-build-0.1 \"list the files in this folder\"",
+            "command" : "cline \"list the files in this folder\"",
             "text" : "One task without its screen."
           }
         ],
@@ -275,7 +404,7 @@
       "type" : "com.dozersandbox/guide@1"
     }
   ],
-  "description" : "Cline's coding agent for the terminal, here on an xAI API key (no Cline account).",
+  "description" : "Cline's coding agent for the terminal (no Cline account), on the key of the provider or gateway you choose (xAI by default).",
   "displayName" : "Cline CLI",
   "id" : "cline/cline",
   "kind" : "workload",

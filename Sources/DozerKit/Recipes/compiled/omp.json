@@ -18,18 +18,39 @@
           "model" : {
             "hosts" : [
               {
+                "host" : "api.anthropic.com",
+                "reason" : "Anthropic — when the sandbox's key is Anthropic's"
+              },
+              {
+                "host" : "api.openai.com",
+                "reason" : "OpenAI — when the sandbox's key is OpenAI's"
+              },
+              {
                 "host" : "api.x.ai",
                 "paths" : [
                   "/v1/models",
                   "/v1/responses",
                   "/v1/chat/completions"
-                ]
+                ],
+                "reason" : "xAI — when the sandbox's key is xAI's"
+              },
+              {
+                "host" : "generativelanguage.googleapis.com",
+                "reason" : "Google AI — when the sandbox's key is Google AI's"
+              },
+              {
+                "host" : "openrouter.ai",
+                "reason" : "OpenRouter — when the sandbox's key is OpenRouter's"
+              },
+              {
+                "host" : "ai-gateway.vercel.sh",
+                "reason" : "Vercel AI Gateway — when the sandbox's key is Vercel AI Gateway's"
               }
             ],
             "id" : "model:omp",
-            "phrase" : "talk to your AI model (xAI)",
-            "summary" : "oh-my-pi's model here (the xAI API, with your key) — needed for it to answer.",
-            "title" : "Talk to xAI"
+            "phrase" : "talk to your AI model",
+            "summary" : "oh-my-pi's model — the provider or gateway its key is for (Anthropic, OpenAI, xAI, Google AI, OpenRouter or Vercel AI Gateway), with an API key. Needed for oh-my-pi to answer.",
+            "title" : "Talk to its model provider"
           },
           "quiet" : [
             {
@@ -71,7 +92,12 @@
         },
         "runtime" : {
           "allow" : [
-            "api.x.ai:443"
+            "api.anthropic.com:443",
+            "api.openai.com:443",
+            "api.x.ai:443",
+            "generativelanguage.googleapis.com:443",
+            "openrouter.ai:443",
+            "ai-gateway.vercel.sh:443"
           ],
           "deny" : [
             "api.commandcode.ai:443",
@@ -136,16 +162,12 @@
           "argv" : [
             "omp",
             "-p",
-            "--model",
-            "xai/grok-build-0.1",
             "say ok"
           ],
           "expect" : "DOZ_FAKE_OK"
         },
         "command" : [
-          "omp",
-          "--model",
-          "xai/grok-build-0.1"
+          "omp"
         ],
         "env" : {
 
@@ -157,6 +179,10 @@
               "setupVersion" : 2
             }
           }
+        ],
+        "model_args" : [
+          "--model",
+          "$DOZ_MODEL"
         ],
         "no_prompts_args" : [
 
@@ -196,11 +222,61 @@
             "accounts" : [
               "key"
             ],
-            "checked" : "2026-10-14",
+            "checked" : "2026-10-16",
             "keys_page" : "https://console.x.ai/",
             "kind" : "api-key",
-            "note" : "oh-my-pi's built-in xAI provider reads XAI_API_KEY; model xai/grok-build-0.1 in the command.",
+            "note" : "oh-my-pi's built-in providers, each reading its key from the environment; Dozer puts the model on its command line (--model xai/grok-build-0.1 on xAI, the default; --model PROVIDER/MODEL for the others).",
             "provider" : "xai"
+          },
+          {
+            "accounts" : [
+              "api-key"
+            ],
+            "checked" : "2026-10-16",
+            "keys_page" : "https://console.anthropic.com/settings/keys",
+            "kind" : "api-key",
+            "note" : "oh-my-pi through Anthropic: doz try omp --provider anthropic (or choose it in the try setup); the model with --model.",
+            "provider" : "anthropic"
+          },
+          {
+            "accounts" : [
+              "openai-key"
+            ],
+            "checked" : "2026-10-16",
+            "keys_page" : "https://platform.openai.com/api-keys",
+            "kind" : "api-key",
+            "note" : "oh-my-pi through OpenAI: doz try omp --provider openai (or choose it in the try setup); the model with --model.",
+            "provider" : "openai"
+          },
+          {
+            "accounts" : [
+              "key"
+            ],
+            "checked" : "2026-10-16",
+            "keys_page" : "https://aistudio.google.com/apikey",
+            "kind" : "api-key",
+            "note" : "oh-my-pi through Google AI: doz try omp --provider google (or choose it in the try setup); the model with --model.",
+            "provider" : "google"
+          },
+          {
+            "accounts" : [
+              "key"
+            ],
+            "checked" : "2026-10-16",
+            "keys_page" : "https://openrouter.ai/keys",
+            "kind" : "api-key",
+            "note" : "oh-my-pi through OpenRouter: doz try omp --gateway openrouter (or choose it in the try setup); the model with --model.",
+            "provider" : "openrouter"
+          },
+          {
+            "accounts" : [
+              "key"
+            ],
+            "checked" : "2026-10-16",
+            "keys_page" : "https://vercel.com/docs/ai-gateway/authentication-and-byok",
+            "kind" : "api-key",
+            "note" : "oh-my-pi through Vercel AI Gateway: doz try omp --gateway vercel-ai-gateway (or choose it in the try setup); the model with --model.",
+            "provider" : "vercel-ai-gateway"
           }
         ]
       },
@@ -210,20 +286,69 @@
       "config" : {
         "entries" : [
           {
-            "checked" : "2026-10-14",
+            "checked" : "2026-10-16",
+            "evidence" : "make recipe-check: its check turn through a stand-in OpenRouter (doz try with --gateway openrouter; models@1)",
             "gateway" : "openrouter",
-            "level" : "unknown",
-            "reason" : "oh-my-pi reads OPENROUTER_API_KEY; not checked"
+            "level" : "verified"
           },
           {
-            "checked" : "2026-10-14",
+            "checked" : "2026-10-16",
+            "evidence" : "make recipe-check: its check turn through a stand-in Vercel AI Gateway (doz try with --gateway vercel-ai-gateway; models@1)",
             "gateway" : "vercel-ai-gateway",
-            "level" : "unknown",
-            "reason" : "oh-my-pi reads AI_GATEWAY_API_KEY; not checked"
+            "level" : "verified"
           }
         ]
       },
       "type" : "com.dozersandbox/gateways@1"
+    },
+    {
+      "config" : {
+        "default" : "xai",
+        "models" : {
+          "xai" : "grok-build-0.1"
+        },
+        "native" : [
+          {
+            "env" : {
+              "DOZ_MODEL" : "anthropic/${{ dozer.model }}"
+            },
+            "source" : "anthropic"
+          },
+          {
+            "env" : {
+              "DOZ_MODEL" : "openai/${{ dozer.model }}"
+            },
+            "source" : "openai"
+          },
+          {
+            "env" : {
+              "DOZ_MODEL" : "xai/${{ dozer.model }}"
+            },
+            "source" : "xai"
+          },
+          {
+            "env" : {
+              "DOZ_MODEL" : "google/${{ dozer.model }}"
+            },
+            "source" : "google"
+          },
+          {
+            "docs" : "https://github.com/can1357/oh-my-pi/blob/v18.10.4/docs/providers.md",
+            "env" : {
+              "DOZ_MODEL" : "openrouter/${{ dozer.model }}"
+            },
+            "source" : "openrouter"
+          },
+          {
+            "docs" : "https://github.com/can1357/oh-my-pi/blob/v18.10.4/docs/providers.md",
+            "env" : {
+              "DOZ_MODEL" : "vercel-ai-gateway/${{ dozer.model }}"
+            },
+            "source" : "vercel-ai-gateway"
+          }
+        ]
+      },
+      "type" : "com.dozersandbox/models@1"
     },
     {
       "config" : {
@@ -258,12 +383,12 @@
             "evidence" : "make recipe-check: omp -p \"say ok\" printed the stand-in's answer and exited in a fresh try",
             "level" : "verified",
             "notes" : [
-              "omp -p --model xai/grok-build-0.1 \"…\""
+              "omp -p \"…\""
             ],
             "tag" : "headless"
           }
         ],
-        "terms" : "Your xAI API key — a key from console.x.ai."
+        "terms" : "Your API key of the provider or gateway you choose (xAI by default)."
       },
       "type" : "com.dozersandbox/directory@1"
     },
@@ -273,14 +398,14 @@
         "intro" : "oh-my-pi is a coding agent with its own screen: the session on the left. Ask it to read, change and run the code in your folder.",
         "steps" : [
           {
-            "command" : "omp -p --model xai/grok-build-0.1 \"say ok\"",
+            "command" : "omp -p \"say ok\"",
             "text" : "Check it answers, without its screen."
           },
           {
             "text" : "Ask it something in its own screen — the session on the left."
           },
           {
-            "command" : "omp -p --model xai/grok-build-0.1 \"list the files in this folder\"",
+            "command" : "omp -p \"list the files in this folder\"",
             "text" : "One task without its screen."
           }
         ],
@@ -292,7 +417,7 @@
       "type" : "com.dozersandbox/guide@1"
     }
   ],
-  "description" : "A batteries-included derivative of the pi coding agent (omp), here on an xAI API key.",
+  "description" : "A batteries-included derivative of the pi coding agent (omp), on the key of the provider or gateway you choose (xAI by default).",
   "displayName" : "oh-my-pi",
   "id" : "can1357/omp",
   "kind" : "workload",

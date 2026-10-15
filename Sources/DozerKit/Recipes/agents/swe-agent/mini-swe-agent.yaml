@@ -5,7 +5,7 @@ schema: 2
 kind: workload
 id: swe-agent/mini-swe-agent
 displayName: mini-swe-agent
-description: A minimal bash-only coding agent from the SWE-agent team, here on an xAI API key.
+description: A minimal bash-only coding agent from the SWE-agent team, on the key of the provider or gateway you choose (xAI by default).
 author: SWE-agent team (Princeton, Stanford)
 sourceUrl: https://github.com/SWE-agent/mini-swe-agent
 licenses:
@@ -23,17 +23,33 @@ capabilities:
   config:
     runtime:
       allow:
+      - api.anthropic.com:443
+      - api.openai.com:443
       - api.x.ai:443
+      - generativelanguage.googleapis.com:443
+      - openrouter.ai:443
+      - ai-gateway.vercel.sh:443
     dozer:
       model:
         id: model:mini-swe-agent
-        title: Talk to xAI
-        summary: mini-swe-agent's model here (the xAI API, with your key) — needed for it to answer.
-        phrase: talk to your AI model (xAI)
+        title: Talk to its model provider
+        summary: mini-SWE-agent's model — the provider or gateway its key is for (Anthropic, OpenAI, xAI, Google AI, OpenRouter or Vercel AI Gateway), with an API key. Needed for mini-SWE-agent to answer.
+        phrase: talk to your AI model
         hosts:
+        - host: api.anthropic.com
+          reason: Anthropic — when the sandbox's key is Anthropic's
+        - host: api.openai.com
+          reason: OpenAI — when the sandbox's key is OpenAI's
         - host: api.x.ai
           paths:
           - /v1/chat/completions
+          reason: xAI — when the sandbox's key is xAI's
+        - host: generativelanguage.googleapis.com
+          reason: Google AI — when the sandbox's key is Google AI's
+        - host: openrouter.ai
+          reason: OpenRouter — when the sandbox's key is OpenRouter's
+        - host: ai-gateway.vercel.sh
+          reason: Vercel AI Gateway — when the sandbox's key is Vercel AI Gateway's
       update: []
       excluded: []
 - type: com.docker.sandbox/credential@1
@@ -145,8 +161,6 @@ capabilities:
   config:
     command:
     - mini
-    - -m
-    - xai/grok-build-0.1
     no_prompts_args:
     - --yolo
     passthrough:
@@ -166,8 +180,6 @@ capabilities:
     check:
       argv:
       - mini
-      - -m
-      - xai/grok-build-0.1
       - -t
       - say ok
       - --yolo
@@ -183,19 +195,74 @@ capabilities:
       accounts:
       - key
       keys_page: https://console.x.ai/
-      note: mini-swe-agent's LiteLLM model xai/grok-build-0.1 reads XAI_API_KEY; its own .env setup (mini-extra config) is skipped (MSWEA_CONFIGURED).
-      checked: '2026-10-14'
+      note: 'mini-SWE-agent''s LiteLLM model from the environment (MSWEA_MODEL_NAME openai/MODEL with OPENAI_BASE_URL for an OpenAI-compatible provider or gateway, anthropic/MODEL with ANTHROPIC_BASE_URL); on xAI (the default) the model is grok-build-0.1. Its own .env setup (mini-extra config) is skipped (MSWEA_CONFIGURED).'
+      checked: '2026-10-16'
+    - kind: api-key
+      provider: anthropic
+      accounts:
+      - api-key
+      keys_page: https://console.anthropic.com/settings/keys
+      note: 'mini-SWE-agent through Anthropic: doz try mini-swe-agent --provider anthropic (or choose it in the try setup); the model with --model.'
+      checked: '2026-10-16'
+    - kind: api-key
+      provider: openai
+      accounts:
+      - openai-key
+      keys_page: https://platform.openai.com/api-keys
+      note: 'mini-SWE-agent through OpenAI: doz try mini-swe-agent --provider openai (or choose it in the try setup); the model with --model.'
+      checked: '2026-10-16'
+    - kind: api-key
+      provider: google
+      accounts:
+      - key
+      keys_page: https://aistudio.google.com/apikey
+      note: 'mini-SWE-agent through Google AI: doz try mini-swe-agent --provider google (or choose it in the try setup); the model with --model.'
+      checked: '2026-10-16'
+    - kind: api-key
+      provider: openrouter
+      accounts:
+      - key
+      keys_page: https://openrouter.ai/keys
+      note: 'mini-SWE-agent through OpenRouter: doz try mini-swe-agent --gateway openrouter (or choose it in the try setup); the model with --model.'
+      checked: '2026-10-16'
+    - kind: api-key
+      provider: vercel-ai-gateway
+      accounts:
+      - key
+      keys_page: https://vercel.com/docs/ai-gateway/authentication-and-byok
+      note: 'mini-SWE-agent through Vercel AI Gateway: doz try mini-swe-agent --gateway vercel-ai-gateway (or choose it in the try setup); the model with --model.'
+      checked: '2026-10-16'
 - type: com.dozersandbox/gateways@1
   config:
     entries:
     - gateway: openrouter
-      level: unknown
-      reason: mini-swe-agent has an OpenRouter model class; not checked
-      checked: '2026-10-14'
+      level: verified
+      evidence: 'make recipe-check: its check turn through a stand-in OpenRouter (doz try with --gateway openrouter; models@1)'
+      checked: '2026-10-16'
     - gateway: vercel-ai-gateway
-      level: unknown
-      reason: not checked against mini-swe-agent
-      checked: '2026-10-14'
+      level: verified
+      evidence: 'make recipe-check: its check turn through a stand-in Vercel AI Gateway (doz try with --gateway vercel-ai-gateway; models@1)'
+      checked: '2026-10-16'
+- type: com.dozersandbox/models@1
+  config:
+    default: xai
+    shapes:
+    - shape: openai-chat
+      env:
+        MSWEA_MODEL_NAME: 'openai/${{ dozer.model }}'
+        OPENAI_BASE_URL: '${{ dozer.base_url }}'
+      key_env:
+      - OPENAI_API_KEY
+      source: https://docs.litellm.ai/docs/providers/openai_compatible
+    - shape: anthropic-messages
+      env:
+        MSWEA_MODEL_NAME: 'anthropic/${{ dozer.model }}'
+        ANTHROPIC_BASE_URL: '${{ dozer.base_url }}'
+      key_env:
+      - ANTHROPIC_API_KEY
+      source: https://docs.litellm.ai/docs/providers/anthropic
+    models:
+      xai: grok-build-0.1
 - type: com.dozersandbox/currency@1
   config:
     checked: '2026-10-14'
@@ -215,19 +282,19 @@ capabilities:
     - tag: headless
       level: verified
       notes:
-      - mini -m xai/grok-build-0.1 -t "…" --yolo --exit-immediately
+      - mini -t "…" --yolo --exit-immediately
       evidence: 'make recipe-check: mini -t "say ok" submitted the stand-in''s answer and exited in a fresh try'
       checked: '2026-10-14'
-    terms: Your xAI API key — a key from console.x.ai.
+    terms: Your API key of the provider or gateway you choose (xAI by default).
 - type: com.dozersandbox/guide@1
   config:
     intro: "mini-swe-agent is a coding agent with its own screen: the session on the left. Ask it to read, change and run the code in your folder."
     steps:
     - text: "Check it answers, without its screen."
-      command: "mini -m xai/grok-build-0.1 -t \"say ok\" --yolo --cost-limit 0 --exit-immediately"
+      command: "mini -t \"say ok\" --yolo --cost-limit 0 --exit-immediately"
     - text: "Ask it something in its own screen — the session on the left."
     - text: "One task without its screen."
-      command: "mini -m xai/grok-build-0.1 -t \"list the files in this folder\" --yolo --cost-limit 0 --exit-immediately"
+      command: "mini -t \"list the files in this folder\" --yolo --cost-limit 0 --exit-immediately"
     tips:
     - "Files it makes are in /workspace — your folder on the Mac."
     - "Restart its session from the session's ⋯ menu; End stops it."

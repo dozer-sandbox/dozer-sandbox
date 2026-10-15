@@ -229,6 +229,7 @@
             },
             "level" : "documented",
             "limits" : [
+              "not offered in a Dozer try: Codex takes a provider's base URL only from its config.toml (or -c), and its launcher is Dozer's own (baked into its image); its ChatGPT and OpenAI accounts stay its path",
               "with env_key Codex does not fetch OpenRouter's model catalogue: other makers' models show an \"Unknown model\" warning (OpenRouter recommends an auth command instead)"
             ],
             "notes" : [
@@ -263,6 +264,9 @@
               ]
             },
             "level" : "documented",
+            "limits" : [
+              "not offered in a Dozer try: Codex takes a provider's base URL only from its config.toml (or -c), and its launcher is Dozer's own (baked into its image); its ChatGPT and OpenAI accounts stay its path"
+            ],
             "notes" : [
               "/codex/v1 is Codex's own compatibility endpoint; /model lists the gateway's catalogue"
             ],

@@ -141,7 +141,7 @@ func searchDetails(_ e: DirectoryIndex.Entry) -> String {
     }
     for l in e.limits { s += "  limit: \(l.with.map { "\($0.key) \($0.value)" }.sorted().joined(separator: ", ")) — \(l.reason)\n" }
     if !e.gateways.isEmpty {
-        s += "  model gateways: " + e.gateways.map { "\($0.gateway) \($0.level)" + ($0.offered == true ? " (doz try --gateway \($0.gateway))" : "") }
+        s += "  model gateways: " + e.gateways.map { "\($0.gateway) \($0.level)" + ($0.offered == true ? " (doz try \(e.id) --gateway \($0.gateway))" : "") }
             .joined(separator: " · ") + "\n"
     }
     let tags = e.tags.filter { ["documented", "verified"].contains($0.level) }.map(\.tag)

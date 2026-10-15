@@ -311,6 +311,8 @@
           "properties": {
             "command": { "type": "array", "minItems": 1, "items": { "type": "string" } },
             "no_prompts_args": { "$ref": "#/$defs/strings" },
+            "model_args_after": { "$ref": "#/$defs/strings", "description": "Subcommands whose own flags model_args are (exec, run): there they go after the subcommand." },
+            "model_args": { "$ref": "#/$defs/strings", "description": "The arguments that choose its model when it takes the model only on its command line ([-m, $DOZ_MODEL]): put first when DOZ_MODEL is set (models@1 sets it) and the run names no model of its own." },
             "no_prompts_env": { "$ref": "#/$defs/stringMap", "description": "Environment set only when the launcher puts no_prompts_args first (the same rule: not with <ID>.permissions = ask, nor as root)." },
             "passthrough": { "$ref": "#/$defs/strings" },
             "env": { "$ref": "#/$defs/stringMap" },
@@ -369,7 +371,7 @@
     },
     "firstRun": {
       "type": "object", "additionalProperties": false, "required": ["file", "set"],
-      "properties": { "file": { "type": "string", "pattern": "^~/" }, "set": { "type": "object" }, "format": { "enum": ["json"], "description": "json: a JSON file whose name has no extension." } }
+      "properties": { "file": { "type": "string", "pattern": "^~/" }, "set": { "type": "object" }, "format": { "enum": ["json"], "description": "json: a JSON file whose name has no extension." }, "each_run": { "type": "boolean", "description": "Written at every run, its keys set, each $DOZ_… in a value the run's own (a JSON file of a recipe with models@1)." } }
     },
 
     "authCapability": {

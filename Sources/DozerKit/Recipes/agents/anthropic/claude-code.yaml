@@ -155,6 +155,7 @@ capabilities:
         - --model
         - ${{ dozer.model }}
       limits:
+      - 'not offered in a Dozer try: the gateway takes its key as a Bearer token (ANTHROPIC_AUTH_TOKEN) at ANTHROPIC_BASE_URL in place of Claude Code''s own account, which Dozer''s Claude Code flow (this Mac''s login, a setup token, an Anthropic API key) does not set — and Anthropic supports Claude models only through a gateway'
       - only guaranteed with Anthropic's own models, Anthropic first in the provider order
       - 'never with a Claude subscription (mac / setup-token): the gateway key replaces it'
       notes:
@@ -175,6 +176,7 @@ capabilities:
         - --model
         - ${{ dozer.model }}
       limits:
+      - 'not offered in a Dozer try: the gateway takes its key as a Bearer token (ANTHROPIC_AUTH_TOKEN) at ANTHROPIC_BASE_URL in place of Claude Code''s own account, which Dozer''s Claude Code flow (this Mac''s login, a setup token, an Anthropic API key) does not set — and Anthropic supports Claude models only through a gateway'
       - 'never with a Claude subscription (mac / setup-token): the gateway key replaces it'
       notes:
       - /claude-code is Claude Code's own compatibility endpoint; discovery puts every gateway model in /model

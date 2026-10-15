@@ -182,16 +182,16 @@
       "config" : {
         "entries" : [
           {
-            "checked" : "2026-10-14",
+            "checked" : "2026-10-16",
             "gateway" : "openrouter",
-            "level" : "unknown",
-            "reason" : "not checked against Agent Development Kit"
+            "level" : "no",
+            "reason" : "ADK is a framework: the model is named in your agent's own code, and this image's Python speaks only the Gemini API (its OpenAI and LiteLLM model classes need packages that are not in the pinned lock)"
           },
           {
-            "checked" : "2026-10-14",
+            "checked" : "2026-10-16",
             "gateway" : "vercel-ai-gateway",
-            "level" : "unknown",
-            "reason" : "not checked against Agent Development Kit"
+            "level" : "no",
+            "reason" : "ADK is a framework: the model is named in your agent's own code, and this image's Python speaks only the Gemini API (its OpenAI and LiteLLM model classes need packages that are not in the pinned lock)"
           }
         ]
       },

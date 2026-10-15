@@ -12,7 +12,7 @@ final class FirstRunTests: XCTestCase {
 
     func testEveryAgentGetsItsOwnSitesAtCreateAndTheyAreNeverASwitch() throws {
         XCTAssertEqual(AgentPermissions.agentPermissions(try kind("claude-code")), ["vendor:claude-code"])
-        XCTAssertEqual(AgentPermissions.agentPermissions(try kind("pi")), ["vendor:pi"])
+        XCTAssertEqual(AgentPermissions.agentPermissions(try kind("pi")), ["vendor:pi", "sources:pi"], "618: and pi's other model sources")
         XCTAssertEqual(AgentPermissions.agentPermissions(try kind("codex")), [AgentPermissions.openAIModel, "vendor:codex"])
         for id in ["vendor:claude-code", "vendor:pi", "vendor:codex"] {
             let p = try XCTUnwrap(AgentPermissions.permission(id))

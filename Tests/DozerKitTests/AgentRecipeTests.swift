@@ -85,7 +85,7 @@ final class AgentRecipeTests: XCTestCase {
         }
         XCTAssertEqual(AgentRecipes.recipe("gemini")?.auth.methods.map(\.kind), ["api-key"], "Gemini: API key only")
         XCTAssertEqual(AgentRecipes.recipe("grok")?.auth.methods.map(\.kind), ["api-key", "vendor-sign-in"])
-        XCTAssertEqual(AgentRecipes.recipe("pi")?.auth.methods.map(\.kind), ["api-key", "gateway"])
+        XCTAssertEqual(AgentRecipes.recipe("pi")?.auth.methods.map(\.kind), Array(repeating: "api-key", count: 6), "618: a key of each source it is offered")
         XCTAssertEqual(AgentRecipes.recipe("claude-code")?.auth.methods.first?.accounts, ["mac", "setup-token"])
     }
 
@@ -158,8 +158,8 @@ final class AgentRecipeTests: XCTestCase {
                 if s.level == "experimental" { experimental.append("\(r.id) × \(s.gateway)") }
             }
         }
-        // Antigravity CLI names undocumented AGY_LLM_GATEWAY_* settings — not checked yet.
-        XCTAssertEqual(unknown, ["antigravity × openrouter", "antigravity × vercel-ai-gateway", "tgpt × openrouter", "tgpt × vercel-ai-gateway", "adk × openrouter", "adk × vercel-ai-gateway", "clai × openrouter", "clai × vercel-ai-gateway", "goose × vercel-ai-gateway", "kilo × vercel-ai-gateway", "droid × openrouter", "droid × vercel-ai-gateway", "dirac × openrouter", "dirac × vercel-ai-gateway", "cline × openrouter", "cline × vercel-ai-gateway", "letta-code × openrouter", "letta-code × vercel-ai-gateway", "docker-agent × openrouter", "docker-agent × vercel-ai-gateway", "nanocoder × openrouter", "nanocoder × vercel-ai-gateway", "mini-swe-agent × openrouter", "mini-swe-agent × vercel-ai-gateway", "open-interpreter × openrouter", "open-interpreter × vercel-ai-gateway", "crush × openrouter", "crush × vercel-ai-gateway", "mimo-code × openrouter", "mimo-code × vercel-ai-gateway", "codewhale × openrouter", "codewhale × vercel-ai-gateway", "maki × openrouter", "maki × vercel-ai-gateway", "omp × openrouter", "omp × vercel-ai-gateway", "tau × openrouter", "tau × vercel-ai-gateway"])
+        // 618: every gateway pair is decided — offered (models@1) or said no, with its reason.
+        XCTAssertEqual(unknown, [])
         XCTAssertEqual(experimental, ["grok × openrouter"])
     }
 
@@ -210,7 +210,7 @@ final class AgentRecipeTests: XCTestCase {
         XCTAssertEqual(level("gemini", "gateway:openrouter"), "no")
         XCTAssertEqual(level("grok", "gateway:openrouter"), "experimental")
         XCTAssertEqual(level("grok", "multi-vendor-models"), "documented")
-        XCTAssertEqual(level("pi", "gateway:openrouter"), "documented")
+        XCTAssertEqual(level("pi", "gateway:openrouter"), "verified", "618: recipe-check ran pi through it")
         XCTAssertEqual(level("claude-code", "vendor-sign-in"), "documented")
         XCTAssertEqual(level("gemini", "vendor-sign-in"), "no")
         XCTAssertEqual(level("claude-code", "open-source"), "no")
@@ -221,7 +221,7 @@ final class AgentRecipeTests: XCTestCase {
         XCTAssertEqual(level("grok", "headless"), "verified")
         XCTAssertTrue(AgentRecipes.recipe("codex")!.hasTag("multi-vendor-models"))
         XCTAssertFalse(AgentRecipes.recipe("gemini")!.hasTag("multi-vendor-models"))
-        XCTAssertEqual(AgentRecipes.all.filter { $0.models == nil && $0.hasTag("gateway:openrouter") }.map(\.id), ["claude-code", "pi", "codex", "opencode", "copilot", "goose", "kilo"])
+        XCTAssertEqual(AgentRecipes.all.filter { $0.models == nil && $0.hasTag("gateway:openrouter") }.map(\.id), ["claude-code", "codex"])
         XCTAssertEqual(AgentRecipes.all.filter { $0.models != nil }.filter { $0.hasTag("gateway:openrouter") }.map(\.id),
                        AgentRecipes.all.filter { $0.offeredSources.contains("openrouter") && $0.models != nil }.map(\.id), "617: offered = the tag")
     }

@@ -18,17 +18,30 @@
           "model" : {
             "hosts" : [
               {
+                "host" : "api.anthropic.com",
+                "reason" : "Anthropic — when the sandbox's key is Anthropic's"
+              },
+              {
+                "host" : "api.openai.com",
+                "reason" : "OpenAI — when the sandbox's key is OpenAI's"
+              },
+              {
                 "host" : "api.x.ai",
                 "paths" : [
                   "/v1/models",
                   "/v1/chat/completions"
-                ]
+                ],
+                "reason" : "xAI — when the sandbox's key is xAI's"
+              },
+              {
+                "host" : "openrouter.ai",
+                "reason" : "OpenRouter — when the sandbox's key is OpenRouter's"
               }
             ],
             "id" : "model:maki",
-            "phrase" : "talk to your AI model (xAI)",
-            "summary" : "Maki's model here (the xAI API, with your key) — needed for it to answer.",
-            "title" : "Talk to xAI"
+            "phrase" : "talk to your AI model",
+            "summary" : "Maki's model — the provider or gateway its key is for (Anthropic, OpenAI, xAI or OpenRouter), with an API key. Needed for Maki to answer.",
+            "title" : "Talk to its model provider"
           },
           "quiet" : [
             {
@@ -51,7 +64,10 @@
         },
         "runtime" : {
           "allow" : [
+            "api.anthropic.com:443",
+            "api.openai.com:443",
             "api.x.ai:443",
+            "openrouter.ai:443",
             "api.github.com:443"
           ],
           "deny" : [
@@ -117,20 +133,20 @@
           "argv" : [
             "maki",
             "-p",
-            "-m",
-            "xai/grok-build-0.1",
             "say ok"
           ],
           "expect" : "DOZ_FAKE_OK"
         },
         "command" : [
-          "maki",
-          "-m",
-          "xai/grok-build-0.1"
+          "maki"
         ],
         "env" : {
 
         },
+        "model_args" : [
+          "-m",
+          "$DOZ_MODEL"
+        ],
         "no_prompts_args" : [
           "--yolo"
         ],
@@ -175,11 +191,41 @@
             "accounts" : [
               "key"
             ],
-            "checked" : "2026-10-14",
+            "checked" : "2026-10-16",
             "keys_page" : "https://console.x.ai/",
             "kind" : "api-key",
-            "note" : "Maki's xai provider reads XAI_API_KEY each run; model xai/grok-build-0.1 (its default would be an Anthropic model).",
+            "note" : "Maki's own providers, each reading its key from the environment; Dozer puts the model on its command line (-m xai/grok-build-0.1 on xAI, the default; -m PROVIDER/MODEL for the others).",
             "provider" : "xai"
+          },
+          {
+            "accounts" : [
+              "api-key"
+            ],
+            "checked" : "2026-10-16",
+            "keys_page" : "https://console.anthropic.com/settings/keys",
+            "kind" : "api-key",
+            "note" : "Maki through Anthropic: doz try maki --provider anthropic (or choose it in the try setup); the model with --model.",
+            "provider" : "anthropic"
+          },
+          {
+            "accounts" : [
+              "openai-key"
+            ],
+            "checked" : "2026-10-16",
+            "keys_page" : "https://platform.openai.com/api-keys",
+            "kind" : "api-key",
+            "note" : "Maki through OpenAI: doz try maki --provider openai (or choose it in the try setup); the model with --model.",
+            "provider" : "openai"
+          },
+          {
+            "accounts" : [
+              "key"
+            ],
+            "checked" : "2026-10-16",
+            "keys_page" : "https://openrouter.ai/keys",
+            "kind" : "api-key",
+            "note" : "Maki through OpenRouter: doz try maki --gateway openrouter (or choose it in the try setup); the model with --model.",
+            "provider" : "openrouter"
           }
         ]
       },
@@ -189,20 +235,56 @@
       "config" : {
         "entries" : [
           {
-            "checked" : "2026-10-14",
+            "checked" : "2026-10-16",
+            "evidence" : "make recipe-check: its check turn through a stand-in OpenRouter (doz try with --gateway openrouter; models@1)",
             "gateway" : "openrouter",
-            "level" : "unknown",
-            "reason" : "Maki reads OPENROUTER_API_KEY; not checked"
+            "level" : "verified"
           },
           {
-            "checked" : "2026-10-14",
+            "checked" : "2026-10-16",
             "gateway" : "vercel-ai-gateway",
-            "level" : "unknown",
-            "reason" : "not checked against Maki"
+            "level" : "no",
+            "reason" : "Maki has no Vercel AI Gateway provider of its own; a custom one needs its providers.toml"
           }
         ]
       },
       "type" : "com.dozersandbox/gateways@1"
+    },
+    {
+      "config" : {
+        "default" : "xai",
+        "models" : {
+          "xai" : "grok-build-0.1"
+        },
+        "native" : [
+          {
+            "env" : {
+              "DOZ_MODEL" : "anthropic/${{ dozer.model }}"
+            },
+            "source" : "anthropic"
+          },
+          {
+            "env" : {
+              "DOZ_MODEL" : "openai/${{ dozer.model }}"
+            },
+            "source" : "openai"
+          },
+          {
+            "env" : {
+              "DOZ_MODEL" : "xai/${{ dozer.model }}"
+            },
+            "source" : "xai"
+          },
+          {
+            "docs" : "https://github.com/tontinton/maki#providers",
+            "env" : {
+              "DOZ_MODEL" : "openrouter/${{ dozer.model }}"
+            },
+            "source" : "openrouter"
+          }
+        ]
+      },
+      "type" : "com.dozersandbox/models@1"
     },
     {
       "config" : {
@@ -228,12 +310,12 @@
             "evidence" : "make recipe-check: maki -p \"say ok\" printed the stand-in's answer and exited in a fresh try",
             "level" : "verified",
             "notes" : [
-              "maki -p -m xai/grok-build-0.1 \"…\""
+              "maki -p \"…\""
             ],
             "tag" : "headless"
           }
         ],
-        "terms" : "Your xAI API key — a key from console.x.ai."
+        "terms" : "Your API key of the provider or gateway you choose (xAI by default)."
       },
       "type" : "com.dozersandbox/directory@1"
     },
@@ -243,14 +325,14 @@
         "intro" : "Maki is a coding agent with its own screen: the session on the left. Ask it to read, change and run the code in your folder.",
         "steps" : [
           {
-            "command" : "maki -p -m xai/grok-build-0.1 \"say ok\"",
+            "command" : "maki -p \"say ok\"",
             "text" : "Check it answers, without its screen."
           },
           {
             "text" : "Ask it something in its own screen — the session on the left."
           },
           {
-            "command" : "maki -p -m xai/grok-build-0.1 \"list the files in this folder\"",
+            "command" : "maki -p \"list the files in this folder\"",
             "text" : "One task without its screen."
           }
         ],
@@ -262,7 +344,7 @@
       "type" : "com.dozersandbox/guide@1"
     }
   ],
-  "description" : "A Rust coding agent for the terminal with Lua plugins, here on an xAI API key.",
+  "description" : "A Rust coding agent for the terminal with Lua plugins, on the key of the provider or gateway you choose (xAI by default).",
   "displayName" : "Maki",
   "id" : "tontinton/maki",
   "kind" : "workload",

@@ -326,9 +326,18 @@ extension HostCore {
             var source = p
             if case .record(let a) = resolved, AgentCredentials.accepts(sb.spec.imageSpec?.name, a),
                let s = AgentCredentials.source(of: a).flatMap(KeyProviders.provider) { source = s }
-            applyKeyAccount(m, source, resolved)
-            applyPolicy(m, file)
-            return
+            // 618: a built-in agent with sources (pi) on an Anthropic key (or none) keeps its own path below — its
+            // per-sandbox key (`doz key set`) included; another source's key goes the recipe agents' way.
+            let builtin = ImageChoice.parse(sb.spec.imageSpec?.name ?? "")?.agent.recipe?.isBuiltin == true
+            if !(builtin && source.id == "anthropic") {
+                applyKeyAccount(m, source, resolved)
+                applyPolicy(m, file)
+                return
+            }
+            // Another source's key it held before (an account switched back to Anthropic) goes.
+            for other in [CredentialBinding.openai, .chatgpt] + KeyProviders.keyBindings { sb.egress?.vault.remove(other.id) }
+            // Its other sources' hosts are reachable (`sources:pi`): watched, so the key's placeholder sent there is refused.
+            sb.egress?.leakGuardHosts = Set(ModelSources.ids.flatMap(ModelSources.hosts))
         }
         switch resolvedAccount(m, file) {
         case .none:
