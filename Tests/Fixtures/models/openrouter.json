@@ -1,0 +1,638 @@
+{
+ "data": [
+  {
+   "id": "google/gemini-4-argon",
+   "name": "Google: Gemini 4 Argon",
+   "created": 1791907477,
+   "context_length": 1048576,
+   "architecture": {
+    "modality": "text+image+file+audio+video->text",
+    "input_modalities": [
+     "audio",
+     "file",
+     "image",
+     "text",
+     "video"
+    ],
+    "output_modalities": [
+     "text"
+    ],
+    "tokenizer": "Gemini",
+    "instruct_type": null
+   },
+   "pricing": {
+    "prompt": "0.000002",
+    "completion": "0.00001",
+    "image": "0.000002",
+    "audio": "0.000002",
+    "input_audio_cache": "0.0000001",
+    "web_search": "0.014",
+    "internal_reasoning": "0.00001",
+    "input_cache_read": "0.0000001",
+    "input_cache_write": "0.0000001875"
+   },
+   "supported_parameters": [
+    "include_reasoning",
+    "max_tokens",
+    "reasoning",
+    "reasoning_effort",
+    "response_format",
+    "seed",
+    "stop",
+    "structured_outputs",
+    "temperature",
+    "tool_choice",
+    "tools",
+    "top_p"
+   ],
+   "supported_voices": null,
+   "knowledge_cutoff": null,
+   "expiration_date": null,
+   "benchmarks": {
+    "design_arena": [
+     {
+      "arena": "models",
+      "category": "3d",
+      "elo": 1390,
+      "win_rate": 64.3,
+      "rank": 7
+     },
+     {
+      "arena": "models",
+      "category": "codecategories",
+      "elo": 1336,
+      "win_rate": 57.6,
+      "rank": 8
+     },
+     {
+      "arena": "models",
+      "category": "gamedev",
+      "elo": 1371,
+      "win_rate": 62.2,
+      "rank": 6
+     },
+     {
+      "arena": "models",
+      "category": "uicomponent",
+      "elo": 1297,
+      "win_rate": 51.2,
+      "rank": 18
+     },
+     {
+      "arena": "models",
+      "category": "website",
+      "elo": 1324,
+      "win_rate": 56.4,
+      "rank": 6
+     }
+    ],
+    "artificial_analysis": {
+     "intelligence_index": 52.6,
+     "coding_index": null,
+     "agentic_index": null
+    }
+   },
+   "reasoning": {
+    "mandatory": true,
+    "supported_efforts": [
+     "high",
+     "medium",
+     "low"
+    ],
+    "default_effort": "medium"
+   }
+  },
+  {
+   "id": "google/gemini-4-argon:batch",
+   "name": "Google: Gemini 4 Argon (batch)",
+   "created": 1791907477,
+   "context_length": 1048576,
+   "architecture": {
+    "modality": "text+image+file+audio+video->text",
+    "input_modalities": [
+     "audio",
+     "file",
+     "image",
+     "text",
+     "video"
+    ],
+    "output_modalities": [
+     "text"
+    ],
+    "tokenizer": "Gemini",
+    "instruct_type": null
+   },
+   "pricing": {
+    "prompt": "0.000001",
+    "completion": "0.000005",
+    "image": "0.000001",
+    "audio": "0.000001",
+    "input_audio_cache": "0.00000005",
+    "web_search": "0.014",
+    "internal_reasoning": "0.000005",
+    "input_cache_read": "0.00000005",
+    "input_cache_write": "0.0000001875"
+   },
+   "supported_parameters": [
+    "include_reasoning",
+    "max_tokens",
+    "reasoning",
+    "reasoning_effort",
+    "response_format",
+    "seed",
+    "stop",
+    "structured_outputs",
+    "temperature",
+    "tool_choice",
+    "tools",
+    "top_p"
+   ],
+   "supported_voices": null,
+   "knowledge_cutoff": null,
+   "expiration_date": null,
+   "benchmarks": {
+    "design_arena": [
+     {
+      "arena": "models",
+      "category": "3d",
+      "elo": 1390,
+      "win_rate": 64.3,
+      "rank": 7
+     },
+     {
+      "arena": "models",
+      "category": "codecategories",
+      "elo": 1336,
+      "win_rate": 57.6,
+      "rank": 8
+     },
+     {
+      "arena": "models",
+      "category": "gamedev",
+      "elo": 1371,
+      "win_rate": 62.2,
+      "rank": 6
+     },
+     {
+      "arena": "models",
+      "category": "uicomponent",
+      "elo": 1297,
+      "win_rate": 51.2,
+      "rank": 18
+     },
+     {
+      "arena": "models",
+      "category": "website",
+      "elo": 1324,
+      "win_rate": 56.4,
+      "rank": 6
+     }
+    ],
+    "artificial_analysis": {
+     "intelligence_index": 52.6,
+     "coding_index": null,
+     "agentic_index": null
+    }
+   },
+   "reasoning": {
+    "mandatory": true,
+    "supported_efforts": [
+     "high",
+     "medium",
+     "low"
+    ],
+    "default_effort": "medium"
+   }
+  },
+  {
+   "id": "google/gemini-nano-banana-2.1",
+   "name": "Google: Nano Banana 2.1",
+   "created": 1791300825,
+   "context_length": 65536,
+   "architecture": {
+    "modality": "text+image->text+image",
+    "input_modalities": [
+     "image",
+     "text"
+    ],
+    "output_modalities": [
+     "image",
+     "text"
+    ],
+    "tokenizer": "Gemini",
+    "instruct_type": null
+   },
+   "pricing": {
+    "prompt": "0.0000015",
+    "completion": "0.0000075",
+    "image_output": "0.00003",
+    "web_search": "0.014"
+   },
+   "supported_parameters": [
+    "include_reasoning",
+    "max_tokens",
+    "reasoning",
+    "reasoning_effort",
+    "response_format",
+    "seed",
+    "structured_outputs",
+    "temperature",
+    "tool_choice",
+    "tools",
+    "top_p"
+   ],
+   "supported_voices": null,
+   "knowledge_cutoff": null,
+   "expiration_date": null,
+   "reasoning": {
+    "mandatory": false,
+    "default_enabled": true,
+    "supported_efforts": [
+     "high",
+     "minimal",
+     "none"
+    ],
+    "default_effort": "minimal"
+   }
+  },
+  {
+   "id": "anthropic/claude-sonnet-5.5",
+   "name": "Anthropic: Claude Sonnet 5.5",
+   "created": 1790618686,
+   "context_length": 1000000,
+   "architecture": {
+    "modality": "text+image+file->text",
+    "input_modalities": [
+     "text",
+     "image",
+     "file"
+    ],
+    "output_modalities": [
+     "text"
+    ],
+    "tokenizer": "Claude",
+    "instruct_type": null
+   },
+   "pricing": {
+    "prompt": "0.000002",
+    "completion": "0.00001",
+    "web_search": "0.01",
+    "input_cache_read": "0.0000001",
+    "input_cache_write": "0.0000025",
+    "input_cache_write_1h": "0.000004"
+   },
+   "supported_parameters": [
+    "include_reasoning",
+    "max_completion_tokens",
+    "max_tokens",
+    "reasoning",
+    "reasoning_effort",
+    "response_format",
+    "stop",
+    "structured_outputs",
+    "tool_choice",
+    "tools",
+    "verbosity"
+   ],
+   "supported_voices": null,
+   "knowledge_cutoff": null,
+   "expiration_date": null,
+   "benchmarks": {
+    "design_arena": [
+     {
+      "arena": "models",
+      "category": "3d",
+      "elo": 1456,
+      "win_rate": 69.4,
+      "rank": 3
+     },
+     {
+      "arena": "models",
+      "category": "codecategories",
+      "elo": 1366,
+      "win_rate": 60.4,
+      "rank": 3
+     },
+     {
+      "arena": "models",
+      "category": "dataviz",
+      "elo": 1381,
+      "win_rate": 66.3,
+      "rank": 2
+     },
+     {
+      "arena": "models",
+      "category": "gamedev",
+      "elo": 1469,
+      "win_rate": 71.6,
+      "rank": 1
+     },
+     {
+      "arena": "models",
+      "category": "uicomponent",
+      "elo": 1379,
+      "win_rate": 63.7,
+      "rank": 3
+     },
+     {
+      "arena": "models",
+      "category": "website",
+      "elo": 1331,
+      "win_rate": 56.3,
+      "rank": 5
+     }
+    ],
+    "artificial_analysis": {
+     "intelligence_index": 56,
+     "coding_index": null,
+     "agentic_index": null
+    }
+   },
+   "reasoning": {
+    "mandatory": true,
+    "supported_efforts": [
+     "max",
+     "xhigh",
+     "high",
+     "medium",
+     "low"
+    ],
+    "default_effort": "high"
+   }
+  },
+  {
+   "id": "anthropic/claude-sonnet-5.5:batch",
+   "name": "Anthropic: Claude Sonnet 5.5 (batch)",
+   "created": 1790618686,
+   "context_length": 1000000,
+   "architecture": {
+    "modality": "text+image+file->text",
+    "input_modalities": [
+     "text",
+     "image",
+     "file"
+    ],
+    "output_modalities": [
+     "text"
+    ],
+    "tokenizer": "Claude",
+    "instruct_type": null
+   },
+   "pricing": {
+    "prompt": "0.000001",
+    "completion": "0.000005",
+    "web_search": "0.01",
+    "input_cache_read": "0.00000005",
+    "input_cache_write": "0.00000125",
+    "input_cache_write_1h": "0.000002"
+   },
+   "supported_parameters": [
+    "include_reasoning",
+    "max_tokens",
+    "reasoning",
+    "reasoning_effort",
+    "response_format",
+    "stop",
+    "structured_outputs",
+    "tool_choice",
+    "tools",
+    "verbosity"
+   ],
+   "supported_voices": null,
+   "knowledge_cutoff": null,
+   "expiration_date": null,
+   "benchmarks": {
+    "design_arena": [
+     {
+      "arena": "models",
+      "category": "3d",
+      "elo": 1456,
+      "win_rate": 69.4,
+      "rank": 3
+     },
+     {
+      "arena": "models",
+      "category": "codecategories",
+      "elo": 1366,
+      "win_rate": 60.4,
+      "rank": 3
+     },
+     {
+      "arena": "models",
+      "category": "dataviz",
+      "elo": 1381,
+      "win_rate": 66.3,
+      "rank": 2
+     },
+     {
+      "arena": "models",
+      "category": "gamedev",
+      "elo": 1469,
+      "win_rate": 71.6,
+      "rank": 1
+     },
+     {
+      "arena": "models",
+      "category": "uicomponent",
+      "elo": 1379,
+      "win_rate": 63.7,
+      "rank": 3
+     },
+     {
+      "arena": "models",
+      "category": "website",
+      "elo": 1331,
+      "win_rate": 56.3,
+      "rank": 5
+     }
+    ],
+    "artificial_analysis": {
+     "intelligence_index": 56,
+     "coding_index": null,
+     "agentic_index": null
+    }
+   },
+   "reasoning": {
+    "mandatory": true,
+    "supported_efforts": [
+     "max",
+     "xhigh",
+     "high",
+     "medium",
+     "low"
+    ],
+    "default_effort": "high"
+   }
+  },
+  {
+   "id": "x-ai/grok-4.7",
+   "name": "SpaceXAI: Grok 4.7",
+   "created": 1790007541,
+   "context_length": 500000,
+   "architecture": {
+    "modality": "text+image+file->text",
+    "input_modalities": [
+     "text",
+     "image",
+     "file"
+    ],
+    "output_modalities": [
+     "text"
+    ],
+    "tokenizer": "Grok",
+    "instruct_type": null
+   },
+   "pricing": {
+    "prompt": "0.000002",
+    "completion": "0.000006",
+    "web_search": "0.005",
+    "input_cache_read": "0.0000005",
+    "overrides": [
+     {
+      "min_prompt_tokens": 200000,
+      "prompt": "0.000004",
+      "completion": "0.000012",
+      "input_cache_read": "0.000001"
+     }
+    ]
+   },
+   "supported_parameters": [
+    "include_reasoning",
+    "logprobs",
+    "max_tokens",
+    "reasoning",
+    "reasoning_effort",
+    "response_format",
+    "seed",
+    "structured_outputs",
+    "temperature",
+    "tool_choice",
+    "tools",
+    "top_logprobs",
+    "top_p"
+   ],
+   "supported_voices": null,
+   "knowledge_cutoff": null,
+   "expiration_date": null,
+   "benchmarks": {
+    "design_arena": [
+     {
+      "arena": "models",
+      "category": "3d",
+      "elo": 1273,
+      "win_rate": 48.1,
+      "rank": 24
+     },
+     {
+      "arena": "models",
+      "category": "codecategories",
+      "elo": 1267,
+      "win_rate": 46.9,
+      "rank": 33
+     },
+     {
+      "arena": "models",
+      "category": "dataviz",
+      "elo": 1236,
+      "win_rate": 45.7,
+      "rank": 40
+     },
+     {
+      "arena": "models",
+      "category": "gamedev",
+      "elo": 1312,
+      "win_rate": 51.8,
+      "rank": 16
+     },
+     {
+      "arena": "models",
+      "category": "uicomponent",
+      "elo": 1269,
+      "win_rate": 48.1,
+      "rank": 31
+     },
+     {
+      "arena": "models",
+      "category": "website",
+      "elo": 1249,
+      "win_rate": 45.1,
+      "rank": 43
+     }
+    ],
+    "artificial_analysis": {
+     "intelligence_index": 46.4,
+     "coding_index": null,
+     "agentic_index": null
+    }
+   },
+   "reasoning": {
+    "mandatory": true,
+    "default_enabled": true,
+    "supported_efforts": [
+     "xhigh",
+     "high",
+     "medium",
+     "low"
+    ],
+    "default_effort": "high"
+   }
+  },
+  {
+   "id": "openai/gpt-5.4-mini",
+   "name": "OpenAI: GPT-5.4 Mini",
+   "context_length": 400000,
+   "pricing": {
+    "prompt": "0.00000025",
+    "completion": "0.000002"
+   },
+   "supported_parameters": [
+    "tools",
+    "temperature"
+   ],
+   "architecture": {
+    "output_modalities": [
+     "text"
+    ]
+   }
+  },
+  {
+   "id": "acme/variable",
+   "name": "Acme: Variable\u0007 Price\u202e",
+   "context_length": 8192,
+   "pricing": {
+    "prompt": "-1",
+    "completion": "-1"
+   },
+   "supported_parameters": [
+    "temperature"
+   ],
+   "architecture": {
+    "output_modalities": [
+     "text"
+    ]
+   }
+  },
+  {
+   "id": "acme/image-maker",
+   "name": "Acme: Image Maker",
+   "context_length": 4096,
+   "pricing": {
+    "prompt": "0",
+    "completion": "0"
+   },
+   "architecture": {
+    "output_modalities": [
+     "image"
+    ]
+   }
+  },
+  {
+   "id": "bad id with spaces",
+   "name": "Bad"
+  },
+  {
+   "id": 12345,
+   "name": "Not a string id"
+  }
+ ]
+}

@@ -34,6 +34,24 @@ ones depends on the tool: each section below lists them, its default first. Choo
 - The default models were chosen from the providers' published names; a model a provider has renamed or retired is
   refused by the provider itself — choose another with `--model`.
 
+### Which models: `doz models`
+
+```sh
+doz models --gateway openrouter               # OpenRouter's models: id, context, price in and out per million tokens, tools
+doz models --gateway vercel-ai-gateway sonnet # Vercel AI Gateway's, narrowed to those matching "sonnet"
+doz models --gateway openrouter --refresh     # read the list again now
+doz models --provider xai                     # a provider: the model Dozer checked
+```
+
+- **A gateway publishes its list**, and Dozer reads it on this Mac — never from a sandbox — at most once a day, keeping
+  the last one (offline, the last list stays; `--refresh` reads it now and starts Dozer's background process when it
+  is not running). `--json` gives it as data.
+- **A provider lists its models only with a key**, so `doz models` shows the model Dozer checked for it; any other id
+  that provider names may still be given with `--model`.
+- **A `--model` a gateway does not list is used as given**, with a note on the closest ids it does list:
+  `note: openai/gpt-5.4-mni is not in OpenRouter's model list — did you mean openai/gpt-5.4-mini, …? (used as given)`.
+  Lists change every week, so it is never refused for that.
+
 A tool that answers and exits opens a **shell** as its session, with the tool on the PATH. Type its commands there.
 
 ## OpenClaw

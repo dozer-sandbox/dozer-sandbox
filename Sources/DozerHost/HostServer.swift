@@ -40,7 +40,9 @@ public final class HostServer: @unchecked Sendable {
                         newStoreKeepalive: settings.bool(SettingKey.keepalive),
                         newStoreDefaultAccount: settings.string(SettingKey.defaultAccount) ?? "mac",
                         // 594: `latest` agent versions are asked of the npm registry (DOZ_TEST_NPM_REGISTRY: a stub).
-                        agentRegistry: .fromEnvironment())
+                        agentRegistry: .fromEnvironment(),
+                        // 618: the gateways' public model lists (DOZ_TEST_MODEL_LIST: offline or a stand-in).
+                        modelLists: .fromEnvironment())
     }
 
     public enum StartError: Error, LocalizedError {

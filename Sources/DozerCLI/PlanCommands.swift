@@ -9,6 +9,7 @@ import DozerHost
 
 /// The host's plan of `r`.
 func requestPlan(_ r: PlanRequest, _ g: GlobalOptions) async throws -> CreatePlan {
+    await ModelNote.check(r.create, g)          // 618: a gateway's model id it does not list
     var q = HostRequest(.plan)
     q.planRequest = r
     return try decode(try await query(q, g), CreatePlan.self, g)

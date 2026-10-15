@@ -15,7 +15,7 @@ final class ServeExposureTests: XCTestCase {
             .policyPreview("s"), .terminal("s"), .terminalTicket("s"), .terminalSocket("s"), .settings, .settingsChange, .sessionScreen("s", "shell"),
             .terminalLayout("s"), .terminalLayoutSet("s"), .bootLogs("s"), .bootLog("s", 1), .buildLog("s"), .onboarding, .onboardingConfig, .preparations,
             .accountAdd, .sandboxKey("s"), .workspaceCheck, .workspaceChoose, .quickAdd, .projectsDirChoose, .projectOpen, .projectPreview,
-            .projectWrite, .resources, .resourcesPreview, .bases, .tryCatalog, .tryList, .plan, .dockerfileChoose, .access, .accessCheck, .accessGithubKey, .signup,
+            .projectWrite, .resources, .resourcesPreview, .bases, .tryCatalog, .tryList, .models("openrouter"), .plan, .dockerfileChoose, .access, .accessCheck, .accessGithubKey, .signup,
             .serveStatus, .serveDevices, .serveShare, .serveRevoke("abc123"), .serveRename("abc123"), .serveProbe,
         ]
         for r in all { _ = covered(r) }
@@ -29,7 +29,7 @@ final class ServeExposureTests: XCTestCase {
              .stream, .actions, .operations, .policyPreview, .terminal, .terminalTicket, .terminalSocket, .settings, .settingsChange,
              .sessionScreen, .terminalLayout, .terminalLayoutSet, .bootLogs, .bootLog, .buildLog, .onboarding, .onboardingConfig, .preparations,
              .accountAdd, .sandboxKey, .workspaceCheck, .workspaceChoose, .quickAdd, .projectsDirChoose, .projectOpen, .projectPreview,
-             .projectWrite, .resources, .resourcesPreview, .bases, .tryCatalog, .tryList, .plan, .dockerfileChoose, .access, .accessCheck, .accessGithubKey, .signup,
+             .projectWrite, .resources, .resourcesPreview, .bases, .tryCatalog, .tryList, .models, .plan, .dockerfileChoose, .access, .accessCheck, .accessGithubKey, .signup,
              .serveStatus, .serveDevices, .serveShare, .serveRevoke, .serveRename, .serveProbe:
             return true
         }

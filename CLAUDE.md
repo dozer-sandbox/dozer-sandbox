@@ -1678,6 +1678,18 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   and a models@1 recipe's entries may never contradict what a try can do (`offersGateway`). The Quick try's "Through a
   gateway" is `throughGateway`; `doz search` marks the offered ones; the tags read `gatewaySupport`. `make recipe-check` runs a models@1 recipe
   once per offered source (`RECIPE_SELECTIONS`), `ModelSourcesTests`, `probes/617-*/recipes/models/browser-try-models.mjs`.
+- **Model lists** (618, owner: "… its also missing the step to choose a model"; `ModelLists.swift`, `HostCore+Models.swift`):
+  a gateway's PUBLIC list (OpenRouter `/api/v1/models`, Vercel AI Gateway `/v1/models` — no key) is read by the HOST on
+  the Mac, never a sandbox — the read-only op `models` (`modelsSource`, `modelsRefresh`) reads it when a day old (not
+  within 10 min of a failure; one read per gateway at a time; offline silent, the last list kept) into
+  `<store>/model-lists.json` (Resources: Dozer's own records). Strictly decoded (`ModelLists.parse`: text models only, a
+  bad entry dropped, ids `isModelID`, text inert and capped, prices per million tokens), ≤ 3000 entries. A provider
+  (Anthropic, OpenAI, xAI, Google) lists only with a key, so its list is the checked default (`kind: default`) — any id
+  may be typed. In-process (no host) answers the cache only; the real host's fetcher is `ModelListFetcher.fromEnvironment`
+  (`DOZ_TEST_MODEL_LIST=offline|FILE|DIR`; a guarded run without it reads nothing). `doz models [--gateway|--provider]
+  [SEARCH] [--refresh]`; `--model` with a gateway gets a did-you-mean NOTE (`ModelNote`, never a refusal — lists go
+  stale) in `requestPlan`, `create` and `up`. The web route `GET /api/v1/models/{source}` → `WebModelList` (the default
+  first). `ModelListTests`; fixtures `Tests/Fixtures/models/` (trimmed real lists + crafted edge cases).
 - **The guide** (617.11, owner: "i tried fabric and it just gave me a terminal … our companion guide"; `RecipeGuide.swift`,
   `SandboxGuide.swift`, `components/try-guide.js`, RECIPE-FORMAT.md "The guide"): `guide@1` = intro, ≤ 8 steps
   `{text, command?, edit?}`, ≤ 6 tips, docs, a `notice` (`doz try` says it first). The first step WITH a command is the check turn as a person types it

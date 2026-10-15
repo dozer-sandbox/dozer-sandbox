@@ -117,6 +117,11 @@ public actor HostCore {
     /// in-process host (and a unit test, unless it sets a stub) asks nothing.
     var agentRegistry: NpmRegistry = .disabled
     public func setAgentRegistry(_ r: NpmRegistry) { agentRegistry = r }
+    /// 618: where the gateways' model lists are read (the real host: their public URLs; tests: a stub or nothing).
+    var modelListFetcher: ModelListFetcher = .disabled
+    public func setModelListFetcher(_ f: ModelListFetcher) { modelListFetcher = f }
+    /// 618: one read of a gateway's list at a time.
+    var modelListReads: [String: Task<Void, Never>] = [:]
 
     /// Tests: the preparation work and the "already prepared" check.
     public func setPreparationRunner(_ r: @escaping PreparationRunner, prepared: @escaping @Sendable (String, DozerStore) -> Bool) {
@@ -125,10 +130,12 @@ public actor HostCore {
     }
 
     public init(store: DozerStore, readOnly: Bool, version: String, services: CredentialServices = .forHost(),
-                newStoreKeepalive: Bool = false, newStoreDefaultAccount: String? = nil, agentRegistry: NpmRegistry = .disabled) {
+                newStoreKeepalive: Bool = false, newStoreDefaultAccount: String? = nil, agentRegistry: NpmRegistry = .disabled,
+                modelLists: ModelListFetcher = .disabled) {
         TestSafety.checkStore(store.root)          // 611: a guarded test never runs on the default store
         self.store = store
         self.agentRegistry = agentRegistry
+        self.modelListFetcher = modelLists
         self.readOnly = readOnly
         self.version = version
         self.services = services
@@ -731,6 +738,8 @@ public actor HostCore {
             var problems: [Int: String] = [:]
             for (i, p) in ps.enumerated() { if let e = await exactVersionProblem(p.create, mustCheck: false) { problems[i] = e } }
             return try JSONValue(encoding: plans(ps, versionProblems: problems))
+        case .models:
+            return try JSONValue(encoding: try await modelLists(source: r.modelsSource, refresh: r.modelsRefresh == true))
         case .bases:
             let s = store
             let check = preparedCheck

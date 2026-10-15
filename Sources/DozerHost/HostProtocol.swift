@@ -147,12 +147,16 @@ public enum HostOp: String, Codable, Sendable, CaseIterable {
     /// (`planRequests`, ≤ 128) — the store's facts read ONCE (the image list alone costs ~0.6 s), answered with
     /// `[CreatePlan]` in the same order. The Quick try's readiness. Read-only.
     case plans
+    /// 618 (owner: "… its also missing the step to choose a model"): the models a source offers (`modelsSource`; none:
+    /// every source) — `[ModelList]`. A gateway's public list is read again by the host when it is a day old (or
+    /// `modelsRefresh`), never by a sandbox; in-process (no host) the cache only. Read-only.
+    case models
 
     /// Operations that only read — answered from the store in-process when no host is running.
     public var isReadOnly: Bool {
         switch self {
         case .ping, .ls, .inspect, .pointList, .imageList, .keyList, .accountList, .imageTree, .prepareStatus, .sessionScreen, .terminalLayout, .bootLog, .buildLog, .resources,
-             .bases, .builderStatus, .netPermissions, .workspaceRules, .plan, .plans: true
+             .bases, .builderStatus, .netPermissions, .workspaceRules, .plan, .plans, .models: true
         case .netPolicy: false        // decided per request (a change needs the host)
         default: false
         }
@@ -312,6 +316,9 @@ public struct HostRequest: Codable, Equatable, Sendable {
     public var planRequest: PlanRequest?
     /// 617: `plans` — several at once.
     public var planRequests: [PlanRequest]?
+    /// 618: `models` — the source (a provider or gateway id; nil: every source), and read a gateway's list now.
+    public var modelsSource: String?
+    public var modelsRefresh: Bool?
     /// 617: `copy`'s what and where.
     public var fileCopy: CopyRequest?
     /// 617: `attach` with no session named — open the image's own session when it is not running (`doz attach`).

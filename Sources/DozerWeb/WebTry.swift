@@ -205,7 +205,51 @@ extension WebTryCatalog {
     }
 }
 
+/// 618: the models a source offers, for the Try setup's picker — field by field (the host's list is someone else's
+/// data, checked and capped there; nothing here is a secret). `kind`: fetched (a gateway's own list), none (a gateway
+/// whose list was never read), default (a provider: only the model Dozer checked — any other id may be typed).
+public struct WebModelList: Codable, Equatable, Sendable {
+    public struct Model: Codable, Equatable, Sendable {
+        public var id: String
+        public var name: String
+        public var maker: String?
+        public var context: Int?
+        public var priceIn: Double?
+        public var priceOut: Double?
+        public var tools: Bool?
+    }
+    public var source: String
+    public var title: String
+    public var gateway: Bool
+    public var kind: String
+    public var fetchedAt: Date?
+    public var defaultModel: String?
+    public var models: [Model]
+
+    public init(_ l: ModelList) {
+        source = l.source
+        title = l.title
+        gateway = l.gateway
+        kind = l.kind
+        fetchedAt = l.fetchedAt
+        defaultModel = l.defaultModel
+        // The default first, then the list's own order.
+        let ordered = l.models.filter { $0.id == l.defaultModel } + l.models.filter { $0.id != l.defaultModel }
+        models = ordered.map { Model(id: $0.id, name: $0.name, maker: $0.maker, context: $0.context,
+                                     priceIn: $0.pricePerMillionIn, priceOut: $0.pricePerMillionOut, tools: $0.tools) }
+    }
+}
+
 extension HostWebData {
+    /// 618: the host's read-only `models` for one source.
+    public func models(_ source: String) async throws -> WebModelList {
+        var q = HostRequest(.models)
+        q.modelsSource = source
+        let all = try await query(q).0.decode([ModelList].self)
+        guard let l = all.first(where: { $0.source == source }) else { throw HostError(.notFound, "no model list for \(source)") }
+        return WebModelList(l)
+    }
+
     /// The host's read-only `plan` (in-process when no host runs — looking never starts one).
     public func plan(_ r: PlanRequest) async throws -> WebPlan {
         var q = HostRequest(.plan)

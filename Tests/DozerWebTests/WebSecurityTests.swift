@@ -387,6 +387,11 @@ final class WebSecurityTests: XCTestCase {
             // 617.11: the guide (facts are words: an account's name, a source's title — never a key)
             WebGuide(SandboxGuide.make(AgentRecipes.recipe("fabric")!, version: nil, source: "google", model: "gemini-2.5-flash", account: "google",
                                        accountKind: .key, network: "its model only (Locked)", workspace: "/Users/x/try-fabric", trial: true)!),
+            // 618: a model list (someone else's data, projected)
+            WebModelList(ModelList(source: "openrouter", title: "OpenRouter", gateway: true, kind: "fetched", fetchedAt: now,
+                                   defaultModel: "openai/gpt-5.4-mini",
+                                   models: [ModelInfo(id: "openai/gpt-5.4-mini", name: "GPT-5.4 Mini", maker: "OpenAI", context: 400_000,
+                                                      pricePerMillionIn: 0.25, pricePerMillionOut: 2, tools: true)])),
             // 593 §9
             WebSavedScreen(SessionScreen(name: "a", SavedScreen(info: SavedScreenInfo(session: "s", savedAt: now, reason: "sleep"), vt: Data(), text: ""))),
             WebTerminalLayout(TerminalLayout(panes: [.init(tabs: [.init(session: "s")], selected: 0)])),

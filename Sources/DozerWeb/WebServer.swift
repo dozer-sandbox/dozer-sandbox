@@ -987,6 +987,9 @@ public final class DozerWebServer: @unchecked Sendable {
             let store = DozerStore(root: URL(fileURLWithPath: data.storePath))
             return json(WebTryCatalog.list(secretEntry: settings.secretEntryAllowed, currency: AgentCurrency.all(store: store),
                                            installs: WebTryCatalog.installs(store: store, settings: settings.current)))
+        case .models(let source):
+            // 618: read-only — the host's `models` (in-process with no host: the cache only), as a projection.
+            return json(try await data.models(source))
         case .plan:
             // 617: changes nothing; POST (CSRF, above) like the quick-add question.
             try Self.requireJSONBody(md)

@@ -327,6 +327,7 @@ struct Create: AsyncParsableCommand {
         var o = try create.options()
         if dryRun { printPlan(try await requestPlan(PlanRequest(purpose: "create", name: name, create: o), g), g); return }
         if prepare { o.prepare = true }
+        await ModelNote.check(o, g)               // 618: a gateway's model id it does not list (a note)
         try preflightAgentAccount(&o, g)          // 594: pi needs an API-key account — before anything is made
         // 596 (B7, B9): a Dockerfile base — where it is built, and Apple's tool ready before a start builds it.
         if o.dockerfile != nil { try await builderPreflight(g, required: start) }
@@ -677,6 +678,7 @@ struct Up: AsyncParsableCommand {
                 if !create.key.isEmpty { o.keys = create.key }          // 617: custom keys given here win over the file's
                 try create.applyModelSource(to: &o)                       // 617 (models@1)
                 if dryRun { printPlan(try await requestPlan(PlanRequest(purpose: "up", name: name, create: o), g), g); return }
+                await ModelNote.check(o, g)                               // 618
                 // 594: doz_project.yaml's image and account are checked like any create.
                 try preflightAgentAccount(&o, g)
                 if create.rebuild && create.useCurrent { throw ValidationError("--rebuild or --use-current, not both") }
