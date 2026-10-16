@@ -709,8 +709,12 @@ async function saveKey(field, button) {
     await api('accounts', { method: 'POST', json: { name, kind, secret, ...(kind === 'key' ? { provider: p } : {}) } });
     toast('Key saved — ' + name + ' (' + (src ? src.title : a.providerTitle || p) + ')');
     SETUP.adding = false;
+    // The source's row reads the agent's usable accounts: the key just saved is one of them now (the owner's "kept
+    // asking for a key" — the plan used it, the row still read the list from before), until the catalog is read again.
+    SETUP.a = { ...a, usableAccounts: [...(a.usableAccounts || []),
+      { name, kind, source: null, isDefault: false, modelSource: src ? src.id : p }] };
     await replan(name);
-    refreshCatalog();
+    refreshCatalog(a.id);
   } catch (e) { SETUP.error = e.message || String(e); }
   paintSetup();
 }
@@ -736,8 +740,18 @@ async function recheck() {
   paintSetup();
 }
 
-function refreshCatalog() {
-  api('try').then((catalog) => { if (state.tr) take(state.tr, catalog, 'full'); }).catch(() => { /* the list stays */ });
+/// The catalog read again; an open setup of `id` takes its agent from it (the accounts as the host lists them).
+function refreshCatalog(id) {
+  api('try').then((catalog) => {
+    if (state.tr) take(state.tr, catalog, 'full');
+    const fresh = id && catalog.agents.find((x) => x.id === id);
+    if (!fresh || !SETUP.d || !SETUP.a || SETUP.a.id !== id) return;
+    // Repainted only when the accounts differ (a repaint moves the focus — the model search may be in use).
+    const names = (x) => (x.usableAccounts || []).map((u) => u.name).sort().join(',');
+    const differ = names(fresh) !== names(SETUP.a);
+    SETUP.a = fresh;
+    if (differ) paintSetup();
+  }).catch(() => { /* the list stays */ });
 }
 
 function planFacts(a, p) {
