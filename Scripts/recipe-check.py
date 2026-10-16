@@ -490,11 +490,17 @@ class Harness:
                 code, out = self.doz("exec", name, "--", "sh", "-c",
                                      "curl -s -m 20 -o /dev/null -w '%%{http_code}' -H '%s' https://%s%s" % (header % m.group(0), host, path),
                                      timeout=120)
-                leaked = [q for q in self.requests()[n0:] if "doz_cred_" in json.dumps(q.get("auth") or {})
-                          or any(k in json.dumps(q.get("auth") or {}) for k in KEYS.values())]
+                # Only requests to THAT host: the agent's own calls to its chosen source go on meanwhile (pi lists
+                # OpenRouter's models in the background — GET openrouter.ai/api/v1/models/user, the key rightly swapped
+                # in), and counting them failed pi · openrouter in every full run.
+                leaked = [q for q in self.requests()[n0:] if q.get("host") == host
+                          and ("doz_cred_" in json.dumps(q.get("auth") or {})
+                               or any(k in json.dumps(q.get("auth") or {}) for k in KEYS.values()))]
                 got = out.strip()[-3:]
                 if got not in ("400", "401", "403") or leaked:
-                    fail("keys: the placeholder sent to %s was not refused by the proxy (HTTP %s, %d reached the stand-in)" % (host, got, len(leaked)))
+                    what = ", ".join("%s %s%s" % (q.get("method"), q.get("host"), q.get("path")) for q in leaked)
+                    fail("keys: the placeholder sent to %s was not refused by the proxy (HTTP %s, %d reached the stand-in%s)"
+                         % (host, got, len(leaked), ": " + what if what else ""))
         step("keys", keys)
 
         # 6. status (OSC 7501) — the default selection only (the protocol is the agent's, not the source's)
