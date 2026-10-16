@@ -1700,6 +1700,19 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   [SEARCH] [--refresh]`; `--model` with a gateway gets a did-you-mean NOTE (`ModelNote`, never a refusal — lists go
   stale) in `requestPlan`, `create` and `up`. The web route `GET /api/v1/models/{source}` → `WebModelList` (the default
   first). `ModelListTests`; fixtures `Tests/Fixtures/models/` (trimmed real lists + crafted edge cases).
+  **The choice in the dashboard** (owner: "open router should be part of the key choices; needs rethink"; workspace mockup
+  `changes/618-*/try-model-source.html`): ONE section, "Where TOOL gets its model" (`components/model-source.js`:
+  `sourceList` — providers then gateways as equal rows, each with its key status, the chosen row's key / choice of keys /
+  paste under it — and `modelPicker`, fed by `GET models/SOURCE`, searchable, a typed id allowed). The Try setup
+  (`sourceSections` in `views/try.js`: a choice re-plans with that source's default key; the plan's "Same in Terminal")
+  and New Sandbox's Account step (`nwModelSource`) both draw it; `WebAccounts.sources` includes a built-in agent that
+  declares models@1 (pi), plus `gatewaySources` / `sourceModels`; `WebPlan.Model.Source.keysPage`. A tool with no choice
+  (Claude Code, Codex) keeps its Key section. **`doz_project.yaml` `model_source:` / `model:`** (owner: yes):
+  `DozerProject.modelSource/model`, checked by `modelProblem()` (an id `isModelID`; the source one the agent is offered,
+  else the fix names them), into `createOptions`; `doz init --provider/--gateway/--model` write them, `doz up`'s flags win
+  over them, the plan's yaml echoes them (the "not project keys" note is gone), New Sandbox writes them
+  (`WebProjectForm.modelSource/model`, explicit keys `model_source`/`model`). Workspace probe
+  `probes/618-*/models/browser-model-source.mjs` (1440/390, light/dark, overflow).
 - **The guide** (617.11, owner: "i tried fabric and it just gave me a terminal … our companion guide"; `RecipeGuide.swift`,
   `SandboxGuide.swift`, `components/try-guide.js`, RECIPE-FORMAT.md "The guide"): `guide@1` = intro, ≤ 8 steps
   `{text, command?, edit?}`, ≤ 6 tips, docs, a `notice` (`doz try` says it first). The first step WITH a command is the check turn as a person types it

@@ -12,7 +12,10 @@ final class CodexWebTests: XCTestCase {
                              isDefault: true, usedBy: [], state: "ok", keychainService: "doz-chatgpt:plan", fingerprint: "abc")
         let a = WebAccounts(accounts: [WebAccount(row)], defaultAccount: "mac", keepalive: false, openaiDefault: "plan")
         XCTAssertEqual(a.agents["codex"], ["codex-mac", "chatgpt", "openai-key"])
-        XCTAssertEqual(a.agents["pi"], ["api-key"], "unchanged")
+        // 618: pi takes a key of each source it is offered (New Sandbox shows them, as Try does).
+        XCTAssertEqual(a.agents["pi"], ["api-key", "key", "openai-key"])
+        XCTAssertEqual(a.sources["pi"]?.first, "anthropic")
+        XCTAssertTrue(a.gatewaySources.contains("openrouter"))
         XCTAssertEqual(a.agents["claude-code"], ["mac", "setup-token", "api-key"], "unchanged")
         let json = String(decoding: try JSONEncoder().encode(a), as: UTF8.self)
         XCTAssertTrue(json.contains("\"openaiDefault\":\"plan\""))

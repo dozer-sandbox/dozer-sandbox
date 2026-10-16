@@ -1,7 +1,7 @@
 # More agents: Antigravity CLI, Grok Build, OpenCode, GitHub Copilot CLI, Qwen Code, Goose, Kilo Code CLI, Mistral Vibe, Factory Droid, Dirac, Kimi Code, Cline CLI, OpenHands CLI, Letta Code, Docker Agent, Nanocoder, mini-swe-agent, Open Interpreter, Crush, MiMo Code, CodeWhale, Maki, oh-my-pi, Tau, Gemini CLI
 
 Beside Claude Code, pi and Codex, Dozer runs agents from other makers. Each uses an **API key** — most of them of the
-provider or gateway you choose (`--provider` / `--gateway`, or the Quick try's Model section; `--model` picks the
+provider or gateway you choose (`--provider` / `--gateway`, or the Quick try's “Where it gets its model”; `--model` picks the
 model; see [Other AI tools](28-ai-tools.md#providers-and-gateways)). The key stays on your Mac and the sandbox only ever
 gets a placeholder, which Dozer's proxy swaps for the key on the way out — and only to that provider's or gateway's
 own API.
@@ -101,7 +101,7 @@ gateway you choose: **Anthropic**, **OpenAI**, **xAI** (the default), **Google A
 ## Qwen Code (Alibaba Qwen)
 
 Alibaba Qwen's open-source agent, a Gemini CLI fork (`doz try qwen-code`, or `qwen`). Its free Qwen sign-in ended in
-April 2026; Dozer runs it in its **OpenAI-compatible mode**, pointed at the provider or gateway you choose: **OpenAI**, **xAI** (the default), **Google AI**, **OpenRouter** or **Vercel AI Gateway** (`--provider` / `--gateway`, or the Quick try's Model section; `--model` picks the model).
+April 2026; Dozer runs it in its **OpenAI-compatible mode**, pointed at the provider or gateway you choose: **OpenAI**, **xAI** (the default), **Google AI**, **OpenRouter** or **Vercel AI Gateway** (`--provider` / `--gateway`, or the Quick try's “Where it gets its model”; `--model` picks the model).
 On xAI the model is `grok-code-fast-1`.
 
 - **Installed** from the npm registry, integrity-checked; it needs Node 22 (the Node and Debian bases; not Alpine).
@@ -140,7 +140,7 @@ gateway you choose: **Anthropic**, **OpenAI**, **xAI** (the default), **Google A
 ## Mistral Vibe (Mistral AI)
 
 Mistral AI's terminal agent (`doz try mistral-vibe`, or `vibe`). Vibe takes any OpenAI-compatible or Anthropic
-provider, and Dozer names the one you choose: **Anthropic**, **OpenAI**, **xAI** (the default), **Google AI**, **OpenRouter** or **Vercel AI Gateway** (`--provider` / `--gateway`, or the Quick try's Model section; `--model` picks the model). On xAI the model is `grok-build-0.1`. Mistral's own
+provider, and Dozer names the one you choose: **Anthropic**, **OpenAI**, **xAI** (the default), **Google AI**, **OpenRouter** or **Vercel AI Gateway** (`--provider` / `--gateway`, or the Quick try's “Where it gets its model”; `--model` picks the model). On xAI the model is `grok-build-0.1`. Mistral's own
 models need a Mistral key, which Dozer does not hold yet.
 
 - **Installed** from PyPI with every dependency hash-pinned, into its own Python (Debian base; not Alpine).
@@ -184,7 +184,7 @@ you choose: **Anthropic**, **OpenAI**, **xAI** (the default), **Google AI**, **O
 ## Kimi Code (Moonshot AI)
 
 Moonshot AI's terminal agent, the successor to kimi-cli (`doz try kimi-code`, or `kimi`). Kimi Code takes its model
-from the environment (`KIMI_MODEL_*`), and Dozer names the provider or gateway you choose: **Anthropic**, **OpenAI**, **xAI** (the default), **Google AI**, **OpenRouter** or **Vercel AI Gateway** (`--provider` / `--gateway`, or the Quick try's Model section; `--model` picks the model). On xAI the
+from the environment (`KIMI_MODEL_*`), and Dozer names the provider or gateway you choose: **Anthropic**, **OpenAI**, **xAI** (the default), **Google AI**, **OpenRouter** or **Vercel AI Gateway** (`--provider` / `--gateway`, or the Quick try's “Where it gets its model”; `--model` picks the model). On xAI the
 model is `grok-build-0.1`. Kimi's own models need a Kimi account or a Moonshot key, which Dozer does not hold yet.
 
 - **Installed** from the npm registry, integrity-checked. Node 22 on the Node and Debian bases (not Alpine: it needs
@@ -215,7 +215,7 @@ Dozer puts the provider and model on its command line (`cline -P xai -m grok-bui
 ## OpenHands CLI (OpenHands)
 
 OpenHands' terminal agent (`doz try openhands`). Its LLM settings come from the environment (`--override-with-envs`,
-in Dozer's command), set for the provider or gateway you choose: **Anthropic**, **OpenAI**, **xAI** (the default), **Google AI**, **OpenRouter** or **Vercel AI Gateway** (`--provider` / `--gateway`, or the Quick try's Model section; `--model` picks the model). On xAI the model is `grok-build-0.1`.
+in Dozer's command), set for the provider or gateway you choose: **Anthropic**, **OpenAI**, **xAI** (the default), **Google AI**, **OpenRouter** or **Vercel AI Gateway** (`--provider` / `--gateway`, or the Quick try's “Where it gets its model”; `--model` picks the model). On xAI the model is `grok-build-0.1`.
 Nothing is written to its settings.
 
 - **Installed** from its GitHub release (the linux-arm64 build), checked against the SHA-512 Dozer recorded. Debian and

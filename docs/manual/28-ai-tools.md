@@ -19,7 +19,7 @@ doz search gemini                               # what Dozer runs with a Google 
 Most tools here can talk to more than one: **Anthropic**, **OpenAI**, **xAI**, **Google AI** (the Gemini API), and the
 gateways **OpenRouter** and **Vercel AI Gateway** (one key, many models — their model names are `creator/name`). Which
 ones depends on the tool: each section below lists them, its default first. Choose one with `--provider` (or
-`--gateway`) on `doz try`, `doz new`, `doz create` and `doz up`, or in the Quick try's setup (the Model section);
+`--gateway`) on `doz try`, `doz new`, `doz create` and `doz up`, or in the Quick try's setup (“Where TOOL gets its model”, then the model picker) and New Sandbox, or in doz_project.yaml (`model_source:`, `model:`);
 `--model` picks the model (the default is the provider's or gateway's: `grok-4-1-fast`, `gpt-5.4-mini`,
 `gemini-2.5-flash`, `claude-sonnet-4-6`, `openai/gpt-5.4-mini` …).
 

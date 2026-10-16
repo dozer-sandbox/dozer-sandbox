@@ -133,6 +133,8 @@ memory: 4G
 network: agent              # agent, bake, locked, open, nat, none
 permissions: "+web"         # standard, locked, open, or changes on Standard
 account: default            # default, none, or an account name
+model_source: openrouter    # where the model comes from: a provider or gateway the agent is offered (doz models)
+model: anthropic/claude-sonnet-4.6   # a model id of that source
 sessions:                   # what doz up starts; the first is attached
   - claude                  #   the image's own session
   - name: server            #   a session of your own
@@ -163,6 +165,8 @@ workspace_view: on          # off: share the folder directly (programs in it los
 | `network` | `agent`, `bake`, `locked`, `open`, `nat`, `none` | per image | `agent`/`bake`/`locked`/`open`: at the next `doz up`, live (unless you edited the sandbox's permissions since); `nat`/`none`: when made |
 | `permissions` | what the agent may do on a network with permissions (`agent`, `locked`, `open`): `standard`, `locked`, `open`, or changes on Standard like `+web,-error-reports` (or a list); see [What the agent can do](10-permissions-and-network.md) | `defaults.permissions` (standard) | when made (later: `doz net allow` / `doz net deny`) |
 | `account` | `default`, `none` or an account name | follow the store's default | run `doz account use NAME ACCOUNT` |
+| `model_source` | where the model comes from: a provider or gateway the agent is offered — `anthropic`, `openai`, `xai`, `google`, `openrouter`, `vercel-ai-gateway` (which ones depends on the tool: [Other AI tools](28-ai-tools.md#providers-and-gateways)); `--provider` / `--gateway` on `doz up` win over it | the agent's own | when made |
+| `model` | a model id of that source (`doz models --gateway openrouter`); `--model` on `doz up` wins over it | the source's default | when made |
 | `sessions` | a list of session names, or `{name, command}` — at most 16 | the image's own session | every `doz up` |
 | `agent_prompt` | text, at most 16 KiB | — | the next session |
 | `agent_prompt_mode` | `append` or `replace` | `append` | the next session |

@@ -56,6 +56,9 @@ public struct DozerProject: Equatable, Sendable {
     public var permissions: [String]?
     /// 617 (D6): custom key accounts attached beside the account (`--key NAME`), when the sandbox is made.
     public var keys: [String]?
+    /// 618: where the model comes from (a provider or gateway the agent is offered) and the model (an id) — when made.
+    public var modelSource: String?
+    public var model: String?
 
     public init(name: String, image: String, cpus: Int? = nil, memoryMiB: UInt64? = nil, network: String? = nil, account: String? = nil) {
         self.name = name
@@ -104,6 +107,8 @@ public struct DozerProject: Equatable, Sendable {
         ("agent_sudo", "true or false: the agent's passwordless sudo in the sandbox (default: the setting sandbox.agent_sudo, true)"),
         ("github", "off, read or push: git and gh signed in as you on GitHub — the permissions \"Use GitHub as you\" / \"Push to GitHub\" (default off; when the sandbox is made — later: doz net allow NAME github:as-you)"),
         ("keys", "custom keys attached beside the account (doz account add NAME --custom …), each of its hosts allowed — when the sandbox is made"),
+        ("model_source", "where the model comes from: a provider or gateway the agent is offered (anthropic, openai, xai, google, openrouter, vercel-ai-gateway — doz models); default: its own — when the sandbox is made"),
+        ("model", "a model id of that source (doz models --gateway openrouter); default: the source's own — when the sandbox is made"),
     ] + settingKeys.map { k in
         (k.key, "\(DozerSettings.definition(k.setting)?.type.name ?? "a value"): this sandbox's \(k.setting) (default: the setting)")
     }
@@ -145,6 +150,7 @@ public struct DozerProject: Equatable, Sendable {
         if !WebNameCheck.isSandboxName(name) { return "name: 1–40 of a-z 0-9 - (not starting with -)" }
         if base != nil, dockerfile != nil { return "base or dockerfile — not both" }
         if let a = agent, let why = Self.agentProblem(a) { return why }
+        if let why = modelProblem() { return why }
         if let b = base, BaseCatalogue.base(b) == nil { return "base: \(BaseCatalogue.ids.joined(separator: ", ")) (doz base ls)" }
         if let c = cpus, !(1...64).contains(c) { return "cpus: a whole number 1–64" }
         if let m = memoryMiB, !(256...262_144).contains(m) { return "memory: 256 MiB – 256 GiB" }
@@ -176,6 +182,24 @@ public struct DozerProject: Equatable, Sendable {
     }
 
     /// 618: the names a person types — a family's name once (`opencode`), never its members' ids (`opencode2`).
+    /// 618: what is wrong with `model_source` / `model` for this project's agent (nil: fine) — the source must be one the
+    /// agent is offered, the model an id (`ModelSelection.isModelID`). The fix names the choices.
+    public func modelProblem() -> String? {
+        if let m = model, !ModelSelection.isModelID(m) { return "model: a model id — letters, digits and . _ : / @ + - (doz models)" }
+        guard modelSource != nil || model != nil else { return nil }
+        let offered = AgentCredentials.sources(chosenImage) ?? []
+        let tool = AgentKind(rawValue: ImageChoice.parse(chosenImage)?.agent.rawValue ?? "")?.recipe?.title ?? "this agent"
+        guard !offered.isEmpty else { return "model_source and model: \(tool) has no choice of model (leave them out)" }
+        if let s = modelSource, !offered.contains(s) { return "model_source: \(Self.modelSourceWords(offered))" }
+        return nil
+    }
+
+    /// "anthropic, openai, xai, google, openrouter or vercel-ai-gateway (doz models)".
+    static func modelSourceWords(_ offered: [String]) -> String {
+        guard !offered.isEmpty else { return "a provider or gateway" }
+        return (offered.count > 1 ? offered.dropLast().joined(separator: ", ") + " or " + offered.last! : offered[0]) + " (doz models)"
+    }
+
     public static var agentWords: String {
         var seen: [String] = []
         for k in AgentKind.allCases where k != .none {
@@ -239,6 +263,18 @@ public struct DozerProject: Equatable, Sendable {
         } else {
             out += "image: \(image)                  # when made\n"
             out += "# (or: agent: claude-code|pi|codex|none with base: python … or dockerfile: ./Dockerfile — doz base ls)\n"
+        }
+        // 618 (owner: "yes" to model keys): where the model comes from and which model — for an agent with a choice.
+        let offered = AgentCredentials.sources(chosenImage) ?? []
+        if let s = modelSource {
+            out += "model_source: \(s)          # \(Self.modelSourceWords(offered)) — when made\n"
+        } else if offered.count > 1 {
+            out += "# model_source: \(offered[0])     # \(Self.modelSourceWords(offered)) — when made\n"
+        }
+        if let m = model {
+            out += "model: \(quoted(m))   # a model id of that source (doz models) — when made\n"
+        } else if offered.count > 1 || modelSource != nil {
+            out += "# model: …                  # a model id of that source (doz models --gateway openrouter); default: the source's own — when made\n"
         }
         out += "\n"
         out += cpus.map { "cpus: \($0)                     # when made\n" } ?? "# cpus: 2                    # when made\n"
@@ -322,6 +358,8 @@ public struct DozerProject: Equatable, Sendable {
         words += Self.gitHubWords(gh) ?? []
         if !words.isEmpty { o.allow = words }
         if let k = keys, !k.isEmpty { o.keys = k }
+        o.modelSource = modelSource                  // 618
+        o.model = model
         o.project = file.path
         // 596 (B6): a Dockerfile relative to this folder (its folder is the build context).
         if let d = dockerfile {

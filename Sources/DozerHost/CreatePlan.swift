@@ -490,6 +490,8 @@ public enum CreatePlanner {
         p.agentPromptMode = o.agentPromptMode
         p.settings = o.settings ?? [:]
         p.keys = o.keys
+        p.modelSource = o.modelSource             // 618: project keys now
+        p.model = o.model
         let (words, github) = splitGitHub(o.allow ?? [])
         p.github = github
         let sites = words.filter { $0.hasPrefix("site:") }
@@ -498,7 +500,6 @@ public enum CreatePlanner {
         if !perms.isEmpty, SettingType.permissionWords(perms.joined(separator: ",")) != nil { p.permissions = perms }
         var notes: [String] = []
         if isolated { notes.append("in a folder, doz up shares that folder at /workspace; this sandbox has none (isolated)") }
-        if o.modelSource != nil || o.model != nil { notes.append("the model provider and model are not project keys — give --provider/--gateway and --model to doz up") }
         if !sites.isEmpty {
             notes.append("a site is not a project key — after doz up: " + sites.map { "doz net allow \(p.name) \($0)" }.joined(separator: "; "))
         }

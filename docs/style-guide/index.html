@@ -286,8 +286,13 @@ name: todo-app</pre></details>
   <h2>Try’s setup, and every destructive confirmation: a box to tick</h2>
   <p><b>Try</b> opens a smaller modal over the Quick try (<code>dialog.dlg.try-setup</code>): every prerequisite — the key (the one it uses, a choice when it can use
     several, or the card: paste, a source kept outside, what is not offered), the image, the plan — and the final <b>Start</b>; Cancel or Esc leaves nothing behind.
-    A tool that speaks several APIs gets a <b>Model</b> section first (<code>.try-model</code>): the provider or gateway (providers, then gateways, each with its default model) and the model
-    (empty: that default); the key part then follows that source — its accounts, or a paste saved as its key.
+    A tool with a choice of model gets ONE section, <b>Where TOOL gets its model</b> (<code>components/model-source.js</code>, also New Sandbox's account step): its
+    providers, then the gateways, as equal rows (<code>.ms-src</code> › <code>.ms-opt</code>, a radio each), each with its key status (<code>.pill.st-ok</code> naming the key, or
+    <code>.st-off</code> “no key yet”); the chosen row (<code>.on</code>) holds what it needs under it (<code>.ms-need</code>): the key it uses (a choice when there are several,
+    “Add another key”), or the paste field, where to get a key and the 1Password/AWS/program fold. Then <b>Model</b>: the picker (<code>.ms-picker</code>) — the source's own
+    list (a gateway's public list, read on this Mac once a day), searchable, name · maker · context · price per million tokens, the default tagged; an id that looks like
+    one may be used as typed. What is truly not offered is one quiet line (<code>.ms-notoffer</code>); a tool with one source shows one line (<code>.ms-one</code>). The plan
+    shows the model and “Same in Terminal”. A tool with no choice of model (Claude Code, Codex: their own sign-ins) keeps its <b>Key</b> section.
     <b>Every destructive confirmation is ONE component</b> (<code>confirmAction</code> / <code>confirmWithCheck</code> in <code>components/dialog.js</code>): a box to tick whose
     sentence says what happens (“Yes, reset demo”), the button disabled until it is ticked and named by the verb, its icon by the verb (trash for Remove and Delete,
     <code>rotate-ccw</code> for Reset, <code>history</code> for Revert) — never a name to type. Removing or resetting a sandbox, deleting or reverting to a restore point,
@@ -302,19 +307,29 @@ name: todo-app</pre></details>
       <div class="dlg-foot dlg-buttons"><span class="why"></span><button class="btn quiet" type="button"><i data-i="x"></i>Cancel</button><button class="btn primary" type="button"><i data-i="rocket"></i>Start</button></div>
     </form></dialog>
     <dialog class="dlg try-setup" open><form method="dialog">
-      <div class="dlg-head"><span data-mark="shell-gpt" class="mark"></span><h2 class="h-title">Try ShellGPT</h2><button class="btn sm quiet icon-only" type="button" aria-label="Cancel"><i data-i="x"></i></button></div>
+      <div class="dlg-head"><span data-mark="shell-gpt" class="mark"></span><h2 class="h-title">Try OpenCode 2</h2><button class="btn sm quiet icon-only" type="button" aria-label="Cancel"><i data-i="x"></i></button></div>
       <div class="dlg-body"><p class="sub">A fresh sandbox, try-sgpt: a new empty folder of its own, the network locked to its model, your key never inside.</p>
         <div class="qt-sect"><h3>Version</h3><div class="segmented try-versions" role="group" aria-label="Version"><button type="button" class="seg" aria-pressed="false">OpenCode 2 · 2.0.29 (recommended)</button><button type="button" class="seg active" aria-pressed="true"><i data-i="check"></i>OpenCode 1 · 1.19.0</button></div>
           <p class="muted">A sandbox keeps the major it is made with — the other one is a new try. (A family's majors — <code>.try-versions</code>: the recommended one first; the chosen one <code>.active</code> with a check; choosing one re-plans, the catalog is not read again; the title, THE PLAN's Version row and the pane behind follow.)</p></div>
-        <div class="qt-sect"><h3>Model</h3><div class="try-model">
-          <label class="field"><span>Provider or gateway</span><select><optgroup label="Providers"><option>xAI — grok-4-1-fast</option><option>OpenAI — gpt-5.4-mini</option></optgroup><optgroup label="Gateways — one key, many models"><option selected>OpenRouter — openai/gpt-5.4-mini</option></optgroup></select></label>
-          <label class="field"><span>Model</span><input type="text" placeholder="openai/gpt-5.4-mini" value="anthropic/claude-sonnet-4.6"></label></div>
-          <p class="muted">A gateway names a model creator/name (anthropic/claude-sonnet-4.6). Empty: openai/gpt-5.4-mini. Its key only ever goes to OpenRouter; the sandbox sees a placeholder.</p></div>
-        <div class="qt-sect"><h3>Key</h3><div class="try-need"><h4>An OpenRouter key</h4>
-          <div class="try-option"><div><strong>Paste an OpenRouter key</strong><div class="muted">Kept in this Mac’s keychain as an account; the sandbox only ever sees a placeholder.</div></div>
-            <div class="try-paste"><input type="password" placeholder="paste the key (sk-or-…)"><button class="btn sm" type="button"><i data-i="key-round"></i>Save the key</button></div></div></div></div>
-        <div class="qt-sect"><h3>The plan</h3><dl class="qt-plan"><dt>Name</dt><dd>try-sgpt</dd><dt>Model</dt><dd>anthropic/claude-sonnet-4.6 through OpenRouter</dd><dt>Network</dt><dd>Locked — only its model providers</dd></dl></div></div>
-      <div class="dlg-foot dlg-buttons"><span class="why">Add a key first</span><button class="btn quiet" type="button"><i data-i="x"></i>Cancel</button><button class="btn primary" type="button" disabled><i data-i="rocket"></i>Start</button></div>
+        <div class="qt-sect"><h3>Where OpenCode 2 gets its model</h3><p class="muted ms-lead">Its own provider is chosen; any other — or a gateway — works the same way.</p>
+          <div class="ms-src" role="radiogroup">
+            <div class="ms-grp">Providers</div>
+            <label class="ms-opt"><input type="radio" name="sg-ms"><span class="ms-t">xAI</span><span class="ms-k"><span class="pill st-ok"><i data-i="circle-check"></i>johnoscott</span></span><span class="ms-d">default grok-build-0.1 · OpenCode 2’s own</span></label>
+            <label class="ms-opt"><input type="radio" name="sg-ms"><span class="ms-t">Anthropic</span><span class="ms-k"><span class="pill st-off"><i data-i="circle-dot"></i>no key yet</span></span><span class="ms-d">default claude-sonnet-4-6</span></label>
+            <div class="ms-grp">Gateways <span>— one key, models from many makers</span></div>
+            <label class="ms-opt on"><input type="radio" name="sg-ms" checked><span class="ms-t">OpenRouter</span><span class="ms-k"><span class="pill st-off"><i data-i="circle-dot"></i>no key yet</span></span><span class="ms-d">one key, models from many makers</span></label>
+            <div class="ms-need"><div class="try-paste"><input type="password" placeholder="paste your OpenRouter key (sk-or-…)"><button class="btn sm" type="button"><i data-i="key-round"></i>Save the key</button></div>
+              <div class="muted ms-small">Kept in this Mac’s keychain; the sandbox only ever sees a placeholder. Get one at <strong>openrouter.ai/keys</strong>.</div>
+              <details class="ms-other"><summary>Keep it in 1Password, AWS or a program instead</summary><code class="ms-cmd">doz account add NAME --provider openrouter --from op://VAULT/ITEM/FIELD</code></details></div>
+          </div>
+          <p class="ms-notoffer">Not offered: a Claude subscription sign-in — it takes API keys only.</p></div>
+        <div class="qt-sect"><h3>Model</h3><div class="ms-picker"><div class="ms-top"><i data-i="search"></i><input type="search" value="claude" placeholder="Search OpenRouter’s models — name, maker or id"></div>
+          <div class="ms-mlist">
+            <label class="ms-m on"><input type="radio" name="sg-m" checked><span class="ms-mt"><span class="ms-nm">Claude Sonnet 4.6</span> <code class="ms-id">anthropic/claude-sonnet-4.6</code></span><span class="ms-price">$3 / $15<br>per 1M in / out</span><span class="ms-meta">Anthropic · 1M context</span></label>
+            <label class="ms-m"><input type="radio" name="sg-m"><span class="ms-mt"><span class="ms-nm">GPT-5.4 Mini</span> <code class="ms-id">openai/gpt-5.4-mini</code><span class="tag">default</span></span><span class="ms-price">$0.25 / $2<br>per 1M in / out</span><span class="ms-meta">OpenAI · 400K context</span></label></div>
+          <div class="ms-foot">OpenRouter’s public model list, read on this Mac 2 hours ago · prices per million tokens</div></div></div>
+        <div class="qt-sect"><h3>The plan</h3><dl class="qt-plan"><dt>Name</dt><dd>try-sgpt</dd><dt>Model</dt><dd>OpenRouter — once its key is saved</dd><dt>Network</dt><dd>Locked — only its model providers</dd><dt>Same in Terminal</dt><dd><code>doz try opencode --gateway openrouter --model anthropic/claude-sonnet-4.6</code></dd></dl></div></div>
+      <div class="dlg-foot dlg-buttons"><span class="why">Save an OpenRouter key, or choose a source that has one</span><button class="btn quiet" type="button"><i data-i="x"></i>Cancel</button><button class="btn primary" type="button" disabled><i data-i="rocket"></i>Start</button></div>
     </form></dialog>
     <dialog class="dlg" open><form method="dialog">
       <div class="dlg-head"><h2 class="h-title">Delete try-pi?</h2><button class="btn sm quiet icon-only" type="button" aria-label="Close"><i data-i="x"></i></button></div>

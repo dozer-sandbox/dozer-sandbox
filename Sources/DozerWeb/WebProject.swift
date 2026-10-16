@@ -78,6 +78,9 @@ public struct WebProjectForm: Codable, Equatable, Sendable {
     public var agentPrompt: String?
     public var agentPromptMode: String?
     public var sessions: [Session]?
+    /// 618: `model_source` / `model` — where the model comes from and which model (checked by the project's own rule).
+    public var modelSource: String?
+    public var model: String?
 
     static let settingFields: [(field: String, setting: String)] = [
         ("sshAgent", SettingKey.sshAgent), ("clipboard", SettingKey.clipboard), ("browserBridge", SettingKey.browserBridge),
@@ -108,6 +111,8 @@ public struct WebProjectForm: Codable, Equatable, Sendable {
         agentPrompt = p.agentPrompt
         agentPromptMode = p.agentPromptMode
         sessions = p.sessions.isEmpty ? nil : p.sessions.map { Session(name: $0.name, command: $0.command) }
+        modelSource = p.modelSource
+        model = p.model
     }
 
     /// The project these choices make (each value checked by its own rule; the whole by the parser).
@@ -142,6 +147,10 @@ public struct WebProjectForm: Codable, Equatable, Sendable {
         p.agentPrompt = agentPrompt
         p.agentPromptMode = agentPromptMode
         p.sessions = (sessions ?? []).map { DozerProject.Session(name: $0.name, command: $0.command) }
+        if let s = modelSource, !ModelSources.ids.contains(s) { throw invalid("modelSource: a provider or gateway (doz models)") }
+        if let m = model, !ModelSelection.isModelID(m) { throw invalid("model: a model id — letters, digits and . _ : / @ + -") }
+        p.modelSource = modelSource
+        p.model = model
         return p
     }
 }
@@ -192,7 +201,8 @@ struct WebProjectRequest {
     var explicit: Set<String> = []
     var replace: String?
 
-    static let explicitKeys: Set<String> = Set<String>(["cpus", "memory", "network", "permissions", "account", "github", "agent_sudo", "image"])
+    static let explicitKeys: Set<String> = Set<String>(["cpus", "memory", "network", "permissions", "account", "github", "agent_sudo", "image",
+                                                                         "model_source", "model"])
         .union(DozerProject.settingKeys.map(\.key))
 
     static func decode(_ body: Data, allowed: Set<String>) throws -> WebProjectRequest {
@@ -207,7 +217,8 @@ struct WebProjectRequest {
         if let form = d["form"] {
             guard let fd = form as? [String: Any] else { throw WebAction.Invalid("form: an object") }
             let known: Set<String> = ["name", "image", "agent", "base", "dockerfile", "account", "github", "sshAgent", "network", "permissions", "cpus",
-                                      "memory", "clipboard", "browserBridge", "openFiles", "tmux", "ignoreMode", "workspaceView", "agentSudo", "agentPrompt", "agentPromptMode", "sessions"]
+                                      "memory", "clipboard", "browserBridge", "openFiles", "tmux", "ignoreMode", "workspaceView", "agentSudo", "agentPrompt", "agentPromptMode", "sessions",
+                                      "modelSource", "model"]
             let unknown = Set(fd.keys).subtracting(known)
             guard unknown.isEmpty else { throw WebAction.Invalid("form: no \(unknown.sorted().joined(separator: ", "))") }
             do { r.form = try JSONDecoder().decode(WebProjectForm.self, from: JSONSerialization.data(withJSONObject: fd)) } catch {

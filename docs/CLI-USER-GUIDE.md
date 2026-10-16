@@ -198,6 +198,8 @@ memory: 4G
 network: agent              # agent, bake, locked, open, nat, none
 permissions: "+web"         # standard, locked, open, or changes on Standard (a network with permissions only)
 account: default            # default, none, or an account name
+model_source: openrouter    # where the model comes from (a provider or gateway the agent is offered; doz models)
+model: anthropic/claude-sonnet-4.6   # a model id of that source (--provider/--gateway/--model on doz up win)
 sessions:                   # what `doz up` starts; the first is attached
   - claude                  #   the image's own session
   - name: server            #   a session of your own (no shell: the command is split on spaces,

@@ -77,7 +77,7 @@ doz uninstall [--keep-store] [--keep-config] [--yes]
   first if it never was). **`up` with no name**, in that folder, creates, starts or wakes exactly
   that sandbox, with the folder at `/workspace`, starts its `sessions` and attaches to the first.
   The file is YAML with a closed set of keys — `version`, `name`, `image`, `cpus`, `memory`,
-  `network`, `account`, `sessions`, `agent_prompt`, `agent_prompt_mode`, `agent_sudo`, `clipboard`, `browser_bridge`, `tmux`; an unknown key or a bad
+  `network`, `account`, `model_source`, `model`, `sessions`, `agent_prompt`, `agent_prompt_mode`, `agent_sudo`, `clipboard`, `browser_bridge`, `tmux`; an unknown key or a bad
   value is an error naming its line.
 
   ```yaml

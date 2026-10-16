@@ -76,6 +76,58 @@ final class MajorChoiceTests: XCTestCase {
         XCTAssertTrue(o1.argv.contains("opencode@1"), o1.command)
     }
 
+    /// 618 (owner: yes to model keys): `model_source:` and `model:` — read, written, checked against what the agent is
+    /// offered, carried into the create; the plan's yaml says them (no more "not project keys" note).
+    func testAProjectFileTakesItsModelSourceAndModel() throws {
+        let yaml = "version: 1\nname: p\nagent: opencode@2\nmodel_source: openrouter\nmodel: anthropic/claude-sonnet-4.6\n"
+        let p = try DozerProject.parse(yaml)
+        XCTAssertEqual(p.modelSource, "openrouter")
+        XCTAssertEqual(p.model, "anthropic/claude-sonnet-4.6")
+        let o = p.createOptions(folder: root, file: root.appendingPathComponent("doz_project.yaml"), settings: DozerSettings(text: ""))
+        XCTAssertEqual(o.modelSource, "openrouter")
+        XCTAssertEqual(o.model, "anthropic/claude-sonnet-4.6")
+        let back = try DozerProject.parse(p.render())
+        XCTAssertEqual(back.modelSource, "openrouter")
+        XCTAssertEqual(back.model, "anthropic/claude-sonnet-4.6")
+        // Refused with the fix: a source that is no source, one the agent is not offered, a model that is no id, an agent
+        // with no choice of model.
+        XCTAssertThrowsError(try DozerProject.parse("version: 1\nname: p\nagent: opencode@2\nmodel_source: nosuch\n")) {
+            XCTAssertTrue("\($0)".contains("line 4") && "\($0)".contains("model_source:"), "\($0)")
+        }
+        XCTAssertThrowsError(try DozerProject.parse("version: 1\nname: p\nagent: opencode@2\nmodel_source: google\n")) {
+            XCTAssertTrue("\($0)".contains("openrouter") && "\($0)".contains("doz models"), "\($0)")
+        }
+        XCTAssertThrowsError(try DozerProject.parse("version: 1\nname: p\nagent: opencode@2\nmodel: 'a b'\n"))
+        XCTAssertThrowsError(try DozerProject.parse("version: 1\nname: p\nagent: claude-code\nmodel_source: anthropic\n")) {
+            XCTAssertTrue("\($0)".contains("no choice of model"), "\($0)")
+        }
+        // An agent with a choice gets the keys as comments; one without does not.
+        var plain = DozerProject(name: "p", image: "opencode2")
+        plain.agent = "opencode@2"
+        XCTAssertTrue(plain.render().contains("# model_source:"), plain.render())
+        var cc = DozerProject(name: "p", image: "claude-code")
+        cc.agent = "claude-code"
+        XCTAssertFalse(cc.render().contains("model_source"))
+        // The plan's file says them.
+        let planned = try plan("try", ["--agent", "opencode@2", "--gateway", "openrouter", "--model", "anthropic/claude-sonnet-4.6"])
+        XCTAssertTrue(planned.yaml.contains("model_source: openrouter"), planned.yaml)
+        XCTAssertTrue(planned.yaml.contains("model: anthropic/claude-sonnet-4.6"), planned.yaml)
+        XCTAssertNil(planned.yamlNote)
+        // doz init writes them.
+        let i = try XCTUnwrap(try DozerCommand.parseAsRoot(["init", "--yes", "--name", "p", "--agent", "opencode@2", "--gateway", "openrouter",
+                                                          "--model", "x-ai/grok-build-0.1"]) as? Init)
+        let made = try i.ask(folder: root, existing: nil, asker: Asker(yes: true, json: false))
+        XCTAssertEqual(made.modelSource, "openrouter")
+        XCTAssertEqual(made.model, "x-ai/grok-build-0.1")
+        XCTAssertThrowsError(try (try XCTUnwrap(try DozerCommand.parseAsRoot(["init", "--yes", "--name", "p", "--agent", "opencode@2", "--provider", "openrouter"]) as? Init))
+            .ask(folder: root, existing: nil, asker: Asker(yes: true, json: false)))
+        // New Sandbox's form.
+        var form = WebProjectForm(made)
+        XCTAssertEqual(form.modelSource, "openrouter")
+        form.model = "nope nope"
+        XCTAssertThrowsError(try form.project())
+    }
+
     func testAProjectFileTakesAMajor() throws {
         XCTAssertNil(DozerProject.agentProblem("opencode@1"))
         XCTAssertNil(DozerProject.agentProblem("opencode@2.0.28"))

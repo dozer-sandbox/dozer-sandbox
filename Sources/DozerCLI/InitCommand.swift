@@ -42,6 +42,10 @@ struct Init: AsyncParsableCommand {
     @Flag(inversion: .prefixedNo, help: "Run its sessions inside tmux.") var tmux: Bool?
     @Option(name: .long, help: "lock or hide: what a .dozignore in the folder does to the paths it lists — lock: listed but unreadable; hide: not there.") var ignoreMode: String?
     @Flag(inversion: .prefixedNo, help: "The agent's passwordless sudo.") var agentSudo: Bool?
+    // 618: where the model comes from and which model (the file's model_source: / model:).
+    @Option(name: .long, help: "A provider the agent is offered (the file's model_source:): anthropic, openai, xai, google.") var provider: String?
+    @Option(name: .long, help: "A gateway the agent is offered (the file's model_source:): openrouter, vercel-ai-gateway.") var gateway: String?
+    @Option(name: .long, help: "A model id of that source (the file's model:; doz models).") var model: String?
     @Flag(name: [.short, .long], help: "Accept every default; ask nothing.") var yes = false
     @Flag(name: .long, help: "Replace an existing project file without asking.") var force = false
 
@@ -185,6 +189,12 @@ struct Init: AsyncParsableCommand {
             p.name = sandbox
             p.image = img
         }
+        // 618: --provider/--gateway/--model write model_source:/model: (an existing file's stay unless given).
+        if provider != nil && gateway != nil { throw invalid("--provider or --gateway, not both") }
+        if let x = gateway, !ModelSources.isGateway(x) { throw invalid("--gateway: \(ModelSources.ids.filter(ModelSources.isGateway).joined(separator: ", "))") }
+        if let x = provider, ModelSources.isGateway(x) { throw invalid("\(x) is a gateway: --gateway \(x)") }
+        if let s = provider ?? gateway { p.modelSource = s }
+        if let m = model { p.model = m }
         if let e = existing {
             // What the existing file set stays set (unless answered differently below).
             if e.cpus != nil { explicit.insert("cpus") }

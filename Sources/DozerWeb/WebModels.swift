@@ -1093,6 +1093,8 @@ public struct WebPlan: Codable, Equatable, Sendable {
             /// `key` (with the provider), `api-key` (Anthropic), `openai-key` — what a pasted key is saved as.
             public var accountKind: String
             public var keyHint: String?
+            /// 618: where a key of it is made (the gateway's own page; a provider's from the recipes that name one).
+            public var keysPage: String?
         }
         public var source: String
         public var title: String
@@ -1147,8 +1149,18 @@ public struct WebPlan: Codable, Equatable, Sendable {
         model = p.model.map { m in
             Model(source: m.source, title: m.title, gateway: m.gateway, model: m.model,
                   offered: m.offered.map { Model.Source(id: $0.id, title: $0.title, gateway: $0.gateway, defaultModel: $0.defaultModel,
-                                                        accountKind: $0.accountKind, keyHint: $0.keyHint) })
+                                                        accountKind: $0.accountKind, keyHint: $0.keyHint,
+                                                        keysPage: WebPlan.keysPage($0.id)) })
         }
+    }
+
+    /// 618: where a key of `source` is made — a gateway's own keys page, else the first recipe that names one for it.
+    static func keysPage(_ source: String) -> String? {
+        if let g = Gateways.gateway(source) { return g.keysPage }
+        for r in AgentRecipes.all {
+            if let m = r.auth.methods.first(where: { $0.provider == source && $0.keysPage != nil }) { return m.keysPage }
+        }
+        return nil
     }
 }
 
@@ -1264,6 +1276,9 @@ public struct WebAccounts: Codable, Equatable, Sendable {
     public var providerTools: [String: [String]] = [:]
     public var agentTitles: [String: String] = [:]
     public var uncheckedProviders: [String] = []
+    /// 618: the sources that are gateways, and each source's default model (New Sandbox's "Where TOOL gets its model").
+    public var gatewaySources: [String] = []
+    public var sourceModels: [String: String] = [:]
 
     public init(accounts: [WebAccount], defaultAccount: String, keepalive: Bool, openaiDefault: String? = nil,
                 providerDefaults: [String: String] = [:]) {
@@ -1276,13 +1291,17 @@ public struct WebAccounts: Codable, Equatable, Sendable {
         }
         let kinds = Dictionary(accounts.compactMap { a in AccountKind(rawValue: a.kind).map { (a.name, $0) } }) { a, _ in a }
         for kind in AgentKind.allCases {
-            guard let r = kind.recipe, !r.isBuiltin, let s = AgentCredentials.sources(r.id), let k = AgentCredentials.kinds(r.id) else { continue }
+            guard let r = kind.recipe, let s = AgentCredentials.sources(r.id), let k = AgentCredentials.kinds(r.id) else { continue }
             agents[r.id] = k.map(\.rawValue).sorted()
             sources[r.id] = s
             recipeDefaults[r.id] = AgentCredentials.defaultAccount(for: r.id, anthropic: defaultAccount, openai: openaiDefault,
                                                                    providers: providerDefaults, kinds: kinds)
         }
-        for id in ModelSources.ids { sourceTitles[id] = ModelSources.title(id) }
+        for id in ModelSources.ids {
+            sourceTitles[id] = ModelSources.title(id)
+            if ModelSources.isGateway(id) { gatewaySources.append(id) }
+            if let m = ModelSources.endpoints(id).first?.defaultModel { sourceModels[id] = m }
+        }
         providers = ["anthropic", "openai"] + ModelSources.ids.filter { $0 != "anthropic" && $0 != "openai" }
         for kind in AgentKind.allCases where kind != .none {
             guard let r = kind.recipe else { continue }

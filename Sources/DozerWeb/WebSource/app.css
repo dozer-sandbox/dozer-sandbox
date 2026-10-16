@@ -1606,9 +1606,60 @@ dialog.dlg.try-setup { width: min(640px, calc(100vw - 32px)); }
 .try-option.not-offered { color: var(--ink-2); }
 .try-paste { display: flex; gap: var(--sp-3); align-items: center; margin-top: var(--sp-1); }
 .try-paste input { flex: 1; min-width: 0; }
-/* 617 (models@1): the provider or gateway and the model, side by side; stacked when narrow. */
-.try-model { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: var(--sp-3); }
-.try-model select, .try-model input { width: 100%; }
+/* 618: where the model comes from (components/model-source.js) — providers and gateways as equal rows, each with its key
+   status; the chosen row's key under it; then the model picker. Try setup and New Sandbox. */
+.ms-lead { margin: calc(-1 * var(--sp-1)) 0 var(--sp-3); }
+.ms-src { border: var(--bw) solid var(--line); border-radius: var(--r-lg); overflow: hidden; background: var(--surface); }
+.ms-grp { font-size: var(--fs-sm); font-weight: var(--fw-strong); color: var(--ink-2); padding: var(--sp-3) var(--sp-4) var(--sp-2);
+  background: var(--surface-2); border-top: var(--bw) solid var(--line); }
+.ms-grp:first-child { border-top: 0; }
+.ms-grp span { font-weight: var(--fw-regular); }
+.ms-opt { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; gap: 2px var(--sp-4); align-items: center; padding: var(--sp-3) var(--sp-4);
+  border-top: var(--bw) solid var(--line); cursor: pointer; }
+.ms-grp + .ms-opt { border-top: 0; }
+.ms-opt:hover { background: var(--surface-2); }
+.ms-opt.on { background: var(--accent-tint); }
+.ms-opt input { margin: 0; accent-color: var(--accent); }
+.ms-t { font-weight: var(--fw-strong); min-width: 0; }
+.ms-d { grid-column: 2; font-size: var(--fs-sm); color: var(--ink-2); min-width: 0; overflow-wrap: anywhere; }
+.ms-k { grid-row: 1 / span 2; grid-column: 3; }
+.ms-need { display: grid; gap: var(--sp-3); padding: var(--sp-2) var(--sp-4) var(--sp-4) calc(var(--sp-4) + 18px + var(--sp-4)); background: var(--accent-tint); }
+.ms-need-one { padding: var(--sp-3) 0 0; background: none; }
+.ms-one { display: flex; gap: var(--sp-3); align-items: center; flex-wrap: wrap; padding: var(--sp-3) var(--sp-4); border: var(--bw) solid var(--line);
+  border-radius: var(--r-lg); }
+.ms-one .ms-t { flex: 1; }
+.ms-keyline { display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; }
+.ms-keyline .icon { color: var(--ok); }
+.ms-keyline select { min-width: 0; max-width: 100%; }
+.ms-small { font-size: var(--fs-sm); }
+.ms-other summary { color: var(--accent); cursor: pointer; font-size: var(--fs-sm); }
+.ms-other > * + * { margin-top: var(--sp-2); }
+.ms-cmd { display: block; font-family: var(--mono); font-size: var(--fs-mono); padding: var(--sp-2) var(--sp-3); border-radius: var(--r-sm); background: var(--surface-2);
+  overflow-wrap: anywhere; user-select: all; }
+.ms-notoffer { margin: var(--sp-2) 2px 0; font-size: var(--fs-sm); color: var(--ink-2); }
+.ms-picker { border: var(--bw) solid var(--line); border-radius: var(--r-lg); overflow: hidden; background: var(--surface); }
+.ms-top { display: flex; gap: var(--sp-2); align-items: center; padding: var(--sp-2) var(--sp-3); background: var(--surface-2); color: var(--ink-2); }
+.ms-top input { flex: 1; min-width: 0; }
+.ms-mlist { max-height: 264px; overflow: auto; }
+.ms-m { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; gap: 1px var(--sp-3); align-items: center; padding: var(--sp-2) var(--sp-3);
+  border-top: var(--bw) solid var(--line); cursor: pointer; }
+.ms-m:first-child { border-top: 0; }
+.ms-m:hover { background: var(--surface-2); }
+.ms-m.on { background: var(--accent-tint); }
+.ms-m input { margin: 0; accent-color: var(--accent); }
+.ms-mt { min-width: 0; overflow-wrap: anywhere; }
+.ms-nm { font-weight: var(--fw-strong); }
+.ms-id { font-family: var(--mono); font-size: var(--fs-mono); color: var(--ink-2); }
+.ms-meta { grid-column: 2; font-size: var(--fs-sm); color: var(--ink-2); }
+.ms-price { grid-row: 1 / span 2; grid-column: 3; font-size: var(--fs-sm); color: var(--ink-2); text-align: right; white-space: nowrap; }
+.ms-empty, .ms-typed { padding: var(--sp-3); font-size: var(--fs-sm); color: var(--ink-2); }
+.ms-typed { border-top: var(--bw) solid var(--line); }
+.ms-foot { padding: var(--sp-2) var(--sp-3); font-size: var(--fs-sm); color: var(--ink-2); border-top: var(--bw) solid var(--line); background: var(--surface-2); }
+@media (max-width: 600px) {
+  .ms-opt, .ms-m { grid-template-columns: 18px minmax(0, 1fr); }
+  .ms-k, .ms-price { grid-row: auto; grid-column: 2; justify-self: start; text-align: left; }
+  .ms-need { padding-left: var(--sp-4); }
+}
 /* 618: the try setup's Version choice (a family's majors) */
 .try-versions { display: flex; flex-wrap: wrap; }
 /* 617.11: the Guide tab — preamble, this try's facts, the steps (each command with Copy and Run), tips. */

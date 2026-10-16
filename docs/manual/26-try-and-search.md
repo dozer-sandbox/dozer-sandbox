@@ -87,6 +87,15 @@ to where you opened it.
   or the command to run for a key you keep in 1Password, AWS or a program. Then **the plan** (its name, base, network,
   its new empty folder — not one of yours — and what reaches your Mac), the same as a command to copy (`doz try grok`),
   and what it can reach.
+- **Where it gets its model** — **Try…** opens its setup. A tool that can use more than one provider (pi, OpenCode, and
+  most of the recipe tools) shows ONE list: its providers, then the gateways (OpenRouter, Vercel AI Gateway — one key,
+  models from many makers), each with its key status. Its own provider is chosen; choose any other the same way. The
+  chosen one shows its key (a choice when you have several, or "Add another key"), or a field to paste one, where to get
+  a key and the command for a key kept in 1Password, AWS or a program. Then **Model**: the source's own list —
+  a gateway's public list, read by Dozer on this Mac once a day — to search by name, maker or id, with each model's
+  context and price per million tokens and the default marked; an id it does not list can still be typed. The plan
+  names the model, and **Same in Terminal** is the command (`doz try pi --gateway openrouter --model …`). New Sandbox
+  asks the same in its Account step, and writes the choice to `doz_project.yaml` (`model_source:`, `model:`).
 - **Nothing is prepared while you browse.** **Start** makes it, starts it and opens its session: a first start
   prepares its image, and its terminal area shows the progress (the steps, the one under way and the last lines of the
   build) until the session is there. A try's page says **Sleep (hibernate)** · **Delete…** · **Keep** — Delete removes
