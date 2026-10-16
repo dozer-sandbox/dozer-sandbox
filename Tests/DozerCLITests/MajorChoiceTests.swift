@@ -128,6 +128,35 @@ final class MajorChoiceTests: XCTestCase {
         XCTAssertThrowsError(try form.project())
     }
 
+    /// 618: the dashboard's Try plan (its POST plan body, as the page sends it: the card's ref) and `doz try --dry-run`
+    /// plan the SAME release — also on a store whose host failed to reach the registry (it refused to plan then, while
+    /// the CLI with no host planned the pin).
+    func testTheWebTryPlanIsTheCLIPlan() async throws {
+        let store = DozerStore(root: root)
+        for agent in ["opencode", "opencode2", "pi", "grok"] {
+            AgentVersions.update(agent, store) { $0.failedAt = Date(); $0.lastError = "offline" }
+        }
+        let c = HostCore(store: store, readOnly: true, version: "test", services: .forHost())
+        await c.load()
+        func planned(_ r: PlanRequest) async throws -> CreatePlan {
+            var q = HostRequest(.plan)
+            q.planRequest = r
+            let m = await c.handle(q)
+            XCTAssertNil(m.error, m.error?.message ?? "")
+            return try XCTUnwrap(m.result).decode(CreatePlan.self)
+        }
+        for typed in ["opencode", "opencode@1", "pi", "grok"] {
+            let cli = try await planned(PlanRequest(purpose: "try", create: try ChoiceOptions.from(["--agent", typed]).planChoices()))
+            let body = try JSONSerialization.data(withJSONObject: ["purpose": "try", "agent": typed])
+            let web = try await planned(try WebPlanQuery.decode(body).request)
+            XCTAssertEqual(web.version?.version, cli.version?.version, typed)
+            XCTAssertEqual(web.create.image, cli.create.image, typed)
+            XCTAssertNotNil(cli.version?.version, typed)
+            XCTAssertFalse(web.problems.contains { $0.text.contains("could not be reached") }, "\(typed): \(web.problems.map(\.text))")
+            XCTAssertFalse(web.problems.contains { $0.text.contains("needs a proxied network") }, "\(typed): \(web.problems.map(\.text))")
+        }
+    }
+
     func testAProjectFileTakesAMajor() throws {
         XCTAssertNil(DozerProject.agentProblem("opencode@1"))
         XCTAssertNil(DozerProject.agentProblem("opencode@2.0.28"))

@@ -251,8 +251,8 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   `pi(_:)`; `ImageSpec.agent` records it, so it is in the bake key. `AgentVersions.spec(purpose:)`
   is synchronous and uses only the store: `.create` → the newest image PREPARED for this build, else
   the newest `usable` one an older doz's recipe made (no waiting), `.prepare` → the version the
-  setting names (cached latest, a known exact, else the pin when the registry was never asked, else a
-  clear error). `HostCore.freshen` is the only thing that asks the registry (hourly cache in
+  setting names (cached latest, a known exact, else the pin — whether the registry was never asked or did not
+  answer: 618, a host that had failed to reach it refused while the CLI with no host planned the pin, so Try and `--dry-run` disagreed). `HostCore.freshen` is the only thing that asks the registry (hourly cache in
   `<store>/agent-versions.json`, 5-min back-off after a failure). Only the
   real host asks (`HostServer` passes `.fromEnvironment()`; `DOZ_TEST_NPM_REGISTRY=offline|URL` for
   tests); in-process hosts and unit tests have `.disabled` and resolve to the pin. Claude Code's own

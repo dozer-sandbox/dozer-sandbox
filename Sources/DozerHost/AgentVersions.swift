@@ -487,11 +487,10 @@ public enum AgentVersions {
         if purpose == .create, let p = usable(image, store: store, settings: settings).first { return p }
         let rec = all(store)[agent]
         if let latest = rec?.latest { return try make(latest) }
-        if let e = rec?.lastError {
-            throw HostError(.unavailable, "\(agent): \(key) is latest, but the npm registry could not be reached (\(e)) and no \(image) image is prepared — "
-                            + "try again online, or set an exact version: doz config set \(key) \(pin.version)")
-        }
-        // Never asked (an in-process host, a test): the built-in pin.
+        // Never asked (an in-process host, a test) OR asked and not answered (offline): the built-in pin, the version Dozer
+        // checked. 618: these two used to differ — a running host that had failed to reach the registry REFUSED to plan,
+        // while the same command with no host running planned the pin, so the dashboard's Try (always through the host)
+        // and `doz try --dry-run` disagreed on one store. A preparation offline fails on the download anyway, saying so.
         return try make(pin)
     }
 
