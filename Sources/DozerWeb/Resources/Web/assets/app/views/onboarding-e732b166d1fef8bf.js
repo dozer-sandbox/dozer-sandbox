@@ -411,6 +411,7 @@ function wizStepUsage(d, w) {
 /// official build's package sends it; a confirmation email comes first. Nothing is pre-filled or pre-ticked; Skip
 /// moves on. The address is never kept in the page after the request.
 const SIGNUP_INTERESTS = [['release-news', 'Release news', 'A short email when a new version is out.'],
+  ['tool-news', 'Tool news', 'New and updated tools you can try in Dozer.'],
   ['early-access', 'Early access', 'Try new features before they are released.'],
   ['tips', 'Tips and tricks', 'Ways to get more out of Dozer, now and then.']];
 function wizStepSignup(d, w) {

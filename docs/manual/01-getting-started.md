@@ -66,7 +66,7 @@ At each question the recommended answer is already selected: press **Enter** to 
    never names, paths, contents or anything inside a sandbox — and where to see it exactly
    (`doz telemetry show`). **Enter** keeps them on; answer **n** to turn them off. A build from the
    open-source repository sends nothing and skips this step.
-6. **Stay in touch (optional).** Release news, early access and tips and tricks by email — skip it
+6. **Stay in touch (optional).** Release news, tool news, early access and tips and tricks by email — skip it
    with **Enter**. See [Usage statistics and sign-up](#usage-statistics-and-sign-up).
 
 **In your browser:**
@@ -125,7 +125,7 @@ doz telemetry reset                                     # a new random install i
 ```
 
 **Signing up is optional**: `doz signup` (or the setup's *Stay in touch*) asks for an email and what you
-want — release news, early access, tips and tricks. A confirmation email comes first; every email has a
+want — release news, tool news (new and updated tools you can try), early access, tips and tricks. A confirmation email comes first; every email has a
 one-click unsubscribe, and your email is never linked to the statistics.
 
 **Builds from the open-source repository send nothing.** The statistics and sign-up code is part of the

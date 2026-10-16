@@ -80,6 +80,8 @@ final class WebSignupTests: XCTestCase {
     func testTheBodyIsDecodedStrictlyAndNeverEchoed() throws {
         let r = try WebSignup.decode(Data(good.utf8))
         XCTAssertEqual(r, SignupRequest(email: "me@example.com", interests: ["release-news", "tips"], source: "onboarding-web"))
+        let all = try WebSignup.decode(Data(#"{"email":"me@example.com","interests":["tool-news","release-news","early-access","tips"]}"#.utf8))
+        XCTAssertEqual(all.interests, ["release-news", "tool-news", "early-access", "tips"], "all four, in the list's order")
         for body in [#"{"email":"me@example.com"}"#, #"{"email":"me@example.com","interests":["tips"],"source":"cli"}"#,
                      #"{"email":"secret-me@","interests":["tips"]}"#, #"{"email":"secret-me@example.com","interests":[]}"#,
                      #"{"email":"secret-me@example.com","interests":["tips","tips"]}"#,

@@ -94,7 +94,7 @@ Then, in an official build, two last questions:
   **n** sets `telemetry.send_anonymous_usage_stats = false`. When `DO_NOT_TRACK` or
   `$DOZ_SEND_ANONYMOUS_USAGE_STATS` already decides, it says so and does not ask. A build from the
   open-source repository sends nothing and skips the step.
-- **Stay in touch** (optional) — release news, early access and tips and tricks by email; **Enter**
+- **Stay in touch** (optional) — release news, tool news, early access and tips and tricks by email; **Enter**
   skips it.
 
 ### Without questions (scripts)

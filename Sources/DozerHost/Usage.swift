@@ -29,7 +29,7 @@ import DozerKit
 /// One sign-up: an email and what it is for. Nothing else is ever sent with it — not the install id. Its description
 /// is redacted (a log line or an interpolation never shows the address).
 public struct SignupRequest: Codable, Sendable, Equatable, CustomStringConvertible, CustomDebugStringConvertible, CustomReflectable {
-    public static let interestValues = ["release-news", "early-access", "tips"]
+    public static let interestValues = ["release-news", "tool-news", "early-access", "tips"]
     public static let sourceValues = ["cli", "onboarding-web", "onboarding-cli", "website"]
 
     public var email: String
@@ -46,7 +46,7 @@ public struct SignupRequest: Codable, Sendable, Equatable, CustomStringConvertib
         self.source = source
     }
 
-    /// A checked request: an email of a plain shape, 1–3 known interests (each once, in the list's order), a known
+    /// A checked request: an email of a plain shape, 1–4 known interests (each once, in the list's order), a known
     /// source. The error never repeats the email.
     public static func make(email: String, interests: [String], source: String) throws -> SignupRequest {
         let e = email.trimmingCharacters(in: .whitespacesAndNewlines)

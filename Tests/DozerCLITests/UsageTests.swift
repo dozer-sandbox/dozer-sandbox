@@ -348,6 +348,11 @@ final class UsageTests: XCTestCase {
         let r = try SignupRequest.make(email: "  me@example.com ", interests: ["tips", "release-news"], source: "cli")
         XCTAssertEqual(r.email, "me@example.com")
         XCTAssertEqual(r.interests, ["release-news", "tips"], "the list's order")
+        // Tool news has its own topic, after Release news (the owner: recipe updates will be decoupled from releases).
+        XCTAssertEqual(SignupRequest.interestValues, ["release-news", "tool-news", "early-access", "tips"])
+        XCTAssertEqual(SignupCommand.labels.count, SignupRequest.interestValues.count, "a label for each, in its order")
+        XCTAssertEqual(try SignupRequest.make(email: "me@example.com", interests: ["tips", "tool-news", "early-access", "release-news"], source: "cli").interests,
+                       SignupRequest.interestValues)
         XCTAssertFalse("\(r)".contains("me@example.com"), "the description is redacted")
         XCTAssertFalse(String(reflecting: r).contains("me@example.com"))
         for e in ["", "me", "me@", "@x.com", "me@x", "me @x.com", "me@x..com", "<me>@x.com", "a@b@c.com"] {
