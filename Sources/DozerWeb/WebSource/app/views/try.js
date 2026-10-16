@@ -490,6 +490,23 @@ function sourceSections(a, plan, missing) {
   return out;
 }
 
+/// 618: a tool with ONE source and no choice of model (Grok Build: an xAI key, checked by the tool at start-up) — the same
+/// section as one line (the source and its key status); its key part below. Claude Code and Codex (their own sign-ins and
+/// subscriptions) keep their Key section.
+function keyOnly(a) {
+  return !!a.provider && !['claude-code', 'codex'].includes(a.id)
+    && (a.usableAccounts || []).every((x) => ['api-key', 'openai-key', 'key'].includes(x.kind));
+}
+
+function oneSourceSection(a, plan, missing) {
+  const src = { id: a.provider, title: a.providerTitle || a.provider, gateway: false, defaultModel: null };
+  const keys = usable(a);
+  const nodes = sourceList({ tool: nameOf(a), sources: [src], chosen: src.id, keysOf: () => keys, onChoose: () => {},
+    needFor: () => keyNodes(a, plan, missing) });
+  if (!missing && keys.length > 1) nodes.push(keyNodes(a, plan, null)[1]);
+  return [sect('Where ' + nameOf(a) + ' gets its model', ...nodes)];
+}
+
 /// What the chosen source needs: the key it uses (a choice when there are several, another one added), else a paste.
 function sourceNeed(plan, src, keys) {
   if (!src) return [];
@@ -593,7 +610,7 @@ function paintSetup() {
     h('div', { class: 'dlg-body' },
       h('p', { class: 'sub' }, 'A fresh sandbox, ' + plan.name + ': a new empty folder of its own, the network locked to its model, your key never inside.'),
       ...(familyOf(a).length > 1 ? [sect('Version', ...versionNodes(a))] : []),
-      ...(plan.model && plan.model.offered && plan.model.offered.length ? sourceSections(a, plan, missing) : [sect('Key', ...keyNodes(a, plan, missing))]),
+      ...(plan.model && plan.model.offered && plan.model.offered.length ? sourceSections(a, plan, missing) : keyOnly(a) ? oneSourceSection(a, plan, missing) : [sect('Key', ...keyNodes(a, plan, missing))]),
       sect('Image', h('div', { class: 'try-prep', 'data-try-prep': '' }, ...prepNodes({ ...a, plan }))),
       sect('The plan', planFacts(a, plan)),
       ...blocked.map((p) => callout('bad', { compact: true, body: p.text + (p.fix ? ' — ' + p.fix : '') })),
