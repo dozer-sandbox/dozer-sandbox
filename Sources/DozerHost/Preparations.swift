@@ -509,6 +509,12 @@ extension HostCore {
             image = "lab"
         }
         if runningPreparation(image) != nil { return image }
+        // 618: a sandbox made at an exact release (NAME@VERSION) other than the one a preparation of the image makes — its
+        // own boot bakes its own spec (ensureImage), never a preparation of another release.
+        if let imageSpec = spec.imageSpec, let v = imageSpec.agent?.version,
+           let p = try? AgentVersions.spec(image, purpose: .prepare, store: store, settings: DozerSettings.load()), p.agent?.version != v {
+            return nil
+        }
         await freshen(image, update: false)
         let s = store
         let check = preparedCheck
@@ -524,6 +530,28 @@ extension HostCore {
     /// is only SAID (`image ls`, doctor, create, the Images page) — never prepared by itself; `update` is
     /// kept for its callers and does nothing more.
     @discardableResult
+    /// 618: an exact release asked for one sandbox (`NAME@VERSION` → `CreateOptions.agentVersion`) is checked like a pin
+    /// before anything is made: the registry has it and its integrity is recorded (`AgentVersions.known`); its major was
+    /// checked when the name was resolved (AgentRef). nil: fine (or nothing asked). `mustCheck` false (a plan): a host
+    /// that cannot ask the registry (in-process) says nothing — the create checks it.
+    func exactVersionProblem(_ o: CreateOptions, mustCheck: Bool) async -> String? {
+        guard let v = o.agentVersion else { return nil }
+        guard let r = ImageChoice.parse(DozerImages.canonicalName(o.image))?.agent.recipe else {
+            return "\(o.image) has no agent to install at \(v)"
+        }
+        let s = store
+        if AgentVersions.known(r.id, version: v, store: s) != nil { return nil }
+        if AgentRecipe.pinnedOnlyKinds.contains(r.install.kind) {
+            return "\(r.title) is installed at the release its recipe pins (\(r.install.pinned.version)) — not \(v)"
+        }
+        guard agentRegistry.lookup != nil || agentRegistry.manifest != nil else {
+            return mustCheck ? "\(r.title) \(v) cannot be checked here (no registry) — try again with the host running, online" : nil
+        }
+        let f = await AgentVersions.refresh(r.id, store: s, settings: DozerSettings.load(), registry: agentRegistry, version: v)
+        if AgentVersions.known(r.id, version: v, store: s) != nil { return nil }
+        return "\(r.title) has no release \(v) Dozer could check" + (f.error.map { " (\($0))" } ?? "")
+    }
+
     func freshen(_ image: String, update: Bool) async -> AgentVersions.Freshness? {
         // 596: any base × agent image — the base's tag (hourly: its digest, for the next preparation and
         // "update available"; never a rebuild by itself), then the agent's version as before.

@@ -32,8 +32,13 @@ extension AgentRecipe {
             public var env: [String: String]
             /// Where the tool reads the key for this shape — the placeholder is put there too.
             public var keyEnv: [String]?
-            enum CodingKeys: String, CodingKey { case shape, env, keyEnv = "key_env" }
-            public init(shape: String, env: [String: String], keyEnv: [String]? = nil) { self.shape = shape; self.env = env; self.keyEnv = keyEnv }
+            /// Where the tool documents taking this shape's base URL, key and model (an https page) — what makes a gateway
+            /// it offers count as `documented` without a gateways@1 entry of its own.
+            public var source: String?
+            enum CodingKeys: String, CodingKey { case shape, env, keyEnv = "key_env", source }
+            public init(shape: String, env: [String: String], keyEnv: [String]? = nil, source: String? = nil) {
+                self.shape = shape; self.env = env; self.keyEnv = keyEnv; self.source = source
+            }
         }
 
         public struct NativeEntry: Codable, Sendable, Equatable {
@@ -41,8 +46,12 @@ extension AgentRecipe {
             /// `{model}` only (a native client has no base URL).
             public var env: [String: String]
             public var keyEnv: [String]?
-            enum CodingKeys: String, CodingKey { case source, env, keyEnv = "key_env" }
-            public init(source: String, env: [String: String], keyEnv: [String]? = nil) { self.source = source; self.env = env; self.keyEnv = keyEnv }
+            /// Where the tool documents this source (an https page), as `ShapeEntry.source`.
+            public var docs: String?
+            enum CodingKeys: String, CodingKey { case source, env, keyEnv = "key_env", docs }
+            public init(source: String, env: [String: String], keyEnv: [String]? = nil, docs: String? = nil) {
+                self.source = source; self.env = env; self.keyEnv = keyEnv; self.docs = docs
+            }
         }
     }
 
@@ -54,11 +63,47 @@ extension AgentRecipe {
         var out: [String] = []
         for s in ModelSources.ids where !except.contains(s) {
             if (m.native ?? []).contains(where: { $0.source == s }) { out.append(s); continue }
+            // 618: a key-less source is a tool's own (OpenCode Zen's free models): offered by a native entry only.
+            if ModelSources.isKeyless(s) { continue }
             let eps = ModelSources.endpoints(s)
             if (m.shapes ?? []).contains(where: { e in eps.contains { $0.shapes.contains(e.shape) } }) { out.append(s) }
         }
         guard out.contains(m.default) else { return out }
         return [m.default] + out.filter { $0 != m.default }
+    }
+
+    /// 618 (owner: "openrouter can behave as an openai compatible model API"): how it works through each catalogue
+    /// gateway — THE list the plan's offer, `doz search`, the tags and the Quick try's "Through a gateway" read. A gateway
+    /// models@1 offers (a shape the gateway serves, or a native entry) needs no gateways@1 entry: it is derived, as
+    /// `documented` from the entry's own `source`. A gateways@1 entry overrides it — `verified` once `make recipe-check`
+    /// has run the tool through it (its evidence), or the levels of a tool without models@1. Catalogue order.
+    public var gatewaySupport: [GatewaySupport] {
+        Gateways.all.compactMap { g in
+            if let e = gateways.first(where: { $0.gateway == g.id }) { return e }
+            return derivedGateway(g.id)
+        }
+    }
+
+    /// True when a try can go through `gateway` (models@1 offers it).
+    public func offersGateway(_ gateway: String) -> Bool { models != nil && offeredSources.contains(gateway) }
+
+    /// A try through some gateway is possible — the Quick try's "Through a gateway".
+    public var throughGateway: Bool { Gateways.all.contains { offersGateway($0.id) } }
+
+    /// The entry models@1 implies for an offered gateway (nil: not offered, or no source to cite).
+    func derivedGateway(_ gateway: String) -> GatewaySupport? {
+        guard offersGateway(gateway), let m = models else { return nil }
+        if let n = m.native?.first(where: { $0.source == gateway }) {
+            guard let d = n.docs else { return nil }
+            return GatewaySupport(gateway: gateway, level: "documented", evidence: "offered through its own client (models@1)", source: d, checked: checked)
+        }
+        for e in m.shapes ?? [] {
+            guard let ep = ModelSources.endpoints(gateway).first(where: { $0.shapes.contains(e.shape) }) else { continue }
+            guard let d = e.source else { return nil }
+            return GatewaySupport(gateway: gateway, level: "documented", shape: e.shape, endpoint: ep.id,
+                                  evidence: "offered through its \(e.shape) base URL (models@1)", source: d, checked: checked)
+        }
+        return nil
     }
 
     /// 617: what a choice of `source` (and `model`, else the default) does — nil when the source is not offered, or the
@@ -70,7 +115,7 @@ extension AgentRecipe {
             return ModelSelection(source: source, shape: nil, baseURL: nil, model: chosen,
                                   env: ModelSelection.fill(n.env, baseURL: nil, model: chosen), keyEnv: n.keyEnv ?? [])
         }
-        for e in m.shapes ?? [] {
+        for e in m.shapes ?? [] where !ModelSources.isKeyless(source) {
             guard let ep = ModelSources.endpoints(source).first(where: { $0.shapes.contains(e.shape) }) else { continue }
             let chosen = model ?? m.models?[source] ?? ep.defaultModel ?? ""
             return ModelSelection(source: source, shape: e.shape, baseURL: ep.baseUrl, model: chosen,
@@ -82,18 +127,24 @@ extension AgentRecipe {
     /// models@1's own rules (from `validate()`).
     func validateModels(_ bad: (String) -> SandboxError) throws {
         guard let m = models else { return }
-        guard !isBuiltin else { throw bad("models@1 is a recipe agent's (the built-in agents keep their own accounts)") }
+        // 618: a built-in agent (pi) may declare its sources — native only, at session time (nothing baked: its image is
+        // Dozer's own); Claude Code and Codex keep their own accounts.
+        if isBuiltin, (id == "claude-code" || id == "codex" || !(m.shapes ?? []).isEmpty) {
+            throw bad("models@1 of a built-in agent: pi's only, native sources only (Claude Code and Codex keep their own accounts)")
+        }
         let ids = Set(ModelSources.ids)
         guard ids.contains(m.default) else { throw bad("models default \(m.default) is not a provider or gateway") }
         guard credentials.first?.provider == m.default else { throw bad("models default \(m.default) is its credential's provider") }
         var shapes = Set<String>()
         for e in m.shapes ?? [] {
             guard Gateway.shapes.contains(e.shape), shapes.insert(e.shape).inserted else { throw bad("models shape \(e.shape): a known shape, once") }
+            if let u = e.source, !u.hasPrefix("https://") { throw bad("models shape \(e.shape): source is an https URL") }
             try Self.validateSelectionEnv(e.env, keyEnv: e.keyEnv, baseURL: true, recipe: self, bad)
         }
         var natives = Set<String>()
         for n in m.native ?? [] {
             guard ids.contains(n.source), natives.insert(n.source).inserted else { throw bad("models native \(n.source): a provider or gateway, once") }
+            if let u = n.docs, !u.hasPrefix("https://") { throw bad("models native \(n.source): docs is an https URL") }
             try Self.validateSelectionEnv(n.env, keyEnv: n.keyEnv, baseURL: false, recipe: self, bad)
         }
         for x in m.except ?? [] where !ids.contains(x) { throw bad("models except \(x) is not a provider or gateway") }
@@ -102,9 +153,10 @@ extension AgentRecipe {
         for (s, v) in m.models ?? [:] {
             guard offered.contains(s), ModelSelection.isModelID(v) else { throw bad("models.\(s): an offered source and a model id") }
         }
-        // Its model permission reaches every source it is offered (the key still goes only to the source chosen).
+        // Its model permission reaches every source it is offered (the key still goes only to the source chosen) — a
+        // built-in agent's other sources through its hidden `sources:` permission (AgentPermissions.sourcesPermission).
         let reach = Set((network.model.hosts ?? []).map(\.host))
-        for s in offered {
+        for s in offered where !isBuiltin {
             for h in ModelSources.hosts(s) where !reach.contains(h) { throw bad("its model permission does not reach \(h) (\(s))") }
         }
     }
@@ -117,7 +169,8 @@ extension AgentRecipe {
             }
             if !baseURL, v.contains("{base_url}") { throw bad("models native env \(k): no {base_url} (a native client has none)") }
             let stripped = v.replacingOccurrences(of: "{base_url}", with: "").replacingOccurrences(of: "{model}", with: "")
-            if stripped.contains("{") { throw bad("models env \(k): only {base_url} and {model}") }
+            // 618: a JSON value may hold braces (Mistral Vibe's VIBE_PROVIDERS); a template other than these two may not.
+            if stripped.range(of: "\\{[A-Za-z_][A-Za-z0-9_.]*\\}", options: .regularExpression) != nil { throw bad("models env \(k): only {base_url} and {model}") }
         }
         var seen = Set<String>()
         for a in keyEnv ?? [] {
@@ -156,30 +209,70 @@ public struct ModelSelection: Sendable, Equatable {
 }
 
 /// 617: the model sources — every key provider of providers.json, in its order; a gateway's endpoints are gateways.json's.
+/// 618: then the key-less sources (providers.json `keyless`: OpenCode Zen's free models) — no key, no account.
 public enum ModelSources {
-    public static var ids: [String] { KeyProviders.all.map(\.id) }
+    public static var ids: [String] { KeyProviders.all.map(\.id) + KeyProviders.keyless.map(\.id) }
+
+    /// The sources that take a key (an account of one is a key of it).
+    public static var keyed: [String] { KeyProviders.all.map(\.id) }
 
     public static func isGateway(_ id: String) -> Bool { KeyProviders.provider(id)?.gateway == true }
 
+    /// 618: a source that takes no key (nothing to add; a try with it has no account).
+    public static func isKeyless(_ id: String) -> Bool { keyless(id) != nil }
+
+    public static func keyless(_ id: String) -> KeylessSource? { KeyProviders.keyless.first { $0.id == id } }
+
     /// The endpoints offered to recipes (those with a default model; a gateway's coding-agent variants are not).
     public static func endpoints(_ id: String) -> [Gateway.Endpoint] {
+        if let k = keyless(id) { return k.endpoints }
         guard let p = KeyProviders.provider(id) else { return [] }
         let all = p.gateway == true ? (Gateways.gateway(id)?.endpoints ?? []) : (p.endpoints ?? [])
         return all.filter { $0.defaultModel != nil }
     }
 
-    /// The hosts its key may go to (the proxy's binding).
-    public static func hosts(_ id: String) -> [String] { KeyProviders.provider(id)?.hosts ?? [] }
+    /// The hosts its key may go to (the proxy's binding); a key-less source's, the hosts it answers on (no key goes there).
+    public static func hosts(_ id: String) -> [String] { keyless(id)?.hosts ?? KeyProviders.provider(id)?.hosts ?? [] }
 
-    public static func title(_ id: String) -> String { KeyProviders.provider(id)?.title ?? id }
+    /// The hosts a source's KEY may go to — none for a key-less source (the leak guard watches these).
+    public static func keyHosts(_ id: String) -> [String] { KeyProviders.provider(id)?.hosts ?? [] }
+
+    public static func title(_ id: String) -> String { keyless(id)?.title ?? KeyProviders.provider(id)?.title ?? id }
 
     /// The account kind a source's key comes in: Anthropic an API key (`api-key`), OpenAI an OpenAI key (`openai-key`),
     /// every other a `key` of that provider. Never a subscription (a Claude login, a ChatGPT sign-in, this Mac's Codex).
+    /// 618: a key-less source, `none` — no account at all.
     public static func accountKind(_ id: String) -> String {
+        if isKeyless(id) { return "none" }
         switch id {
-        case "anthropic": "api-key"
-        case "openai": "openai-key"
-        default: "key"
+        case "anthropic": return "api-key"
+        case "openai": return "openai-key"
+        default: return "key"
         }
+    }
+}
+
+/// 618 (owner: "OpenCode Zen free models, no key"): a model source that takes no key — the tool reaches it with no
+/// account (OpenCode 2 without a key uses OpenCode Zen's free models). Dozer adds nothing to its requests; its hosts are
+/// reachable only through the recipe's model permission, path by path. The list of models is curated (the public model
+/// list has no prices, so it cannot tell a free model from a paid one): the free models the docs list that the tool's
+/// pinned release can use without a key (OpenCode 2.0.29 enables only its catalogue's zero-cost models when it has
+/// none), each with its data terms as the docs state them.
+public struct KeylessSource: Codable, Sendable, Equatable {
+    public var id: String
+    public var title: String
+    public var hosts: [String]
+    public var endpoints: [Gateway.Endpoint]
+    public var models: [Model]
+    /// Where the source documents its models and their terms (an https page).
+    public var docs: String
+    /// When the list and the terms were last checked against the docs (YYYY-MM-DD).
+    public var checked: String
+
+    public struct Model: Codable, Sendable, Equatable {
+        public var id: String
+        public var name: String
+        /// Its data terms as the docs state them — short, the docs' own words where they have them.
+        public var note: String?
     }
 }

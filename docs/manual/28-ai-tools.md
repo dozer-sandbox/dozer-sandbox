@@ -19,7 +19,7 @@ doz search gemini                               # what Dozer runs with a Google 
 Most tools here can talk to more than one: **Anthropic**, **OpenAI**, **xAI**, **Google AI** (the Gemini API), and the
 gateways **OpenRouter** and **Vercel AI Gateway** (one key, many models — their model names are `creator/name`). Which
 ones depends on the tool: each section below lists them, its default first. Choose one with `--provider` (or
-`--gateway`) on `doz try`, `doz new`, `doz create` and `doz up`, or in the Quick try's setup (the Model section);
+`--gateway`) on `doz try`, `doz new`, `doz create` and `doz up`, or in the Quick try's setup (“Where TOOL gets its model”, then the model picker) and New Sandbox, or in doz_project.yaml (`model_source:`, `model:`);
 `--model` picks the model (the default is the provider's or gateway's: `grok-4-1-fast`, `gpt-5.4-mini`,
 `gemini-2.5-flash`, `claude-sonnet-4-6`, `openai/gpt-5.4-mini` …).
 
@@ -33,6 +33,24 @@ ones depends on the tool: each section below lists them, its default first. Choo
   switch), but a placeholder sent to any other host is refused.
 - The default models were chosen from the providers' published names; a model a provider has renamed or retired is
   refused by the provider itself — choose another with `--model`.
+
+### Which models: `doz models`
+
+```sh
+doz models --gateway openrouter               # OpenRouter's models: id, context, price in and out per million tokens, tools
+doz models --gateway vercel-ai-gateway sonnet # Vercel AI Gateway's, narrowed to those matching "sonnet"
+doz models --gateway openrouter --refresh     # read the list again now
+doz models --provider xai                     # a provider: the model Dozer checked
+```
+
+- **A gateway publishes its list**, and Dozer reads it on this Mac — never from a sandbox — at most once a day, keeping
+  the last one (offline, the last list stays; `--refresh` reads it now and starts Dozer's background process when it
+  is not running). `--json` gives it as data.
+- **A provider lists its models only with a key**, so `doz models` shows the model Dozer checked for it; any other id
+  that provider names may still be given with `--model`.
+- **A `--model` a gateway does not list is used as given**, with a note on the closest ids it does list:
+  `note: openai/gpt-5.4-mni is not in OpenRouter's model list — did you mean openai/gpt-5.4-mini, …? (used as given)`.
+  Lists change every week, so it is never refused for that.
 
 A tool that answers and exits opens a **shell** as its session, with the tool on the PATH. Type its commands there.
 
@@ -133,11 +151,13 @@ A small terminal chat client.
 
 - **Installed** from the project's static linux-arm64 release on GitHub, checked against the SHA-512 Dozer recorded.
   Every base, Alpine included.
-- **Key:** a Gemini API key; tgpt is set to its Gemini provider (`AI_PROVIDER=gemini`, `GEMINI_MODEL`). It calls the
-  Gemini API's OpenAI-compatible endpoint, and Dozer's proxy sends the key as Google's `x-goog-api-key` header —
-  checked against a stand-in provider, not yet against Google itself.
+- **Providers:** **Google AI** (the default — its Gemini provider, `AI_PROVIDER=gemini`), **OpenAI**, **xAI**,
+  **OpenRouter** and **Vercel AI Gateway** (its OpenAI provider at the chosen source's chat endpoint, `OPENAI_URL`,
+  `OPENAI_MODEL`).
+- **Key:** an API key of that provider or gateway (a placeholder in the sandbox). On Google AI, Dozer's proxy sends the
+  key as Google's `x-goog-api-key` header — checked against a stand-in provider, not yet against Google itself.
 - **Use:** the session is its interactive mode (`tgpt -i`); one question is `tgpt -q "a question"`.
-- **May reach:** the Gemini API. Its key-less "free" providers are other companies' services, which Dozer does not allow
+- **May reach:** the API of the provider or gateway it was given. Its key-less "free" providers are other companies' services, which Dozer does not allow
   by default.
 
 ## smolagents
@@ -185,11 +205,14 @@ in a sandbox the key stays on the Mac.
 Pydantic AI's command line for chatting with models.
 
 - **Installed** from PyPI with every dependency pinned by its hash, on Dozer's own Python (Debian-based bases).
-- **Key:** an xAI API key, through Pydantic AI's OpenAI provider: `OPENAI_BASE_URL` is xAI's API and the key's placeholder
-  is also `OPENAI_API_KEY`. The session starts `clai -m openai:grok-4-1-fast`.
-- **Use:** one question is `clai -m openai:grok-4-1-fast "a question"`.
-- **May reach:** xAI's API. Other providers are not offered: its model is fixed in the session's command (`-m`), which
-  Dozer cannot set per sandbox yet.
+- **Providers:** **xAI** (the default), **Anthropic**, **OpenAI**, **Google AI**, **OpenRouter** and **Vercel AI
+  Gateway** — Pydantic AI's OpenAI-compatible model at the chosen source's base URL (`OPENAI_BASE_URL`), or its
+  Anthropic model (`ANTHROPIC_BASE_URL`). Dozer puts the model on its command line (`-m openai-chat:MODEL`; on xAI,
+  `grok-4-1-fast`), unless you give your own `-m`.
+- **Key:** an API key of that provider or gateway (a placeholder in the sandbox, also under `OPENAI_API_KEY` or
+  `ANTHROPIC_API_KEY`).
+- **Use:** one question is `clai --no-stream "a question"`.
+- **May reach:** the API of the provider or gateway it was given.
 - **Later:** `clai web` (its chat page) needs a forwarded port.
 
 ## Fabric

@@ -306,6 +306,6 @@ final class RecipeAgentsTests: XCTestCase {
         XCTAssertEqual((x["error"] as? [String: Any])?["code"] as? String, "doz_credential_unavailable", "xAI's is OpenAI's shape")
         let a = try body(EgressProxy.refusal(host: "api.anthropic.com", 401, "no key"))
         XCTAssertEqual(a["type"] as? String, "error", "Anthropic's, as before")
-        XCTAssertEqual(KeyProviders.seamHosts, ["api.x.ai", "openrouter.ai", "ai-gateway.vercel.sh", "generativelanguage.googleapis.com", "stitch.googleapis.com"])
+        XCTAssertEqual(KeyProviders.seamHosts, ["api.x.ai", "openrouter.ai", "ai-gateway.vercel.sh", "generativelanguage.googleapis.com", "stitch.googleapis.com", "opencode.ai"])
     }
 }

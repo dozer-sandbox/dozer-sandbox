@@ -124,6 +124,21 @@ public struct AgentRecipe: Codable, Sendable, Equatable {
     /// 617 (RP-1, owner: "web port forwarding first"): the web ports its program serves in the sandbox, each forwarded
     /// to the Mac's loopback while the sandbox runs (`com.dozersandbox/ports@1`). nil: none.
     public var ports: WebPorts? = nil
+    /// 618 (owner: "make sure there is a way the user can chose an earlier major version"): the major release line this
+    /// recipe is of a family whose majors are separate recipes (`com.dozersandbox/family@1`; AgentRef.swift). nil: none.
+    public var family: Family? = nil
+
+    public struct Family: Codable, Sendable, Equatable {
+        /// What a person types (`opencode`): the recommended major's recipe.
+        public var family: String
+        public var major: Int
+        /// "OpenCode 2".
+        public var title: String
+        /// The major the family's name means — exactly one per family, moved by Dozer only once the new major passes
+        /// `make recipe-check`. Labelled "recommended", never "latest".
+        public var recommended: Bool? = nil
+        public var isRecommended: Bool { recommended == true }
+    }
 
     /// The web ports a recipe declares, and how its web part is started when the session's program is not it.
     public struct WebPorts: Codable, Sendable, Equatable {
@@ -261,10 +276,33 @@ public struct AgentRecipe: Codable, Sendable, Equatable {
         /// 617: `shell` — the default session is a login shell with the program on its PATH, for a command-line tool that
         /// answers and exits (Fabric, llm) rather than an interactive program; nil: the session runs `command`.
         public var session: String? = nil
+        /// 618: a background service the program starts and keeps (OpenCode 2's `opencode serve --service`) — it holds
+        /// the environment of the command that started it, so the launcher restarts it first when it runs with another
+        /// value of `env` than this run has (a model or source chosen since). Emitted only into such a recipe's launcher.
+        public var service: Service? = nil
+        /// 618: the arguments that choose its model when the tool takes it ONLY on its command line (`[-m, $DOZ_MODEL]`):
+        /// the launcher puts them first when `DOZ_MODEL` is set (models@1 sets it per source — `xai/${{ dozer.model }}`)
+        /// and the run gives no flag of its own. Emitted only into such a recipe's launcher.
+        public var modelArgs: [String]? = nil
+        /// 618: subcommands whose own flags they are (`exec`, `run`): there the arguments go AFTER the subcommand.
+        public var modelArgsAfter: [String]? = nil
+
+        public struct Service: Codable, Sendable, Equatable {
+            /// The service process's arguments after the program (`[serve, --service]`).
+            public var args: [String]
+            /// What restarts it, after the program (`[service, restart]`) — run with this run's environment.
+            public var restart: [String]
+            /// 618: what starts it when the restart fails — OpenCode 2 waits for the old server to go, and in the VM it stays a
+            /// zombie (the init never reaps it) after it stopped: start it then (`[service, start]`).
+            public var start: [String]? = nil
+            /// The variables compared (`[DOZ_MODEL]`); one this run does not set is not compared.
+            public var env: [String]
+        }
 
         enum CodingKeys: String, CodingKey {
-            case command, passthrough, env, session
-            case noPromptsArgs = "no_prompts_args", firstRun = "first_run", sessionEnv = "session_env", noPromptsEnv = "no_prompts_env"
+            case command, passthrough, env, session, service
+            case noPromptsArgs = "no_prompts_args", firstRun = "first_run", sessionEnv = "session_env", noPromptsEnv = "no_prompts_env",
+                 modelArgs = "model_args", modelArgsAfter = "model_args_after"
         }
     }
 
@@ -277,6 +315,12 @@ public struct AgentRecipe: Codable, Sendable, Equatable {
         /// 617: `json` — a JSON file whose name has no extension (Kimi Code's `workspace-trust/wd_workspace_…` record);
         /// nil: the kind of file follows from its name.
         public var format: String? = nil
+        /// 618: written at EVERY run, its keys set (not only when absent), each `$DOZ_…` in a value replaced by the
+        /// run's own (models@1 sets them per source) — for a tool that takes its model only from its settings file
+        /// (Crush's `models.large`). A JSON file; skipped when the run has no model source chosen.
+        public var eachRun: Bool? = nil
+
+        enum CodingKeys: String, CodingKey { case file, set, format, eachRun = "each_run" }
     }
 
     public struct State: Codable, Sendable, Equatable {
@@ -704,16 +748,21 @@ public struct KeyProvider: Codable, Sendable, Equatable {
 }
 
 public enum KeyProviders {
-    struct File: Codable { var schema: Int; var providers: [KeyProvider] }
+    struct File: Codable { var schema: Int; var providers: [KeyProvider]; var keyless: [KeylessSource]? }
 
-    public static let all: [KeyProvider] = {
+    static let file: File = {
         do {
-            let f = try JSONDecoder().decode(File.self, from: Data(PackageResources.providers_json))
-            return f.providers
+            return try JSONDecoder().decode(File.self, from: Data(PackageResources.providers_json))
         } catch {
             fatalError("617: the built-in providers.json does not decode: \(error)")
         }
     }()
+
+    public static var all: [KeyProvider] { file.providers }
+
+    /// 618: the model sources that take no key (OpenCode Zen's free models) — never a key provider: no binding, no
+    /// placeholder, no account; their hosts are no key's.
+    public static var keyless: [KeylessSource] { file.keyless ?? [] }
 
     public static func provider(_ id: String) -> KeyProvider? { all.first { $0.id == id } }
 
@@ -724,7 +773,8 @@ public enum KeyProviders {
     }
 
     /// The hosts of the providers that are new in 617 (their upstream leg goes to the test seam's fake).
-    public static var seamHosts: Set<String> { Set(all.filter { $0.builtinBinding == nil }.flatMap(\.hosts)) }
+    /// 618: and the key-less sources' (OpenCode Zen's free models go to the fake too — never a real model in a test).
+    public static var seamHosts: Set<String> { Set(all.filter { $0.builtinBinding == nil }.flatMap(\.hosts) + keyless.flatMap(\.hosts)) }
 
     /// Every binding a key provider defines (the new ones; Anthropic's and OpenAI's are the existing bindings).
     public static var keyBindings: [CredentialBinding] { all.filter { $0.builtinBinding == nil }.map(\.binding) }
@@ -765,6 +815,42 @@ public enum KeyProviders {
                       let h = u.host, p.hosts.contains(h), e.defaultModel.map(ModelSelection.isModelID) ?? true else {
                     throw SandboxError.invalidSpec("provider \(p.id): endpoint \(e.id): known shapes, an https base URL on its hosts, a model id")
                 }
+            }
+        }
+    }
+
+    /// 618: the key-less sources — ids no provider's, hosts no provider's (a key never goes there), an endpoint on its
+    /// hosts with a default model, and its listed models (the default among them), each a model id with a short note.
+    public static func validate(keyless: [KeylessSource], providers: [KeyProvider]) throws {
+        var ids = Set(providers.map(\.id)), hosts = Set(providers.flatMap(\.hosts))
+        for k in keyless {
+            guard k.id.range(of: "^[a-z][a-z0-9-]{0,23}$", options: .regularExpression) != nil, ids.insert(k.id).inserted, k.id != "custom" else {
+                throw SandboxError.invalidSpec("keyless source id \(k.id): [a-z][a-z0-9-]*, unique among the providers and sources, not custom")
+            }
+            guard !k.hosts.isEmpty else { throw SandboxError.invalidSpec("keyless source \(k.id) has no hosts") }
+            for h in k.hosts {
+                guard AgentRecipes.isExactHost(h), hosts.insert(h).inserted else {
+                    throw SandboxError.invalidSpec("keyless source \(k.id): \(h) is not an exact host name, or is a provider's host")
+                }
+            }
+            guard !k.endpoints.isEmpty else { throw SandboxError.invalidSpec("keyless source \(k.id) has no endpoint") }
+            for e in k.endpoints {
+                guard !e.shapes.isEmpty, e.shapes.allSatisfy(Gateway.shapes.contains), let u = URL(string: e.baseUrl), u.scheme == "https",
+                      let h = u.host, k.hosts.contains(h), let d = e.defaultModel, ModelSelection.isModelID(d) else {
+                    throw SandboxError.invalidSpec("keyless source \(k.id): endpoint \(e.id): known shapes, an https base URL on its hosts, a default model id")
+                }
+            }
+            var seen = Set<String>()
+            for m in k.models {
+                guard ModelSelection.isModelID(m.id), seen.insert(m.id).inserted, !m.name.isEmpty, m.note.map({ !$0.isEmpty && $0.count <= 160 }) ?? true else {
+                    throw SandboxError.invalidSpec("keyless source \(k.id): model \(m.id): a model id, once, a name, a short note")
+                }
+            }
+            guard let d = k.endpoints.first?.defaultModel, seen.contains(d) else {
+                throw SandboxError.invalidSpec("keyless source \(k.id): its default model is one of its models")
+            }
+            guard k.docs.hasPrefix("https://"), k.checked.range(of: "^[0-9]{4}-[0-9]{2}-[0-9]{2}$", options: .regularExpression) != nil else {
+                throw SandboxError.invalidSpec("keyless source \(k.id): docs is an https URL, checked a date")
             }
         }
     }
@@ -825,11 +911,12 @@ extension AgentRecipe {
                 RecipeTag(tag: id, level: unknown ? "unknown" : yes ? level : "no", evidence: "the recipe's \(what)", checked: checked)
             }
             if id.hasPrefix("gateway:") {
-                guard let s = gateways.first(where: { "gateway:" + $0.gateway == id }) else { return nil }
+                guard let s = gatewaySupport.first(where: { "gateway:" + $0.gateway == id }) else { return nil }
                 return RecipeTag(tag: id, level: s.level, evidence: s.evidence ?? s.reason, source: s.source, notes: s.limits, checked: s.checked)
             }
             switch id {
             case "multi-vendor-models":
+                let gateways = gatewaySupport
                 let best = gateways.min { rank[$0.level, default: 9] < rank[$1.level, default: 9] }
                 let level = gateways.contains(where: \.isApplicable) ? best!.level : gateways.allSatisfy { $0.level == "no" } ? "no" : "unknown"
                 let via = gateways.filter { $0.level == level }.map(\.gateway)
@@ -957,7 +1044,8 @@ public enum AgentRecipes {
                                           ("maki.json", PackageResources.maki_json),
                                           ("omp.json", PackageResources.omp_json),
                                           ("tau.json", PackageResources.tau_json),
-                                          ("stitch.json", PackageResources.stitch_json)]
+                                          ("stitch.json", PackageResources.stitch_json),
+                                          ("opencode2.json", PackageResources.opencode2_json)]
         do {
             // 617: each is a schema-2 document (Recipes/compiled/PRODUCT.json — its YAML as JSON), mapped to the model.
             return try files.map { name, bytes in
@@ -969,7 +1057,7 @@ public enum AgentRecipes {
     }()
 
     /// The names of the compiled-in files (a test ties them to `Recipes/` and Package.swift).
-    public static let compiledFiles = ["claude-code.json", "pi.json", "codex.json", "antigravity.json", "gemini.json", "grok.json", "fabric.json", "openclaw.json", "nanobot.json", "gptme.json", "llm.json", "shell-gpt.json", "zeroclaw.json", "aichat.json", "tgpt.json", "opencode.json", "smolagents.json", "adk.json", "promptfoo.json", "clai.json", "copilot.json", "qwen-code.json", "goose.json", "kilo.json", "mistral-vibe.json", "droid.json", "dirac.json", "kimi-code.json", "cline.json", "openhands.json", "letta-code.json", "docker-agent.json", "nanocoder.json", "mini-swe-agent.json", "open-interpreter.json", "crush.json", "mimo-code.json", "codewhale.json", "maki.json", "omp.json", "tau.json", "stitch.json"]
+    public static let compiledFiles = ["claude-code.json", "pi.json", "codex.json", "antigravity.json", "gemini.json", "grok.json", "fabric.json", "openclaw.json", "nanobot.json", "gptme.json", "llm.json", "shell-gpt.json", "zeroclaw.json", "aichat.json", "tgpt.json", "opencode.json", "smolagents.json", "adk.json", "promptfoo.json", "clai.json", "copilot.json", "qwen-code.json", "goose.json", "kilo.json", "mistral-vibe.json", "droid.json", "dirac.json", "kimi-code.json", "cline.json", "openhands.json", "letta-code.json", "docker-agent.json", "nanocoder.json", "mini-swe-agent.json", "open-interpreter.json", "crush.json", "mimo-code.json", "codewhale.json", "maki.json", "omp.json", "tau.json", "stitch.json", "opencode2.json"]
 
     nonisolated(unsafe) private static var registered: [AgentRecipe] = []
     private static let lock = NSLock()
@@ -1060,6 +1148,29 @@ public enum AgentRecipes {
             }
             if let i = r.icon, AgentIcons.entry(i)?.kind != "product" {
                 throw SandboxError.invalidSpec("\(r.id): icon \(i) is not a product in Recipes/icons/icons.json")
+            }
+        }
+        try validateFamilies(recipes)
+    }
+
+    /// 618: a family's majors are separate recipes — one recommended, majors once each, the family's name the id of one
+    /// of them (the one that predates the family: its sandboxes, image, settings and statistics keep that id) and no other
+    /// recipe's id or alias, each member's pin of its own major, the same kind of tool.
+    static func validateFamilies(_ recipes: [AgentRecipe]) throws {
+        let byFamily = Dictionary(grouping: recipes.filter { $0.family != nil }, by: { $0.family!.family })
+        for (name, members) in byFamily {
+            func bad(_ s: String) -> SandboxError { SandboxError.invalidSpec("family \(name): \(s)") }
+            guard members.filter({ $0.family!.isRecommended }).count == 1 else { throw bad("exactly one recommended major") }
+            guard Set(members.map { $0.family!.major }).count == members.count else { throw bad("each major once") }
+            guard members.contains(where: { $0.id == name }) else { throw bad("its name is the id of one of its majors") }
+            for r in recipes where r.family?.family != name && (r.id == name || (r.aliases ?? []).contains(name)) {
+                throw bad("\(r.id) is outside the family but answers to its name")
+            }
+            for r in members {
+                guard AgentRef.major(of: r.install.pinned.version) == r.family!.major else {
+                    throw bad("\(r.id) pins \(r.install.pinned.version), not a release of major \(r.family!.major)")
+                }
+                guard r.catalogKind == members[0].catalogKind else { throw bad("its majors are one kind of tool") }
             }
         }
     }
@@ -1196,11 +1307,60 @@ extension AgentRecipe {
         for a in launch.command + launch.noPromptsArgs + launch.passthrough + (resume ?? []) where !scriptSafe(a) || a.isEmpty {
             throw bad("an argument holds a quote, a backslash or a newline: \(a)")
         }
+        if let m = launch.modelArgs {
+            // 618: plain words written into the launcher; `$DOZ_…` variables in them are the selection's (every models@1
+            // entry sets each one named), exactly one word names the model ($DOZ_MODEL), none names a credential.
+            let vars = { (w: String) -> [String] in
+                let ns = w as NSString
+                return (try! NSRegularExpression(pattern: "\\$(DOZ_[A-Z0-9_]+)")).matches(in: w, range: NSRange(location: 0, length: ns.length))
+                    .map { ns.substring(with: $0.range(at: 1)) }
+            }
+            let word = { (w: String) in
+                w.replacingOccurrences(of: "\\$DOZ_[A-Z0-9_]+", with: "x", options: .regularExpression)
+                    .range(of: "^[A-Za-z0-9-][A-Za-z0-9._=:/@-]*$", options: .regularExpression) != nil
+            }
+            let named = Set(m.flatMap(vars))
+            // (A built-in agent's are put on its default session by the host at session open — never baked.)
+            guard let models, let flag = m.first, flag.hasPrefix("-"), !flag.contains("$"), m.allSatisfy(word),
+                  m.filter({ vars($0).contains("DOZ_MODEL") }).count == 1, !named.contains(where: BakeEnvironment.isCredential) else {
+                throw bad("launch.model_args: a recipe agent with models@1; a flag first, plain words, one naming $DOZ_MODEL, no credential")
+            }
+            for a in launch.modelArgsAfter ?? [] where a.range(of: "^[a-z][a-z0-9-]*$", options: .regularExpression) == nil {
+                throw bad("launch.model_args_after: subcommand words")
+            }
+            let envs = (models.shapes ?? []).map(\.env) + (models.native ?? []).map(\.env)
+            guard envs.allSatisfy({ e in named.allSatisfy { e[$0] != nil } }) else {
+                throw bad("launch.model_args: every models@1 entry sets each variable it names (\(named.sorted().joined(separator: ", ")))")
+            }
+        }
+        if let s = launch.service {
+            // 618: plain words only — they are written into the launcher (a shell script).
+            let word = { (w: String) in w.range(of: "^[A-Za-z0-9-][A-Za-z0-9._=-]*$", options: .regularExpression) != nil }
+            guard !isBuiltin, !s.args.isEmpty, !s.restart.isEmpty, s.start?.isEmpty != true, (s.args + s.restart + (s.start ?? [])).allSatisfy(word) else {
+                throw bad("launch.service: a recipe agent's, its args and restart plain words (letters, digits, . _ = -)")
+            }
+            guard !s.env.isEmpty, Set(s.env).count == s.env.count, s.env.allSatisfy({
+                $0.range(of: "^[A-Z_][A-Z0-9_]*$", options: .regularExpression) != nil && !BakeEnvironment.isCredential($0)
+            }) else { throw bad("launch.service env: variable names, once each, none a credential (placeholders differ per run)") }
+        }
         var everyEnv = launch.env.merging(state.env, uniquingKeysWith: { a, _ in a }).merging(launch.noPromptsEnv ?? [:], uniquingKeysWith: { a, _ in a })
         for (k, v) in (launch.sessionEnv ?? [:]).merging((network.offWithout ?? []).flatMap(\.env), uniquingKeysWith: { a, _ in a }) { everyEnv[k] = everyEnv[k] ?? v }
         for (k, v) in everyEnv {
             guard k.range(of: "^[A-Z_][A-Z0-9_]*$", options: .regularExpression) != nil, !BakeEnvironment.isCredential(k), scriptSafe(v) else {
                 throw bad("env \(k): a variable name that names no credential, and a value with no quote")
+            }
+        }
+        for f in launch.firstRun ?? [] where f.eachRun == true {
+            // 618: a JSON file, its `$DOZ_…` values the selection's (every models@1 entry sets each), never a credential's.
+            let named = Set(f.set.values.flatMap(\.strings).flatMap { s -> [String] in
+                let ns = s as NSString
+                return (try! NSRegularExpression(pattern: "\\$(DOZ_[A-Z0-9_]+)")).matches(in: s, range: NSRange(location: 0, length: ns.length))
+                    .map { ns.substring(with: $0.range(at: 1)) }
+            })
+            let envs = (models?.shapes ?? []).map(\.env) + (models?.native ?? []).map(\.env)
+            guard !isBuiltin, models != nil, f.file.hasSuffix(".json") || f.format == "json", named.contains("DOZ_MODEL"),
+                  !named.contains(where: BakeEnvironment.isCredential), envs.allSatisfy({ e in named.allSatisfy { e[$0] != nil } }) else {
+                throw bad("first_run each_run \(f.file): a JSON file of a recipe agent with models@1, naming $DOZ_MODEL, each $DOZ_… set by every models@1 entry, none a credential")
             }
         }
         for f in launch.firstRun ?? [] {
@@ -1345,13 +1505,26 @@ extension AgentRecipe {
         // 617 (owner): what it is — a kind and its categories, declared.
         try Categories.validate(kind: catalogKind, categories: categories, what: "recipe \(id)")
         // gateways (owner, 617): one entry per catalogue gateway, each with its evidence and machine-applicable how.
+        // 618: a gateway models@1 offers is derived (gatewaySupport) — an entry for it only overrides; every other
+        // catalogue gateway is said explicitly. What a try can do and what the entry says never disagree.
         let catalogue = Gateways.all.map(\.id)
-        guard gateways.map(\.gateway).sorted() == catalogue.sorted() else {
-            throw bad("gateways: one entry for each of \(catalogue.joined(separator: ", ")) (unknown is allowed, said explicitly)")
+        let entries = gateways.map(\.gateway)
+        guard Set(entries).count == entries.count, Set(entries).isSubset(of: catalogue) else {
+            throw bad("gateways: at most one entry for each of \(catalogue.joined(separator: ", "))")
+        }
+        for g in catalogue where !entries.contains(g) && derivedGateway(g) == nil {
+            throw bad(offersGateway(g)
+                ? "gateways[\(g)]: models@1 offers it — cite where the tool documents it (the shape's source, the native entry's docs) or give an entry"
+                : "gateways: one entry for each of \(catalogue.joined(separator: ", ")) that models@1 does not offer (unknown is allowed, said explicitly)")
         }
         for s in gateways {
             let at = "gateways[\(s.gateway)]"
             guard GatewaySupport.levels.contains(s.level) else { throw bad("\(at).level: \(GatewaySupport.levels.joined(separator: ", "))") }
+            if models != nil {
+                let offered = offersGateway(s.gateway)
+                if offered, !s.isApplicable { throw bad("\(at): models@1 offers it, so it is not \(s.level)") }
+                if !offered, s.isApplicable { throw bad("\(at): \(s.level), but models@1 does not offer it — add it to models@1, or say no and why") }
+            }
             if let d = s.checked, !Self.isISODate(d) { throw bad("\(at).checked is not an ISO date") }
             if let u = s.source, !u.hasPrefix("https://") { throw bad("\(at).source is an https URL") }
             if let sh = s.shape, !Gateway.shapes.contains(sh) { throw bad("\(at).shape \(sh)") }
@@ -1361,7 +1534,9 @@ extension AgentRecipe {
             }
             switch s.level {
             case "documented", "verified", "experimental":
-                guard let how = s.how, !(how.env ?? [:]).isEmpty || !(how.config ?? []).isEmpty else { throw bad("\(at): how (env or config) is required") }
+                // models@1 says how a try reaches an offered gateway; `how` is then optional.
+                let how = s.how ?? GatewayHow()
+                if !offersGateway(s.gateway), (how.env ?? [:]).isEmpty, (how.config ?? []).isEmpty { throw bad("\(at): how (env or config) is required") }
                 guard s.checked != nil else { throw bad("\(at): checked is required") }
                 if s.level == "documented", s.source == nil { throw bad("\(at): a documented entry cites its source") }
                 if s.level != "documented", s.evidence?.isEmpty != false { throw bad("\(at): a \(s.level) entry says its evidence") }

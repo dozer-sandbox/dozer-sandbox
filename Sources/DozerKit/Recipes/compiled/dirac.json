@@ -18,16 +18,37 @@
           "model" : {
             "hosts" : [
               {
+                "host" : "api.anthropic.com",
+                "reason" : "Anthropic — when the sandbox's key is Anthropic's"
+              },
+              {
+                "host" : "api.openai.com",
+                "reason" : "OpenAI — when the sandbox's key is OpenAI's"
+              },
+              {
                 "host" : "api.x.ai",
                 "paths" : [
                   "/v1/chat/completions"
-                ]
+                ],
+                "reason" : "xAI — when the sandbox's key is xAI's"
+              },
+              {
+                "host" : "generativelanguage.googleapis.com",
+                "reason" : "Google AI — when the sandbox's key is Google AI's"
+              },
+              {
+                "host" : "openrouter.ai",
+                "reason" : "OpenRouter — when the sandbox's key is OpenRouter's"
+              },
+              {
+                "host" : "ai-gateway.vercel.sh",
+                "reason" : "Vercel AI Gateway — when the sandbox's key is Vercel AI Gateway's"
               }
             ],
             "id" : "model:dirac",
-            "phrase" : "talk to your AI model (xAI)",
-            "summary" : "Dirac's model here (the xAI API, with your key) — needed for it to answer.",
-            "title" : "Talk to xAI"
+            "phrase" : "talk to your AI model",
+            "summary" : "Dirac's model — the provider or gateway its key is for (Anthropic, OpenAI, xAI, Google AI, OpenRouter or Vercel AI Gateway), with an API key. Needed for Dirac to answer.",
+            "title" : "Talk to its model provider"
           },
           "update" : [
 
@@ -35,7 +56,12 @@
         },
         "runtime" : {
           "allow" : [
-            "api.x.ai:443"
+            "api.anthropic.com:443",
+            "api.openai.com:443",
+            "api.x.ai:443",
+            "generativelanguage.googleapis.com:443",
+            "openrouter.ai:443",
+            "ai-gateway.vercel.sh:443"
           ]
         }
       },
@@ -98,8 +124,7 @@
           "dirac"
         ],
         "env" : {
-          "DIRAC_NO_AUTO_UPDATE" : "1",
-          "DIRAC_PROVIDER" : "xai"
+          "DIRAC_NO_AUTO_UPDATE" : "1"
         },
         "first_run" : [
           {
@@ -144,11 +169,61 @@
             "accounts" : [
               "key"
             ],
-            "checked" : "2026-10-14",
+            "checked" : "2026-10-16",
             "keys_page" : "https://console.x.ai/",
             "kind" : "api-key",
-            "note" : "Dirac reads XAI_API_KEY with xAI as its provider (actModeApiProvider/planModeApiProvider in its global state for the TUI, DIRAC_PROVIDER for a one-shot run) and picks its own xAI model; its other providers are not offered here yet.",
+            "note" : "Dirac's provider from the environment (DIRAC_PROVIDER, DIRAC_MODEL, DIRAC_BASE_URL; the key's placeholder under DIRAC_API_KEY): its xai provider on xAI (the default, model grok-build-0.1), its OpenAI-compatible or Anthropic provider for the others.",
             "provider" : "xai"
+          },
+          {
+            "accounts" : [
+              "api-key"
+            ],
+            "checked" : "2026-10-16",
+            "keys_page" : "https://console.anthropic.com/settings/keys",
+            "kind" : "api-key",
+            "note" : "Dirac through Anthropic: doz try dirac --provider anthropic (or choose it in the try setup); the model with --model.",
+            "provider" : "anthropic"
+          },
+          {
+            "accounts" : [
+              "openai-key"
+            ],
+            "checked" : "2026-10-16",
+            "keys_page" : "https://platform.openai.com/api-keys",
+            "kind" : "api-key",
+            "note" : "Dirac through OpenAI: doz try dirac --provider openai (or choose it in the try setup); the model with --model.",
+            "provider" : "openai"
+          },
+          {
+            "accounts" : [
+              "key"
+            ],
+            "checked" : "2026-10-16",
+            "keys_page" : "https://aistudio.google.com/apikey",
+            "kind" : "api-key",
+            "note" : "Dirac through Google AI: doz try dirac --provider google (or choose it in the try setup); the model with --model.",
+            "provider" : "google"
+          },
+          {
+            "accounts" : [
+              "key"
+            ],
+            "checked" : "2026-10-16",
+            "keys_page" : "https://openrouter.ai/keys",
+            "kind" : "api-key",
+            "note" : "Dirac through OpenRouter: doz try dirac --gateway openrouter (or choose it in the try setup); the model with --model.",
+            "provider" : "openrouter"
+          },
+          {
+            "accounts" : [
+              "key"
+            ],
+            "checked" : "2026-10-16",
+            "keys_page" : "https://vercel.com/docs/ai-gateway/authentication-and-byok",
+            "kind" : "api-key",
+            "note" : "Dirac through Vercel AI Gateway: doz try dirac --gateway vercel-ai-gateway (or choose it in the try setup); the model with --model.",
+            "provider" : "vercel-ai-gateway"
           }
         ]
       },
@@ -158,20 +233,64 @@
       "config" : {
         "entries" : [
           {
-            "checked" : "2026-10-14",
+            "checked" : "2026-10-16",
+            "evidence" : "make recipe-check: its check turn through a stand-in OpenRouter (doz try with --gateway openrouter; models@1)",
             "gateway" : "openrouter",
-            "level" : "unknown",
-            "reason" : "Dirac reads OPENROUTER_API_KEY; not checked"
+            "level" : "verified"
           },
           {
-            "checked" : "2026-10-14",
+            "checked" : "2026-10-16",
+            "evidence" : "make recipe-check: its check turn through a stand-in Vercel AI Gateway (doz try with --gateway vercel-ai-gateway; models@1)",
             "gateway" : "vercel-ai-gateway",
-            "level" : "unknown",
-            "reason" : "not checked against Dirac"
+            "level" : "verified"
           }
         ]
       },
       "type" : "com.dozersandbox/gateways@1"
+    },
+    {
+      "config" : {
+        "default" : "xai",
+        "models" : {
+          "xai" : "grok-build-0.1"
+        },
+        "native" : [
+          {
+            "env" : {
+              "DIRAC_MODEL" : "${{ dozer.model }}",
+              "DIRAC_PROVIDER" : "xai"
+            },
+            "source" : "xai"
+          }
+        ],
+        "shapes" : [
+          {
+            "env" : {
+              "DIRAC_BASE_URL" : "${{ dozer.base_url }}",
+              "DIRAC_MODEL" : "${{ dozer.model }}",
+              "DIRAC_PROVIDER" : "openai"
+            },
+            "key_env" : [
+              "DIRAC_API_KEY"
+            ],
+            "shape" : "openai-chat",
+            "source" : "https://github.com/dirac-run/dirac#environment-variables"
+          },
+          {
+            "env" : {
+              "DIRAC_BASE_URL" : "${{ dozer.base_url }}",
+              "DIRAC_MODEL" : "${{ dozer.model }}",
+              "DIRAC_PROVIDER" : "anthropic"
+            },
+            "key_env" : [
+              "DIRAC_API_KEY"
+            ],
+            "shape" : "anthropic-messages",
+            "source" : "https://github.com/dirac-run/dirac#environment-variables"
+          }
+        ]
+      },
+      "type" : "com.dozersandbox/models@1"
     },
     {
       "config" : {
@@ -211,7 +330,7 @@
             "tag" : "headless"
           }
         ],
-        "terms" : "Your xAI API key — a key from console.x.ai."
+        "terms" : "Your API key of the provider or gateway you choose (xAI by default)."
       },
       "type" : "com.dozersandbox/directory@1"
     },
@@ -240,7 +359,7 @@
       "type" : "com.dozersandbox/guide@1"
     }
   ],
-  "description" : "A Cline-derived coding agent for the terminal, aimed at lower API cost, here on an xAI API key.",
+  "description" : "A Cline-derived coding agent for the terminal, aimed at lower API cost, on the key of the provider or gateway you choose (xAI by default).",
   "displayName" : "Dirac",
   "id" : "dirac-run/dirac",
   "kind" : "workload",

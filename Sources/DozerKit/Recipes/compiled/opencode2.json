@@ -1,0 +1,433 @@
+{
+  "args" : {
+    "version" : {
+      "buildArg" : "OPENCODE2_VERSION",
+      "default" : "2.0.29",
+      "description" : "The OpenCode 2 release Dozer installs (its pin).",
+      "pattern" : "[0-9]+\\.[0-9]+\\.[0-9]+([-+][0-9A-Za-z.-]+)?"
+    }
+  },
+  "author" : "Anomaly",
+  "capabilities" : [
+    {
+      "config" : {
+        "dozer" : {
+          "excluded" : [
+
+          ],
+          "model" : {
+            "hosts" : [
+              {
+                "host" : "api.x.ai",
+                "reason" : "xAI — when the sandbox's key is xAI's"
+              },
+              {
+                "host" : "api.openai.com",
+                "reason" : "OpenAI — when the sandbox's key is OpenAI's"
+              },
+              {
+                "host" : "api.anthropic.com",
+                "reason" : "Anthropic — when the sandbox's key is Anthropic's"
+              },
+              {
+                "host" : "openrouter.ai",
+                "reason" : "OpenRouter — when the sandbox's key is OpenRouter's"
+              },
+              {
+                "host" : "ai-gateway.vercel.sh",
+                "reason" : "Vercel AI Gateway — when the sandbox's key is Vercel AI Gateway's"
+              },
+              {
+                "host" : "opencode.ai",
+                "paths" : [
+                  "/zen/v1/chat/completions",
+                  "/zen/v1/responses"
+                ],
+                "reason" : "OpenCode Zen's free models — no key; only its model requests, nothing else of opencode.ai (no Console sign-in)"
+              }
+            ],
+            "id" : "model:opencode2",
+            "phrase" : "talk to your AI model",
+            "summary" : "OpenCode 2's model — the provider or gateway its key is for (xAI, OpenAI, Anthropic, OpenRouter or Vercel AI Gateway), with an API key; or OpenCode Zen's free models, with no key. Needed for OpenCode to answer.",
+            "title" : "Talk to its model provider"
+          },
+          "update" : [
+
+          ]
+        },
+        "runtime" : {
+          "allow" : [
+            "api.x.ai:443",
+            "api.openai.com:443",
+            "api.anthropic.com:443",
+            "openrouter.ai:443",
+            "ai-gateway.vercel.sh:443",
+            "opencode.ai:443"
+          ]
+        }
+      },
+      "type" : "com.docker.sandbox/network-policy@1"
+    },
+    {
+      "config" : {
+        "apiKey" : {
+          "inject" : [
+            {
+              "domain" : "api.x.ai",
+              "format" : "Bearer %s",
+              "header" : "authorization"
+            }
+          ],
+          "name" : "XAI_API_KEY",
+          "proxyManaged" : true
+        },
+        "dozer" : {
+          "accounts" : [
+            "key"
+          ]
+        },
+        "phase" : "runtime",
+        "service" : "xai"
+      },
+      "description" : "xAI API access",
+      "type" : "com.docker.sandbox/credential@1"
+    },
+    {
+      "config" : {
+        "path" : "/home/agent/.local/share/opencode"
+      },
+      "type" : "com.docker.sandbox/volume@1"
+    },
+    {
+      "config" : {
+        "path" : "/home/agent/.config/opencode"
+      },
+      "type" : "com.docker.sandbox/volume@1"
+    },
+    {
+      "config" : {
+        "directory" : "/home/agent/.agents/skills/dozer",
+        "dozer" : {
+          "kind" : "skill"
+        },
+        "filename" : "SKILL.md"
+      },
+      "type" : "com.docker.sandbox/agent-context@1"
+    },
+    {
+      "config" : {
+        "binary" : "opencode",
+        "integrity" : "sha512-EsCnvp5lMJNem0YoQJM9PkXY0KrkiugL55M9J2JlImQzKdQnZ4CKutrPAXOnsa889qHhY5tjRpAnD/ZYFzhkRA==",
+        "kind" : "npm-platform-binary",
+        "package" : "@opencode/cli",
+        "payload" : "bin/opencode",
+        "platform_package" : "@opencode/cli-linux-arm64"
+      },
+      "type" : "com.dozersandbox/install@1"
+    },
+    {
+      "config" : {
+        "check" : {
+          "argv" : [
+            "opencode",
+            "run",
+            "say ok"
+          ],
+          "expect" : "DOZ_FAKE_OK"
+        },
+        "command" : [
+          "opencode"
+        ],
+        "env" : {
+          "OPENCODE_DISABLE_AUTOUPDATE" : "1",
+          "OPENCODE_DISABLE_MODELS_FETCH" : "1"
+        },
+        "first_run" : [
+          {
+            "file" : "~/.config/opencode/opencode.json",
+            "set" : {
+              "model" : "{env:DOZ_MODEL}"
+            }
+          }
+        ],
+        "no_prompts_args" : [
+
+        ],
+        "passthrough" : [
+          "--version",
+          "-v",
+          "--help",
+          "-h",
+          "auth",
+          "models",
+          "upgrade",
+          "uninstall",
+          "mcp",
+          "debug",
+          "stats",
+          "service",
+          "pair",
+          "serve",
+          "plugin",
+          "session",
+          "api"
+        ],
+        "resume" : [
+          "--continue"
+        ],
+        "service" : {
+          "args" : [
+            "serve",
+            "--service"
+          ],
+          "env" : [
+            "DOZ_MODEL"
+          ],
+          "restart" : [
+            "service",
+            "restart"
+          ],
+          "start" : [
+            "service",
+            "start"
+          ]
+        },
+        "state_env" : {
+
+        },
+        "status" : "none",
+        "verify" : [
+          {
+            "argv" : [
+              "opencode",
+              "--version"
+            ],
+            "expect" : "${{ kit.args.version }}"
+          }
+        ]
+      },
+      "type" : "com.dozersandbox/launch@1"
+    },
+    {
+      "config" : {
+        "methods" : [
+          {
+            "accounts" : [
+              "key"
+            ],
+            "checked" : "2026-10-14",
+            "keys_page" : "https://console.x.ai/",
+            "kind" : "api-key",
+            "note" : "OpenCode 2 works with many providers; Dozer offers it on an xAI key (XAI_API_KEY, model xai/grok-build-0.1) for now.",
+            "provider" : "xai"
+          },
+          {
+            "account" : "an OpenCode Zen, Anthropic, OpenAI or GitHub Copilot account",
+            "checked" : "2026-10-14",
+            "in_sandbox" : false,
+            "kind" : "vendor-sign-in",
+            "note" : "OpenCode can sign in itself (opencode auth login); that sign-in would live in the sandbox's own state, not on the Mac — Dozer does not offer it yet."
+          }
+        ]
+      },
+      "type" : "com.dozersandbox/auth@1"
+    },
+    {
+      "config" : {
+        "entries" : [
+          {
+            "checked" : "2026-10-14",
+            "gateway" : "openrouter",
+            "how" : {
+              "env" : {
+                "OPENROUTER_API_KEY" : "${{ dozer.placeholder }}"
+              },
+              "model_args" : [
+                "--model",
+                "openrouter/${{ dozer.model }}"
+              ]
+            },
+            "level" : "documented",
+            "notes" : [
+              "OpenRouter is one of OpenCode's built-in providers (OPENROUTER_API_KEY)"
+            ],
+            "shape" : "openai-chat",
+            "source" : "https://opencode.ai/v2/docs/cli/providers"
+          },
+          {
+            "checked" : "2026-10-14",
+            "gateway" : "vercel-ai-gateway",
+            "how" : {
+              "env" : {
+                "AI_GATEWAY_API_KEY" : "${{ dozer.placeholder }}"
+              },
+              "model_args" : [
+                "--model",
+                "vercel/${{ dozer.model }}"
+              ]
+            },
+            "level" : "documented",
+            "notes" : [
+              "Vercel AI Gateway is one of OpenCode's built-in providers (AI_GATEWAY_API_KEY)"
+            ],
+            "shape" : "openai-chat",
+            "source" : "https://opencode.ai/v2/docs/cli/providers"
+          }
+        ]
+      },
+      "type" : "com.dozersandbox/gateways@1"
+    },
+    {
+      "config" : {
+        "default" : "xai",
+        "models" : {
+          "xai" : "grok-build-0.1"
+        },
+        "native" : [
+          {
+            "env" : {
+              "DOZ_MODEL" : "xai/${{ dozer.model }}"
+            },
+            "source" : "xai"
+          },
+          {
+            "env" : {
+              "DOZ_MODEL" : "openai/${{ dozer.model }}"
+            },
+            "source" : "openai"
+          },
+          {
+            "env" : {
+              "DOZ_MODEL" : "anthropic/${{ dozer.model }}"
+            },
+            "source" : "anthropic"
+          },
+          {
+            "env" : {
+              "DOZ_MODEL" : "openrouter/${{ dozer.model }}"
+            },
+            "source" : "openrouter"
+          },
+          {
+            "env" : {
+              "DOZ_MODEL" : "vercel/${{ dozer.model }}"
+            },
+            "source" : "vercel-ai-gateway"
+          },
+          {
+            "docs" : "https://opencode.ai/docs/zen/",
+            "env" : {
+              "DOZ_MODEL" : "opencode/${{ dozer.model }}"
+            },
+            "source" : "opencode-zen"
+          }
+        ]
+      },
+      "type" : "com.dozersandbox/models@1"
+    },
+    {
+      "config" : {
+        "checked" : "2026-10-14"
+      },
+      "type" : "com.dozersandbox/currency@1"
+    },
+    {
+      "config" : {
+        "categories" : [
+          "coding-agent"
+        ],
+        "default_base" : "debian",
+        "icon" : "opencode",
+        "kind" : "coding-agent",
+        "limits" : [
+          {
+            "musl" : true,
+            "reason" : "Dozer installs OpenCode 2's glibc build; its musl build is a separate package, not used yet"
+          }
+        ],
+        "platforms" : {
+          "glibc" : true,
+          "musl" : false
+        },
+        "tags" : [
+          {
+            "checked" : "2026-10-14",
+            "level" : "documented",
+            "notes" : [
+              "opencode run \"…\""
+            ],
+            "source" : "https://opencode.ai/v2/docs/cli/commands",
+            "tag" : "headless"
+          }
+        ],
+        "terms" : "Your xAI API key — a key from console.x.ai; or no key, with OpenCode Zen's free models (each model's data terms are in its docs)."
+      },
+      "type" : "com.dozersandbox/directory@1"
+    },
+    {
+      "config" : {
+        "ports" : [
+          {
+            "auth" : "token",
+            "path" : "/",
+            "port" : 49374,
+            "title" : "OpenCode web",
+            "token_hint" : "run opencode pair in the sandbox — it prints a one-time link (5 minutes) that signs this Mac's browser in; when this Mac's port is not 49374, change 49374 in the link to it"
+          }
+        ],
+        "serve" : [
+          "opencode",
+          "service",
+          "start"
+        ]
+      },
+      "type" : "com.dozersandbox/ports@1"
+    },
+    {
+      "config" : {
+        "docs" : "https://opencode.ai/v2/docs/",
+        "intro" : "OpenCode 2 is a coding agent with its own screen and a background server. Ask it to read, change and run the code in your folder.",
+        "steps" : [
+          {
+            "command" : "opencode run \"say ok\"",
+            "text" : "Check it answers, without its screen."
+          },
+          {
+            "text" : "Ask it something in its own screen."
+          },
+          {
+            "command" : "opencode run \"list the files in this folder\"",
+            "text" : "One task without its screen."
+          }
+        ],
+        "tips" : [
+          "Files it makes are in /workspace — your folder on the Mac.",
+          "Restart its session from the session's ⋯ menu; End stops it.",
+          "A key added with OpenCode's /connect is stored inside this sandbox; a key added in Dozer stays on your Mac."
+        ]
+      },
+      "type" : "com.dozersandbox/guide@1"
+    },
+    {
+      "config" : {
+        "family" : "opencode",
+        "major" : 2,
+        "recommended" : true,
+        "title" : "OpenCode 2"
+      },
+      "type" : "com.dozersandbox/family@1"
+    }
+  ],
+  "description" : "OpenCode's second major release — an open-source coding agent for the terminal with a background server and a web UI, here on an xAI API key.",
+  "displayName" : "OpenCode 2",
+  "id" : "anomalyco/opencode2",
+  "kind" : "workload",
+  "licenses" : [
+    "MIT"
+  ],
+  "provides" : [
+    "com.dozersandbox/opencode2@${{ kit.args.version }}"
+  ],
+  "schema" : 2,
+  "sourceUrl" : "https://github.com/anomalyco/opencode"
+}

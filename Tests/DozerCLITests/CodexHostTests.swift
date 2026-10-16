@@ -90,7 +90,7 @@ final class CodexHostTests: XCTestCase {
         for k in [AccountKind.mac, .setupToken, .apiKey] { XCTAssertFalse(AgentCredentials.accepts("codex", k), k.rawValue) }
         for k in [AccountKind.chatgpt, .openaiKey] {
             XCTAssertFalse(AgentCredentials.accepts("claude-code", k), k.rawValue)
-            XCTAssertFalse(AgentCredentials.accepts("pi", k), k.rawValue)
+            XCTAssertEqual(AgentCredentials.accepts("pi", k), k == .openaiKey, "618: pi takes an OpenAI API key, never a ChatGPT sign-in — \(k.rawValue)")
             XCTAssertTrue(AgentCredentials.accepts("codex", k))
             XCTAssertTrue(AgentCredentials.accepts(nil, k), "the lab: any")
         }

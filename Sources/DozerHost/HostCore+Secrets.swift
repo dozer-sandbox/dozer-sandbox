@@ -148,7 +148,9 @@ extension HostCore {
     /// 617 (owner: Quick try "a blank modal with a considerable delay"): several plans on ONE reading of the store's
     /// facts — the image list (`images()`: every image's readiness, ~0.6 s with ~50 images) was read again for each
     /// of the ~45 agents the Quick try plans. Every plan is exactly what `plan` alone answers.
-    func plans(_ rs: [PlanRequest]) -> [CreatePlan] {
+    /// 618: `versionProblems` — by index, an exact release (`NAME@VERSION`) the registry did not confirm: a plan problem,
+    /// shown before anything is made.
+    func plans(_ rs: [PlanRequest], versionProblems: [Int: String] = [:]) -> [CreatePlan] {
         guard !rs.isEmpty else { return [] }
         let settings = DozerSettings.load()
         let file = accountStore.load()
@@ -157,13 +159,16 @@ extension HostCore {
         let taken = Set(managed.keys).union(store.sandboxNames())
         let rows = (try? images()) ?? []
         var codex: (openaiDefault: String?, signedIn: Bool)?        // read once, and only for a Codex plan
-        return rs.map { r in
+        return rs.enumerated().map { i, r in
             let openai = AgentCredentials.codexFlow(CreatePlanner.image(r, settings: settings))
             if openai, codex == nil { codex = (effectiveOpenAIDefault(file), codexMacSignedIn()) }
             let facts = PlanFacts(settings: settings, accounts: file, taken: taken, images: rows, sourceLabels: labels, store: store,
                                   openaiDefault: openai ? codex?.openaiDefault : file.openaiDefault,
                                   codexMac: openai && codex?.signedIn == true)
-            return CreatePlanner.plan(r, facts: facts)
+            var p = CreatePlanner.plan(r, facts: facts)
+            // First: it says why (the registry's own answer), before what follows from it.
+            if let e = versionProblems[i] { p.problems.insert(PlanProblem(code: "version", text: e, fix: nil), at: 0) }
+            return p
         }
     }
 

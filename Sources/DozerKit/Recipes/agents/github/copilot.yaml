@@ -5,7 +5,7 @@ schema: 2
 kind: workload
 id: github/copilot
 displayName: GitHub Copilot CLI
-description: GitHub's coding agent for the terminal, here with your own model key (xAI) instead of a Copilot plan.
+description: GitHub's coding agent for the terminal, with your own model key instead of a Copilot plan — on the key of the provider or gateway you choose (xAI by default).
 author: GitHub
 sourceUrl: https://github.com/github/copilot-cli
 licenses:
@@ -23,19 +23,35 @@ capabilities:
   config:
     runtime:
       allow:
+      - api.anthropic.com:443
+      - api.openai.com:443
       - api.x.ai:443
+      - generativelanguage.googleapis.com:443
+      - openrouter.ai:443
+      - ai-gateway.vercel.sh:443
     dozer:
       model:
         id: model:copilot
-        title: Talk to xAI
-        summary: GitHub Copilot CLI's model here (the xAI API, with your key) — needed for it to answer.
-        phrase: talk to your AI model (xAI)
+        title: Talk to its model provider
+        summary: GitHub Copilot CLI's model — the provider or gateway its key is for (Anthropic, OpenAI, xAI, Google AI, OpenRouter or Vercel AI Gateway), with an API key. Needed for GitHub Copilot CLI to answer.
+        phrase: talk to your AI model
         hosts:
+        - host: api.anthropic.com
+          reason: Anthropic — when the sandbox's key is Anthropic's
+        - host: api.openai.com
+          reason: OpenAI — when the sandbox's key is OpenAI's
         - host: api.x.ai
           paths:
           - /v1/models
           - /v1/chat/completions
           - /v1/responses
+          reason: xAI — when the sandbox's key is xAI's
+        - host: generativelanguage.googleapis.com
+          reason: Google AI — when the sandbox's key is Google AI's
+        - host: openrouter.ai
+          reason: OpenRouter — when the sandbox's key is OpenRouter's
+        - host: ai-gateway.vercel.sh
+          reason: Vercel AI Gateway — when the sandbox's key is Vercel AI Gateway's
       update: []
       excluded: []
 - type: com.docker.sandbox/credential@1
@@ -53,8 +69,6 @@ capabilities:
     dozer:
       accounts:
       - key
-      env_aliases:
-      - COPILOT_PROVIDER_API_KEY
 - type: com.docker.sandbox/volume@1
   config:
     path: /home/agent/.copilot
@@ -103,9 +117,6 @@ capabilities:
     env:
       COPILOT_OFFLINE: 'true'
       COPILOT_AUTO_UPDATE: 'false'
-      COPILOT_PROVIDER_TYPE: openai
-      COPILOT_PROVIDER_BASE_URL: https://api.x.ai/v1
-      COPILOT_MODEL: grok-code-fast-1
     state_env:
       COPILOT_HOME: /home/agent/.copilot
     # /workspace is trusted at the first start, as Claude Code's and Codex's are (the VM is the boundary), so the
@@ -137,8 +148,43 @@ capabilities:
       accounts:
       - key
       keys_page: https://console.x.ai/
-      note: GitHub Copilot CLI's own BYOK mode (COPILOT_PROVIDER_*), offline from GitHub — no Copilot plan or GitHub sign-in. Dozer offers it on an xAI key for now.
-      checked: '2026-10-14'
+      note: 'Copilot CLI''s bring-your-own-key settings (COPILOT_PROVIDER_TYPE, COPILOT_PROVIDER_BASE_URL, COPILOT_MODEL; the key''s placeholder under COPILOT_PROVIDER_API_KEY), pointed at the chosen provider or gateway; on xAI (the default) the model is grok-code-fast-1. No Copilot plan or GitHub sign-in.'
+      checked: '2026-10-16'
+    - kind: api-key
+      provider: anthropic
+      accounts:
+      - api-key
+      keys_page: https://console.anthropic.com/settings/keys
+      note: 'GitHub Copilot CLI through Anthropic: doz try copilot --provider anthropic (or choose it in the try setup); the model with --model.'
+      checked: '2026-10-16'
+    - kind: api-key
+      provider: openai
+      accounts:
+      - openai-key
+      keys_page: https://platform.openai.com/api-keys
+      note: 'GitHub Copilot CLI through OpenAI: doz try copilot --provider openai (or choose it in the try setup); the model with --model.'
+      checked: '2026-10-16'
+    - kind: api-key
+      provider: google
+      accounts:
+      - key
+      keys_page: https://aistudio.google.com/apikey
+      note: 'GitHub Copilot CLI through Google AI: doz try copilot --provider google (or choose it in the try setup); the model with --model.'
+      checked: '2026-10-16'
+    - kind: api-key
+      provider: openrouter
+      accounts:
+      - key
+      keys_page: https://openrouter.ai/keys
+      note: 'GitHub Copilot CLI through OpenRouter: doz try copilot --gateway openrouter (or choose it in the try setup); the model with --model.'
+      checked: '2026-10-16'
+    - kind: api-key
+      provider: vercel-ai-gateway
+      accounts:
+      - key
+      keys_page: https://vercel.com/docs/ai-gateway/authentication-and-byok
+      note: 'GitHub Copilot CLI through Vercel AI Gateway: doz try copilot --gateway vercel-ai-gateway (or choose it in the try setup); the model with --model.'
+      checked: '2026-10-16'
     - kind: vendor-sign-in
       account: a GitHub account with a Copilot plan
       in_sandbox: false
@@ -148,33 +194,35 @@ capabilities:
   config:
     entries:
     - gateway: openrouter
-      level: documented
-      shape: openai-chat
-      endpoint: v1
-      how:
-        env:
-          COPILOT_PROVIDER_TYPE: openai
-          COPILOT_PROVIDER_BASE_URL: ${{ dozer.gateway.endpoint.v1 }}
-          COPILOT_PROVIDER_API_KEY: ${{ dozer.placeholder }}
-          COPILOT_MODEL: ${{ dozer.model }}
-      limits:
-      - the model must support tool calls and streaming
-      source: https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/use-byok-models
-      checked: '2026-10-14'
+      level: verified
+      evidence: 'make recipe-check: its check turn through a stand-in OpenRouter (doz try with --gateway openrouter; models@1)'
+      checked: '2026-10-16'
     - gateway: vercel-ai-gateway
-      level: documented
-      shape: openai-chat
-      endpoint: v1
-      how:
-        env:
-          COPILOT_PROVIDER_TYPE: openai
-          COPILOT_PROVIDER_BASE_URL: ${{ dozer.gateway.endpoint.v1 }}
-          COPILOT_PROVIDER_API_KEY: ${{ dozer.placeholder }}
-          COPILOT_MODEL: ${{ dozer.model }}
-      limits:
-      - the model must support tool calls and streaming
+      level: verified
+      evidence: 'make recipe-check: its check turn through a stand-in Vercel AI Gateway (doz try with --gateway vercel-ai-gateway; models@1)'
+      checked: '2026-10-16'
+- type: com.dozersandbox/models@1
+  config:
+    default: xai
+    shapes:
+    - shape: openai-chat
+      env:
+        COPILOT_PROVIDER_TYPE: openai
+        COPILOT_PROVIDER_BASE_URL: '${{ dozer.base_url }}'
+        COPILOT_MODEL: '${{ dozer.model }}'
+      key_env:
+      - COPILOT_PROVIDER_API_KEY
       source: https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/use-byok-models
-      checked: '2026-10-14'
+    - shape: anthropic-messages
+      env:
+        COPILOT_PROVIDER_TYPE: anthropic
+        COPILOT_PROVIDER_BASE_URL: '${{ dozer.base_url }}'
+        COPILOT_MODEL: '${{ dozer.model }}'
+      key_env:
+      - COPILOT_PROVIDER_API_KEY
+      source: https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/use-byok-models
+    models:
+      xai: grok-code-fast-1
 - type: com.dozersandbox/currency@1
   config:
     checked: '2026-10-14'
@@ -200,7 +248,7 @@ capabilities:
       - copilot -p "…"
       source: https://docs.github.com/en/copilot/how-tos/copilot-cli/automate-copilot-cli/run-cli-programmatically
       checked: '2026-10-14'
-    terms: Your xAI API key — a key from console.x.ai. GitHub Copilot CLI is GitHub's software under its own licence; Dozer installs it from the npm registry.
+    terms: Your API key of the provider or gateway you choose (xAI by default). GitHub Copilot CLI is GitHub's software under its own licence; Dozer installs it from the npm registry.
     licence: Proprietary (GitHub Copilot CLI License)
 - type: com.dozersandbox/guide@1
   config:

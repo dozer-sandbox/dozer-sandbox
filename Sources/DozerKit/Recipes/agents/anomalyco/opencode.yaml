@@ -5,7 +5,7 @@ schema: 2
 kind: workload
 id: anomalyco/opencode
 displayName: OpenCode
-description: An open-source coding agent for the terminal that works with many model providers, here on an xAI API key.
+description: An open-source coding agent for the terminal that works with many model providers, on the key of the provider or gateway you choose (xAI by default).
 author: Anomaly
 sourceUrl: https://github.com/anomalyco/opencode
 licenses:
@@ -23,19 +23,35 @@ capabilities:
   config:
     runtime:
       allow:
+      - api.anthropic.com:443
+      - api.openai.com:443
       - api.x.ai:443
+      - generativelanguage.googleapis.com:443
+      - openrouter.ai:443
+      - ai-gateway.vercel.sh:443
     dozer:
       model:
         id: model:opencode
-        title: Talk to xAI
-        summary: OpenCode's model here (the xAI API, with an API key) — needed for OpenCode to answer.
-        phrase: talk to your AI model (xAI)
+        title: Talk to its model provider
+        summary: OpenCode's model — the provider or gateway its key is for (Anthropic, OpenAI, xAI, Google AI, OpenRouter or Vercel AI Gateway), with an API key. Needed for OpenCode to answer.
+        phrase: talk to your AI model
         hosts:
+        - host: api.anthropic.com
+          reason: Anthropic — when the sandbox's key is Anthropic's
+        - host: api.openai.com
+          reason: OpenAI — when the sandbox's key is OpenAI's
         - host: api.x.ai
           paths:
           - /v1/models
           - /v1/chat/completions
           - /v1/responses
+          reason: xAI — when the sandbox's key is xAI's
+        - host: generativelanguage.googleapis.com
+          reason: Google AI — when the sandbox's key is Google AI's
+        - host: openrouter.ai
+          reason: OpenRouter — when the sandbox's key is OpenRouter's
+        - host: ai-gateway.vercel.sh
+          reason: Vercel AI Gateway — when the sandbox's key is Vercel AI Gateway's
       update: []
       excluded: []
 - type: com.docker.sandbox/credential@1
@@ -111,6 +127,26 @@ capabilities:
     - file: ~/.config/opencode/node_modules/.package-lock.json
       set:
         lockfileVersion: 3
+    # The model source chosen: this file (OPENCODE_CONFIG, read after its own settings) names the model from the environment
+    # ({env:DOZ_MODEL}) and declares the two providers a source can be — OpenAI-compatible and Anthropic — at the
+    # source's base URL, each key read from the variable its placeholder is in (never written here).
+    - file: ~/.config/opencode/doz.json
+      set:
+        model: '{env:DOZ_MODEL}'
+        provider.doz.npm: '@ai-sdk/openai-compatible'
+        provider.doz.name: Dozer (OpenAI-compatible)
+        provider.doz.options.baseURL: '{env:DOZ_BASE_URL}'
+        provider.doz.options.apiKey: '{env:OPENAI_API_KEY}'
+        provider.doz.models:
+          '{env:DOZ_MODEL_ID}':
+            name: '{env:DOZ_MODEL_ID}'
+        provider.dozanthropic.npm: '@ai-sdk/anthropic'
+        provider.dozanthropic.name: Dozer (Anthropic)
+        provider.dozanthropic.options.baseURL: '{env:DOZ_BASE_URL}'
+        provider.dozanthropic.options.apiKey: '{env:ANTHROPIC_API_KEY}'
+        provider.dozanthropic.models:
+          '{env:DOZ_MODEL_ID}':
+            name: '{env:DOZ_MODEL_ID}'
     status: none
     resume:
     - --continue
@@ -133,8 +169,43 @@ capabilities:
       accounts:
       - key
       keys_page: https://console.x.ai/
-      note: OpenCode works with many providers; Dozer offers it on an xAI key (XAI_API_KEY, model xai/grok-build-0.1) for now.
-      checked: '2026-10-14'
+      note: 'OpenCode'' own xai provider on xAI (the default, model xai/grok-build-0.1); for the others, a provider of Dozer''s in its config (OPENCODE_CONFIG): OpenAI-compatible at the chosen source''s base URL, or Anthropic, the key read from the variable its placeholder is in.'
+      checked: '2026-10-16'
+    - kind: api-key
+      provider: anthropic
+      accounts:
+      - api-key
+      keys_page: https://console.anthropic.com/settings/keys
+      note: 'OpenCode through Anthropic: doz try opencode --provider anthropic (or choose it in the try setup); the model with --model.'
+      checked: '2026-10-16'
+    - kind: api-key
+      provider: openai
+      accounts:
+      - openai-key
+      keys_page: https://platform.openai.com/api-keys
+      note: 'OpenCode through OpenAI: doz try opencode --provider openai (or choose it in the try setup); the model with --model.'
+      checked: '2026-10-16'
+    - kind: api-key
+      provider: google
+      accounts:
+      - key
+      keys_page: https://aistudio.google.com/apikey
+      note: 'OpenCode through Google AI: doz try opencode --provider google (or choose it in the try setup); the model with --model.'
+      checked: '2026-10-16'
+    - kind: api-key
+      provider: openrouter
+      accounts:
+      - key
+      keys_page: https://openrouter.ai/keys
+      note: 'OpenCode through OpenRouter: doz try opencode --gateway openrouter (or choose it in the try setup); the model with --model.'
+      checked: '2026-10-16'
+    - kind: api-key
+      provider: vercel-ai-gateway
+      accounts:
+      - key
+      keys_page: https://vercel.com/docs/ai-gateway/authentication-and-byok
+      note: 'OpenCode through Vercel AI Gateway: doz try opencode --gateway vercel-ai-gateway (or choose it in the try setup); the model with --model.'
+      checked: '2026-10-16'
     - kind: vendor-sign-in
       account: an OpenCode Zen, Anthropic, OpenAI or GitHub Copilot account
       in_sandbox: false
@@ -144,31 +215,44 @@ capabilities:
   config:
     entries:
     - gateway: openrouter
-      level: documented
-      shape: openai-chat
-      how:
-        env:
-          OPENROUTER_API_KEY: ${{ dozer.placeholder }}
-        model_args:
-        - --model
-        - openrouter/${{ dozer.model }}
-      notes:
-      - OpenRouter is one of OpenCode's built-in providers (OPENROUTER_API_KEY)
-      source: https://opencode.ai/docs/providers/
-      checked: '2026-10-14'
+      level: verified
+      evidence: 'make recipe-check: its check turn through a stand-in OpenRouter (doz try with --gateway openrouter; models@1)'
+      checked: '2026-10-16'
     - gateway: vercel-ai-gateway
-      level: documented
-      shape: openai-chat
-      how:
-        env:
-          AI_GATEWAY_API_KEY: ${{ dozer.placeholder }}
-        model_args:
-        - --model
-        - vercel/${{ dozer.model }}
-      notes:
-      - Vercel AI Gateway is one of OpenCode's built-in providers (AI_GATEWAY_API_KEY)
+      level: verified
+      evidence: 'make recipe-check: its check turn through a stand-in Vercel AI Gateway (doz try with --gateway vercel-ai-gateway; models@1)'
+      checked: '2026-10-16'
+- type: com.dozersandbox/models@1
+  config:
+    default: xai
+    shapes:
+    - shape: openai-chat
+      env:
+        OPENCODE_CONFIG: /home/agent/.config/opencode/doz.json
+        DOZ_MODEL: 'doz/${{ dozer.model }}'
+        DOZ_MODEL_ID: '${{ dozer.model }}'
+        DOZ_BASE_URL: '${{ dozer.base_url }}'
+      key_env:
+      - OPENAI_API_KEY
       source: https://opencode.ai/docs/providers/
-      checked: '2026-10-14'
+    - shape: anthropic-messages
+      env:
+        OPENCODE_CONFIG: /home/agent/.config/opencode/doz.json
+        DOZ_MODEL: 'dozanthropic/${{ dozer.model }}'
+        DOZ_MODEL_ID: '${{ dozer.model }}'
+        DOZ_BASE_URL: '${{ dozer.base_url }}/v1'
+      key_env:
+      - ANTHROPIC_API_KEY
+      source: https://opencode.ai/docs/providers/
+    native:
+    - source: xai
+      env:
+        OPENCODE_CONFIG: /home/agent/.config/opencode/doz.json
+        DOZ_MODEL: 'xai/${{ dozer.model }}'
+        DOZ_MODEL_ID: '${{ dozer.model }}'
+        DOZ_BASE_URL: https://api.x.ai/v1
+    models:
+      xai: grok-build-0.1
 - type: com.dozersandbox/currency@1
   config:
     checked: '2026-10-14'
@@ -192,7 +276,7 @@ capabilities:
       - opencode run "…"
       evidence: 'make recipe-check: opencode run "say ok" printed the stand-in''s answer and exited in a fresh try'
       checked: '2026-10-14'
-    terms: Your xAI API key — a key from console.x.ai.
+    terms: Your API key of the provider or gateway you choose (xAI by default).
 - type: com.dozersandbox/guide@1
   config:
     intro: "OpenCode is a coding agent with its own screen: the session on the left. Ask it to read, change and run the code in your folder."
@@ -206,3 +290,8 @@ capabilities:
     - "Files it makes are in /workspace — your folder on the Mac."
     - "Restart its session from the session's ⋯ menu; End stops it."
     docs: https://github.com/anomalyco/opencode
+- type: com.dozersandbox/family@1
+  config:
+    family: opencode
+    major: 1
+    title: OpenCode 1

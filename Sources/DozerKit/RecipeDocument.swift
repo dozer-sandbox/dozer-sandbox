@@ -68,9 +68,11 @@ public struct RecipeDocument: Codable, Sendable, Equatable {
         public static let ports = "com.dozersandbox/ports@1"
         /// 617.11: its guide (intro, first steps, tips, docs).
         public static let guide = "com.dozersandbox/guide@1"
+        /// 618: one major release line of a tool whose majors are separate recipes.
+        public static let family = "com.dozersandbox/family@1"
         /// Kit's own types (exported as they are, `dozer:` keys removed).
         public static let kit = [networkPolicy, credential, volume, agentContext]
-        public static let dozer = [install, launch, auth, gateways, currency, directory, models, ports, guide]
+        public static let dozer = [install, launch, auth, gateways, currency, directory, models, ports, guide, family]
     }
 
     /// Kit's network-policy@1 (`install`/`runtime` × `allow`/`deny`), Dozer's whole network under `dozer`.
@@ -178,10 +180,16 @@ public struct RecipeDocument: Codable, Sendable, Equatable {
         /// The smoke turn `make recipe-check` runs (required: `check()` refuses a file without one).
         public var check: AgentRecipe.Smoke?
         public var settings: AgentRecipe.SettingKeys?
+        /// 618: a background service restarted when it runs with another value of `env` (AgentRecipe.Launch.service).
+        public var service: AgentRecipe.Launch.Service? = nil
+        /// 618: the arguments that choose its model from `DOZ_MODEL` (AgentRecipe.Launch.modelArgs).
+        public var modelArgs: [String]? = nil
+        public var modelArgsAfter: [String]? = nil
         enum CodingKeys: String, CodingKey {
-            case command, passthrough, env, status, resume, verify, check, settings, session
+            case command, passthrough, env, status, resume, verify, check, settings, session, service
             case noPromptsArgs = "no_prompts_args", stateEnv = "state_env", firstRun = "first_run", sessionEnv = "session_env",
-                 resumeCheck = "resume_check", noPromptsEnv = "no_prompts_env"
+                 resumeCheck = "resume_check", noPromptsEnv = "no_prompts_env", modelArgs = "model_args",
+                 modelArgsAfter = "model_args_after"
         }
     }
 
@@ -241,6 +249,7 @@ public struct RecipeCapability: Codable, Sendable, Equatable {
         case models(AgentRecipe.Models)
         case ports(AgentRecipe.WebPorts)
         case guide(AgentRecipe.Guide)
+        case family(AgentRecipe.Family)
     }
 
     enum CodingKeys: String, CodingKey { case type, name, optional, description, config }
@@ -270,6 +279,7 @@ public struct RecipeCapability: Codable, Sendable, Equatable {
         case T.models: config = .models(try c.decode(AgentRecipe.Models.self, forKey: .config))
         case T.ports: config = .ports(try c.decode(AgentRecipe.WebPorts.self, forKey: .config))
         case T.guide: config = .guide(try c.decode(AgentRecipe.Guide.self, forKey: .config))
+        case T.family: config = .family(try c.decode(AgentRecipe.Family.self, forKey: .config))
         default:
             throw DecodingError.dataCorruptedError(forKey: .type, in: c, debugDescription: "capability type \(type) is not one this build knows")
         }
@@ -295,6 +305,7 @@ public struct RecipeCapability: Codable, Sendable, Equatable {
         case .models(let v): try c.encode(v, forKey: .config)
         case .ports(let v): try c.encode(v, forKey: .config)
         case .guide(let v): try c.encode(v, forKey: .config)
+        case .family(let v): try c.encode(v, forKey: .config)
         }
     }
 }
@@ -334,7 +345,7 @@ extension RecipeDocument {
         for t in [Types.networkPolicy, Types.install, Types.launch, Types.auth, Types.gateways, Types.directory] where types.filter({ $0 == t }).count != 1 {
             throw bad("exactly one \(t)")
         }
-        for t in [Types.agentContext, Types.currency, Types.models, Types.ports, Types.guide] where types.filter({ $0 == t }).count > 1 { throw bad("at most one \(t)") }
+        for t in [Types.agentContext, Types.currency, Types.models, Types.ports, Types.guide, Types.family] where types.filter({ $0 == t }).count > 1 { throw bad("at most one \(t)") }
         for c in capabilities where c.optional != nil || c.name != nil { throw bad("\(c.type): optional and name are export's, not the recipe's") }
         guard launch.check != nil else { throw bad("launch@1 has no check (the smoke turn make recipe-check runs)") }
         let recipe = try recipeUnchecked()
@@ -387,6 +398,7 @@ extension RecipeDocument {
     var directory: Directory { one { if case .directory(let v) = $0 { v } else { nil } }! }
     var ports: AgentRecipe.WebPorts? { one { if case .ports(let v) = $0 { v } else { nil } } }
     var guide: AgentRecipe.Guide? { one { if case .guide(let v) = $0 { v } else { nil } } }
+    var family: AgentRecipe.Family? { one { if case .family(let v) = $0 { v } else { nil } } }
 
     /// Every string that is a template.
     var templateStrings: [String] {
@@ -526,14 +538,15 @@ extension RecipeDocument {
                                          requirements: i.requirements,
                                          extras: i.extras?.map { var e = $0; e.url = Self.toModel(e.url); e.path = Self.toModel(e.path); return e }),
             launch: AgentRecipe.Launch(command: l.command, noPromptsArgs: l.noPromptsArgs, noPromptsEnv: l.noPromptsEnv, passthrough: l.passthrough,
-                                       env: l.env, firstRun: l.firstRun, sessionEnv: l.sessionEnv, session: l.session),
+                                       env: l.env, firstRun: l.firstRun, sessionEnv: l.sessionEnv, session: l.session, service: l.service,
+                                       modelArgs: l.modelArgs, modelArgsAfter: l.modelArgsAfter),
             state: AgentRecipe.State(persist: volumes.map { Self.toModelPath($0.path) }, env: l.stateEnv),
             credentials: credentials.map { AgentRecipe.CredentialUse(provider: $0.service, accounts: $0.dozer.accounts, envAliases: $0.dozer.envAliases) },
             network: networkPolicy.dozer, status: l.status, prompt: prompt, resume: l.resume, resumeCheck: l.resumeCheck,
             verify: l.verify.map { AgentRecipe.Check(argv: $0.argv, expect: $0.expect.map(Self.toModel)) }, smoke: l.check,
             terms: d.terms, lifecycle: currency?.lifecycle, icon: d.icon, checked: currency?.checked, settings: l.settings, auth: auth,
             gateways: gateways.entries.map { Self.mapGateway($0, Self.toModel) }, tags: d.tags, catalogKind: d.kind, categories: d.categories, guide: guide,
-            models: models.map { Self.mapModels($0, Self.toModel) }, ports: ports)
+            models: models.map { Self.mapModels($0, Self.toModel) }, ports: ports, family: family)
     }
 
     /// The file a model would be written as (the inverse of `recipe()`): what the recipe says, plus what only the file
@@ -578,7 +591,7 @@ extension RecipeDocument {
         caps.append(RecipeCapability(type: T.launch, config: .launch(Launch(
             command: l.command, noPromptsArgs: l.noPromptsArgs, noPromptsEnv: l.noPromptsEnv, passthrough: l.passthrough, env: l.env, stateEnv: r.state.env,
             firstRun: l.firstRun, sessionEnv: l.sessionEnv, session: l.session, status: r.status, resume: r.resume, resumeCheck: r.resumeCheck,
-            verify: r.verify.map { AgentRecipe.Check(argv: $0.argv, expect: $0.expect.map(Self.toFile)) }, check: r.smoke, settings: r.settings))))
+            verify: r.verify.map { AgentRecipe.Check(argv: $0.argv, expect: $0.expect.map(Self.toFile)) }, check: r.smoke, settings: r.settings, service: l.service, modelArgs: l.modelArgs, modelArgsAfter: l.modelArgsAfter))))
         caps.append(RecipeCapability(type: T.auth, config: .auth(r.auth)))
         caps.append(RecipeCapability(type: T.gateways, config: .gateways(Gateways(entries: r.gateways.map { Self.mapGateway($0, Self.toFile) }))))
         if let m = r.models { caps.append(RecipeCapability(type: T.models, config: .models(Self.mapModels(m, Self.toFile)))) }
@@ -590,6 +603,7 @@ extension RecipeDocument {
             licence: licenses == [r.licence] ? nil : r.licence, kind: r.catalogKind, categories: r.categories))))
         if let p = r.ports { caps.append(RecipeCapability(type: T.ports, config: .ports(p))) }
         if let g = r.guide { caps.append(RecipeCapability(type: T.guide, config: .guide(g))) }
+        if let f = r.family { caps.append(RecipeCapability(type: T.family, config: .family(f))) }
         capabilities = caps
     }
 }

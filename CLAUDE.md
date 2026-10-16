@@ -251,8 +251,8 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   `pi(_:)`; `ImageSpec.agent` records it, so it is in the bake key. `AgentVersions.spec(purpose:)`
   is synchronous and uses only the store: `.create` → the newest image PREPARED for this build, else
   the newest `usable` one an older doz's recipe made (no waiting), `.prepare` → the version the
-  setting names (cached latest, a known exact, else the pin when the registry was never asked, else a
-  clear error). `HostCore.freshen` is the only thing that asks the registry (hourly cache in
+  setting names (cached latest, a known exact, else the pin — whether the registry was never asked or did not
+  answer: 618, a host that had failed to reach it refused while the CLI with no host planned the pin, so Try and `--dry-run` disagreed). `HostCore.freshen` is the only thing that asks the registry (hourly cache in
   `<store>/agent-versions.json`, 5-min back-off after a failure). Only the
   real host asks (`HostServer` passes `.fromEnvironment()`; `DOZ_TEST_NPM_REGISTRY=offline|URL` for
   tests); in-process hosts and unit tests have `.disabled` and resolve to the pin. Claude Code's own
@@ -1672,8 +1672,55 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   that source's key), the plan's `model` (+ every offered source), the Quick try setup's Model section, New Sandbox's
   chooser (`WebAccounts.sources`). **A recipe agent's sandbox decrypts every model source's hosts**
   (`EgressProxy.leakGuardHosts`) so a placeholder sent to another source is refused, never tunnelled unseen. Codex keeps
-  its own flow (`AgentCredentials.codexFlow` — never "provider == openai"). `make recipe-check` runs a models@1 recipe
+  its own flow (`AgentCredentials.codexFlow` — never "provider == openai"). 618 (owner: "openrouter can behave as an openai compatible model API"): a gateway models@1
+  offers needs no gateways@1 entry — `AgentRecipe.gatewaySupport` derives it (`documented`, citing the shape's `source` /
+  the native entry's `docs`); an entry only overrides (`verified` + evidence once recipe-check ran it, no `how` needed),
+  and a models@1 recipe's entries may never contradict what a try can do (`offersGateway`). The Quick try's "Through a
+  gateway" is `throughGateway`; `doz search` marks the offered ones; the tags read `gatewaySupport`. A tool that takes its model
+  only on its command line declares `launch.model_args` (`[-m, $DOZ_MODEL]`; the launcher puts them first when
+  `DOZ_MODEL` is set, never over the run's own flag or for a passthrough subcommand — `RecipeModelArgsTests`); one that
+  takes it only from its settings file, a `first_run` entry with `each_run` (written at every run, `$DOZ_…` filled in,
+  never a key — `RecipeEachRunTests`; the helper then runs before the passthrough). Both only in such a recipe's launcher. pi (built-in) declares
+  models@1 too — native only, at session time: `AgentCredentials.sources` includes it, a non-Anthropic key goes the
+  recipe agents' way in `applyMainAccount` (an Anthropic one keeps pi's own path, `doz key set` included), its other
+  sources' hosts are the hidden `sources:pi` permission (added at create, like Codex's `model:openai`), and the host puts
+  its `--model` on the default session (`builtinModelArguments`: off Anthropic, or a model chosen there). Its image and
+  launcher are unchanged (`RecipePinTests`). Claude Code and Codex record why a gateway is not offered (their
+  gateways entries' `limits`). A source that takes NO key (providers.json `keyless`: `opencode-zen`, OpenCode Zen's free
+  models — OpenCode 2 sends its own "Bearer public") is never a key provider: no binding, no placeholder, no account
+  (`AgentCredentials.account(forSource:)` answers `none`; `--account` refused; `doz account add` refuses it), offered
+  only by a `native` entry, its host in the recipe's model permission path by path (`/zen/v1/chat/completions`,
+  `/zen/v1/responses`), still watched by the leak guard. A try records it as `SandboxConfig.modelSource` and uses it
+  while it has no account (`HostCore.keylessSource`; an account added later wins); its vault holds no key at all. Its
+  model list is curated — the free models the docs list AND the pinned release enables without a key — each with its
+  data terms (`ModelInfo.note`, `ModelList.kind` `listed`). recipe-check runs it with no account and fails on any
+  credential at its host or any refusal in the Locked try. `make recipe-check` runs a models@1 recipe
   once per offered source (`RECIPE_SELECTIONS`), `ModelSourcesTests`, `probes/617-*/recipes/models/browser-try-models.mjs`.
+- **Model lists** (618, owner: "… its also missing the step to choose a model"; `ModelLists.swift`, `HostCore+Models.swift`):
+  a gateway's PUBLIC list (OpenRouter `/api/v1/models`, Vercel AI Gateway `/v1/models` — no key) is read by the HOST on
+  the Mac, never a sandbox — the read-only op `models` (`modelsSource`, `modelsRefresh`) reads it when a day old (not
+  within 10 min of a failure; one read per gateway at a time; offline silent, the last list kept) into
+  `<store>/model-lists.json` (Resources: Dozer's own records). Strictly decoded (`ModelLists.parse`: text models only, a
+  bad entry dropped, ids `isModelID`, text inert and capped, prices per million tokens), ≤ 3000 entries. A provider
+  (Anthropic, OpenAI, xAI, Google) lists only with a key, so its list is the checked default (`kind: default`) — any id
+  may be typed. In-process (no host) answers the cache only; the real host's fetcher is `ModelListFetcher.fromEnvironment`
+  (`DOZ_TEST_MODEL_LIST=offline|FILE|DIR`; a guarded run without it reads nothing). `doz models [--gateway|--provider]
+  [SEARCH] [--refresh]`; `--model` with a gateway gets a did-you-mean NOTE (`ModelNote`, never a refusal — lists go
+  stale) in `requestPlan`, `create` and `up`. The web route `GET /api/v1/models/{source}` → `WebModelList` (the default
+  first). `ModelListTests`; fixtures `Tests/Fixtures/models/` (trimmed real lists + crafted edge cases).
+  **The choice in the dashboard** (owner: "open router should be part of the key choices; needs rethink"; workspace mockup
+  `changes/618-*/try-model-source.html`): ONE section, "Where TOOL gets its model" (`components/model-source.js`:
+  `sourceList` — providers then gateways as equal rows, each with its key status, the chosen row's key / choice of keys /
+  paste under it — and `modelPicker`, fed by `GET models/SOURCE`, searchable, a typed id allowed). The Try setup
+  (`sourceSections` in `views/try.js`: a choice re-plans with that source's default key; the plan's "Same in Terminal")
+  and New Sandbox's Account step (`nwModelSource`) both draw it; `WebAccounts.sources` includes a built-in agent that
+  declares models@1 (pi), plus `gatewaySources` / `sourceModels`; `WebPlan.Model.Source.keysPage`. A tool with no choice
+  (Claude Code, Codex) keeps its Key section. **`doz_project.yaml` `model_source:` / `model:`** (owner: yes):
+  `DozerProject.modelSource/model`, checked by `modelProblem()` (an id `isModelID`; the source one the agent is offered,
+  else the fix names them), into `createOptions`; `doz init --provider/--gateway/--model` write them, `doz up`'s flags win
+  over them, the plan's yaml echoes them (the "not project keys" note is gone), New Sandbox writes them
+  (`WebProjectForm.modelSource/model`, explicit keys `model_source`/`model`). Workspace probe
+  `probes/618-*/models/browser-model-source.mjs` (1440/390, light/dark, overflow).
 - **The guide** (617.11, owner: "i tried fabric and it just gave me a terminal … our companion guide"; `RecipeGuide.swift`,
   `SandboxGuide.swift`, `components/try-guide.js`, RECIPE-FORMAT.md "The guide"): `guide@1` = intro, ≤ 8 steps
   `{text, command?, edit?}`, ≤ 6 tips, docs, a `notice` (`doz try` says it first). The first step WITH a command is the check turn as a person types it
@@ -1764,6 +1811,32 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   refusals under Locked. Its first-run files seed exactly that (an empty `node_modules/.package-lock.json`, the lock's
   root dependency), so it calls nothing but its model; `OPENCODE_DISABLE_MODELS_FETCH` keeps models.dev out (the model
   must then be in its bundled list — `opencode models xai`). No OSC 7501 (recipe-check's status probe saw nothing).
+- **A tool's majors** (618, owner: "go with B and one card … make sure there is a way the user can chose an earlier
+  major version"; 617.B5's first qualified name): each major is a recipe; `com.dozersandbox/family@1` {family, major,
+  title, recommended} ties them (`AgentRecipes.validateFamilies`: one recommended, majors once, the family's name the id
+  of the member that predates it — its sandboxes/image/settings/statistics keep it — no other recipe answers to it, each
+  pin of its own major). **What a person TYPES goes through `AgentRef`** (DozerKit): `NAME` (a family's recommended
+  major), `NAME@MAJOR`, `NAME@VERSION` — `--agent`/`--image`, `doz try`, `doz_project.yaml agent:`, the web plan query,
+  `doz search`; a STORED name never does (an existing sandbox never changes major). Turning a recipe back into a typed
+  name is `AgentRef.typed` (the family's name only for the recommended major — never a member's id alone: it would mean
+  the recommended one). An exact release (`CreateOptions.agentVersion`) is checked like a pin before anything is made
+  (`HostCore.exactVersionProblem`: known, or the registry confirms it with its integrity) — a plan problem `version`,
+  a create refused; its sandbox's boot bakes its own spec (`imageToPrepare` never prepares another release for it).
+  `latest` stays within a member's major (`NpmRegistry.versions`, `newest(in:major:)`). A sandbox records
+  `SandboxConfig.agentRef` (`opencode@2.0.29`, display only); the plan's `version` (`PlanVersion`: release, ref, majors,
+  `familyLine` — "recommended", never "latest") is the try's first line, `--dry-run` and (with the Guide's version fact)
+  how to get the other. Quick try: ONE card per family, a Version choice in its setup that RE-PLANS only (the catalog's
+  `family` + `ref`); New Sandbox: one chip, its majors under it. `AgentRefTests`, `FamilyVersionsTests`,
+  `MajorChoiceTests`, `WebTryTests`; workspace `probes/618-*/browser-try-version.mjs`.
+- **OpenCode 2** (`opencode2`, npm `@opencode/cli` + `@opencode/cli-linux-arm64`, glibc; models@1 native: xAI, OpenAI,
+  Anthropic, OpenRouter, Vercel — the model through `{env:DOZ_MODEL}` in its opencode.json): its first command starts a
+  **background server** (`opencode serve --service`, re-parented to PID 1, 127.0.0.1:49374) that keeps the environment
+  of the run that started it — so `launch.service` (generic, any recipe) makes the launcher restart it when it runs with
+  another `DOZ_MODEL` (never a key's variable: placeholders differ per run), `start` as the fallback (its restart waits
+  for the old server, a zombie the VM's init never reaps). ports@1 49374 "OpenCode web" (auth token: `opencode pair`
+  prints a one-use link; change 49374 in it when this Mac's port moved). Proved: only its model is called (Open, every
+  request decrypted, its own update/models checks on), no plugin or Code Mode download, its first screen is a session.
+  `RecipeServiceTests`; workspace `probes/618-*/` (service-restart.sh, verify-*.sh).
 - **Is it current?** (owner: "record the latest version and how old it is and is it current"). MEASURED: the host checks
   every agent's latest release hourly while it runs (`HostCore.refreshAgentVersions` → `AgentVersions.refresh`, the same
   cache as a preparation's) and, once per new latest, when it came out and npm's deprecation (`NpmRegistry.releaseInfo`:

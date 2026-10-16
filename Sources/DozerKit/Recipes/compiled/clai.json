@@ -18,13 +18,34 @@
           "model" : {
             "hosts" : [
               {
-                "host" : "api.x.ai"
+                "host" : "api.anthropic.com",
+                "reason" : "Anthropic — when the sandbox's key is Anthropic's"
+              },
+              {
+                "host" : "api.openai.com",
+                "reason" : "OpenAI — when the sandbox's key is OpenAI's"
+              },
+              {
+                "host" : "api.x.ai",
+                "reason" : "xAI — when the sandbox's key is xAI's"
+              },
+              {
+                "host" : "generativelanguage.googleapis.com",
+                "reason" : "Google AI — when the sandbox's key is Google AI's"
+              },
+              {
+                "host" : "openrouter.ai",
+                "reason" : "OpenRouter — when the sandbox's key is OpenRouter's"
+              },
+              {
+                "host" : "ai-gateway.vercel.sh",
+                "reason" : "Vercel AI Gateway — when the sandbox's key is Vercel AI Gateway's"
               }
             ],
             "id" : "model:clai",
-            "phrase" : "talk to your AI model (xAI)",
-            "summary" : "clai (Pydantic AI)'s model (the xAI API, with an API key) — needed for clai (Pydantic AI) to answer.",
-            "title" : "Talk to xAI"
+            "phrase" : "talk to your AI model",
+            "summary" : "clai (Pydantic AI)'s model — the provider or gateway its key is for (Anthropic, OpenAI, xAI, Google AI, OpenRouter or Vercel AI Gateway), with an API key. Needed for clai (Pydantic AI) to answer.",
+            "title" : "Talk to its model provider"
           },
           "update" : [
 
@@ -32,7 +53,12 @@
         },
         "runtime" : {
           "allow" : [
-            "api.x.ai:443"
+            "api.anthropic.com:443",
+            "api.openai.com:443",
+            "api.x.ai:443",
+            "generativelanguage.googleapis.com:443",
+            "openrouter.ai:443",
+            "ai-gateway.vercel.sh:443"
           ]
         }
       },
@@ -54,9 +80,6 @@
         "dozer" : {
           "accounts" : [
             "key"
-          ],
-          "env_aliases" : [
-            "OPENAI_API_KEY"
           ]
         },
         "phase" : "runtime",
@@ -183,21 +206,21 @@
         "check" : {
           "argv" : [
             "clai",
-            "-m",
-            "openai:grok-4-1-fast",
             "--no-stream",
             "say ok"
           ],
           "expect" : "DOZ_FAKE_OK"
         },
         "command" : [
-          "clai",
-          "-m",
-          "openai:grok-4-1-fast"
+          "clai"
         ],
         "env" : {
-          "OPENAI_BASE_URL" : "https://api.x.ai/v1"
+
         },
+        "model_args" : [
+          "-m",
+          "$DOZ_MODEL"
+        ],
         "no_prompts_args" : [
 
         ],
@@ -229,11 +252,61 @@
             "accounts" : [
               "key"
             ],
-            "checked" : "2026-10-14",
+            "checked" : "2026-10-16",
             "keys_page" : "https://console.x.ai/",
             "kind" : "api-key",
-            "note" : "clai speaks to xAI through Pydantic AI's OpenAI provider: OPENAI_BASE_URL is xAI's API and the xAI key's placeholder is also OPENAI_API_KEY; the session starts it with -m openai:grok-4-1-fast (its own xai: provider needs the xai-sdk package, which is not installed). Its other providers are not offered here yet.",
+            "note" : "clai speaks to the chosen provider or gateway through Pydantic AI's OpenAI-compatible model (OPENAI_BASE_URL, -m openai-chat:MODEL, the key's placeholder under OPENAI_API_KEY) or its Anthropic model (ANTHROPIC_BASE_URL, -m anthropic:MODEL); on xAI (the default) the model is grok-4-1-fast.",
             "provider" : "xai"
+          },
+          {
+            "accounts" : [
+              "api-key"
+            ],
+            "checked" : "2026-10-16",
+            "keys_page" : "https://console.anthropic.com/settings/keys",
+            "kind" : "api-key",
+            "note" : "clai (Pydantic AI) through Anthropic: doz try clai --provider anthropic (or choose it in the try setup); the model with --model.",
+            "provider" : "anthropic"
+          },
+          {
+            "accounts" : [
+              "openai-key"
+            ],
+            "checked" : "2026-10-16",
+            "keys_page" : "https://platform.openai.com/api-keys",
+            "kind" : "api-key",
+            "note" : "clai (Pydantic AI) through OpenAI: doz try clai --provider openai (or choose it in the try setup); the model with --model.",
+            "provider" : "openai"
+          },
+          {
+            "accounts" : [
+              "key"
+            ],
+            "checked" : "2026-10-16",
+            "keys_page" : "https://aistudio.google.com/apikey",
+            "kind" : "api-key",
+            "note" : "clai (Pydantic AI) through Google AI: doz try clai --provider google (or choose it in the try setup); the model with --model.",
+            "provider" : "google"
+          },
+          {
+            "accounts" : [
+              "key"
+            ],
+            "checked" : "2026-10-16",
+            "keys_page" : "https://openrouter.ai/keys",
+            "kind" : "api-key",
+            "note" : "clai (Pydantic AI) through OpenRouter: doz try clai --gateway openrouter (or choose it in the try setup); the model with --model.",
+            "provider" : "openrouter"
+          },
+          {
+            "accounts" : [
+              "key"
+            ],
+            "checked" : "2026-10-16",
+            "keys_page" : "https://vercel.com/docs/ai-gateway/authentication-and-byok",
+            "kind" : "api-key",
+            "note" : "clai (Pydantic AI) through Vercel AI Gateway: doz try clai --gateway vercel-ai-gateway (or choose it in the try setup); the model with --model.",
+            "provider" : "vercel-ai-gateway"
           }
         ]
       },
@@ -243,20 +316,53 @@
       "config" : {
         "entries" : [
           {
-            "checked" : "2026-10-14",
+            "checked" : "2026-10-16",
+            "evidence" : "make recipe-check: its check turn through a stand-in OpenRouter (doz try with --gateway openrouter; models@1)",
             "gateway" : "openrouter",
-            "level" : "unknown",
-            "reason" : "not checked against clai (Pydantic AI)"
+            "level" : "verified"
           },
           {
-            "checked" : "2026-10-14",
+            "checked" : "2026-10-16",
+            "evidence" : "make recipe-check: its check turn through a stand-in Vercel AI Gateway (doz try with --gateway vercel-ai-gateway; models@1)",
             "gateway" : "vercel-ai-gateway",
-            "level" : "unknown",
-            "reason" : "not checked against clai (Pydantic AI)"
+            "level" : "verified"
           }
         ]
       },
       "type" : "com.dozersandbox/gateways@1"
+    },
+    {
+      "config" : {
+        "default" : "xai",
+        "models" : {
+          "xai" : "grok-4-1-fast"
+        },
+        "shapes" : [
+          {
+            "env" : {
+              "DOZ_MODEL" : "openai-chat:${{ dozer.model }}",
+              "OPENAI_BASE_URL" : "${{ dozer.base_url }}"
+            },
+            "key_env" : [
+              "OPENAI_API_KEY"
+            ],
+            "shape" : "openai-chat",
+            "source" : "https://ai.pydantic.dev/models/openai/#openai-compatible-models"
+          },
+          {
+            "env" : {
+              "ANTHROPIC_BASE_URL" : "${{ dozer.base_url }}",
+              "DOZ_MODEL" : "anthropic:${{ dozer.model }}"
+            },
+            "key_env" : [
+              "ANTHROPIC_API_KEY"
+            ],
+            "shape" : "anthropic-messages",
+            "source" : "https://ai.pydantic.dev/models/anthropic/"
+          }
+        ]
+      },
+      "type" : "com.dozersandbox/models@1"
     },
     {
       "config" : {
@@ -282,12 +388,12 @@
             "evidence" : "A2 VM proof: its check turn answered DOZ_FAKE_OK through the fake provider (make recipe-check; probes/617-*/recipes/clai)",
             "level" : "verified",
             "notes" : [
-              "clai -m openai:MODEL PROMPT"
+              "clai PROMPT"
             ],
             "tag" : "headless"
           }
         ],
-        "terms" : "Your xAI API key — a key from console.x.ai."
+        "terms" : "Your API key of the provider or gateway you choose (xAI by default)."
       },
       "type" : "com.dozersandbox/directory@1"
     },
@@ -297,25 +403,25 @@
         "intro" : "clai is Pydantic AI's command line: its session on the left is a chat, and `clai` with a prompt answers once.",
         "steps" : [
           {
-            "command" : "clai -m openai:grok-4-1-fast --no-stream \"say ok\"",
+            "command" : "clai --no-stream \"say ok\"",
             "text" : "Check it answers."
           },
           {
             "text" : "Chat in its session on the left."
           },
           {
-            "command" : "clai -m openai:grok-4-1-fast --no-stream \"what is a sandbox, in one line?\"",
+            "command" : "clai --no-stream \"what is a sandbox, in one line?\"",
             "text" : "One question."
           }
         ],
         "tips" : [
-          "Its model is fixed in the session's command (`-m openai:grok-4-1-fast`)."
+          "Its model is `DOZ_MODEL`, set for the key you chose (`clai -m MODEL` picks another)."
         ]
       },
       "type" : "com.dozersandbox/guide@1"
     }
   ],
-  "description" : "Pydantic AI's command line for chatting with models, on an xAI API key.",
+  "description" : "Pydantic AI's command line for chatting with models, on the key of the provider or gateway you choose (xAI by default).",
   "displayName" : "clai (Pydantic AI)",
   "id" : "pydantic/clai",
   "kind" : "workload",

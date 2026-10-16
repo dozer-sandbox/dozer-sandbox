@@ -13,7 +13,7 @@ import { accountChooser, accountCommandsNode, accountForm } from '../components/
 import { table } from '../components/blocks-53c969feeec8fe89.js';
 import { btn } from '../components/button-cbb8a60e3220f977.js';
 import { callout } from '../components/callout-e7d97c36b36fe970.js';
-import { imagePicker, pickerNameHint } from '../components/image-picker-576337e5376588c0.js';
+import { imagePicker, pickerNameHint } from '../components/image-picker-a3da919656685919.js';
 import { wizHead, wizMount } from '../components/modal-8b94d803d636ec5e.js';
 import { refreshNav } from '../components/nav-6f650ce2ca4e8409.js';
 import { pageFailure, toast } from '../components/notices-0eac624a71d00e4f.js';
@@ -411,6 +411,7 @@ function wizStepUsage(d, w) {
 /// official build's package sends it; a confirmation email comes first. Nothing is pre-filled or pre-ticked; Skip
 /// moves on. The address is never kept in the page after the request.
 const SIGNUP_INTERESTS = [['release-news', 'Release news', 'A short email when a new version is out.'],
+  ['tool-news', 'Tool news', 'New and updated tools you can try in Dozer.'],
   ['early-access', 'Early access', 'Try new features before they are released.'],
   ['tips', 'Tips and tricks', 'Ways to get more out of Dozer, now and then.']];
 function wizStepSignup(d, w) {

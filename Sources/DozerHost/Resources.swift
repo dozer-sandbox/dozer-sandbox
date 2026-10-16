@@ -237,7 +237,9 @@ public enum Resources {
                                             // 596: the bases' resolved digests, the Dockerfiles and their builds.
                                             "base-digests.json", "dockerfiles.json",
                                             // 599e: the Access step's last checks (never a secret).
-                                            "access.json"]
+                                            "access.json",
+                                            // 618: the gateways' model lists (public, fetched by the host; a cache).
+                                            "model-lists.json"]
     static let builtInImages = ["lab", "claude-code", "pi", "codex"]
     /// 596: an image a preparation makes again (any base × agent — a template is not).
     static func isPreparedImage(_ name: String) -> Bool { builtInImages.contains(name) || ImageChoice.parse(name)?.name == name }

@@ -23,7 +23,7 @@ final class DirectoryIndexTests: XCTestCase {
         for r in AgentRecipes.all {
             let e = a.entries.first { $0.kind == "agent" && $0.id == r.id }
             XCTAssertEqual(e?.status, "supported", r.id)
-            XCTAssertEqual(e?.tryCommand, "doz try \(r.id)")
+            XCTAssertEqual(e?.tryCommand, "doz try \(AgentRef.typed(r))", "618: a family member by the name that means it")
             XCTAssertEqual(e?.tags.count, CapabilityTags.all.count, "every tag, at its level — a no is a fact too")
             XCTAssertEqual(e?.gateways.count, Gateways.all.count)
         }

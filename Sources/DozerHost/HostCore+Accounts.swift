@@ -171,6 +171,7 @@ extension HostCore {
         }
         let main: String?
         switch resolvedAccount(m, accountStore.load()) {
+        case .none where keylessSource(m) != nil: main = nil          // 618: a key-less source needs none
         case .none: main = AgentCredentials.sandboxProblem(image: m.sandbox.spec.imageSpec?.name, account: nil, missing: nil)
         case .missing(let n): main = AgentCredentials.sandboxProblem(image: m.sandbox.spec.imageSpec?.name, account: nil, missing: n)
         case .record(let a): main = AgentCredentials.sandboxProblem(image: m.sandbox.spec.imageSpec?.name, account: a, missing: nil)
@@ -321,14 +322,31 @@ extension HostCore {
         // 617: a key agent (Grok Build, Gemini CLI) uses its provider's key only — never an Anthropic binding.
         // 617: a multi-source recipe agent takes the source of the account it is given (OpenAI, OpenRouter, …) — its
         // default source's when it has none or one it cannot use.
+        // 618: a key-less source (OpenCode Zen's free models): no key of any source in its vault; a placeholder sent to
+        // any source's host is refused (the leak guard), and its own host gets nothing added.
+        if keylessSource(m) != nil {
+            for b in [CredentialBinding.anthropic, .claudeOAuth, .openai, .chatgpt] + KeyProviders.keyBindings { sb.egress?.vault.remove(b.id) }
+            sb.egress?.leakGuardHosts = Set(ModelSources.ids.flatMap(ModelSources.hosts))
+            applyPolicy(m, file)
+            return
+        }
         if let p = AgentCredentials.keyProvider(sb.spec.imageSpec?.name) {
             let resolved = resolvedAccount(m, file)
             var source = p
             if case .record(let a) = resolved, AgentCredentials.accepts(sb.spec.imageSpec?.name, a),
                let s = AgentCredentials.source(of: a).flatMap(KeyProviders.provider) { source = s }
-            applyKeyAccount(m, source, resolved)
-            applyPolicy(m, file)
-            return
+            // 618: a built-in agent with sources (pi) on an Anthropic key (or none) keeps its own path below — its
+            // per-sandbox key (`doz key set`) included; another source's key goes the recipe agents' way.
+            let builtin = ImageChoice.parse(sb.spec.imageSpec?.name ?? "")?.agent.recipe?.isBuiltin == true
+            if !(builtin && source.id == "anthropic") {
+                applyKeyAccount(m, source, resolved)
+                applyPolicy(m, file)
+                return
+            }
+            // Another source's key it held before (an account switched back to Anthropic) goes.
+            for other in [CredentialBinding.openai, .chatgpt] + KeyProviders.keyBindings { sb.egress?.vault.remove(other.id) }
+            // Its other sources' hosts are reachable (`sources:pi`): watched, so the key's placeholder sent there is refused.
+            sb.egress?.leakGuardHosts = Set(ModelSources.ids.flatMap(ModelSources.hosts))
         }
         switch resolvedAccount(m, file) {
         case .none:

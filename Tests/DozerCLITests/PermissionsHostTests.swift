@@ -158,7 +158,7 @@ final class PermissionsHostTests: XCTestCase {
         var f = CreateOptions(image: "go-pi")
         f.permissions = ["github"]
         let (fm, _) = try DozerImages.spec(name: "a5", options: f, store: store, environment: [:])
-        XCTAssertEqual(fm.network.policy?.permissions, ["model", "github", "vendor:pi"], "model forced on")
+        XCTAssertEqual(fm.network.policy?.permissions, ["model", "github", "vendor:pi", "sources:pi"], "model forced on")
         // The setting.
         let xdg = root.appendingPathComponent("xdg")
         try FileManager.default.createDirectory(at: xdg.appendingPathComponent("dozer-sandbox"), withIntermediateDirectories: true)

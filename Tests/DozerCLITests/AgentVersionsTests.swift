@@ -160,15 +160,15 @@ final class AgentVersionsTests: XCTestCase {
                        "an exact version not known is asked for once, then known")
     }
 
-    /// latest with no network and no image: a clear error naming an exact version.
-    func testOfflineWithNothingPreparedSaysWhatToDo() async throws {
+    /// latest with no network and no image: the pin — exactly what a store whose registry was never asked plans (618: a
+    /// host that had failed to reach the registry refused instead, so the dashboard and `doz try --dry-run` disagreed).
+    func testOfflineWithNothingPreparedPlansThePinLikeNeverAsked() async throws {
+        let neverAsked = try AgentVersions.spec("claude-code", purpose: .create, store: store, settings: latest)?.agent?.version
         let stub = Stub()
         stub.fail = "the Internet connection appears to be offline"
         await AgentVersions.refresh("claude-code", store: store, settings: latest, registry: stub.registry)
-        XCTAssertThrowsError(try AgentVersions.spec("claude-code", purpose: .create, store: store, settings: latest)) {
-            let m = ($0 as? HostError)?.message ?? ""
-            XCTAssertTrue(m.contains("could not be reached") && m.contains("doz config set images.claude_code_version 2.1.227"), m)
-        }
+        XCTAssertEqual(try AgentVersions.spec("claude-code", purpose: .create, store: store, settings: latest)?.agent?.version, "2.1.227")
+        XCTAssertEqual(neverAsked, "2.1.227")
         // An exact pin always works from what the store has.
         let pinned = DozerSettings(text: "[images]\nclaude_code_version = \"2.1.227\"\n")
         XCTAssertEqual(try AgentVersions.spec("claude-code", purpose: .create, store: store, settings: pinned)?.agent?.version, "2.1.227")

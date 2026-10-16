@@ -201,6 +201,8 @@ public struct DirectoryIndex: Codable, Sendable, Equatable {
         public var gateway: String
         public var level: String
         public var reason: String?
+        /// 618: a try can go through it (`doz try ID --gateway GATEWAY`) — models@1 offers it.
+        public var offered: Bool?
     }
 
     public struct TagFact: Codable, Sendable, Equatable {
@@ -257,10 +259,10 @@ public struct DirectoryIndex: Codable, Sendable, Equatable {
                      keys: r.credentials.map { KeyRef(provider: $0.provider, accounts: $0.accounts) },
                      reach: Reach(model: model, update: r.network.update.map { HostPaths(host: $0.host, paths: $0.paths) }, excluded: r.network.excluded),
                      install: Install(kind: r.install.kind, version: r.install.pinned.version, source: r.install.package),
-                     defaultBase: r.defaultBase, terms: r.terms, tryCommand: "doz try \(r.id)", homepage: r.homepage,
+                     defaultBase: r.defaultBase, terms: r.terms, tryCommand: "doz try \(AgentRef.typed(r))", homepage: r.homepage,
                      auth: r.auth.methods.map { AuthFact(kind: $0.kind, provider: $0.provider, keysPage: $0.keysPage, freeTier: $0.freeTier,
                                                          freeTierNote: $0.freeTierNote, account: $0.account, note: $0.note, checked: $0.checked) },
-                     gateways: r.gateways.map { GatewayFact(gateway: $0.gateway, level: $0.level, reason: $0.reason) },
+                     gateways: r.gatewaySupport.map { GatewayFact(gateway: $0.gateway, level: $0.level, reason: $0.reason, offered: r.offersGateway($0.gateway)) },
                      tags: r.capabilityTags.map { TagFact(tag: $0.tag, level: $0.level) }, agents: nil, lifecycle: r.lifecycle,
                      icon: IconRef(AgentIcons.resolve(r)), catalogKind: r.catalogKind, categories: r.categories)
     }

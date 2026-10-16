@@ -1,15 +1,16 @@
 // views/new-sandbox — The New Sandbox wizard (599f): the same model as doz init.
 import { $, h } from '../dom/h.js';
 import { icon } from '../dom/icons.js';
-import { AGENT_NAMES, parseImageName } from '../core/agents.js';
+import { AGENT_NAMES, agentKey, parseImageName } from '../core/agents.js';
 import { api } from '../core/api.js';
 import { plural } from '../core/format.js';
 import { actOrThrow, waitOp } from '../core/operations.js';
-import { setting } from '../core/settings.js';
+import { secretEntryAllowed, setting } from '../core/settings.js';
 import { state } from '../core/state.js';
 import { isRemote } from '../core/session.js';
 import { renderAccessStep } from '../components/access-step.js';
-import { accountChooser } from '../components/accounts.js';
+import { accountChooser, accountForm, sourceOf } from '../components/accounts.js';
+import { modelPicker, noKeyNodes, resetModelSearch, sourceCommand, sourceList } from '../components/model-source.js';
 import { btn } from '../components/button.js';
 import { callout } from '../components/callout.js';
 import { createDialog } from '../components/create-dialog.js';
@@ -34,7 +35,7 @@ import { tildePath } from '../core/paths.js';
 // diff and a yes), then makes the sandbox as `doz up` would and opens it with the boot view, as Quick add does.
 const NW_FIELD = { cpus: 'cpus', memory: 'memory', network: 'network', permissions: 'permissions', account: 'account', github: 'github',
                    agent_sudo: 'agentSudo', ssh_agent: 'sshAgent', clipboard: 'clipboard', browser_bridge: 'browserBridge', open_files: 'openFiles', tmux: 'tmux',
-                   ignore_mode: 'ignoreMode' };
+                   ignore_mode: 'ignoreMode', model_source: 'modelSource', model: 'model' };
 export function newSandboxWizard(start = {}) {
   // 603: a draft left by the browser's Back is resumed, never silently replaced (a new start asks first).
   const go = () => { if (location.hash === '#/new') renderModal(true); else location.hash = '#/new'; };
@@ -104,7 +105,7 @@ function nwAnswer(id) {
   switch (id) {
     case 'folder': return nw.open ? tildePath(nw.open.folder) : null;
     case 'image': return f.name + ' · ' + (f.dockerfile ? 'Dockerfile' : f.image);
-    case 'account': { const a = nwAgent(f); return a ? (f.account && f.account !== 'default' ? f.account : 'the store default') : 'none needed'; }
+    case 'account': { const a = nwAgent(f); return a ? (f.account && f.account !== 'default' ? f.account : 'the store default') + (f.modelSource ? ' · ' + f.modelSource : '') + (f.model ? ' · ' + f.model : '') : 'none needed'; }
     case 'access': { const g = f.github || setting('defaults.github', 'off'), ssh = f.sshAgent || setting('sandbox.ssh_agent', 'off');
       return 'GitHub ' + ({ off: 'off', read: 'read-only', push: 'read and push' }[g] || g) + ' · SSH ' + ssh; }
     case 'rules': return f.ignoreMode || setting('workspace.ignore_mode', 'lock');
@@ -347,11 +348,84 @@ function nwAccount() {
   if (!nwPermissionNet(nwNetwork(f)) && nwNetwork(f) !== 'bake') {
     return { el: h('p', { class: 'muted' }, 'Its network (' + nwNetwork(f) + ') reaches no account’s API: it uses none.') };
   }
+  // 618: an agent that takes a key of several sources (pi, the recipe agents) — "Where TOOL gets its model", as Try.
+  const srcKey = agentKey(agent, nw.accounts.sources || {});
+  if (nw.accounts.sources && nw.accounts.sources[srcKey] && nw.accounts.sources[srcKey].length) return nwModelSource(agent, nw.accounts.sources[srcKey]);
   const acct = accountChooser({ accounts: nw.accounts, agent: () => agent, defaultValue: 'default', value: f.account || null,
                                 onChange: () => { nwSet('account', acct.get() || 'default'); } });
   return {
     el: h('div', { class: 'nw-fields' }, acct.el, h('small', { class: 'muted' }, 'The account the Mac’s proxy uses for it — the sandbox only ever sees a placeholder.')),
     collect() { if (!acct.ok()) throw new Error((AGENT_NAMES[agent] || 'This agent') + ' needs an Anthropic API key — add one above, or go back and choose another agent.'); },
+  };
+}
+/// 618: the account step for an agent with a choice of model source — the source (its key in the row), then the model.
+/// The choices become the file's model_source / model / account (the tool's own source and its default model: none).
+function nwModelSource(agent, ids) {
+  resetModelSearch();
+  const nw = state.nw, f = nw.form, acc = nw.accounts;
+  const tool = AGENT_NAMES[agent] || (acc.agentTitles || {})[agent] || agent;
+  const titles = acc.sourceTitles || {}, gateways = new Set(acc.gatewaySources || []), models = acc.sourceModels || {};
+  const keyless = new Set(acc.keylessSources || []);          // 618: OpenCode Zen's free models — no key, no account
+  const sources = ids.map((id) => ({ id, title: titles[id] || id, gateway: gateways.has(id), defaultModel: models[id] || null,
+                                     accountKind: keyless.has(id) ? 'none' : id === 'anthropic' ? 'api-key' : id === 'openai' ? 'openai-key' : 'key' }));
+  const keysOf = (id) => acc.accounts.filter((x) => sourceOf(x) === id).sort((x, y) => (y.isDefault ? 1 : 0) - (x.isDefault ? 1 : 0));
+  const chosen = f.modelSource || ids[0];
+  if (!f.account || f.account === 'default' || !keysOf(chosen).some((x) => x.name === f.account)) {
+    const k = keysOf(chosen)[0];
+    if (k && k.name !== f.account) nwSet('account', k.name);
+  }
+  const box = h('div', { class: 'nw-fields', 'data-nw-model-source': '' });
+  const paint = () => {
+    const src = f.modelSource || ids[0];
+    const need = (id) => {
+      const s = sources.find((x) => x.id === id), keys = keysOf(id);
+      if (keyless.has(id)) return noKeyNodes(s);
+      if (keys.length && !nw.addingKey) {
+        if (keys.length === 1) {
+          return [h('div', { class: 'ms-keyline' }, icon('key-round'), h('span', null, 'Uses ', h('strong', null, keys[0].name),
+            ' — ' + (keys[0].sourceLabel || 'Keychain') + ' · the sandbox only ever sees a placeholder')),
+            h('div', null, btn('Add another key', () => { nw.addingKey = true; paint(); }, { small: true, quiet: true, icon: 'plus' }))];
+        }
+        const sel = h('select', { 'aria-label': 'Key', 'data-nw-key': '' }, ...keys.map((x) => h('option', { value: x.name }, x.name + (x.isDefault ? ' (default)' : ''))));
+        sel.value = keys.some((x) => x.name === f.account) ? f.account : keys[0].name;
+        sel.addEventListener('change', () => { nwSet('account', sel.value); });
+        return [h('div', { class: 'ms-keyline' }, icon('key-round'), h('span', null, 'Key'), sel),
+          h('div', null, btn('Add another key', () => { nw.addingKey = true; paint(); }, { small: true, quiet: true, icon: 'plus' }))];
+      }
+      const n = keys.length ? id + '-' + (keys.length + 1) : id;
+      const form = secretEntryAllowed()
+        ? accountForm({ sources: [id], titles, name: acc.accounts.some((x) => x.name === n) ? n + '-2' : n,
+            onAdded: (r, name) => { nw.accounts = r; nw.addingKey = false; nwSet('account', name); toast('Key saved — ' + name + ' (' + s.title + ')'); paint(); } })
+        : h('div', { class: 'muted ms-small', 'data-secret-why': '1' }, 'Pasting keys here is off (ui.allow_secret_entry) — in a terminal: doz account add NAME ' +
+            (s.accountKind === 'api-key' ? '--api-key' : s.accountKind === 'openai-key' ? '--openai-key' : '--provider ' + id));
+      return [form, h('details', { class: 'ms-other' }, h('summary', null, 'Keep it in 1Password, AWS or a program instead'),
+        h('code', { class: 'ms-cmd' }, sourceCommand(id, s.accountKind)),
+        h('div', { class: 'muted ms-small' }, 'or --from aws:arn:… or --from-command \'…\' — then Check again.'),
+        h('div', null, btn('Check again', async () => { try { nw.accounts = await api('accounts'); } catch (_) { /* keep */ } paint(); }, { small: true, quiet: true, icon: 'refresh-cw' })))];
+    };
+    const list = sourceList({ tool, sources, chosen: src, keysOf, needFor: need,
+      onChoose: (id) => {
+        nwSet('model_source', id === ids[0] ? null : id); nwSet('model', null); nw.addingKey = false;
+        const k = keysOf(id)[0];
+        nwSet('account', k ? k.name : 'default');
+        paint();
+      } });
+    const ready = keyless.has(src) || keysOf(src).length > 0;
+    const s = sources.find((x) => x.id === src);
+    box.replaceChildren(h('div', { class: 'qt-sect' }, h('h3', null, 'Where ' + tool + ' gets its model'),
+      ids.length > 1 ? h('p', { class: 'muted ms-lead' }, 'Its own provider is chosen; any other — or a gateway — works the same way.') : null, ...list),
+      ready ? h('div', { class: 'qt-sect' }, h('h3', null, 'Model'),
+        modelPicker({ source: src, title: s.title, gateway: s.gateway, current: f.model || s.defaultModel,
+          onPick: (id, isDefault) => { nwSet('model', isDefault ? null : id); paint(); } })) : null,
+      h('small', { class: 'muted' }, 'The key the Mac’s proxy uses for it — the sandbox only ever sees a placeholder. Written to doz_project.yaml as model_source and model.'));
+  };
+  paint();
+  return {
+    el: box,
+    collect() {
+      const src = f.modelSource || ids[0];
+      if (!keyless.has(src) && !keysOf(src).length) throw new Error('Save ' + (/^[AEIOUx]/.test(titles[src] || src) ? 'an ' : 'a ') + (titles[src] || src) + ' key, or choose a source that has one.');
+    },
   };
 }
 function nwAccess() {

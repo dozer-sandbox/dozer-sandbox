@@ -33,7 +33,7 @@ agent is told about where it runs.
   | agent | accounts it can use |
   |---|---|
   | Claude Code | `mac`, a setup token, an API key |
-  | pi | an API key only (a Claude subscription is never given to it) |
+  | pi | an API key only (a Claude subscription is never given to it): Anthropic's (the default), or an OpenAI, xAI, Google AI, OpenRouter or Vercel AI Gateway key (`doz try pi --gateway openrouter`); off Anthropic, Dozer puts the model on its session's command line (`--model PROVIDER/MODEL`) |
   | Codex | `mac` (this Mac's Codex login), a ChatGPT sign-in or an OpenAI API key — never an Anthropic account (and no Claude agent ever gets an OpenAI one) |
 
   This is checked **before** a sandbox is made. With no account pi can use, Dozer stops and tells you

@@ -42,6 +42,7 @@ node-maki credentials=xai:key agentName=Maki package=nil pinned=nil
 node-omp credentials=xai:key agentName=oh-my-pi package=nil pinned=nil
 node-tau credentials=xai:key agentName=Tau package=nil pinned=nil
 node-stitch credentials=google-stitch:key agentName=Google Stitch CLI package=nil pinned=nil
+node-opencode2 credentials=xai:key agentName=OpenCode 2 package=nil pinned=nil
 python-claude-code credentials=anthropic:mac,setup-token,api-key agentName=Claude Code package=nil pinned=nil
 python-pi credentials=anthropic:api-key agentName=pi package=nil pinned=nil
 python credentials=nil agentName=nil package=nil pinned=nil
@@ -85,6 +86,7 @@ python-maki credentials=xai:key agentName=Maki package=nil pinned=nil
 python-omp credentials=xai:key agentName=oh-my-pi package=nil pinned=nil
 python-tau credentials=xai:key agentName=Tau package=nil pinned=nil
 python-stitch credentials=google-stitch:key agentName=Google Stitch CLI package=nil pinned=nil
+python-opencode2 credentials=xai:key agentName=OpenCode 2 package=nil pinned=nil
 go-claude-code credentials=anthropic:mac,setup-token,api-key agentName=Claude Code package=nil pinned=nil
 go-pi credentials=anthropic:api-key agentName=pi package=nil pinned=nil
 go credentials=nil agentName=nil package=nil pinned=nil
@@ -128,6 +130,7 @@ go-maki credentials=xai:key agentName=Maki package=nil pinned=nil
 go-omp credentials=xai:key agentName=oh-my-pi package=nil pinned=nil
 go-tau credentials=xai:key agentName=Tau package=nil pinned=nil
 go-stitch credentials=google-stitch:key agentName=Google Stitch CLI package=nil pinned=nil
+go-opencode2 credentials=xai:key agentName=OpenCode 2 package=nil pinned=nil
 rust-claude-code credentials=anthropic:mac,setup-token,api-key agentName=Claude Code package=nil pinned=nil
 rust-pi credentials=anthropic:api-key agentName=pi package=nil pinned=nil
 rust credentials=nil agentName=nil package=nil pinned=nil
@@ -171,6 +174,7 @@ rust-maki credentials=xai:key agentName=Maki package=nil pinned=nil
 rust-omp credentials=xai:key agentName=oh-my-pi package=nil pinned=nil
 rust-tau credentials=xai:key agentName=Tau package=nil pinned=nil
 rust-stitch credentials=google-stitch:key agentName=Google Stitch CLI package=nil pinned=nil
+rust-opencode2 credentials=xai:key agentName=OpenCode 2 package=nil pinned=nil
 java-claude-code credentials=anthropic:mac,setup-token,api-key agentName=Claude Code package=nil pinned=nil
 java-pi credentials=anthropic:api-key agentName=pi package=nil pinned=nil
 java credentials=nil agentName=nil package=nil pinned=nil
@@ -214,6 +218,7 @@ java-maki credentials=xai:key agentName=Maki package=nil pinned=nil
 java-omp credentials=xai:key agentName=oh-my-pi package=nil pinned=nil
 java-tau credentials=xai:key agentName=Tau package=nil pinned=nil
 java-stitch credentials=google-stitch:key agentName=Google Stitch CLI package=nil pinned=nil
+java-opencode2 credentials=xai:key agentName=OpenCode 2 package=nil pinned=nil
 ruby-claude-code credentials=anthropic:mac,setup-token,api-key agentName=Claude Code package=nil pinned=nil
 ruby-pi credentials=anthropic:api-key agentName=pi package=nil pinned=nil
 ruby credentials=nil agentName=nil package=nil pinned=nil
@@ -257,6 +262,7 @@ ruby-maki credentials=xai:key agentName=Maki package=nil pinned=nil
 ruby-omp credentials=xai:key agentName=oh-my-pi package=nil pinned=nil
 ruby-tau credentials=xai:key agentName=Tau package=nil pinned=nil
 ruby-stitch credentials=google-stitch:key agentName=Google Stitch CLI package=nil pinned=nil
+ruby-opencode2 credentials=xai:key agentName=OpenCode 2 package=nil pinned=nil
 dotnet-claude-code credentials=anthropic:mac,setup-token,api-key agentName=Claude Code package=nil pinned=nil
 dotnet-pi credentials=anthropic:api-key agentName=pi package=nil pinned=nil
 dotnet credentials=nil agentName=nil package=nil pinned=nil
@@ -300,6 +306,7 @@ dotnet-maki credentials=xai:key agentName=Maki package=nil pinned=nil
 dotnet-omp credentials=xai:key agentName=oh-my-pi package=nil pinned=nil
 dotnet-tau credentials=xai:key agentName=Tau package=nil pinned=nil
 dotnet-stitch credentials=google-stitch:key agentName=Google Stitch CLI package=nil pinned=nil
+dotnet-opencode2 credentials=xai:key agentName=OpenCode 2 package=nil pinned=nil
 debian-claude-code credentials=anthropic:mac,setup-token,api-key agentName=Claude Code package=nil pinned=nil
 debian-pi credentials=anthropic:api-key agentName=pi package=nil pinned=nil
 debian credentials=nil agentName=nil package=nil pinned=nil
@@ -343,6 +350,7 @@ maki credentials=xai:key agentName=Maki package=nil pinned=0.6.3 sha512-EvaWRSZi
 omp credentials=xai:key agentName=oh-my-pi package=nil pinned=18.10.4 sha512-3ZmxKel2M9fL+bMtRZe9SLZSzJpW3CPn04l8ShQXjNx3r34o8iZKhReT1PEoPWr5N/s/fH+UIdhemFj0Ytv/yg==
 tau credentials=xai:key agentName=Tau package=tau-ai pinned=0.4.7 sha512-d4WAekaGnc6sVNtqtN57wIGdKTbGa/EsnvCPa2rKShDZ5u/UmycxtREaYLqCW7QRkW7WygD2slaHwb5SbNBe9Q==
 stitch credentials=google-stitch:key agentName=Google Stitch CLI package=@google/stitch pinned=0.11.1 sha512-MzzAvOMU8AuvmIDJpAONSs5oJuHLofMleWsTNChw0HmzrPIWdI9d597BTtQXOypzXqwwy+8E3dU0vzGtj0ucDg==
+opencode2 credentials=xai:key agentName=OpenCode 2 package=@opencode/cli pinned=2.0.29 sha512-EsCnvp5lMJNem0YoQJM9PkXY0KrkiugL55M9J2JlImQzKdQnZ4CKutrPAXOnsa889qHhY5tjRpAnD/ZYFzhkRA==
 ubuntu-claude-code credentials=anthropic:mac,setup-token,api-key agentName=Claude Code package=nil pinned=nil
 ubuntu-pi credentials=anthropic:api-key agentName=pi package=nil pinned=nil
 ubuntu credentials=nil agentName=nil package=nil pinned=nil
@@ -386,6 +394,7 @@ ubuntu-maki credentials=xai:key agentName=Maki package=nil pinned=nil
 ubuntu-omp credentials=xai:key agentName=oh-my-pi package=nil pinned=nil
 ubuntu-tau credentials=xai:key agentName=Tau package=nil pinned=nil
 ubuntu-stitch credentials=google-stitch:key agentName=Google Stitch CLI package=nil pinned=nil
+ubuntu-opencode2 credentials=xai:key agentName=OpenCode 2 package=nil pinned=nil
 alpine-claude-code credentials=anthropic:mac,setup-token,api-key agentName=Claude Code package=nil pinned=nil
 alpine-pi credentials=anthropic:api-key agentName=pi package=nil pinned=nil
 alpine-codex credentials=openai:codex-mac,chatgpt,openai-key agentName=Codex package=nil pinned=nil
@@ -428,6 +437,7 @@ alpine-maki credentials=xai:key agentName=Maki package=nil pinned=nil
 alpine-omp credentials=xai:key agentName=oh-my-pi package=nil pinned=nil
 alpine-tau credentials=xai:key agentName=Tau package=nil pinned=nil
 alpine-stitch credentials=google-stitch:key agentName=Google Stitch CLI package=nil pinned=nil
+alpine-opencode2 credentials=xai:key agentName=OpenCode 2 package=nil pinned=nil
 df-0123456789ab-claude-code credentials=anthropic:mac,setup-token,api-key agentName=Claude Code package=nil pinned=nil
 df-0123456789ab-pi credentials=anthropic:api-key agentName=pi package=nil pinned=nil
 df-0123456789ab credentials=nil agentName=nil package=nil pinned=nil
@@ -471,3 +481,4 @@ df-0123456789ab-maki credentials=xai:key agentName=Maki package=nil pinned=nil
 df-0123456789ab-omp credentials=xai:key agentName=oh-my-pi package=nil pinned=nil
 df-0123456789ab-tau credentials=xai:key agentName=Tau package=nil pinned=nil
 df-0123456789ab-stitch credentials=google-stitch:key agentName=Google Stitch CLI package=nil pinned=nil
+df-0123456789ab-opencode2 credentials=xai:key agentName=OpenCode 2 package=nil pinned=nil

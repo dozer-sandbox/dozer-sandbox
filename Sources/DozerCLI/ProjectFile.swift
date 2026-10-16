@@ -89,7 +89,8 @@ extension DozerProject {
                 image = s
             case "agent":
                 let s = try scalarString(v, key)
-                guard AgentKind(rawValue: s) != nil else { throw bad(v, "agent: \(DozerProject.agentWords)") }
+                // 618: a tool's major or release too (opencode@1, opencode@2.0.28).
+                if let why = DozerProject.agentProblem(s) { throw bad(v, why) }
                 p.agent = s
             case "base":
                 let s = try scalarString(v, key)
@@ -176,6 +177,15 @@ extension DozerProject {
                 let s = v.bool == false ? "off" : try scalarString(v, key)
                 guard ["off", "read", "push"].contains(s) else { throw bad(v, "github: off, read or push") }
                 p.github = s
+            case "model_source":
+                // 618: where the model comes from — checked against the agent's offered sources below (problem()).
+                let s = try scalarString(v, key)
+                guard ModelSources.ids.contains(s) else { throw bad(v, "model_source: \(ModelSources.ids.joined(separator: ", ")) (doz models)") }
+                p.modelSource = s
+            case "model":
+                let s = try scalarString(v, key)
+                guard ModelSelection.isModelID(s) else { throw bad(v, "model: a model id — letters, digits and . _ : / @ + - (doz models)") }
+                p.model = s
             case "keys":
                 // 617: custom key accounts — a list of names (or one name).
                 let names: [String]

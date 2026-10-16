@@ -140,6 +140,7 @@ let package = Package(
                 .embedInCode("Recipes/compiled/omp.json"),
                 .embedInCode("Recipes/compiled/tau.json"),
                 .embedInCode("Recipes/compiled/stitch.json"),
+                .embedInCode("Recipes/compiled/opencode2.json"),
                 .embedInCode("Recipes/providers.json"),
                 .embedInCode("Recipes/gateways.json"),
                 .embedInCode("Recipes/tags.json"),

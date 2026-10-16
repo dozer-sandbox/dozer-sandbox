@@ -45,10 +45,15 @@ export function imagePicker({ images = [], bases = null, value = 'claude-code', 
         const first = agentList.find((x) => x.kind === id);
         if (first && sectionOf(agent) !== id) choose(first.id); else changed();
       } } }, withIcon(ic, label)))));
+  // 618: a family (OpenCode 1 and 2) is ONE chip — its recommended major — and a Version choice below reaches the others.
+  const familyOf = (a) => { const c = agentList.find((x) => x.id === a); return c && c.family ? agentList.filter((x) => x.family && x.family.name === c.family.name).sort((x, y) => x.family.major - y.family.major) : []; };
+  const chipOf = (a) => { const f = familyOf(a); return f.length ? (f.find((x) => x.family.recommended) || f[0]).id : a; };
   const agentSegs = {};
   const agentCtl = h('div', { class: 'segmented agent-chips', role: 'group', 'aria-label': 'Agent', 'data-agent-choice': '' },
-    [...agentList.map((x) => [x.id, x.title]), ['none', 'none']].map(([a, label]) => (agentSegs[a] = h('button', { type: 'button', class: 'seg', 'data-agent': a,
-      on: { click: () => { section = sectionOf(a); choose(a); } } }, label))));
+    [...agentList.filter((x) => !x.family || x.family.recommended).map((x) => [x.id, x.family ? x.title.replace(/ \d+$/, '') : x.title]), ['none', 'none']]
+      .map(([a, label]) => (agentSegs[a] = h('button', { type: 'button', class: 'seg', 'data-agent': a,
+        on: { click: () => { section = sectionOf(a); choose(a); } } }, label))));
+  const versionCtl = h('div', { class: 'segmented agent-versions', role: 'group', 'aria-label': 'Version', 'data-agent-version': '' });
   // Base kind.
   const kindSegs = {};
   const kindSeg = (k, label, ic, extra = {}) => (kindSegs[k] = h('button', { type: 'button', class: 'seg', 'data-base-kind': k, ...extra,
@@ -135,10 +140,17 @@ export function imagePicker({ images = [], bases = null, value = 'claude-code', 
   function paint() {
     for (const [id, b] of Object.entries(sectionSegs)) { b.classList.toggle('active', id === section); b.setAttribute('aria-pressed', id === section ? 'true' : 'false'); b.disabled = kind === 'template'; }
     for (const [a, b] of Object.entries(agentSegs)) {
-      b.classList.toggle('active', a === agent); b.setAttribute('aria-pressed', a === agent ? 'true' : 'false'); b.disabled = kind === 'template';
+      const on = a === chipOf(agent);
+      b.classList.toggle('active', on); b.setAttribute('aria-pressed', on ? 'true' : 'false'); b.disabled = kind === 'template';
       b.hidden = section === 'none' || sectionOf(a) !== section;          // only the section's agents (none: no list)
     }
     agentCtl.hidden = section === 'none';
+    // 618: the chosen family's majors (a sandbox keeps the one it is made with).
+    const fam = section === 'none' ? [] : familyOf(agent);
+    versionCtl.hidden = fam.length < 2;
+    versionCtl.replaceChildren(...fam.map((x) => h('button', { type: 'button', class: 'seg' + (x.id === agent ? ' active' : ''),
+      'aria-pressed': x.id === agent ? 'true' : 'false', 'data-agent-version-choice': x.id, disabled: kind === 'template',
+      on: { click: () => choose(x.id) } }, x.family.title + (x.family.recommended ? ' (recommended)' : ''))));
     // A recipe agent that cannot run on Alpine: that base's card says so (never chosen for it).
     const c = agentList.find((x) => x.id === agent);
     for (const [id, card] of Object.entries(cards)) {
@@ -165,7 +177,7 @@ export function imagePicker({ images = [], bases = null, value = 'claude-code', 
   }
   paint();
   const el = h('div', { class: 'field image-picker' },
-    h('span', null, 'Agent'), sectionCtl, agentCtl,
+    h('span', null, 'Agent'), sectionCtl, agentCtl, versionCtl,
     h('span', null, 'Base'), kindCtl, grid, dfPanel, tplPanel, summary, byName);
   return {
     el,

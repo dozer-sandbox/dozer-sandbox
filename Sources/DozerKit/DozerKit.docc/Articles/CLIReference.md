@@ -77,7 +77,7 @@ doz uninstall [--keep-store] [--keep-config] [--yes]
   first if it never was). **`up` with no name**, in that folder, creates, starts or wakes exactly
   that sandbox, with the folder at `/workspace`, starts its `sessions` and attaches to the first.
   The file is YAML with a closed set of keys — `version`, `name`, `image`, `cpus`, `memory`,
-  `network`, `account`, `sessions`, `agent_prompt`, `agent_prompt_mode`, `agent_sudo`, `clipboard`, `browser_bridge`, `tmux`; an unknown key or a bad
+  `network`, `account`, `model_source`, `model`, `sessions`, `agent_prompt`, `agent_prompt_mode`, `agent_sudo`, `clipboard`, `browser_bridge`, `tmux`; an unknown key or a bad
   value is an error naming its line.
 
   ```yaml
@@ -299,6 +299,8 @@ doz try grok                                     # try an agent: a new empty fol
 doz try --ui grok                                # the same in the dashboard's Quick try (#/try/grok; doz ui started in the background if needed)
 doz try grok --dry-run --json                    # the plan (also --dry-run on new, create, up)
 doz search grok                                  # supported? exit 0 supported · 8 limited · 6 coming · 2 unknown
+doz models --gateway openrouter sonnet           # a gateway's models (read on this Mac once a day; --refresh now); --provider X: its checked default
+doz try opencode --provider opencode-zen         # OpenCode 2 on OpenCode Zen's free models: no key, no account (doz models --provider opencode-zen: each with its data terms)
 doz guide try-fabric                             # how to use its agent or tool: this sandbox's facts, the first steps, tips (--json)
 doz account add grok --provider xai --from op://Dev/xAI/credential   # read on use from 1Password / aws:ARN / --from-command 'ARGV'
 doz account show grok                            # where its key comes from and the last read — never the key
@@ -717,7 +719,7 @@ the guest binaries, and credentials.
 doz telemetry [show] [--json]   # whether this doz sends anonymous usage statistics, why, the install id,
                                 # and exactly what it would send (after the next command, and today so far)
 doz telemetry reset             # a new random install id; the day's counts forgotten
-doz signup [--email ADDRESS] [--interest release-news|early-access|tips …] [-y]
+doz signup [--email ADDRESS] [--interest release-news|tool-news|early-access|tips …] [-y]
                                 # optional: news from Dozer by email (asked on a terminal); confirmed first
 ```
 

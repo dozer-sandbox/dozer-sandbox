@@ -18,16 +18,37 @@
           "model" : {
             "hosts" : [
               {
+                "host" : "api.anthropic.com",
+                "reason" : "Anthropic — when the sandbox's key is Anthropic's"
+              },
+              {
+                "host" : "api.openai.com",
+                "reason" : "OpenAI — when the sandbox's key is OpenAI's"
+              },
+              {
                 "host" : "api.x.ai",
                 "paths" : [
                   "/v1/chat/completions"
-                ]
+                ],
+                "reason" : "xAI — when the sandbox's key is xAI's"
+              },
+              {
+                "host" : "generativelanguage.googleapis.com",
+                "reason" : "Google AI — when the sandbox's key is Google AI's"
+              },
+              {
+                "host" : "openrouter.ai",
+                "reason" : "OpenRouter — when the sandbox's key is OpenRouter's"
+              },
+              {
+                "host" : "ai-gateway.vercel.sh",
+                "reason" : "Vercel AI Gateway — when the sandbox's key is Vercel AI Gateway's"
               }
             ],
             "id" : "model:mini-swe-agent",
-            "phrase" : "talk to your AI model (xAI)",
-            "summary" : "mini-swe-agent's model here (the xAI API, with your key) — needed for it to answer.",
-            "title" : "Talk to xAI"
+            "phrase" : "talk to your AI model",
+            "summary" : "mini-SWE-agent's model — the provider or gateway its key is for (Anthropic, OpenAI, xAI, Google AI, OpenRouter or Vercel AI Gateway), with an API key. Needed for mini-SWE-agent to answer.",
+            "title" : "Talk to its model provider"
           },
           "update" : [
 
@@ -35,7 +56,12 @@
         },
         "runtime" : {
           "allow" : [
-            "api.x.ai:443"
+            "api.anthropic.com:443",
+            "api.openai.com:443",
+            "api.x.ai:443",
+            "generativelanguage.googleapis.com:443",
+            "openrouter.ai:443",
+            "ai-gateway.vercel.sh:443"
           ]
         }
       },
@@ -167,8 +193,6 @@
         "check" : {
           "argv" : [
             "mini",
-            "-m",
-            "xai/grok-build-0.1",
             "-t",
             "say ok",
             "--yolo",
@@ -179,9 +203,7 @@
           "expect" : "DOZ_FAKE_OK"
         },
         "command" : [
-          "mini",
-          "-m",
-          "xai/grok-build-0.1"
+          "mini"
         ],
         "env" : {
           "LITELLM_LOCAL_MODEL_COST_MAP" : "True",
@@ -218,11 +240,61 @@
             "accounts" : [
               "key"
             ],
-            "checked" : "2026-10-14",
+            "checked" : "2026-10-16",
             "keys_page" : "https://console.x.ai/",
             "kind" : "api-key",
-            "note" : "mini-swe-agent's LiteLLM model xai/grok-build-0.1 reads XAI_API_KEY; its own .env setup (mini-extra config) is skipped (MSWEA_CONFIGURED).",
+            "note" : "mini-SWE-agent's LiteLLM model from the environment (MSWEA_MODEL_NAME openai/MODEL with OPENAI_BASE_URL for an OpenAI-compatible provider or gateway, anthropic/MODEL with ANTHROPIC_BASE_URL); on xAI (the default) the model is grok-build-0.1. Its own .env setup (mini-extra config) is skipped (MSWEA_CONFIGURED).",
             "provider" : "xai"
+          },
+          {
+            "accounts" : [
+              "api-key"
+            ],
+            "checked" : "2026-10-16",
+            "keys_page" : "https://console.anthropic.com/settings/keys",
+            "kind" : "api-key",
+            "note" : "mini-SWE-agent through Anthropic: doz try mini-swe-agent --provider anthropic (or choose it in the try setup); the model with --model.",
+            "provider" : "anthropic"
+          },
+          {
+            "accounts" : [
+              "openai-key"
+            ],
+            "checked" : "2026-10-16",
+            "keys_page" : "https://platform.openai.com/api-keys",
+            "kind" : "api-key",
+            "note" : "mini-SWE-agent through OpenAI: doz try mini-swe-agent --provider openai (or choose it in the try setup); the model with --model.",
+            "provider" : "openai"
+          },
+          {
+            "accounts" : [
+              "key"
+            ],
+            "checked" : "2026-10-16",
+            "keys_page" : "https://aistudio.google.com/apikey",
+            "kind" : "api-key",
+            "note" : "mini-SWE-agent through Google AI: doz try mini-swe-agent --provider google (or choose it in the try setup); the model with --model.",
+            "provider" : "google"
+          },
+          {
+            "accounts" : [
+              "key"
+            ],
+            "checked" : "2026-10-16",
+            "keys_page" : "https://openrouter.ai/keys",
+            "kind" : "api-key",
+            "note" : "mini-SWE-agent through OpenRouter: doz try mini-swe-agent --gateway openrouter (or choose it in the try setup); the model with --model.",
+            "provider" : "openrouter"
+          },
+          {
+            "accounts" : [
+              "key"
+            ],
+            "checked" : "2026-10-16",
+            "keys_page" : "https://vercel.com/docs/ai-gateway/authentication-and-byok",
+            "kind" : "api-key",
+            "note" : "mini-SWE-agent through Vercel AI Gateway: doz try mini-swe-agent --gateway vercel-ai-gateway (or choose it in the try setup); the model with --model.",
+            "provider" : "vercel-ai-gateway"
           }
         ]
       },
@@ -232,20 +304,53 @@
       "config" : {
         "entries" : [
           {
-            "checked" : "2026-10-14",
+            "checked" : "2026-10-16",
+            "evidence" : "make recipe-check: its check turn through a stand-in OpenRouter (doz try with --gateway openrouter; models@1)",
             "gateway" : "openrouter",
-            "level" : "unknown",
-            "reason" : "mini-swe-agent has an OpenRouter model class; not checked"
+            "level" : "verified"
           },
           {
-            "checked" : "2026-10-14",
+            "checked" : "2026-10-16",
+            "evidence" : "make recipe-check: its check turn through a stand-in Vercel AI Gateway (doz try with --gateway vercel-ai-gateway; models@1)",
             "gateway" : "vercel-ai-gateway",
-            "level" : "unknown",
-            "reason" : "not checked against mini-swe-agent"
+            "level" : "verified"
           }
         ]
       },
       "type" : "com.dozersandbox/gateways@1"
+    },
+    {
+      "config" : {
+        "default" : "xai",
+        "models" : {
+          "xai" : "grok-build-0.1"
+        },
+        "shapes" : [
+          {
+            "env" : {
+              "MSWEA_MODEL_NAME" : "openai/${{ dozer.model }}",
+              "OPENAI_BASE_URL" : "${{ dozer.base_url }}"
+            },
+            "key_env" : [
+              "OPENAI_API_KEY"
+            ],
+            "shape" : "openai-chat",
+            "source" : "https://docs.litellm.ai/docs/providers/openai_compatible"
+          },
+          {
+            "env" : {
+              "ANTHROPIC_BASE_URL" : "${{ dozer.base_url }}",
+              "MSWEA_MODEL_NAME" : "anthropic/${{ dozer.model }}"
+            },
+            "key_env" : [
+              "ANTHROPIC_API_KEY"
+            ],
+            "shape" : "anthropic-messages",
+            "source" : "https://docs.litellm.ai/docs/providers/anthropic"
+          }
+        ]
+      },
+      "type" : "com.dozersandbox/models@1"
     },
     {
       "config" : {
@@ -274,12 +379,12 @@
             "evidence" : "make recipe-check: mini -t \"say ok\" submitted the stand-in's answer and exited in a fresh try",
             "level" : "verified",
             "notes" : [
-              "mini -m xai/grok-build-0.1 -t \"…\" --yolo --exit-immediately"
+              "mini -t \"…\" --yolo --exit-immediately"
             ],
             "tag" : "headless"
           }
         ],
-        "terms" : "Your xAI API key — a key from console.x.ai."
+        "terms" : "Your API key of the provider or gateway you choose (xAI by default)."
       },
       "type" : "com.dozersandbox/directory@1"
     },
@@ -289,14 +394,14 @@
         "intro" : "mini-swe-agent is a coding agent with its own screen: the session on the left. Ask it to read, change and run the code in your folder.",
         "steps" : [
           {
-            "command" : "mini -m xai/grok-build-0.1 -t \"say ok\" --yolo --cost-limit 0 --exit-immediately",
+            "command" : "mini -t \"say ok\" --yolo --cost-limit 0 --exit-immediately",
             "text" : "Check it answers, without its screen."
           },
           {
             "text" : "Ask it something in its own screen — the session on the left."
           },
           {
-            "command" : "mini -m xai/grok-build-0.1 -t \"list the files in this folder\" --yolo --cost-limit 0 --exit-immediately",
+            "command" : "mini -t \"list the files in this folder\" --yolo --cost-limit 0 --exit-immediately",
             "text" : "One task without its screen."
           }
         ],
@@ -308,7 +413,7 @@
       "type" : "com.dozersandbox/guide@1"
     }
   ],
-  "description" : "A minimal bash-only coding agent from the SWE-agent team, here on an xAI API key.",
+  "description" : "A minimal bash-only coding agent from the SWE-agent team, on the key of the provider or gateway you choose (xAI by default).",
   "displayName" : "mini-swe-agent",
   "id" : "swe-agent/mini-swe-agent",
   "kind" : "workload",

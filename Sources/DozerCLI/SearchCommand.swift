@@ -65,7 +65,9 @@ func searchLine(_ h: SearchHit, local: SearchLocal?, base: String?) -> String {
     }
     switch h.outcome {
     case "supported":
-        var s = "\(e.title) — supported" + (e.checked.map { " · checked \($0)" } ?? "")
+        // 618: a family's major says which it is and the others ("recommended; also @1").
+        let fam = AgentRecipes.recipe(e.id).flatMap { AgentRef.choicesLine($0) }.map { " (\($0))" } ?? ""
+        var s = "\(e.title)\(fam) — supported" + (e.checked.map { " · checked \($0)" } ?? "")
         if let p = e.keys.first?.provider {
             let title = KeyProviders.provider(p)?.title ?? p
             s += " · key: \(title)" + (local?.haveKey.map { " (you have \($0)" + (local?.source.map { ", \($0)" } ?? "") + ")" } ?? " (none yet — doz try asks)")
@@ -138,7 +140,10 @@ func searchDetails(_ e: DirectoryIndex.Entry) -> String {
             + (a.note.map { " — \($0)" } ?? "") + "\n"
     }
     for l in e.limits { s += "  limit: \(l.with.map { "\($0.key) \($0.value)" }.sorted().joined(separator: ", ")) — \(l.reason)\n" }
-    if !e.gateways.isEmpty { s += "  model gateways: " + e.gateways.map { "\($0.gateway) \($0.level)" }.joined(separator: " · ") + "\n" }
+    if !e.gateways.isEmpty {
+        s += "  model gateways: " + e.gateways.map { "\($0.gateway) \($0.level)" + ($0.offered == true ? " (doz try \(e.id) --gateway \($0.gateway))" : "") }
+            .joined(separator: " · ") + "\n"
+    }
     let tags = e.tags.filter { ["documented", "verified"].contains($0.level) }.map(\.tag)
     if let k = e.catalogKind { s += "  what it is: " + categoryLine(kind: k, categories: e.categories) + "\n" }
     if !tags.isEmpty { s += "  tags: \(tags.joined(separator: ", "))\n" }
@@ -171,9 +176,12 @@ struct SearchCommand: AsyncParsableCommand {
     var index: String?
     @Flag(name: .long, help: ArgumentHelp("With --index: replace FILE.", visibility: .hidden)) var force = false
 
+    /// 618: `opencode@1` / `opencode@2.0.28` search for that major's recipe (a term without @ is searched as it is).
+    var resolvedTerms: [String] { terms.map { t in t.contains("@") ? ((try? AgentRef.resolve(t)).flatMap { $0?.recipe.id } ?? t) : t } }
+
     func validate() throws {
         let known = Set(CapabilityTags.all.map(\.id) + Categories.kinds.map(\.id) + Categories.all.map(\.id))
-        let q = SearchQuery.parse(terms, tags: tag, level: level, base: base)
+        let q = SearchQuery.parse(resolvedTerms, tags: tag, level: level, base: base)
         for t in q.tags where !known.contains(t) { throw ValidationError("no tag \(t) — the tags: \(known.sorted().joined(separator: ", "))") }
         for l in q.levels where !AgentRecipe.GatewaySupport.levels.contains(l) { throw ValidationError("--level: documented, verified, experimental, no, unknown or any") }
         if let b = base, BaseCatalogue.base(b) == nil { throw ValidationError("--base: \(BaseCatalogue.ids.joined(separator: ", "))") }
@@ -190,7 +198,7 @@ struct SearchCommand: AsyncParsableCommand {
             if !g.json { Out.stdout("wrote \(url.path) — \(built.entries.count) entries, \(DirectoryIndex.format), unsigned\n") }
             return
         }
-        let q = SearchQuery.parse(terms, tags: tag, level: level, base: base)
+        let q = SearchQuery.parse(resolvedTerms, tags: tag, level: level, base: base)
         var result = DirectorySearch.search(q, in: built)
         // 617: a superseded agent brings what replaces it (doz search gemini lists Antigravity CLI too).
         for h in result.hits {

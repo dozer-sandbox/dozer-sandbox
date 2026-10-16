@@ -52,6 +52,34 @@ final class WebTryTests: XCTestCase {
         XCTAssertFalse(json.contains("\"plan\":{"), "no plan in the list")
     }
 
+    /// 618: a family's majors are in the catalog with their family and the name that means each (the plan's agent);
+    /// the page shows the recommended one as the card and offers the others in its setup.
+    func testAFamilysMajorsAndTheirRefs() async throws {
+        let list = WebTryCatalog.list(secretEntry: true)
+        let members = list.agents.filter { $0.family?.name == "opencode" }.sorted { $0.family!.major < $1.family!.major }
+        XCTAssertEqual(members.map(\.id), ["opencode", "opencode2"])
+        XCTAssertEqual(members.filter { $0.family!.recommended }.count, 1)
+        for m in members { XCTAssertEqual(m.ref, m.family!.recommended ? "opencode" : "opencode@\(m.family!.major)") }
+        XCTAssertEqual(list.agents.first { $0.id == "grok" }?.ref, "grok")
+        XCTAssertNil(list.agents.first { $0.id == "grok" }?.family)
+        // The whole catalog plans each major by its ref — OpenCode 1 is never planned as the family's recommended one.
+        var asked: [String] = []
+        _ = await WebTryCatalog.build(plans: { rs in asked = rs.map(\.create.image); return rs.map { _ in nil } }, secretEntry: false)
+        XCTAssertTrue(asked.contains("opencode") && asked.contains("opencode2"), "\(asked)")
+        // The plan query takes a major or a release, and refuses one there is not.
+        let one = try WebPlanQuery.decode(Data(#"{"purpose":"try","agent":"opencode@1"}"#.utf8)).request
+        XCTAssertEqual(one.create.image, "opencode")
+        XCTAssertEqual(one.create.agentRef, "opencode@1")
+        let exact = try WebPlanQuery.decode(Data(#"{"purpose":"try","agent":"opencode@2.0.28"}"#.utf8)).request
+        XCTAssertEqual(exact.create.image, "opencode2")
+        XCTAssertEqual(exact.create.agentVersion, "2.0.28")
+        XCTAssertThrowsError(try WebPlanQuery.decode(Data(#"{"purpose":"try","agent":"opencode@9"}"#.utf8))) {
+            XCTAssertFalse("\($0)".contains("@9"), "a refusal never echoes the value")
+        }
+        // New Sandbox's catalog carries the family too (one chip, a Version choice).
+        XCTAssertEqual(WebBases.catalogAgents.first { $0.id == "opencode2" }?.family?.major, 2)
+    }
+
     /// The whole catalog asks for every agent's plan in ONE call (the host's `plans`: one reading of the store).
     func testTheWholeCatalogPlansEveryAgentInOneCall() async {
         var calls: [[PlanRequest]] = []
@@ -192,7 +220,7 @@ final class WebTryTests: XCTestCase {
         let catalog = await WebTryCatalog.build(plan: { r in WebPlan(CreatePlan.sample(name: "try-" + r.create.image, image: r.create.image)) },
                                                 secretEntry: true, accounts: accounts)
         let by = Dictionary(uniqueKeysWithValues: catalog.agents.map { ($0.id, $0) })
-        XCTAssertEqual(by["pi"]?.usableAccounts.map(\.name), ["anthropic"], "pi: an API key, never the Mac's login")
+        XCTAssertEqual(by["pi"]?.usableAccounts.map(\.name), ["anthropic", "oai", "xai1", "google"], "pi: an API key of a source it is offered (618), never the Mac's login")
         XCTAssertEqual(by["claude-code"]?.usableAccounts.map(\.name), ["mac", "anthropic"])
         XCTAssertEqual(by["codex"]?.usableAccounts.map(\.name), ["oai"])
         XCTAssertEqual(by["grok"]?.usableAccounts.map(\.name), ["xai1"], "a key of its own provider only")

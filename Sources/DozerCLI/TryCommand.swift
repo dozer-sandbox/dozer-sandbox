@@ -57,7 +57,7 @@ struct TryCommand: AsyncParsableCommand {
     func run() async throws {
         // Which agent.
         let given = thing ?? choices.agent
-        if let t = thing, let a = choices.agent, AgentRecipes.matching(t)?.id != AgentRecipes.matching(a)?.id {
+        if let t = thing, let a = choices.agent, (try? AgentRef.resolve(t))?.text != (try? AgentRef.resolve(a))?.text {
             throw fail(HostError(.invalid, "\(t) or --agent \(a) — not both"), g)
         }
         // 617: the dashboard's Quick try, on that agent.
@@ -75,7 +75,11 @@ struct TryCommand: AsyncParsableCommand {
         // 617: a superseded agent still runs — said first, with what replaces it.
         if let l = recipe.lifecycle, !l.isCurrent, !g.json, !g.quiet { Out.stderr("[doz] note: \(standingLine(l))\n") }
         var c = choices
-        c.agent = recipe.id
+        // 618: what was typed when it names a tool (opencode@1 keeps its major and release); else the recipe found.
+        if let t = given, (try? AgentRef.resolve(t)) != nil { c.agent = t } else {
+            // A family member picked from the list: by its major (its id alone would be the family's recommended one).
+            c.agent = AgentRef.typed(recipe)
+        }
         // 617: the plan's command is the whole command — the try's own flags too (`doz try grok --rm --dry-run`).
         let flags = (rm ? ["--rm"] : []) + (keep ? ["--keep"] : []) + (detach ? ["-d"] : [])
         let planned = try await requestPlan(PlanRequest(purpose: "try", create: try c.planChoices(), tryFlags: flags.isEmpty ? nil : flags), g)
@@ -95,6 +99,8 @@ struct TryCommand: AsyncParsableCommand {
             // Isolated: nothing of the Mac is shared — the way files come out (owner).
             if planned.workspace == nil { parts.append("pull files with: doz get \(planned.name) /workspace/FILE") }
             Out.stdout(parts.joined(separator: " · ") + "\n")
+            // 618: a family's major — which one, and how to get the other.
+            if let l = planned.version?.familyLine() { Out.stdout(l + "\n") }
         }
         // The image prepares NOW, in the host, while the key is dealt with (joined by the start below).
         if planned.imageState.state == "unprepared" {
@@ -174,8 +180,12 @@ struct TryCommand: AsyncParsableCommand {
 
     /// THING → a recipe; a known-but-unsupported thing → its sentence (exit 6); nothing → did you mean (exit 2).
     func resolve(_ t: String) throws -> AgentRecipe {
-        if t.contains("@") { throw fail(HostError(.notImplemented, "a model (THING@MODEL) comes in a later version — doz try \(t.split(separator: "@").first ?? "") for now"), g) }
-        if let r = AgentRecipes.matching(t) { return r }
+        // 618: NAME, NAME@MAJOR (opencode@1), NAME@VERSION (opencode@2.0.28); a family's name is its recommended major.
+        do {
+            if let r = try AgentRef.resolve(t) { return r.recipe }
+        } catch let p as AgentRef.Problem {
+            throw fail(HostError(.invalid, p.description), g)
+        }
         let index = DirectoryIndex.build(version: DozerCommand.version)
         let found = DirectorySearch.search(SearchQuery.parse([t]), in: index)
         if let h = found.hits.first(where: { $0.entry.kind == "agent" }) {
@@ -208,7 +218,9 @@ struct TryCommand: AsyncParsableCommand {
         let fits = { (e: DirectoryIndex.Entry) in wanted.allSatisfy { e.catalogKind == $0 || (e.categories ?? []).contains($0) } }
         let order = Dictionary(uniqueKeysWithValues: Categories.kinds.enumerated().map { ($1.id, $0) })
         let byKind = { (a: DirectoryIndex.Entry, b: DirectoryIndex.Entry) in (order[a.catalogKind ?? ""] ?? 9) < (order[b.catalogKind ?? ""] ?? 9) }
-        let agents = index.entries.filter { $0.kind == "agent" && $0.status == "supported" && fits($0) }.enumerated()
+        // 618: a family is ONE line — its recommended major ("also @1" names the others).
+        let oneOfFamily = { (e: DirectoryIndex.Entry) in AgentRecipes.recipe(e.id)?.family.map(\.isRecommended) ?? true }
+        let agents = index.entries.filter { $0.kind == "agent" && $0.status == "supported" && fits($0) && oneOfFamily($0) }.enumerated()
             .sorted { byKind($0.1, $1.1) || (!byKind($1.1, $0.1) && $0.0 < $1.0) }.map(\.1)
         let coming = index.entries.filter { $0.kind == "agent" && $0.status != "supported" && fits($0) }
         if agents.isEmpty {
@@ -229,7 +241,8 @@ struct TryCommand: AsyncParsableCommand {
             let l = searchLocal(e, accounts: accounts, images: images)
             let key = l?.haveKey.map { "key: \($0)" + (l?.source.map { " (\($0))" } ?? "") } ?? "no key yet — you'll be asked"
             let image = l?.image == "unprepared" ? "prepares ~1–3 min" : "ready"
-            s += String(format: "  %2d. %@ — %@ · %@ · %@\n", i + 1, e.title, e.publisher ?? "", key, image)
+            let fam = AgentRecipes.recipe(e.id).flatMap { AgentRef.choicesLine($0) }.map { " (\($0))" } ?? ""
+            s += String(format: "  %2d. %@%@ — %@ · %@ · %@\n", i + 1, e.title, fam, e.publisher ?? "", key, image)
             // 617: its latest release (and how old), and its standing with its maker.
             s += "      " + latestLine(e.latest, agent: e.id) + "\n"
             if let l = e.lifecycle, !l.isCurrent { s += "      " + standingLine(l) + "\n" }
@@ -243,7 +256,7 @@ struct TryCommand: AsyncParsableCommand {
         }
         let answer = asker.text("Pick a number or a name", default: "1") { a in
             if let n = Int(a), (1...agents.count).contains(n) { return nil }
-            return AgentRecipes.matching(a) == nil ? "a number from 1 to \(agents.count), or an agent's name" : nil
+            return (try? AgentRef.resolve(a)) == nil ? "a number from 1 to \(agents.count), or an agent's name (opencode@1 for an earlier major)" : nil
         }
         if let n = Int(answer) { return try resolve(agents[n - 1].id) }
         return try resolve(answer)

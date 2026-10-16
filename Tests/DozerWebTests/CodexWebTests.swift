@@ -12,7 +12,10 @@ final class CodexWebTests: XCTestCase {
                              isDefault: true, usedBy: [], state: "ok", keychainService: "doz-chatgpt:plan", fingerprint: "abc")
         let a = WebAccounts(accounts: [WebAccount(row)], defaultAccount: "mac", keepalive: false, openaiDefault: "plan")
         XCTAssertEqual(a.agents["codex"], ["codex-mac", "chatgpt", "openai-key"])
-        XCTAssertEqual(a.agents["pi"], ["api-key"], "unchanged")
+        // 618: pi takes a key of each source it is offered (New Sandbox shows them, as Try does).
+        XCTAssertEqual(a.agents["pi"], ["api-key", "key", "openai-key"])
+        XCTAssertEqual(a.sources["pi"]?.first, "anthropic")
+        XCTAssertTrue(a.gatewaySources.contains("openrouter"))
         XCTAssertEqual(a.agents["claude-code"], ["mac", "setup-token", "api-key"], "unchanged")
         let json = String(decoding: try JSONEncoder().encode(a), as: UTF8.self)
         XCTAssertTrue(json.contains("\"openaiDefault\":\"plan\""))
@@ -31,7 +34,7 @@ final class CodexWebTests: XCTestCase {
         XCTAssertTrue(a.providers.contains("xai"))
         XCTAssertTrue(a.providerTools["anthropic"]?.contains("claude-code") == true)
         XCTAssertTrue(a.providerTools["anthropic"]?.contains("pi") == true)
-        XCTAssertEqual(a.providerTools["openai"]?.first, "codex")
+        XCTAssertTrue(a.providerTools["openai"]?.contains("codex") == true)
         XCTAssertTrue(a.providerTools["xai"]?.contains("grok") == true, "\(a.providerTools["xai"] ?? [])")
         for ids in a.providerTools.values { for id in ids { XCTAssertNotNil(a.agentTitles[id], id) } }
         XCTAssertTrue(a.uncheckedProviders.contains("vercel-ai-gateway"))

@@ -1,3 +1,4 @@
+import DozerKit
 import Foundation
 
 /// The CLOSED route table (590). Every route is a case; a path that does not parse to one is a 404
@@ -100,6 +101,7 @@ public enum WebRoute: Equatable, Sendable {
     case bases                     // GET  /api/v1/bases
     case tryCatalog                // GET  /api/v1/try (617: the Quick try page's list)
     case tryList                   // GET  /api/v1/try/list (617: the same list without the plans — the page draws at once)
+    case models(String)            // GET  /api/v1/models/{source} (618: the models a provider or gateway offers — a projection)
     case plan                      // POST /api/v1/plan  ({purpose, name?, agent?, base?, isolated?} — 617)
     case dockerfileChoose          // POST /api/v1/dockerfile/choose  ({start?})
     // 599e — Access: each credential's choice and last confirmation (read, never starts a host); a live
@@ -211,6 +213,8 @@ public enum WebRoute: Equatable, Sendable {
             case "serve": return .serveStatus
             default: return nil
             }
+        case 2 where rest[0] == "models" && ModelSources.ids.contains(rest[1]):
+            return .models(rest[1])
         case 2 where rest == ["try", "list"]:
             return .tryList
         case 2 where rest == ["images", "tree"]:

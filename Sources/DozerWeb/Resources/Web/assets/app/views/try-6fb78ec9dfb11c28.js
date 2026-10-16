@@ -29,6 +29,7 @@ import { pageFailure, toast } from '../components/notices-0eac624a71d00e4f.js';
 import { paintStartProgress } from '../components/start-progress-b16374ebc7173de4.js';
 import { drawPendingTry } from './sandbox-f272187004699aa3.js';
 import { planCommand, reachList } from '../components/plan-view-d5bc01e363272562.js';
+import { modelPicker, noKeyNodes, resetModelSearch, sourceCommand, sourceList } from '../components/model-source-60dac846f8ef41a6.js';
 import { prepCard } from '../components/prep-card-f04587dbc4728b29.js';
 
 const AGENT_ID = /^[a-z0-9][a-z0-9-]{0,39}$/;
@@ -76,11 +77,18 @@ export async function viewTry() {
 /// section's first ready one, else its first.
 function choose(tr, want) {
   const c = tr.catalog;
-  const named = c.agents.find((a) => a.id === want) || c.coming.find((a) => a.id === want);
+  // 618: a family's card is its recommended major — another major asked for (#/try/opencode2) is that card, with its
+  // Version chosen in the setup.
+  const cards = c.agents.filter((a) => !a.family || a.family.recommended);
+  let named = c.agents.find((a) => a.id === want) || c.coming.find((a) => a.id === want);
+  if (named && named.family && !named.family.recommended) {
+    tr.version = named.id;
+    named = cards.find((a) => a.family && a.family.name === named.family.name) || named;
+  }
   if (named && named.catalogKind) tr.kind = named.catalogKind;
   if (named) { tr.agent = named.id; return; }
-  if (tr.agent && (c.agents.some((a) => a.id === tr.agent) || c.coming.some((a) => a.id === tr.agent))) return;
-  const first = c.agents.find((a) => a.catalogKind === tr.kind && a.ready) || c.agents.find((a) => a.catalogKind === tr.kind) || c.agents[0] || null;
+  if (tr.agent && (cards.some((a) => a.id === tr.agent) || c.coming.some((a) => a.id === tr.agent))) return;
+  const first = cards.find((a) => a.catalogKind === tr.kind && a.ready) || cards.find((a) => a.catalogKind === tr.kind) || cards[0] || null;
   tr.agent = first ? first.id : null;
 }
 
@@ -121,14 +129,36 @@ function take(tr, catalog, stage) {
 
 function retryLoad() { const tr = state.tr; if (tr) { tr.loadError = ''; paint({}); load(tr, true); } }
 
-/// Agents (and the coming ones) as the search sees them.
+/// Agents (and the coming ones) as the search sees them — a family once (618: its recommended major's card; the
+/// setup's Version choice reaches the others).
 function entries() {
   const c = state.tr.catalog;
   // 617: the declared kind and categories search as tags too (tag:terminal-tool).
   const words = (x) => [...(x.categories || []), ...(x.catalogKind ? [x.catalogKind] : [])];
-  return [...c.agents.map((a) => ({ ...a, kind: 'agent', tags: [...(a.tags || []), ...words(a)] })),
+  return [...c.agents.filter((a) => !a.family || a.family.recommended).map((a) => ({ ...a, kind: 'agent', tags: [...(a.tags || []), ...words(a)] })),
     ...c.coming.map((x) => ({ ...x, kind: 'coming', tags: words(x), current: true }))];
 }
+
+/// 618: the majors of `a`'s family in the catalog, oldest first (empty: not a family).
+function familyOf(a) {
+  if (!a || !a.family || !state.tr) return [];
+  return state.tr.catalog.agents.filter((x) => x.family && x.family.name === a.family.name).sort((x, y) => x.family.major - y.family.major);
+}
+
+/// 618: "also @1" — the other majors, for a card.
+function alsoWords(a) {
+  const others = familyOf(a).filter((x) => x.id !== a.id);
+  return others.length ? 'also ' + others.map((x) => '@' + x.family.major).join(', ') : null;
+}
+
+/// 618: what a major is called — "OpenCode 1" (its family's title), else the tool's own.
+function nameOf(a) { return a && a.family ? a.family.title : a ? a.title : ''; }
+
+/// 618: the major chosen in its card's setup (the card itself until one is).
+function chosenOf(card) { const tr = state.tr; return (tr && tr.version && familyOf(card).find((x) => x.id === tr.version)) || card; }
+
+/// 618: a catalog agent by id — a family's other majors included (they have no card of their own).
+function anyAgent(id) { return state.tr ? state.tr.catalog.agents.find((x) => x.id === id) : null; }
 
 /// In the section shown (an entry with no kind shows in both).
 function inKind(e, kind = state.tr.kind) { return !e.catalogKind || e.catalogKind === kind; }
@@ -201,7 +231,7 @@ function prepNodes(a) {
 
 function select(id, opts = {}) {
   const tr = state.tr;
-  if (tr.agent !== id) { tr.error = ''; }
+  if (tr.agent !== id) { tr.error = ''; tr.version = null; }
   const e = entries().find((x) => x.id === id);
   if (e && e.catalogKind && e.catalogKind !== tr.kind) { tr.kind = e.catalogKind; tr.f = new Set([...tr.f].filter((x) => x === 'ready')); }
   tr.agent = id;
@@ -213,7 +243,9 @@ function select(id, opts = {}) {
 
 function resultItem(a) {
   const tr = state.tr, sel = a.id === tr.agent;
-  const sub = a.kind === 'coming' ? 'coming' : [a.version, a.age ? ago(a.age) : null, a.current === false ? 'superseded' : null].filter(Boolean).join(' · ');
+  const sub = a.kind === 'coming' ? 'coming' : [a.version, a.age ? ago(a.age) : null, a.current === false ? 'superseded' : null,
+    // 618: a family's card — the recommended major (never "latest"), and the others its setup offers.
+    a.family ? 'recommended' : null, alsoWords(a)].filter(Boolean).join(' · ');
   const b = h('button', { type: 'button', role: 'option', class: 'qt-item' + (a.current === false ? ' superseded' : '') + (a.kind === 'coming' ? ' coming' : ''),
     'aria-selected': String(sel), tabindex: sel ? '0' : '-1', 'data-try-agent': a.id, ...(a.kind === 'coming' ? { 'data-try-coming': a.id } : {}) },
     mark(a.icon),
@@ -351,18 +383,23 @@ function detailNodes() {
   const versions = h('dl', { class: 'qt-plan' },
     h('dt', null, 'Dozer installs'), h('dd', { 'data-try-latest': a.id }, (a.version || '—') + (a.age ? ' · released ' + ago(a.age) : '')),
     a.latest ? h('dt', null, 'Its newest') : null, a.latest ? h('dd', { class: 'muted' }, a.latest.replace(/^latest:?\s*/, '')) : null,
-    h('dt', null, 'Base'), h('dd', null, a.base || '—'));
-  const tryBtn = btn('Try ' + a.title + '…', () => openSetup(a), { primary: true, lg: true, icon: 'rocket', title: 'Set it up and start it (Enter)' });
+    h('dt', null, 'Base'), h('dd', null, a.base || '—'),
+    // 618: a family's majors — each one Dozer checked; Try's Version picks one.
+    ...(familyOf(a).length > 1 ? [h('dt', null, 'Majors'), h('dd', { 'data-try-majors': '' },
+      familyOf(a).map((x) => x.family.title + (x.version ? ' ' + x.version : '') + (x.family.recommended ? ' (recommended)' : '')).join(' · ')
+        + ' — Try lets you choose')] : []));
+  const shown = chosenOf(a);                                    // 618: the major chosen in its setup
+  const tryBtn = btn('Try ' + nameOf(shown) + '…', () => openSetup(a), { primary: true, lg: true, icon: 'rocket', title: 'Set it up and start it (Enter)' });
   tryBtn.dataset.tryOpen = '';
   // The list alone (no plan yet): what it can reach and its command follow with the plans; Try waits for them.
   const planning = (what) => h('p', { class: 'muted', 'data-try-planning': '' }, tr.loadError ? 'Not read: ' + tr.loadError : 'Reading ' + what + '…');
-  if (!a.plan) { tryBtn.disabled = true; tryBtn.title = 'Reading its plan…'; }
+  if (!shown.plan) { tryBtn.disabled = true; tryBtn.title = 'Reading its plan…'; }
   return [back, head, facts,
     a.description ? h('p', { class: 'qt-desc', 'data-try-description': '' }, a.description) : null,
     standing,
     sect('Versions', versions),
-    sect('What it can reach', a.plan ? reachList(a.plan.reach) : planning('what it can reach')),
-    sect('The same, in a terminal', a.plan ? planCommand(a.plan) : planning('its command')),
+    sect('What it can reach', shown.plan ? reachList(shown.plan.reach) : planning('what it can reach')),
+    sect('The same, in a terminal', shown.plan ? planCommand(shown.plan) : planning('its command')),
     h('div', { class: 'qt-foot' }, h('span', { class: 'qt-gap' }), h('span', { class: 'qt-note' }, 'Enter'), tryBtn)].filter(Boolean);   // (replaceChildren writes a null as "null")
 }
 
@@ -379,7 +416,7 @@ function detailNodes() {
 // 617 (owner: "add OpenAI and Anthropic AND gateway support"): an agent whose recipe speaks several APIs (models@1) gets
 // a Model section — the provider or gateway (its key only ever goes there) and the model (empty: that source's
 // default) — and the key part follows the source chosen: its accounts, or a paste saved as that source's key.
-const SETUP = { d: null, a: null, plan: null, account: null, source: null, model: '', busy: false, error: '' };
+const SETUP = { d: null, a: null, plan: null, account: null, source: null, model: '', busy: false, error: '', adding: false };
 
 /// The accounts the agent can use — of the model source chosen, when it has a choice — the provider's default first.
 function usable(a) {
@@ -391,7 +428,7 @@ function usable(a) {
 async function replan(account) {
   const a = SETUP.a;
   SETUP.account = account || null;
-  SETUP.plan = await api('plan', { method: 'POST', json: { purpose: 'try', agent: a.id, ...(account ? { account } : {}),
+  SETUP.plan = await api('plan', { method: 'POST', json: { purpose: 'try', agent: a.ref || a.id, ...(account ? { account } : {}),
     ...(SETUP.source ? { source: SETUP.source } : {}), ...(SETUP.model ? { model: SETUP.model } : {}) } });
 }
 
@@ -401,57 +438,154 @@ function chosenSource(plan) {
   return m ? (m.offered || []).find((x) => x.id === m.source) || null : null;
 }
 
-const MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,127}$/;
-
 /// 617 (models@1): the provider or gateway it talks to, and the model — only for an agent that can use more than one.
-function modelNodes(plan) {
-  const m = plan.model;
-  if (!m || !m.offered || m.offered.length < 2) return [];
-  const option = (x) => h('option', { value: x.id }, x.title + ' — ' + x.defaultModel);
-  const providers = m.offered.filter((x) => !x.gateway), gateways = m.offered.filter((x) => x.gateway);
-  const sel = h('select', { 'aria-label': 'Provider or gateway', 'data-try-source': '' },
-    providers.length ? h('optgroup', { label: 'Providers' }, ...providers.map(option)) : null,
-    gateways.length ? h('optgroup', { label: 'Gateways — one key, many models' }, ...gateways.map(option)) : null);
-  sel.value = m.source;
-  sel.addEventListener('change', async () => {
-    SETUP.source = sel.value; SETUP.model = ''; SETUP.error = '';
-    // A key of that source: its default (or only) one, else none — then the key part asks for one.
-    const keys = (SETUP.a.usableAccounts || []).filter((x) => x.modelSource === sel.value);
-    const pick = keys.find((x) => x.isDefault) || keys[0];
-    await replan(pick ? pick.name : null).catch((e) => { SETUP.error = e.message || String(e); });
-    paintSetup();
-  });
-  const cur = chosenSource(plan);
-  const model = h('input', { type: 'text', spellcheck: 'false', autocomplete: 'off', 'data-try-model': '', 'aria-label': 'Model',
-    placeholder: cur ? cur.defaultModel : '' });
-  model.value = SETUP.model || '';
-  const apply = async () => {
-    const v = model.value.trim();
-    if (v === (SETUP.model || '')) return;
-    if (v && !MODEL_ID.test(v)) { SETUP.error = 'That is not a model id — letters, digits and . _ : / @ + -'; paintSetup(); return; }
-    SETUP.model = v; SETUP.error = '';
-    await replan(SETUP.account).catch((e) => { SETUP.error = e.message || String(e); });
-    paintSetup();
-  };
-  model.addEventListener('change', apply);
-  model.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); apply(); } });
-  const note = m.gateway
-    ? 'A gateway names a model creator/name (anthropic/claude-sonnet-4.6). Empty: ' + (cur ? cur.defaultModel : 'its default') + '.'
-    : 'Empty: ' + (cur ? cur.defaultModel : 'its default') + '.';
-  return [h('div', { class: 'try-model', 'data-try-models': '' },
-    h('label', { class: 'field' }, h('span', null, 'Provider or gateway'), sel),
-    h('label', { class: 'field' }, h('span', null, 'Model'), model)),
-    h('p', { class: 'muted' }, note + ' Its key only ever goes to ' + m.title + '; the sandbox sees a placeholder.')];
+/// 618 (owner: "make sure there is a way the user can chose an earlier major version"): a family's majors, the
+/// recommended one first chosen. Choosing one RE-PLANS only (POST plan with its ref) — the catalog is never read again.
+function versionNodes(a) {
+  const fam = familyOf(a);
+  if (fam.length < 2) return [];
+  // The recommended major first, then the others newest first; the chosen one is the segmented control's `.active`.
+  const order = [...fam].sort((x, y) => (y.family.recommended ? 1 : 0) - (x.family.recommended ? 1 : 0) || y.family.major - x.family.major);
+  const seg = h('div', { class: 'segmented try-versions', role: 'group', 'aria-label': 'Version', 'data-try-version': a.id },
+    ...order.map((x) => h('button', { type: 'button', class: 'seg' + (x.id === a.id ? ' active' : ''), 'aria-pressed': String(x.id === a.id), 'data-try-version-choice': x.id,
+      title: x.family.recommended ? 'The major Dozer recommends' : 'An earlier (or other) major',
+      on: { click: () => chooseVersion(x) } }, x.id === a.id ? icon('check') : null,
+      x.family.title + (x.version ? ' · ' + x.version : '') + (x.family.recommended ? ' (recommended)' : ''))));
+  return [seg, h('p', { class: 'muted' }, 'A sandbox keeps the major it is made with — the other one is a new try.')];
 }
+
+async function chooseVersion(x) {
+  if (!SETUP.a || SETUP.a.id === x.id || SETUP.busy) return;
+  SETUP.a = x; SETUP.source = null; SETUP.model = ''; SETUP.error = '';
+  if (state.tr) state.tr.version = x.family && x.family.recommended ? null : x.id;
+  try {
+    // Its own plan, with a key it can use (another major may take other keys).
+    const u = usable(x);
+    SETUP.plan = x.plan || SETUP.plan;
+    await replan(x.plan && keyProblem(x.plan) && u.length ? u[0].name : null);
+  } catch (e) { SETUP.error = e.message || String(e); }
+  paintSetup();
+  if (state.modal === 'try') paint({});                          // the details pane behind follows the choice
+}
+
+/// 618 (owner: "open router should be part of the key choices; needs rethink" — mockup try-model-source): ONE section,
+/// "Where TOOL gets its model": its providers and the gateways as equal rows, each with its key status; the chosen row
+/// holds its key (or a choice of keys, or a paste field); then the model picker (the source's own list).
+function keysBySource(a) {
+  const all = a.usableAccounts || [];
+  return (id) => all.filter((x) => x.modelSource === id).sort((x, y) => (y.isDefault ? 1 : 0) - (x.isDefault ? 1 : 0));
+}
+
+function sourceSections(a, plan, missing) {
+  const m = plan.model, keysOf = keysBySource(a), tool = nameOf(a);
+  const card = a.card || null;
+  const notOffered = card && card.notOffered && card.notOffered.length ? 'Not offered: ' + card.notOffered.join(' · ') : null;
+  const list = sourceList({ tool, sources: m.offered, chosen: m.source, keysOf, onChoose: chooseSource,
+    needFor: (id) => sourceNeed(plan, m.offered.find((x) => x.id === id), keysOf(id)), notOffered });
+  const out = [sect('Where ' + tool + ' gets its model',
+    ...(m.offered.length > 1 ? [h('p', { class: 'muted ms-lead' }, 'Its own provider is chosen; any other — or a gateway — works the same way.')] : []), ...list)];
+  if (!missing) {
+    out.push(sect('Model', modelPicker({ source: m.source, title: m.title, gateway: m.gateway, current: m.model, onPick: chooseModel })));
+  }
+  return out;
+}
+
+/// 618: a tool with ONE source and no choice of model (Grok Build: an xAI key, checked by the tool at start-up) — the same
+/// section as one line (the source and its key status); its key part below. Claude Code and Codex (their own sign-ins and
+/// subscriptions) keep their Key section.
+function keyOnly(a) {
+  return !!a.provider && !['claude-code', 'codex'].includes(a.id)
+    && (a.usableAccounts || []).every((x) => ['api-key', 'openai-key', 'key'].includes(x.kind));
+}
+
+function oneSourceSection(a, plan, missing) {
+  const src = { id: a.provider, title: a.providerTitle || a.provider, gateway: false, defaultModel: null };
+  const keys = usable(a);
+  const nodes = sourceList({ tool: nameOf(a), sources: [src], chosen: src.id, keysOf: () => keys, onChoose: () => {},
+    needFor: () => keyNodes(a, plan, missing) });
+  if (!missing && keys.length > 1) nodes.push(keyNodes(a, plan, null)[1]);
+  return [sect('Where ' + nameOf(a) + ' gets its model', ...nodes)];
+}
+
+/// What the chosen source needs: the key it uses (a choice when there are several, another one added), else a paste.
+function sourceNeed(plan, src, keys) {
+  if (!src) return [];
+  if (src.accountKind === 'none') return noKeyNodes(src);          // 618: OpenCode Zen's free models — no key
+  const acc = plan.account;
+  if (keys.length && !SETUP.adding) {
+    let line;
+    if (keys.length > 1) {
+      const sel = h('select', { 'aria-label': 'The key this try uses', 'data-try-account': '' },
+        ...keys.map((x) => h('option', { value: x.name }, x.name + (x.source ? ' — ' + x.source : '') + (x.isDefault ? ' (default)' : ''))));
+      sel.value = (acc && keys.some((x) => x.name === acc.name)) ? acc.name : keys[0].name;
+      sel.addEventListener('change', async () => { await replan(sel.value).catch((e) => { SETUP.error = e.message || String(e); }); paintSetup(); });
+      line = h('div', { class: 'ms-keyline' }, icon('key-round'), h('span', null, 'Key'), sel);
+    } else {
+      line = h('div', { class: 'ms-keyline', 'data-try-key-ok': '' }, icon('key-round'), h('span', null, 'Uses ', h('strong', null, keys[0].name),
+        ' — ' + (keys[0].source || 'Keychain') + ' · the sandbox only ever sees a placeholder'));
+    }
+    return [line, h('div', null, btn('Add another key', () => { SETUP.adding = true; paintSetup(); }, { small: true, quiet: true, icon: 'plus' }))];
+  }
+  return pasteNodes(src, keys.length > 0);
+}
+
+function pasteNodes(src, adding) {
+  const a1 = /^[AEIOUx]/.test(src.title) ? 'an ' : 'a ';
+  const nodes = [];
+  if (secretEntryAllowed()) {
+    const field = h('input', { type: 'password', autocomplete: 'off', spellcheck: 'false', 'data-try-key': '',
+      placeholder: 'paste your ' + src.title + ' key' + (src.keyHint ? ' (' + src.keyHint + '…)' : ''), 'aria-label': 'Paste ' + a1 + src.title + ' key' });
+    const save = btn('Save the key', () => saveKey(field, save), { small: true, icon: 'key-round' });
+    field.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); saveKey(field, save); } });
+    nodes.push(h('div', { class: 'try-paste' }, field, save),
+      h('div', { class: 'muted ms-small' }, 'Kept in this Mac’s keychain; the sandbox only ever sees a placeholder.',
+        src.keysPage ? [' Get one at ', h('strong', null, src.keysPage.replace(/^https?:\/\//, '')), '.'] : null));
+  } else {
+    nodes.push(h('div', { class: 'muted ms-small', 'data-secret-why': '1' }, 'Pasting keys here is off (ui.allow_secret_entry) — in a terminal on this Mac:'),
+      h('code', { class: 'ms-cmd' }, 'doz account add NAME ' + (src.accountKind === 'api-key' ? '--api-key' : src.accountKind === 'openai-key' ? '--openai-key' : '--provider ' + src.id)));
+  }
+  nodes.push(h('details', { class: 'ms-other' }, h('summary', null, 'Keep it in 1Password, AWS or a program instead'),
+    h('code', { class: 'ms-cmd' }, sourceCommand(src.id, src.accountKind)),
+    h('div', { class: 'muted ms-small' }, 'or --from aws:arn:… or --from-command \'…\' — then Check again.'),
+    h('div', null, btn('Check again', () => recheck(), { small: true, quiet: true, icon: 'refresh-cw' }))));
+  if (adding) nodes.push(h('div', null, btn('Keep the key it has', () => { SETUP.adding = false; paintSetup(); }, { small: true, quiet: true })));
+  return nodes;
+}
+
+/// Another source: its default (or only) key, else none — then its row asks for one. The tool's own source is
+/// planned without a flag (the default needs no choice).
+async function chooseSource(id) {
+  const m = SETUP.plan && SETUP.plan.model;
+  SETUP.source = m && m.offered[0] && m.offered[0].id === id ? null : id;
+  SETUP.model = ''; SETUP.error = ''; SETUP.adding = false;
+  const keys = keysBySource(SETUP.a)(id);
+  SETUP.source = SETUP.source || (keys.length ? null : id);
+  await replan(keys.length ? keys[0].name : null).catch((e) => { SETUP.error = e.message || String(e); });
+  paintSetup();
+}
+
+/// A model from the picker (its default: no flag), or an id as typed.
+async function chooseModel(id, isDefault) {
+  SETUP.model = isDefault ? '' : id; SETUP.error = '';
+  const acc = SETUP.plan && SETUP.plan.account;
+  await replan(SETUP.account || (acc && acc.name) || null).catch((e) => { SETUP.error = e.message || String(e); });
+  paintSetup();
+}
+
+function whyNoKey(plan) { const t = plan.model.title; return 'Save ' + (/^[AEIOUx]/.test(t) ? 'an ' : 'a ') + t + ' key, or choose a source that has one'; }
 
 function keyProblem(plan) { return (plan.problems || []).find((p) => p.code === 'key'); }
 
-async function openSetup(a) {
+async function openSetup(card) {
+  // 618: another major asked for by its link (#/try/opencode2): the setup opens on it (its Version chosen).
+  const asked = state.tr && state.tr.version ? anyAgent(state.tr.version) : null;
+  const a = asked && familyOf(card).some((x) => x.id === asked.id) && asked.plan ? asked : card;
   if (!a.plan) return;                                            // the list alone: its plan is still being read
   if (SETUP.d && SETUP.d.open) return;
   if (SETUP.d) { SETUP.d.remove(); SETUP.d = null; }      // closed, its (asynchronous) close event not yet run
-  SETUP.a = a; SETUP.plan = a.plan; SETUP.account = null; SETUP.source = null; SETUP.model = ''; SETUP.busy = false; SETUP.error = '';
-  const d = h('dialog', { class: 'dlg try-setup', 'aria-labelledby': 'try-setup-title', 'data-try-setup': a.id });
+  SETUP.a = a; SETUP.plan = a.plan; SETUP.account = null; SETUP.source = null; SETUP.model = ''; SETUP.busy = false; SETUP.error = ''; SETUP.adding = false;
+  resetModelSearch();
+  const d = h('dialog', { class: 'dlg try-setup', 'aria-labelledby': 'try-setup-title', 'data-try-setup': card.id });
   d.addEventListener('close', () => { d.remove(); if (SETUP.d === d) SETUP.d = null; });
   SETUP.d = d;
   document.body.append(d);
@@ -473,16 +607,16 @@ function paintSetup() {
   start.disabled = !!missing || blocked.length > 0 || SETUP.busy;
   const cancel = btn('Cancel', () => d.close(), { quiet: true, icon: 'x' });
   d.replaceChildren(h('form', { method: 'dialog', on: { submit: (ev) => { ev.preventDefault(); if (!start.disabled) tryCreate(start); } } },
-    h('div', { class: 'dlg-head' }, mark(a.icon), h('h2', { class: 'h-title', id: 'try-setup-title' }, 'Try ' + a.title), close),
+    h('div', { class: 'dlg-head' }, mark(a.icon), h('h2', { class: 'h-title', id: 'try-setup-title' }, 'Try ' + nameOf(a)), close),
     h('div', { class: 'dlg-body' },
       h('p', { class: 'sub' }, 'A fresh sandbox, ' + plan.name + ': a new empty folder of its own, the network locked to its model, your key never inside.'),
-      ...(plan.model && plan.model.offered && plan.model.offered.length > 1 ? [sect('Model', ...modelNodes(plan))] : []),
-      sect('Key', ...keyNodes(a, plan, missing)),
+      ...(familyOf(a).length > 1 ? [sect('Version', ...versionNodes(a))] : []),
+      ...(plan.model && plan.model.offered && plan.model.offered.length ? sourceSections(a, plan, missing) : keyOnly(a) ? oneSourceSection(a, plan, missing) : [sect('Key', ...keyNodes(a, plan, missing))]),
       sect('Image', h('div', { class: 'try-prep', 'data-try-prep': '' }, ...prepNodes({ ...a, plan }))),
       sect('The plan', planFacts(a, plan)),
       ...blocked.map((p) => callout('bad', { compact: true, body: p.text + (p.fix ? ' — ' + p.fix : '') })),
       SETUP.error ? callout('bad', { compact: true, attrs: { 'data-try-error': '' }, body: SETUP.error }) : null),
-    h('div', { class: 'dlg-foot dlg-buttons' }, h('span', { class: 'why' }, missing ? 'Add a key first' : ''), cancel, start)));
+    h('div', { class: 'dlg-foot dlg-buttons' }, h('span', { class: 'why' }, missing ? (plan.model ? whyNoKey(plan) : 'Add a key first') : ''), cancel, start)));
   const f = d.querySelector('[data-try-key]');
   (f || (start.disabled ? cancel : start)).focus();
 }
@@ -575,8 +709,13 @@ async function saveKey(field, button) {
     for (let n = 2; taken.has(name); n++) name = base + '-' + n;
     await api('accounts', { method: 'POST', json: { name, kind, secret, ...(kind === 'key' ? { provider: p } : {}) } });
     toast('Key saved — ' + name + ' (' + (src ? src.title : a.providerTitle || p) + ')');
+    SETUP.adding = false;
+    // The source's row reads the agent's usable accounts: the key just saved is one of them now (the owner's "kept
+    // asking for a key" — the plan used it, the row still read the list from before), until the catalog is read again.
+    SETUP.a = { ...a, usableAccounts: [...(a.usableAccounts || []),
+      { name, kind, source: null, isDefault: false, modelSource: src ? src.id : p }] };
     await replan(name);
-    refreshCatalog();
+    refreshCatalog(a.id);
   } catch (e) { SETUP.error = e.message || String(e); }
   paintSetup();
 }
@@ -602,8 +741,18 @@ async function recheck() {
   paintSetup();
 }
 
-function refreshCatalog() {
-  api('try').then((catalog) => { if (state.tr) take(state.tr, catalog, 'full'); }).catch(() => { /* the list stays */ });
+/// The catalog read again; an open setup of `id` takes its agent from it (the accounts as the host lists them).
+function refreshCatalog(id) {
+  api('try').then((catalog) => {
+    if (state.tr) take(state.tr, catalog, 'full');
+    const fresh = id && catalog.agents.find((x) => x.id === id);
+    if (!fresh || !SETUP.d || !SETUP.a || SETUP.a.id !== id) return;
+    // Repainted only when the accounts differ (a repaint moves the focus — the model search may be in use).
+    const names = (x) => (x.usableAccounts || []).map((u) => u.name).sort().join(',');
+    const differ = names(fresh) !== names(SETUP.a);
+    SETUP.a = fresh;
+    if (differ) paintSetup();
+  }).catch(() => { /* the list stays */ });
 }
 
 function planFacts(a, p) {
@@ -611,12 +760,16 @@ function planFacts(a, p) {
   const fact = (k, v) => [h('dt', null, k), h('dd', null, v)];
   return h('dl', { class: 'qt-plan try-facts' },
     ...fact('Name', p.name),
+    // 618: which major and release ("OpenCode 1 · 1.19.0").
+    ...fact('Version', nameOf(a) + ' · ' + ((p.version && p.version.version) || a.version || '—')),
     ...fact('Base', a.base || '—'),
     // 617 (models@1): the model and where its key goes; the network line then names no single host.
-    ...(p.model ? fact('Model', p.model.model + ' through ' + p.model.title) : []),
+    ...(p.model ? fact('Model', keyProblem(p) ? p.model.title + ' — once its key is saved' : p.model.model + ' through ' + p.model.title) : []),
     ...fact('Network', p.model ? 'Locked — only its model providers' : 'Locked — only its model (' + (lines('model')[0] || 'its model') + ')'),
     ...fact('Folder', lines('folder')[0] || '—'),
-    ...fact('Your Mac', lines('bridge').join(' · ') || '—'));
+    ...fact('Your Mac', lines('bridge').join(' · ') || '—'),
+    // 618: what Start makes, as a command.
+    ...fact('Same in Terminal', h('code', { 'data-try-command': '' }, p.command)));
 }
 
 /// Start → the ordinary `create` action (a try: `trial`, its new folder, the account the setup chose), then the start

@@ -41,6 +41,7 @@ kind maki Maki
 kind omp oh-my-pi
 kind tau Tau
 kind stitch Google Stitch CLI
+kind opencode2 OpenCode 2
 parse lab → alpine none lab Alpine · none base-name lab-sandbox
 parse claude-code → node claude-code claude-code Node.js · Claude Code base-name claude-sandbox
 parse pi → node pi pi Node.js · pi base-name pi-sandbox
@@ -85,6 +86,7 @@ parse node-maki → node maki node-maki Node.js · Maki base-name node-maki-sand
 parse node-omp → node omp node-omp Node.js · oh-my-pi base-name node-omp-sandbox
 parse node-tau → node tau node-tau Node.js · Tau base-name node-tau-sandbox
 parse node-stitch → node stitch node-stitch Node.js · Google Stitch CLI base-name node-stitch-sandbox
+parse node-opencode2 → node opencode2 node-opencode2 Node.js · OpenCode 2 base-name node-opencode-sandbox
 parse python-claude-code → python claude-code python-claude-code Python · Claude Code base-name python-claude-sandbox
 parse python-pi → python pi python-pi Python · pi base-name python-pi-sandbox
 parse python → python none python Python · none base-name python-sandbox
@@ -128,6 +130,7 @@ parse python-maki → python maki python-maki Python · Maki base-name python-ma
 parse python-omp → python omp python-omp Python · oh-my-pi base-name python-omp-sandbox
 parse python-tau → python tau python-tau Python · Tau base-name python-tau-sandbox
 parse python-stitch → python stitch python-stitch Python · Google Stitch CLI base-name python-stitch-sandbox
+parse python-opencode2 → python opencode2 python-opencode2 Python · OpenCode 2 base-name python-opencode-sandbox
 parse go-claude-code → go claude-code go-claude-code Go · Claude Code base-name go-claude-sandbox
 parse go-pi → go pi go-pi Go · pi base-name go-pi-sandbox
 parse go → go none go Go · none base-name go-sandbox
@@ -171,6 +174,7 @@ parse go-maki → go maki go-maki Go · Maki base-name go-maki-sandbox
 parse go-omp → go omp go-omp Go · oh-my-pi base-name go-omp-sandbox
 parse go-tau → go tau go-tau Go · Tau base-name go-tau-sandbox
 parse go-stitch → go stitch go-stitch Go · Google Stitch CLI base-name go-stitch-sandbox
+parse go-opencode2 → go opencode2 go-opencode2 Go · OpenCode 2 base-name go-opencode-sandbox
 parse rust-claude-code → rust claude-code rust-claude-code Rust · Claude Code base-name rust-claude-sandbox
 parse rust-pi → rust pi rust-pi Rust · pi base-name rust-pi-sandbox
 parse rust → rust none rust Rust · none base-name rust-sandbox
@@ -214,6 +218,7 @@ parse rust-maki → rust maki rust-maki Rust · Maki base-name rust-maki-sandbox
 parse rust-omp → rust omp rust-omp Rust · oh-my-pi base-name rust-omp-sandbox
 parse rust-tau → rust tau rust-tau Rust · Tau base-name rust-tau-sandbox
 parse rust-stitch → rust stitch rust-stitch Rust · Google Stitch CLI base-name rust-stitch-sandbox
+parse rust-opencode2 → rust opencode2 rust-opencode2 Rust · OpenCode 2 base-name rust-opencode-sandbox
 parse java-claude-code → java claude-code java-claude-code Java · Claude Code base-name java-claude-sandbox
 parse java-pi → java pi java-pi Java · pi base-name java-pi-sandbox
 parse java → java none java Java · none base-name java-sandbox
@@ -257,6 +262,7 @@ parse java-maki → java maki java-maki Java · Maki base-name java-maki-sandbox
 parse java-omp → java omp java-omp Java · oh-my-pi base-name java-omp-sandbox
 parse java-tau → java tau java-tau Java · Tau base-name java-tau-sandbox
 parse java-stitch → java stitch java-stitch Java · Google Stitch CLI base-name java-stitch-sandbox
+parse java-opencode2 → java opencode2 java-opencode2 Java · OpenCode 2 base-name java-opencode-sandbox
 parse ruby-claude-code → ruby claude-code ruby-claude-code Ruby · Claude Code base-name ruby-claude-sandbox
 parse ruby-pi → ruby pi ruby-pi Ruby · pi base-name ruby-pi-sandbox
 parse ruby → ruby none ruby Ruby · none base-name ruby-sandbox
@@ -300,6 +306,7 @@ parse ruby-maki → ruby maki ruby-maki Ruby · Maki base-name ruby-maki-sandbox
 parse ruby-omp → ruby omp ruby-omp Ruby · oh-my-pi base-name ruby-omp-sandbox
 parse ruby-tau → ruby tau ruby-tau Ruby · Tau base-name ruby-tau-sandbox
 parse ruby-stitch → ruby stitch ruby-stitch Ruby · Google Stitch CLI base-name ruby-stitch-sandbox
+parse ruby-opencode2 → ruby opencode2 ruby-opencode2 Ruby · OpenCode 2 base-name ruby-opencode-sandbox
 parse dotnet-claude-code → dotnet claude-code dotnet-claude-code .NET · Claude Code base-name dotnet-claude-sandbox
 parse dotnet-pi → dotnet pi dotnet-pi .NET · pi base-name dotnet-pi-sandbox
 parse dotnet → dotnet none dotnet .NET · none base-name dotnet-sandbox
@@ -343,6 +350,7 @@ parse dotnet-maki → dotnet maki dotnet-maki .NET · Maki base-name dotnet-maki
 parse dotnet-omp → dotnet omp dotnet-omp .NET · oh-my-pi base-name dotnet-omp-sandbox
 parse dotnet-tau → dotnet tau dotnet-tau .NET · Tau base-name dotnet-tau-sandbox
 parse dotnet-stitch → dotnet stitch dotnet-stitch .NET · Google Stitch CLI base-name dotnet-stitch-sandbox
+parse dotnet-opencode2 → dotnet opencode2 dotnet-opencode2 .NET · OpenCode 2 base-name dotnet-opencode-sandbox
 parse debian-claude-code → debian claude-code debian-claude-code Debian · Claude Code base-name debian-claude-sandbox
 parse debian-pi → debian pi debian-pi Debian · pi base-name debian-pi-sandbox
 parse debian → debian none debian Debian · none base-name debian-sandbox
@@ -386,6 +394,7 @@ parse maki → debian maki maki Debian · Maki base-name maki-sandbox
 parse omp → debian omp omp Debian · oh-my-pi base-name omp-sandbox
 parse tau → debian tau tau Debian · Tau base-name tau-sandbox
 parse stitch → debian stitch stitch Debian · Google Stitch CLI base-name stitch-sandbox
+parse opencode2 → debian opencode2 opencode2 Debian · OpenCode 2 base-name opencode-sandbox
 parse ubuntu-claude-code → ubuntu claude-code ubuntu-claude-code Ubuntu · Claude Code base-name ubuntu-claude-sandbox
 parse ubuntu-pi → ubuntu pi ubuntu-pi Ubuntu · pi base-name ubuntu-pi-sandbox
 parse ubuntu → ubuntu none ubuntu Ubuntu · none base-name ubuntu-sandbox
@@ -429,6 +438,7 @@ parse ubuntu-maki → ubuntu maki ubuntu-maki Ubuntu · Maki base-name ubuntu-ma
 parse ubuntu-omp → ubuntu omp ubuntu-omp Ubuntu · oh-my-pi base-name ubuntu-omp-sandbox
 parse ubuntu-tau → ubuntu tau ubuntu-tau Ubuntu · Tau base-name ubuntu-tau-sandbox
 parse ubuntu-stitch → ubuntu stitch ubuntu-stitch Ubuntu · Google Stitch CLI base-name ubuntu-stitch-sandbox
+parse ubuntu-opencode2 → ubuntu opencode2 ubuntu-opencode2 Ubuntu · OpenCode 2 base-name ubuntu-opencode-sandbox
 parse alpine-claude-code → alpine claude-code alpine-claude-code Alpine · Claude Code base-name alpine-claude-sandbox
 parse alpine-pi → alpine pi alpine-pi Alpine · pi base-name alpine-pi-sandbox
 parse alpine-codex → alpine codex alpine-codex Alpine · Codex base-name alpine-codex-sandbox
@@ -471,6 +481,7 @@ parse alpine-maki → alpine maki alpine-maki Alpine · Maki base-name alpine-ma
 parse alpine-omp → alpine omp alpine-omp Alpine · oh-my-pi base-name alpine-omp-sandbox
 parse alpine-tau → alpine tau alpine-tau Alpine · Tau base-name alpine-tau-sandbox
 parse alpine-stitch → alpine stitch alpine-stitch Alpine · Google Stitch CLI base-name alpine-stitch-sandbox
+parse alpine-opencode2 → alpine opencode2 alpine-opencode2 Alpine · OpenCode 2 base-name alpine-opencode-sandbox
 parse df-0123456789ab-claude-code → df-0123456789ab claude-code df-0123456789ab-claude-code Dockerfile · Claude Code base-name dockerfile-claude-sandbox
 parse df-0123456789ab-pi → df-0123456789ab pi df-0123456789ab-pi Dockerfile · pi base-name dockerfile-pi-sandbox
 parse df-0123456789ab → df-0123456789ab none df-0123456789ab Dockerfile · none base-name dockerfile-sandbox
@@ -514,6 +525,7 @@ parse df-0123456789ab-maki → df-0123456789ab maki df-0123456789ab-maki Dockerf
 parse df-0123456789ab-omp → df-0123456789ab omp df-0123456789ab-omp Dockerfile · oh-my-pi base-name dockerfile-omp-sandbox
 parse df-0123456789ab-tau → df-0123456789ab tau df-0123456789ab-tau Dockerfile · Tau base-name dockerfile-tau-sandbox
 parse df-0123456789ab-stitch → df-0123456789ab stitch df-0123456789ab-stitch Dockerfile · Google Stitch CLI base-name dockerfile-stitch-sandbox
+parse df-0123456789ab-opencode2 → df-0123456789ab opencode2 df-0123456789ab-opencode2 Dockerfile · OpenCode 2 base-name dockerfile-opencode-sandbox
 parse node-claude-code → node claude-code claude-code Node.js · Claude Code base-name node-claude-code-sandbox
 parse node-pi → node pi pi Node.js · pi base-name node-pi-sandbox
 parse node-codex → node codex codex Node.js · Codex base-name node-codex-sandbox

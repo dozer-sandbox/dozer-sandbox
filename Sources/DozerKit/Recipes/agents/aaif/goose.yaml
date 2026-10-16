@@ -5,7 +5,7 @@ schema: 2
 kind: workload
 id: aaif/goose
 displayName: Goose
-description: An open-source, extensible AI agent for the terminal (Agentic AI Foundation, ex-Block), here on an xAI API key.
+description: An open-source, extensible AI agent for the terminal (Agentic AI Foundation, ex-Block), on the key of the provider or gateway you choose (xAI by default).
 author: Agentic AI Foundation
 sourceUrl: https://github.com/aaif-goose/goose
 licenses:
@@ -23,19 +23,35 @@ capabilities:
   config:
     runtime:
       allow:
+      - api.anthropic.com:443
+      - api.openai.com:443
       - api.x.ai:443
+      - generativelanguage.googleapis.com:443
+      - openrouter.ai:443
+      - ai-gateway.vercel.sh:443
     dozer:
       model:
         id: model:goose
-        title: Talk to xAI
-        summary: Goose's model here (the xAI API, with your key) — needed for Goose to answer.
-        phrase: talk to your AI model (xAI)
+        title: Talk to its model provider
+        summary: Goose's model — the provider or gateway its key is for (Anthropic, OpenAI, xAI, Google AI, OpenRouter or Vercel AI Gateway), with an API key. Needed for Goose to answer.
+        phrase: talk to your AI model
         hosts:
+        - host: api.anthropic.com
+          reason: Anthropic — when the sandbox's key is Anthropic's
+        - host: api.openai.com
+          reason: OpenAI — when the sandbox's key is OpenAI's
         - host: api.x.ai
           paths:
           - /v1/models
           - /v1/chat/completions
           - /v1/responses
+          reason: xAI — when the sandbox's key is xAI's
+        - host: generativelanguage.googleapis.com
+          reason: Google AI — when the sandbox's key is Google AI's
+        - host: openrouter.ai
+          reason: OpenRouter — when the sandbox's key is OpenRouter's
+        - host: ai-gateway.vercel.sh
+          reason: Vercel AI Gateway — when the sandbox's key is Vercel AI Gateway's
       update: []
       excluded: []
 - type: com.docker.sandbox/credential@1
@@ -96,8 +112,6 @@ capabilities:
     - web
     - completion
     env:
-      GOOSE_PROVIDER: xai
-      GOOSE_MODEL: grok-code-fast-1
       GOOSE_MODE: auto
       GOOSE_DISABLE_KEYRING: '1'
       GOOSE_TELEMETRY_ENABLED: 'false'
@@ -139,27 +153,81 @@ capabilities:
       accounts:
       - key
       keys_page: https://console.x.ai/
-      note: Goose's xAI provider (GOOSE_PROVIDER=xai, XAI_API_KEY, model grok-code-fast-1). Its other providers Dozer does not offer here yet.
-      checked: '2026-10-14'
+      note: 'Goose''s own providers from the environment (GOOSE_PROVIDER, GOOSE_MODEL): xai on xAI (the default, model grok-code-fast-1), openai with OPENAI_BASE_URL for an OpenAI-compatible provider or gateway, anthropic with ANTHROPIC_HOST.'
+      checked: '2026-10-16'
+    - kind: api-key
+      provider: anthropic
+      accounts:
+      - api-key
+      keys_page: https://console.anthropic.com/settings/keys
+      note: 'Goose through Anthropic: doz try goose --provider anthropic (or choose it in the try setup); the model with --model.'
+      checked: '2026-10-16'
+    - kind: api-key
+      provider: openai
+      accounts:
+      - openai-key
+      keys_page: https://platform.openai.com/api-keys
+      note: 'Goose through OpenAI: doz try goose --provider openai (or choose it in the try setup); the model with --model.'
+      checked: '2026-10-16'
+    - kind: api-key
+      provider: google
+      accounts:
+      - key
+      keys_page: https://aistudio.google.com/apikey
+      note: 'Goose through Google AI: doz try goose --provider google (or choose it in the try setup); the model with --model.'
+      checked: '2026-10-16'
+    - kind: api-key
+      provider: openrouter
+      accounts:
+      - key
+      keys_page: https://openrouter.ai/keys
+      note: 'Goose through OpenRouter: doz try goose --gateway openrouter (or choose it in the try setup); the model with --model.'
+      checked: '2026-10-16'
+    - kind: api-key
+      provider: vercel-ai-gateway
+      accounts:
+      - key
+      keys_page: https://vercel.com/docs/ai-gateway/authentication-and-byok
+      note: 'Goose through Vercel AI Gateway: doz try goose --gateway vercel-ai-gateway (or choose it in the try setup); the model with --model.'
+      checked: '2026-10-16'
 - type: com.dozersandbox/gateways@1
   config:
     entries:
     - gateway: openrouter
-      level: documented
-      shape: openai-chat
-      how:
-        env:
-          GOOSE_PROVIDER: openrouter
-          OPENROUTER_API_KEY: ${{ dozer.placeholder }}
-          GOOSE_MODEL: ${{ dozer.model }}
-      notes:
-      - OpenRouter is one of Goose's built-in providers
-      source: https://goose-docs.ai/docs/getting-started/providers
-      checked: '2026-10-14'
+      level: verified
+      evidence: 'make recipe-check: its check turn through a stand-in OpenRouter (doz try with --gateway openrouter; models@1)'
+      checked: '2026-10-16'
     - gateway: vercel-ai-gateway
-      level: unknown
-      reason: Goose documents no Vercel AI Gateway provider; its OpenAI-compatible host setting was not checked against it
-      checked: '2026-10-14'
+      level: verified
+      evidence: 'make recipe-check: its check turn through a stand-in Vercel AI Gateway (doz try with --gateway vercel-ai-gateway; models@1)'
+      checked: '2026-10-16'
+- type: com.dozersandbox/models@1
+  config:
+    default: xai
+    shapes:
+    - shape: openai-chat
+      env:
+        GOOSE_PROVIDER: openai
+        GOOSE_MODEL: '${{ dozer.model }}'
+        OPENAI_BASE_URL: '${{ dozer.base_url }}'
+      key_env:
+      - OPENAI_API_KEY
+      source: https://goose-docs.ai/docs/getting-started/providers
+    - shape: anthropic-messages
+      env:
+        GOOSE_PROVIDER: anthropic
+        GOOSE_MODEL: '${{ dozer.model }}'
+        ANTHROPIC_HOST: '${{ dozer.base_url }}'
+      key_env:
+      - ANTHROPIC_API_KEY
+      source: https://goose-docs.ai/docs/getting-started/providers
+    native:
+    - source: xai
+      env:
+        GOOSE_PROVIDER: xai
+        GOOSE_MODEL: '${{ dozer.model }}'
+    models:
+      xai: grok-code-fast-1
 - type: com.dozersandbox/currency@1
   config:
     checked: '2026-10-14'
@@ -180,7 +248,7 @@ capabilities:
       - goose run -t "…"
       source: https://goose-docs.ai/docs/guides/goose-cli-commands
       checked: '2026-10-14'
-    terms: Your xAI API key — a key from console.x.ai.
+    terms: Your API key of the provider or gateway you choose (xAI by default).
 - type: com.dozersandbox/guide@1
   config:
     intro: "Goose is a coding agent with its own screen: the session on the left. Ask it to read, change and run the code in your folder."

@@ -31,7 +31,8 @@ final class ModelSourcesTests: XCTestCase {
     // MARK: the data
 
     func testEveryProviderAndGatewayIsAModelSourceWithEndpoints() throws {
-        XCTAssertEqual(ModelSources.ids, ["anthropic", "openai", "xai", "google", "google-stitch", "openrouter", "vercel-ai-gateway"])
+        XCTAssertEqual(ModelSources.ids, ["anthropic", "openai", "xai", "google", "google-stitch", "openrouter", "vercel-ai-gateway", "opencode-zen"])
+        XCTAssertEqual(ModelSources.keyed, ["anthropic", "openai", "xai", "google", "google-stitch", "openrouter", "vercel-ai-gateway"])
         XCTAssertEqual(ModelSources.ids.filter(ModelSources.isGateway), ["openrouter", "vercel-ai-gateway"])
         // Google Stitch's key is a service's (a hosted design tool), not a model's: it serves no shape, so no recipe is
         // ever offered it as a model source — only the Stitch CLI, whose credential it is.
@@ -66,7 +67,7 @@ final class ModelSourcesTests: XCTestCase {
         XCTAssertEqual(sgpt.selection(source: "vercel-ai-gateway", model: "anthropic/claude-sonnet-4.6")?.env["DEFAULT_MODEL"], "anthropic/claude-sonnet-4.6")
         XCTAssertNil(sgpt.selection(source: "anthropic"), "not offered")
         // An agent without models@1: its one provider, no selection (the built-in three included).
-        for id in ["claude-code", "pi", "codex", "grok"] {
+        for id in ["claude-code", "codex", "gemini"] {
             let r = try XCTUnwrap(AgentRecipes.recipe(id))
             XCTAssertNil(r.models)
             XCTAssertEqual(r.offeredSources, r.credentials.map(\.provider))
@@ -151,6 +152,16 @@ final class ModelSourcesTests: XCTestCase {
         let back = try ChoiceOptions.from(Array(p.argv.dropFirst(3)) + ["--agent", "shell-gpt"]).planChoices()
         XCTAssertEqual(back.modelSource, "openrouter")
         XCTAssertEqual(back.model, "anthropic/claude-sonnet-4.6")
+        // 618: pi on a gateway: its key goes to that gateway; Anthropic's hosts stay reachable with no key; on Anthropic the line is as before.
+        let model = AgentPermissions.permission("model")!.title
+        let pg = CreatePlanner.plan(PlanRequest(purpose: "try", create: try ChoiceOptions.from(["--agent", "pi", "--gateway", "openrouter",
+                                                                                                 "--model", "anthropic/claude-sonnet-4.5"]).planChoices()), facts: facts)
+        XCTAssertEqual(pg.reach.first?.text, "Model: anthropic/claude-sonnet-4.5 through OpenRouter (openrouter.ai) — its key only ever goes there")
+        XCTAssertFalse(pg.reach.contains { $0.text.hasPrefix(model) }, pg.reach.map(\.text).joined(separator: " | "))
+        XCTAssertTrue(pg.reach.contains { $0.kind == "model" && $0.text == "Anthropic, pi's default provider (api.anthropic.com, statsig.anthropic.com): reachable; no key goes there on this run" },
+                      "still reachable (the permission stays), and said so")
+        let pa = CreatePlanner.plan(PlanRequest(purpose: "try", create: try ChoiceOptions.from(["--agent", "pi"]).planChoices()), facts: facts)
+        XCTAssertTrue(pa.reach.contains { $0.text.hasPrefix(model) }, pa.reach.map(\.text).joined(separator: " | "))
         // No key of the chosen source: no account, the problem names the fix.
         let none = CreatePlanner.plan(PlanRequest(purpose: "try", create: try ChoiceOptions.from(["--agent", "shell-gpt", "--provider", "openai"]).planChoices()),
                                       facts: facts)
@@ -211,6 +222,48 @@ final class ModelSourcesTests: XCTestCase {
         XCTAssertEqual(mine["DEFAULT_MODEL"], "mine")
     }
 
+    /// 618: pi (built-in) on another source — that source's key only, its hosts through the hidden `sources:pi`, its
+    /// model on the session's command line; on Anthropic it keeps its own path and its own model pick.
+    func testPiOnAGatewayKey() async throws {
+        let c = await core()
+        _ = await c.handle(HostRequest.keyAccountAdd(name: "or", provider: "openrouter", secret: "sk-or-v1-FAKE0123456789abcdef"))
+        var r = HostRequest(.create, name: "p")
+        r.create = CreateOptions(image: "pi", network: "locked")
+        r.create?.modelSource = "openrouter"
+        let m = await c.handle(r)
+        XCTAssertNil(m.error, m.error?.message ?? "")
+        let v = try await XCTUnwrapAsync(await c.vault(of: "p"))
+        XCTAssertTrue(v.hasSecret("key:openrouter"))
+        XCTAssertFalse(v.hasSecret("anthropic"))
+        XCTAssertEqual(Set(v.sessionEnvironment().keys), ["OPENROUTER_API_KEY"], "pi reads OPENROUTER_API_KEY itself")
+        // Anthropic's hosts stay reachable (its shared model permission) but no key goes there: no Anthropic binding, and
+        // the OpenRouter placeholder sent there is refused by the leak guard.
+        let guarded = try await XCTUnwrapAsync(await c.leakGuardHosts(of: "p"))
+        XCTAssertTrue(guarded.contains("api.anthropic.com"))
+        let perms = try await c.permissionsOf("p")
+        XCTAssertTrue(perms?.contains("sources:pi") == true)
+        let args = try await c.builtinModelArguments(of: "p")
+        XCTAssertEqual(args, ["--model", "openrouter/openai/gpt-5.4-mini"])
+        let pe = try await c.selectionEnvironment("p")
+        XCTAssertEqual(pe["DOZ_MODEL"], "openrouter/openai/gpt-5.4-mini")
+        // On Anthropic (its default): its own path and its own model — nothing on its command line.
+        _ = await c.handle(HostRequest.accountAdd(name: "ak", kind: .apiKey, plan: nil, secret: "sk-ant-api03-FAKE0123456789abcdef"))
+        var use = HostRequest(.accountUse, name: "p")
+        use.account = "ak"
+        let u = await c.handle(use)
+        XCTAssertNil(u.error, u.error?.message ?? "")
+        let v2 = try await XCTUnwrapAsync(await c.vault(of: "p"))
+        XCTAssertTrue(v2.hasSecret("anthropic"))
+        XCTAssertFalse(v2.hasSecret("key:openrouter"))
+        let none = try await c.builtinModelArguments(of: "p")
+        XCTAssertEqual(none, [])
+        let watched = try await XCTUnwrapAsync(await c.leakGuardHosts(of: "p"))
+        XCTAssertTrue(watched.contains("openrouter.ai"), "its other sources are watched: an Anthropic placeholder sent there is refused")
+        // Claude Code and Codex: never.
+        XCTAssertNil(AgentCredentials.sources("claude-code"))
+        XCTAssertNil(AgentCredentials.sources("codex"))
+    }
+
     func testCreateRefusesASourceItCannotUse() async throws {
         let c = await core()
         var r = HostRequest(.create, name: "sg")
@@ -221,10 +274,120 @@ final class ModelSourcesTests: XCTestCase {
         r.create?.modelSource = "anthropic"
         m = await c.handle(r)
         XCTAssertTrue(m.error?.message.contains("cannot use Anthropic") == true, m.error?.message ?? "")
-        r.create = CreateOptions(image: "grok", network: "locked")
+        r.create = CreateOptions(image: "gemini", network: "locked")
         r.create?.modelSource = "openai"
         m = await c.handle(r)
         XCTAssertTrue(m.error?.message.contains("no choice of model provider") == true, m.error?.message ?? "")
+    }
+
+    // MARK: 618: a key-less source (OpenCode Zen's free models)
+
+    /// The data: never a key provider — no binding, no key host, no account kind; offered by a native entry only (an
+    /// OpenAI-shaped tool is never offered it); its models listed with their data terms.
+    func testAKeylessSourceIsNoKeyProvider() throws {
+        XCTAssertNoThrow(try KeyProviders.validate(keyless: KeyProviders.keyless, providers: KeyProviders.all))
+        XCTAssertTrue(ModelSources.isKeyless("opencode-zen"))
+        XCTAssertNil(KeyProviders.provider("opencode-zen"), "no key provider: no binding, no account add")
+        XCTAssertEqual(ModelSources.accountKind("opencode-zen"), "none")
+        XCTAssertEqual(ModelSources.hosts("opencode-zen"), ["opencode.ai"])
+        XCTAssertEqual(ModelSources.keyHosts("opencode-zen"), [], "no key ever goes there")
+        XCTAssertFalse(KeyProviders.keyBindings.contains { $0.hosts.contains("opencode.ai") })
+        XCTAssertEqual(AgentRecipes.all.filter { $0.offeredSources.contains("opencode-zen") }.map(\.id), ["opencode2"],
+                       "OpenCode 2 only: a shape alone never offers a key-less source")
+        let oc = try XCTUnwrap(AgentRecipes.recipe("opencode2"))
+        let sel = try XCTUnwrap(oc.selection(source: "opencode-zen"))
+        XCTAssertEqual(sel.model, "big-pickle")
+        XCTAssertEqual(sel.env, ["DOZ_MODEL": "opencode/big-pickle"])
+        XCTAssertEqual(oc.selection(source: "opencode-zen", model: "space-bunny-free")?.env["DOZ_MODEL"], "opencode/space-bunny-free")
+        // Its model permission reaches opencode.ai only on the inference paths (no Console, no device sign-in).
+        let zen = try XCTUnwrap(oc.network.model.hosts?.first { $0.host == "opencode.ai" })
+        XCTAssertEqual(zen.paths, ["/zen/v1/chat/completions", "/zen/v1/responses"])
+        XCTAssertNotNil(AgentPermissions.permission("model:opencode2"))
+        let pol = NetworkPolicy.permissions(AgentPermissions.normalized(["model:opencode2"]))
+        XCTAssertEqual(pol.evaluate(host: "opencode.ai", port: 443, method: "POST", path: "/zen/v1/chat/completions").action, .allow)
+        XCTAssertEqual(pol.evaluate(host: "opencode.ai", port: 443, method: "POST", path: "/zen/v1/responses").action, .allow)
+        XCTAssertEqual(pol.evaluate(host: "opencode.ai", port: 443, method: "GET", path: "/console/api/config").action, .deny, "no Console config")
+        XCTAssertEqual(pol.evaluate(host: "opencode.ai", port: 443, method: "POST", path: "/console/auth/device/code").action, .deny, "no device sign-in")
+        XCTAssertEqual(pol.evaluate(host: "opencode.ai", port: 443, method: "GET", path: "/zen/go/v1/usage").action, .deny, "nothing else of Zen")
+        // The list: curated, with the docs' data terms.
+        let l = ModelLists.list("opencode-zen", record: nil)
+        XCTAssertEqual(l.kind, "listed")
+        XCTAssertEqual(l.defaultModel, "big-pickle")
+        XCTAssertTrue(l.models.allSatisfy { $0.note != nil && $0.pricePerMillionIn == 0 })
+        XCTAssertFalse(l.models.contains { $0.id == "jev-1.13-free" }, "a free model that needs a key is not listed")
+        XCTAssertTrue(renderModelLists([l], searched: false).contains("DATA TERMS"))
+        // A key-less source whose host is a provider's is refused (a key could go there).
+        var bad = KeyProviders.keyless
+        bad[0].hosts = ["api.x.ai"]
+        bad[0].endpoints[0].baseUrl = "https://api.x.ai/v1"
+        XCTAssertThrowsError(try KeyProviders.validate(keyless: bad, providers: KeyProviders.all))
+        bad = KeyProviders.keyless
+        bad[0].endpoints[0].defaultModel = "not-listed"
+        XCTAssertThrowsError(try KeyProviders.validate(keyless: bad, providers: KeyProviders.all), "its default is one of its models")
+    }
+
+    /// The account, the plan and the CLI: no account and no key problem; the plan says no key goes there.
+    func testAKeylessSourceNeedsNoAccount() throws {
+        var f = AccountsFile()
+        XCTAssertEqual(AgentCredentials.account(forSource: "opencode-zen", image: "opencode2", account: nil, file: f).name, "none")
+        XCTAssertNil(AgentCredentials.account(forSource: "opencode-zen", image: "opencode2", account: nil, file: f).problem)
+        var x = AccountRecord(name: "x", kind: .key, plan: nil)
+        x.provider = "xai"
+        f.accounts.append(x)
+        XCTAssertEqual(AgentCredentials.account(forSource: "opencode-zen", image: "opencode2", account: "x", file: f).problem?.fix, "leave out --account")
+        XCTAssertFalse(AgentCredentials.requirement("opencode2").contains("OpenCode Zen"), AgentCredentials.requirement("opencode2"))
+        XCTAssertNotNil(AgentCredentials.account(forSource: "opencode-zen", image: "shell-gpt", account: nil, file: f).problem, "offered to OpenCode 2 only")
+        let facts = PlanFacts(settings: DozerSettings(text: ""), accounts: AccountsFile(), taken: [], images: [], store: DozerStore(root: root),
+                              projectsDir: "/tmp/618-zen-projects")
+        let p = CreatePlanner.plan(PlanRequest(purpose: "try", create: try ChoiceOptions.from(["--agent", "opencode2", "--provider", "opencode-zen"]).planChoices()),
+                                   facts: facts)
+        XCTAssertEqual(p.problems.map(\.text), [], "no key needed: Start is possible")
+        XCTAssertEqual(p.account?.kind, "none")
+        XCTAssertEqual(p.account?.provider, "opencode-zen")
+        XCTAssertEqual(p.model?.source, "opencode-zen")
+        XCTAssertEqual(p.model?.offered.first { $0.id == "opencode-zen" }?.accountKind, "none")
+        XCTAssertEqual(p.reach.first?.text, "Model: big-pickle through OpenCode Zen (opencode.ai) — no key needed: no key of yours goes there")
+        XCTAssertEqual(p.command, "doz try opencode@2 --provider opencode-zen")
+        XCTAssertTrue(renderPlan(p).contains("account: none — OpenCode Zen needs no key"), renderPlan(p))
+        XCTAssertTrue(p.reach.contains { $0.kind == "key" && $0.text.hasPrefix("Key: none needed") }, p.reach.map(\.text).joined(separator: " | "))
+        XCTAssertFalse(p.reach.contains { $0.text == "No key yet" })
+        let back = try ChoiceOptions.from(Array(p.argv.dropFirst(3)) + ["--agent", "opencode2"]).planChoices()
+        XCTAssertEqual(back.modelSource, "opencode-zen")
+    }
+
+    /// The host: no key in the vault (none of any source), no placeholder, the model in OpenCode's settings, no problem
+    /// on its page; an account added later wins.
+    func testASandboxOnAKeylessSource() async throws {
+        let c = await core()
+        _ = await c.handle(HostRequest.keyAccountAdd(name: "work-xai", provider: "xai", secret: "xai-FAKE-0123456789abcdef"))
+        var r = HostRequest(.create, name: "oz")
+        r.create = CreateOptions(image: "opencode2", network: "locked")
+        r.create?.modelSource = "opencode-zen"
+        r.create?.model = "space-bunny-free"
+        let m = await c.handle(r)
+        XCTAssertNil(m.error, m.error?.message ?? "")
+        let v = try await XCTUnwrapAsync(await c.vault(of: "oz"))
+        XCTAssertFalse(v.hasSecret("key:xai"), "the store's xAI default is not used")
+        XCTAssertEqual(v.sessionEnvironment(), [:], "no placeholder at all")
+        let e = try await c.selectionEnvironment("oz")
+        XCTAssertEqual(e["DOZ_MODEL"], "opencode/space-bunny-free")
+        let guarded = try await XCTUnwrapAsync(await c.leakGuardHosts(of: "oz"))
+        XCTAssertTrue(guarded.isSuperset(of: ["api.x.ai", "opencode.ai"]), "a placeholder sent anywhere is refused")
+        let problem = try await c.credentialProblemOf("oz")
+        XCTAssertNil(problem)
+        // An account added later: its source wins.
+        var use = HostRequest(.accountUse, name: "oz")
+        use.account = "work-xai"
+        let u = await c.handle(use)
+        XCTAssertNil(u.error, u.error?.message ?? "")
+        let e2 = try await c.selectionEnvironment("oz")
+        XCTAssertEqual(e2["DOZ_MODEL"], "xai/grok-build-0.1")
+        // An account given with a key-less source is refused.
+        var r2 = HostRequest(.create, name: "oz2")
+        r2.create = CreateOptions(image: "opencode2", network: "locked", account: "work-xai")
+        r2.create?.modelSource = "opencode-zen"
+        let m2 = await c.handle(r2)
+        XCTAssertTrue(m2.error?.message.contains("takes no key") == true, m2.error?.message ?? "")
     }
 
     // MARK: the recipe's own rules
@@ -247,9 +410,52 @@ final class ModelSourcesTests: XCTestCase {
         refused({ $0.models?.models = ["openrouter": "bad model"] }, "a model id")
         refused({ $0.network.model.hosts?.removeAll { $0.host == "openrouter.ai" } }, "the model permission reaches every offered source")
         refused({ $0.models?.native = [AgentRecipe.Models.NativeEntry(source: "google", env: ["U": "{base_url}"])] }, "a native client has no base URL")
-        var b = try XCTUnwrap(AgentRecipes.recipe("pi"))
-        b.models = AgentRecipe.Models(default: "anthropic")
-        XCTAssertThrowsError(try b.validate(), "the built-in agents keep their own accounts")
+        var b = try XCTUnwrap(AgentRecipes.recipe("claude-code"))
+        b.models = AgentRecipe.Models(default: "anthropic", native: [.init(source: "anthropic", env: [:])])
+        XCTAssertThrowsError(try b.validate(), "Claude Code and Codex keep their own accounts")
+        // 618: pi declares its sources — native only (nothing baked: its image is Dozer's own).
+        var pi = try XCTUnwrap(AgentRecipes.recipe("pi"))
+        XCTAssertNoThrow(try pi.validate())
+        XCTAssertEqual(pi.offeredSources, ["anthropic", "openai", "xai", "google", "openrouter", "vercel-ai-gateway"])
+        pi.models?.shapes = [.init(shape: "openai-chat", env: ["X": "{base_url}"])]
+        XCTAssertThrowsError(try pi.validate(), "a built-in agent's sources are native only")
+    }
+
+    /// 618: an OpenAI-compatible shape is offered the gateways without listing them; what a try can do and what the
+    /// gateway entries say never disagree; `verified` only from an entry that says its evidence.
+    func testTheGatewaysFollowFromTheShapes() throws {
+        var r = sgpt
+        r.gateways = []
+        r.models?.shapes?[0].source = "https://example.com/docs#base-url"
+        XCTAssertNoThrow(try r.validate(), "an offered gateway needs no entry")
+        XCTAssertEqual(r.gatewaySupport.map(\.gateway), ["openrouter", "vercel-ai-gateway"])
+        XCTAssertEqual(r.gatewaySupport.map(\.level), ["documented", "documented"], "documented, never verified, without evidence")
+        XCTAssertEqual(r.gatewaySupport.first?.source, "https://example.com/docs#base-url")
+        XCTAssertEqual(r.gatewaySupport.first?.endpoint, "v1")
+        XCTAssertTrue(r.throughGateway)
+        XCTAssertTrue(r.capabilityTags.contains { $0.tag == "gateway:openrouter" && $0.level == "documented" })
+        // An entry overrides (the evidence of a recipe-check run).
+        r.gateways = [AgentRecipe.GatewaySupport(gateway: "openrouter", level: "verified", evidence: "make recipe-check", checked: "2026-10-16")]
+        XCTAssertNoThrow(try r.validate(), "an override needs no how: models@1 says it")
+        XCTAssertEqual(r.gatewaySupport.map(\.level), ["verified", "documented"])
+        // Never a contradiction.
+        r.gateways = [AgentRecipe.GatewaySupport(gateway: "openrouter", level: "no", reason: "x")]
+        XCTAssertThrowsError(try r.validate(), "offered, so not no")
+        r.gateways = []
+        r.models?.shapes?[0].source = nil
+        XCTAssertThrowsError(try r.validate(), "an offered gateway with nothing to cite") { XCTAssertTrue("\($0)".contains("cite"), "\($0)") }
+        r.models?.shapes?[0].source = "http://example.com"
+        XCTAssertThrowsError(try r.validate(), "an https source")
+        // A tool with models@1 that is not offered a gateway says so; it cannot claim one.
+        var n = sgpt
+        n.models?.except = ["openrouter"]
+        n.network.model.hosts?.removeAll { $0.host == "openrouter.ai" }
+        n.gateways = sgpt.gateways
+        XCTAssertThrowsError(try n.validate(), "verified, but not offered")
+        XCTAssertFalse(n.offersGateway("openrouter"))
+        // Without models@1 nothing is offered, whatever the entries document (the built-ins).
+        let cc = try XCTUnwrap(AgentRecipes.recipe("claude-code"))
+        XCTAssertFalse(cc.throughGateway)
     }
 }
 
@@ -260,6 +466,9 @@ extension HostCore {
     }
 
     func leakGuardHosts(of name: String) -> Set<String>? { (try? get(name))?.sandbox.egress?.leakGuardHosts }
+    func builtinModelArguments(of name: String) throws -> [String] { builtinModelArguments(try get(name)) }
+    func permissionsOf(_ name: String) throws -> [String]? { try get(name).config.spec.network.policy?.permissions }
+    func credentialProblemOf(_ name: String) throws -> String? { credentialProblem(try get(name)) }
 }
 
 extension RecipeHostTests {

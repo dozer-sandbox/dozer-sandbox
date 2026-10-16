@@ -5,7 +5,7 @@ schema: 2
 kind: workload
 id: tontinton/maki
 displayName: Maki
-description: A Rust coding agent for the terminal with Lua plugins, here on an xAI API key.
+description: A Rust coding agent for the terminal with Lua plugins, on the key of the provider or gateway you choose (xAI by default).
 author: Tony Solomonik and contributors
 sourceUrl: https://github.com/tontinton/maki
 licenses:
@@ -23,21 +23,31 @@ capabilities:
   config:
     runtime:
       allow:
+      - api.anthropic.com:443
+      - api.openai.com:443
       - api.x.ai:443
+      - openrouter.ai:443
       - api.github.com:443
       deny:
       - models.dev:443
     dozer:
       model:
         id: model:maki
-        title: Talk to xAI
-        summary: Maki's model here (the xAI API, with your key) — needed for it to answer.
-        phrase: talk to your AI model (xAI)
+        title: Talk to its model provider
+        summary: Maki's model — the provider or gateway its key is for (Anthropic, OpenAI, xAI or OpenRouter), with an API key. Needed for Maki to answer.
+        phrase: talk to your AI model
         hosts:
+        - host: api.anthropic.com
+          reason: Anthropic — when the sandbox's key is Anthropic's
+        - host: api.openai.com
+          reason: OpenAI — when the sandbox's key is OpenAI's
         - host: api.x.ai
           paths:
           - /v1/models
           - /v1/chat/completions
+          reason: xAI — when the sandbox's key is xAI's
+        - host: openrouter.ai
+          reason: OpenRouter — when the sandbox's key is OpenRouter's
       update: []
       excluded: []
       vendor:
@@ -83,8 +93,9 @@ capabilities:
   config:
     command:
     - maki
-    - -m
-    - xai/grok-build-0.1
+    model_args:
+    - '-m'
+    - '$DOZ_MODEL'
     no_prompts_args:
     - --yolo
     passthrough:
@@ -115,8 +126,6 @@ capabilities:
       argv:
       - maki
       - -p
-      - -m
-      - xai/grok-build-0.1
       - say ok
       expect: DOZ_FAKE_OK
 - type: com.dozersandbox/auth@1
@@ -127,19 +136,59 @@ capabilities:
       accounts:
       - key
       keys_page: https://console.x.ai/
-      note: Maki's xai provider reads XAI_API_KEY each run; model xai/grok-build-0.1 (its default would be an Anthropic model).
-      checked: '2026-10-14'
+      note: 'Maki''s own providers, each reading its key from the environment; Dozer puts the model on its command line (-m xai/grok-build-0.1 on xAI, the default; -m PROVIDER/MODEL for the others).'
+      checked: '2026-10-16'
+    - kind: api-key
+      provider: anthropic
+      accounts:
+      - api-key
+      keys_page: https://console.anthropic.com/settings/keys
+      note: 'Maki through Anthropic: doz try maki --provider anthropic (or choose it in the try setup); the model with --model.'
+      checked: '2026-10-16'
+    - kind: api-key
+      provider: openai
+      accounts:
+      - openai-key
+      keys_page: https://platform.openai.com/api-keys
+      note: 'Maki through OpenAI: doz try maki --provider openai (or choose it in the try setup); the model with --model.'
+      checked: '2026-10-16'
+    - kind: api-key
+      provider: openrouter
+      accounts:
+      - key
+      keys_page: https://openrouter.ai/keys
+      note: 'Maki through OpenRouter: doz try maki --gateway openrouter (or choose it in the try setup); the model with --model.'
+      checked: '2026-10-16'
 - type: com.dozersandbox/gateways@1
   config:
     entries:
     - gateway: openrouter
-      level: unknown
-      reason: Maki reads OPENROUTER_API_KEY; not checked
-      checked: '2026-10-14'
+      level: verified
+      evidence: 'make recipe-check: its check turn through a stand-in OpenRouter (doz try with --gateway openrouter; models@1)'
+      checked: '2026-10-16'
     - gateway: vercel-ai-gateway
-      level: unknown
-      reason: not checked against Maki
-      checked: '2026-10-14'
+      level: 'no'
+      reason: 'Maki has no Vercel AI Gateway provider of its own; a custom one needs its providers.toml'
+      checked: '2026-10-16'
+- type: com.dozersandbox/models@1
+  config:
+    default: xai
+    native:
+    - source: anthropic
+      env:
+        DOZ_MODEL: 'anthropic/${{ dozer.model }}'
+    - source: openai
+      env:
+        DOZ_MODEL: 'openai/${{ dozer.model }}'
+    - source: xai
+      env:
+        DOZ_MODEL: 'xai/${{ dozer.model }}'
+    - source: openrouter
+      env:
+        DOZ_MODEL: 'openrouter/${{ dozer.model }}'
+      docs: https://github.com/tontinton/maki#providers
+    models:
+      xai: grok-build-0.1
 - type: com.dozersandbox/currency@1
   config:
     checked: '2026-10-14'
@@ -157,19 +206,19 @@ capabilities:
     - tag: headless
       level: verified
       notes:
-      - maki -p -m xai/grok-build-0.1 "…"
+      - maki -p "…"
       evidence: 'make recipe-check: maki -p "say ok" printed the stand-in''s answer and exited in a fresh try'
       checked: '2026-10-14'
-    terms: Your xAI API key — a key from console.x.ai.
+    terms: Your API key of the provider or gateway you choose (xAI by default).
 - type: com.dozersandbox/guide@1
   config:
     intro: "Maki is a coding agent with its own screen: the session on the left. Ask it to read, change and run the code in your folder."
     steps:
     - text: "Check it answers, without its screen."
-      command: "maki -p -m xai/grok-build-0.1 \"say ok\""
+      command: "maki -p \"say ok\""
     - text: "Ask it something in its own screen — the session on the left."
     - text: "One task without its screen."
-      command: "maki -p -m xai/grok-build-0.1 \"list the files in this folder\""
+      command: "maki -p \"list the files in this folder\""
     tips:
     - "Files it makes are in /workspace — your folder on the Mac."
     - "Restart its session from the session's ⋯ menu; End stops it."

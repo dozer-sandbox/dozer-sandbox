@@ -5,7 +5,7 @@ schema: 2
 kind: workload
 id: dirac-run/dirac
 displayName: Dirac
-description: A Cline-derived coding agent for the terminal, aimed at lower API cost, here on an xAI API key.
+description: A Cline-derived coding agent for the terminal, aimed at lower API cost, on the key of the provider or gateway you choose (xAI by default).
 author: dirac-run
 sourceUrl: https://github.com/dirac-run/dirac
 licenses:
@@ -23,17 +23,33 @@ capabilities:
   config:
     runtime:
       allow:
+      - api.anthropic.com:443
+      - api.openai.com:443
       - api.x.ai:443
+      - generativelanguage.googleapis.com:443
+      - openrouter.ai:443
+      - ai-gateway.vercel.sh:443
     dozer:
       model:
         id: model:dirac
-        title: Talk to xAI
-        summary: Dirac's model here (the xAI API, with your key) — needed for it to answer.
-        phrase: talk to your AI model (xAI)
+        title: Talk to its model provider
+        summary: Dirac's model — the provider or gateway its key is for (Anthropic, OpenAI, xAI, Google AI, OpenRouter or Vercel AI Gateway), with an API key. Needed for Dirac to answer.
+        phrase: talk to your AI model
         hosts:
+        - host: api.anthropic.com
+          reason: Anthropic — when the sandbox's key is Anthropic's
+        - host: api.openai.com
+          reason: OpenAI — when the sandbox's key is OpenAI's
         - host: api.x.ai
           paths:
           - /v1/chat/completions
+          reason: xAI — when the sandbox's key is xAI's
+        - host: generativelanguage.googleapis.com
+          reason: Google AI — when the sandbox's key is Google AI's
+        - host: openrouter.ai
+          reason: OpenRouter — when the sandbox's key is OpenRouter's
+        - host: ai-gateway.vercel.sh
+          reason: Vercel AI Gateway — when the sandbox's key is Vercel AI Gateway's
       update: []
       excluded: []
 - type: com.docker.sandbox/credential@1
@@ -76,7 +92,6 @@ capabilities:
     - -h
     - help
     env:
-      DIRAC_PROVIDER: xai
       DIRAC_NO_AUTO_UPDATE: '1'
     state_env: {}
     first_run:
@@ -105,19 +120,81 @@ capabilities:
       accounts:
       - key
       keys_page: https://console.x.ai/
-      note: Dirac reads XAI_API_KEY with xAI as its provider (actModeApiProvider/planModeApiProvider in its global state for the TUI, DIRAC_PROVIDER for a one-shot run) and picks its own xAI model; its other providers are not offered here yet.
-      checked: '2026-10-14'
+      note: 'Dirac''s provider from the environment (DIRAC_PROVIDER, DIRAC_MODEL, DIRAC_BASE_URL; the key''s placeholder under DIRAC_API_KEY): its xai provider on xAI (the default, model grok-build-0.1), its OpenAI-compatible or Anthropic provider for the others.'
+      checked: '2026-10-16'
+    - kind: api-key
+      provider: anthropic
+      accounts:
+      - api-key
+      keys_page: https://console.anthropic.com/settings/keys
+      note: 'Dirac through Anthropic: doz try dirac --provider anthropic (or choose it in the try setup); the model with --model.'
+      checked: '2026-10-16'
+    - kind: api-key
+      provider: openai
+      accounts:
+      - openai-key
+      keys_page: https://platform.openai.com/api-keys
+      note: 'Dirac through OpenAI: doz try dirac --provider openai (or choose it in the try setup); the model with --model.'
+      checked: '2026-10-16'
+    - kind: api-key
+      provider: google
+      accounts:
+      - key
+      keys_page: https://aistudio.google.com/apikey
+      note: 'Dirac through Google AI: doz try dirac --provider google (or choose it in the try setup); the model with --model.'
+      checked: '2026-10-16'
+    - kind: api-key
+      provider: openrouter
+      accounts:
+      - key
+      keys_page: https://openrouter.ai/keys
+      note: 'Dirac through OpenRouter: doz try dirac --gateway openrouter (or choose it in the try setup); the model with --model.'
+      checked: '2026-10-16'
+    - kind: api-key
+      provider: vercel-ai-gateway
+      accounts:
+      - key
+      keys_page: https://vercel.com/docs/ai-gateway/authentication-and-byok
+      note: 'Dirac through Vercel AI Gateway: doz try dirac --gateway vercel-ai-gateway (or choose it in the try setup); the model with --model.'
+      checked: '2026-10-16'
 - type: com.dozersandbox/gateways@1
   config:
     entries:
     - gateway: openrouter
-      level: unknown
-      reason: Dirac reads OPENROUTER_API_KEY; not checked
-      checked: '2026-10-14'
+      level: verified
+      evidence: 'make recipe-check: its check turn through a stand-in OpenRouter (doz try with --gateway openrouter; models@1)'
+      checked: '2026-10-16'
     - gateway: vercel-ai-gateway
-      level: unknown
-      reason: not checked against Dirac
-      checked: '2026-10-14'
+      level: verified
+      evidence: 'make recipe-check: its check turn through a stand-in Vercel AI Gateway (doz try with --gateway vercel-ai-gateway; models@1)'
+      checked: '2026-10-16'
+- type: com.dozersandbox/models@1
+  config:
+    default: xai
+    shapes:
+    - shape: openai-chat
+      env:
+        DIRAC_PROVIDER: openai
+        DIRAC_BASE_URL: '${{ dozer.base_url }}'
+        DIRAC_MODEL: '${{ dozer.model }}'
+      key_env:
+      - DIRAC_API_KEY
+      source: https://github.com/dirac-run/dirac#environment-variables
+    - shape: anthropic-messages
+      env:
+        DIRAC_PROVIDER: anthropic
+        DIRAC_BASE_URL: '${{ dozer.base_url }}'
+        DIRAC_MODEL: '${{ dozer.model }}'
+      key_env:
+      - DIRAC_API_KEY
+      source: https://github.com/dirac-run/dirac#environment-variables
+    native:
+    - source: xai
+      env:
+        DIRAC_PROVIDER: xai
+        DIRAC_MODEL: '${{ dozer.model }}'
+    models:
+      xai: grok-build-0.1
 - type: com.dozersandbox/currency@1
   config:
     checked: '2026-10-14'
@@ -143,7 +220,7 @@ capabilities:
       - dirac --yolo "…"
       evidence: 'make recipe-check: dirac --yolo "say ok" ended its task with the stand-in''s answer in a fresh try'
       checked: '2026-10-14'
-    terms: Your xAI API key — a key from console.x.ai.
+    terms: Your API key of the provider or gateway you choose (xAI by default).
 - type: com.dozersandbox/guide@1
   config:
     intro: "Dirac is a coding agent with its own screen: the session on the left. Ask it to read, change and run the code in your folder."

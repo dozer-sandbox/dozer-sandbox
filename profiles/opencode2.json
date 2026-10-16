@@ -1,0 +1,51 @@
+{
+  "schema": 1,
+  "agent": "opencode2",
+  "version": "opencode v2.0.29",
+  "profiled": "2026-10-14",
+  "how": "a fresh try with the Open network, every HTTPS request decrypted and logged; its first start, then a scripted task (read a file, edit it, run a command) run non-interactively with FAKE keys \u2014 xAI and Google through a fake provider that answers text only, Anthropic and OpenAI refused by the real API (401). A real-key run would see more: the model's turns and what its tool calls fetch.",
+  "taskEnded": "DOZ_FAKE_OK",
+  "endpoints": [
+    {
+      "host": "api.x.ai",
+      "method": "GET",
+      "path": "/v1/responses",
+      "when": "task",
+      "count": 1,
+      "credential": [
+        "placeholder swapped for key:xai"
+      ],
+      "refusedWhenProfiled": false,
+      "determination": "allow",
+      "reason": "xAI's API \u2014 the model; the GET opens the Responses connection the turn then uses",
+      "seen": true
+    },
+    {
+      "host": "api.x.ai",
+      "method": "POST",
+      "path": "/v1/responses",
+      "when": "task",
+      "count": 2,
+      "credential": [
+        "placeholder swapped for key:xai"
+      ],
+      "refusedWhenProfiled": false,
+      "determination": "allow",
+      "reason": "xAI's API \u2014 the model (the key is swapped in by Dozer's proxy)",
+      "seen": true
+    },
+    {
+      "host": "opencode.ai",
+      "method": "POST",
+      "path": "/zen/v1/chat/completions",
+      "when": "task",
+      "count": 2,
+      "credential": [
+        "none"
+      ],
+      "refusedWhenProfiled": false,
+      "determination": "allow-path",
+      "reason": "OpenCode Zen's free models (--provider opencode-zen, 2026-10-16) \u2014 no key: OpenCode sends its own \"public\" token, Dozer adds nothing; only its model paths on opencode.ai are allowed (not the Console or its sign-in)"
+    }
+  ]
+}

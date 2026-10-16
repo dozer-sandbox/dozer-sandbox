@@ -36,6 +36,35 @@ public struct NpmRegistry: Sendable {
     /// agent, the archive's Last-Modified for a manifest one. nil: never asked.
     public typealias ReleaseInfoLookup = @Sendable (_ recipe: AgentRecipe, _ release: AgentRelease) async throws -> ReleaseInfo
     public var releaseInfo: ReleaseInfoLookup? = nil
+    /// 618: every version a package has (npm's full document) — for a family member whose package's `latest` left its
+    /// major, the newest release of its own major. nil: never asked.
+    public typealias VersionsLookup = @Sendable (_ package: String) async throws -> [String]
+    public var versions: VersionsLookup? = nil
+
+    /// 618: the newest stable release of `major` among `versions` (nil: none).
+    public static func newest(in versions: [String], major: Int) -> String? {
+        versions.filter { SemVer.parse($0)?.pre.isEmpty == true && AgentRef.major(of: $0) == major }
+            .max { SemVer.compare($0, $1) == .orderedAscending }
+    }
+
+    /// 618: npm's full document → its version list, over HTTPS (or a test server over http on loopback).
+    public static func httpVersions(_ base: URL, timeout: TimeInterval = 20) -> VersionsLookup {
+        { package in
+            let path = package.replacingOccurrences(of: "/", with: "%2F")
+            guard let url = URL(string: base.absoluteString.hasSuffix("/") ? base.absoluteString + path : base.absoluteString + "/" + path) else {
+                throw HostError(.invalid, "no registry URL for \(package)")
+            }
+            var req = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: timeout)
+            req.setValue("application/json", forHTTPHeaderField: "Accept")
+            let (data, response) = try await URLSession.shared.data(for: req)
+            guard (response as? HTTPURLResponse)?.statusCode == 200,
+                  let o = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let v = o["versions"] as? [String: Any] else {
+                throw HostError(.failed, "the npm registry gave no version list for \(package)")
+            }
+            return Array(v.keys)
+        }
+    }
+
     public struct ReleaseInfo: Sendable, Equatable {
         public var released: Date?
         public var deprecated: String?
@@ -187,9 +216,16 @@ public struct NpmRegistry: Sendable {
     public static func fromEnvironment(_ env: [String: String] = ProcessInfo.processInfo.environment) -> NpmRegistry {
         var r = fromEnvironmentLookups(env)
         switch env["DOZ_TEST_NPM_REGISTRY"] {
-        case "offline": r.releaseInfo = { rec, _ in throw HostError(.unavailable, "offline (DOZ_TEST_NPM_REGISTRY): \(rec.id)'s release date not looked up") }
-        case let s? where !s.isEmpty: r.releaseInfo = httpReleaseInfo(URL(string: s).flatMap { ["http", "https"].contains($0.scheme ?? "") ? $0 : nil } ?? npmjs)
-        default: r.releaseInfo = httpReleaseInfo(npmjs)
+        case "offline":
+            r.releaseInfo = { rec, _ in throw HostError(.unavailable, "offline (DOZ_TEST_NPM_REGISTRY): \(rec.id)'s release date not looked up") }
+            r.versions = { p in throw HostError(.unavailable, "offline (DOZ_TEST_NPM_REGISTRY): \(p)'s versions not looked up") }
+        case let s? where !s.isEmpty:
+            let base = URL(string: s).flatMap { ["http", "https"].contains($0.scheme ?? "") ? $0 : nil } ?? npmjs
+            r.releaseInfo = httpReleaseInfo(base)
+            r.versions = httpVersions(base)
+        default:
+            r.releaseInfo = httpReleaseInfo(npmjs)
+            r.versions = httpVersions(npmjs)
         }
         return r
     }
@@ -422,7 +458,8 @@ public enum AgentVersions {
     /// exact one). Only what the store has; `refresh` (async) is what asks the registry.
     /// 596: any base × agent image — the agent's version as before (the settings are per AGENT), the
     /// base as resolved (`BaseDigests`, else the catalogue's pin; a Dockerfile: its last build).
-    public static func spec(_ image: String, purpose: Purpose, store: DozerStore, settings: DozerSettings) throws -> ImageSpec? {
+    /// 618: `version` — an exact release asked for this sandbox only (`NAME@VERSION`), over the setting.
+    public static func spec(_ image: String, purpose: Purpose, store: DozerStore, settings: DozerSettings, version: String? = nil) throws -> ImageSpec? {
         guard let choice = ImageChoice.parse(image), choice.name == image, image != "lab" else { return nil }
         guard choice.agent != .none else {
             if purpose == .create, let p = prepared(image, store: store, settings: settings).first { return p }
@@ -430,7 +467,7 @@ public enum AgentVersions {
         }
         let agent = choice.agent.rawValue
         let pin = AgentImages.pinned(agent)!
-        let want = setting(agent, settings)
+        let want = version ?? setting(agent, settings)
         let key = SettingKey.agentVersion(agent)!
         func make(_ r: AgentRelease) throws -> ImageSpec { try DozerImages.compose(choice, release: r, store: store, purpose: purpose) }
         if want != "latest" {
@@ -438,6 +475,9 @@ public enum AgentVersions {
             // 594 W28: an older doz's image of that version is USED (never rebuilt without asking) — said as stale.
             if purpose == .create, let p = usable(image, store: store, settings: settings).first(where: { $0.agent?.version == want }) { return p }
             guard let r = known(agent, version: want, store: store) else {
+                if version != nil {
+                    throw HostError(.unavailable, "\(agent)@\(want) is not a release Dozer has checked — it checks one against the npm registry before anything is made")
+                }
                 throw HostError(.unavailable, "\(agent) \(want) (\(key)) is not known here yet and the npm registry could not be asked — "
                                 + "try again online, or set \(key) to a version this store has (\(pin.version) is built in)")
             }
@@ -447,11 +487,10 @@ public enum AgentVersions {
         if purpose == .create, let p = usable(image, store: store, settings: settings).first { return p }
         let rec = all(store)[agent]
         if let latest = rec?.latest { return try make(latest) }
-        if let e = rec?.lastError {
-            throw HostError(.unavailable, "\(agent): \(key) is latest, but the npm registry could not be reached (\(e)) and no \(image) image is prepared — "
-                            + "try again online, or set an exact version: doz config set \(key) \(pin.version)")
-        }
-        // Never asked (an in-process host, a test): the built-in pin.
+        // Never asked (an in-process host, a test) OR asked and not answered (offline): the built-in pin, the version Dozer
+        // checked. 618: these two used to differ — a running host that had failed to reach the registry REFUSED to plan,
+        // while the same command with no host running planned the pin, so the dashboard's Try (always through the host)
+        // and `doz try --dry-run` disagreed on one store. A preparation offline fails on the download anyway, saying so.
         return try make(pin)
     }
 
@@ -483,13 +522,13 @@ public enum AgentVersions {
     /// than an hour (or `force`); for an exact version not known here, ask for that version. Never
     /// throws: a failure is recorded (and returned) and the store's images are used.
     @discardableResult
-    public static func refresh(_ image: String, store: DozerStore, settings: DozerSettings, registry: NpmRegistry,
+    public static func refresh(_ image: String, store: DozerStore, settings: DozerSettings, registry: NpmRegistry, version: String? = nil,
                                now: Date = Date(), force: Bool = false) async -> Freshness {
-        var f = await refreshPackage(image, store: store, settings: settings, registry: registry, now: now, force: force)
+        var f = await refreshPackage(image, store: store, settings: settings, registry: registry, now: now, force: force, version: version)
         // 596 (B2): Claude Code's native build at the version a preparation would make — its checksums,
         // once per version (a base without Node installs it; the Node images never ask).
         if image == "claude-code", let lookup = registry.native {
-            let want = setting(image, settings)
+            let want = version ?? setting(image, settings)
             let target = want == "latest" ? all(store)[image]?.latest?.version : want
             if let v = target, knownNative(v, store: store) == nil {
                 do {
@@ -504,8 +543,8 @@ public enum AgentVersions {
     }
 
     static func refreshPackage(_ image: String, store: DozerStore, settings: DozerSettings, registry: NpmRegistry,
-                               now: Date, force: Bool) async -> Freshness {
-        let want = setting(image, settings)
+                               now: Date, force: Bool, version: String? = nil) async -> Freshness {
+        let want = version ?? setting(image, settings)
         let rec = all(store)[image]
         var f = Freshness(image: image, setting: want, latest: rec?.latest?.version, checkedAt: rec?.checkedAt, error: nil, looked: false)
         // 617: an agent from its vendor's own release manifest (Antigravity CLI) — only its latest can be looked up.
@@ -577,7 +616,9 @@ public enum AgentVersions {
                 f.looked = true
             } catch {
                 f.error = HostError.from(error).message
-                update(image, store) { $0.failedAt = now; $0.lastError = f.error }
+                // 618: one sandbox's NAME@VERSION that does not exist says so to that create only — the agent's own
+                // lookups (its setting) are not held back by it.
+                if version == nil { update(image, store) { $0.failedAt = now; $0.lastError = f.error } }
             }
             return f
         }
@@ -589,7 +630,15 @@ public enum AgentVersions {
             }
         }
         do {
-            let r = try await lookup(package, "latest")
+            var r = try await lookup(package, "latest")
+            // 618: a family's major keeps to its own major — when its package's `latest` is another major's, the newest
+            // release of its own (OpenCode 1 stays on 1.x whatever its package does next).
+            if let fam = AgentRecipes.recipe(image)?.family, AgentRef.major(of: r.version) != fam.major {
+                guard let all = registry.versions, let v = NpmRegistry.newest(in: try await all(package), major: fam.major) else {
+                    throw HostError(.unavailable, "\(package)'s latest is \(r.version), and no release of \(fam.title) (\(fam.major).x) was found")
+                }
+                r = try await lookup(package, v)
+            }
             update(image, store) { $0.latest = r; $0.checkedAt = now; $0.failedAt = nil; $0.lastError = nil; $0.remember(r) }
             if let recipe = AgentRecipes.recipe(image) { await rememberReleaseInfo(image, recipe, r, registry: registry, store: store) }
             f.latest = r.version

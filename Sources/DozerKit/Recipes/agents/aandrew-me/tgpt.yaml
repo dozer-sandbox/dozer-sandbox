@@ -5,7 +5,7 @@ schema: 2
 kind: workload
 id: aandrew-me/tgpt
 displayName: tgpt
-description: A small terminal chat client for many AI providers, set up on a Gemini API key.
+description: A small terminal chat client for many AI providers, on the key of the provider or gateway you choose (Google AI by default).
 author: aandrew-me
 sourceUrl: https://github.com/aandrew-me/tgpt
 licenses:
@@ -23,15 +23,28 @@ capabilities:
   config:
     runtime:
       allow:
+      - api.openai.com:443
+      - api.x.ai:443
       - generativelanguage.googleapis.com:443
+      - openrouter.ai:443
+      - ai-gateway.vercel.sh:443
     dozer:
       model:
         id: model:tgpt
-        title: Talk to Google AI
-        summary: tgpt's model (the Gemini API, with an API key) — needed for tgpt to answer.
-        phrase: talk to your AI model (Google AI)
+        title: Talk to its model provider
+        summary: tgpt's model — the provider or gateway its key is for (OpenAI, xAI, Google AI, OpenRouter or Vercel AI Gateway), with an API key. Needed for tgpt to answer.
+        phrase: talk to your AI model
         hosts:
+        - host: api.openai.com
+          reason: OpenAI — when the sandbox's key is OpenAI's
+        - host: api.x.ai
+          reason: xAI — when the sandbox's key is xAI's
         - host: generativelanguage.googleapis.com
+          reason: Google AI — when the sandbox's key is Google AI's
+        - host: openrouter.ai
+          reason: OpenRouter — when the sandbox's key is OpenRouter's
+        - host: ai-gateway.vercel.sh
+          reason: Vercel AI Gateway — when the sandbox's key is Vercel AI Gateway's
       update: []
       excluded: []
 - type: com.docker.sandbox/credential@1
@@ -72,9 +85,7 @@ capabilities:
     - '-v'
     - '--help'
     - '-h'
-    env:
-      AI_PROVIDER: gemini
-      GEMINI_MODEL: gemini-2.5-flash
+    env: {}
     state_env: {}
     status: none
     verify:
@@ -96,19 +107,64 @@ capabilities:
       accounts:
       - key
       keys_page: https://aistudio.google.com/apikey
-      note: tgpt is set to its Gemini provider (AI_PROVIDER=gemini, GEMINI_MODEL=gemini-2.5-flash), which reads GEMINI_API_KEY and calls the Gemini API's OpenAI-compatible endpoint with a Bearer header; Dozer's proxy sends the key there as x-goog-api-key (checked against a stand-in, not yet against Google). Its key-less free providers reach third-party services Dozer does not allow by default.
-      checked: '2026-10-14'
+      note: 'tgpt''s Gemini provider on Google AI (the default: AI_PROVIDER=gemini, GEMINI_MODEL gemini-2.5-flash); its OpenAI provider for the others (OPENAI_URL at the chosen source''s chat endpoint, OPENAI_MODEL; the key''s placeholder under OPENAI_API_KEY).'
+      checked: '2026-10-16'
+    - kind: api-key
+      provider: openai
+      accounts:
+      - openai-key
+      keys_page: https://platform.openai.com/api-keys
+      note: 'tgpt through OpenAI: doz try tgpt --provider openai (or choose it in the try setup); the model with --model.'
+      checked: '2026-10-16'
+    - kind: api-key
+      provider: xai
+      accounts:
+      - key
+      keys_page: https://console.x.ai/
+      note: 'tgpt through xAI: doz try tgpt --provider xai (or choose it in the try setup); the model with --model.'
+      checked: '2026-10-16'
+    - kind: api-key
+      provider: openrouter
+      accounts:
+      - key
+      keys_page: https://openrouter.ai/keys
+      note: 'tgpt through OpenRouter: doz try tgpt --gateway openrouter (or choose it in the try setup); the model with --model.'
+      checked: '2026-10-16'
+    - kind: api-key
+      provider: vercel-ai-gateway
+      accounts:
+      - key
+      keys_page: https://vercel.com/docs/ai-gateway/authentication-and-byok
+      note: 'tgpt through Vercel AI Gateway: doz try tgpt --gateway vercel-ai-gateway (or choose it in the try setup); the model with --model.'
+      checked: '2026-10-16'
 - type: com.dozersandbox/gateways@1
   config:
     entries:
     - gateway: openrouter
-      level: unknown
-      reason: not checked against tgpt
-      checked: '2026-10-14'
+      level: verified
+      evidence: 'make recipe-check: its check turn through a stand-in OpenRouter (doz try with --gateway openrouter; models@1)'
+      checked: '2026-10-16'
     - gateway: vercel-ai-gateway
-      level: unknown
-      reason: not checked against tgpt
-      checked: '2026-10-14'
+      level: verified
+      evidence: 'make recipe-check: its check turn through a stand-in Vercel AI Gateway (doz try with --gateway vercel-ai-gateway; models@1)'
+      checked: '2026-10-16'
+- type: com.dozersandbox/models@1
+  config:
+    default: google
+    shapes:
+    - shape: openai-chat
+      env:
+        AI_PROVIDER: openai
+        OPENAI_URL: '${{ dozer.base_url }}/chat/completions'
+        OPENAI_MODEL: '${{ dozer.model }}'
+      key_env:
+      - OPENAI_API_KEY
+      source: https://github.com/aandrew-me/tgpt#readme
+    native:
+    - source: google
+      env:
+        AI_PROVIDER: gemini
+        GEMINI_MODEL: '${{ dozer.model }}'
 - type: com.dozersandbox/currency@1
   config:
     checked: '2026-10-14'
@@ -129,7 +185,7 @@ capabilities:
       - tgpt -q PROMPT
       evidence: 'A2 VM proof: its check turn answered DOZ_FAKE_OK through the fake provider (make recipe-check; probes/617-*/recipes/tgpt)'
       checked: '2026-10-14'
-    terms: Your Gemini API key — a key from aistudio.google.com.
+    terms: Your API key of the provider or gateway you choose (Google AI by default).
 - type: com.dozersandbox/guide@1
   config:
     intro: "tgpt is a small terminal chat: its session on the left is its interactive mode, and `tgpt -q` answers one question."

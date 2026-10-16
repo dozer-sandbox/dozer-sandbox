@@ -204,11 +204,14 @@ is the program. Its sha512 is checked against `integrity`; it is placed under `/
 | `command` | The program and its first arguments. |
 | `no_prompts_args` | What turns its own approval prompts off (the sandbox is the boundary). |
 | `no_prompts_env` | Variables set only when `no_prompts_args` would be put first (not with `ID.permissions = ask`, nor as root) — for an agent whose approval switch is a variable: MiMo Code's flag asks again on a terminal, its variable does not. |
+| `model_args` | For a tool that takes its model only on its command line: the arguments that choose it (`[-m, $DOZ_MODEL]`, Cline's `[-P, $DOZ_MODEL_PROVIDER, -m, $DOZ_MODEL]`). Each `$DOZ_…` is a variable every `models@1` entry sets for its source (exactly one word names `$DOZ_MODEL`, none a credential). The launcher puts them first when `DOZ_MODEL` is set, unless the run gives its first flag itself or is a passthrough subcommand. A built-in agent's (pi's `--model`) are put on its default session by the host at session open, off its default source or with a model chosen — never baked. |
+| `model_args_after` | Subcommands whose own flags `model_args` are (`run`, `exec`): there they go right after the subcommand (`docker-agent run --model X coder`). |
 | `passthrough` | First arguments that run it as it is (`--version`, `login`). |
 | `env`, `state_env` | Environment of every run; of its state folders (both baked). |
-| `first_run` | Settings written into its config files, only the keys not there yet: `{file: ~/….json or ~/….toml, set: {dotted.key: value}}`; in a TOML file a key with no table (`schema_version`) is a top-level key, written above the first table; or a dotenv file, `{file: ~/…/.env, set: {KEY: value}}` (`KEY=value` lines — a key the file already has, even commented out, is kept; the file is made when missing; never a credential's name); a TOML key segment in double quotes is one key (`'projects."/workspace".trust_level': trusted` → `[projects."/workspace"]`); `format: json` for a JSON file whose name has no extension (Kimi Code's per-folder trust record); or a YAML file, `{file: ~/….yaml, set: {KEY: value}}` (top-level `KEY: value` lines only, each a string, number or bool — a key the file already has at the top level, even commented out, is kept; the file is made when missing). |
+| `first_run` | An entry with `each_run: true` is written at EVERY run instead (a JSON file; its keys set, each `$DOZ_…` in a value the run's own, from `models@1`; skipped when the run has no source chosen; never a key — name the variable the placeholder is in, `$OPENAI_API_KEY`, for the tool to expand) — for a tool that takes its model only from its settings file (Crush). Otherwise: settings written into its config files, only the keys not there yet: `{file: ~/….json or ~/….toml, set: {dotted.key: value}}`; in a TOML file a key with no table (`schema_version`) is a top-level key, written above the first table; or a dotenv file, `{file: ~/…/.env, set: {KEY: value}}` (`KEY=value` lines — a key the file already has, even commented out, is kept; the file is made when missing; never a credential's name); a TOML key segment in double quotes is one key (`'projects."/workspace".trust_level': trusted` → `[projects."/workspace"]`); `format: json` for a JSON file whose name has no extension (Kimi Code's per-folder trust record); or a YAML file, `{file: ~/….yaml, set: {KEY: value}}` (top-level `KEY: value` lines only, each a string, number or bool — a key the file already has at the top level, even commented out, is kept; the file is made when missing). |
 | `session_env` | Environment Dozer gives each session when it opens (never baked). |
 | `session` | `shell` for a command-line tool that answers and exits (Fabric, llm): the default session is a login shell (`bash -l`) with the program on its PATH, named for the program. Absent: the session runs `command`. A shell session has no `resume`. |
+| `service` | A background service the program starts and keeps, which holds the environment of the run that started it (OpenCode 2's `opencode serve --service`): `{args, restart, start?, env}` — its arguments after the program, what restarts it, what starts it when the restart fails (a stopped server the VM's init leaves as a zombie), and the variables compared (`[DOZ_MODEL]`; never a key's: placeholders differ per run). Before every run, the launcher restarts a service of the same user running with another value of one of `env` than the run sets, so a model or source chosen since applies. Plain words only (it is written into the launcher). |
 | `status` | `osc7501` (it reports its state to Dozer) or `none`. |
 | `resume`, `resume_check` | Arguments that continue its last conversation after a restart, and a check that there is one. |
 | `verify` | Checks after preparation: `{argv, expect}`; `expect` may hold `${{ kit.args.version }}`. |
@@ -219,10 +222,14 @@ is the program. Its sha512 is checked against `integrity`; it is placed under `/
 `{kind, provider?, account?, accounts?, keys_page?, free_tier?, free_tier_note?, in_sandbox?, gateways?, note?,
 checked?}`; `kind` is `api-key`, `vendor-sign-in`, `none` or `gateway`.
 
-**`com.dozersandbox/gateways@1`** — `entries`: one per model gateway in Dozer's catalogue: `{gateway, level (documented
-| verified | experimental | no | unknown), shape?, endpoint?, how?, proxy_route?, limits?, notes?, evidence?,
-source?, checked?, reason?}`. `how` is `{env?, config?, args?, model_args?}`, whose values may hold
-`${{ dozer.placeholder }}`, `${{ dozer.model }}` and `${{ dozer.gateway.endpoint.ID }}`.
+**`com.dozersandbox/gateways@1`** — `entries`: how it works through each model gateway in Dozer's catalogue: `{gateway,
+level (documented | verified | experimental | no | unknown), shape?, endpoint?, how?, proxy_route?, limits?, notes?,
+evidence?, source?, checked?, reason?}`. `how` is `{env?, config?, args?, model_args?}`, whose values may hold
+`${{ dozer.placeholder }}`, `${{ dozer.model }}` and `${{ dozer.gateway.endpoint.ID }}`. A gateway that `models@1` offers
+needs no entry: it is `documented`, citing the shape's `source` (or the native entry's `docs`). An entry for it only
+overrides that — `verified` with its evidence once `make recipe-check` has run the tool through it — and needs no `how`.
+Every gateway models@1 does not offer has an entry (`no` with its reason, or `unknown`); a recipe with models@1 may not
+call one `documented`/`verified`/`experimental` that a try cannot use, nor `no` one it offers.
 
 **`com.dozersandbox/models@1`** — which model sources it can be tried with, and how a choice reaches its own settings.
 See [Model sources](#model-sources-providers-and-gateways).
@@ -301,6 +308,30 @@ the version (the pin), the provider and model with the account's NAME ("your key
 folder (the Mac's path) and where its settings live. `make recipe-check` runs every step with a command after the check
 turn's that is not an edit, in a shell in the try (exit 0).
 
+## Families: a tool's majors
+
+When a tool's new major release line is a different program (OpenCode 2: another npm package, another config, a
+background server), each major is a recipe of its own, and `com.dozersandbox/family@1` ties them together:
+
+```yaml
+- type: com.dozersandbox/family@1
+  config:
+    family: opencode          # what a person types: the recommended major
+    major: 2
+    title: OpenCode 2
+    recommended: true         # exactly one per family
+```
+
+- `NAME` is the family's recommended major, `NAME@MAJOR` a major, `NAME@VERSION` an exact release of the major it
+  belongs to (`AgentRef`). A member named by its own id (`opencode2`) is that major.
+- The family's name is the id of one of its members — the one that predates the family. Its sandboxes, image, settings
+  and statistics keep that id, so an existing sandbox never changes major. No other recipe or alias may use the name.
+- Each member pins a release of its own major. Its `latest` stays within that major: when the package's `latest` tag is
+  another major's, Dozer takes the newest stable release of its own.
+- Each major has its own guide, check, network profile and statistics id.
+- Move `recommended` to a new major only once its recipe passes `make recipe-check`, in a commit of its own. It is
+  "recommended", never "latest".
+
 ## Kinds and categories
 
 Every recipe says what it is, in `directory@1` — declared, because nothing else in its data can say it:
@@ -338,7 +369,7 @@ schema's enum and this table together (`CategoriesTests` holds them to each othe
 ## Model sources: providers and gateways
 
 A **model source** is where a key goes: a provider (`anthropic`, `openai`, `xai`, `google`) or a gateway
-(`openrouter`, `vercel-ai-gateway`). Each is a key provider in `Recipes/providers.json` — its hosts, the header its key
+(`openrouter`, `vercel-ai-gateway`) — or a source that takes no key (`opencode-zen`, below). Each is a key provider in `Recipes/providers.json` — its hosts, the header its key
 rides in, the variable its placeholder is in, its check — and each lists its **endpoints**: the API shapes it serves
 (`openai-chat`, `openai-responses`, `anthropic-messages`, `gemini`), the base URL of each, and a default model (a
 gateway's is `creator/name`). Gateways take their endpoints from `Recipes/gateways.json`.
@@ -353,9 +384,11 @@ A recipe says what it can speak, and nothing about keys:
     - shape: openai-chat
       env: {API_BASE_URL: '${{ dozer.base_url }}', DEFAULT_MODEL: '${{ dozer.model }}'}
       key_env: [OPENAI_API_KEY]          # where it reads the key for this shape
+      source: https://…                  # where the tool documents taking a base URL, key and model
     native:                              # the sources it reaches through its own client (no base URL)
     - source: anthropic
       env: {DEFAULT_MODEL: 'anthropic/${{ dozer.model }}'}
+      docs: https://…                    # optional: where the tool documents this source
     models:                              # optional: a default model per source, over the source's own
       openrouter: openai/gpt-5.4-mini
 ```
@@ -364,7 +397,9 @@ A recipe says what it can speak, and nothing about keys:
 recipe is offered (in a fresh try with that source's fake key) and puts that source's model there.
 
 - **What it is offered:** every source with an endpoint speaking one of `shapes` (the first shape listed that the source
-  serves wins), and every source named in `native`. `except` (a list of source ids) leaves sources out a shape would
+  serves wins), and every source named in `native`. So a tool that takes an OpenAI-compatible base URL (`openai-chat`
+  or `openai-responses`) is offered OpenRouter and Vercel AI Gateway without naming them; its gateway entries follow
+  (see `gateways@1`), and so do `--gateway`, the plan, the Quick try's "Through a gateway" and `doz search`. `except` (a list of source ids) leaves sources out a shape would
   offer. The try setup, New Sandbox, `doz try --provider SOURCE` (`--gateway` is the same flag) and `doz create` offer
   exactly these.
 - **What a choice does:** at every session open and every `doz exec`, Dozer sets the chosen entry's `env` (never over a
@@ -384,6 +419,16 @@ recipe is offered (in a fresh try with that source's fake key) and puts that sou
   of that provider (`doz account add NAME --provider openrouter`).
 - A recipe without `models@1` keeps its one credential exactly as before (the built-in three; Claude Code's and Codex's
   own account flows are untouched).
+- **A source that takes no key** (`opencode-zen`: OpenCode Zen's free models) is listed under `keyless` in
+  `Recipes/providers.json` — its hosts, its endpoints, and the models Dozer lists for it, each with its data terms as the
+  source's docs state them (its own model list has no prices, so a free model cannot be told from a paid one): the
+  free models the docs list that the tool's pinned release can use without a key; `checked` is when the list and terms
+  were last compared with the docs and that release. It is never a key provider: no binding, no placeholder,
+  no account (`doz account add` refuses it), and its hosts may be no provider's. A recipe is offered it only by a
+  `native` entry — a shape alone never offers it, since only the tool that knows it can use it. A try with it has no
+  account at all (`--account` is refused); the leak guard still watches its hosts, so a placeholder sent there is
+  refused. Its hosts go in the recipe's model permission path by path (only the requests the tool makes for a model:
+  `/zen/v1/chat/completions` and `/zen/v1/responses` for OpenCode 2), so nothing else of that site is reachable.
 
 ## Templating
 

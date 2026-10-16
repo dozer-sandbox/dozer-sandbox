@@ -18,16 +18,37 @@
           "model" : {
             "hosts" : [
               {
+                "host" : "api.anthropic.com",
+                "reason" : "Anthropic — when the sandbox's key is Anthropic's"
+              },
+              {
+                "host" : "api.openai.com",
+                "reason" : "OpenAI — when the sandbox's key is OpenAI's"
+              },
+              {
                 "host" : "api.x.ai",
                 "paths" : [
                   "/v1/chat/completions"
-                ]
+                ],
+                "reason" : "xAI — when the sandbox's key is xAI's"
+              },
+              {
+                "host" : "generativelanguage.googleapis.com",
+                "reason" : "Google AI — when the sandbox's key is Google AI's"
+              },
+              {
+                "host" : "openrouter.ai",
+                "reason" : "OpenRouter — when the sandbox's key is OpenRouter's"
+              },
+              {
+                "host" : "ai-gateway.vercel.sh",
+                "reason" : "Vercel AI Gateway — when the sandbox's key is Vercel AI Gateway's"
               }
             ],
             "id" : "model:droid",
-            "phrase" : "talk to your AI model (xAI)",
-            "summary" : "Factory Droid's model here (the xAI API, with your key) — needed for it to answer.",
-            "title" : "Talk to xAI"
+            "phrase" : "talk to your AI model",
+            "summary" : "Factory Droid's model — the provider or gateway its key is for (Anthropic, OpenAI, xAI, Google AI, OpenRouter or Vercel AI Gateway), with an API key. Needed for Factory Droid to answer.",
+            "title" : "Talk to its model provider"
           },
           "update" : [
 
@@ -35,7 +56,12 @@
         },
         "runtime" : {
           "allow" : [
-            "api.x.ai:443"
+            "api.anthropic.com:443",
+            "api.openai.com:443",
+            "api.x.ai:443",
+            "generativelanguage.googleapis.com:443",
+            "openrouter.ai:443",
+            "ai-gateway.vercel.sh:443"
           ]
         }
       },
@@ -100,10 +126,15 @@
             "droid",
             "exec",
             "-m",
-            "custom:grok-build-0.1",
+            "custom:${{ dozer.model }}",
             "say ok"
           ],
-          "expect" : "DOZ_FAKE_OK"
+          "expect" : "DOZ_FAKE_OK",
+          "screen" : {
+            "allow" : [
+              "Try \".*login"
+            ]
+          }
         },
         "command" : [
           "droid"
@@ -130,6 +161,22 @@
                   "trustedAt" : "2026-10-14T00:00:00.000Z"
                 }
               }
+            }
+          },
+          {
+            "each_run" : true,
+            "file" : "~/.factory/settings.json",
+            "set" : {
+              "customModels" : [
+                {
+                  "apiKeyHelper" : "printenv $DOZ_KEY_VAR",
+                  "baseUrl" : "$DOZ_BASE_URL",
+                  "displayName" : "$DOZ_MODEL",
+                  "maxOutputTokens" : 8192,
+                  "model" : "$DOZ_MODEL",
+                  "provider" : "$DOZ_DROID_PROVIDER"
+                }
+              ]
             }
           }
         ],
@@ -178,11 +225,61 @@
             "accounts" : [
               "key"
             ],
-            "checked" : "2026-10-14",
+            "checked" : "2026-10-16",
             "keys_page" : "https://console.x.ai/",
             "kind" : "api-key",
-            "note" : "Droid's airgap mode (FACTORY_AIRGAP_ENABLED) with a custom model on xAI's API; its key comes from apiKeyHelper (printenv XAI_API_KEY), so it is never written into Droid's settings (an apiKey value would be).",
+            "note" : "Droid's custom model (its settings' customModels, written at every run: the chosen source's base URL and model, generic Chat Completions or Anthropic; the key printed from the variable its placeholder is in). On xAI (the default) the model is grok-build-0.1. Factory's account, models and cloud are not used (airgap mode).",
             "provider" : "xai"
+          },
+          {
+            "accounts" : [
+              "api-key"
+            ],
+            "checked" : "2026-10-16",
+            "keys_page" : "https://console.anthropic.com/settings/keys",
+            "kind" : "api-key",
+            "note" : "Factory Droid through Anthropic: doz try droid --provider anthropic (or choose it in the try setup); the model with --model.",
+            "provider" : "anthropic"
+          },
+          {
+            "accounts" : [
+              "openai-key"
+            ],
+            "checked" : "2026-10-16",
+            "keys_page" : "https://platform.openai.com/api-keys",
+            "kind" : "api-key",
+            "note" : "Factory Droid through OpenAI: doz try droid --provider openai (or choose it in the try setup); the model with --model.",
+            "provider" : "openai"
+          },
+          {
+            "accounts" : [
+              "key"
+            ],
+            "checked" : "2026-10-16",
+            "keys_page" : "https://aistudio.google.com/apikey",
+            "kind" : "api-key",
+            "note" : "Factory Droid through Google AI: doz try droid --provider google (or choose it in the try setup); the model with --model.",
+            "provider" : "google"
+          },
+          {
+            "accounts" : [
+              "key"
+            ],
+            "checked" : "2026-10-16",
+            "keys_page" : "https://openrouter.ai/keys",
+            "kind" : "api-key",
+            "note" : "Factory Droid through OpenRouter: doz try droid --gateway openrouter (or choose it in the try setup); the model with --model.",
+            "provider" : "openrouter"
+          },
+          {
+            "accounts" : [
+              "key"
+            ],
+            "checked" : "2026-10-16",
+            "keys_page" : "https://vercel.com/docs/ai-gateway/authentication-and-byok",
+            "kind" : "api-key",
+            "note" : "Factory Droid through Vercel AI Gateway: doz try droid --gateway vercel-ai-gateway (or choose it in the try setup); the model with --model.",
+            "provider" : "vercel-ai-gateway"
           },
           {
             "account" : "a Factory account (FACTORY_API_KEY or its sign-in)",
@@ -199,20 +296,57 @@
       "config" : {
         "entries" : [
           {
-            "checked" : "2026-10-14",
+            "checked" : "2026-10-16",
+            "evidence" : "make recipe-check: its check turn through a stand-in OpenRouter (doz try with --gateway openrouter; models@1)",
             "gateway" : "openrouter",
-            "level" : "unknown",
-            "reason" : "Droid takes any OpenAI-compatible custom model; OpenRouter was not checked"
+            "level" : "verified"
           },
           {
-            "checked" : "2026-10-14",
+            "checked" : "2026-10-16",
+            "evidence" : "make recipe-check: its check turn through a stand-in Vercel AI Gateway (doz try with --gateway vercel-ai-gateway; models@1)",
             "gateway" : "vercel-ai-gateway",
-            "level" : "unknown",
-            "reason" : "not checked against Droid"
+            "level" : "verified"
           }
         ]
       },
       "type" : "com.dozersandbox/gateways@1"
+    },
+    {
+      "config" : {
+        "default" : "xai",
+        "models" : {
+          "xai" : "grok-build-0.1"
+        },
+        "shapes" : [
+          {
+            "env" : {
+              "DOZ_BASE_URL" : "${{ dozer.base_url }}",
+              "DOZ_DROID_PROVIDER" : "generic-chat-completion-api",
+              "DOZ_KEY_VAR" : "OPENAI_API_KEY",
+              "DOZ_MODEL" : "${{ dozer.model }}"
+            },
+            "key_env" : [
+              "OPENAI_API_KEY"
+            ],
+            "shape" : "openai-chat",
+            "source" : "https://docs.factory.ai/cli/byok/overview"
+          },
+          {
+            "env" : {
+              "DOZ_BASE_URL" : "${{ dozer.base_url }}",
+              "DOZ_DROID_PROVIDER" : "anthropic",
+              "DOZ_KEY_VAR" : "ANTHROPIC_API_KEY",
+              "DOZ_MODEL" : "${{ dozer.model }}"
+            },
+            "key_env" : [
+              "ANTHROPIC_API_KEY"
+            ],
+            "shape" : "anthropic-messages",
+            "source" : "https://docs.factory.ai/cli/byok/overview"
+          }
+        ]
+      },
+      "type" : "com.dozersandbox/models@1"
     },
     {
       "config" : {
@@ -248,12 +382,12 @@
             "evidence" : "make recipe-check: droid exec printed the stand-in's answer and exited in a fresh try",
             "level" : "verified",
             "notes" : [
-              "droid exec -m custom:grok-build-0.1 \"…\""
+              "droid exec -m custom:MODEL \"…\""
             ],
             "tag" : "headless"
           }
         ],
-        "terms" : "Your xAI API key — a key from console.x.ai. Droid runs in its airgap mode; Factory's account, models and cloud features are not used."
+        "terms" : "Your API key of the provider or gateway you choose (xAI by default). Droid runs in its airgap mode; Factory's account, models and cloud features are not used."
       },
       "type" : "com.dozersandbox/directory@1"
     },
@@ -263,14 +397,14 @@
         "intro" : "Factory Droid is a coding agent with its own screen: the session on the left. Ask it to read, change and run the code in your folder.",
         "steps" : [
           {
-            "command" : "droid exec -m custom:grok-build-0.1 \"say ok\"",
+            "command" : "droid exec -m \"custom:$DOZ_MODEL\" \"say ok\"",
             "text" : "Check it answers, without its screen."
           },
           {
             "text" : "Ask it something in its own screen — the session on the left."
           },
           {
-            "command" : "droid exec -m custom:grok-build-0.1 \"list the files in this folder\"",
+            "command" : "droid exec -m \"custom:$DOZ_MODEL\" \"list the files in this folder\"",
             "text" : "One task without its screen."
           }
         ],
@@ -282,7 +416,7 @@
       "type" : "com.dozersandbox/guide@1"
     }
   ],
-  "description" : "Factory's coding agent for the terminal, in its airgap mode with your own xAI API key (no Factory account).",
+  "description" : "Factory's coding agent for the terminal, in its airgap mode with your own key of the provider or gateway you choose (xAI by default; no Factory account).",
   "displayName" : "Factory Droid",
   "id" : "factory-ai/droid",
   "kind" : "workload",

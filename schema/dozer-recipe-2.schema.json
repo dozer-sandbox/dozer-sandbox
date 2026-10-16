@@ -50,6 +50,7 @@
           { "$ref": "#/$defs/modelsCapability" },
           { "$ref": "#/$defs/directoryCapability" },
           { "$ref": "#/$defs/portsCapability" },
+          { "$ref": "#/$defs/familyCapability" },
           { "$ref": "#/$defs/guideCapability" }
         ]
       },
@@ -64,7 +65,8 @@
         { "contains": { "$ref": "#/$defs/isCurrency" }, "minContains": 0, "maxContains": 1 },
         { "contains": { "$ref": "#/$defs/isModels" }, "minContains": 0, "maxContains": 1 },
         { "contains": { "$ref": "#/$defs/isPorts" }, "minContains": 0, "maxContains": 1 },
-        { "contains": { "$ref": "#/$defs/isGuide" }, "minContains": 0, "maxContains": 1 }
+        { "contains": { "$ref": "#/$defs/isGuide" }, "minContains": 0, "maxContains": 1 },
+        { "contains": { "$ref": "#/$defs/isFamily" }, "minContains": 0, "maxContains": 1 }
       ]
     }
   },
@@ -101,14 +103,16 @@
               "properties": {
                 "shape": { "enum": ["openai-chat", "openai-responses", "anthropic-messages", "gemini"] },
                 "env": { "$ref": "#/$defs/stringMap" },
-                "key_env": { "$ref": "#/$defs/strings" }
+                "key_env": { "$ref": "#/$defs/strings" },
+                "source": { "type": "string", "pattern": "^https://" }
               } } },
             "native": { "type": "array", "items": {
               "type": "object", "additionalProperties": false, "required": ["source", "env"],
               "properties": {
                 "source": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
                 "env": { "$ref": "#/$defs/stringMap" },
-                "key_env": { "$ref": "#/$defs/strings" }
+                "key_env": { "$ref": "#/$defs/strings" },
+                "docs": { "type": "string", "pattern": "^https://" }
               } } },
             "except": { "$ref": "#/$defs/strings" },
             "models": { "$ref": "#/$defs/stringMap" }
@@ -118,6 +122,7 @@
     },
     "isPorts": { "type": "object", "required": ["type"], "properties": { "type": { "const": "com.dozersandbox/ports@1" } } },
     "isGuide": { "type": "object", "required": ["type"], "properties": { "type": { "const": "com.dozersandbox/guide@1" } } },
+    "isFamily": { "type": "object", "required": ["type"], "properties": { "type": { "const": "com.dozersandbox/family@1" } } },
 
     "networkPolicyCapability": {
       "type": "object", "additionalProperties": false, "required": ["type", "config"],
@@ -306,6 +311,8 @@
           "properties": {
             "command": { "type": "array", "minItems": 1, "items": { "type": "string" } },
             "no_prompts_args": { "$ref": "#/$defs/strings" },
+            "model_args_after": { "$ref": "#/$defs/strings", "description": "Subcommands whose own flags model_args are (exec, run): there they go after the subcommand." },
+            "model_args": { "$ref": "#/$defs/strings", "description": "The arguments that choose its model when it takes the model only on its command line ([-m, $DOZ_MODEL]): put first when DOZ_MODEL is set (models@1 sets it) and the run names no model of its own." },
             "no_prompts_env": { "$ref": "#/$defs/stringMap", "description": "Environment set only when the launcher puts no_prompts_args first (the same rule: not with <ID>.permissions = ask, nor as root)." },
             "passthrough": { "$ref": "#/$defs/strings" },
             "env": { "$ref": "#/$defs/stringMap" },
@@ -313,6 +320,16 @@
             "first_run": { "type": "array", "items": { "$ref": "#/$defs/firstRun" } },
             "session_env": { "$ref": "#/$defs/stringMap" },
             "session": { "enum": ["shell"], "description": "shell: the default session is a login shell with the program on its PATH (a tool that answers and exits)." },
+            "service": {
+              "type": "object", "additionalProperties": false, "required": ["args", "restart", "env"],
+              "description": "A background service the program starts and keeps, which holds the environment of the command that started it: the launcher restarts it (args after the program) when it runs with another value of one of env than this run sets.",
+              "properties": {
+                "args": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+                "restart": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+                "start": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 }, "description": "What starts it when the restart fails (a stopped server left as a zombie)." },
+                "env": { "type": "array", "minItems": 1, "items": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*$" } }
+              }
+            },
             "status": { "enum": ["osc7501", "none"] },
             "resume": { "$ref": "#/$defs/strings" },
             "resume_check": { "type": "string" },
@@ -354,7 +371,7 @@
     },
     "firstRun": {
       "type": "object", "additionalProperties": false, "required": ["file", "set"],
-      "properties": { "file": { "type": "string", "pattern": "^~/" }, "set": { "type": "object" }, "format": { "enum": ["json"], "description": "json: a JSON file whose name has no extension." } }
+      "properties": { "file": { "type": "string", "pattern": "^~/" }, "set": { "type": "object" }, "format": { "enum": ["json"], "description": "json: a JSON file whose name has no extension." }, "each_run": { "type": "boolean", "description": "Written at every run, its keys set, each $DOZ_… in a value the run's own (a JSON file of a recipe with models@1)." } }
     },
 
     "authCapability": {
@@ -481,6 +498,24 @@
               }
             },
             "serve": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } }
+          }
+        }
+      }
+    },
+
+    "familyCapability": {
+      "type": "object", "additionalProperties": false, "required": ["type", "config"],
+      "description": "com.dozersandbox/family@1 (618): one major release line of a tool whose majors are separate recipes. NAME is the family's recommended major, NAME@MAJOR a major, NAME@VERSION an exact release.",
+      "properties": {
+        "type": { "const": "com.dozersandbox/family@1" },
+        "description": { "type": "string" },
+        "config": {
+          "type": "object", "additionalProperties": false, "required": ["family", "major", "title"],
+          "properties": {
+            "family": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,39}$" },
+            "major": { "type": "integer", "minimum": 0, "maximum": 9999 },
+            "title": { "type": "string", "minLength": 1, "maxLength": 40 },
+            "recommended": { "type": "boolean", "description": "The major NAME means: exactly one per family, moved across majors only by Dozer once the new major passes make recipe-check." }
           }
         }
       }

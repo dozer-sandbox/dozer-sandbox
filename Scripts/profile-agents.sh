@@ -7,6 +7,7 @@
 #
 #   make profile-agents AGENTS="grok gemini"            record (keeps every determination already made)
 #   make profile-agents AGENTS="grok" DIFF=1            report new / missing endpoints only — never writes, never allows
+#   PROFILE_TRY_FLAGS="--provider opencode-zen"          618: the try with another model source (a key-less one included)
 #
 # Keys are FAKE, always: xAI, Google and Google Stitch go to Scripts/fake-provider.py (the provider seam, its own CA), which answers
 # text only (no tool calls); Anthropic and OpenAI get a fake key the real API refuses (401). A real-key run would see
@@ -56,7 +57,7 @@ for a in "$@"; do
     grok) bin=grok; task="grok -p \"\$T\"" ;;
     antigravity) bin=agy; task="agy -p \"\$T\"" ;;
     copilot) bin=copilot; task="copilot -p \"\$T\"" ;;
-    opencode) bin=opencode; task="opencode run \"\$T\"" ;;
+    opencode|opencode2) bin=opencode; task="opencode run \"\$T\"" ;;
     qwen-code) bin=qwen; task="qwen -p \"\$T\"" ;;
     goose) bin=goose; task="goose run --no-session -t \"\$T\"" ;;
     kilo) bin=kilo; task="kilo run --auto \"\$T\"" ;;
@@ -98,7 +99,7 @@ for a in "$@"; do
   esac
   # The release it runs is the one Dozer installs: a recipe agent's pin (exact), a built-in one's latest. The profile
   # is of that release, and a sandbox that reports another (an updater that ran, a wrong install) fails the run.
-  read -r setting want vcmd <<EOF2
+  read -r setting want typed vcmd <<EOF2
 $(/usr/bin/python3 - "$REPO/Sources/DozerKit/Recipes/compiled/$a.json" "$a" "$bin" <<'PY'
 import json, sys
 d = json.load(open(sys.argv[1])); caps = {c["type"]: c["config"] for c in d["capabilities"]}
@@ -107,14 +108,18 @@ key = (launch.get("settings") or {}).get("version") or "images.%s_version" % sys
 # How it reports its release: a recipe agent's first verify command (smolagents has no --version); built-ins BIN --version.
 import shlex
 v = (not inst.get("builtin") and (launch.get("verify") or [{}])[0].get("argv")) or [sys.argv[3], "--version"]
-print(key, "latest" if inst.get("builtin") else d["args"]["version"]["default"], shlex.join(v))
+# 618: a family's major is tried by the name that means IT (the family's name only for its recommended major).
+fam = caps.get("com.dozersandbox/family@1")
+typed = sys.argv[2] if not fam else (fam["family"] if fam.get("recommended") else "%s@%d" % (fam["family"], fam["major"]))
+print(key, "latest" if inst.get("builtin") else d["args"]["version"]["default"], typed, shlex.join(v))
 PY
 )
 EOF2
   doz config set "$setting" "$want" >/dev/null || { echo "profile-agents: could not set $setting = $want" >&2; rc=1; continue; }
   old=$(trial); [ -n "$old" ] && doz rm "$old" --yes >/dev/null 2>&1
   echo "== $a: a fresh try (Open network, every request logged)"
-  doz try "$a" -d -q --rebuild --network open || { rc=1; continue; }
+  # shellcheck disable=SC2086
+  doz try "$typed" -d -q --rebuild --network open ${PROFILE_TRY_FLAGS:-} || { rc=1; continue; }
   n=$(trial)
   sleep "${PROFILE_FIRST_START_SECONDS:-25}"
   start=$(/bin/date +%s)

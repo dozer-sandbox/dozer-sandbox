@@ -69,7 +69,10 @@ extension AgentRecipe {
             }
         }
         for (a, w) in zip(c.argv, words) where a != w {
-            guard let allowed = vars[a], allowed.contains(w) else { return false }
+            if let allowed = vars[a], allowed.contains(w) { continue }
+            // 618: a template inside a word (Droid's `custom:${{ dozer.model }}`) — the same word with the variable.
+            let inside = vars.contains { t, names in a.contains(t) && names.contains { a.replacingOccurrences(of: t, with: $0) == w } }
+            guard inside else { return false }
         }
         return true
     }

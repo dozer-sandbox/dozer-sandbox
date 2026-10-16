@@ -5,7 +5,7 @@ schema: 2
 kind: workload
 id: openinterpreter/open-interpreter
 displayName: Open Interpreter
-description: Open Interpreter, rebuilt as a Codex CLI derivative, here on an xAI API key.
+description: Open Interpreter, rebuilt as a Codex CLI derivative, on the key of the provider or gateway you choose (xAI by default).
 author: Open Interpreter
 sourceUrl: https://github.com/openinterpreter/openinterpreter
 licenses:
@@ -23,18 +23,31 @@ capabilities:
   config:
     runtime:
       allow:
+      - api.openai.com:443
       - api.x.ai:443
+      - generativelanguage.googleapis.com:443
+      - openrouter.ai:443
+      - ai-gateway.vercel.sh:443
       - raw.githubusercontent.com:443
     dozer:
       model:
         id: model:open-interpreter
-        title: Talk to xAI
-        summary: Open Interpreter's model here (the xAI API, with your key) — needed for it to answer.
-        phrase: talk to your AI model (xAI)
+        title: Talk to its model provider
+        summary: Open Interpreter's model — the provider or gateway its key is for (OpenAI, xAI, Google AI, OpenRouter or Vercel AI Gateway), with an API key. Needed for Open Interpreter to answer.
+        phrase: talk to your AI model
         hosts:
+        - host: api.openai.com
+          reason: OpenAI — when the sandbox's key is OpenAI's
         - host: api.x.ai
           paths:
           - /v1/chat/completions
+          reason: xAI — when the sandbox's key is xAI's
+        - host: generativelanguage.googleapis.com
+          reason: Google AI — when the sandbox's key is Google AI's
+        - host: openrouter.ai
+          reason: OpenRouter — when the sandbox's key is OpenRouter's
+        - host: ai-gateway.vercel.sh
+          reason: Vercel AI Gateway — when the sandbox's key is Vercel AI Gateway's
       update: []
       excluded: []
       vendor:
@@ -74,6 +87,21 @@ capabilities:
   config:
     command:
     - interpreter
+    model_args:
+    - '-m'
+    - '$DOZ_MODEL'
+    - '-c'
+    - 'model_provider=doz'
+    - '-c'
+    - 'model_providers.doz.name=Dozer'
+    - '-c'
+    - 'model_providers.doz.base_url=$DOZ_BASE_URL'
+    - '-c'
+    - 'model_providers.doz.env_key=OPENAI_API_KEY'
+    - '-c'
+    - 'model_providers.doz.wire_api=chat'
+    model_args_after:
+    - exec
     no_prompts_args:
     - --dangerously-bypass-approvals-and-sandbox
     passthrough:
@@ -133,19 +161,60 @@ capabilities:
       accounts:
       - key
       keys_page: https://console.x.ai/
-      note: A Codex-style model_providers.xai entry (env_key XAI_API_KEY, wire_api chat), model grok-build-0.1; its ChatGPT sign-in, analytics and plugins are off.
-      checked: '2026-10-14'
+      note: 'Open Interpreter''s provider settings given on its command line (-c model_provider and model_providers.doz: the chosen source''s base URL, the key''s placeholder read from OPENAI_API_KEY; -m the model); on xAI (the default) the model is grok-build-0.1.'
+      checked: '2026-10-16'
+    - kind: api-key
+      provider: openai
+      accounts:
+      - openai-key
+      keys_page: https://platform.openai.com/api-keys
+      note: 'Open Interpreter through OpenAI: doz try open-interpreter --provider openai (or choose it in the try setup); the model with --model.'
+      checked: '2026-10-16'
+    - kind: api-key
+      provider: google
+      accounts:
+      - key
+      keys_page: https://aistudio.google.com/apikey
+      note: 'Open Interpreter through Google AI: doz try open-interpreter --provider google (or choose it in the try setup); the model with --model.'
+      checked: '2026-10-16'
+    - kind: api-key
+      provider: openrouter
+      accounts:
+      - key
+      keys_page: https://openrouter.ai/keys
+      note: 'Open Interpreter through OpenRouter: doz try open-interpreter --gateway openrouter (or choose it in the try setup); the model with --model.'
+      checked: '2026-10-16'
+    - kind: api-key
+      provider: vercel-ai-gateway
+      accounts:
+      - key
+      keys_page: https://vercel.com/docs/ai-gateway/authentication-and-byok
+      note: 'Open Interpreter through Vercel AI Gateway: doz try open-interpreter --gateway vercel-ai-gateway (or choose it in the try setup); the model with --model.'
+      checked: '2026-10-16'
 - type: com.dozersandbox/gateways@1
   config:
     entries:
     - gateway: openrouter
-      level: unknown
-      reason: takes any model_providers entry, as Codex does; OpenRouter was not checked
-      checked: '2026-10-14'
+      level: verified
+      evidence: 'make recipe-check: its check turn through a stand-in OpenRouter (doz try with --gateway openrouter; models@1)'
+      checked: '2026-10-16'
     - gateway: vercel-ai-gateway
-      level: unknown
-      reason: not checked against Open Interpreter
-      checked: '2026-10-14'
+      level: verified
+      evidence: 'make recipe-check: its check turn through a stand-in Vercel AI Gateway (doz try with --gateway vercel-ai-gateway; models@1)'
+      checked: '2026-10-16'
+- type: com.dozersandbox/models@1
+  config:
+    default: xai
+    shapes:
+    - shape: openai-chat
+      env:
+        DOZ_MODEL: '${{ dozer.model }}'
+        DOZ_BASE_URL: '${{ dozer.base_url }}'
+      key_env:
+      - OPENAI_API_KEY
+      source: https://github.com/openinterpreter/open-interpreter#configuration
+    models:
+      xai: grok-build-0.1
 - type: com.dozersandbox/currency@1
   config:
     checked: '2026-10-14'
@@ -170,7 +239,7 @@ capabilities:
       - interpreter exec --skip-git-repo-check "…"
       evidence: 'make recipe-check: interpreter exec printed the stand-in''s answer and exited in a fresh try'
       checked: '2026-10-14'
-    terms: Your xAI API key — a key from console.x.ai.
+    terms: Your API key of the provider or gateway you choose (xAI by default).
 - type: com.dozersandbox/guide@1
   config:
     intro: "Open Interpreter is a coding agent with its own screen: the session on the left. Ask it to read, change and run the code in your folder."

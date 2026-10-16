@@ -167,7 +167,7 @@ public enum PermissionPolicy {
         // update hosts are never a switch; Anthropic's model is not listed where a recipe agent has its own.
         let ownModel = AgentPermissions.hasOwnModel(names)
         let rows = AgentPermissions.all.filter {
-            (!AgentPermissions.isAgentModel($0.id) || names.contains($0.id)) && !AgentPermissions.isAgentUpdate($0.id) && !AgentPermissions.isAgentVendor($0.id) && !(ownModel && $0.id == "model")
+            (!AgentPermissions.isAgentModel($0.id) || names.contains($0.id)) && !AgentPermissions.isAgentUpdate($0.id) && !AgentPermissions.isAgentVendor($0.id) && !AgentPermissions.isAgentSources($0.id) && !(ownModel && $0.id == "model")
         }.map { p in
             PermissionRow(id: p.id, title: p.title, summary: p.summary, on: names.contains(p.id),
                           locked: p.locked || AgentPermissions.isAgentModel(p.id), warning: p.warning,
@@ -210,7 +210,7 @@ public enum PermissionPolicy {
         let (names, own) = inferred(policy)
         // 617: an agent's own update hosts are part of "update yourself"; Anthropic's model is not a recipe agent's.
         let ownModel = AgentPermissions.hasOwnModel(names)
-        let on = AgentPermissions.all.filter { names.contains($0.id) && !AgentPermissions.isAgentUpdate($0.id) && !AgentPermissions.isAgentVendor($0.id) }.map(\.phrase)
+        let on = AgentPermissions.all.filter { names.contains($0.id) && !AgentPermissions.isAgentUpdate($0.id) && !AgentPermissions.isAgentVendor($0.id) && !AgentPermissions.isAgentSources($0.id) }.map(\.phrase)
         let off = AgentPermissions.all.filter { !names.contains($0.id) && !AgentPermissions.isAgentOwn($0.id) && !(ownModel && $0.id == "model") }
         var s = "You may " + list(on) + "."
         let sites = own.filter { $0.action == .allow && !$0.hasHTTPConditions }.map(\.host)

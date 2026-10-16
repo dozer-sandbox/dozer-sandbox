@@ -87,6 +87,18 @@ to where you opened it.
   or the command to run for a key you keep in 1Password, AWS or a program. Then **the plan** (its name, base, network,
   its new empty folder — not one of yours — and what reaches your Mac), the same as a command to copy (`doz try grok`),
   and what it can reach.
+- **Where it gets its model** — **Try…** opens its setup. A tool that can use more than one provider (pi, OpenCode, and
+  most of the recipe tools) shows ONE list: its providers, then the gateways (OpenRouter, Vercel AI Gateway — one key,
+  models from many makers), each with its key status. Its own provider is chosen; choose any other the same way. The
+  chosen one shows its key (a choice when you have several, or "Add another key"), or a field to paste one, where to get
+  a key and the command for a key kept in 1Password, AWS or a program. Then **Model**: the source's own list —
+  a gateway's public list, read by Dozer on this Mac once a day — to search by name, maker or id, with each model's
+  context and price per million tokens and the default marked; an id it does not list can still be typed. The plan
+  names the model, and **Same in Terminal** is the command (`doz try pi --gateway openrouter --model …`). New Sandbox
+  asks the same in its Account step, and writes the choice to `doz_project.yaml` (`model_source:`, `model:`).
+  OpenCode 2 also lists **OpenCode Zen** (free models), marked "no key needed": chosen, it needs no key and no account,
+  Start is ready at once, and its model list shows each free model with its data terms as OpenCode's docs state them
+  (`doz try opencode --provider opencode-zen`).
 - **Nothing is prepared while you browse.** **Start** makes it, starts it and opens its session: a first start
   prepares its image, and its terminal area shows the progress (the steps, the one under way and the last lines of the
   build) until the session is there. A try's page says **Sleep (hibernate)** · **Delete…** · **Keep** — Delete removes
@@ -178,6 +190,33 @@ categories — `personal-agent`, `terminal-tool`, `framework`, `browser-agent`, 
 | 2 | nothing by that name (it suggests the closest) |
 | 64 | usage |
 
+## A tool's major version
+
+Some tools come in more than one major release line, each a recipe of its own — OpenCode 1 and OpenCode 2. The tool's
+name is the one Dozer recommends; you can always choose another:
+
+```sh
+doz try opencode                   # the major Dozer recommends (a release it checked)
+doz try opencode@1                 # OpenCode 1, kept up to date within 1.x
+doz try opencode@2.0.28            # exactly that release (checked against the registry before anything is made)
+doz create my-app --agent opencode@1      # the same in new, create and up — and in doz_project.yaml: agent: opencode@1
+```
+
+- **Recommended, never "latest"**: the recommended major is one whose recipe passed Dozer's checks; Dozer moves it to a
+  new major only once that one has.
+- **A sandbox keeps its major.** It records what it was made as (`opencode@2.0.29`). Later recommendations never move
+  it, and a reset keeps its major. The other major is a new sandbox.
+- **A project file keeps its major too.** What Dozer writes for later — a plan's `doz_project.yaml`, `doz init`, New
+  Sandbox — records the major the name resolved to (`agent: opencode@2`), so `doz up` on it next year makes the same
+  major. A file you write by hand with the bare name (`agent: opencode`) keeps meaning the recommended major; `doz up`
+  says which one when it makes the sandbox.
+- **Where you see them**: a try's first line, `--dry-run` and the sandbox's Guide say which release it is and how to get
+  the other one (`OpenCode 1 1.19.0 (recommended) — OpenCode 2: doz try opencode@2`). `doz search` marks each major
+  (`(recommended; also @2)`), and the `doz try` list shows the tool once. In the dashboard, Quick try has one card per
+  tool, with a **Version** choice in its Try setup; New Sandbox shows the tool once, with its majors under it.
+- An exact release that does not exist, or a major that does not, is refused with the choices there are
+  (`opencode has opencode@1 (recommended) and opencode@2 — not @9`).
+
 ## One set of choices
 
 `doz new`, `doz create`, `doz up` and `doz try` take the same choice options, named after the keys of
@@ -185,7 +224,7 @@ categories — `personal-agent`, `terminal-tool`, `framework`, `browser-agent`, 
 
 | option | what it chooses |
 |---|---|
-| `--agent`, `--base`, `--dockerfile` | the agent and its base (`--image` is the shorthand for both) |
+| `--agent`, `--base`, `--dockerfile` | the agent and its base (`--image` is the shorthand for both); a tool's major or release: `--agent opencode@1` |
 | `--permissions` | what the agent may do: `standard`, `locked`, `open`, `+web`, `-error-reports`, `site:HOST` (`--allow` is the same) |
 | `--network` | `agent`, `locked`, `open`, `bake`, `nat` or `none` |
 | `--account`, `--key` | the account, and custom keys beside it |

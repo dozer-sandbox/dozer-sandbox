@@ -8,7 +8,7 @@ import { setting } from '../core/settings-e508eb68e0b62892.js';
 import { accountChooser } from './accounts-5fdcb84f475c8132.js';
 import { callout } from './callout-e7d97c36b36fe970.js';
 import { dialog } from './dialog-6e2b5c41ab058a33.js';
-import { imagePicker, pickerNameHint } from './image-picker-576337e5376588c0.js';
+import { imagePicker, pickerNameHint } from './image-picker-a3da919656685919.js';
 import { confirmWeb, isAgentModel, permissionSwitches } from './permissions-b76d7ef3f66e7dd5.js';
 import { workspaceChooser } from './workspace-chooser-9e92b5edc7706aba.js';
 

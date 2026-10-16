@@ -117,6 +117,11 @@ public actor HostCore {
     /// in-process host (and a unit test, unless it sets a stub) asks nothing.
     var agentRegistry: NpmRegistry = .disabled
     public func setAgentRegistry(_ r: NpmRegistry) { agentRegistry = r }
+    /// 618: where the gateways' model lists are read (the real host: their public URLs; tests: a stub or nothing).
+    var modelListFetcher: ModelListFetcher = .disabled
+    public func setModelListFetcher(_ f: ModelListFetcher) { modelListFetcher = f }
+    /// 618: one read of a gateway's list at a time.
+    var modelListReads: [String: Task<Void, Never>] = [:]
 
     /// Tests: the preparation work and the "already prepared" check.
     public func setPreparationRunner(_ r: @escaping PreparationRunner, prepared: @escaping @Sendable (String, DozerStore) -> Bool) {
@@ -125,10 +130,12 @@ public actor HostCore {
     }
 
     public init(store: DozerStore, readOnly: Bool, version: String, services: CredentialServices = .forHost(),
-                newStoreKeepalive: Bool = false, newStoreDefaultAccount: String? = nil, agentRegistry: NpmRegistry = .disabled) {
+                newStoreKeepalive: Bool = false, newStoreDefaultAccount: String? = nil, agentRegistry: NpmRegistry = .disabled,
+                modelLists: ModelListFetcher = .disabled) {
         TestSafety.checkStore(store.root)          // 611: a guarded test never runs on the default store
         self.store = store
         self.agentRegistry = agentRegistry
+        self.modelListFetcher = modelLists
         self.readOnly = readOnly
         self.version = version
         self.services = services
@@ -445,6 +452,7 @@ public actor HostCore {
         i.credentialProblem = credentialProblem(m)
         i.trial = m.config.trial
         i.trialFolder = m.config.trialFolder
+        i.agentRef = m.config.agentRef            // 618
         i.extraKeys = m.config.extraKeys
         // 617 (RP-1): whether something serves each port — read in the background, never on this call's path.
         if phase == .running, !readOnly, !wantedPorts(m).isEmpty,
@@ -721,12 +729,17 @@ public actor HostCore {
             return try JSONValue(encoding: try await ports(r))             // 617 (RP-1)
         case .plan:
             guard let p = r.planRequest, PlanRequest.purposes.contains(p.purpose) else { throw HostError(.invalid, "plan: what to plan (purpose new, create, up, init or try)") }
-            return try JSONValue(encoding: plan(p))
+            let e = await exactVersionProblem(p.create, mustCheck: false)
+            return try JSONValue(encoding: plans([p], versionProblems: e.map { [0: $0] } ?? [:])[0])
         case .plans:
             guard let ps = r.planRequests, ps.count <= 128, ps.allSatisfy({ PlanRequest.purposes.contains($0.purpose) }) else {
                 throw HostError(.invalid, "plans: at most 128 plans, each with a purpose (new, create, up, init or try)")
             }
-            return try JSONValue(encoding: plans(ps))
+            var problems: [Int: String] = [:]
+            for (i, p) in ps.enumerated() { if let e = await exactVersionProblem(p.create, mustCheck: false) { problems[i] = e } }
+            return try JSONValue(encoding: plans(ps, versionProblems: problems))
+        case .models:
+            return try JSONValue(encoding: try await modelLists(source: r.modelsSource, refresh: r.modelsRefresh == true))
         case .bases:
             let s = store
             let check = preparedCheck
@@ -884,6 +897,8 @@ public actor HostCore {
         // gets the image already prepared. 594 W28: an out-of-date one is used as it is (the CLI and
         // the page say so) unless the user chose `rebuild` — then this doz's image is prepared first.
         await freshen(o.image, update: false)
+        // 618: an exact release asked for this sandbox (NAME@VERSION) is checked like a pin before anything is made.
+        if let e = await exactVersionProblem(o, mustCheck: true) { throw HostError(.invalid, e) }
         if o.rebuild == true, DozerImages.builtIn.contains(DozerImages.canonicalName(o.image))
             || DozerImages.isPreparable(DozerImages.canonicalName(o.image), store: store) {
             let img = DozerImages.canonicalName(o.image)
@@ -963,6 +978,11 @@ public actor HostCore {
             cfg.extraKeys = keys.filter { seen.insert($0).inserted }
         }
         if let model = o.model, let source = modelSource { cfg.models = [source: model] }     // 617 (models@1)
+        if let source = modelSource, ModelSources.isKeyless(source) { cfg.modelSource = source; cfg.account = nil }   // 618: no key, no account
+        // 618: what it was made as — the family's (or tool's) name and the exact release (`opencode@2.0.29`).
+        if let r = spec.imageSpec.flatMap({ ImageChoice.parse($0.name)?.agent.recipe }), r.family != nil || o.agentRef != nil {
+            cfg.agentRef = AgentRef.recorded(r, version: spec.imageSpec?.agent?.version)
+        }
         if o.trial == true {                           // 617 (D14)
             cfg.trial = true
             // The try's own folder — made now by Dozer, so its delete may offer to remove it (never one of yours).
@@ -1520,6 +1540,24 @@ public actor HostCore {
         }
         return e
     }
+    /// 618: a built-in agent with model sources (pi) gets `launch.model_args` on its default session, filled from the
+    /// selection — only off its default source or with a model chosen there (on its own default it keeps its own pick).
+    func builtinModelArguments(_ m: Managed) -> [String] {
+        let image = m.sandbox.spec.imageSpec?.name
+        guard let r = image.flatMap({ ImageChoice.parse($0) })?.agent.recipe, r.isBuiltin, let args = r.launch.modelArgs,
+              let sel = modelSelection(m), sel.source != r.models?.default || m.config.models?[sel.source] != nil else { return [] }
+        return Self.filledModelArguments(args, sel.env)
+    }
+
+    /// Each `$DOZ_…` in `args` replaced by its value in `env` (none missing: models@1 is validated to set each).
+    static func filledModelArguments(_ args: [String], _ env: [String: String]) -> [String] {
+        args.map { a in
+            var out = a
+            for (k, v) in env.sorted(by: { $0.key.count > $1.key.count }) where k.hasPrefix("DOZ_") { out = out.replacingOccurrences(of: "$" + k, with: v) }
+            return out
+        }
+    }
+
     func recipeEnvironment(_ env: [String: String], _ m: Managed) -> [String: String] {
         var e = Self.withRecipeEnvironment(env, imageSpec: m.config.spec.imageSpec?.name, permissions: m.sandbox.egress?.policy.permissions)
         // 617 (models@1): the chosen model source's settings (base URL, model), never over the caller's own value.
@@ -1536,7 +1574,17 @@ public actor HostCore {
               var source = AgentCredentials.sources(image)?.first else { return nil }
         if case .record(let a) = resolvedAccount(m, accountStore.load()), AgentCredentials.accepts(image, a),
            let s = AgentCredentials.source(of: a) { source = s }
+        else if let k = keylessSource(m) { source = k }
         return r.selection(source: source, model: m.config.models?[source])
+    }
+
+    /// 618: the key-less source this sandbox uses (OpenCode Zen's free models): the one it was made with, while it has no
+    /// account and its agent is still offered it. nil: it uses a key (or none at all).
+    func keylessSource(_ m: Managed) -> String? {
+        guard let s = m.config.modelSource, ModelSources.isKeyless(s), AgentCredentials.sources(m.sandbox.spec.imageSpec?.name)?.contains(s) == true
+        else { return nil }
+        if case .none = resolvedAccount(m, accountStore.load()) { return s }
+        return nil
     }
     static func withClipboardSink(_ env: [String: String], on: Bool) -> [String: String] {
         guard on else { return env }
@@ -1645,6 +1693,8 @@ public actor HostCore {
                 argv += ["--append-system-prompt", AgentPrompt.guestPromptPath]
             }
         }
+        // 618: a built-in agent's model on its command line (pi's --model), at session open — never baked.
+        if recordArgv == m.config.defaultSession.argv { argv += builtinModelArguments(m) }
         if argv == m.config.defaultSession.argv { await deliverGuideNote(m) }    // 617.11: a shell tool's first steps, once
         argv += extraArguments
         // 599i: Codex's credentials for this session — its auth.json with placeholders only (or none).

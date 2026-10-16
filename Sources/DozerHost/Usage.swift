@@ -29,7 +29,7 @@ import DozerKit
 /// One sign-up: an email and what it is for. Nothing else is ever sent with it — not the install id. Its description
 /// is redacted (a log line or an interpolation never shows the address).
 public struct SignupRequest: Codable, Sendable, Equatable, CustomStringConvertible, CustomDebugStringConvertible, CustomReflectable {
-    public static let interestValues = ["release-news", "early-access", "tips"]
+    public static let interestValues = ["release-news", "tool-news", "early-access", "tips"]
     public static let sourceValues = ["cli", "onboarding-web", "onboarding-cli", "website"]
 
     public var email: String
@@ -46,7 +46,7 @@ public struct SignupRequest: Codable, Sendable, Equatable, CustomStringConvertib
         self.source = source
     }
 
-    /// A checked request: an email of a plain shape, 1–3 known interests (each once, in the list's order), a known
+    /// A checked request: an email of a plain shape, 1–4 known interests (each once, in the list's order), a known
     /// source. The error never repeats the email.
     public static func make(email: String, interests: [String], source: String) throws -> SignupRequest {
         let e = email.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -288,7 +288,7 @@ public enum UsageSchema {
     public static let chips = ["m1", "m2", "m3", "m4", "m5", "other"]
     /// A CLOSED list, the same as the receiving Worker's `AGENTS` (617: gemini and grok, deployed there first).
     /// `UsageTests` checks every agent id is in it — a new recipe that is not breaks the daily message.
-    public static let agents = ["claude-code", "codex", "pi", "none", "gemini", "grok", "antigravity", "fabric", "openclaw", "nanobot", "gptme", "llm", "shell-gpt", "zeroclaw", "aichat", "tgpt", "opencode", "smolagents", "adk", "promptfoo", "clai", "copilot", "qwen-code", "goose", "kilo", "mistral-vibe", "droid", "dirac", "kimi-code", "every-code", "cline", "openhands", "codebuddy", "letta-code", "docker-agent", "nanocoder", "mini-swe-agent", "open-interpreter", "crush", "mimo-code", "codewhale", "maki", "omp", "tau", "stitch"]
+    public static let agents = ["claude-code", "codex", "pi", "none", "gemini", "grok", "antigravity", "fabric", "openclaw", "nanobot", "gptme", "llm", "shell-gpt", "zeroclaw", "aichat", "tgpt", "opencode", "smolagents", "adk", "promptfoo", "clai", "copilot", "qwen-code", "goose", "kilo", "mistral-vibe", "droid", "dirac", "kimi-code", "every-code", "cline", "openhands", "codebuddy", "letta-code", "docker-agent", "nanocoder", "mini-swe-agent", "open-interpreter", "crush", "mimo-code", "codewhale", "maki", "omp", "tau", "stitch", "opencode2"]
     public static let accounts = ["mac", "api-key", "setup-token", "none"]
     public static let networks = ["standard", "locked", "open", "custom", "nat", "none"]
     public static let onboardingVia = ["cli", "web"]

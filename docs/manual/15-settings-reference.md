@@ -369,6 +369,7 @@ This table is generated from `doz config show` and checked against it on every b
 | `images.omp_version` | `latest` | latest, or an exact version like 2.1.227 | new sandboxes | — | The oh-my-pi the omp image (and every base's oh-my-pi image) is prepared with: latest or an exact version like 18.10.4, as images.claude_code_version. |
 | `images.tau_version` | `latest` | latest, or an exact version like 2.1.227 | new sandboxes | — | The Tau the tau image (and every base's Tau image) is prepared with: latest or an exact version like 0.4.7, as images.claude_code_version. |
 | `images.stitch_version` | `latest` | latest, or an exact version like 2.1.227 | new sandboxes | — | The Google Stitch CLI the stitch image (and every base's Google Stitch CLI image) is prepared with: latest or an exact version like 0.11.1, as images.claude_code_version. |
+| `images.opencode2_version` | `latest` | latest, or an exact version like 2.1.227 | new sandboxes | — | The OpenCode 2 the opencode2 image (and every base's OpenCode 2 image) is prepared with: latest or an exact version like 2.0.29, as images.claude_code_version. |
 
 ### `[images.lab]`
 
@@ -670,6 +671,13 @@ This table is generated from `doz config show` and checked against it on every b
 |---|---|---|---|---|---|
 | `images.stitch.memory_mib` | `2048` | integer 256–262144 | new sandboxes | `doz create --memory` | Memory (MiB) of a new stitch sandbox (a custom image follows the image it was saved from). |
 | `images.stitch.network` | `agent` | agent \| bake \| locked \| open \| nat \| none | new sandboxes | `doz create --network` | The network of a new stitch sandbox: agent, bake, locked, open (proxied presets), nat or none. |
+
+### `[images.opencode2]`
+
+| key | default | values | applies | overridden by | what it does |
+|---|---|---|---|---|---|
+| `images.opencode2.memory_mib` | `2048` | integer 256–262144 | new sandboxes | `doz create --memory` | Memory (MiB) of a new opencode2 sandbox (a custom image follows the image it was saved from). |
+| `images.opencode2.network` | `agent` | agent \| bake \| locked \| open \| nat \| none | new sandboxes | `doz create --network` | The network of a new opencode2 sandbox: agent, bake, locked, open (proxied presets), nat or none. |
 
 ### `[kernel]`
 

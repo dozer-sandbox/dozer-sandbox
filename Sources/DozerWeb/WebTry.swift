@@ -41,8 +41,9 @@ public struct WebPlanQuery: Equatable, Sendable {
             q.name = s
         }
         if let v = d["agent"], !(v is NSNull) {
-            guard let s = v as? String, s.count <= 40, s == "none" || AgentRecipes.matching(s) != nil else {
-                throw WebAction.Invalid("agent: an agent this Dozer has (doz search lists them)")
+            // 618: NAME, NAME@MAJOR (opencode@1) or NAME@VERSION (opencode@2.0.28) — refused with a fixed message.
+            guard let s = v as? String, s.count <= 60, s == "none" || ((try? AgentRef.resolve(s)) ?? nil) != nil else {
+                throw WebAction.Invalid("agent: an agent this Dozer has (doz search lists them), or NAME@MAJOR / NAME@VERSION")
             }
             q.agent = s
         }
@@ -76,9 +77,14 @@ public struct WebPlanQuery: Equatable, Sendable {
     public var request: PlanRequest {
         var o = CreateOptions(image: "")
         if agent != nil || base != nil {
-            let kind: AgentKind = agent == "none" || agent == nil ? .none
-                : AgentRecipes.matching(agent!).flatMap { AgentKind(rawValue: $0.id) } ?? .none
+            let ref = agent == "none" ? nil : agent.flatMap { (try? AgentRef.resolve($0)) ?? nil }
+            let kind: AgentKind = ref.flatMap { AgentKind(rawValue: $0.recipe.id) } ?? .none
             o.image = ImageChoice(base: base ?? kind.recipe?.defaultBase ?? "node", agent: kind).name
+            // 618: its exact release, and what was asked (the Quick try's Version choice: opencode@1).
+            if let ref {
+                o.agentVersion = ref.exact
+                if ref.qualifier != nil || ref.family != nil { o.agentRef = ref.text }
+            }
         }
         if isolated { o.isolated = true }
         if let account { o.account = account }
@@ -125,7 +131,7 @@ extension WebTryCatalog {
                              currency: [String: AgentCurrency] = [:], accounts: [WebAccount] = [],
                              installs: ([String: String]) -> [String: String] = { _ in [:] }) async -> WebTryCatalog {
         let recipes = recipeAgents()
-        let ps = await plans(recipes.map { WebPlanQuery(purpose: "try", agent: $0.id).request })
+        let ps = await plans(recipes.map { WebPlanQuery(purpose: "try", agent: AgentRef.typed($0)).request })
         var planned: [String: WebPlan] = [:]
         for (r, p) in zip(recipes, ps) { if let p { planned[r.id] = p } }
         let images = planned.compactMapValues { $0.create?.image }
@@ -158,7 +164,7 @@ extension WebTryCatalog {
             a.tags = r.capabilityTags.filter { ["documented", "verified"].contains($0.level) }.map(\.tag)
             a.openSource = r.hasTag("open-source")
             a.headless = r.hasTag("headless")
-            a.gateway = r.gateways.contains { ["documented", "verified"].contains($0.level) }
+            a.gateway = r.throughGateway          // 618: a try can go through one (models@1 offers it)
             a.current = r.lifecycle?.isCurrent ?? true
             a.ready = p.map { card == nil && !$0.problems.contains { $0.code != "key" } } ?? false
             // What a try installs (`installs`), else the recipe's pin; its release date only when it IS the latest the
@@ -169,6 +175,8 @@ extension WebTryCatalog {
             a.description = r.description
             a.catalogKind = r.catalogKind
             a.categories = r.categories ?? []
+            a.family = r.family.map(FamilyInfo.init)           // 618
+            a.ref = AgentRef.typed(r)
             // 617 (owner: a key added in "What you need" did not work): the accounts this agent can use — the setup
             // plans with one when the provider's default is one it cannot (Claude Code's Mac login for pi).
             a.usableAccounts = accounts.filter { w in
@@ -197,7 +205,56 @@ extension WebTryCatalog {
     }
 }
 
+/// 618: the models a source offers, for the Try setup's picker — field by field (the host's list is someone else's
+/// data, checked and capped there; nothing here is a secret). `kind`: fetched (a gateway's own list), none (a gateway
+/// whose list was never read), default (a provider: only the model Dozer checked — any other id may be typed).
+public struct WebModelList: Codable, Equatable, Sendable {
+    public struct Model: Codable, Equatable, Sendable {
+        public var id: String
+        public var name: String
+        public var maker: String?
+        public var context: Int?
+        public var priceIn: Double?
+        public var priceOut: Double?
+        public var tools: Bool?
+        /// 618: a key-less source's model — its data terms as the source's docs state them.
+        public var note: String? = nil
+    }
+    public var source: String
+    public var title: String
+    public var gateway: Bool
+    public var kind: String
+    public var fetchedAt: Date?
+    public var defaultModel: String?
+    public var models: [Model]
+    /// 618: a `listed` list (a key-less source's): when it was checked against the docs.
+    public var checked: String? = nil
+
+    public init(_ l: ModelList) {
+        source = l.source
+        title = l.title
+        gateway = l.gateway
+        kind = l.kind
+        fetchedAt = l.fetchedAt
+        defaultModel = l.defaultModel
+        checked = l.checked
+        // The default first, then the list's own order.
+        let ordered = l.models.filter { $0.id == l.defaultModel } + l.models.filter { $0.id != l.defaultModel }
+        models = ordered.map { Model(id: $0.id, name: $0.name, maker: $0.maker, context: $0.context,
+                                     priceIn: $0.pricePerMillionIn, priceOut: $0.pricePerMillionOut, tools: $0.tools, note: $0.note) }
+    }
+}
+
 extension HostWebData {
+    /// 618: the host's read-only `models` for one source.
+    public func models(_ source: String) async throws -> WebModelList {
+        var q = HostRequest(.models)
+        q.modelsSource = source
+        let all = try await query(q).0.decode([ModelList].self)
+        guard let l = all.first(where: { $0.source == source }) else { throw HostError(.notFound, "no model list for \(source)") }
+        return WebModelList(l)
+    }
+
     /// The host's read-only `plan` (in-process when no host runs — looking never starts one).
     public func plan(_ r: PlanRequest) async throws -> WebPlan {
         var q = HostRequest(.plan)

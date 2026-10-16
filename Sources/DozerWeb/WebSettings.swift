@@ -403,11 +403,11 @@ public enum WebSignup {
         guard let email = d["email"] as? String, SignupRequest.emailProblem(email.trimmingCharacters(in: .whitespacesAndNewlines)) == nil else {
             throw WebAction.Invalid("email: an email address (name@example.com)")
         }
-        guard let list = d["interests"] as? [Any], list.count <= 3, let interests = list as? [String] else {
-            throw WebAction.Invalid("interests: a list of release-news, early-access, tips")
+        guard let list = d["interests"] as? [Any], list.count <= SignupRequest.interestValues.count, let interests = list as? [String] else {
+            throw WebAction.Invalid("interests: a list of release-news, tool-news, early-access, tips")
         }
         do { return try SignupRequest.make(email: email, interests: interests, source: "onboarding-web") } catch {
-            throw WebAction.Invalid("interests: at least one of release-news, early-access, tips (each once)")
+            throw WebAction.Invalid("interests: at least one of release-news, tool-news, early-access, tips (each once)")
         }
     }
 }

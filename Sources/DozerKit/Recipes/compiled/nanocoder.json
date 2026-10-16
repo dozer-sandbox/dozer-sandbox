@@ -18,16 +18,37 @@
           "model" : {
             "hosts" : [
               {
+                "host" : "api.anthropic.com",
+                "reason" : "Anthropic — when the sandbox's key is Anthropic's"
+              },
+              {
+                "host" : "api.openai.com",
+                "reason" : "OpenAI — when the sandbox's key is OpenAI's"
+              },
+              {
                 "host" : "api.x.ai",
                 "paths" : [
                   "/v1/chat/completions"
-                ]
+                ],
+                "reason" : "xAI — when the sandbox's key is xAI's"
+              },
+              {
+                "host" : "generativelanguage.googleapis.com",
+                "reason" : "Google AI — when the sandbox's key is Google AI's"
+              },
+              {
+                "host" : "openrouter.ai",
+                "reason" : "OpenRouter — when the sandbox's key is OpenRouter's"
+              },
+              {
+                "host" : "ai-gateway.vercel.sh",
+                "reason" : "Vercel AI Gateway — when the sandbox's key is Vercel AI Gateway's"
               }
             ],
             "id" : "model:nanocoder",
-            "phrase" : "talk to your AI model (xAI)",
-            "summary" : "Nanocoder's model here (the xAI API, with your key) — needed for it to answer.",
-            "title" : "Talk to xAI"
+            "phrase" : "talk to your AI model",
+            "summary" : "Nanocoder's model — the provider or gateway its key is for (Anthropic, OpenAI, xAI, Google AI, OpenRouter or Vercel AI Gateway), with an API key. Needed for Nanocoder to answer.",
+            "title" : "Talk to its model provider"
           },
           "quiet" : [
             {
@@ -41,7 +62,12 @@
         },
         "runtime" : {
           "allow" : [
-            "api.x.ai:443"
+            "api.anthropic.com:443",
+            "api.openai.com:443",
+            "api.x.ai:443",
+            "generativelanguage.googleapis.com:443",
+            "openrouter.ai:443",
+            "ai-gateway.vercel.sh:443"
           ],
           "deny" : [
             "models.dev:443"
@@ -128,7 +154,7 @@
                   "models" : [
                     "grok-build-0.1"
                   ],
-                  "name" : "xAI",
+                  "name" : "Dozer",
                   "sdkProvider" : "openai-compatible"
                 }
               ]
@@ -182,11 +208,61 @@
             "accounts" : [
               "key"
             ],
-            "checked" : "2026-10-14",
+            "checked" : "2026-10-16",
             "keys_page" : "https://console.x.ai/",
             "kind" : "api-key",
-            "note" : "An OpenAI-compatible provider in ~/.config/nanocoder/agents.config.json on xAI's API; its apiKey is the reference ${XAI_API_KEY}, which Nanocoder expands from the environment each run, so the key is never written there. Model grok-build-0.1.",
+            "note" : "Nanocoder's provider from the environment (NANOCODER_PROVIDERS: an OpenAI-compatible provider at the chosen source's base URL, or its Anthropic client; its apiKey the reference $OPENAI_API_KEY or $ANTHROPIC_API_KEY, which Nanocoder expands each run, so the key is never written there). On xAI (the default) the model is grok-build-0.1.",
             "provider" : "xai"
+          },
+          {
+            "accounts" : [
+              "api-key"
+            ],
+            "checked" : "2026-10-16",
+            "keys_page" : "https://console.anthropic.com/settings/keys",
+            "kind" : "api-key",
+            "note" : "Nanocoder through Anthropic: doz try nanocoder --provider anthropic (or choose it in the try setup); the model with --model.",
+            "provider" : "anthropic"
+          },
+          {
+            "accounts" : [
+              "openai-key"
+            ],
+            "checked" : "2026-10-16",
+            "keys_page" : "https://platform.openai.com/api-keys",
+            "kind" : "api-key",
+            "note" : "Nanocoder through OpenAI: doz try nanocoder --provider openai (or choose it in the try setup); the model with --model.",
+            "provider" : "openai"
+          },
+          {
+            "accounts" : [
+              "key"
+            ],
+            "checked" : "2026-10-16",
+            "keys_page" : "https://aistudio.google.com/apikey",
+            "kind" : "api-key",
+            "note" : "Nanocoder through Google AI: doz try nanocoder --provider google (or choose it in the try setup); the model with --model.",
+            "provider" : "google"
+          },
+          {
+            "accounts" : [
+              "key"
+            ],
+            "checked" : "2026-10-16",
+            "keys_page" : "https://openrouter.ai/keys",
+            "kind" : "api-key",
+            "note" : "Nanocoder through OpenRouter: doz try nanocoder --gateway openrouter (or choose it in the try setup); the model with --model.",
+            "provider" : "openrouter"
+          },
+          {
+            "accounts" : [
+              "key"
+            ],
+            "checked" : "2026-10-16",
+            "keys_page" : "https://vercel.com/docs/ai-gateway/authentication-and-byok",
+            "kind" : "api-key",
+            "note" : "Nanocoder through Vercel AI Gateway: doz try nanocoder --gateway vercel-ai-gateway (or choose it in the try setup); the model with --model.",
+            "provider" : "vercel-ai-gateway"
           }
         ]
       },
@@ -196,20 +272,51 @@
       "config" : {
         "entries" : [
           {
-            "checked" : "2026-10-14",
+            "checked" : "2026-10-16",
+            "evidence" : "make recipe-check: its check turn through a stand-in OpenRouter (doz try with --gateway openrouter; models@1)",
             "gateway" : "openrouter",
-            "level" : "unknown",
-            "reason" : "Nanocoder takes any OpenAI-compatible provider; OpenRouter was not checked"
+            "level" : "verified"
           },
           {
-            "checked" : "2026-10-14",
+            "checked" : "2026-10-16",
+            "evidence" : "make recipe-check: its check turn through a stand-in Vercel AI Gateway (doz try with --gateway vercel-ai-gateway; models@1)",
             "gateway" : "vercel-ai-gateway",
-            "level" : "unknown",
-            "reason" : "not checked against Nanocoder"
+            "level" : "verified"
           }
         ]
       },
       "type" : "com.dozersandbox/gateways@1"
+    },
+    {
+      "config" : {
+        "default" : "xai",
+        "models" : {
+          "xai" : "grok-build-0.1"
+        },
+        "shapes" : [
+          {
+            "env" : {
+              "NANOCODER_PROVIDERS" : "[{\"name\":\"Dozer\",\"sdkProvider\":\"openai-compatible\",\"baseUrl\":\"${{ dozer.base_url }}\",\"apiKey\":\"$OPENAI_API_KEY\",\"models\":[\"${{ dozer.model }}\"]}]"
+            },
+            "key_env" : [
+              "OPENAI_API_KEY"
+            ],
+            "shape" : "openai-chat",
+            "source" : "https://github.com/Nano-Collective/nanocoder/blob/v1.31.0/docs/configuration/providers/index.md"
+          },
+          {
+            "env" : {
+              "NANOCODER_PROVIDERS" : "[{\"name\":\"Dozer\",\"sdkProvider\":\"anthropic\",\"baseUrl\":\"${{ dozer.base_url }}/v1\",\"apiKey\":\"$ANTHROPIC_API_KEY\",\"models\":[\"${{ dozer.model }}\"]}]"
+            },
+            "key_env" : [
+              "ANTHROPIC_API_KEY"
+            ],
+            "shape" : "anthropic-messages",
+            "source" : "https://github.com/Nano-Collective/nanocoder/blob/v1.31.0/docs/configuration/providers/index.md"
+          }
+        ]
+      },
+      "type" : "com.dozersandbox/models@1"
     },
     {
       "config" : {
@@ -246,7 +353,7 @@
             "tag" : "headless"
           }
         ],
-        "terms" : "Your xAI API key — a key from console.x.ai."
+        "terms" : "Your API key of the provider or gateway you choose (xAI by default)."
       },
       "type" : "com.dozersandbox/directory@1"
     },
@@ -275,7 +382,7 @@
       "type" : "com.dozersandbox/guide@1"
     }
   ],
-  "description" : "The Nano Collective's local-first coding agent for the terminal, here on an xAI API key.",
+  "description" : "The Nano Collective's local-first coding agent for the terminal, on the key of the provider or gateway you choose (xAI by default).",
   "displayName" : "Nanocoder",
   "id" : "nano-collective/nanocoder",
   "kind" : "workload",

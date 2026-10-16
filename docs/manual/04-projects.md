@@ -133,6 +133,8 @@ memory: 4G
 network: agent              # agent, bake, locked, open, nat, none
 permissions: "+web"         # standard, locked, open, or changes on Standard
 account: default            # default, none, or an account name
+model_source: openrouter    # where the model comes from: a provider or gateway the agent is offered (doz models)
+model: anthropic/claude-sonnet-4.6   # a model id of that source
 sessions:                   # what doz up starts; the first is attached
   - claude                  #   the image's own session
   - name: server            #   a session of your own
@@ -155,7 +157,7 @@ workspace_view: on          # off: share the folder directly (programs in it los
 | `version` | `1` | — | — |
 | `name` | the sandbox: 1–40 of `a-z 0-9 -` | the folder's name | — |
 | `image` | `claude-code`, `pi`, `lab`, a base × agent image (`python-claude-code`, `go-pi`, `debian`, …) or a template | `defaults.image` | when the sandbox is made |
-| `agent` | `claude-code`, `pi`, `codex`, `antigravity`, `gemini`, `grok` or `none` — instead of `image`, with `base` or `dockerfile` | `claude-code` | when made |
+| `agent` | `claude-code`, `pi`, `codex`, `antigravity`, `gemini`, `grok` (any tool `doz search` lists) or `none` — instead of `image`, with `base` or `dockerfile`; a tool's major or exact release: `opencode@1`, `opencode@2.0.28` ([A tool's major version](26-try-and-search.md#a-tools-major-version)) | `claude-code` | when made |
 | `base` | a recommended base: `node`, `python`, `go`, `rust`, `java`, `ruby`, `dotnet`, `debian`, `ubuntu`, `alpine` | `node` | when made |
 | `dockerfile` | your own Dockerfile, relative to the folder or absolute (see [Images and bases](08-images-and-bases.md#your-own-dockerfile)) | — | when made |
 | `cpus` | 1–64 | `defaults.cpus` (2) | when made |
@@ -163,6 +165,8 @@ workspace_view: on          # off: share the folder directly (programs in it los
 | `network` | `agent`, `bake`, `locked`, `open`, `nat`, `none` | per image | `agent`/`bake`/`locked`/`open`: at the next `doz up`, live (unless you edited the sandbox's permissions since); `nat`/`none`: when made |
 | `permissions` | what the agent may do on a network with permissions (`agent`, `locked`, `open`): `standard`, `locked`, `open`, or changes on Standard like `+web,-error-reports` (or a list); see [What the agent can do](10-permissions-and-network.md) | `defaults.permissions` (standard) | when made (later: `doz net allow` / `doz net deny`) |
 | `account` | `default`, `none` or an account name | follow the store's default | run `doz account use NAME ACCOUNT` |
+| `model_source` | where the model comes from: a provider or gateway the agent is offered — `anthropic`, `openai`, `xai`, `google`, `openrouter`, `vercel-ai-gateway` (which ones depends on the tool: [Other AI tools](28-ai-tools.md#providers-and-gateways)); `--provider` / `--gateway` on `doz up` win over it | the agent's own | when made |
+| `model` | a model id of that source (`doz models --gateway openrouter`); `--model` on `doz up` wins over it | the source's default | when made |
 | `sessions` | a list of session names, or `{name, command}` — at most 16 | the image's own session | every `doz up` |
 | `agent_prompt` | text, at most 16 KiB | — | the next session |
 | `agent_prompt_mode` | `append` or `replace` | `append` | the next session |

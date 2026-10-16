@@ -18,16 +18,37 @@
           "model" : {
             "hosts" : [
               {
+                "host" : "api.anthropic.com",
+                "reason" : "Anthropic — when the sandbox's key is Anthropic's"
+              },
+              {
+                "host" : "api.openai.com",
+                "reason" : "OpenAI — when the sandbox's key is OpenAI's"
+              },
+              {
                 "host" : "api.x.ai",
                 "paths" : [
                   "/v1/responses"
-                ]
+                ],
+                "reason" : "xAI — when the sandbox's key is xAI's"
+              },
+              {
+                "host" : "generativelanguage.googleapis.com",
+                "reason" : "Google AI — when the sandbox's key is Google AI's"
+              },
+              {
+                "host" : "openrouter.ai",
+                "reason" : "OpenRouter — when the sandbox's key is OpenRouter's"
+              },
+              {
+                "host" : "ai-gateway.vercel.sh",
+                "reason" : "Vercel AI Gateway — when the sandbox's key is Vercel AI Gateway's"
               }
             ],
             "id" : "model:letta-code",
-            "phrase" : "talk to your AI model (xAI)",
-            "summary" : "Letta Code's model here (the xAI API, with your key) — needed for it to answer.",
-            "title" : "Talk to xAI"
+            "phrase" : "talk to your AI model",
+            "summary" : "Letta Code's model — the provider or gateway its key is for (Anthropic, OpenAI, xAI, Google AI, OpenRouter or Vercel AI Gateway), with an API key. Needed for Letta Code to answer.",
+            "title" : "Talk to its model provider"
           },
           "quiet" : [
             {
@@ -41,7 +62,12 @@
         },
         "runtime" : {
           "allow" : [
-            "api.x.ai:443"
+            "api.anthropic.com:443",
+            "api.openai.com:443",
+            "api.x.ai:443",
+            "generativelanguage.googleapis.com:443",
+            "openrouter.ai:443",
+            "ai-gateway.vercel.sh:443"
           ],
           "deny" : [
             "api.letta.com:443"
@@ -100,8 +126,6 @@
             "letta",
             "--backend",
             "local",
-            "-m",
-            "xai/grok-4.3",
             "--new-agent",
             "-p",
             "say ok"
@@ -116,14 +140,16 @@
         "command" : [
           "letta",
           "--backend",
-          "local",
-          "-m",
-          "xai/grok-4.3"
+          "local"
         ],
         "env" : {
           "DISABLE_AUTOUPDATER" : "1",
           "LETTA_CODE_TELEM" : "0"
         },
+        "model_args" : [
+          "-m",
+          "$DOZ_MODEL"
+        ],
         "no_prompts_args" : [
 
         ],
@@ -168,11 +194,61 @@
             "accounts" : [
               "key"
             ],
-            "checked" : "2026-10-14",
+            "checked" : "2026-10-16",
             "keys_page" : "https://console.x.ai/",
             "kind" : "api-key",
-            "note" : "Letta Code's local backend (--backend local, no Letta account) with its xAI provider, which reads XAI_API_KEY each run; model xai/grok-4.3 (grok-build-0.1 is not in its catalogue).",
+            "note" : "Letta Code's local backend (--backend local, no Letta account) with its own providers, each reading its key from the environment; Dozer puts the model on its command line (-m xai/grok-4.3 on xAI, the default — grok-build-0.1 is not in its catalogue).",
             "provider" : "xai"
+          },
+          {
+            "accounts" : [
+              "api-key"
+            ],
+            "checked" : "2026-10-16",
+            "keys_page" : "https://console.anthropic.com/settings/keys",
+            "kind" : "api-key",
+            "note" : "Letta Code through Anthropic: doz try letta-code --provider anthropic (or choose it in the try setup); the model with --model.",
+            "provider" : "anthropic"
+          },
+          {
+            "accounts" : [
+              "openai-key"
+            ],
+            "checked" : "2026-10-16",
+            "keys_page" : "https://platform.openai.com/api-keys",
+            "kind" : "api-key",
+            "note" : "Letta Code through OpenAI: doz try letta-code --provider openai (or choose it in the try setup); the model with --model.",
+            "provider" : "openai"
+          },
+          {
+            "accounts" : [
+              "key"
+            ],
+            "checked" : "2026-10-16",
+            "keys_page" : "https://aistudio.google.com/apikey",
+            "kind" : "api-key",
+            "note" : "Letta Code through Google AI: doz try letta-code --provider google (or choose it in the try setup); the model with --model.",
+            "provider" : "google"
+          },
+          {
+            "accounts" : [
+              "key"
+            ],
+            "checked" : "2026-10-16",
+            "keys_page" : "https://openrouter.ai/keys",
+            "kind" : "api-key",
+            "note" : "Letta Code through OpenRouter: doz try letta-code --gateway openrouter (or choose it in the try setup); the model with --model.",
+            "provider" : "openrouter"
+          },
+          {
+            "accounts" : [
+              "key"
+            ],
+            "checked" : "2026-10-16",
+            "keys_page" : "https://vercel.com/docs/ai-gateway/authentication-and-byok",
+            "kind" : "api-key",
+            "note" : "Letta Code through Vercel AI Gateway: doz try letta-code --gateway vercel-ai-gateway (or choose it in the try setup); the model with --model.",
+            "provider" : "vercel-ai-gateway"
           },
           {
             "account" : "a Letta Cloud account",
@@ -189,20 +265,69 @@
       "config" : {
         "entries" : [
           {
-            "checked" : "2026-10-14",
+            "checked" : "2026-10-16",
+            "evidence" : "make recipe-check: its check turn through a stand-in OpenRouter (doz try with --gateway openrouter; models@1)",
             "gateway" : "openrouter",
-            "level" : "unknown",
-            "reason" : "Letta Code has an OpenRouter provider; not checked"
+            "level" : "verified"
           },
           {
-            "checked" : "2026-10-14",
+            "checked" : "2026-10-16",
+            "evidence" : "make recipe-check: its check turn through a stand-in Vercel AI Gateway (doz try with --gateway vercel-ai-gateway; models@1)",
             "gateway" : "vercel-ai-gateway",
-            "level" : "unknown",
-            "reason" : "not checked against Letta Code"
+            "level" : "verified"
           }
         ]
       },
       "type" : "com.dozersandbox/gateways@1"
+    },
+    {
+      "config" : {
+        "default" : "xai",
+        "models" : {
+          "xai" : "grok-4.3"
+        },
+        "native" : [
+          {
+            "env" : {
+              "DOZ_MODEL" : "anthropic/${{ dozer.model }}"
+            },
+            "source" : "anthropic"
+          },
+          {
+            "env" : {
+              "DOZ_MODEL" : "openai/${{ dozer.model }}"
+            },
+            "source" : "openai"
+          },
+          {
+            "env" : {
+              "DOZ_MODEL" : "xai/${{ dozer.model }}"
+            },
+            "source" : "xai"
+          },
+          {
+            "env" : {
+              "DOZ_MODEL" : "google/${{ dozer.model }}"
+            },
+            "source" : "google"
+          },
+          {
+            "docs" : "https://github.com/letta-ai/letta-code#local-backend",
+            "env" : {
+              "DOZ_MODEL" : "openrouter/${{ dozer.model }}"
+            },
+            "source" : "openrouter"
+          },
+          {
+            "docs" : "https://github.com/letta-ai/letta-code#local-backend",
+            "env" : {
+              "DOZ_MODEL" : "vercel-ai-gateway/${{ dozer.model }}"
+            },
+            "source" : "vercel-ai-gateway"
+          }
+        ]
+      },
+      "type" : "com.dozersandbox/models@1"
     },
     {
       "config" : {
@@ -237,12 +362,12 @@
             "evidence" : "make recipe-check: letta -p \"say ok\" (local backend) printed the stand-in's answer and exited in a fresh try",
             "level" : "verified",
             "notes" : [
-              "letta --backend local -m xai/grok-4.3 --new-agent -p \"…\""
+              "letta --backend local --new-agent -p \"…\""
             ],
             "tag" : "headless"
           }
         ],
-        "terms" : "Your xAI API key — a key from console.x.ai. Letta Cloud is not used."
+        "terms" : "Your API key of the provider or gateway you choose (xAI by default). Letta Cloud is not used."
       },
       "type" : "com.dozersandbox/directory@1"
     },
@@ -252,14 +377,14 @@
         "intro" : "Letta Code is a coding agent with its own screen: the session on the left. Ask it to read, change and run the code in your folder.",
         "steps" : [
           {
-            "command" : "letta --backend local -m xai/grok-4.3 --new-agent -p \"say ok\"",
+            "command" : "letta --backend local --new-agent -p \"say ok\"",
             "text" : "Check it answers, without its screen."
           },
           {
             "text" : "Ask it something in its own screen — the session on the left."
           },
           {
-            "command" : "letta --backend local -m xai/grok-4.3 --new-agent -p \"list the files in this folder\"",
+            "command" : "letta --backend local --new-agent -p \"list the files in this folder\"",
             "text" : "One task without its screen."
           }
         ],
@@ -271,7 +396,7 @@
       "type" : "com.dozersandbox/guide@1"
     }
   ],
-  "description" : "Letta's memory-first coding agent, with its local backend (no Letta account), here on an xAI API key.",
+  "description" : "Letta's memory-first coding agent, with its local backend (no Letta account), on the key of the provider or gateway you choose (xAI by default).",
   "displayName" : "Letta Code",
   "id" : "letta-ai/letta-code",
   "kind" : "workload",

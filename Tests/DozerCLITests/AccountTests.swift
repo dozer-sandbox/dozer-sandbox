@@ -609,7 +609,8 @@ final class AccountTests: XCTestCase {
 
     func testTheCompatibilityTable() {
         XCTAssertEqual(AgentCredentials.kinds("claude-code"), [.mac, .setupToken, .apiKey])
-        XCTAssertEqual(AgentCredentials.kinds("pi"), [.apiKey], "pi: an Anthropic API key only — never a Claude subscription")
+        // 618: pi takes an API key of any source it is offered (Anthropic's by default) — never a Claude subscription.
+        XCTAssertEqual(AgentCredentials.kinds("pi"), [.apiKey, .openaiKey, .key], "pi: an API key only — never a Claude subscription")
         XCTAssertNil(AgentCredentials.kinds("lab"))
         XCTAssertNil(AgentCredentials.kinds(nil))
         XCTAssertTrue(AgentCredentials.needsAccount("pi"))
@@ -619,16 +620,16 @@ final class AccountTests: XCTestCase {
         XCTAssertTrue(AgentCredentials.accepts("pi", .apiKey))
         XCTAssertTrue(AgentCredentials.accepts("lab", .mac), "no agent: anything goes")
         XCTAssertEqual(AgentImages.credentials("pi"), [AgentCredentialSupport(provider: "anthropic", accountKinds: ["api-key"])])
-        XCTAssertEqual(AgentCredentials.requirement("pi"), "pi needs an Anthropic API key")
+        XCTAssertEqual(AgentCredentials.requirement("pi"), "pi needs an Anthropic API key, an OpenAI API key, an xAI API key, a Google AI (Gemini API) key, an OpenRouter key or a Vercel AI Gateway key")
 
         let kinds: [String: AccountKind] = ["mac": .mac, "sub": .setupToken]
         // pi: every way of having no usable account is refused, with the next step.
         var p = AgentCredentials.createProblem(image: "pi", account: nil, defaultAccount: "none", kinds: kinds)
         XCTAssertTrue(p?.contains("pi needs an Anthropic API key") == true && p?.contains("doz account add NAME --api-key") == true, p ?? "nil")
         p = AgentCredentials.createProblem(image: "pi", account: nil, defaultAccount: "mac", kinds: kinds)
-        XCTAssertTrue(p?.hasPrefix("pi can't use the account mac (this Mac's Claude login)") == true, p ?? "nil")
+        XCTAssertTrue(p?.contains("the store has no default key for any of them") == true, p ?? "nil")
         p = AgentCredentials.createProblem(image: "pi", account: "default", defaultAccount: "sub", kinds: kinds)
-        XCTAssertTrue(p?.contains("can't use the account sub") == true, p ?? "nil")
+        XCTAssertTrue(p?.contains("the store has no default key") == true, p ?? "nil")      // 618: a subscription default is skipped
         p = AgentCredentials.createProblem(image: "pi", account: "mac", defaultAccount: "none", kinds: kinds)
         XCTAssertTrue(p?.contains("can't use the account mac") == true, p ?? "nil")
         // …and names the accounts that fit, when there are some.
@@ -642,9 +643,9 @@ final class AccountTests: XCTestCase {
         XCTAssertNil(AgentCredentials.createProblem(image: "claude-code", account: nil, defaultAccount: "none", kinds: kinds))
         XCTAssertNil(AgentCredentials.createProblem(image: "lab", account: "mac", defaultAccount: "none", kinds: kinds))
         // An existing sandbox: the banner.
-        XCTAssertEqual(AgentCredentials.sandboxProblem(image: "pi", account: .mac, missing: nil), "pi can't use the account mac — choose an API-key account")
+        XCTAssertEqual(AgentCredentials.sandboxProblem(image: "pi", account: .mac, missing: nil), "pi can't use the account mac — choose a key account of Anthropic, OpenAI, xAI, Google AI (Gemini API), OpenRouter, Vercel AI Gateway (doz account add NAME --api-key)")
         XCTAssertEqual(AgentCredentials.sandboxProblem(image: "pi", account: nil, missing: nil),
-                       "pi has no credential — pi needs an Anthropic API key; choose an API-key account")
+                       "pi has no credential — pi needs an Anthropic API key, an OpenAI API key, an xAI API key, a Google AI (Gemini API) key, an OpenRouter key or a Vercel AI Gateway key; choose a key account of Anthropic, OpenAI, xAI, Google AI (Gemini API), OpenRouter, Vercel AI Gateway (doz account add NAME --api-key)")
         XCTAssertNil(AgentCredentials.sandboxProblem(image: "claude-code", account: .mac, missing: nil))
         XCTAssertNil(AgentCredentials.sandboxProblem(image: "claude-code", account: nil, missing: nil))
     }
@@ -655,13 +656,13 @@ final class AccountTests: XCTestCase {
         // The store's default is mac (this Mac's login): pi cannot use it — refused, nothing made.
         do { try await create(c, "p1", image: "pi"); XCTFail("created") } catch let e as HostError {
             XCTAssertEqual(e.code, .invalid)
-            XCTAssertTrue(e.message.contains("pi can't use the account mac") && e.message.contains("doz account add NAME --api-key"), e.message)
+            XCTAssertTrue(e.message.contains("the store has no default key") && e.message.contains("doz account add NAME --api-key"), e.message)
         }
         XCTAssertFalse(FileManager.default.fileExists(atPath: DozerStore(root: root).layout("p1").sandboxDirectory.path))
         // An explicit none is a choice: made, and it says what is missing.
         let none = try await create(c, "p2", account: "none", image: "pi")
         XCTAssertEqual(none.agent, "pi")
-        XCTAssertEqual(none.credentialProblem, "pi has no credential — pi needs an Anthropic API key; choose an API-key account")
+        XCTAssertEqual(none.credentialProblem, "pi has no credential — pi needs an Anthropic API key, an OpenAI API key, an xAI API key, a Google AI (Gemini API) key, an OpenRouter key or a Vercel AI Gateway key; choose a key account of Anthropic, OpenAI, xAI, Google AI (Gemini API), OpenRouter, Vercel AI Gateway (doz account add NAME --api-key)")
         func prompt(_ n: String) async throws -> AgentPromptReport? {
             try await c.handle(HostRequest(.agentPrompt, name: n)).result?.decode(AgentPromptReport.self)
         }

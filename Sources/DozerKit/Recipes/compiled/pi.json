@@ -121,6 +121,10 @@
         "env" : {
 
         },
+        "model_args" : [
+          "--model",
+          "$DOZ_MODEL"
+        ],
         "no_prompts_args" : [
 
         ],
@@ -159,19 +163,61 @@
             "accounts" : [
               "api-key"
             ],
-            "checked" : "2026-10-12",
-            "keys_page" : "https://platform.claude.com/settings/keys",
+            "checked" : "2026-10-16",
+            "keys_page" : "https://console.anthropic.com/settings/keys",
             "kind" : "api-key",
-            "note" : "pi reads ANTHROPIC_API_KEY; a Claude subscription is never given to it.",
+            "note" : "pi reads ANTHROPIC_API_KEY; a Claude subscription is never given to it. On Anthropic it picks its own model unless you choose one (--model).",
             "provider" : "anthropic"
           },
           {
-            "checked" : "2026-10-12",
-            "gateways" : [
-              "openrouter"
+            "accounts" : [
+              "openai-key"
             ],
-            "kind" : "gateway",
-            "note" : "pi reads OPENROUTER_API_KEY (its docs/providers.md). Dozer offers gateways in a later version."
+            "checked" : "2026-10-16",
+            "keys_page" : "https://platform.openai.com/api-keys",
+            "kind" : "api-key",
+            "note" : "pi through OpenAI: doz try pi --provider openai (or choose it in the try setup); the model with --model.",
+            "provider" : "openai"
+          },
+          {
+            "accounts" : [
+              "key"
+            ],
+            "checked" : "2026-10-16",
+            "keys_page" : "https://console.x.ai/",
+            "kind" : "api-key",
+            "note" : "pi through xAI: doz try pi --provider xai (or choose it in the try setup); the model with --model.",
+            "provider" : "xai"
+          },
+          {
+            "accounts" : [
+              "key"
+            ],
+            "checked" : "2026-10-16",
+            "keys_page" : "https://aistudio.google.com/apikey",
+            "kind" : "api-key",
+            "note" : "pi through Google AI: doz try pi --provider google (or choose it in the try setup); the model with --model.",
+            "provider" : "google"
+          },
+          {
+            "accounts" : [
+              "key"
+            ],
+            "checked" : "2026-10-16",
+            "keys_page" : "https://openrouter.ai/keys",
+            "kind" : "api-key",
+            "note" : "pi's own OpenRouter provider reads OPENROUTER_API_KEY (its docs/providers.md); Dozer gives its session --model openrouter/MODEL.",
+            "provider" : "openrouter"
+          },
+          {
+            "accounts" : [
+              "key"
+            ],
+            "checked" : "2026-10-16",
+            "keys_page" : "https://vercel.com/docs/ai-gateway/authentication-and-byok",
+            "kind" : "api-key",
+            "note" : "pi through Vercel AI Gateway: doz try pi --gateway vercel-ai-gateway (or choose it in the try setup); the model with --model.",
+            "provider" : "vercel-ai-gateway"
           }
         ]
       },
@@ -181,48 +227,66 @@
       "config" : {
         "entries" : [
           {
-            "checked" : "2026-10-12",
-            "endpoint" : "v1",
+            "checked" : "2026-10-16",
+            "evidence" : "make recipe-check: its check turn through a stand-in OpenRouter (doz try with --gateway openrouter; models@1)",
             "gateway" : "openrouter",
-            "how" : {
-              "env" : {
-                "OPENROUTER_API_KEY" : "${{ dozer.placeholder }}"
-              },
-              "model_args" : [
-                "--model",
-                "openrouter/${{ dozer.model }}"
-              ]
-            },
-            "level" : "documented",
-            "notes" : [
-              "pi's own openrouter provider knows the base URL (https://openrouter.ai/api/v1) and also speaks Anthropic Messages there for Anthropic models (packages/ai/src/providers/openrouter.ts)",
-              "--model is PROVIDER/MODEL in pi's docs (azure/gpt-5.4)"
-            ],
-            "shape" : "openai-chat",
-            "source" : "https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/providers.md"
+            "level" : "verified"
           },
           {
-            "checked" : "2026-10-12",
+            "checked" : "2026-10-16",
+            "evidence" : "make recipe-check: its check turn through a stand-in Vercel AI Gateway (doz try with --gateway vercel-ai-gateway; models@1)",
             "gateway" : "vercel-ai-gateway",
-            "how" : {
-              "env" : {
-                "AI_GATEWAY_API_KEY" : "${{ dozer.placeholder }}"
-              },
-              "model_args" : [
-                "--model",
-                "${{ dozer.model }}"
-              ]
-            },
-            "level" : "documented",
-            "notes" : [
-              "pi's own vercel-ai-gateway provider knows the base URL; AI_GATEWAY_API_KEY is in pi's providers.md, and Vercel's setup writes the key to ~/.pi/agent/auth.json instead",
-              "which API shape pi's Vercel provider speaks is not stated by either side (left out)"
-            ],
-            "source" : "https://vercel.com/docs/ai-gateway/coding-agents/pi"
+            "level" : "verified"
           }
         ]
       },
       "type" : "com.dozersandbox/gateways@1"
+    },
+    {
+      "config" : {
+        "default" : "anthropic",
+        "native" : [
+          {
+            "env" : {
+              "DOZ_MODEL" : "anthropic/${{ dozer.model }}"
+            },
+            "source" : "anthropic"
+          },
+          {
+            "env" : {
+              "DOZ_MODEL" : "openai/${{ dozer.model }}"
+            },
+            "source" : "openai"
+          },
+          {
+            "env" : {
+              "DOZ_MODEL" : "xai/${{ dozer.model }}"
+            },
+            "source" : "xai"
+          },
+          {
+            "env" : {
+              "DOZ_MODEL" : "google/${{ dozer.model }}"
+            },
+            "source" : "google"
+          },
+          {
+            "docs" : "https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/providers.md",
+            "env" : {
+              "DOZ_MODEL" : "openrouter/${{ dozer.model }}"
+            },
+            "source" : "openrouter"
+          },
+          {
+            "docs" : "https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/providers.md",
+            "env" : {
+              "DOZ_MODEL" : "vercel-ai-gateway/${{ dozer.model }}"
+            },
+            "source" : "vercel-ai-gateway"
+          }
+        ]
+      },
+      "type" : "com.dozersandbox/models@1"
     },
     {
       "config" : {
@@ -275,7 +339,7 @@
       "type" : "com.dozersandbox/guide@1"
     }
   ],
-  "description" : "A small, open-source coding agent that works with many model providers.",
+  "description" : "A small, open-source coding agent that works with many model providers — on the key of the provider or gateway you choose (Anthropic by default).",
   "displayName" : "pi",
   "id" : "earendil-works/pi",
   "kind" : "workload",

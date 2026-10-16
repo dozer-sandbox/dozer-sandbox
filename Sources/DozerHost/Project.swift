@@ -56,6 +56,9 @@ public struct DozerProject: Equatable, Sendable {
     public var permissions: [String]?
     /// 617 (D6): custom key accounts attached beside the account (`--key NAME`), when the sandbox is made.
     public var keys: [String]?
+    /// 618: where the model comes from (a provider or gateway the agent is offered) and the model (an id) — when made.
+    public var modelSource: String?
+    public var model: String?
 
     public init(name: String, image: String, cpus: Int? = nil, memoryMiB: UInt64? = nil, network: String? = nil, account: String? = nil) {
         self.name = name
@@ -90,7 +93,7 @@ public struct DozerProject: Equatable, Sendable {
         ("version", "the file's format: 1"),
         ("name", "the sandbox: 1–40 of a-z 0-9 -"),
         ("image", "claude-code, pi, codex, lab, a base × agent image (python-claude-code, …), or a template (doz image ls) — or agent + base/dockerfile"),
-        ("agent", "claude-code, pi, codex or none (default claude-code)"),
+        ("agent", "claude-code, pi, codex or none (default claude-code); a tool's major or release: opencode@1, opencode@2.0.28"),
         ("base", "a recommended base: node, python, go, rust, java, ruby, dotnet, debian, ubuntu, alpine (doz base ls)"),
         ("dockerfile", "your Dockerfile (./Dockerfile): built with Apple's container build — its RUN steps run OUTSIDE Dozer's network policy"),
         ("cpus", "virtual CPUs, 1–64 (default: the settings' defaults.cpus)"),
@@ -104,6 +107,8 @@ public struct DozerProject: Equatable, Sendable {
         ("agent_sudo", "true or false: the agent's passwordless sudo in the sandbox (default: the setting sandbox.agent_sudo, true)"),
         ("github", "off, read or push: git and gh signed in as you on GitHub — the permissions \"Use GitHub as you\" / \"Push to GitHub\" (default off; when the sandbox is made — later: doz net allow NAME github:as-you)"),
         ("keys", "custom keys attached beside the account (doz account add NAME --custom …), each of its hosts allowed — when the sandbox is made"),
+        ("model_source", "where the model comes from: a provider or gateway the agent is offered (anthropic, openai, xai, google, openrouter, vercel-ai-gateway — doz models); default: its own — when the sandbox is made"),
+        ("model", "a model id of that source (doz models --gateway openrouter); default: the source's own — when the sandbox is made"),
     ] + settingKeys.map { k in
         (k.key, "\(DozerSettings.definition(k.setting)?.type.name ?? "a value"): this sandbox's \(k.setting) (default: the setting)")
     }
@@ -144,7 +149,8 @@ public struct DozerProject: Equatable, Sendable {
     public func problem(effectiveNetwork: String? = nil) -> String? {
         if !WebNameCheck.isSandboxName(name) { return "name: 1–40 of a-z 0-9 - (not starting with -)" }
         if base != nil, dockerfile != nil { return "base or dockerfile — not both" }
-        if let a = agent, AgentKind(rawValue: a) == nil { return "agent: \(Self.agentWords)" }
+        if let a = agent, let why = Self.agentProblem(a) { return why }
+        if let why = modelProblem() { return why }
         if let b = base, BaseCatalogue.base(b) == nil { return "base: \(BaseCatalogue.ids.joined(separator: ", ")) (doz base ls)" }
         if let c = cpus, !(1...64).contains(c) { return "cpus: a whole number 1–64" }
         if let m = memoryMiB, !(256...262_144).contains(m) { return "memory: 256 MiB – 256 GiB" }
@@ -165,14 +171,65 @@ public struct DozerProject: Equatable, Sendable {
     }
 
     /// 617: "claude-code, pi, codex, antigravity, gemini, grok or none" — every agent this build has a recipe for.
+    /// 618: why `agent:` cannot be served (nil: fine) — an agent id, `none`, or NAME@MAJOR / NAME@VERSION (AgentRef).
+    public static func agentProblem(_ a: String) -> String? {
+        if a == "none" || AgentKind(rawValue: a) != nil { return nil }
+        do {
+            return try AgentRef.resolve(a) == nil ? "agent: \(agentWords)" : nil
+        } catch {
+            return "agent: \((error as? AgentRef.Problem)?.description ?? "\(error)")"
+        }
+    }
+
+    /// 618: the names a person types — a family's name once (`opencode`), never its members' ids (`opencode2`).
+    /// 618: what is wrong with `model_source` / `model` for this project's agent (nil: fine) — the source must be one the
+    /// agent is offered, the model an id (`ModelSelection.isModelID`). The fix names the choices.
+    public func modelProblem() -> String? {
+        if let m = model, !ModelSelection.isModelID(m) { return "model: a model id — letters, digits and . _ : / @ + - (doz models)" }
+        guard modelSource != nil || model != nil else { return nil }
+        let offered = AgentCredentials.sources(chosenImage) ?? []
+        let tool = AgentKind(rawValue: ImageChoice.parse(chosenImage)?.agent.rawValue ?? "")?.recipe?.title ?? "this agent"
+        guard !offered.isEmpty else { return "model_source and model: \(tool) has no choice of model (leave them out)" }
+        if let s = modelSource, !offered.contains(s) { return "model_source: \(Self.modelSourceWords(offered))" }
+        return nil
+    }
+
+    /// "anthropic, openai, xai, google, openrouter or vercel-ai-gateway (doz models)".
+    static func modelSourceWords(_ offered: [String]) -> String {
+        guard !offered.isEmpty else { return "a provider or gateway" }
+        return (offered.count > 1 ? offered.dropLast().joined(separator: ", ") + " or " + offered.last! : offered[0]) + " (doz models)"
+    }
+
     public static var agentWords: String {
-        AgentKind.allCases.filter { $0 != .none }.map(\.rawValue).joined(separator: ", ") + " or none"
+        var seen: [String] = []
+        for k in AgentKind.allCases where k != .none {
+            let n = k.recipe?.family?.family ?? k.rawValue
+            if !seen.contains(n) { seen.append(n) }
+        }
+        return seen.joined(separator: ", ") + " or none"
+    }
+
+    /// 618: `agent:` as a file written for later records it — a family's major pinned (`opencode` → `opencode@2`,
+    /// `opencode2` → `opencode@2`), so a project made today never changes major when the recommendation moves.
+    public static func fileAgent(_ s: String) -> String {
+        if s == "none" { return s }
+        if let ref = try? AgentRef.resolve(s) { return ref.pinned }
+        return AgentRecipes.matching(s)?.id ?? s
+    }
+
+    /// 618: a hand-written bare family name (`agent: opencode`) keeps meaning "the recommended major" — what it
+    /// resolved to, said once when the sandbox is made (nil: anything else).
+    public static func familyNote(_ s: String?) -> String? {
+        guard let s, let ref = try? AgentRef.resolve(s), ref.family != nil, ref.qualifier == nil else { return nil }
+        return "agent: \(s) in \(fileName) is \(ref.pinned), the recommended major — write agent: \(ref.pinned) to keep it when the recommendation moves"
     }
 
     /// 596: the image agent + base name (a Dockerfile's: the agent's, the host swaps in its base). 617: with no
     /// base, the agent's recipe's default base (Node for the three that existed — as before; Debian for Grok Build).
     public var chosenImage: String {
-        let a = AgentKind(rawValue: agent ?? "claude-code") ?? .claudeCode
+        // 618: `agent: opencode@1` is that major's recipe (a family's name: its recommended major).
+        let ref = agent.flatMap { try? AgentRef.resolve($0) }
+        let a = ref.flatMap { AgentKind(rawValue: $0.recipe.id) } ?? AgentKind(rawValue: agent ?? "claude-code") ?? .claudeCode
         if dockerfile != nil { return ImageChoice(base: a == .none ? "alpine" : "node", agent: a).name }
         return ImageChoice(base: base ?? a.recipe?.defaultBase ?? "node", agent: a).name
     }
@@ -206,6 +263,18 @@ public struct DozerProject: Equatable, Sendable {
         } else {
             out += "image: \(image)                  # when made\n"
             out += "# (or: agent: claude-code|pi|codex|none with base: python … or dockerfile: ./Dockerfile — doz base ls)\n"
+        }
+        // 618 (owner: "yes" to model keys): where the model comes from and which model — for an agent with a choice.
+        let offered = AgentCredentials.sources(chosenImage) ?? []
+        if let s = modelSource {
+            out += "model_source: \(s)          # \(Self.modelSourceWords(offered)) — when made\n"
+        } else if offered.count > 1 {
+            out += "# model_source: \(offered[0])     # \(Self.modelSourceWords(offered)) — when made\n"
+        }
+        if let m = model {
+            out += "model: \(quoted(m))   # a model id of that source (doz models) — when made\n"
+        } else if offered.count > 1 || modelSource != nil {
+            out += "# model: …                  # a model id of that source (doz models --gateway openrouter); default: the source's own — when made\n"
         }
         out += "\n"
         out += cpus.map { "cpus: \($0)                     # when made\n" } ?? "# cpus: 2                    # when made\n"
@@ -271,6 +340,11 @@ public struct DozerProject: Equatable, Sendable {
         o.agentPrompt = agentPrompt
         o.agentPromptMode = agentPromptMode
         o.agentSudo = agentSudo
+        // 618: `agent: opencode@1` / `opencode@2.0.28` — its exact release, and what the file said.
+        if let a = agent, let ref = try? AgentRef.resolve(a) {
+            o.agentVersion = ref.exact
+            if ref.qualifier != nil || ref.family != nil { o.agentRef = ref.text }
+        }
         o.settings = settings.isEmpty ? nil : settings
         // 599f: permissions: words on Standard (a preset word replaces it); 599d: github: → its two permissions.
         var words: [String] = []
@@ -284,6 +358,8 @@ public struct DozerProject: Equatable, Sendable {
         words += Self.gitHubWords(gh) ?? []
         if !words.isEmpty { o.allow = words }
         if let k = keys, !k.isEmpty { o.keys = k }
+        o.modelSource = modelSource                  // 618
+        o.model = model
         o.project = file.path
         // 596 (B6): a Dockerfile relative to this folder (its folder is the build context).
         if let d = dockerfile {

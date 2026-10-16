@@ -55,7 +55,14 @@ public struct SandboxGuide: Codable, Equatable, Sendable {
             : "Its session is its own screen (the terminal): talk to it there. The commands below run in a shell beside it — open one with New shell."
         var facts: [Fact] = []
         let v = (version ?? r.install.pinned.version).split(separator: "+").first.map(String.init) ?? r.install.pinned.version
-        facts.append(Fact(id: "version", label: "Version", value: "\(r.title) \(v)" + (r.isBuiltin ? "" : " (Dozer's pin)")))
+        var versionLine = "\(r.title) \(v)" + (r.isBuiltin || v != r.install.pinned.version ? "" : " (Dozer's pin)")
+        // 618: a family's major — which one, and how to get the others (a sandbox never changes major).
+        if let f = r.family {
+            if f.isRecommended { versionLine += " · recommended" }
+            let others = AgentRef.members(f.family).filter { $0.id != r.id }.map { "\($0.family!.title): doz try \(AgentRef.typed($0))" }
+            if !others.isEmpty { versionLine += " — " + others.joined(separator: " · ") }
+        }
+        facts.append(Fact(id: "version", label: "Version", value: versionLine))
         let keyLine: String = {
             guard let account else { return "no key yet — the sandbox has no account" }
             if accountKind == .mac { return "your Claude Code login on this Mac — the sandbox holds a placeholder" }

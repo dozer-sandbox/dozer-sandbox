@@ -1093,6 +1093,8 @@ public struct WebPlan: Codable, Equatable, Sendable {
             /// `key` (with the provider), `api-key` (Anthropic), `openai-key` — what a pasted key is saved as.
             public var accountKind: String
             public var keyHint: String?
+            /// 618: where a key of it is made (the gateway's own page; a provider's from the recipes that name one).
+            public var keysPage: String?
         }
         public var source: String
         public var title: String
@@ -1125,8 +1127,12 @@ public struct WebPlan: Codable, Equatable, Sendable {
         public var model: String?
     }
     public var create: Create?
+    /// 618: the release it installs and what it is made as (`opencode@1`) — the setup's Version row.
+    public struct Version: Codable, Equatable, Sendable { public var version: String?; public var ref: String; public var title: String }
+    public var version: Version?
 
     public init(_ p: CreatePlan) {
+        version = p.version.map { Version(version: $0.version, ref: $0.ref, title: $0.title) }
         name = p.name
         image = Image(name: p.imageState.name, title: p.imageState.title, state: p.imageState.state)
         workspace = p.workspace
@@ -1143,8 +1149,18 @@ public struct WebPlan: Codable, Equatable, Sendable {
         model = p.model.map { m in
             Model(source: m.source, title: m.title, gateway: m.gateway, model: m.model,
                   offered: m.offered.map { Model.Source(id: $0.id, title: $0.title, gateway: $0.gateway, defaultModel: $0.defaultModel,
-                                                        accountKind: $0.accountKind, keyHint: $0.keyHint) })
+                                                        accountKind: $0.accountKind, keyHint: $0.keyHint,
+                                                        keysPage: WebPlan.keysPage($0.id)) })
         }
+    }
+
+    /// 618: where a key of `source` is made — a gateway's own keys page, else the first recipe that names one for it.
+    static func keysPage(_ source: String) -> String? {
+        if let g = Gateways.gateway(source) { return g.keysPage }
+        for r in AgentRecipes.all {
+            if let m = r.auth.methods.first(where: { $0.provider == source && $0.keysPage != nil }) { return m.keysPage }
+        }
+        return nil
     }
 }
 
@@ -1199,6 +1215,10 @@ public struct WebTryCatalog: Codable, Equatable, Sendable {
         /// 617 (owner: "split them"): `coding-agent` | `ai-tool`, and its categories (the pills).
         public var catalogKind: String? = nil
         public var categories: [String] = []
+        /// 618: the major it is of a family (OpenCode 1 / OpenCode 2), and the name that means exactly it (`opencode@1`)
+        /// — the plan's `agent`. One card per family (its recommended major); the setup's Version choice re-plans by `ref`.
+        public var family: FamilyInfo? = nil
+        public var ref: String? = nil
         public struct Usable: Codable, Equatable, Sendable {
             public var name: String
             public var kind: String
@@ -1207,6 +1227,14 @@ public struct WebTryCatalog: Codable, Equatable, Sendable {
             /// 617 (models@1): the model source its key is of (`openai`, `openrouter` …), for a recipe agent's choice.
             public var modelSource: String? = nil
         }
+    }
+    /// 618: a recipe's family@1 as the page needs it.
+    public struct FamilyInfo: Codable, Equatable, Sendable {
+        public var name: String
+        public var major: Int
+        public var title: String
+        public var recommended: Bool
+        public init(_ f: AgentRecipe.Family) { name = f.family; major = f.major; title = f.title; recommended = f.isRecommended }
     }
     public struct Coming: Codable, Equatable, Sendable {
         public var id: String; public var title: String; public var publisher: String; public var reason: String
@@ -1248,6 +1276,11 @@ public struct WebAccounts: Codable, Equatable, Sendable {
     public var providerTools: [String: [String]] = [:]
     public var agentTitles: [String: String] = [:]
     public var uncheckedProviders: [String] = []
+    /// 618: the sources that are gateways, and each source's default model (New Sandbox's "Where TOOL gets its model").
+    public var gatewaySources: [String] = []
+    public var sourceModels: [String: String] = [:]
+    /// 618: the sources that take no key (OpenCode Zen's free models) — no account, nothing to add.
+    public var keylessSources: [String] = []
 
     public init(accounts: [WebAccount], defaultAccount: String, keepalive: Bool, openaiDefault: String? = nil,
                 providerDefaults: [String: String] = [:]) {
@@ -1260,23 +1293,28 @@ public struct WebAccounts: Codable, Equatable, Sendable {
         }
         let kinds = Dictionary(accounts.compactMap { a in AccountKind(rawValue: a.kind).map { (a.name, $0) } }) { a, _ in a }
         for kind in AgentKind.allCases {
-            guard let r = kind.recipe, !r.isBuiltin, let s = AgentCredentials.sources(r.id), let k = AgentCredentials.kinds(r.id) else { continue }
+            guard let r = kind.recipe, let s = AgentCredentials.sources(r.id), let k = AgentCredentials.kinds(r.id) else { continue }
             agents[r.id] = k.map(\.rawValue).sorted()
             sources[r.id] = s
             recipeDefaults[r.id] = AgentCredentials.defaultAccount(for: r.id, anthropic: defaultAccount, openai: openaiDefault,
                                                                    providers: providerDefaults, kinds: kinds)
         }
-        for id in ModelSources.ids { sourceTitles[id] = ModelSources.title(id) }
-        providers = ["anthropic", "openai"] + ModelSources.ids.filter { $0 != "anthropic" && $0 != "openai" }
+        for id in ModelSources.ids {
+            sourceTitles[id] = ModelSources.title(id)
+            if ModelSources.isGateway(id) { gatewaySources.append(id) }
+            if ModelSources.isKeyless(id) { keylessSources.append(id) }
+            if let m = ModelSources.endpoints(id).first?.defaultModel { sourceModels[id] = m }
+        }
+        providers = ["anthropic", "openai"] + ModelSources.keyed.filter { $0 != "anthropic" && $0 != "openai" }
         for kind in AgentKind.allCases where kind != .none {
             guard let r = kind.recipe else { continue }
             agentTitles[r.id] = r.title
             // The built-in three: Claude Code and pi take Anthropic accounts, Codex OpenAI's; a recipe agent its sources.
             let srcs = AgentCredentials.sources(r.id) ?? (r.id == "codex" ? ["openai"] : ["anthropic"])
-            for s in srcs { providerTools[s, default: []].append(r.id) }
+            for s in srcs where !ModelSources.isKeyless(s) { providerTools[s, default: []].append(r.id) }
         }
         // Anthropic's and OpenAI's keys are checked by Dozer itself; another provider's only when providers.json says how.
-        uncheckedProviders = ModelSources.ids.filter { $0 != "anthropic" && $0 != "openai" && KeyProviders.provider($0)?.check == nil }
+        uncheckedProviders = ModelSources.keyed.filter { $0 != "anthropic" && $0 != "openai" && KeyProviders.provider($0)?.check == nil }
     }
 }
 

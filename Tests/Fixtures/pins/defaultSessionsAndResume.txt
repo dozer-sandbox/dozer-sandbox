@@ -51,4 +51,5 @@ resume maki --continue check=nil
 resume omp --continue check=nil
 resume tau  check=nil
 resume stitch  check=nil
+resume opencode2 --continue check=nil
 resume nil 

@@ -5,7 +5,7 @@ schema: 2
 kind: workload
 id: hmbown/codewhale
 displayName: CodeWhale
-description: A provider-neutral coding agent for the terminal (formerly DeepSeek TUI), here on an xAI API key.
+description: A provider-neutral coding agent for the terminal (formerly DeepSeek TUI), on the key of the provider or gateway you choose (xAI by default).
 author: Hunter Bown and contributors
 sourceUrl: https://github.com/Hmbown/CodeWhale
 licenses:
@@ -23,19 +23,32 @@ capabilities:
   config:
     runtime:
       allow:
+      - api.anthropic.com:443
+      - api.openai.com:443
       - api.x.ai:443
+      - generativelanguage.googleapis.com:443
+      - openrouter.ai:443
       deny:
       - models.dev:443
     dozer:
       model:
         id: model:codewhale
-        title: Talk to xAI
-        summary: CodeWhale's model here (the xAI API, with your key) — needed for it to answer.
-        phrase: talk to your AI model (xAI)
+        title: Talk to its model provider
+        summary: CodeWhale's model — the provider or gateway its key is for (Anthropic, OpenAI, xAI, Google AI or OpenRouter), with an API key. Needed for CodeWhale to answer.
+        phrase: talk to your AI model
         hosts:
+        - host: api.anthropic.com
+          reason: Anthropic — when the sandbox's key is Anthropic's
+        - host: api.openai.com
+          reason: OpenAI — when the sandbox's key is OpenAI's
         - host: api.x.ai
           paths:
           - /v1/chat/completions
+          reason: xAI — when the sandbox's key is xAI's
+        - host: generativelanguage.googleapis.com
+          reason: Google AI — when the sandbox's key is Google AI's
+        - host: openrouter.ai
+          reason: OpenRouter — when the sandbox's key is OpenRouter's
       update: []
       excluded: []
       quiet:
@@ -89,8 +102,6 @@ capabilities:
     - update
     - config
     env:
-      CODEWHALE_PROVIDER: xai
-      CODEWHALE_MODEL: grok-build-0.1
       CODEWHALE_TELEMETRY: '0'
       CODEWHALE_NO_UPDATE_CHECK: '1'
     state_env: {}
@@ -116,24 +127,75 @@ capabilities:
       accounts:
       - key
       keys_page: https://console.x.ai/
-      note: CodeWhale's built-in xai provider (CODEWHALE_PROVIDER=xai) reads XAI_API_KEY each run; model grok-build-0.1. Its own account (hosted keys) is not used.
-      checked: '2026-10-14'
-    - kind: vendor-sign-in
-      account: a CodeWhale account (codewhale login)
-      in_sandbox: false
-      note: CodeWhale's account keeps provider keys on its servers; Dozer does not offer it.
-      checked: '2026-10-14'
+      note: 'CodeWhale''s built-in providers (CODEWHALE_PROVIDER, CODEWHALE_MODEL), each reading its own key from the environment; on xAI (the default) the model is grok-build-0.1. Its own account (hosted keys) is not used.'
+      checked: '2026-10-16'
+    - kind: api-key
+      provider: anthropic
+      accounts:
+      - api-key
+      keys_page: https://console.anthropic.com/settings/keys
+      note: 'CodeWhale through Anthropic: doz try codewhale --provider anthropic (or choose it in the try setup); the model with --model.'
+      checked: '2026-10-16'
+    - kind: api-key
+      provider: openai
+      accounts:
+      - openai-key
+      keys_page: https://platform.openai.com/api-keys
+      note: 'CodeWhale through OpenAI: doz try codewhale --provider openai (or choose it in the try setup); the model with --model.'
+      checked: '2026-10-16'
+    - kind: api-key
+      provider: google
+      accounts:
+      - key
+      keys_page: https://aistudio.google.com/apikey
+      note: 'CodeWhale through Google AI: doz try codewhale --provider google (or choose it in the try setup); the model with --model.'
+      checked: '2026-10-16'
+    - kind: api-key
+      provider: openrouter
+      accounts:
+      - key
+      keys_page: https://openrouter.ai/keys
+      note: 'CodeWhale through OpenRouter: doz try codewhale --gateway openrouter (or choose it in the try setup); the model with --model.'
+      checked: '2026-10-16'
 - type: com.dozersandbox/gateways@1
   config:
     entries:
     - gateway: openrouter
-      level: unknown
-      reason: CodeWhale has an OpenRouter route; not checked
-      checked: '2026-10-14'
+      level: verified
+      evidence: 'make recipe-check: its check turn through a stand-in OpenRouter (doz try with --gateway openrouter; models@1)'
+      checked: '2026-10-16'
     - gateway: vercel-ai-gateway
-      level: unknown
-      reason: not checked against CodeWhale
-      checked: '2026-10-14'
+      level: 'no'
+      reason: 'CodeWhale has no Vercel AI Gateway provider, and it sends a key from the environment only to a built-in provider''s own endpoint (a custom base URL needs its own stored credential)'
+      source: https://github.com/Hmbown/CodeWhale/blob/v0.10.1/docs/PROVIDERS.md
+      checked: '2026-10-16'
+- type: com.dozersandbox/models@1
+  config:
+    default: xai
+    native:
+    - source: xai
+      env:
+        CODEWHALE_PROVIDER: xai
+        CODEWHALE_MODEL: '${{ dozer.model }}'
+    - source: openai
+      env:
+        CODEWHALE_PROVIDER: openai
+        CODEWHALE_MODEL: '${{ dozer.model }}'
+    - source: anthropic
+      env:
+        CODEWHALE_PROVIDER: anthropic
+        CODEWHALE_MODEL: '${{ dozer.model }}'
+    - source: openrouter
+      env:
+        CODEWHALE_PROVIDER: openrouter
+        CODEWHALE_MODEL: '${{ dozer.model }}'
+      docs: https://github.com/Hmbown/CodeWhale/blob/v0.10.1/docs/PROVIDERS.md
+    - source: google
+      env:
+        CODEWHALE_PROVIDER: google
+        CODEWHALE_MODEL: '${{ dozer.model }}'
+    models:
+      xai: grok-build-0.1
 - type: com.dozersandbox/currency@1
   config:
     checked: '2026-10-14'
@@ -156,7 +218,7 @@ capabilities:
       - codewhale exec "…" (--auto for tools)
       evidence: 'make recipe-check: codewhale exec "say ok" printed the stand-in''s answer and exited in a fresh try'
       checked: '2026-10-14'
-    terms: Your xAI API key — a key from console.x.ai.
+    terms: Your API key of the provider or gateway you choose (xAI by default).
 - type: com.dozersandbox/guide@1
   config:
     intro: "CodeWhale is a coding agent with its own screen: the session on the left. Ask it to read, change and run the code in your folder."
