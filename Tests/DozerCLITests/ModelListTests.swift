@@ -221,4 +221,14 @@ final class ModelListTests: XCTestCase {
         XCTAssertNil(WebRoute.parse(method: .post, target: "/api/v1/models/openrouter"))
         XCTAssertEqual(WebExposure.kind(.models("xai")), .read)
     }
+
+    /// 618: a key-less source's list reaches the page with each model's data terms and when it was checked.
+    func testTheWebProjectionCarriesAKeylessSourcesTerms() {
+        let w = WebModelList(ModelLists.list("opencode-zen", record: nil))
+        XCTAssertEqual(w.kind, "listed")
+        XCTAssertEqual(w.checked, "2026-10-16")
+        XCTAssertEqual(w.models.first?.id, "big-pickle")
+        XCTAssertTrue(w.models.allSatisfy { ($0.note ?? "").isEmpty == false && $0.priceIn == 0 })
+        XCTAssertEqual(WebRoute.parse(method: .get, target: "/api/v1/models/opencode-zen"), .models("opencode-zen"))
+    }
 }

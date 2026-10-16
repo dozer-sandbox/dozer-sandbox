@@ -34,6 +34,8 @@
 #               --gateway SOURCE`), `${{ dozer.model }}` and `${{ dozer.base_url }}` in its check argv = that source's, the request seen on
 #               that source's host with that key, and the leak guard to another provider AND another gateway. all
 #               (default; also $RECIPE_SELECTIONS), default (its default source only), or a list. The build is once.
+#               618: a source that takes no key (opencode-zen) is tried with no account: its requests reach its host
+#               with no credential, the guest holds no placeholder, and the Locked try is refused nothing.
 import argparse, datetime, glob, json, os, pty, re, select, shlex, shutil, signal, struct, subprocess, sys, termios, threading, time, fcntl
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -68,6 +70,10 @@ LEAK_TARGET = {
     "google-stitch": ("stitch.googleapis.com", "x-goog-api-key: %s", "/mcp"),
 }
 GATEWAYS = ("openrouter", "vercel-ai-gateway")
+# 618: the model sources that take NO key (providers.json `keyless`) — the try has no account; the stand-in answers only a
+# request with no credential (OpenCode's own "public" at most); the guest holds no placeholder; the Locked try is refused
+# nothing.
+KEYLESS = {"opencode-zen": "opencode.ai"}
 STATES_NEEDED = ("idle", "working", "done")
 # What a ready agent's first screen never asks (case-insensitive; a line a recipe's check.screen.allow matches is excused).
 SETUP_SCREEN = [
@@ -280,7 +286,7 @@ class Harness:
         if not sels:
             fail("no selection to check (--selections %s; the recipe offers: %s)" % (self.args.selections, r.models))
             return [self.finish(res, t_all)]
-        missing = [s for s, _ in sels if s not in KEYS]
+        missing = [s for s, _ in sels if s not in KEYS and s not in KEYLESS]
         if missing:
             fail("no stand-in for %s (Scripts/fake-provider.py fakes %s)" % (", ".join(missing), ", ".join(sorted(KEYS))))
             return [self.finish(res, t_all)]
@@ -345,7 +351,7 @@ class Harness:
             before = {s["name"] for s in self.sandboxes()}
             extra = []
             if r.models:
-                extra = ["--gateway" if source in GATEWAYS else "--provider", source, "--account", "rc-" + source]
+                extra = ["--gateway" if source in GATEWAYS else "--provider", source] + ([] if source in KEYLESS else ["--account", "rc-" + source])
             code, out = self.doz("try", r.typed, *extra, "-d", "-q", timeout=1500)
             names = [s["name"] for s in self.sandboxes() if s.get("trial") and s["name"] not in before]
             if code != 0 or not names:
@@ -405,6 +411,27 @@ class Harness:
             if code != int(c.get("exit") or 0):
                 fail("smoke: %s exited %d, expected %d" % (" ".join(argv), code, int(c.get("exit") or 0)))
             seen = self.requests()[n0:]
+            if source in KEYLESS:
+                host = KEYLESS[source]
+                there = [q for q in seen if (q.get("host") or "").split(":")[0] == host]
+                if not there:
+                    fail("smoke: no request reached %s (the key-less source) — %d requests: %s" % (
+                        host, len(seen), ", ".join(sorted({(q.get("host") or "") + (q.get("path") or "") for q in seen}))[:300]))
+                carried = [q for q in there if any(v not in ("Bearer public", "public") for v in (q.get("auth") or {}).values())]
+                if carried:
+                    fail("smoke: a request to the key-less %s carried a credential: %s" % (host, json.dumps(carried[0].get("auth"))[:200]))
+                res["keyless_paths"] = sorted({q.get("method", "") + " " + (q.get("path") or "").split("?")[0] for q in there})
+                # A Locked try with a key-less source is refused nothing (its model permission reaches exactly what it asks).
+                code, out = self.doz("net", "log", name, "--json", timeout=120)
+                try:
+                    log = json.loads(out[out.index("["):])
+                except ValueError:
+                    log = []
+                denied = [x for x in log if x.get("verdict") == "denied"]
+                res["refusals"] = len(denied)
+                if denied:
+                    fail("smoke: the try was refused %d request(s): %s" % (len(denied), ", ".join(sorted({(x.get("host") or "") + (x.get("path") or "") for x in denied}))[:300]))
+                return
             if not any(KEYS[source] in json.dumps(q.get("auth") or {}) for q in seen):
                 fail("smoke: the stand-in never saw the %s key swapped in by the proxy (%d requests: %s)" % (
                     source, len(seen), ", ".join(sorted({(q.get("host") or "") + (q.get("path") or "") for q in seen}))[:300]))
@@ -438,7 +465,12 @@ class Harness:
                                  "env; for d in %s; do find \"$d\" -maxdepth 2 -type f -size -64k -exec cat {} + 2>/dev/null; done; true" % dirs,
                                  timeout=120)
             m = re.search(r"doz_cred_[A-Za-z0-9_-]+", out)
-            if not m:
+            if source in KEYLESS:
+                # 618: no key, so no placeholder either — a key-less try's vault is empty.
+                if m:
+                    fail("keys: a doz placeholder is in a key-less try's guest")
+                m = None
+            elif not m:
                 fail("keys: no doz placeholder in the guest (%s or its state folders)" % r.key_env)
             pats = " ".join("-e '%s'" % k for k in KEYS.values())
             code, out = self.doz("exec", name, "--user", "root", "--", "sh", "-c",

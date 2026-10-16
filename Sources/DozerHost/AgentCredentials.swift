@@ -81,7 +81,7 @@ public enum AgentCredentials {
     public static func requirement(_ image: String) -> String {
         let name = AgentImages.agentName(image) ?? image
         guard let k = kinds(image) else { return "" }
-        if let s = sources(image), !s.isEmpty {
+        if let s = sources(image)?.filter({ !ModelSources.isKeyless($0) }), !s.isEmpty {
             let phrases = s.map(keyPhrase)
             return "\(name) needs " + (phrases.count == 1 ? phrases[0] : phrases.dropLast().joined(separator: ", ") + " or " + phrases.last!)
         }
@@ -134,6 +134,13 @@ public enum AgentCredentials {
         }
         if let model, !ModelSelection.isModelID(model) {
             return (nil, ("that is not a model id (letters, digits and . _ : / @ + -, at most 128)", "--model creator/name"))
+        }
+        // 618: a key-less source (OpenCode Zen's free models) takes no account at all — `none`.
+        if ModelSources.isKeyless(source) {
+            if let a = account, a != "default", a != "none" {
+                return (nil, ("\(ModelSources.title(source)) takes no key, so no account", "leave out --account"))
+            }
+            return ("none", nil)
         }
         let add = "doz account add NAME \(addFlag(source))"
         if let a = account, a != "default" {
@@ -213,7 +220,7 @@ public enum AgentCredentials {
         guard let image, let k = kinds(image) else { return nil }
         let agent = AgentImages.agentName(image) ?? image
         let choose: String
-        if let s = sources(image), s.count > 1 {
+        if let s = sources(image)?.filter({ !ModelSources.isKeyless($0) }), s.count > 1 {
             choose = "choose a key account of " + s.map(ModelSources.title).joined(separator: ", ") + " (doz account add NAME \(addFlag(s[0])))"
         } else {
             choose = keyProvider(image).map { "choose a \($0.title) key account (doz account add NAME \(addFlag($0.id)))" }

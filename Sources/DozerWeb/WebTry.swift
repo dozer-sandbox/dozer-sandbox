@@ -217,6 +217,8 @@ public struct WebModelList: Codable, Equatable, Sendable {
         public var priceIn: Double?
         public var priceOut: Double?
         public var tools: Bool?
+        /// 618: a key-less source's model — its data terms as the source's docs state them.
+        public var note: String? = nil
     }
     public var source: String
     public var title: String
@@ -225,6 +227,8 @@ public struct WebModelList: Codable, Equatable, Sendable {
     public var fetchedAt: Date?
     public var defaultModel: String?
     public var models: [Model]
+    /// 618: a `listed` list (a key-less source's): when it was checked against the docs.
+    public var checked: String? = nil
 
     public init(_ l: ModelList) {
         source = l.source
@@ -233,10 +237,11 @@ public struct WebModelList: Codable, Equatable, Sendable {
         kind = l.kind
         fetchedAt = l.fetchedAt
         defaultModel = l.defaultModel
+        checked = l.checked
         // The default first, then the list's own order.
         let ordered = l.models.filter { $0.id == l.defaultModel } + l.models.filter { $0.id != l.defaultModel }
         models = ordered.map { Model(id: $0.id, name: $0.name, maker: $0.maker, context: $0.context,
-                                     priceIn: $0.pricePerMillionIn, priceOut: $0.pricePerMillionOut, tools: $0.tools) }
+                                     priceIn: $0.pricePerMillionIn, priceOut: $0.pricePerMillionOut, tools: $0.tools, note: $0.note) }
     }
 }
 

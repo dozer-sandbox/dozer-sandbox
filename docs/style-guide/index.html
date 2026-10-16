@@ -288,9 +288,11 @@ name: todo-app</pre></details>
     several, or the card: paste, a source kept outside, what is not offered), the image, the plan — and the final <b>Start</b>; Cancel or Esc leaves nothing behind.
     A tool with a choice of model gets ONE section, <b>Where TOOL gets its model</b> (<code>components/model-source.js</code>, also New Sandbox's account step): its
     providers, then the gateways, as equal rows (<code>.ms-src</code> › <code>.ms-opt</code>, a radio each), each with its key status (<code>.pill.st-ok</code> naming the key, or
-    <code>.st-off</code> “no key yet”); the chosen row (<code>.on</code>) holds what it needs under it (<code>.ms-need</code>): the key it uses (a choice when there are several,
+    <code>.st-off</code> “no key yet”; a source that takes no key — OpenCode Zen's free models — <code>.st-ok</code> “no key needed”, and its chosen row says no key of yours goes there (<code>.ms-keyline[data-ms-no-key]</code>),
+    so Start is ready at once); the chosen row (<code>.on</code>) holds what it needs under it (<code>.ms-need</code>): the key it uses (a choice when there are several,
     “Add another key”), or the paste field, where to get a key and the 1Password/AWS/program fold. Then <b>Model</b>: the picker (<code>.ms-picker</code>) — the source's own
-    list (a gateway's public list, read on this Mac once a day), searchable, name · maker · context · price per million tokens, the default tagged; an id that looks like
+    list (a gateway's public list, read on this Mac once a day), searchable, name · maker · context · price per million tokens, the default tagged; a key-less source's models carry their data terms as its docs state
+    them (<code>.ms-note</code>, “Data: …”, never Dozer's own judgement); an id that looks like
     one may be used as typed. What is truly not offered is one quiet line (<code>.ms-notoffer</code>); a tool with one source shows one line (<code>.ms-one</code> — Grok Build: its xAI key, no choice of model). The plan
     shows the model and “Same in Terminal”. A tool with no choice of model (Claude Code, Codex: their own sign-ins) keeps its <b>Key</b> section.
     <b>Every destructive confirmation is ONE component</b> (<code>confirmAction</code> / <code>confirmWithCheck</code> in <code>components/dialog.js</code>): a box to tick whose
@@ -316,6 +318,7 @@ name: todo-app</pre></details>
             <div class="ms-grp">Providers</div>
             <label class="ms-opt"><input type="radio" name="sg-ms"><span class="ms-t">xAI</span><span class="ms-k"><span class="pill st-ok"><i data-i="circle-check"></i>johnoscott</span></span><span class="ms-d">default grok-build-0.1 · OpenCode 2’s own</span></label>
             <label class="ms-opt"><input type="radio" name="sg-ms"><span class="ms-t">Anthropic</span><span class="ms-k"><span class="pill st-off"><i data-i="circle-dot"></i>no key yet</span></span><span class="ms-d">default claude-sonnet-4-6</span></label>
+            <label class="ms-opt"><input type="radio" name="sg-ms"><span class="ms-t">OpenCode Zen</span><span class="ms-k"><span class="pill st-ok"><i data-i="circle-check"></i>no key needed</span></span><span class="ms-d">free models</span></label>
             <div class="ms-grp">Gateways <span>— one key, models from many makers</span></div>
             <label class="ms-opt on"><input type="radio" name="sg-ms" checked><span class="ms-t">OpenRouter</span><span class="ms-k"><span class="pill st-off"><i data-i="circle-dot"></i>no key yet</span></span><span class="ms-d">one key, models from many makers</span></label>
             <div class="ms-need"><div class="try-paste"><input type="password" placeholder="paste your OpenRouter key (sk-or-…)"><button class="btn sm" type="button"><i data-i="key-round"></i>Save the key</button></div>
@@ -331,6 +334,11 @@ name: todo-app</pre></details>
         <div class="qt-sect"><h3>The plan</h3><dl class="qt-plan"><dt>Name</dt><dd>try-sgpt</dd><dt>Model</dt><dd>OpenRouter — once its key is saved</dd><dt>Network</dt><dd>Locked — only its model providers</dd><dt>Same in Terminal</dt><dd><code>doz try opencode --gateway openrouter --model anthropic/claude-sonnet-4.6</code></dd></dl></div></div>
       <div class="dlg-foot dlg-buttons"><span class="why">Save an OpenRouter key, or choose a source that has one</span><button class="btn quiet" type="button"><i data-i="x"></i>Cancel</button><button class="btn primary" type="button" disabled><i data-i="rocket"></i>Start</button></div>
     </form></dialog>
+    <div class="ms-picker"><div class="ms-top"><i data-i="search"></i><input type="search" placeholder="Search OpenCode Zen’s models — name, maker or id"></div>
+      <div class="ms-mlist">
+        <label class="ms-m on"><input type="radio" name="sg-z" checked><span class="ms-mt"><span class="ms-nm">Space Bunny Free</span> <code class="ms-id">space-bunny-free</code></span><span class="ms-price">free / free<br>per 1M in / out</span><span class="ms-meta"></span><span class="ms-note">Data: zero retention; not used for training</span></label>
+        <label class="ms-m"><input type="radio" name="sg-z"><span class="ms-mt"><span class="ms-nm">Big Pickle</span> <code class="ms-id">big-pickle</code><span class="tag">default</span></span><span class="ms-price">free / free<br>per 1M in / out</span><span class="ms-meta"></span><span class="ms-note">Data: during its free period, collected data may be used to improve the model</span></label></div>
+      <div class="ms-foot">OpenCode Zen’s free models as its docs list them (checked 2026-10-16), with their data terms — type any other free model id it names</div></div>
     <dialog class="dlg" open><form method="dialog">
       <div class="dlg-head"><h2 class="h-title">Delete try-pi?</h2><button class="btn sm quiet icon-only" type="button" aria-label="Close"><i data-i="x"></i></button></div>
       <div class="dlg-body"><p class="sub">The sandbox, its disks, snapshot and restore points are deleted.</p>

@@ -978,6 +978,7 @@ public actor HostCore {
             cfg.extraKeys = keys.filter { seen.insert($0).inserted }
         }
         if let model = o.model, let source = modelSource { cfg.models = [source: model] }     // 617 (models@1)
+        if let source = modelSource, ModelSources.isKeyless(source) { cfg.modelSource = source; cfg.account = nil }   // 618: no key, no account
         // 618: what it was made as — the family's (or tool's) name and the exact release (`opencode@2.0.29`).
         if let r = spec.imageSpec.flatMap({ ImageChoice.parse($0.name)?.agent.recipe }), r.family != nil || o.agentRef != nil {
             cfg.agentRef = AgentRef.recorded(r, version: spec.imageSpec?.agent?.version)
@@ -1573,7 +1574,17 @@ public actor HostCore {
               var source = AgentCredentials.sources(image)?.first else { return nil }
         if case .record(let a) = resolvedAccount(m, accountStore.load()), AgentCredentials.accepts(image, a),
            let s = AgentCredentials.source(of: a) { source = s }
+        else if let k = keylessSource(m) { source = k }
         return r.selection(source: source, model: m.config.models?[source])
+    }
+
+    /// 618: the key-less source this sandbox uses (OpenCode Zen's free models): the one it was made with, while it has no
+    /// account and its agent is still offered it. nil: it uses a key (or none at all).
+    func keylessSource(_ m: Managed) -> String? {
+        guard let s = m.config.modelSource, ModelSources.isKeyless(s), AgentCredentials.sources(m.sandbox.spec.imageSpec?.name)?.contains(s) == true
+        else { return nil }
+        if case .none = resolvedAccount(m, accountStore.load()) { return s }
+        return nil
     }
     static func withClipboardSink(_ env: [String: String], on: Bool) -> [String: String] {
         guard on else { return env }

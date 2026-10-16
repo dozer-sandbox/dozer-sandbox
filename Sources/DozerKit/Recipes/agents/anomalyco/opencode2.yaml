@@ -28,11 +28,12 @@ capabilities:
       - api.anthropic.com:443
       - openrouter.ai:443
       - ai-gateway.vercel.sh:443
+      - opencode.ai:443
     dozer:
       model:
         id: model:opencode2
         title: Talk to its model provider
-        summary: OpenCode 2's model — the provider or gateway its key is for (xAI, OpenAI, Anthropic, OpenRouter or Vercel AI Gateway), with an API key. Needed for OpenCode to answer.
+        summary: OpenCode 2's model — the provider or gateway its key is for (xAI, OpenAI, Anthropic, OpenRouter or Vercel AI Gateway), with an API key; or OpenCode Zen's free models, with no key. Needed for OpenCode to answer.
         phrase: talk to your AI model
         hosts:
         - host: api.x.ai
@@ -45,6 +46,11 @@ capabilities:
           reason: OpenRouter — when the sandbox's key is OpenRouter's
         - host: ai-gateway.vercel.sh
           reason: Vercel AI Gateway — when the sandbox's key is Vercel AI Gateway's
+        - host: opencode.ai
+          paths:
+          - /zen/v1/chat/completions
+          - /zen/v1/responses
+          reason: OpenCode Zen's free models — no key; only its model requests, nothing else of opencode.ai (no Console sign-in)
       update: []
       excluded: []
 - type: com.docker.sandbox/credential@1
@@ -202,6 +208,10 @@ capabilities:
     - source: vercel-ai-gateway
       env:
         DOZ_MODEL: 'vercel/${{ dozer.model }}'
+    - source: opencode-zen
+      env:
+        DOZ_MODEL: 'opencode/${{ dozer.model }}'
+      docs: https://opencode.ai/docs/zen/
     models:
       xai: grok-build-0.1
 - type: com.dozersandbox/currency@1
@@ -227,7 +237,7 @@ capabilities:
       - opencode run "…"
       source: https://opencode.ai/v2/docs/cli/commands
       checked: '2026-10-14'
-    terms: Your xAI API key — a key from console.x.ai.
+    terms: Your xAI API key — a key from console.x.ai; or no key, with OpenCode Zen's free models (each model's data terms are in its docs).
 - type: com.dozersandbox/ports@1
   config:
     ports:
@@ -252,6 +262,7 @@ capabilities:
     tips:
     - "Files it makes are in /workspace — your folder on the Mac."
     - "Restart its session from the session's ⋯ menu; End stops it."
+    - "A key added with OpenCode's /connect is stored inside this sandbox; a key added in Dozer stays on your Mac."
     docs: https://opencode.ai/v2/docs/
 - type: com.dozersandbox/family@1
   config:

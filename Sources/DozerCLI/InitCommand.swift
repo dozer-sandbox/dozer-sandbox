@@ -43,7 +43,7 @@ struct Init: AsyncParsableCommand {
     @Option(name: .long, help: "lock or hide: what a .dozignore in the folder does to the paths it lists — lock: listed but unreadable; hide: not there.") var ignoreMode: String?
     @Flag(inversion: .prefixedNo, help: "The agent's passwordless sudo.") var agentSudo: Bool?
     // 618: where the model comes from and which model (the file's model_source: / model:).
-    @Option(name: .long, help: "A provider the agent is offered (the file's model_source:): anthropic, openai, xai, google.") var provider: String?
+    @Option(name: .long, help: "A provider the agent is offered (the file's model_source:): anthropic, openai, xai, google; opencode-zen (no key).") var provider: String?
     @Option(name: .long, help: "A gateway the agent is offered (the file's model_source:): openrouter, vercel-ai-gateway.") var gateway: String?
     @Option(name: .long, help: "A model id of that source (the file's model:; doz models).") var model: String?
     @Flag(name: [.short, .long], help: "Accept every default; ask nothing.") var yes = false

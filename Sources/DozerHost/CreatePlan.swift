@@ -317,6 +317,8 @@ public enum CreatePlanner {
 
         // A source chosen with no key of it yet: no account (the try setup offers that source's key).
         if sourceProblem, let s = modelSource, policy != nil { account = PlanAccount(name: nil, kind: nil, provider: s, sourceLabel: nil) }
+        // 618: a key-less source (OpenCode Zen's free models): no account, and none is needed.
+        if !sourceProblem, let s = modelSource, ModelSources.isKeyless(s), policy != nil { account = PlanAccount(name: nil, kind: "none", provider: s, sourceLabel: nil) }
 
         // 617 (models@1): which source and model — the account's source (the chosen one's when it has no key yet).
         var planModel: PlanModel?
@@ -372,7 +374,9 @@ public enum CreatePlanner {
                 }
             }
             let hosts = ModelSources.hosts(m.source).joined(separator: ", ")
-            reach.insert(ReachLine("model", "Model: \(m.model) through \(m.title) (\(hosts)) — its key only ever goes there"), at: 0)
+            reach.insert(ReachLine("model", ModelSources.isKeyless(m.source)
+                ? "Model: \(m.model) through \(m.title) (\(hosts)) — no key needed: no key of yours goes there"
+                : "Model: \(m.model) through \(m.title) (\(hosts)) — its key only ever goes there"), at: 0)
         }
         var argv = Self.argv(purpose: r.purpose, name: r.name, options: o, given: r.create, choice: choice, settings: f.settings)
         if r.purpose == "try" { argv += (r.tryFlags ?? []).filter { PlanRequest.tryFlagWords.contains($0) } }
@@ -572,6 +576,8 @@ public enum CreatePlanner {
         if let a = account {
             if let n = a.name {
                 out.append(ReachLine("key", "Key: \(n)" + (a.sourceLabel.map { " from \($0)" } ?? "") + " — the sandbox gets a placeholder, the key stays on this Mac"))
+            } else if a.kind == "none", let s = a.provider {
+                out.append(ReachLine("key", "Key: none needed — \(ModelSources.title(s)) takes none, and nothing of yours is added to its requests"))   // 618
             } else if a.provider != nil {
                 out.append(ReachLine("key", "No key yet"))
             }

@@ -27,6 +27,7 @@ final class AgentRecipeTests: XCTestCase {
         XCTAssertEqual(AgentRecipes.all.map(\.id), ["claude-code", "pi", "codex", "antigravity", "gemini", "grok", "fabric", "openclaw", "nanobot", "gptme", "llm", "shell-gpt", "zeroclaw", "aichat", "tgpt", "opencode", "smolagents", "adk", "promptfoo", "clai", "copilot", "qwen-code", "goose", "kilo", "mistral-vibe", "droid", "dirac", "kimi-code", "cline", "openhands", "letta-code", "docker-agent", "nanocoder", "mini-swe-agent", "open-interpreter", "crush", "mimo-code", "codewhale", "maki", "omp", "tau", "stitch", "opencode2"])
         XCTAssertNoThrow(try AgentRecipes.validate(AgentRecipes.all))
         XCTAssertNoThrow(try KeyProviders.validate(KeyProviders.all))
+        XCTAssertNoThrow(try KeyProviders.validate(keyless: KeyProviders.keyless, providers: KeyProviders.all))
         XCTAssertNoThrow(try Gateways.validate(Gateways.all))
         XCTAssertEqual(KeyProviders.all.map(\.id), ["anthropic", "openai", "xai", "google", "google-stitch", "openrouter", "vercel-ai-gateway"])
         XCTAssertEqual(Gateways.all.map(\.id), ["openrouter", "vercel-ai-gateway"])

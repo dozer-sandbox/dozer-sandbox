@@ -96,6 +96,9 @@ to where you opened it.
   context and price per million tokens and the default marked; an id it does not list can still be typed. The plan
   names the model, and **Same in Terminal** is the command (`doz try pi --gateway openrouter --model …`). New Sandbox
   asks the same in its Account step, and writes the choice to `doz_project.yaml` (`model_source:`, `model:`).
+  OpenCode 2 also lists **OpenCode Zen** (free models), marked "no key needed": chosen, it needs no key and no account,
+  Start is ready at once, and its model list shows each free model with its data terms as OpenCode's docs state them
+  (`doz try opencode --provider opencode-zen`).
 - **Nothing is prepared while you browse.** **Start** makes it, starts it and opens its session: a first start
   prepares its image, and its terminal area shows the progress (the steps, the one under way and the last lines of the
   build) until the session is there. A try's page says **Sleep (hibernate)** · **Delete…** · **Keep** — Delete removes

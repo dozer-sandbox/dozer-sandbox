@@ -14,13 +14,14 @@ struct ModelsCommand: AsyncParsableCommand {
         discussion: """
         A gateway (OpenRouter, Vercel AI Gateway) publishes its list: Dozer reads it on this Mac at most once a day and \
         keeps the last one (offline: the last list). A provider (Anthropic, OpenAI, xAI, Google) lists its models only \
-        with a key, so only the model Dozer checked is shown — any model id may still be given with --model. SEARCH \
-        narrows the list by id, name or maker.
+        with a key, so only the model Dozer checked is shown — any model id may still be given with --model. A source \
+        that takes no key (opencode-zen: OpenCode Zen's free models) shows the models Dozer lists for it, each with its \
+        data terms as the source's docs state them. SEARCH narrows the list by id, name or maker.
         """)
 
     @OptionGroup var g: GlobalOptions
     @Option(name: .long, help: "A gateway: openrouter, vercel-ai-gateway.") var gateway: String?
-    @Option(name: .long, help: "A provider: anthropic, openai, xai, google.") var provider: String?
+    @Option(name: .long, help: "A provider: anthropic, openai, xai, google; or opencode-zen (free models, no key).") var provider: String?
     @Flag(name: .long, help: "Read a gateway's list now (starts the host when none runs).") var refresh = false
     @Argument(help: "Words to look for in a model's id, name or maker.") var search: [String] = []
 
@@ -59,15 +60,20 @@ func renderModelLists(_ lists: [ModelList], searched: Bool, now: Date = Date()) 
             s += "\(l.title) (gateway): \(l.models.count) model\(l.models.count == 1 ? "" : "s")\(searched ? " match" : "")\(age)\n"
         case "none":
             s += "\(l.title) (gateway): its list has not been read yet — doz models --gateway \(l.source) --refresh\n"
+        case "listed":
+            s += "\(l.title): \(l.models.count) model\(l.models.count == 1 ? "" : "s")\(searched ? " match" : ""), no key needed"
+                + " — its docs, checked \(l.checked ?? "—"): \(l.docs ?? "")\n"
         default:
             s += "\(l.title): the model Dozer checked — any other id with --model\n"
         }
         guard !l.models.isEmpty else { continue }
-        var t = [["MODEL", "CONTEXT", "IN $/M", "OUT $/M", "TOOLS", "NAME"]]
+        // 618: a key-less source's models carry their data terms (the docs' words) — a column of their own.
+        let terms = l.models.contains { $0.note != nil }
+        var t = [["MODEL", "CONTEXT", "IN $/M", "OUT $/M", "TOOLS", "NAME"] + (terms ? ["DATA TERMS"] : [])]
         for m in l.models {
             t.append([m.id + (m.id == l.defaultModel ? " (default)" : ""), m.context.map(ModelsAge.tokens) ?? "—",
                       m.pricePerMillionIn.map(ModelsAge.price) ?? "—", m.pricePerMillionOut.map(ModelsAge.price) ?? "—",
-                      m.tools.map { $0 ? "yes" : "no" } ?? "—", (m.maker.map { $0 + " · " } ?? "") + m.name])
+                      m.tools.map { $0 ? "yes" : "no" } ?? "—", (m.maker.map { $0 + " · " } ?? "") + m.name] + (terms ? [m.note ?? "—"] : []))
         }
         s += Out.table(t)
     }
@@ -93,14 +99,15 @@ enum ModelNote {
     nonisolated(unsafe) static var said = false
 
     static func text(model: String, list: ModelList) -> String? {
-        guard list.kind == "fetched", !list.models.contains(where: { $0.id == model }) else { return nil }
+        guard list.kind == "fetched" || list.kind == "listed", !list.models.contains(where: { $0.id == model }) else { return nil }
         let near = ModelLists.suggestions(for: model, in: list)
         let mean = near.isEmpty ? "" : " — did you mean \(near.joined(separator: ", "))?"
-        return "note: \(model) is not in \(list.title)'s model list\(mean) (doz models --gateway \(list.source); used as given)"
+        let flag = list.gateway ? "--gateway" : "--provider"
+        return "note: \(model) is not in \(list.title)'s model list\(mean) (doz models \(flag) \(list.source); used as given)"
     }
 
     static func check(_ o: CreateOptions, _ g: GlobalOptions) async {
-        guard !said, !g.json, !g.quiet, let model = o.model, let source = o.modelSource, ModelLists.fetched(source) else { return }
+        guard !said, !g.json, !g.quiet, let model = o.model, let source = o.modelSource, ModelLists.fetched(source) || ModelSources.isKeyless(source) else { return }
         var r = HostRequest(.models)
         r.modelsSource = source
         guard let lists = try? decode(try await query(r, g), [ModelList].self, g), let l = lists.first,

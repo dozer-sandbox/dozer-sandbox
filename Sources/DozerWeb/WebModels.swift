@@ -1279,6 +1279,8 @@ public struct WebAccounts: Codable, Equatable, Sendable {
     /// 618: the sources that are gateways, and each source's default model (New Sandbox's "Where TOOL gets its model").
     public var gatewaySources: [String] = []
     public var sourceModels: [String: String] = [:]
+    /// 618: the sources that take no key (OpenCode Zen's free models) — no account, nothing to add.
+    public var keylessSources: [String] = []
 
     public init(accounts: [WebAccount], defaultAccount: String, keepalive: Bool, openaiDefault: String? = nil,
                 providerDefaults: [String: String] = [:]) {
@@ -1300,18 +1302,19 @@ public struct WebAccounts: Codable, Equatable, Sendable {
         for id in ModelSources.ids {
             sourceTitles[id] = ModelSources.title(id)
             if ModelSources.isGateway(id) { gatewaySources.append(id) }
+            if ModelSources.isKeyless(id) { keylessSources.append(id) }
             if let m = ModelSources.endpoints(id).first?.defaultModel { sourceModels[id] = m }
         }
-        providers = ["anthropic", "openai"] + ModelSources.ids.filter { $0 != "anthropic" && $0 != "openai" }
+        providers = ["anthropic", "openai"] + ModelSources.keyed.filter { $0 != "anthropic" && $0 != "openai" }
         for kind in AgentKind.allCases where kind != .none {
             guard let r = kind.recipe else { continue }
             agentTitles[r.id] = r.title
             // The built-in three: Claude Code and pi take Anthropic accounts, Codex OpenAI's; a recipe agent its sources.
             let srcs = AgentCredentials.sources(r.id) ?? (r.id == "codex" ? ["openai"] : ["anthropic"])
-            for s in srcs { providerTools[s, default: []].append(r.id) }
+            for s in srcs where !ModelSources.isKeyless(s) { providerTools[s, default: []].append(r.id) }
         }
         // Anthropic's and OpenAI's keys are checked by Dozer itself; another provider's only when providers.json says how.
-        uncheckedProviders = ModelSources.ids.filter { $0 != "anthropic" && $0 != "openai" && KeyProviders.provider($0)?.check == nil }
+        uncheckedProviders = ModelSources.keyed.filter { $0 != "anthropic" && $0 != "openai" && KeyProviders.provider($0)?.check == nil }
     }
 }
 

@@ -88,7 +88,7 @@ struct ChoiceOptions: ParsableArguments {
     @Option(name: .long, help: "A custom key to attach beside the account (doz account add NAME --custom …); repeatable. Each of its hosts must be allowed (--allow site:HOST).")
     var key: [String] = []
 
-    @Option(name: .long, help: "The model provider a tool or recipe agent uses — anthropic, openai, xai, google (doz try AGENT --dry-run lists what it can use). Its account is then a key of that provider: --account, else that provider's default.")
+    @Option(name: .long, help: "The model provider a tool or recipe agent uses — anthropic, openai, xai, google (doz try AGENT --dry-run lists what it can use). Its account is then a key of that provider: --account, else that provider's default. opencode-zen (OpenCode 2): OpenCode Zen's free models, no key and no account.")
     var provider: String?
 
     @Option(name: .long, help: "The model gateway a tool or recipe agent goes through — openrouter or vercel-ai-gateway (one key, many models). Its account is then a key of that gateway.")

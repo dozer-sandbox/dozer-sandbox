@@ -171,6 +171,7 @@ extension HostCore {
         }
         let main: String?
         switch resolvedAccount(m, accountStore.load()) {
+        case .none where keylessSource(m) != nil: main = nil          // 618: a key-less source needs none
         case .none: main = AgentCredentials.sandboxProblem(image: m.sandbox.spec.imageSpec?.name, account: nil, missing: nil)
         case .missing(let n): main = AgentCredentials.sandboxProblem(image: m.sandbox.spec.imageSpec?.name, account: nil, missing: n)
         case .record(let a): main = AgentCredentials.sandboxProblem(image: m.sandbox.spec.imageSpec?.name, account: a, missing: nil)
@@ -321,6 +322,14 @@ extension HostCore {
         // 617: a key agent (Grok Build, Gemini CLI) uses its provider's key only — never an Anthropic binding.
         // 617: a multi-source recipe agent takes the source of the account it is given (OpenAI, OpenRouter, …) — its
         // default source's when it has none or one it cannot use.
+        // 618: a key-less source (OpenCode Zen's free models): no key of any source in its vault; a placeholder sent to
+        // any source's host is refused (the leak guard), and its own host gets nothing added.
+        if keylessSource(m) != nil {
+            for b in [CredentialBinding.anthropic, .claudeOAuth, .openai, .chatgpt] + KeyProviders.keyBindings { sb.egress?.vault.remove(b.id) }
+            sb.egress?.leakGuardHosts = Set(ModelSources.ids.flatMap(ModelSources.hosts))
+            applyPolicy(m, file)
+            return
+        }
         if let p = AgentCredentials.keyProvider(sb.spec.imageSpec?.name) {
             let resolved = resolvedAccount(m, file)
             var source = p

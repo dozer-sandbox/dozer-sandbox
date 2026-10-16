@@ -22,11 +22,13 @@ public struct ModelInfo: Codable, Equatable, Sendable {
     public var pricePerMillionIn: Double?
     public var pricePerMillionOut: Double?
     public var tools: Bool?
+    /// 618: a key-less source's model — its data terms as the source's docs state them (Dozer's own list, never fetched).
+    public var note: String?
 
     public init(id: String, name: String, maker: String? = nil, context: Int? = nil, pricePerMillionIn: Double? = nil,
-                pricePerMillionOut: Double? = nil, tools: Bool? = nil) {
+                pricePerMillionOut: Double? = nil, tools: Bool? = nil, note: String? = nil) {
         self.id = id; self.name = name; self.maker = maker; self.context = context
-        self.pricePerMillionIn = pricePerMillionIn; self.pricePerMillionOut = pricePerMillionOut; self.tools = tools
+        self.pricePerMillionIn = pricePerMillionIn; self.pricePerMillionOut = pricePerMillionOut; self.tools = tools; self.note = note
     }
 }
 
@@ -36,8 +38,12 @@ public struct ModelList: Codable, Equatable, Sendable {
     public var title: String
     public var gateway: Bool
     /// `fetched` (a gateway's own list), `none` (a gateway whose list was never read — offline, or no host yet),
-    /// `default` (a provider: the model Dozer checked only).
+    /// `default` (a provider: the model Dozer checked only), 618: `listed` (a key-less source: the models Dozer lists,
+    /// checked against its docs on `checked`).
     public var kind: String
+    /// 618: when a `listed` list was checked against the source's docs (YYYY-MM-DD), and where they are.
+    public var checked: String? = nil
+    public var docs: String? = nil
     public var fetchedAt: Date?
     /// The source's default model (the plan's, when nothing is chosen).
     public var defaultModel: String?
@@ -221,6 +227,13 @@ public enum ModelLists {
     /// The list a source offers now, from what the store has.
     public static func list(_ source: String, record: ModelListRecord?) -> ModelList {
         let def = ModelSources.endpoints(source).first?.defaultModel
+        if let k = ModelSources.keyless(source) {
+            var l = ModelList(source: source, title: k.title, gateway: false, kind: "listed", fetchedAt: nil, defaultModel: def,
+                              models: k.models.map { ModelInfo(id: $0.id, name: $0.name, pricePerMillionIn: 0, pricePerMillionOut: 0, note: $0.note) })
+            l.checked = k.checked
+            l.docs = k.docs
+            return l
+        }
         if fetched(source), let r = record, !r.models.isEmpty {
             return ModelList(source: source, title: ModelSources.title(source), gateway: ModelSources.isGateway(source), kind: "fetched",
                              fetchedAt: r.fetchedAt, defaultModel: def, models: r.models)
@@ -232,7 +245,7 @@ public enum ModelLists {
     /// `--model X` with a source chosen: X is not in its list — the closest few ids (a note, never a refusal: lists go
     /// stale). Empty when X is listed, or the list is only the default (a provider's).
     public static func suggestions(for model: String, in list: ModelList, limit: Int = 3) -> [String] {
-        guard list.kind == "fetched", !list.models.contains(where: { $0.id == model }) else { return [] }
+        guard list.kind == "fetched" || list.kind == "listed", !list.models.contains(where: { $0.id == model }) else { return [] }
         let want = model.lowercased()
         let tail = want.split(separator: "/").last.map(String.init) ?? want
         let scored = list.models.map { m -> (Int, String) in

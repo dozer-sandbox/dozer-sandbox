@@ -7,6 +7,7 @@
 #
 #   make profile-agents AGENTS="grok gemini"            record (keeps every determination already made)
 #   make profile-agents AGENTS="grok" DIFF=1            report new / missing endpoints only — never writes, never allows
+#   PROFILE_TRY_FLAGS="--provider opencode-zen"          618: the try with another model source (a key-less one included)
 #
 # Keys are FAKE, always: xAI, Google and Google Stitch go to Scripts/fake-provider.py (the provider seam, its own CA), which answers
 # text only (no tool calls); Anthropic and OpenAI get a fake key the real API refuses (401). A real-key run would see
@@ -117,7 +118,8 @@ EOF2
   doz config set "$setting" "$want" >/dev/null || { echo "profile-agents: could not set $setting = $want" >&2; rc=1; continue; }
   old=$(trial); [ -n "$old" ] && doz rm "$old" --yes >/dev/null 2>&1
   echo "== $a: a fresh try (Open network, every request logged)"
-  doz try "$typed" -d -q --rebuild --network open || { rc=1; continue; }
+  # shellcheck disable=SC2086
+  doz try "$typed" -d -q --rebuild --network open ${PROFILE_TRY_FLAGS:-} || { rc=1; continue; }
   n=$(trial)
   sleep "${PROFILE_FIRST_START_SECONDS:-25}"
   start=$(/bin/date +%s)

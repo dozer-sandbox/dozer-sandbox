@@ -31,7 +31,9 @@ func renderPlan(_ p: CreatePlan) -> String {
     if let v = p.version {
         s += "  version: " + (v.familyLine(command: p.purpose == "try" ? "doz try" : "--agent") ?? "\(v.title) \(v.version ?? "(at its preparation)")") + "\n"
     }
-    if let a = p.account {
+    if let a = p.account, a.kind == "none", let src = a.provider {
+        s += "  account: none — \(ModelSources.title(src)) needs no key\n"
+    } else if let a = p.account {
         s += "  account: " + (a.name.map { "\($0)" + (a.kind.map { " (\($0)\(a.provider.map { ", \($0)" } ?? ""))" } ?? "") + (a.sourceLabel.map { " — key from \($0)" } ?? "") } ?? "none") + "\n"
     }
     // 617 (models@1): the model and where it goes; the other providers and gateways it can use, and how.

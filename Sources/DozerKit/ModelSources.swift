@@ -63,6 +63,8 @@ extension AgentRecipe {
         var out: [String] = []
         for s in ModelSources.ids where !except.contains(s) {
             if (m.native ?? []).contains(where: { $0.source == s }) { out.append(s); continue }
+            // 618: a key-less source is a tool's own (OpenCode Zen's free models): offered by a native entry only.
+            if ModelSources.isKeyless(s) { continue }
             let eps = ModelSources.endpoints(s)
             if (m.shapes ?? []).contains(where: { e in eps.contains { $0.shapes.contains(e.shape) } }) { out.append(s) }
         }
@@ -113,7 +115,7 @@ extension AgentRecipe {
             return ModelSelection(source: source, shape: nil, baseURL: nil, model: chosen,
                                   env: ModelSelection.fill(n.env, baseURL: nil, model: chosen), keyEnv: n.keyEnv ?? [])
         }
-        for e in m.shapes ?? [] {
+        for e in m.shapes ?? [] where !ModelSources.isKeyless(source) {
             guard let ep = ModelSources.endpoints(source).first(where: { $0.shapes.contains(e.shape) }) else { continue }
             let chosen = model ?? m.models?[source] ?? ep.defaultModel ?? ""
             return ModelSelection(source: source, shape: e.shape, baseURL: ep.baseUrl, model: chosen,
@@ -207,30 +209,70 @@ public struct ModelSelection: Sendable, Equatable {
 }
 
 /// 617: the model sources — every key provider of providers.json, in its order; a gateway's endpoints are gateways.json's.
+/// 618: then the key-less sources (providers.json `keyless`: OpenCode Zen's free models) — no key, no account.
 public enum ModelSources {
-    public static var ids: [String] { KeyProviders.all.map(\.id) }
+    public static var ids: [String] { KeyProviders.all.map(\.id) + KeyProviders.keyless.map(\.id) }
+
+    /// The sources that take a key (an account of one is a key of it).
+    public static var keyed: [String] { KeyProviders.all.map(\.id) }
 
     public static func isGateway(_ id: String) -> Bool { KeyProviders.provider(id)?.gateway == true }
 
+    /// 618: a source that takes no key (nothing to add; a try with it has no account).
+    public static func isKeyless(_ id: String) -> Bool { keyless(id) != nil }
+
+    public static func keyless(_ id: String) -> KeylessSource? { KeyProviders.keyless.first { $0.id == id } }
+
     /// The endpoints offered to recipes (those with a default model; a gateway's coding-agent variants are not).
     public static func endpoints(_ id: String) -> [Gateway.Endpoint] {
+        if let k = keyless(id) { return k.endpoints }
         guard let p = KeyProviders.provider(id) else { return [] }
         let all = p.gateway == true ? (Gateways.gateway(id)?.endpoints ?? []) : (p.endpoints ?? [])
         return all.filter { $0.defaultModel != nil }
     }
 
-    /// The hosts its key may go to (the proxy's binding).
-    public static func hosts(_ id: String) -> [String] { KeyProviders.provider(id)?.hosts ?? [] }
+    /// The hosts its key may go to (the proxy's binding); a key-less source's, the hosts it answers on (no key goes there).
+    public static func hosts(_ id: String) -> [String] { keyless(id)?.hosts ?? KeyProviders.provider(id)?.hosts ?? [] }
 
-    public static func title(_ id: String) -> String { KeyProviders.provider(id)?.title ?? id }
+    /// The hosts a source's KEY may go to — none for a key-less source (the leak guard watches these).
+    public static func keyHosts(_ id: String) -> [String] { KeyProviders.provider(id)?.hosts ?? [] }
+
+    public static func title(_ id: String) -> String { keyless(id)?.title ?? KeyProviders.provider(id)?.title ?? id }
 
     /// The account kind a source's key comes in: Anthropic an API key (`api-key`), OpenAI an OpenAI key (`openai-key`),
     /// every other a `key` of that provider. Never a subscription (a Claude login, a ChatGPT sign-in, this Mac's Codex).
+    /// 618: a key-less source, `none` — no account at all.
     public static func accountKind(_ id: String) -> String {
+        if isKeyless(id) { return "none" }
         switch id {
-        case "anthropic": "api-key"
-        case "openai": "openai-key"
-        default: "key"
+        case "anthropic": return "api-key"
+        case "openai": return "openai-key"
+        default: return "key"
         }
+    }
+}
+
+/// 618 (owner: "OpenCode Zen free models, no key"): a model source that takes no key — the tool reaches it with no
+/// account (OpenCode 2 without a key uses OpenCode Zen's free models). Dozer adds nothing to its requests; its hosts are
+/// reachable only through the recipe's model permission, path by path. The list of models is curated (the public model
+/// list has no prices, so it cannot tell a free model from a paid one): the free models the docs list that the tool's
+/// pinned release can use without a key (OpenCode 2.0.29 enables only its catalogue's zero-cost models when it has
+/// none), each with its data terms as the docs state them.
+public struct KeylessSource: Codable, Sendable, Equatable {
+    public var id: String
+    public var title: String
+    public var hosts: [String]
+    public var endpoints: [Gateway.Endpoint]
+    public var models: [Model]
+    /// Where the source documents its models and their terms (an https page).
+    public var docs: String
+    /// When the list and the terms were last checked against the docs (YYYY-MM-DD).
+    public var checked: String
+
+    public struct Model: Codable, Sendable, Equatable {
+        public var id: String
+        public var name: String
+        /// Its data terms as the docs state them — short, the docs' own words where they have them.
+        public var note: String?
     }
 }

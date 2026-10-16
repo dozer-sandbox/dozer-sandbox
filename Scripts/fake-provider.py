@@ -4,7 +4,10 @@
 # that ends a task only through its `respond` tool, Dirac, gets that tool call with DOZ_FAKE_OK; one whose only tool is
 # `bash`, mini-swe-agent, gets a bash call that submits DOZ_FAKE_OK) — and Google Stitch's MCP endpoint
 # (stitch.googleapis.com/mcp, JSON-RPC over HTTP: initialize, tools/list, tools/call list_projects → one project titled
-# DOZ_FAKE_OK; every other tool is refused, so nothing is ever generated).
+# DOZ_FAKE_OK; every other tool is refused, so nothing is ever generated). 618: and OpenCode Zen's free models
+# (opencode.ai/zen/v1, what OpenCode 2 calls, and the docs' opencode.ai/inference/openai/v1: Chat Completions and
+# Responses; its public model list) — KEY-LESS: a request that
+# carries any credential but OpenCode's own "public" is refused (401), so a key that leaked there would show.
 # Python 3.9+ stdlib only.
 # Usage: python3 fake-provider.py LEAF.pem LEAF.key REQUESTS.log PORTFILE   (Scripts/fake-provider-up.sh makes the CA,
 #        the leaf and starts it)
@@ -249,9 +252,25 @@ class H(http.server.BaseHTTPRequestHandler):
             return self.send(200, stream, "text/event-stream") if req.get("stream") else self.send(200, msg)
         return self.send(404, {"error": {"message": "not here", "code": 404}})
 
+    # ── 618: OpenCode Zen's free models (opencode.ai), no key ────────────────────────────────────────────────────────
+    def zen(self, auth, body):
+        p = self.path.split("?")[0]
+        if any(v not in ("Bearer public", "public") for v in auth.values()):
+            return self.send(401, {"error": {"message": "a key-less source got a credential", "code": 401}})
+        if self.command == "GET" and p in ("/inference/v1/models", "/zen/v1/models"):
+            return self.send(200, {"object": "list", "data": [{"id": "big-pickle", "object": "model", "created": 0, "owned_by": "opencode"}]})
+        if self.command == "POST" and p in ("/inference/openai/v1/chat/completions", "/zen/v1/chat/completions"):
+            return self.chat(body)
+        if self.command == "POST" and p in ("/inference/openai/v1/responses", "/zen/v1/responses"):
+            req = json.loads(body or b"{}")
+            done, stream = responses_sse(req.get("model", "big-pickle"), call=responses_call(req))
+            return self.send(200, stream, "text/event-stream") if req.get("stream") else self.send(200, done)
+        return self.send(404, {"error": {"message": "not here", "code": 404}})
+
     def do_GET(self):
         auth = self.record()
         h = self.host()
+        if h == "opencode.ai": return self.zen(auth, b"")
         if h == "api.anthropic.com": return self.anthropic(auth, b"")
         if h == "api.openai.com": return self.openai(auth, b"")
         if h in GATEWAYS: return self.gateway(auth, b"")
@@ -278,6 +297,7 @@ class H(http.server.BaseHTTPRequestHandler):
         if b"DOZ_SLOW" in body:
             time.sleep(6)
         h = self.host()
+        if h == "opencode.ai": return self.zen(auth, body)
         if h == "api.anthropic.com": return self.anthropic(auth, body)
         if h == "api.openai.com": return self.openai(auth, body)
         if h in GATEWAYS: return self.gateway(auth, body)

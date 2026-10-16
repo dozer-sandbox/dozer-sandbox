@@ -1686,7 +1686,15 @@ and how `LinuxContainer.create()/start()/stop()` call them. A bump is a delibera
   sources' hosts are the hidden `sources:pi` permission (added at create, like Codex's `model:openai`), and the host puts
   its `--model` on the default session (`builtinModelArguments`: off Anthropic, or a model chosen there). Its image and
   launcher are unchanged (`RecipePinTests`). Claude Code and Codex record why a gateway is not offered (their
-  gateways entries' `limits`). `make recipe-check` runs a models@1 recipe
+  gateways entries' `limits`). A source that takes NO key (providers.json `keyless`: `opencode-zen`, OpenCode Zen's free
+  models — OpenCode 2 sends its own "Bearer public") is never a key provider: no binding, no placeholder, no account
+  (`AgentCredentials.account(forSource:)` answers `none`; `--account` refused; `doz account add` refuses it), offered
+  only by a `native` entry, its host in the recipe's model permission path by path (`/zen/v1/chat/completions`,
+  `/zen/v1/responses`), still watched by the leak guard. A try records it as `SandboxConfig.modelSource` and uses it
+  while it has no account (`HostCore.keylessSource`; an account added later wins); its vault holds no key at all. Its
+  model list is curated — the free models the docs list AND the pinned release enables without a key — each with its
+  data terms (`ModelInfo.note`, `ModelList.kind` `listed`). recipe-check runs it with no account and fails on any
+  credential at its host or any refusal in the Locked try. `make recipe-check` runs a models@1 recipe
   once per offered source (`RECIPE_SELECTIONS`), `ModelSourcesTests`, `probes/617-*/recipes/models/browser-try-models.mjs`.
 - **Model lists** (618, owner: "… its also missing the step to choose a model"; `ModelLists.swift`, `HostCore+Models.swift`):
   a gateway's PUBLIC list (OpenRouter `/api/v1/models`, Vercel AI Gateway `/v1/models` — no key) is read by the HOST on

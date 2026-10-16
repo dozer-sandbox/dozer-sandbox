@@ -30,6 +30,8 @@ func preflightAgentAccount(_ o: inout CreateOptions, _ g: GlobalOptions) throws 
 /// own refusal says what to do.
 func preflightSourceAccount(image: String, source: String, account: String?, _ g: GlobalOptions) throws -> String? {
     guard AgentCredentials.sources(image)?.contains(source) == true else { return account }      // the host says why
+    // 618: a key-less source (OpenCode Zen's free models): no account at all (one given: the host says why not).
+    if ModelSources.isKeyless(source) { return account == nil || account == "default" ? "none" : account }
     let m = try rawCall(HostRequest(.accountList), g)
     guard m.ok == true, let rows = try? m.result?.decode([AccountRow].self) else { return account }
     func sourceOf(_ r: AccountRow) -> String? {

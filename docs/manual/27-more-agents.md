@@ -78,11 +78,20 @@ key of the provider or gateway you choose: **Anthropic**, **OpenAI**, **xAI** (t
 
 - **Installed** from the npm registry's linux-arm64 package, integrity-checked. Debian and Node bases (not Alpine yet).
 - **Key:** an API key of that provider or gateway (`doz account add NAME --provider xai` — or `openrouter`, `vercel-ai-gateway`, `google`; `--api-key` for Anthropic, `--openai-key` for OpenAI); the sandbox only gets a placeholder.
+- **No key at all (OpenCode 2):** OpenCode Zen's free models — `doz try opencode --provider opencode-zen`, or
+  **OpenCode Zen** in the try setup (marked "no key needed"). No account is used and nothing of yours is added to
+  its requests. The model list shows each free model with its data terms as OpenCode's docs state them (some keep
+  nothing, some are used to improve the model) — the free models OpenCode's docs list that this release of OpenCode can
+  use without a key; `doz models --provider opencode-zen` lists them, and `--model`
+  chooses one (default `big-pickle`). Only OpenCode's model requests to `opencode.ai` are allowed — not its Console or
+  its sign-in. A key you add with OpenCode's own `/connect` is stored inside the sandbox; a key added in Dozer stays on
+  your Mac.
 - **Set up for you:** its auto-update, session sharing, language-server downloads and the online model list off; the
   model set in `~/.config/opencode/opencode.json` (written only when it is not there yet). Its plugin kit is not
   downloaded into `~/.config/opencode` when it first starts (it is only for plugins you write; `cd ~/.config/opencode
   && npm install @opencode-ai/plugin` adds it). OpenCode asks no approval questions by default.
-- **May reach:** the API of the provider or gateway it was given (any of those it can use, so you can switch).
+- **May reach:** the API of the provider or gateway it was given (any of those it can use, so you can switch), and, for
+  OpenCode 2, OpenCode Zen's model requests on `opencode.ai` (`/zen/v1/chat/completions`, `/zen/v1/responses`).
 - **Use:** `opencode` (its TUI), or `opencode run "…"` for one answer.
 
 ## GitHub Copilot CLI (GitHub)

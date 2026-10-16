@@ -14,6 +14,7 @@ export const MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,127}$/;
 /// One row's words: a gateway reaches many makers' models; a provider its own (the default named).
 function what(s, own, tool) {
   if (s.gateway) return 'one key, models from many makers';
+  if (s.accountKind === 'none') return 'free models';
   return (s.defaultModel ? 'default ' + s.defaultModel : 'its own models') + (own ? ' · ' + tool + '’s own' : '');
 }
 
@@ -23,7 +24,18 @@ export function keyPill(keys) {
   return h('span', { class: 'pill st-ok', 'data-key-status': 'ok' }, icon('circle-check'), keys.length > 1 ? keys.length + ' keys' : keys[0].name);
 }
 
-/// The source list. sources: [{id, title, gateway, defaultModel}] (the tool's own first); keysOf(id) → [{name}];
+/// 618: a source that takes no key (OpenCode Zen's free models) — its pill, and what its chosen row says.
+function pillOf(s, keys) {
+  if (s.accountKind === 'none') return h('span', { class: 'pill st-ok', 'data-key-status': 'none-needed' }, icon('circle-check'), 'no key needed');
+  return keyPill(keys);
+}
+
+export function noKeyNodes(src) {
+  return [h('div', { class: 'ms-keyline', 'data-ms-no-key': src.id }, icon('circle-check'),
+    h('span', null, 'Nothing to add — no key of yours goes to ' + src.title + '. Each model’s data terms are in the list below.'))];
+}
+
+/// The source list. sources: [{id, title, gateway, defaultModel, accountKind}] (the tool's own first); keysOf(id) → [{name}];
 /// chosen: an id; onChoose(id); needFor(id) → nodes under the chosen row. One source: one line, no list.
 export function sourceList({ tool, sources, chosen, keysOf, onChoose, needFor, notOffered }) {
   const own = sources[0] ? sources[0].id : null;
@@ -31,8 +43,8 @@ export function sourceList({ tool, sources, chosen, keysOf, onChoose, needFor, n
   if (sources.length === 1) {
     const s = sources[0];
     nodes.push(h('div', { class: 'ms-one', 'data-ms-source': s.id },
-      h('span', { class: 'ms-t' }, s.title, h('span', { class: 'muted' }, ' — ' + what(s, false, tool))), keyPill(keysOf(s.id))));
-    if (!keysOf(s.id).length) nodes.push(h('div', { class: 'ms-need ms-need-one' }, ...needFor(s.id)));
+      h('span', { class: 'ms-t' }, s.title, h('span', { class: 'muted' }, ' — ' + what(s, false, tool))), pillOf(s, keysOf(s.id))));
+    if (!keysOf(s.id).length && s.accountKind !== 'none') nodes.push(h('div', { class: 'ms-need ms-need-one' }, ...needFor(s.id)));
   } else {
     const row = (s) => {
       const on = s.id === chosen;
@@ -40,7 +52,7 @@ export function sourceList({ tool, sources, chosen, keysOf, onChoose, needFor, n
       radio.checked = on;
       radio.addEventListener('change', () => { if (radio.checked) onChoose(s.id); });
       const r = h('label', { class: 'ms-opt' + (on ? ' on' : ''), 'data-ms-source': s.id },
-        radio, h('span', { class: 'ms-t' }, s.title), h('span', { class: 'ms-k' }, keyPill(keysOf(s.id))),
+        radio, h('span', { class: 'ms-t' }, s.title), h('span', { class: 'ms-k' }, pillOf(s, keysOf(s.id))),
         h('span', { class: 'ms-d' }, what(s, s.id === own, tool)));
       // What the chosen source needs sits under its row — not inside the label (a click there must not re-choose).
       return on ? [r, h('div', { class: 'ms-need', 'data-ms-need': s.id }, ...needFor(s.id))] : [r];
@@ -98,7 +110,9 @@ export function modelPicker({ source, title, gateway, current, onPick }) {
           m.id === data.defaultModel ? h('span', { class: 'tag' }, 'default') : null),
         h('span', { class: 'ms-price' }, m.priceIn != null && m.priceOut != null ? price(m.priceIn) + ' / ' + price(m.priceOut) : '',
           m.priceIn != null && m.priceOut != null ? h('br') : null, m.priceIn != null ? 'per 1M in / out' : ''),
-        h('span', { class: 'ms-meta' }, [m.maker, ctx, m.tools === false ? 'no tools' : null].filter(Boolean).join(' · ')));
+        h('span', { class: 'ms-meta' }, [m.maker, ctx, m.tools === false ? 'no tools' : null].filter(Boolean).join(' · ')),
+        // 618: a key-less source's model — its data terms, as the source's docs state them.
+        m.note ? h('span', { class: 'ms-note', 'data-ms-note': '' }, 'Data: ' + m.note) : null);
     });
     list.replaceChildren(...rows);
     if (!rows.length) list.append(h('div', { class: 'ms-empty' }, 'No model matches.'));
@@ -117,6 +131,7 @@ export function modelPicker({ source, title, gateway, current, onPick }) {
   const footText = () => {
     if (!data) return '';
     if (data.kind === 'fetched') return title + '’s public model list, read on this Mac' + (data.fetchedAt ? ' ' + ago(data.fetchedAt) : '') + ' · prices per million tokens';
+    if (data.kind === 'listed') return title + '’s free models as its docs list them (checked ' + (data.checked || '—') + '), with their data terms — type any other free model id it names';
     if (data.kind === 'none') return title + '’s list has not been read yet (Dozer reads it on this Mac once a day) — type any model id it names';
     return 'The model Dozer checked for ' + title + ' — type any other id it names';
   };

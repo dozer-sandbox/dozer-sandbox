@@ -112,6 +112,9 @@ struct AccountAdd: AsyncParsableCommand {
     func validate() throws {
         // 611: a public build has no ChatGPT sign-in of its own.
         if chatgpt, !BuildFlavor.current.chatgptSignIn { throw ValidationError(BuildFlavor.chatgptSignInMissing) }
+        if let p = provider, ModelSources.isKeyless(p.lowercased()) {
+            throw ValidationError("\(ModelSources.title(p.lowercased())) takes no key — choose it for a sandbox instead (doz try opencode --provider \(p.lowercased()))")
+        }
         if let p = provider, KeyProviders.provider(p.lowercased()) == nil {
             throw ValidationError("--provider: \(KeyProviders.all.map(\.id).joined(separator: ", ")) — not \(p)")
         }

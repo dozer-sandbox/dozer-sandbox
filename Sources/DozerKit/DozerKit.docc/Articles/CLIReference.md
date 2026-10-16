@@ -300,6 +300,7 @@ doz try --ui grok                                # the same in the dashboard's Q
 doz try grok --dry-run --json                    # the plan (also --dry-run on new, create, up)
 doz search grok                                  # supported? exit 0 supported · 8 limited · 6 coming · 2 unknown
 doz models --gateway openrouter sonnet           # a gateway's models (read on this Mac once a day; --refresh now); --provider X: its checked default
+doz try opencode --provider opencode-zen         # OpenCode 2 on OpenCode Zen's free models: no key, no account (doz models --provider opencode-zen: each with its data terms)
 doz guide try-fabric                             # how to use its agent or tool: this sandbox's facts, the first steps, tips (--json)
 doz account add grok --provider xai --from op://Dev/xAI/credential   # read on use from 1Password / aws:ARN / --from-command 'ARGV'
 doz account show grok                            # where its key comes from and the last read — never the key

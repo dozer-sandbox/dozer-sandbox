@@ -369,7 +369,7 @@ schema's enum and this table together (`CategoriesTests` holds them to each othe
 ## Model sources: providers and gateways
 
 A **model source** is where a key goes: a provider (`anthropic`, `openai`, `xai`, `google`) or a gateway
-(`openrouter`, `vercel-ai-gateway`). Each is a key provider in `Recipes/providers.json` — its hosts, the header its key
+(`openrouter`, `vercel-ai-gateway`) — or a source that takes no key (`opencode-zen`, below). Each is a key provider in `Recipes/providers.json` — its hosts, the header its key
 rides in, the variable its placeholder is in, its check — and each lists its **endpoints**: the API shapes it serves
 (`openai-chat`, `openai-responses`, `anthropic-messages`, `gemini`), the base URL of each, and a default model (a
 gateway's is `creator/name`). Gateways take their endpoints from `Recipes/gateways.json`.
@@ -419,6 +419,16 @@ recipe is offered (in a fresh try with that source's fake key) and puts that sou
   of that provider (`doz account add NAME --provider openrouter`).
 - A recipe without `models@1` keeps its one credential exactly as before (the built-in three; Claude Code's and Codex's
   own account flows are untouched).
+- **A source that takes no key** (`opencode-zen`: OpenCode Zen's free models) is listed under `keyless` in
+  `Recipes/providers.json` — its hosts, its endpoints, and the models Dozer lists for it, each with its data terms as the
+  source's docs state them (its own model list has no prices, so a free model cannot be told from a paid one): the
+  free models the docs list that the tool's pinned release can use without a key; `checked` is when the list and terms
+  were last compared with the docs and that release. It is never a key provider: no binding, no placeholder,
+  no account (`doz account add` refuses it), and its hosts may be no provider's. A recipe is offered it only by a
+  `native` entry — a shape alone never offers it, since only the tool that knows it can use it. A try with it has no
+  account at all (`--account` is refused); the leak guard still watches its hosts, so a placeholder sent there is
+  refused. Its hosts go in the recipe's model permission path by path (only the requests the tool makes for a model:
+  `/zen/v1/chat/completions` and `/zen/v1/responses` for OpenCode 2), so nothing else of that site is reachable.
 
 ## Templating
 

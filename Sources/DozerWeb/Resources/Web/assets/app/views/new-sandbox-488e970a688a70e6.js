@@ -10,7 +10,7 @@ import { state } from '../core/state-450cb6573a620304.js';
 import { isRemote } from '../core/session-a11b36fbe5b8e637.js';
 import { renderAccessStep } from '../components/access-step-1e14712d5c702111.js';
 import { accountChooser, accountForm, sourceOf } from '../components/accounts-5fdcb84f475c8132.js';
-import { modelPicker, resetModelSearch, sourceCommand, sourceList } from '../components/model-source-521bf93f82356b27.js';
+import { modelPicker, noKeyNodes, resetModelSearch, sourceCommand, sourceList } from '../components/model-source-60dac846f8ef41a6.js';
 import { btn } from '../components/button-cbb8a60e3220f977.js';
 import { callout } from '../components/callout-e7d97c36b36fe970.js';
 import { createDialog } from '../components/create-dialog-2a9612911de8626a.js';
@@ -365,8 +365,9 @@ function nwModelSource(agent, ids) {
   const nw = state.nw, f = nw.form, acc = nw.accounts;
   const tool = AGENT_NAMES[agent] || (acc.agentTitles || {})[agent] || agent;
   const titles = acc.sourceTitles || {}, gateways = new Set(acc.gatewaySources || []), models = acc.sourceModels || {};
+  const keyless = new Set(acc.keylessSources || []);          // 618: OpenCode Zen's free models — no key, no account
   const sources = ids.map((id) => ({ id, title: titles[id] || id, gateway: gateways.has(id), defaultModel: models[id] || null,
-                                     accountKind: id === 'anthropic' ? 'api-key' : id === 'openai' ? 'openai-key' : 'key' }));
+                                     accountKind: keyless.has(id) ? 'none' : id === 'anthropic' ? 'api-key' : id === 'openai' ? 'openai-key' : 'key' }));
   const keysOf = (id) => acc.accounts.filter((x) => sourceOf(x) === id).sort((x, y) => (y.isDefault ? 1 : 0) - (x.isDefault ? 1 : 0));
   const chosen = f.modelSource || ids[0];
   if (!f.account || f.account === 'default' || !keysOf(chosen).some((x) => x.name === f.account)) {
@@ -378,6 +379,7 @@ function nwModelSource(agent, ids) {
     const src = f.modelSource || ids[0];
     const need = (id) => {
       const s = sources.find((x) => x.id === id), keys = keysOf(id);
+      if (keyless.has(id)) return noKeyNodes(s);
       if (keys.length && !nw.addingKey) {
         if (keys.length === 1) {
           return [h('div', { class: 'ms-keyline' }, icon('key-round'), h('span', null, 'Uses ', h('strong', null, keys[0].name),
@@ -408,7 +410,7 @@ function nwModelSource(agent, ids) {
         nwSet('account', k ? k.name : 'default');
         paint();
       } });
-    const ready = keysOf(src).length > 0;
+    const ready = keyless.has(src) || keysOf(src).length > 0;
     const s = sources.find((x) => x.id === src);
     box.replaceChildren(h('div', { class: 'qt-sect' }, h('h3', null, 'Where ' + tool + ' gets its model'),
       ids.length > 1 ? h('p', { class: 'muted ms-lead' }, 'Its own provider is chosen; any other — or a gateway — works the same way.') : null, ...list),
@@ -422,7 +424,7 @@ function nwModelSource(agent, ids) {
     el: box,
     collect() {
       const src = f.modelSource || ids[0];
-      if (!keysOf(src).length) throw new Error('Save ' + (/^[AEIOUx]/.test(titles[src] || src) ? 'an ' : 'a ') + (titles[src] || src) + ' key, or choose a source that has one.');
+      if (!keyless.has(src) && !keysOf(src).length) throw new Error('Save ' + (/^[AEIOUx]/.test(titles[src] || src) ? 'an ' : 'a ') + (titles[src] || src) + ' key, or choose a source that has one.');
     },
   };
 }

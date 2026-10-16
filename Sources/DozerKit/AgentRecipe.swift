@@ -748,16 +748,21 @@ public struct KeyProvider: Codable, Sendable, Equatable {
 }
 
 public enum KeyProviders {
-    struct File: Codable { var schema: Int; var providers: [KeyProvider] }
+    struct File: Codable { var schema: Int; var providers: [KeyProvider]; var keyless: [KeylessSource]? }
 
-    public static let all: [KeyProvider] = {
+    static let file: File = {
         do {
-            let f = try JSONDecoder().decode(File.self, from: Data(PackageResources.providers_json))
-            return f.providers
+            return try JSONDecoder().decode(File.self, from: Data(PackageResources.providers_json))
         } catch {
             fatalError("617: the built-in providers.json does not decode: \(error)")
         }
     }()
+
+    public static var all: [KeyProvider] { file.providers }
+
+    /// 618: the model sources that take no key (OpenCode Zen's free models) — never a key provider: no binding, no
+    /// placeholder, no account; their hosts are no key's.
+    public static var keyless: [KeylessSource] { file.keyless ?? [] }
 
     public static func provider(_ id: String) -> KeyProvider? { all.first { $0.id == id } }
 
@@ -768,7 +773,8 @@ public enum KeyProviders {
     }
 
     /// The hosts of the providers that are new in 617 (their upstream leg goes to the test seam's fake).
-    public static var seamHosts: Set<String> { Set(all.filter { $0.builtinBinding == nil }.flatMap(\.hosts)) }
+    /// 618: and the key-less sources' (OpenCode Zen's free models go to the fake too — never a real model in a test).
+    public static var seamHosts: Set<String> { Set(all.filter { $0.builtinBinding == nil }.flatMap(\.hosts) + keyless.flatMap(\.hosts)) }
 
     /// Every binding a key provider defines (the new ones; Anthropic's and OpenAI's are the existing bindings).
     public static var keyBindings: [CredentialBinding] { all.filter { $0.builtinBinding == nil }.map(\.binding) }
@@ -809,6 +815,42 @@ public enum KeyProviders {
                       let h = u.host, p.hosts.contains(h), e.defaultModel.map(ModelSelection.isModelID) ?? true else {
                     throw SandboxError.invalidSpec("provider \(p.id): endpoint \(e.id): known shapes, an https base URL on its hosts, a model id")
                 }
+            }
+        }
+    }
+
+    /// 618: the key-less sources — ids no provider's, hosts no provider's (a key never goes there), an endpoint on its
+    /// hosts with a default model, and its listed models (the default among them), each a model id with a short note.
+    public static func validate(keyless: [KeylessSource], providers: [KeyProvider]) throws {
+        var ids = Set(providers.map(\.id)), hosts = Set(providers.flatMap(\.hosts))
+        for k in keyless {
+            guard k.id.range(of: "^[a-z][a-z0-9-]{0,23}$", options: .regularExpression) != nil, ids.insert(k.id).inserted, k.id != "custom" else {
+                throw SandboxError.invalidSpec("keyless source id \(k.id): [a-z][a-z0-9-]*, unique among the providers and sources, not custom")
+            }
+            guard !k.hosts.isEmpty else { throw SandboxError.invalidSpec("keyless source \(k.id) has no hosts") }
+            for h in k.hosts {
+                guard AgentRecipes.isExactHost(h), hosts.insert(h).inserted else {
+                    throw SandboxError.invalidSpec("keyless source \(k.id): \(h) is not an exact host name, or is a provider's host")
+                }
+            }
+            guard !k.endpoints.isEmpty else { throw SandboxError.invalidSpec("keyless source \(k.id) has no endpoint") }
+            for e in k.endpoints {
+                guard !e.shapes.isEmpty, e.shapes.allSatisfy(Gateway.shapes.contains), let u = URL(string: e.baseUrl), u.scheme == "https",
+                      let h = u.host, k.hosts.contains(h), let d = e.defaultModel, ModelSelection.isModelID(d) else {
+                    throw SandboxError.invalidSpec("keyless source \(k.id): endpoint \(e.id): known shapes, an https base URL on its hosts, a default model id")
+                }
+            }
+            var seen = Set<String>()
+            for m in k.models {
+                guard ModelSelection.isModelID(m.id), seen.insert(m.id).inserted, !m.name.isEmpty, m.note.map({ !$0.isEmpty && $0.count <= 160 }) ?? true else {
+                    throw SandboxError.invalidSpec("keyless source \(k.id): model \(m.id): a model id, once, a name, a short note")
+                }
+            }
+            guard let d = k.endpoints.first?.defaultModel, seen.contains(d) else {
+                throw SandboxError.invalidSpec("keyless source \(k.id): its default model is one of its models")
+            }
+            guard k.docs.hasPrefix("https://"), k.checked.range(of: "^[0-9]{4}-[0-9]{2}-[0-9]{2}$", options: .regularExpression) != nil else {
+                throw SandboxError.invalidSpec("keyless source \(k.id): docs is an https URL, checked a date")
             }
         }
     }

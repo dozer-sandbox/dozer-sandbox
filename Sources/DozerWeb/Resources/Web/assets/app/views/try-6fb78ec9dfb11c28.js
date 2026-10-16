@@ -29,7 +29,7 @@ import { pageFailure, toast } from '../components/notices-0eac624a71d00e4f.js';
 import { paintStartProgress } from '../components/start-progress-b16374ebc7173de4.js';
 import { drawPendingTry } from './sandbox-f272187004699aa3.js';
 import { planCommand, reachList } from '../components/plan-view-d5bc01e363272562.js';
-import { modelPicker, resetModelSearch, sourceCommand, sourceList } from '../components/model-source-521bf93f82356b27.js';
+import { modelPicker, noKeyNodes, resetModelSearch, sourceCommand, sourceList } from '../components/model-source-60dac846f8ef41a6.js';
 import { prepCard } from '../components/prep-card-f04587dbc4728b29.js';
 
 const AGENT_ID = /^[a-z0-9][a-z0-9-]{0,39}$/;
@@ -510,6 +510,7 @@ function oneSourceSection(a, plan, missing) {
 /// What the chosen source needs: the key it uses (a choice when there are several, another one added), else a paste.
 function sourceNeed(plan, src, keys) {
   if (!src) return [];
+  if (src.accountKind === 'none') return noKeyNodes(src);          // 618: OpenCode Zen's free models — no key
   const acc = plan.account;
   if (keys.length && !SETUP.adding) {
     let line;

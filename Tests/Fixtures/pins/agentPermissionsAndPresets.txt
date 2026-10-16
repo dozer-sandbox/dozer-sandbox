@@ -39,7 +39,7 @@ perm model:maki locked=false hosts=api.anthropic.com api.openai.com api.x.ai[/v1
 perm model:omp locked=false hosts=api.anthropic.com api.openai.com api.x.ai[/v1/models,/v1/responses,/v1/chat/completions] generativelanguage.googleapis.com openrouter.ai ai-gateway.vercel.sh
 perm model:tau locked=false hosts=api.anthropic.com api.openai.com api.x.ai[/v1/chat/completions] generativelanguage.googleapis.com openrouter.ai ai-gateway.vercel.sh
 perm model:stitch locked=false hosts=stitch.googleapis.com[/mcp,/v2alpha/]
-perm model:opencode2 locked=false hosts=api.x.ai api.openai.com api.anthropic.com openrouter.ai ai-gateway.vercel.sh
+perm model:opencode2 locked=false hosts=api.x.ai api.openai.com api.anthropic.com openrouter.ai ai-gateway.vercel.sh opencode.ai[/zen/v1/chat/completions,/zen/v1/responses]
 perm sign-in locked=false hosts=console.anthropic.com claude.ai platform.claude.com
 perm update locked=false hosts=downloads.claude.ai pi.dev registry.npmjs.org[/@anthropic-ai/claude-code,/@anthropic-ai%2fclaude-code,/@anthropic-ai%2Fclaude-code,/@earendil-works/pi-coding-agent,/@earendil-works%2fpi-coding-agent,/@earendil-works%2Fpi-coding-agent]
 perm install:system locked=false hosts=deb.debian.org security.debian.org *.ubuntu.com dl-cdn.alpinelinux.org

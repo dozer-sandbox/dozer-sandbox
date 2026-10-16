@@ -1630,6 +1630,8 @@ dialog.dlg.try-setup { width: min(640px, calc(100vw - 32px)); }
 .ms-one .ms-t { flex: 1; }
 .ms-keyline { display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; }
 .ms-keyline .icon { color: var(--ok); }
+.ms-keyline[data-ms-no-key] { flex-wrap: nowrap; align-items: flex-start; }
+.ms-keyline[data-ms-no-key] > span { min-width: 0; }
 .ms-keyline select { min-width: 0; max-width: 100%; }
 .ms-small { font-size: var(--fs-sm); }
 .ms-other summary { color: var(--accent); cursor: pointer; font-size: var(--fs-sm); }
@@ -1651,6 +1653,7 @@ dialog.dlg.try-setup { width: min(640px, calc(100vw - 32px)); }
 .ms-nm { font-weight: var(--fw-strong); }
 .ms-id { font-family: var(--mono); font-size: var(--fs-mono); color: var(--ink-2); }
 .ms-meta { grid-column: 2; font-size: var(--fs-sm); color: var(--ink-2); }
+.ms-note { grid-column: 2; font-size: var(--fs-sm); color: var(--ink-2); }
 .ms-price { grid-row: 1 / span 2; grid-column: 3; font-size: var(--fs-sm); color: var(--ink-2); text-align: right; white-space: nowrap; }
 .ms-empty, .ms-typed { padding: var(--sp-3); font-size: var(--fs-sm); color: var(--ink-2); }
 .ms-typed { border-top: var(--bw) solid var(--line); }
