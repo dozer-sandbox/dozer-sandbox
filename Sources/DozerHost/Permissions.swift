@@ -158,6 +158,13 @@ public enum PermissionPolicy {
         return host
     }
 
+    /// A permission's host as a person reads it: a host limited to some paths says which kind — an agent model
+    /// permission's are its model requests (OpenCode Zen, Grok's API paths), any other's the agent's own package.
+    public static func hostLabel(_ h: PermissionHost, permission id: String) -> String {
+        guard h.pathPrefixes != nil else { return h.host }
+        return h.host + (AgentPermissions.isAgentModel(id) ? " (model requests only)" : " (the agent's own package)")
+    }
+
     /// The checklist, the preset, the sites and the suggestions from `log` (denied connections).
     public static func report(name: String, policy: NetworkPolicy, base: String?, log: [ConnectionRecord]) -> PermissionReport {
         let inferredMode = policy.permissions == nil
@@ -171,7 +178,7 @@ public enum PermissionPolicy {
         }.map { p in
             PermissionRow(id: p.id, title: p.title, summary: p.summary, on: names.contains(p.id),
                           locked: p.locked || AgentPermissions.isAgentModel(p.id), warning: p.warning,
-                          group: p.group, hosts: p.hosts.map { h in h.host + (h.pathPrefixes != nil ? " (the agent's own package)" : "") },
+                          group: p.group, hosts: p.hosts.map { hostLabel($0, permission: p.id) },
                           standard: standard.contains(p.id) || AgentPermissions.isAgentModel(p.id))
         }
         var tmp = policy
