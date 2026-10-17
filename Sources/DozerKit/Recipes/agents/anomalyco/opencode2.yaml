@@ -50,7 +50,9 @@ capabilities:
           paths:
           - /zen/v1/chat/completions
           - /zen/v1/responses
-          reason: OpenCode Zen's free models — no key; only its model requests, nothing else of opencode.ai (no Console sign-in)
+          - /inference/openai/v1/chat/completions
+          - /inference/openai/v1/responses
+          reason: OpenCode Zen's free models — no key; only its model requests (/zen/v1 up to 2.0.31, /inference/openai/v1 from 2.0.32), nothing else of opencode.ai (no Console sign-in)
       update: []
       excluded: []
 - type: com.docker.sandbox/credential@1

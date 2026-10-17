@@ -84,7 +84,7 @@ final class PermissionsHostTests: XCTestCase {
         XCTAssertTrue(rep.inferred)
     }
 
-    func testTheReportTurnsRefusalsIntoOneClickSuggestions() {
+    func testTheReportTurnsRefusalsIntoOneClickSuggestions() throws {
         let p = NetworkPolicy.permissions(AgentPermissions.preset("agent", base: "node")!, preset: "agent")
         let log = [
             ConnectionRecord(kind: .connect, host: "pypi.org", port: 443, verdict: .denied, rule: "default deny"),
@@ -104,6 +104,9 @@ final class PermissionsHostTests: XCTestCase {
         XCTAssertEqual(r.permissions.first { $0.id == "install:node" }?.standard, true)
         XCTAssertEqual(r.permissions.first { $0.id == "web" }?.on, false)
         XCTAssertTrue(r.permissions.first { $0.id == "update" }!.hosts.contains("registry.npmjs.org (the agent's own package)"))
+        // 619: a model permission's path-limited host is its model requests, not a package (OpenCode Zen read wrongly).
+        let zen = try XCTUnwrap(AgentPermissions.permission("model:opencode2")?.hosts.first { $0.host == "opencode.ai" })
+        XCTAssertEqual(PermissionPolicy.hostLabel(zen, permission: "model:opencode2"), "opencode.ai (model requests only)")
         XCTAssertEqual(r.suggestions.count, 2)
         XCTAssertEqual(r.suggestions[0].grant, "install:python")
         XCTAssertEqual(r.suggestions[0].count, 3)

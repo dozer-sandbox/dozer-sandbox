@@ -72,7 +72,7 @@ public struct WebBases: Codable, Equatable, Sendable {
     public static var permissionRows: [WebPermissions.Row] {
         AgentPermissions.all.map { p in
             WebPermissions.Row(id: p.id, title: p.title, summary: p.summary, on: false, locked: p.locked, warning: p.warning, group: p.group,
-                               hosts: p.hosts.map { $0.host + ($0.pathPrefixes != nil ? " (the agent's own package)" : "") }, standard: false)
+                               hosts: p.hosts.map { PermissionPolicy.hostLabel($0, permission: p.id) }, standard: false)
         }
     }
     public static var standardByBase: [String: [String]] {

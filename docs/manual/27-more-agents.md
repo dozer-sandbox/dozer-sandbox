@@ -91,7 +91,8 @@ key of the provider or gateway you choose: **Anthropic**, **OpenAI**, **xAI** (t
   downloaded into `~/.config/opencode` when it first starts (it is only for plugins you write; `cd ~/.config/opencode
   && npm install @opencode-ai/plugin` adds it). OpenCode asks no approval questions by default.
 - **May reach:** the API of the provider or gateway it was given (any of those it can use, so you can switch), and, for
-  OpenCode 2, OpenCode Zen's model requests on `opencode.ai` (`/zen/v1/chat/completions`, `/zen/v1/responses`).
+  OpenCode 2, OpenCode Zen's model requests on `opencode.ai` (`/zen/v1/chat/completions`, `/zen/v1/responses`, and
+  from OpenCode 2.0.32 `/inference/openai/v1/chat/completions`, `/inference/openai/v1/responses`).
 - **Use:** `opencode` (its TUI), or `opencode run "…"` for one answer.
 
 ## GitHub Copilot CLI (GitHub)
