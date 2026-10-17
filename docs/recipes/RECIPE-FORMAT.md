@@ -428,7 +428,8 @@ recipe is offered (in a fresh try with that source's fake key) and puts that sou
   `native` entry — a shape alone never offers it, since only the tool that knows it can use it. A try with it has no
   account at all (`--account` is refused); the leak guard still watches its hosts, so a placeholder sent there is
   refused. Its hosts go in the recipe's model permission path by path (only the requests the tool makes for a model:
-  `/zen/v1/chat/completions` and `/zen/v1/responses` for OpenCode 2), so nothing else of that site is reachable.
+  `/zen/v1/chat/completions` and `/zen/v1/responses` for OpenCode 2, and `/inference/openai/v1/…` the same two from
+  2.0.32, which moved them), so nothing else of that site is reachable.
 
 ## Templating
 

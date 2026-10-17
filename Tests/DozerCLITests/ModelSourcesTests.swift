@@ -301,11 +301,16 @@ final class ModelSourcesTests: XCTestCase {
         XCTAssertEqual(oc.selection(source: "opencode-zen", model: "space-bunny-free")?.env["DOZ_MODEL"], "opencode/space-bunny-free")
         // Its model permission reaches opencode.ai only on the inference paths (no Console, no device sign-in).
         let zen = try XCTUnwrap(oc.network.model.hosts?.first { $0.host == "opencode.ai" })
-        XCTAssertEqual(zen.paths, ["/zen/v1/chat/completions", "/zen/v1/responses"])
+        // 619: OpenCode 2.0.32 moved Zen from /zen/v1 to /inference/openai/v1 (a Locked try's first answer was refused).
+        XCTAssertEqual(zen.paths, ["/zen/v1/chat/completions", "/zen/v1/responses",
+                                   "/inference/openai/v1/chat/completions", "/inference/openai/v1/responses"])
         XCTAssertNotNil(AgentPermissions.permission("model:opencode2"))
         let pol = NetworkPolicy.permissions(AgentPermissions.normalized(["model:opencode2"]))
-        XCTAssertEqual(pol.evaluate(host: "opencode.ai", port: 443, method: "POST", path: "/zen/v1/chat/completions").action, .allow)
-        XCTAssertEqual(pol.evaluate(host: "opencode.ai", port: 443, method: "POST", path: "/zen/v1/responses").action, .allow)
+        for path in zen.paths ?? [] {
+            XCTAssertEqual(pol.evaluate(host: "opencode.ai", port: 443, method: "POST", path: path).action, .allow, path)
+        }
+        XCTAssertEqual(pol.evaluate(host: "opencode.ai", port: 443, method: "GET", path: "/inference/openai/v1/models").action, .deny,
+                       "only the model requests of the new path")
         XCTAssertEqual(pol.evaluate(host: "opencode.ai", port: 443, method: "GET", path: "/console/api/config").action, .deny, "no Console config")
         XCTAssertEqual(pol.evaluate(host: "opencode.ai", port: 443, method: "POST", path: "/console/auth/device/code").action, .deny, "no device sign-in")
         XCTAssertEqual(pol.evaluate(host: "opencode.ai", port: 443, method: "GET", path: "/zen/go/v1/usage").action, .deny, "nothing else of Zen")
